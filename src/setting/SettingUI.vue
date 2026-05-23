@@ -23,14 +23,15 @@ const getAppVersion = computed(() => {
   if (os.platform() === 'linux') {
     return pkgVersion
   }
-  let appVersion = ''
-  const localVersion = getResourcesPath('localVersion')
-  if (localVersion && existsSync(localVersion)) {
-    appVersion = readFileSync(localVersion, 'utf-8')
-  } else {
-    appVersion = pkgVersion
-  }
-  return appVersion
+  return pkgVersion
+  // let appVersion = ''
+  // const localVersion = getResourcesPath('localVersion')
+  // if (localVersion && existsSync(localVersion)) {
+  //   appVersion = readFileSync(localVersion, 'utf-8')
+  // } else {
+  //   appVersion = pkgVersion
+  // }
+  // return appVersion
 })
 
 const verLoading = ref(false)
