@@ -4,9 +4,9 @@
 
 **Goal:** Build the BoxPlayer Agent Media Organizer MVP: a cloud-drive directory `AI Organize` entry that opens a right-side Agent drawer, scans the current directory, diagnoses media organization issues, generates a dry-run plan, requires explicit confirmation for execution, records operations, and supports undo.
 
-**Architecture:** Implement a deterministic, testable Agent tool layer first, then connect it to a Pinia drawer store and Vue UI. The MVP does not require a live LLM call to complete the safe organize loop; AI SDK integration is isolated behind a runtime boundary so model-driven rule edits can be added later without changing file-operation safety.
+**Architecture:** Implement a Vercel AI SDK Agent runtime first, backed by schema-validated tools for scan, diagnosis, planning, and dry-run. The MVP uses `ToolLoopAgent` / AI SDK tool calling as the orchestration boundary; deterministic media helpers are tool implementations, not a replacement for the Agent framework. Execution and undo remain app-side confirmed commands outside the autonomous tool loop.
 
-**Tech Stack:** Vue 3, Pinia, TypeScript, Vitest, Arco Design Vue, existing `AliFileCmd` provider operations, existing `PanTopbtn.vue` and `FileRightMenu.vue` cloud-drive surfaces.
+**Tech Stack:** Vue 3, Pinia, TypeScript, Vitest, Arco Design Vue, Vercel AI SDK Core (`ai`, `zod`), AI Gateway model strings / `gateway()`, existing `AliFileCmd` provider operations, existing `PanTopbtn.vue` and `FileRightMenu.vue` cloud-drive surfaces.
 
 ---
 
@@ -16,6 +16,7 @@
 - Do not add delete support.
 - Do not allow execution without a generated dry-run and an explicit UI confirmation.
 - Prefer app-local TypeScript utilities for this MVP. Do not shell out to `clouddrive-cli` from the renderer.
+- Base Agent orchestration on Vercel AI SDK. Do not implement a handwritten pseudo-agent as the primary runtime.
 - Keep all new Agent code under `src/agent/mediaOrganizer/` except the Pinia export, drawer component, and entry-point wiring.
 
 ## File Structure
@@ -25,7 +26,8 @@
 - Create `src/agent/mediaOrganizer/organizePlanner.ts`: rule presets, plan generation, validation, dry-run generation, and stale/conflict checks.
 - Create `src/agent/mediaOrganizer/operationHistory.ts`: Dexie `iobject`-backed history helpers using existing `DB`.
 - Create `src/agent/mediaOrganizer/executor.ts`: safe adapter over `AliFileCmd.ApiCreatNewForder`, `ApiRenameBatch`, and `ApiMoveBatch`.
-- Create `src/agent/mediaOrganizer/runtime.ts`: centralized Agent runtime facade used by the store. Starts deterministic; later AI SDK tool-calling can live here.
+- Create `src/agent/mediaOrganizer/aiTools.ts`: Vercel AI SDK `tool()` definitions with Zod schemas for read/analysis/planning tools.
+- Create `src/agent/mediaOrganizer/runtime.ts`: centralized Vercel AI SDK `ToolLoopAgent` facade used by the store.
 - Create `src/agent/mediaOrganizer/__tests__/mediaClassifier.test.ts`.
 - Create `src/agent/mediaOrganizer/__tests__/organizePlanner.test.ts`.
 - Create `src/agent/mediaOrganizer/__tests__/operationHistory.test.ts`.
@@ -36,6 +38,33 @@
 - Modify `src/pan/menus/PanTopbtn.vue`: add `AI 整理` toolbar button for normal cloud-drive directories.
 - Modify `src/pan/menus/FileRightMenu.vue`: add `AI 诊断此目录` folder context-menu entry.
 - Modify the parent page that renders pan menus, if needed after exploration, to mount `AgentMediaOrganizerDrawer.vue` once near the pan page root. Likely candidates are `src/pan/index.vue` or `src/layout/PageMain.vue`; choose the smallest surface that can display the drawer while the file list remains visible.
+
+---
+
+### Task 0: Add Vercel AI SDK Dependencies
+
+**Files:**
+- Modify: `package.json`
+- Modify: `pnpm-lock.yaml`
+
+- [ ] **Step 1: Install AI SDK packages**
+
+Run: `pnpm add ai zod`
+
+Expected: dependencies are added to `package.json` and `pnpm-lock.yaml`.
+
+- [ ] **Step 2: Verify dependency entries**
+
+Run: `rg -n '"ai"|"zod"' package.json pnpm-lock.yaml 2>&1 | head -c 4000`
+
+Expected: output includes `ai` and `zod`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add package.json pnpm-lock.yaml
+git commit -m "chore: add vercel ai sdk dependencies"
+```
 
 ---
 
@@ -933,9 +962,10 @@ git commit -m "feat: store media organizer operations"
 
 ---
 
-### Task 5: Add Runtime Facade
+### Task 5: Add Vercel AI SDK Tools And Runtime
 
 **Files:**
+- Create: `src/agent/mediaOrganizer/aiTools.ts`
 - Create: `src/agent/mediaOrganizer/runtime.ts`
 - Test: `src/agent/mediaOrganizer/__tests__/runtime.test.ts`
 
@@ -976,10 +1006,12 @@ const context: MediaOrganizerContext = {
 }
 
 describe('createMediaOrganizerRuntime', () => {
-  it('runs scan, diagnosis, plan, and dry-run without executing', async () => {
+  it('creates a Vercel AI SDK agent and prepares scan, diagnosis, plan, and dry-run results', async () => {
     const runtime = createMediaOrganizerRuntime()
+    const agent = runtime.createAgent(context, createDefaultRules())
     const result = await runtime.preparePlan(context, createDefaultRules())
 
+    expect(agent).toBeTruthy()
     expect(result.scan.stats.suspectedMovies).toBe(1)
     expect(result.plan.actions.length).toBeGreaterThan(0)
     expect(result.dryRun.planId).toBeTruthy()
@@ -1000,32 +1032,127 @@ describe('createMediaOrganizerRuntime', () => {
 
 Run: `pnpm exec vitest run src/agent/mediaOrganizer/__tests__/runtime.test.ts`
 
-Expected: FAIL because `runtime.ts` does not exist.
+Expected: FAIL because `runtime.ts` and `aiTools.ts` do not exist.
 
-- [ ] **Step 3: Implement runtime facade**
+- [ ] **Step 3: Implement AI SDK tools**
+
+Create `src/agent/mediaOrganizer/aiTools.ts`:
+
+```ts
+import { tool } from 'ai'
+import { z } from 'zod'
+import { classifyDirectoryItems, diagnoseScan } from './mediaClassifier'
+import { buildMediaOrganizerPlan, dryRunMediaOrganizerPlan } from './organizePlanner'
+import type { MediaOrganizerContext, MediaOrganizerRules, MediaOrganizerScan } from './types'
+
+export interface MediaOrganizerToolContext {
+  context: MediaOrganizerContext
+  rules: MediaOrganizerRules
+  scan?: MediaOrganizerScan
+}
+
+const emptyInput = z.object({})
+
+export function createMediaOrganizerTools(state: MediaOrganizerToolContext) {
+  return {
+    scanDirectory: tool({
+      description: 'Scan the current BoxPlayer cloud-drive directory and classify media files.',
+      inputSchema: emptyInput,
+      execute: async () => {
+        const sourceItems = state.rules.onlySelectedFiles && state.context.selectedFiles.length
+          ? state.context.selectedFiles
+          : state.context.items
+        const scan = classifyDirectoryItems({
+          provider: state.context.driveId,
+          accountId: state.context.userId,
+          rootFileId: state.context.dirId,
+          rootName: state.context.dirName,
+          items: sourceItems,
+        })
+        state.scan = scan
+        return scan
+      },
+    }),
+
+    diagnoseDirectory: tool({
+      description: 'Diagnose naming, duplicate, subtitle, and organization issues in the scanned directory.',
+      inputSchema: emptyInput,
+      execute: async () => {
+        const scan = state.scan || await createMediaOrganizerTools(state).scanDirectory.execute({})
+        return diagnoseScan(scan)
+      },
+    }),
+
+    generateOrganizePlan: tool({
+      description: 'Generate a safe media organize plan using the current rules. This does not execute changes.',
+      inputSchema: emptyInput,
+      execute: async () => {
+        const scan = state.scan || await createMediaOrganizerTools(state).scanDirectory.execute({})
+        return buildMediaOrganizerPlan(scan, state.rules)
+      },
+    }),
+
+    previewDryRun: tool({
+      description: 'Preview the organize plan and report conflicts. This must happen before execution.',
+      inputSchema: z.object({
+        plan: z.any().describe('The media organizer plan returned by generateOrganizePlan.'),
+      }),
+      execute: async ({ plan }) => {
+        const scan = state.scan || await createMediaOrganizerTools(state).scanDirectory.execute({})
+        return dryRunMediaOrganizerPlan(plan, scan.items)
+      },
+    }),
+  }
+}
+```
+
+- [ ] **Step 4: Implement Vercel AI SDK runtime facade**
 
 Create `src/agent/mediaOrganizer/runtime.ts`:
 
 ```ts
-import { classifyDirectoryItems, diagnoseScan } from './mediaClassifier'
-import { buildMediaOrganizerPlan, dryRunMediaOrganizerPlan } from './organizePlanner'
+import { ToolLoopAgent, gateway, stepCountIs } from 'ai'
+import { createMediaOrganizerTools } from './aiTools'
 import type { MediaOrganizerContext, MediaOrganizerRules } from './types'
+
+const DEFAULT_AGENT_MODEL = 'openai/gpt-5-mini'
 
 export function createMediaOrganizerRuntime() {
   return {
-    async preparePlan(context: MediaOrganizerContext, rules: MediaOrganizerRules) {
-      const sourceItems = rules.onlySelectedFiles && context.selectedFiles.length ? context.selectedFiles : context.items
-      const scan = classifyDirectoryItems({
-        provider: context.driveId,
-        accountId: context.userId,
-        rootFileId: context.dirId,
-        rootName: context.dirName,
-        items: sourceItems,
+    createAgent(context: MediaOrganizerContext, rules: MediaOrganizerRules) {
+      return new ToolLoopAgent({
+        model: gateway(DEFAULT_AGENT_MODEL),
+        instructions: [
+          'You are BoxPlayer Media Organizer Agent.',
+          'Use tools to scan, diagnose, plan, and dry-run media organization changes.',
+          'Never execute file writes inside the autonomous tool loop.',
+          'All rename and move operations require the app confirmation UI.',
+        ].join('\n'),
+        tools: createMediaOrganizerTools({ context, rules }),
+        stopWhen: stepCountIs(6),
       })
-      const diagnosis = diagnoseScan(scan)
-      const plan = buildMediaOrganizerPlan(scan, rules)
-      const dryRun = dryRunMediaOrganizerPlan(plan, scan.items)
+    },
+
+    async preparePlan(context: MediaOrganizerContext, rules: MediaOrganizerRules) {
+      const toolState = { context, rules }
+      const tools = createMediaOrganizerTools(toolState)
+      this.createAgent(context, rules)
+      const scan = await tools.scanDirectory.execute({})
+      const diagnosis = await tools.diagnoseDirectory.execute({})
+      const plan = await tools.generateOrganizePlan.execute({})
+      const dryRun = await tools.previewDryRun.execute({ plan })
       return { scan, diagnosis, plan, dryRun }
+    },
+
+    async runChatMessage(context: MediaOrganizerContext, rules: MediaOrganizerRules, message: string) {
+      const agent = this.createAgent(context, rules)
+      return agent.generate({
+        prompt: [
+          `Current directory: ${context.path || context.dirName}`,
+          `Current rules: ${JSON.stringify(rules)}`,
+          message,
+        ].join('\n'),
+      })
     },
 
     updateRulesFromMessage(rules: MediaOrganizerRules, message: string): MediaOrganizerRules {
@@ -1052,17 +1179,17 @@ export function createMediaOrganizerRuntime() {
 export type MediaOrganizerRuntime = ReturnType<typeof createMediaOrganizerRuntime>
 ```
 
-- [ ] **Step 4: Run runtime tests**
+- [ ] **Step 5: Run runtime tests**
 
 Run: `pnpm exec vitest run src/agent/mediaOrganizer/__tests__/runtime.test.ts src/agent/mediaOrganizer/__tests__/mediaClassifier.test.ts src/agent/mediaOrganizer/__tests__/organizePlanner.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent/mediaOrganizer/runtime.ts src/agent/mediaOrganizer/__tests__/runtime.test.ts
-git commit -m "feat: add media organizer runtime facade"
+git add src/agent/mediaOrganizer/aiTools.ts src/agent/mediaOrganizer/runtime.ts src/agent/mediaOrganizer/__tests__/runtime.test.ts
+git commit -m "feat: add vercel ai media organizer runtime"
 ```
 
 ---

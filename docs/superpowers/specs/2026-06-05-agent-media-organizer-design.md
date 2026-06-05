@@ -12,6 +12,8 @@ The MVP goal is:
 
 > A user can click AI Organize in a cloud-drive directory, let the Agent scan and diagnose the directory, generate a dry-run organize plan, adjust the plan through a contextual chatbox, confirm execution, and undo the operation afterward.
 
+The implementation must be based on the Vercel AI SDK (`vercel/ai`). The Agent runtime uses AI SDK Core tool calling as the orchestration boundary, with tools for scan, diagnosis, rule updates, plan generation, dry-run preview, and user-approved execution. The first Electron/Vue MVP can call the runtime through Pinia instead of an HTTP chat route; a later streaming Chatbox can add `@ai-sdk/vue` once the app has a clear transport boundary. Write operations remain gated by BoxPlayer's structured plan and confirmation UI.
+
 This creates the foundation for later discovery, Bilibili following, TMDB recommendations, personalized suggestions, and library matching.
 
 ## MVP Scope
@@ -197,19 +199,27 @@ Shortcut buttons should sit above the chatbox:
 - `Ignore Subtitles`
 - `Rescan`
 
-## Agent Runtime And Tooling
+## Vercel AI SDK Runtime And Tooling
 
 The LLM must not operate cloud-drive files directly. It can only call controlled tools.
 
-AI SDK should be centralized in an Agent runtime module rather than scattered across Vue components.
+Vercel AI SDK must be centralized in an Agent runtime module rather than scattered across Vue components.
+
+The runtime should use AI SDK Core primitives:
+
+- `ToolLoopAgent` for reusable multi-step agent behavior.
+- AI SDK `tool()` definitions with schema validation for each controlled tool.
+- `stopWhen` / step limits so a task cannot loop indefinitely.
+- AI Gateway model strings or `gateway()` where configured by the app.
+- Optional future `@ai-sdk/vue` integration for the drawer Chatbox transport and streaming UI state after the MVP runtime boundary is stable.
 
 Suggested layers:
 
 ```mermaid
 flowchart TD
   A["Vue directory page"] --> B["Agent drawer"]
-  B --> C["Agent runtime using AI SDK"]
-  C --> D["Controlled tool layer"]
+  B --> C["Vercel AI SDK ToolLoopAgent runtime"]
+  C --> D["Schema-validated controlled tools"]
   D --> E["Existing clouddrive capabilities"]
   E --> F["Cloud-drive provider APIs"]
   D --> G["Plan, dry-run, operation history"]
@@ -247,7 +257,7 @@ Execution tools:
 - `applyPlan`
 - `undoOperation`
 
-Execution tools must not be auto-callable by the model. They are invoked only after explicit user confirmation.
+Execution tools must not be auto-callable by the model. They are exposed as app-side commands invoked only after explicit user confirmation, not as tools available during autonomous AI SDK tool loops.
 
 ## Permission Model
 
@@ -324,6 +334,7 @@ After the MVP is stable:
 
 - The first `AI Organize` toolbar entry belongs to the existing cloud-drive directory toolbar surface. The implementation plan should identify the concrete Vue component during code exploration, but the product owner is the current file-list page, not a standalone chat page.
 - The first execution path should share lower-level clouddrive capabilities instead of shelling out to the CLI from the renderer. CLI and MCP should remain external automation surfaces over the same safe primitives.
+- The MVP implementation must use Vercel AI SDK as the Agent framework. Deterministic helpers are allowed as tool implementations, but the orchestration boundary is AI SDK tools / `ToolLoopAgent`, not a handwritten pseudo-agent.
 - The MVP ships with built-in rule presets for Jellyfin, Emby, Plex, rename-only, rename-plus-move, keep-Chinese-title, ignore-subtitles, and selected-files-only. Editable rule templates are a follow-up.
 - The MVP asks the user to narrow scope or confirm a large scan when a directory scan would include more than 500 files or descend more than 3 folder levels.
 - TMDB matching is a follow-up enhancement for this MVP. The first version may expose a `matchMovieOrTv` tool interface, but implementation should work from filename and directory heuristics first.
