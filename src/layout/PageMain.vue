@@ -12,8 +12,10 @@ import {
   useWinStore
 } from '../store'
 import useMusicLibraryStore from '../store/musiclibrary'
+import useMusicPlayerStore from '../store/musicplayerstore'
+import useBookLibraryStore from '../store/booklibrary'
 import { useMediaLibraryStore } from '../store/medialibrary'
-import { Music, Video } from 'lucide-vue-next'
+import { BookOpen, Music, Pause, Play, SkipBack, SkipForward, Video } from 'lucide-vue-next'
 import { onHideRightMenu, TestAlt, TestCtrl, TestKey, TestShift } from '../utils/keyboardhelper'
 import { copyToClipboard, openExternal } from '../utils/electronhelper'
 import { bootstrapMusicLibrary, shutdownMusicLibrary } from '../utils/musicLibraryBootstrap'
@@ -30,6 +32,7 @@ import Pan from '../pan/index.vue'
 import MediaLibraryView from '../views/MediaLibraryView.vue'
 import MediaServerView from '../views/MediaServerView.vue'
 import PageMusicLibrary from './PageMusicLibrary.vue'
+import PageBookLibrary from './PageBookLibrary.vue'
 
 import UserInfo from '../user/UserInfo.vue'
 import UserLogin from '../user/UserLogin.vue'
@@ -51,10 +54,16 @@ const keyboardStore = useKeyboardStore()
 const mouseStore = useMouseStore()
 const footStore = useFootStore()
 const musicStore = useMusicLibraryStore()
+const musicPlayerStore = useMusicPlayerStore()
+const bookStore = useBookLibraryStore()
 const mediaStore = useMediaLibraryStore()
 
 const handleMusicLibraryClick = () => {
   appStore.toggleTab('music')
+}
+
+const handleBookLibraryClick = () => {
+  appStore.toggleTab('book')
 }
 
 const handleMediaLibraryClick = () => {
@@ -100,8 +109,9 @@ const themeTitle = computed(() => {
 const primaryTabDefinitions = [
   { key: 'pan', title: 'Alt+1', label: '网盘' },
   { key: 'media-server', title: 'Alt+6', label: '媒体服务器' },
-  { key: 'media', title: 'Alt+5', label: '媒体库' },
-  { key: 'music', title: 'Alt+8', label: '音乐' }
+  { key: 'media', title: 'Alt+5', label: '视频' },
+  { key: 'music', title: 'Alt+8', label: '音乐' },
+  { key: 'book', title: 'Alt+9', label: '书籍' }
 ]
 
 const orderedPrimaryTabs = computed(() => {
@@ -146,6 +156,7 @@ keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestAlt('6', state.KeyDownEvent, () => appStore.toggleTab('media-server'))) return
   if (TestAlt('7', state.KeyDownEvent, () => appStore.toggleTab('setting'))) return
   if (TestAlt('8', state.KeyDownEvent, () => appStore.toggleTab('music'))) return
+  if (TestAlt('9', state.KeyDownEvent, () => appStore.toggleTab('book'))) return
   if (TestAlt('f4', state.KeyDownEvent, () => handleHideClick(undefined))) return
   if (TestAlt('m', state.KeyDownEvent, () => handleMinClick(undefined))) return
   if (TestAlt('enter', state.KeyDownEvent, () => handleMaxClick(undefined))) return
@@ -213,6 +224,26 @@ const handleAudioStop = () => {
   footStore.mSaveAudioUrl('')
 }
 
+const formatFooterMusicTime = (sec: number): string => {
+  if (!isFinite(sec) || sec < 0) sec = 0
+  const total = Math.floor(sec)
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+const handleFooterMusicToggle = () => {
+  musicPlayerStore.sendCommand('toggle')
+}
+
+const handleFooterMusicPrev = () => {
+  musicPlayerStore.sendCommand('prev')
+}
+
+const handleFooterMusicNext = () => {
+  musicPlayerStore.sendCommand('next')
+}
+
 onMounted(() => {
   if (settingStore.uiDefaultTab && appStore.appTab !== settingStore.uiDefaultTab) {
     appStore.toggleTab(settingStore.uiDefaultTab)
@@ -227,6 +258,7 @@ onMounted(() => {
   }, 300)
   window.addEventListener('click', onHideRightMenu, { passive: true })
   bootstrapMusicLibrary()
+  bookStore.loadFromDB()
   bootstrapMediaLibrary()
 })
 
@@ -310,6 +342,9 @@ onUnmounted(() => {
         <a-tab-pane key='music' title='8'>
           <PageMusicLibrary />
         </a-tab-pane>
+        <a-tab-pane key='book' title='9'>
+          <PageBookLibrary />
+        </a-tab-pane>
         <a-tab-pane key='setting' title='7'>
           <Setting />
         </a-tab-pane>
@@ -333,6 +368,38 @@ onUnmounted(() => {
           {{ footStore.GetSpaceInfo }}
         </div>
         <div
+          v-if="musicPlayerStore.state.hasTrack"
+          class='footer-music-player'
+          :title='musicPlayerStore.state.title'
+        >
+          <div class='footer-music-cover' @click='musicPlayerStore.togglePanel()'>
+            <img v-if='musicPlayerStore.state.coverUrl' :src='musicPlayerStore.state.coverUrl' alt='' />
+            <Music v-else :size='14' :stroke-width='1.8' />
+          </div>
+          <div class='footer-music-meta' @click='musicPlayerStore.togglePanel()'>
+            <div class='footer-music-title'>{{ musicPlayerStore.state.title || '音乐播放器' }}</div>
+            <div class='footer-music-bar'>
+              <div class='footer-music-bar-fill' :style="{ width: musicPlayerStore.state.progressPercent + '%' }"></div>
+            </div>
+          </div>
+          <span class='footer-music-time'>
+            {{ formatFooterMusicTime(musicPlayerStore.state.currentTime) }}
+          </span>
+          <button class='footer-music-btn' title='上一首' @click.stop='handleFooterMusicPrev'>
+            <SkipBack :size='13' :stroke-width='2' />
+          </button>
+          <button class='footer-music-btn primary' :title="musicPlayerStore.state.isPlaying ? '暂停' : '播放'" @click.stop='handleFooterMusicToggle'>
+            <Pause v-if='musicPlayerStore.state.isPlaying' :size='13' :stroke-width='2' :fill="'currentColor'" />
+            <Play v-else :size='13' :stroke-width='2' :fill="'currentColor'" />
+          </button>
+          <button class='footer-music-btn' title='下一首' @click.stop='handleFooterMusicNext'>
+            <SkipForward :size='13' :stroke-width='2' />
+          </button>
+          <button class='footer-music-toggle' @click.stop='musicPlayerStore.togglePanel()'>
+            {{ musicPlayerStore.panelVisible ? '收起' : '展开' }}
+          </button>
+        </div>
+        <div
           v-if="musicStore.isScanning && appStore.appTab !== 'music'"
           class='footerBar fix music-scan-foot'
           style='cursor: pointer; gap: 6px'
@@ -354,6 +421,18 @@ onUnmounted(() => {
           <Video :size="14" :stroke-width="1.8" class="music-scan-spin" />
           <span class='music-scan-text'>
             视频媒体库扫描 {{ mediaStore.scanProgress }}/{{ mediaStore.scanTotal }}
+          </span>
+        </div>
+        <div
+          v-if="bookStore.isScanning && appStore.appTab !== 'book'"
+          class='footerBar fix music-scan-foot'
+          style='cursor: pointer; gap: 6px'
+          :title='bookStore.scanLabel || "正在扫描书籍库"'
+          @click='handleBookLibraryClick'
+        >
+          <BookOpen :size="14" :stroke-width="1.8" class="music-scan-spin" />
+          <span class='music-scan-text'>
+            {{ bookStore.scanLabel || '正在扫描书籍库' }} · {{ bookStore.scanFound }} 本
           </span>
         </div>
         <div class='flexauto' />
@@ -790,6 +869,118 @@ a {
 .footinfo {
   padding: 0 8px;
   opacity: 0.9;
+}
+
+.footer-music-player {
+  display: flex;
+  align-items: center;
+  flex: 0 1 420px;
+  min-width: 260px;
+  max-width: 420px;
+  height: 24px;
+  padding: 0 6px;
+  gap: 5px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.footer-music-cover {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  color: hsla(0, 0%, 100%, 0.8);
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.footer-music-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.footer-music-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.footer-music-title {
+  max-width: 100%;
+  height: 14px;
+  overflow: hidden;
+  color: hsla(0, 0%, 100%, 0.92);
+  font-size: 12px;
+  line-height: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.footer-music-bar {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+
+.footer-music-bar-fill {
+  height: 100%;
+  background: #ffffff;
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.footer-music-time {
+  flex: 0 0 auto;
+  min-width: 32px;
+  color: hsla(0, 0%, 100%, 0.72);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.footer-music-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: hsla(0, 0%, 100%, 0.82);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.footer-music-btn:hover,
+.footer-music-toggle:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.footer-music-btn.primary {
+  color: var(--foot-bg);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.footer-music-toggle {
+  height: 18px;
+  padding: 0 6px;
+  flex: 0 0 auto;
+  color: hsla(0, 0%, 100%, 0.8);
+  font-size: 11px;
+  line-height: 18px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 body[arco-theme='dark'] .footinfo {

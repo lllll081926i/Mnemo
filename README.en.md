@@ -38,7 +38,7 @@
   </a>
 </p>
 
-[![](https://img.shields.io/badge/-Features-blue)](#features-) [![](https://img.shields.io/badge/-Screenshots-blue)](#screenshots-) [![](https://img.shields.io/badge/-Installation-blue)](#installation-) [![](https://img.shields.io/badge/-CLI-blue)](#clouddrive-cli-) [![](https://img.shields.io/badge/-WeChat-blue)](#wechat-official-account-) [![](https://img.shields.io/badge/-Community-blue)](#community-) [![](https://img.shields.io/badge/-Credits-blue)](#credits-) [![](https://img.shields.io/badge/-Disclaimer-blue)](#disclaimer-)
+[![](https://img.shields.io/badge/-Features-blue)](#features-) [![](https://img.shields.io/badge/-%E2%9C%A8%20New%20Features-orange)](#new-features-) [![](https://img.shields.io/badge/-Screenshots-blue)](#screenshots-) [![](https://img.shields.io/badge/-Installation-blue)](#installation-) [![](https://img.shields.io/badge/-CLI-blue)](#clouddrive-cli-) [![](https://img.shields.io/badge/-WeChat-blue)](#wechat-official-account-) [![](https://img.shields.io/badge/-Community-blue)](#community-) [![](https://img.shields.io/badge/-Credits-blue)](#credits-) [![](https://img.shields.io/badge/-Disclaimer-blue)](#disclaimer-)
 
 # Features [![](https://img.shields.io/badge/-Features-blue)](#features-)
 
@@ -84,6 +84,82 @@
 
 ## Cross-Platform
 29. **Platform support**: supports Windows 7-11, macOS, and Linux.<br>
+
+<a href="#readme">
+    <img src="https://img.shields.io/badge/-Back%20to%20top-orange.svg" alt="#" align="right">
+</a>
+
+# New Features [![](https://img.shields.io/badge/-%E2%9C%A8%20New%20Features-orange)](#new-features-)
+
+> This release ships **45+ major upgrades**, covering AI Read-Aloud / AI Reading Assistant / AI Translation / multi-model chat / advanced music playback / Download infrastructure / 3 new cloud drives / AI media organizer agent. Every new capability is grouped by module below.
+
+## Brand-new “Library” — AI-powered personal e-book reader
+
+1. **AI Text-to-Speech (TTS)**: built-in **Azure Neural TTS** + Web Speech API dual engines, with dozens of natural voices (Xiaoxian / Xiaoxiao / Yunxi / Yunyang and more), reading any book aloud from the cursor with **continuous cross-chapter playback**, adjustable speed / voice / pitch — turn any e-book into a professional audiobook instantly. <br>
+2. **AI Reading Assistant**: one-click access to 10+ leading models — **OpenAI / DeepSeek / Zhipu GLM / Qwen / Moonshot Kimi / SiliconFlow / Ollama (local) / OpenRouter / Vercel AI Gateway** — to **summarize chapters / answer questions / recommend similar books / hold multi-turn conversations**. Includes a **local chapter-vector RAG index** so “what does chapter 3 actually say?” gets a grounded answer. <br>
+3. **AI Word Translation + Whole-Book Translation**: select to translate, with **AI translation (DeepL-grade quality) / Azure / Google Translate**, **bilingual side-by-side reading**, or **whole-book translation mode** — read any foreign-language book without friction. <br>
+4. **Multi-format e-book reader**: supports **EPUB / PDF / TXT / MOBI / AZW / AZW3 / FB2 / DOCX / MD / HTML / CBZ / CBR / CB7 / CBT** — every major format. <br>
+5. **Three pagination modes**: single / double-page / scroll, freely switchable. The new release fixes the “only partial text shown, large blank areas” rendering bug, restoring native pagination and container scrolling. <br>
+6. **Cloud + local dual book sources**: every connected cloud drive auto-detects books; one-click local-folder import; auto-scrape covers / authors / publication dates / summaries. <br>
+7. **Professional typography engine**: built-in **Heti / Hanzi Standard Format / Chinese Web Typography Reset / Tufte CSS / Typebase** academic-grade styles — better Chinese-English mixed typesetting than Kindle. <br>
+8. **Bookshelf / favorites / tags / trash**: complete book lifecycle management with card / list / cover view modes. <br>
+9. **Notes / highlights / bookmarks / selection menu**: customizable highlight colors, attached notes, in-document jumps, keyboard shortcuts. <br>
+10. **Bulk annotation export**: one-click export of all highlights and notes to Markdown / JSON / CSV / TXT. <br>
+11. **Reading statistics**: visualize daily reading time / page turns / completion rate. <br>
+12. **OPDS subscriptions**: subscribe to any OPDS-compliant online library. <br>
+13. **PDF full-text search + chapter navigation + dictionary lookup + reference search**. <br>
+
+## Advanced Music Playback (lx-music-desktop port, no copyright risk)
+
+14. **AudioContext audio engine**: 10-band EQ + reverb + panning + pitch shift (without speed change) + real-time spectrum visualization. <br>
+15. **Word-by-word karaoke lyrics**: per-character highlight animations powered by Web Animations API, with translation / romaji dual-line support. <br>
+16. **Floating desktop lyrics window**: independent transparent always-on-top window, draggable, scrolling with playback. <br>
+17. **Multi-source lyrics / cover fallback**: when LRCLIB has no match, automatically fetches lyrics and covers from NetEase / KuGou / QQ Music / Kuwo / Migu open APIs (metadata only, no audio stream download). <br>
+18. **Customizable theme system**: 12-color visual editor + 15 built-in preset themes, fully CSS-variable-driven. <br>
+
+## Download Infrastructure
+
+19. **Main-process aria2c hosting**: PID file + session resume + graceful shutdown + auto-reconnect on crash. <br>
+20. **EngineClient real-time events**: aria2-lib low-latency event-driven, subscribes to `onDownloadStart/Complete/Error/Stop/BtComplete`, sub-100ms state feedback. <br>
+21. **UPnP automatic port mapping**: BT downloads automatically open NAT ports for better seeding connectivity. <br>
+22. **BT tracker auto-sync every 12h**: pulls the latest public trackers from [ngosang/trackerslist](https://github.com/ngosang/trackerslist) every 12 hours after launch. <br>
+23. **Torrent file selector**: select specific files within a BT task to avoid downloading the whole torrent. <br>
+24. **Task detail drawer**: GID / total size / progress / speed / seeders / connections / InfoHash / save path / file list — all visible at a glance. <br>
+25. **Drag-and-drop add tasks**: drop URLs / magnet links / .torrent files from browser address bars / Finder / File Explorer to create tasks instantly. <br>
+26. **Protocol associations**: `magnet://` / `mo://` automatically captured to open the download dialog (supports macOS `open-url` / `open-file`). <br>
+27. **Download progress indicator**: macOS Dock / Windows taskbar shows real-time download progress ring. <br>
+28. **Completion system notifications**: each completed file triggers a system notification; click to focus the main window. <br>
+29. **Batch pause / resume / delete**: direct RPC, no polling delay. <br>
+30. **Per-platform aria2 configurations**: 7 optimized `aria2.conf` profiles across darwin / linux / win32 × x64 / arm64 / armv7l / ia32. <br>
+31. **Expanded settings**: upload speed cap, seed ratio, seed time, auto-resume unfinished tasks, browser extension RPC URL display, tracker editor (one URL per line) with instant sync. <br>
+32. **Sleep prevention**: blocks system sleep while downloads are in progress. <br>
+
+## New Cloud Drives
+
+| Cloud Drive | App capabilities | clouddrive-cli `--provider` |
+|---|---|---|
+| **Quark Cloud Drive** | Login / browse / download / upload / rename / move / share / search | `quark` |
+| **China Mobile Cloud (139)** | Login / browse / download / upload / rename / move | `cloud139` |
+| **China Telecom Cloud (189)** | Login / browse / download / upload / rename / move | `cloud189` |
+
+33. clouddrive-cli adds three new providers — `cloud139` / `cloud189` / `quark` — and extracts shared `ossUpload` / `uploadUtils` helpers for unified resumable uploads, chunked transfer, and progress callbacks. <br>
+34. clouddrive-cli adds `commandManifest` and `mcpToolSchema` metadata so MCP clients (Claude Desktop, Cursor, etc.) can auto-discover commands, parameters, and examples. <br>
+
+## AI Media Organizer Agent
+
+35. **AgentMediaOrganizer drawer**: right-click any cloud-drive folder to launch “AI Organize”, letting the AI see the current directory and execute renames / moves / classifications according to your description, with multi-turn conversation. <br>
+36. **Powered by Vercel AI SDK**: compatible with all OpenAI-protocol models (GPT / Claude / DeepSeek / Qwen / GLM / Moonshot / Ollama via Gateway, etc.). <br>
+37. **Reversible operation log**: every AI action is recorded in `operationHistory`; one-click rollback to the pre-operation state. <br>
+38. **Pan-context tool set**: built-in `walkDirectory` / `renamePlan` / `movePlan` / `mediaClassifier` and other safe tools the AI can call. <br>
+39. **clouddrive-cli `organize` command**: exposes the same capabilities to AI terminals (Claude Code, Cursor, etc.) so AI agents can organize cloud drives remotely. <br>
+
+## Settings and Infrastructure Refactor
+
+40. **Unified AI / API key configuration page** (`SettingAPI.vue`): centrally manage OpenAI / DeepSeek / Azure TTS / Vercel AI Gateway / translation API keys, shared by the reader and organizer agents. <br>
+41. **Advanced download settings panel** (`SettingDownloadAdvanced.vue`): aggregates aria2, seeding, tracker, and protocol-association advanced parameters. <br>
+42. **`shared/` cross-cutting layer**: constants, UA, `configKeys`, `tracker`, and `rename` utilities reused by main process / renderer / CLI. <br>
+43. **Protocol handler refactor**: unified `electron/main/core/protocol.ts` handles magnet / file / custom protocols, with unit-test coverage. <br>
+44. **aria2 engine policy** (`aria2EnginePolicy.ts`): auto-selects the optimal aria2c binary and configuration based on platform and architecture. <br>
 
 <a href="#readme">
     <img src="https://img.shields.io/badge/-Back%20to%20top-orange.svg" alt="#" align="right">
