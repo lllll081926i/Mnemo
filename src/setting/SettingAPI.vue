@@ -20,14 +20,30 @@ const aiKey = ref(settingStore.apiAIModelKey)
 const aiModelId = ref(settingStore.apiAIModelId)
 const aiBaseUrl = ref(settingStore.apiAIBaseUrl)
 const aiEmbeddingModelId = ref(settingStore.apiAIEmbeddingModelId)
-const aiRagEnabled = ref(settingStore.apiAIRagEnabled)
 const aiSpoilerProtection = ref(settingStore.apiAISpoilerProtection)
 const aiMaxContextChunks = ref(settingStore.apiAIMaxContextChunks)
 const aiIndexingMode = ref(settingStore.apiAIIndexingMode)
 const aiReedyEnabled = ref(settingStore.apiAIReedyEnabled)
+const aiReedyRuntime = ref(settingStore.apiAIReedyRuntime)
 const aiFetching = ref(false)
 const aiModels = ref<{ id: string; name: string }[]>([])
 const aiEmbeddingModels = ref<{ id: string; name: string }[]>([])
+
+const DEFAULT_EMBEDDING_MODELS = [
+  { id: 'text-embedding-3-small', name: 'text-embedding-3-small (OpenAI)' },
+  { id: 'text-embedding-3-large', name: 'text-embedding-3-large (OpenAI)' },
+  { id: 'text-embedding-ada-002', name: 'text-embedding-ada-002 (OpenAI)' },
+  { id: 'BAAI/bge-large-zh-v1.5', name: 'bge-large-zh-v1.5 (SiliconFlow)' },
+  { id: 'BAAI/bge-m3', name: 'bge-m3 (SiliconFlow)' },
+]
+
+const embeddingModelOptions = computed(() => {
+  const fetched = aiEmbeddingModels.value.map(m => ({ id: m.id, name: m.name }))
+  for (const def of DEFAULT_EMBEDDING_MODELS) {
+    if (!fetched.find(f => f.id === def.id)) fetched.push(def)
+  }
+  return fetched
+})
 const aiFetchError = ref('')
 const aiTestStatus = ref<'idle' | 'testing' | 'success' | 'error'>('idle')
 const aiTestMsg = ref('')
@@ -36,23 +52,28 @@ watch(azureKey, (v) => settingStore.updateStore({ apiAzureSpeechKey: v }))
 watch(azureRegion, (v) => settingStore.updateStore({ apiAzureSpeechRegion: v }))
 watch(aiProvider, (v) => {
   settingStore.updateStore({ apiAIModelProvider: v })
-  aiModels.value = []; aiEmbeddingModels.value = []
+  aiModels.value = []; aiEmbeddingModels.value = []; aiFetchError.value = ''
+  aiKey.value = ''; aiModelId.value = ''; aiEmbeddingModelId.value = ''
+  settingStore.updateStore({ apiAIModelKey: '', apiAIModelId: '', apiAIEmbeddingModelId: '' })
   // Auto-fill base URL from provider default
   const info = PROVIDER_INFO[v]
   if (info?.endpoint) {
     aiBaseUrl.value = info.endpoint
     settingStore.updateStore({ apiAIBaseUrl: info.endpoint })
+  } else {
+    aiBaseUrl.value = ''
+    settingStore.updateStore({ apiAIBaseUrl: '' })
   }
 })
 watch(aiKey, (v) => settingStore.updateStore({ apiAIModelKey: v }))
 watch(aiModelId, (v) => settingStore.updateStore({ apiAIModelId: v }))
 watch(aiBaseUrl, (v) => settingStore.updateStore({ apiAIBaseUrl: v }))
 watch(aiEmbeddingModelId, (v) => settingStore.updateStore({ apiAIEmbeddingModelId: v }))
-watch(aiRagEnabled, (v) => settingStore.updateStore({ apiAIRagEnabled: v }))
 watch(aiSpoilerProtection, (v) => settingStore.updateStore({ apiAISpoilerProtection: v }))
 watch(aiMaxContextChunks, (v) => settingStore.updateStore({ apiAIMaxContextChunks: v }))
 watch(aiIndexingMode, (v) => settingStore.updateStore({ apiAIIndexingMode: v }))
 watch(aiReedyEnabled, (v) => settingStore.updateStore({ apiAIReedyEnabled: v }))
+watch(aiReedyRuntime, (v) => settingStore.updateStore({ apiAIReedyRuntime: v }))
 watch(aiEnabled, (v) => { if (!v) { aiProvider.value = ''; aiKey.value = ''; aiModelId.value = '' } })
 
 const hasAzureConfig = computed(() => !!(azureKey.value && azureRegion.value))
@@ -205,21 +226,18 @@ async function runConnectionTest() {
       </div>
     </div>
 
-    <!-- 服务商选择 -->
+    <!-- 服务商 + API 配置 -->
     <div :class="['settingcard', disabledClass]">
-      <div class='settinghead'>服务商</div>
+      <div class='settinghead'>服务商 &amp; API 配置</div>
       <div class='settingspace'></div>
       <div class='settingrow'>
         <a-select v-model:model-value='aiProvider' style='width:100%' :disabled='!aiEnabled' placeholder='选择服务商'>
           <a-option v-for='prov in availableProviders' :key='prov.key' :value='prov.key'>{{ prov.label }}</a-option>
         </a-select>
       </div>
-    </div>
-
-    <!-- 所有 provider 配置 -->
-    <div v-if="aiProvider" :class="['settingcard', disabledClass]">
-      <div class='settinghead'>{{ PROVIDER_INFO[aiProvider]?.name || aiProvider }} 配置</div>
       <div class='settingspace'></div>
+
+      <template v-if="aiProvider">
 
       <!-- Ollama Server URL -->
       <div v-if="aiProvider === 'ollama'" class='settingrow'>
@@ -282,15 +300,13 @@ async function runConnectionTest() {
       <div class='settingrow'><span>Embedding 模型</span></div>
       <div class='settingrow'>
         <a-select
-          v-if='aiEmbeddingModels.length'
           v-model:model-value='aiEmbeddingModelId'
           style='width:100%'
           :disabled='!aiEnabled'
           allow-search
         >
-          <a-option v-for='m in aiEmbeddingModels' :key='m.id' :value='m.id'>{{ m.name }}</a-option>
+          <a-option v-for='m in embeddingModelOptions' :key='m.id' :value='m.id'>{{ m.name }}</a-option>
         </a-select>
-        <a-input v-else v-model:model-value='aiEmbeddingModelId' placeholder='如 text-embedding-3-small' style='width:100%' :disabled='!aiEnabled' />
       </div>
       <div class='settingrow' style='font-size:11px;color:var(--color-text-3);margin-top:2px'>
         留空则禁用 RAG — 仍可聊天，但无法检索本书内容
@@ -303,24 +319,25 @@ async function runConnectionTest() {
         <span v-if="aiTestStatus === 'success'" style='color:rgb(var(--green-6));font-size:13px'>✓ 连接成功</span>
         <span v-if="aiTestStatus === 'error'" style='color:rgb(var(--danger-6));font-size:13px'>{{ aiTestMsg || '连接失败' }}</span>
       </div>
+      </template>
     </div>
 
-    <!-- RAG 设置 -->
+    <!-- Reedy 检索 -->
     <div :class="['settingcard', disabledClass]">
-      <div class='settinghead'>阅读 RAG</div>
+      <div class='settinghead'>Reedy 检索</div>
       <div class='settingspace'></div>
       <div class='settingrow'>
-        <span>启用 RAG</span>
-        <a-switch v-model:model-value='aiRagEnabled' :disabled='!aiEnabled' />
-        <span style='color:var(--color-text-3);font-size:12px;margin-left:8px'>索引章节内容，基于本书上下文回答</span>
+        <span>启用 Reedy</span>
+        <a-switch v-model:model-value='aiReedyEnabled' :disabled='!aiEnabled' />
+        <span style='color:var(--color-text-3);font-size:12px;margin-left:8px'>使用 SQLite 混合检索（向量 + 全文），比旧版 IndexedDB 更精准</span>
       </div>
-      <div class='settingspace'></div>
+      <div class='settingspace' />
       <div class='settingrow'>
         <span>防剧透</span>
         <a-switch v-model:model-value='aiSpoilerProtection' :disabled='!aiEnabled' />
         <span style='color:var(--color-text-3);font-size:12px;margin-left:8px'>仅基于已读/已索引内容回答，拒绝剧透</span>
       </div>
-      <div class='settingspace'></div>
+      <div class='settingspace' />
       <div class='settingrow'>
         <span>上下文段数</span>
         <a-input-number v-model:model-value='aiMaxContextChunks' :min='1' :max='12' style='width:90px' :disabled='!aiEnabled' />
@@ -330,16 +347,14 @@ async function runConnectionTest() {
           <a-option value='background'>后台</a-option>
         </a-select>
       </div>
-    </div>
-
-    <!-- Reedy placeholder -->
-    <div :class="['settingcard', disabledClass]">
-      <div class='settinghead'>Reedy 检索 (Beta)</div>
-      <div class='settingspace'></div>
+      <div class='settingspace' />
       <div class='settingrow'>
-        <span>启用 Reedy</span>
-        <a-switch v-model:model-value='aiReedyEnabled' disabled />
-        <span style='color:var(--color-text-3);font-size:12px;margin-left:8px'>BoxPlayer 适配后二期启用</span>
+        <span>Agent 运行时</span>
+        <a-switch v-model:model-value='aiReedyRuntime' :checked-value="'agent'" :unchecked-value="'mvp'" :disabled='!aiEnabled || !aiReedyEnabled' />
+        <span style='color:var(--color-text-3);font-size:12px;margin-left:8px'>{{ aiReedyRuntime === 'agent' ? '多轮 Agent 模式，支持技能和记忆' : '单轮工具调用模式' }}</span>
+      </div>
+      <div class='settingrow' style='font-size:11px;color:var(--color-text-3);margin-top:2px'>
+        Agent 模式需要保存当前索引，切换后需重新索引
       </div>
     </div>
 

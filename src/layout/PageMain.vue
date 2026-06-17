@@ -33,6 +33,7 @@ import MediaLibraryView from '../views/MediaLibraryView.vue'
 import MediaServerView from '../views/MediaServerView.vue'
 import PageMusicLibrary from './PageMusicLibrary.vue'
 import PageBookLibrary from './PageBookLibrary.vue'
+import PageGlobalSearch from './PageGlobalSearch.vue'
 
 import UserInfo from '../user/UserInfo.vue'
 import UserLogin from '../user/UserLogin.vue'
@@ -111,7 +112,8 @@ const primaryTabDefinitions = [
   { key: 'media-server', title: 'Alt+6', label: '媒体服务器' },
   { key: 'media', title: 'Alt+5', label: '视频' },
   { key: 'music', title: 'Alt+8', label: '音乐' },
-  { key: 'book', title: 'Alt+9', label: '书籍' }
+  { key: 'book', title: 'Alt+9', label: '书籍' },
+  { key: 'search', title: 'Ctrl+K', label: '全局搜索' }
 ]
 
 const orderedPrimaryTabs = computed(() => {
@@ -145,6 +147,10 @@ const handleMaxClick = (_e: any) => {
 const handleHelpPage = () => {
   const ourl = B64decode(useServerStore().helpUrl)
   if (ourl) openExternal(ourl)
+}
+
+const handleGlobalSearch = () => {
+  appStore.toggleTab('search')
 }
 
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -192,6 +198,11 @@ const onKeyDown = (event: KeyboardEvent) => {
     event.cancelBubble = true
     event.returnValue = false
     if (nodeName && !'BODY|DIV'.includes(nodeName)) ele.blur()
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !event.repeat) {
+    event.preventDefault()
+    appStore.toggleTab('search')
+    return
   }
   if (document.body.getElementsByClassName('arco-modal-container').length) return
   if (event.key == 'Control' || event.key == 'Shift' || event.key == 'Alt' || event.key == 'Meta') return
@@ -344,6 +355,9 @@ onUnmounted(() => {
         </a-tab-pane>
         <a-tab-pane key='book' title='9'>
           <PageBookLibrary />
+        </a-tab-pane>
+        <a-tab-pane key='search' title='0'>
+          <PageGlobalSearch />
         </a-tab-pane>
         <a-tab-pane key='setting' title='7'>
           <Setting />

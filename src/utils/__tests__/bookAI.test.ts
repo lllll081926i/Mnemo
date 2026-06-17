@@ -318,8 +318,8 @@ describe('bookAI', () => {
   it('resolves Vercel AI Gateway models through the AI SDK gateway provider', () => {
     const settings = createBookAISettings({
       provider: 'ai-gateway',
-      apiKey: 'gateway-key',
-      modelId: 'google/gemini-2.5-flash-lite',
+      aiGatewayApiKey: 'gateway-key',
+      aiGatewayModel: 'google/gemini-2.5-flash-lite',
     })
 
     const provider = resolveBookAIProvider(settings)
@@ -330,8 +330,8 @@ describe('bookAI', () => {
   it('resolves OpenAI-compatible chat models through chat completions instead of responses', () => {
     const settings = createBookAISettings({
       provider: 'deepseek',
-      apiKey: 'test-key',
-      modelId: 'deepseek-chat',
+      openRouterApiKey: 'test-key',
+      openRouterModel: 'deepseek-chat',
     })
 
     expect(resolveBookAIProvider(settings).getModel()).toEqual({ chatModelId: 'deepseek-chat' })
@@ -410,7 +410,7 @@ describe('bookAI', () => {
   it('rejects operations that exceed the retry timeout', async () => {
     vi.useFakeTimers()
     const observed = vi.fn()
-    const pending = withRetryAndTimeout(() => new Promise<string>(() => {}), 25, 0)
+    const pending = withRetryAndTimeout(() => new Promise<string>(() => {}), 25, { maxRetries: 0 })
     pending.catch(observed)
 
     await vi.advanceTimersByTimeAsync(30)

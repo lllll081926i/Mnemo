@@ -463,6 +463,34 @@ export default class PanDAL {
     if (!dir || (dirPath.length == 0 && !file_id.includes('root'))) {
       if (isCloudUser) {
         // 123 网盘不支持路径查询，依赖已加载的目录结构
+      } else if (isBaiduUser(user_id) && file_id.startsWith('/')) {
+        const dirName = file_id === '/' ? '根目录' : file_id.split('/').filter(Boolean).pop() || '根目录'
+        dir = {
+          __v_skip: true,
+          file_id: file_id,
+          drive_id: drive_id,
+          parent_file_id: '',
+          name: dirName,
+          namesearch: '',
+          description: '',
+          time: 0,
+          size: 0
+        } as IAliGetDirModel
+        dirPath = [dir]
+      } else if (file_id.includes('root')) {
+        const driveType = GetDriveType(user_id, drive_id)
+        dir = {
+          __v_skip: true,
+          file_id: file_id,
+          drive_id: drive_id,
+          parent_file_id: '',
+          name: driveType.title || '根目录',
+          namesearch: '',
+          description: '',
+          time: 0,
+          size: 0
+        } as IAliGetDirModel
+        dirPath = [dir]
       } else {
       let findPath = []
       if (!album_id) {

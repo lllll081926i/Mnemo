@@ -59,7 +59,8 @@ export const quarkRequest = async <T = any>(
   user_id: string,
   path: string,
   init: RequestInit = {},
-  params: Record<string, string | number | undefined> = {}
+  params: Record<string, string | number | undefined> = {},
+  silent = false
 ): Promise<T | { __error: true; code: number; message: string } | null> => {
   const token = await getToken(user_id)
   if (!token?.access_token) {
@@ -78,7 +79,7 @@ export const quarkRequest = async <T = any>(
   const data = await resp.json().catch(() => undefined)
   if (!resp.ok || data?.status === 'error' || (data?.code && data.code !== 0)) {
     const missingLoginCookie = data?.code === 31001 || /require login/i.test(data?.message || '')
-    message.error(missingLoginCookie ? '夸克网盘登录 Cookie 无效或未写入，请重新登录夸克' : (data?.message || '夸克网盘请求失败'))
+    if (!silent) message.error(missingLoginCookie ? '夸克网盘登录 Cookie 无效或未写入，请重新登录夸克' : (data?.message || '夸克网盘请求失败'))
     return { __error: true, code: Number(data?.code || data?.status || resp.status || 0), message: data?.message || '夸克网盘请求失败' }
   }
   return data as T
@@ -117,7 +118,7 @@ export const apiQuarkFileList = async (
   }
 }
 
-export const apiQuarkSearch = async (user_id: string, keyword: string, size = 200): Promise<QuarkFileItem[]> => {
+export const apiQuarkSearch = async (user_id: string, keyword: string, size = 200, silent = false): Promise<QuarkFileItem[]> => {
   if (!keyword) return []
   const data = await quarkRequest(user_id, 'file/search', {}, {
     q: keyword,
@@ -126,7 +127,7 @@ export const apiQuarkSearch = async (user_id: string, keyword: string, size = 20
     _fetch_total: 1,
     _sort: 'file_type:desc,updated_at:desc',
     _is_hl: 1
-  })
+  }, silent)
   return data && !isQuarkError(data) ? getListFromResponse(data) : []
 }
 

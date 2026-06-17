@@ -223,11 +223,11 @@ const maxBarVal = computed(() => Math.max(...last30Days.value.map(d => d.minutes
 <style scoped>
 /* Match koodo stats.css exactly */
 .stats-page {
-  position: fixed;
+  position: absolute;
   top: 0; left: 0;
   width: 100%; height: 100%;
   overflow-y: auto;
-  z-index: 1000;
+  z-index: 10;
   box-sizing: border-box;
   padding: 40px 60px 60px 60px;
   background: var(--color-bg-1);
@@ -235,7 +235,7 @@ const maxBarVal = computed(() => Math.max(...last30Days.value.map(d => d.minutes
 }
 
 .stats-close-btn {
-  position: fixed;
+  position: absolute;
   top: 20px; right: 20px;
   width: 36px; height: 36px;
   border-radius: 50%;
@@ -243,7 +243,7 @@ const maxBarVal = computed(() => Math.max(...last30Days.value.map(d => d.minutes
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 1001;
+  z-index: 11;
   transition: background 0.2s;
   color: var(--color-text-2);
 }

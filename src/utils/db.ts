@@ -5,7 +5,11 @@ import { IMusicTrack } from '../types/music'
 import { IBookItem } from '../types/book'
 import { IBookNote } from '../types/bookNote'
 import { IBookBookmark } from '../types/bookBookmark'
-import type { AIConversationRecord, AIMessageRecord, BookIndexMeta, TextChunk } from './bookAI'
+import type { AIConversation, AIMessage, BookIndexMeta } from '../services/ai/types'
+import type { TextChunk } from './bookAI'
+
+type AIConversationRecord = AIConversation
+type AIMessageRecord = AIMessage
 
 class XBYDB3 extends Dexie {
   iobject: Dexie.Table<object, string>

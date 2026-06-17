@@ -226,6 +226,14 @@ window.TvBoxInvoke = async function(channel: string, data: unknown) {
   }
 }
 
+window.ReedyInvoke = async function(channel: string, ...args: any[]) {
+  try {
+    return await ipcRenderer.invoke(channel, ...args)
+  } catch (e: unknown) {
+    throw e
+  }
+}
+
 function createRightMenu() {
   window.addEventListener('contextmenu', (e) => {
       if (e) e.preventDefault()

@@ -11,6 +11,26 @@ import { registerMediaImageCacheIpc } from '../mediaImageCache'
 import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort } from '../aria/runtime'
 import { pathToFileURL } from 'url'
+import {
+  getBookMeta,
+  isBookIndexed,
+  clearBookData,
+  storeChunks,
+  storeEmbeddings,
+  storeMeta,
+  hybridSearch,
+  writeMemory,
+  searchMemories,
+  listMemories,
+  deleteMemory,
+  listSkills,
+  getSkill,
+  setSkillEnabled,
+  recordMetric,
+  getMetrics,
+  wipeAllData,
+  destroyDb
+} from '../reedy/ReedyService'
 
 let psbId: any
 
@@ -182,6 +202,7 @@ export default class ipcEvent {
       })
     }
     registerMediaImageCacheIpc()
+    this.handleReedy()
   }
 
   private static handleWebToElectron() {
@@ -1114,6 +1135,95 @@ export default class ipcEvent {
           ipcEvent.powerSaveBlockerId = null
         }
       }
+    })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reedy IPC handlers
+  // ---------------------------------------------------------------------------
+
+  private static handleReedy() {
+    // Request-response via ipcMain.handle
+    ipcMain.handle('reedy:get-meta', (_event, bookHash: string) => {
+      return getBookMeta(bookHash)
+    })
+
+    ipcMain.handle('reedy:is-indexed', (_event, bookHash: string) => {
+      return isBookIndexed(bookHash)
+    })
+
+    ipcMain.handle('reedy:clear-book', (_event, bookHash: string) => {
+      clearBookData(bookHash)
+      return { ok: true }
+    })
+
+    ipcMain.handle('reedy:list-skills', () => {
+      return listSkills()
+    })
+
+    ipcMain.handle('reedy:toggle-skill', (_event, skillId: string, enabled: boolean) => {
+      setSkillEnabled(skillId, enabled)
+      return { ok: true }
+    })
+
+    ipcMain.handle('reedy:write-memory', (_event, args: {
+      scope: string; scope_key: string; key: string; summary: string
+      source_message_id?: string; embedding?: number[]
+    }) => {
+      return writeMemory(args as any)
+    })
+
+    ipcMain.handle('reedy:search-memories', (_event, scope: string, scopeKey: string, queryEmbedding: number[] | null, topK: number, recencyWeight?: number) => {
+      return searchMemories(scope as any, scopeKey, queryEmbedding, topK, recencyWeight)
+    })
+
+    ipcMain.handle('reedy:list-memories', (_event, scope: string, scopeKey: string, limit: number) => {
+      return listMemories(scope as any, scopeKey, limit)
+    })
+
+    ipcMain.handle('reedy:delete-memory', (_event, id: string) => {
+      return deleteMemory(id)
+    })
+
+    ipcMain.handle('reedy:export-metrics', (_event, since?: number) => {
+      return getMetrics(since)
+    })
+
+    ipcMain.handle('reedy:wipe-all', () => {
+      wipeAllData()
+      return { ok: true }
+    })
+
+    ipcMain.handle('reedy:record-metric', (_event, evt: any) => {
+      recordMetric(evt)
+      return { ok: true }
+    })
+
+    // Indexing: store chunks + embeddings + meta
+    ipcMain.handle('reedy:store-chunks', (_event, chunks: any[]) => {
+      storeChunks(chunks)
+      return { ok: true }
+    })
+
+    ipcMain.handle('reedy:store-embeddings', (_event, rows: any[]) => {
+      storeEmbeddings(rows)
+      return { ok: true }
+    })
+
+    ipcMain.handle('reedy:store-meta', (_event, meta: any) => {
+      storeMeta(meta)
+      return { ok: true }
+    })
+
+    // Search: hybrid search
+    ipcMain.handle('reedy:search', (_event, bookHash: string, queryEmbedding: number[], queryText: string, topK: number, spoilerBound?: number) => {
+      return hybridSearch(bookHash, queryEmbedding, queryText, topK, spoilerBound)
+    })
+
+    // Cleanup on app quit
+    ipcMain.handle('reedy:destroy', () => {
+      destroyDb()
+      return { ok: true }
     })
   }
 }

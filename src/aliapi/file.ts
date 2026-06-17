@@ -26,6 +26,7 @@ import { apiOneDriveFileDetail, getOneDriveDownloadUrl, mapOneDriveItemToAliMode
 import { apiBoxFileDetail, buildBoxDownloadUrl, getBoxToken, mapBoxItemToAliModel } from '../box/dirfilelist'
 import TreeStore from '../store/treestore'
 import UserDAL from '../user/userdal'
+import { ITokenInfo } from '../user/userstore'
 import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, isWebDavDrive } from '../utils/webdavClient'
 import { getAlipanDownloadPromotionReason, getAlipanVideoPromotionReason, showAlipanMemberPromotion } from '../utils/alipanPromotion'
 
@@ -318,7 +319,7 @@ export default class AliFile {
       let dlink = metaInfo.meta.dlink
       let token = UserDAL.GetUserToken(user_id)
       if (!token?.access_token) {
-        token = await UserDAL.GetUserTokenFromDB(user_id)
+        token = await UserDAL.GetUserTokenFromDB(user_id) as ITokenInfo
       }
       if (token?.access_token && !dlink.includes('access_token=')) {
         dlink += (dlink.includes('?') ? '&' : '?') + `access_token=${encodeURIComponent(token.access_token)}`

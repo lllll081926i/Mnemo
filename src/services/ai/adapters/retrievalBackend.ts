@@ -1,6 +1,6 @@
 import type { AISettings, TextChunk, ScoredChunk, EmbeddingProgress } from '../types'
 
-export type RetrievalBackendKind = 'legacy-idb'
+export type RetrievalBackendKind = 'legacy-idb' | 'reedy'
 
 export interface BackendIndexOptions {
   onProgress?: (progress: EmbeddingProgress) => void
@@ -20,6 +20,7 @@ import { chunkSection } from '../utils/chunker'
 import { getAIProvider } from '../providers'
 import { withRetryAndTimeout, AI_TIMEOUTS, AI_RETRY_CONFIGS } from '../utils/retry'
 import { aiLogger } from '../logger'
+import { ReedyBackend } from './ReedyBackend'
 
 export class LegacyIdbBackend implements RetrievalBackend {
   readonly kind = 'legacy-idb' as const
@@ -102,5 +103,8 @@ export class LegacyIdbBackend implements RetrievalBackend {
 }
 
 export function selectBackend(settings: AISettings): RetrievalBackend {
+  if (settings.reedy?.enabled) {
+    return new ReedyBackend(settings)
+  }
   return new LegacyIdbBackend(settings)
 }

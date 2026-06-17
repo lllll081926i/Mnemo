@@ -12,6 +12,7 @@ import exception from './core/exception'
 import ipcEvent from './core/ipcEvent'
 import MotrixApplication from './aria/MotrixApplication'
 import { registerExternalDownloadProtocol } from './core/protocol'
+import { destroyDb } from './reedy/ReedyService'
 
 const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth']
 
@@ -332,6 +333,7 @@ export default class launch extends EventEmitter {
   handleAppWillQuit() {
     app.on('will-quit', async () => {
       try { await this.motrixApp?.quit() } catch {}
+      try { destroyDb() } catch {}
       try {
         if (AppWindow.appTray) {
           AppWindow.appTray.destroy()

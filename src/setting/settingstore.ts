@@ -224,6 +224,7 @@ export interface SettingState {
   apiAIMaxContextChunks: number
   apiAIIndexingMode: 'on-demand' | 'background'
   apiAIReedyEnabled: boolean
+  apiAIReedyRuntime: 'mvp' | 'agent'
 }
 
 const setting: SettingState = {
@@ -430,7 +431,8 @@ const setting: SettingState = {
   apiAISpoilerProtection: true,
   apiAIMaxContextChunks: 6,
   apiAIIndexingMode: 'on-demand',
-  apiAIReedyEnabled: false
+  apiAIReedyEnabled: false,
+  apiAIReedyRuntime: 'mvp'
 }
 
 function _loadSetting(val: any) {
@@ -648,6 +650,7 @@ function _loadSetting(val: any) {
   setting.apiAIMaxContextChunks = defaultNumberSub(val.apiAIMaxContextChunks, 6, 1, 12)
   setting.apiAIIndexingMode = defaultValue(val.apiAIIndexingMode, ['on-demand', 'background'])
   setting.apiAIReedyEnabled = defaultBool(val.apiAIReedyEnabled, false)
+  setting.apiAIReedyRuntime = defaultValue(val.apiAIReedyRuntime, ['mvp', 'agent']) as 'mvp' | 'agent'
 }
 
 let settingstr = ''

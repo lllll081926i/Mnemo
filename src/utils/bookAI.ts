@@ -79,7 +79,7 @@ function buildAISettings(): AISettings {
     spoilerProtection: store.apiAISpoilerProtection,
     maxContextChunks: store.apiAIMaxContextChunks || 10,
     indexingMode: (store.apiAIIndexingMode as any) || 'on-demand',
-    reedy: { enabled: false, runtime: '' },
+    reedy: { enabled: store.apiAIReedyEnabled, runtime: store.apiAIReedyRuntime || 'mvp' },
   }
 }
 
@@ -274,8 +274,10 @@ export function createLegacyRetrievalBackend() {
 }
 
 export function selectRetrievalBackend(settings = buildAISettings()) {
-  const backend = createLegacyRetrievalBackend()
-  return backend
+  if (settings.reedy?.enabled) {
+    return { id: 'reedy' as const, settings }
+  }
+  return createLegacyRetrievalBackend()
 }
 
 // ── markdown renderer ───────────────────────────────────────────────
@@ -332,4 +334,26 @@ export function extractTextFromHtml(html: string): string {
     return (template.content.textContent || '').replace(/\s+/g, ' ').trim()
   }
   return html.replace(/<(script|style|noscript|nav|header|footer)[\s\S]*?<\/\1>/gi, '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export function chunkPlainTextSection(opts: { bookId: string; sectionIndex: number; chapterTitle: string; text: string; cumulativeSizeBeforeSection?: number }): Array<{ bookId: string; sectionIndex: number; chapterTitle: string; text: string; pageNumber: number }> {
+  const { bookId, sectionIndex, chapterTitle, text, cumulativeSizeBeforeSection = 0 } = opts
+  const chunks = chunkSection(text, sectionIndex, chapterTitle, bookId, cumulativeSizeBeforeSection)
+  return chunks.map(c => ({ bookId: c.bookHash, sectionIndex: c.sectionIndex, chapterTitle: c.chapterTitle, text: c.text, pageNumber: c.pageNumber }))
+}
+
+export { getAIProvider as resolveBookAIProvider } from '../services/ai/providers'
+
+export async function saveAIConversationMessages(bookId: string, mode: BookAIMode, messages: ChatMessage[]): Promise<void> {
+  const conversationId = `${bookId || 'global'}:${mode}`
+  const existing = await aiStore.getMessages(conversationId)
+  if (!existing.length) {
+    await aiStore.saveMessagesBatch(messages.map((msg, i) => ({
+      id: `${conversationId}:${Date.now()}:${i}`,
+      conversationId,
+      role: msg.role,
+      content: msg.content,
+      createdAt: Date.now() + i,
+    })))
+  }
 }

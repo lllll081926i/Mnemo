@@ -111,6 +111,7 @@ const readerTabIcons: Partial<Record<BookManagerView, any>> = {
 
 const settingTabIcons: Record<BookManagerSettingTabKey, any> = {
   general: Settings,
+  background: Settings,
   data: Archive,
   reading: BookOpen,
   appearance: Palette,
@@ -123,6 +124,7 @@ const settingTabIcons: Record<BookManagerSettingTabKey, any> = {
 }
 
 const settingSwitchGroups: Record<BookManagerSettingTabKey, Array<{ key: keyof BookManagerPreferences; label: string; desc?: string; enabled?: boolean }>> = {
+  background: [],
   general: [
     { key: 'isImportPath', label: '导入书籍为链接', desc: '只保存原始路径，不复制书籍文件。当前网盘书库会保存该偏好，后续本地导入使用。' },
     { key: 'isDisableTrashBin', label: '禁用回收站', desc: '删除书籍库记录时直接永久删除本地记录。' },
@@ -648,6 +650,19 @@ function triggerLocalImport() {
   localFileInput.value?.click()
 }
 
+function openExternalLink(url: string) {
+  window.open(url, '_blank')
+}
+
+async function copyContactEmail() {
+  try {
+    await navigator.clipboard.writeText('gaozhangmin@gmail.com')
+    message.success('已复制邮箱')
+  } catch {
+    message.error('复制失败')
+  }
+}
+
 async function handleLocalFileImport(event: Event) {
   const input = event.target as HTMLInputElement
   const files = input.files
@@ -945,8 +960,8 @@ async function deleteOriginalFiles(ids: string[]) {
   const books = bookStore.books.filter((b) => ids.includes(b.id))
   for (const book of books) {
     try {
-      const { ApiFileDeleteBatch } = await import('../aliapi/filecmd')
-      await ApiFileDeleteBatch(book.user_id, book.drive_id, [book.file_id]).catch(() => {})
+      const { default: AliFileCmd } = await import('../aliapi/filecmd')
+      await AliFileCmd.ApiDeleteBatch(book.user_id, book.drive_id, [book.file_id]).catch(() => {})
     } catch { /* 删除网盘文件失败不影响本地删除 */ }
   }
 }
@@ -1296,12 +1311,7 @@ onMounted(async () => {
   }
   userLabelMap.value = map
 
-  // 自动切换到指定书架
-  const shelf = managerPreferences.value.startupShelf
-  if (shelf) {
-    const found = bookStore.shelves.find((s) => s.name === shelf || s.id === shelf)
-    if (found) activeShelf.value = found.id
-  }
+  // 自动切换到指定书架 (shelf feature not yet implemented)
 
   // 自动打开上次阅读的书
   if (managerPreferences.value.isOpenBook) {
@@ -2291,9 +2301,9 @@ watch(() => managerPreferences.value.isPreventSleep, (enabled) => {
                 </div>
                 <div class='manager-setting-actions' style='margin-top:16px'>
                   <a-button size='mini' @click="message.info('已是最新版本')">检查更新</a-button>
-                  <a-button size='mini' @click="window.open('https://github.com/gaozhangmin/boxplayer', '_blank')">GitHub</a-button>
-                  <a-button size='mini' @click="window.open('https://xbyvideohub.com/', '_blank')">官方网站</a-button>
-                  <a-button size='mini' @click="navigator.clipboard?.writeText('gaozhangmin@gmail.com').then(() => message.success('已复制邮箱'))">联系邮箱</a-button>
+                  <a-button size='mini' @click="openExternalLink('https://github.com/gaozhangmin/boxplayer')">GitHub</a-button>
+                  <a-button size='mini' @click="openExternalLink('https://xbyvideohub.com/')">官方网站</a-button>
+                  <a-button size='mini' @click="copyContactEmail">联系邮箱</a-button>
                 </div>
               </div>
             </template>
@@ -2932,6 +2942,7 @@ body[arco-theme='dark'] :global(.manager-settings-scroll) {
 }
 
 .book-main {
+  position: relative;
   height: 100%;
   min-width: 0;
   flex: 1;
