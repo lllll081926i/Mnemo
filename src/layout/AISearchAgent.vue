@@ -199,7 +199,7 @@ const DEFAULT_FOLLOWUPS = [
               :output="(part as any).output"
               :error="(part as any).error"
               @navigate="handleFileNavigate"
-              @select="(files: FileResult[]) => handleSend('删除这些重复文件: ' + files.map(f => f.name).join(', '))"
+              @select="(files: FileResult[]) => handleSend('删除以下' + files.length + '个重复文件: ' + JSON.stringify(files.map(f => ({name:f.name,fileId:f.fileId,driveId:f.driveId,userId:f.userId}))))"
               @retry="handleRetryTool(msg.id, 'tool-findDuplicates', {})"
             />
 

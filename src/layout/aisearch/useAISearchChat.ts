@@ -146,6 +146,7 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
 2. 禁止在未调用工具的情况下编造文件名、大小等信息
 3. 多网盘场景必须先调用 listDrives：
    - 用户要求整理/分析/查重时，先调用 listDrives
+   - 用户要求清理重复文件时，提取消息中的 JSON 数组，直接调用 deleteFiles({ files: [...] })，先展示确认信息
    - listDrives 会在界面弹出网盘选择器，让用户勾选并点确定
    - 用户选择后你会收到类似"用户选择了: 阿里云盘(zxm)、百度网盘。platforms: aliyun,baidu"的消息，提取 platforms 列表传给工具
    - 然后你再执行对应操作
