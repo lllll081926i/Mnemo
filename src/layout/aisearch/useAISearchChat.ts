@@ -496,7 +496,8 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
               appendPart(aiMsgId, { type: 'tool-getMovies', state: 'loading', category: label } as MessagePart)
               scrollBottom()
               try {
-                const API_KEY = ''
+                const { default: Config } = await import('../../config')
+                const API_KEY = Config.TMDB_API_KEY
                 const PROXY = 'https://tmdb-673444103572.asia-east2.run.app'
                 const endpoint = category === 'trending' ? '/trending/movie/week' : `/movie/${category}`
                 const resp = await fetch(`${PROXY}${endpoint}?api_key=${API_KEY}&language=zh-CN&page=${page}`)
