@@ -104,7 +104,7 @@ const DEFAULT_FOLLOWUPS = [
       </div>
 
       <!-- message list -->
-      <template v-else>
+      <div v-else>
       <div
         v-for="msg in messages"
         :key="msg.id"
@@ -247,6 +247,8 @@ const DEFAULT_FOLLOWUPS = [
             />
           </template>
         </div>
+      </div>
+
       </div>
 
       <!-- streaming indicator -->
