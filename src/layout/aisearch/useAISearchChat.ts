@@ -68,7 +68,7 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
 
   // scan all drives by searching common patterns, returns deduplicated files
   async function scanAllDrives(): Promise<GlobalSearchResult[]> {
-    const patterns = ['.', 'pdf', 'mp4', 'mkv', 'txt', 'jpg', 'png', 'mp3', 'zip', 'doc', 'xls', 'ppt', 'epub', 'mobi', 'flac', 'rar', '7z']
+    const patterns = ['pdf', 'mp4', 'mkv', 'txt', 'jpg', 'png', 'mp3', 'zip', 'doc', 'xls', 'ppt', 'epub', 'mobi', 'flac', 'rar', '7z', 'avi', 'wmv', 'mov']
     const seen = new Set<string>()
     const all: GlobalSearchResult[] = []
     for (const p of patterns) {
