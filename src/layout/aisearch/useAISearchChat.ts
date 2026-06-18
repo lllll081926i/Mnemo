@@ -97,6 +97,10 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
     const kw = text.trim()
     if (!kw || loading.value) return
 
+    const { checkAndIncrement } = await import('../../utils/usageLimit')
+    const uc = checkAndIncrement('aiAgentChat')
+    if (!uc.allowed) { const { default: msg } = await import('../../utils/message'); msg.warning(uc.message!); return }
+
     const config = getAIConfig()
     if (!config) return
 

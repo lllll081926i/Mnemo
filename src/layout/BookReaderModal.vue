@@ -82,6 +82,7 @@ import { getEncType, getProxyUrl, getRawUrl } from '../utils/proxyhelper'
 import useBookLibraryStore from '../store/booklibrary'
 import useSettingStore from '../setting/settingstore'
 import message from '../utils/message'
+import { checkAndIncrement } from '../utils/usageLimit'
 import ReaderPanelButton from './book-reader/ReaderPanelButton.vue'
 import ReaderShell from './book-reader/ReaderShell.vue'
 import ReaderBackground from './book-reader/ReaderBackground.vue'
@@ -1555,6 +1556,8 @@ function reserveSpeechRun() {
 function startReaderSpeech(text: string, autoNextReader = false, runId = ++speechRunId, highlightReader = false) {
   const speechText = buildSpeechText([text])
   if (!speechText) return false
+  const uc = checkAndIncrement('readerTTS', speechText.length)
+  if (!uc.allowed) { message.warning(uc.message!); return false }
   speechSession?.stop()
   stopAzureSpeech()
   speechActive.value = false
@@ -1887,6 +1890,8 @@ async function extractAndSaveCover(book: IBookItem) {
 async function askAI(question: string) {
   const prompt = question.trim()
   if (!prompt || aiStreaming.value) return
+  const uc = checkAndIncrement('readerAIChat')
+  if (!uc.allowed) { message.warning(uc.message!); return }
   if (!isAIConfigured()) {
     message.warning('请先在 设置 → API 密钥 中配置 AI 模型')
     return
@@ -2199,6 +2204,8 @@ function openBookLookupPopup(mode: BookLookupMode) {
 }
 
 async function askAIForTranslation(text: string, target: string) {
+  const uc = checkAndIncrement('readerTranslation', text.length)
+  if (!uc.allowed) { message.warning(uc.message!); return }
   transLoading.value = true
   translateResult.value = ''
   try {
