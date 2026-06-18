@@ -321,11 +321,18 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
                 const fileIds = files.map((f: any) => f.file_id)
                 updateToolPart(aiMsgId, 'tool-importShare', { url }, (p: any) => { p.state = 'saving' })
                 scrollBottom()
-                // ensure Quark session is active (cookies may expire)
+                // refresh Quark cookies from Electron session before saving
         if (isQuark) {
-          const { default: UserDAL_ } = await import('../../user/userdal')
-          const ok = await UserDAL_.UserChange(account.userId)
-          if (!ok) throw new Error('夸克网盘登录已过期，请在设置页重新登录')
+          const { readQuarkCookieStringFromElectron, buildQuarkCookieString } = await import('../../quark/auth')
+          const freshCookie = await readQuarkCookieStringFromElectron().catch(() => '')
+          if (freshCookie) {
+            const { default: UserDAL_ } = await import('../../user/userdal')
+            const token = UserDAL_.GetUserToken(account.userId) || await UserDAL_.GetUserTokenFromDB(account.userId)
+            if (token) {
+              token.access_token = freshCookie
+              UserDAL_.SaveUserToken(token)
+            }
+          }
         }
 
         const result = await AliShare.ApiSaveShareFilesBatch(shareId, shareToken, account.userId, account.driveId, 'quark_root', fileIds)
