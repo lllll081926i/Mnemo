@@ -260,7 +260,7 @@ function dispatchSearch(token: ITokenInfo, keyword: string): Promise<GlobalSearc
   return searchAliyun(token, keyword)
 }
 
-export async function searchAllDrives(keyword: string): Promise<GlobalSearchResult[]> {
+export async function searchAllDrives(keyword: string, opts?: { platforms?: string[]; includeMediaServers?: boolean }): Promise<GlobalSearchResult[]> {
   if (!keyword || keyword.trim().length < 2) return []
 
   const k = keyword.trim()
@@ -277,10 +277,13 @@ export async function searchAllDrives(keyword: string): Promise<GlobalSearchResu
   for (const token of tokens) {
     if (!token.access_token || !token.user_id) continue
     if (isSkipProvider(token)) continue
+    if (opts?.platforms?.length && !opts.platforms.includes(token.tokenfrom || 'aliyun')) continue
     promises.push(dispatchSearch(token, k))
   }
 
-  promises.push(searchMediaServers(k))
+  if (opts?.includeMediaServers !== false) {
+    promises.push(searchMediaServers(k))
+  }
 
   const settled = await Promise.allSettled(promises)
   const all: GlobalSearchResult[] = []
