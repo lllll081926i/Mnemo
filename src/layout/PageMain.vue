@@ -37,7 +37,6 @@ import PageGlobalSearch from './PageGlobalSearch.vue'
 
 import UserInfo from '../user/UserInfo.vue'
 import UserLogin from '../user/UserLogin.vue'
-import AccountLogin from '../user/AccountLogin.vue'
 import ShutDown from '../setting/ShutDown.vue'
 
 import MyModal from './MyModal.vue'
@@ -50,12 +49,6 @@ const cryptoDonationAddress = '0xb0a3f7254e97a8bd398b1ab7f70eb48b0dc68eaf'
 const panVisible = ref(true)
 const mediaNavVisible = ref(true)
 const appStore = useAppStore()
-const showAccountLogin = ref(false)
-const accountUser = ref<{ email: string } | null>(null)
-try {
-  const authed = localStorage.getItem('app_user_authed')
-  if (authed === '1') accountUser.value = { email: localStorage.getItem('app_user_email') || '用户' }
-} catch {}
 const settingStore = useSettingStore()
 const winStore = useWinStore()
 const keyboardStore = useKeyboardStore()
@@ -315,9 +308,6 @@ onUnmounted(() => {
         </a-menu>
 
         <div class='flexauto'></div>
-        <a-button v-if="!accountUser" type="text" size="small" @click="showAccountLogin = true">登录</a-button>
-        <a-button v-else type="text" size="small" @click="showAccountLogin = true">{{ accountUser.email }}</a-button>
-        <AccountLogin :visible="showAccountLogin" @update:visible="showAccountLogin = $event" @login="(u) => { accountUser = { email: u.email } }" />
         <ShutDown />
         <UserInfo />
         <UserLogin />
