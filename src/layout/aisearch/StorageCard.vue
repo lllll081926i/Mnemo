@@ -32,22 +32,22 @@ const showUnused = ref(false)
         </div>
       </div>
 
-      <button v-if="output.drives[0]?.topLarge.length" class="sc-section-btn" @click="showLarge = !showLarge">
+      <button v-if="output.drives[0]?.topLarge?.length" class="sc-section-btn" @click="showLarge = !showLarge">
         <ChevronRight :size="12" :stroke-width="2" class="sc-chevron" :class="{ open: showLarge }" /> TOP 10 大文件
       </button>
       <div v-show="showLarge" class="sc-file-list">
-        <div v-for="(f, i) in output.drives[0].topLarge.slice(0, 10)" :key="i" class="sc-file" @click="emit('navigate', f)">
+        <div v-for="(f, i) in (output.drives[0]?.topLarge || []).slice(0, 10)" :key="i" class="sc-file" @click="emit('navigate', f)">
           <span class="sc-file-name">{{ f.name }}</span>
           <span class="sc-file-size">{{ humanSize(f.size) }}</span>
           <span class="sc-file-drive">{{ f.providerName }}</span>
         </div>
       </div>
 
-      <button v-if="output.oldestFiles.length" class="sc-section-btn" @click="showUnused = !showUnused">
+      <button v-if="output.oldestFiles?.length" class="sc-section-btn" @click="showUnused = !showUnused">
         <ChevronRight :size="12" :stroke-width="2" class="sc-chevron" :class="{ open: showUnused }" /> 最旧文件 ({{ output.oldestFiles.length }})
       </button>
       <div v-show="showUnused" class="sc-file-list">
-        <div v-for="(f, i) in output.oldestFiles.slice(0, 10)" :key="i" class="sc-file" @click="emit('navigate', f)">
+        <div v-for="(f, i) in (output.oldestFiles || []).slice(0, 10)" :key="i" class="sc-file" @click="emit('navigate', f)">
           <span class="sc-file-name">{{ f.name }}</span>
           <span class="sc-file-size">{{ humanSize(f.size) }}</span>
           <span class="sc-file-drive">{{ f.providerName }}</span>

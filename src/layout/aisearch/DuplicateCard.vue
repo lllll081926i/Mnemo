@@ -57,9 +57,9 @@ function formatSize(bytes: number): string {
     <template v-else-if="state === 'done' && output">
       <div class="dc-header">
         <Files :size="14" :stroke-width="1.5" />
-        <span>扫描 {{ output.totalFiles }} 个文件，发现 {{ output.groups.length }} 组重复</span>
+        <span>扫描 {{ output.totalFiles }} 个文件，发现 {{ output.groups?.length || 0 }} 组重复</span>
       </div>
-      <div v-if="output.groups.length" class="dc-groups">
+      <div v-if="output.groups?.length" class="dc-groups">
         <div v-for="(g, gi) in output.groups" :key="gi" class="dc-group">
           <button class="dc-group-header" @click="toggleGroup(gi)">
             <ChevronRight :size="12" :stroke-width="2" class="dc-chevron" :class="{ open: expanded.has(gi) }" />
