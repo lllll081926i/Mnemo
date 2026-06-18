@@ -8,6 +8,7 @@ import { openExternal } from '../utils/electronhelper'
 
 const loading = ref(false)
 const emailInput = ref('')
+const showEmail = ref(false)
 const codeSent = ref(false)
 const emailCode = ref('')
 const userEmail = ref(localStorage.getItem('app_user_email') || '')
@@ -108,26 +109,21 @@ onMounted(() => { setupCallbackListener() })
 
     <template v-else>
       <div class="sa-oauth">
-        <button class="sa-btn sa-gh" :disabled="loading" @click="handleOAuth('github')"><Github :size="15" /> GitHub</button>
-        <button class="sa-btn sa-go" :disabled="loading" @click="handleOAuth('google')"><Chrome :size="15" /> Google</button>
+        <button class="sa-provider sa-gh" :disabled="loading" @click="handleOAuth('github')" title="GitHub"><Github :size="20" /></button>
+        <button class="sa-provider sa-go" :disabled="loading" @click="handleOAuth('google')" title="Google"><Chrome :size="20" /></button>
+        <button class="sa-provider sa-em" :class="{ active: showEmail }" :disabled="loading" @click="showEmail = !showEmail" title="邮箱"><Mail :size="20" /></button>
       </div>
 
-      <template v-if="!codeSent">
-        <div class="sa-email">
+      <div v-if="showEmail" class="sa-email-box">
+        <template v-if="!codeSent">
           <input v-model="emailInput" type="email" placeholder="邮箱地址" />
-          <button :disabled="loading || !emailInput.trim()" @click="handleEmailSend">
-            <Loader2 v-if="loading" :size="13" class="spin" /> <span v-else>发送验证码</span>
-          </button>
-        </div>
-      </template>
-      <template v-else>
-        <div class="sa-email">
+          <button :disabled="loading || !emailInput.trim()" @click="handleEmailSend"><Loader2 v-if="loading" :size="13" class="spin" /><span v-else>发送验证码</span></button>
+        </template>
+        <template v-else>
           <input v-model="emailCode" type="text" placeholder="输入验证码" maxlength="6" @keydown.enter="handleEmailVerify" />
-          <button :disabled="loading || emailCode.length < 4" @click="handleEmailVerify">
-            <Loader2 v-if="loading" :size="13" class="spin" /> <span v-else>验证并登录</span>
-          </button>
-        </div>
-      </template>
+          <button :disabled="loading || emailCode.length < 4" @click="handleEmailVerify"><Loader2 v-if="loading" :size="13" class="spin" /><span v-else>验证并登录</span></button>
+        </template>
+      </div>
     </template>
   </div>
 </template>
@@ -143,20 +139,23 @@ onMounted(() => { setupCallbackListener() })
 .sa-logout { display: flex; align-items: center; gap: 4px; margin-left: auto; padding: 4px 10px; font-size: 11px; color: var(--color-text-4); background: transparent; border: 1px solid var(--color-border); border-radius: 5px; cursor: pointer; font-family: inherit; }
 .sa-logout:hover { color: rgb(var(--danger-6)); border-color: rgb(var(--danger-6)); }
 
-.sa-oauth { display: flex; gap: 8px; margin-bottom: 8px; }
-.sa-btn { display: flex; align-items: center; gap: 5px; flex: 1; justify-content: center; padding: 7px 0; font-size: 12px; font-weight: 500; border: 1px solid var(--color-border); border-radius: 7px; cursor: pointer; font-family: inherit; }
-.sa-btn:disabled { opacity: .5; cursor: default; }
+.sa-oauth { display: flex; gap: 12px; margin-bottom: 6px; }
+.sa-provider { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 1px solid var(--color-border); border-radius: 50%; cursor: pointer; font-family: inherit; transition: all .15s; }
+.sa-provider:hover:not(:disabled) { transform: translateY(-1px); }
+.sa-provider:disabled { opacity: .4; cursor: default; }
 .sa-gh { background: #24292e; color: #fff; border-color: #24292e; }
-.sa-gh:hover:not(:disabled) { opacity: .85; }
-.sa-go { background: var(--color-bg-1); color: var(--color-text-2); }
-.sa-go:hover:not(:disabled) { background: var(--color-fill-1); }
+.sa-gh:hover:not(:disabled) { box-shadow: 0 2px 8px rgba(36,41,46,.3); }
+.sa-go { background: var(--color-bg-1); color: var(--color-text-3); }
+.sa-go:hover:not(:disabled) { color: var(--color-text-1); border-color: var(--color-border-2); }
+.sa-em { background: var(--color-bg-1); color: var(--color-text-3); }
+.sa-em:hover:not(:disabled), .sa-em.active { color: rgb(var(--primary-6)); border-color: rgb(var(--primary-6)); }
 
-.sa-email { display: flex; gap: 8px; }
-.sa-email input { flex: 1; padding: 7px 10px; font-size: 12px; color: var(--color-text-1); background: var(--color-fill-1); border: 1px solid var(--color-border); border-radius: 7px; outline: none; font-family: inherit; }
-.sa-email input:focus { border-color: rgb(var(--primary-6)); }
-.sa-email button { display: flex; align-items: center; gap: 3px; padding: 7px 12px; font-size: 12px; font-weight: 500; color: #fff; background: rgb(var(--primary-6)); border: 0; border-radius: 7px; cursor: pointer; font-family: inherit; white-space: nowrap; }
-.sa-email button:hover:not(:disabled) { opacity: .9; }
-.sa-email button:disabled { opacity: .4; cursor: default; }
+.sa-email-box { display: flex; gap: 8px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--color-border); }
+.sa-email-box input { flex: 1; padding: 7px 10px; font-size: 12px; color: var(--color-text-1); background: var(--color-fill-1); border: 1px solid var(--color-border); border-radius: 7px; outline: none; font-family: inherit; min-width: 0; }
+.sa-email-box input:focus { border-color: rgb(var(--primary-6)); }
+.sa-email-box button { display: flex; align-items: center; gap: 3px; padding: 7px 12px; font-size: 12px; font-weight: 500; color: #fff; background: rgb(var(--primary-6)); border: 0; border-radius: 7px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.sa-email-box button:hover:not(:disabled) { opacity: .9; }
+.sa-email-box button:disabled { opacity: .4; cursor: default; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>
