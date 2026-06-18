@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Globe, Loader2, AlertCircle, Copy, ExternalLink } from 'lucide-vue-next'
+import { Globe, Loader2, AlertCircle, Copy, ExternalLink, Download } from 'lucide-vue-next'
+import { modalDaoRuShareLink } from '../../utils/modal'
 import type { LinkResult } from './types'
 
 const props = defineProps<{
@@ -13,6 +14,20 @@ const emit = defineEmits<{ (e: 'retry'): void }>()
 
 function copyText(text: string) {
   navigator.clipboard.writeText(text).catch(() => {})
+}
+
+function canSave(url: string): boolean {
+  return /aliyundrive\.com\/s\/|alipan\.com\/s\/|pan\.quark\.cn\/s\//i.test(url)
+}
+
+function parseSharePwd(url: string, password: string): string {
+  if (password) return password
+  const m = url.match(/[?&#]pwd=([0-9a-zA-Z]+)/i) || url.match(/(?:提取码|密码)[^0-9a-zA-Z]{0,8}([0-9a-zA-Z]{4,8})/i)
+  return m?.[1] || ''
+}
+
+function handleSave(url: string, password: string) {
+  modalDaoRuShareLink(url, parseSharePwd(url, password))
 }
 
 const PLATFORM_COLORS: Record<string, string> = {
@@ -48,6 +63,9 @@ const PLATFORM_COLORS: Record<string, string> = {
             <div class="sl-item-url">{{ l.url }}</div>
             <div v-if="l.note" class="sl-item-note">{{ l.note }}</div>
           </div>
+          <button v-if="canSave(l.url)" class="sl-save-btn" title="保存到网盘" @click="handleSave(l.url, l.password || '')">
+            <Download :size="13" :stroke-width="1.5" />
+          </button>
           <button class="sl-copy-btn" title="复制链接" @click="copyText(l.url)">
             <Copy :size="13" :stroke-width="1.5" />
           </button>
@@ -89,8 +107,10 @@ const PLATFORM_COLORS: Record<string, string> = {
 .sl-item-body { flex: 1; min-width: 0; }
 .sl-item-url { font-size: 12px; color: var(--color-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; }
 .sl-item-note { font-size: 11px; color: var(--color-text-4); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sl-copy-btn, .sl-open-btn { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--color-text-4); cursor: pointer; border-radius: 4px; }
-.sl-copy-btn:hover, .sl-open-btn:hover { background: var(--color-fill-2); color: var(--color-text-2); }
+.sl-copy-btn, .sl-open-btn, .sl-save-btn { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--color-text-4); cursor: pointer; border-radius: 4px; }
+.sl-copy-btn:hover, .sl-open-btn:hover, .sl-save-btn:hover { background: var(--color-fill-2); color: var(--color-text-2); }
+.sl-save-btn { color: rgb(var(--primary-6)); }
+.sl-save-btn:hover { color: rgb(var(--primary-6)); }
 .sl-pass { flex-shrink: 0; font-size: 11px; color: var(--color-text-3); }
 .sl-more { padding: 6px 14px; font-size: 12px; color: var(--color-text-4); }
 .sl-empty { padding: 12px 14px; font-size: 13px; color: var(--color-text-4); }
