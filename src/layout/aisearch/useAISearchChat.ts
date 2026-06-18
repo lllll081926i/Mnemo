@@ -135,7 +135,13 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
 4. 工具返回结果后，简要总结即可
 5. moveFiles 和 deleteFiles 必须先展示确认信息
 6. 完全无关的问题可以正常简短回复
-7. 最多调用工具 5 次`,
+7. 最多调用工具 5 次
+
+## 回复格式
+每次回复必须先写一行【思考】说明你的分析和决策理由，然后再执行操作或给出结论。
+例如：
+【思考】用户想整理文件。需要先调用 listDrives 列出所有网盘让用户选择。
+然后调用对应工具。`,
         messages: apiMessages,
         tools: {
           listDrives: {
@@ -449,15 +455,31 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
         temperature: 0.7,
       })
 
-      // stream text delta into a text part
+      // stream text delta, split reasoning from text
       let textPart: any = null
+      let reasoningPart: any = null
       for await (const part of result.fullStream) {
         if (part.type === 'text-delta') {
-          if (!textPart) {
-            textPart = { type: 'text', text: '' }
-            appendPart(aiMsgId, textPart)
+          const delta = part.text
+          // detect reasoning block: 【思考】... or 【分析】...
+          const reasoningMatch = delta.match(/【(思考|分析)】([\\s\\S]*)/)
+          if (reasoningMatch && !reasoningPart) {
+            reasoningPart = { type: 'reasoning', text: reasoningMatch[2] }
+            appendPart(aiMsgId, reasoningPart)
+            const afterReasoning = delta.slice(reasoningMatch[0].length).trim()
+            if (afterReasoning) {
+              textPart = { type: 'text', text: afterReasoning }
+              appendPart(aiMsgId, textPart)
+            }
+          } else if (reasoningPart && !textPart) {
+            reasoningPart.text += delta
+          } else {
+            if (!textPart) {
+              textPart = { type: 'text', text: '' }
+              appendPart(aiMsgId, textPart)
+            }
+            textPart.text += delta
           }
-          textPart.text += part.text
           scrollBottom()
         }
       }
