@@ -75,7 +75,9 @@ watch(() => props.trigger, () => {
 const DEFAULT_FOLLOWUPS = [
   '帮我找科幻电影',
   '搜索 PDF 文档',
-  '最近有什么新文件',
+  '整理文件',
+  '查找重复文件',
+  '分析存储空间',
 ]
 </script>
 

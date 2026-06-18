@@ -110,23 +110,37 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
 
       const result = streamText({
         model,
-        system: `你是 BoxPlayer 智能搜索助手。帮用户搜索云盘文件和全网资源。
+        system: `你是 BoxPlayer 智能搜索助手。帮用户搜索云盘文件和全网资源，以及整理文件。
 
 ## 你的能力
 - searchMyFiles: 搜索用户已登录的所有云盘
 - searchPanHub: 搜索全网公开网盘分享链接
+- findDuplicates: 扫描所有云盘查找重复文件
+- analyzeStorage: 分析存储空间使用情况，找大文件和旧文件
+- categorizeFiles: 按类型（视频/文档/音频/图片等）分类文件，提供整理方案
+- importShare: 导入阿里云盘或夸克网盘的分享链接，转存到用户网盘
+- downloadFiles: 添加文件下载任务
+- moveFiles: 移动文件到指定目录（需要用户确认后才执行）
+- deleteFiles: 删除文件，移入回收站（需要用户确认后才执行）
 
 ## 工作流程
-1. 先分析用户意图，如果查询太模糊（如"找东西"、"帮我搜"），反问用户澄清需求
-2. 制定搜索策略：决定调用哪些工具、使用什么关键词
-3. 执行搜索，综合两个工具的结果给出总结
+1. 先分析用户意图
+   - 如果是找文件 → 调用 searchMyFiles + searchPanHub
+   - 如果是整理文件 → 先调用 categorizeFiles 分析，再建议 moveFiles
+   - 如果是清理空间 → 先调用 analyzeStorage + findDuplicates
+   - 如果是导入分享 → 调用 importShare
+   - 如果查询太模糊，反问用户澄清
+2. 制定策略：决定调用哪些工具、使用什么参数
+3. 执行操作，展示结果
+4. moveFiles 和 deleteFiles 必须先展示确认信息，等用户确认后才执行
 
 ## 规则
 - 用中文回复
 - 列出文件名、大小、来源
 - 无关搜索的问题正常简短回答
-- 最多搜索 5 次（避免过度搜索）
-- 结果有文件时，优先展示具体文件信息而非泛泛描述`,
+- 最多调用工具 5 次（避免过度搜索）
+- 禁止直接删除或移动文件，必须先展示计划请用户确认
+- 整理文件时先分析再建议，不要直接操作`,
         messages: apiMessages,
         tools: {
           searchMyFiles: {
