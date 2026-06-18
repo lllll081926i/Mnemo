@@ -379,7 +379,7 @@ onUnmounted(() => {
       <div class="gs-page-tabs">
         <button :class="['gs-page-tab', searchMode === 'local' ? 'active' : '']" @click="searchMode = 'local'">搜索我的</button>
         <button :class="['gs-page-tab', searchMode === 'panhub' ? 'active' : '']" @click="searchMode = 'panhub'">搜索全网</button>
-        <button :class="['gs-page-tab', searchMode === 'ai' ? 'active' : '']" @click="searchMode = 'ai'">AI 搜索</button>
+        <button :class="['gs-page-tab', searchMode === 'ai' ? 'active' : '']" @click="searchMode = 'ai'">AI Agent</button>
       </div>
 
       <PanHubSearchBox
@@ -507,7 +507,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Single layout: only one type -->
-      <template v-else-if="isPanHubMode()">
+      <template v-else>
           <div v-if="totalCloud > 0" class="gs-section">
             <div class="gs-section-header">
               <Folder :size="18" :stroke-width="1.5" />
@@ -569,7 +569,7 @@ onUnmounted(() => {
           </template>
       </div>
       </template>
-      <template v-else>
+      <template v-else-if="isPanHubMode()">
         <div v-if="!phSearched" class="ph-hero-row">
           <header class="ph-hero"><div class="ph-hero-badge">PanHub 搜索聚合引擎</div><h1 class="ph-hero-title"><span class="ph-hero-title-line">一键检索</span><span class="ph-hero-title-line ph-hero-title-accent">全网网盘资源</span></h1><p class="ph-hero-desc">聚合阿里云盘、夸克、百度网盘、115、迅雷等平台 · 快速、直达、少打扰</p><ul class="ph-hero-features"><li class="ph-hero-feature">实时聚合</li><li class="ph-hero-feature">多平台覆盖</li><li class="ph-hero-feature">结果去重</li></ul></header>
           <aside class="ph-hero-aside"><PanHubHotSearches :api-base="PANHUB_API_BASE" @select="phHotSelect" /></aside>
