@@ -9,6 +9,7 @@ import SearchFilesCard from './aisearch/SearchFilesCard.vue'
 import SearchLinksCard from './aisearch/SearchLinksCard.vue'
 import SummaryCard from './aisearch/SummaryCard.vue'
 import LoadingIndicator from './aisearch/LoadingIndicator.vue'
+import DriveSelectorCard from './aisearch/DriveSelectorCard.vue'
 import ImportShareCard from './aisearch/ImportShareCard.vue'
 import DownloadCard from './aisearch/DownloadCard.vue'
 import DuplicateCard from './aisearch/DuplicateCard.vue'
@@ -65,6 +66,16 @@ function handleRetryTool(_messageId: string, _toolType: string, input: any) {
   if (input?.keyword) handleSend(input.keyword)
 }
 
+function handleDriveConfirm(selected: { userId: string; name: string; platform: string; driveId: string }[]) {
+  const PLATFORM_LABELS: Record<string, string> = {
+    aliyun: '阿里云盘', quark: '夸克网盘', baidu: '百度网盘', '115': '115网盘',
+    '123': '123云盘', tianyi: '天翼云盘', xunlei: '迅雷云盘', pikpak: 'PikPak',
+    dropbox: 'Dropbox', onedrive: 'OneDrive', box: 'Box',
+  }
+  const desc = selected.map(d => `${PLATFORM_LABELS[d.platform] || d.platform}(${d.name})`).join('、')
+  handleSend('用户选择了: ' + desc)
+}
+
 function handleConfirmAction(msgId: string, partIndex: number) { confirmAction(msgId, partIndex) }
 function handleCancelAction(msgId: string, partIndex: number) { cancelAction(msgId, partIndex) }
 
@@ -109,8 +120,15 @@ const DEFAULT_FOLLOWUPS = [
         <!-- parts -->
         <div class="ai-msg-body">
           <template v-for="(part, pi) in msg.parts" :key="pi">
+            <!-- tool: listDrives -->
+            <DriveSelectorCard
+              v-if="part.type === 'tool-listDrives'"
+              :drives="(part as any).drives"
+              @confirm="handleDriveConfirm"
+            />
+
             <!-- text -->
-            <div v-if="part.type === 'text'" class="ai-msg-text" v-html="renderMarkdown((part as any).text)" />
+            <div v-else-if="part.type === 'text'" class="ai-msg-text" v-html="renderMarkdown((part as any).text)" />
 
             <!-- reasoning -->
             <ReasonChain v-else-if="part.type === 'reasoning'" :text="(part as any).text" />

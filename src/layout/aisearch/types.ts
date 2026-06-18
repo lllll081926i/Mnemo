@@ -61,6 +61,12 @@ export interface ToolSearchPanHubPart {
   error?: string
 }
 
+export interface ToolListDrivesPart {
+  type: 'tool-listDrives'
+  state: 'select'
+  drives: { userId: string; name: string; platform: string; driveId: string }[]
+}
+
 export interface ToolImportSharePart {
   type: 'tool-importShare'
   state: 'parsing' | 'listing' | 'saving' | 'done' | 'error'
@@ -119,6 +125,7 @@ export type MessagePart =
   | ReasoningPart
   | ClarificationPart
   | SummaryPart
+  | ToolListDrivesPart
   | ToolSearchMyFilesPart
   | ToolSearchPanHubPart
   | ToolImportSharePart

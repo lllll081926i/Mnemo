@@ -128,9 +128,10 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
 1. 用户提到文件相关操作，必须调用对应工具，不能只回复文字
 2. 禁止在未调用工具的情况下编造文件名、大小等信息
 3. 多网盘场景必须先调用 listDrives：
-   - 用户要求整理/分析/查重时，先调用 listDrives 列出所有网盘
-   - 然后在聊天中让用户选择要操作哪个网盘还是全部
-   - 用户指定后再执行操作
+   - 用户要求整理/分析/查重时，先调用 listDrives
+   - listDrives 会在界面弹出网盘选择器，让用户勾选并点确定
+   - 用户选择后你会收到类似"用户选择了: 阿里云盘(zxm)、百度网盘"的消息
+   - 然后你再执行对应操作
    - 导入分享：必须问用户保存到阿里云盘还是夸克
 4. 工具返回结果后，简要总结即可
 5. moveFiles 和 deleteFiles 必须先展示确认信息
@@ -145,7 +146,7 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
         messages: apiMessages,
         tools: {
           listDrives: {
-            description: '列出用户所有已登录的网盘',
+            description: '列出用户所有已登录的网盘，让用户在界面中选择要操作的网盘',
             inputSchema: z.object({}),
             execute: async () => {
               const users = await UserDAL.GetUserListFromDB()
@@ -157,6 +158,8 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
                   platform: u.tokenfrom || 'aliyun',
                   driveId: u.default_drive_id || u.drive_id || '',
                 }))
+              appendPart(aiMsgId, { type: 'tool-listDrives', state: 'select', drives } as MessagePart)
+              scrollBottom()
               return { count: drives.length, drives }
             },
           },
