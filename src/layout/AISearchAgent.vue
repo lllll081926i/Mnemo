@@ -9,7 +9,6 @@ import SearchFilesCard from './aisearch/SearchFilesCard.vue'
 import SearchLinksCard from './aisearch/SearchLinksCard.vue'
 import SummaryCard from './aisearch/SummaryCard.vue'
 import LoadingIndicator from './aisearch/LoadingIndicator.vue'
-import FollowUpBar from './aisearch/FollowUpBar.vue'
 import ImportShareCard from './aisearch/ImportShareCard.vue'
 import DownloadCard from './aisearch/DownloadCard.vue'
 import DuplicateCard from './aisearch/DuplicateCard.vue'
@@ -24,6 +23,7 @@ const props = defineProps<{ aiEnabled: boolean; keyword: string; trigger: number
 const appStore = useAppStore()
 const { messages, loading, sendMessage, clear, confirmAction, cancelAction } = useAISearchChat(props.phSearch)
 const chatContainer = ref<HTMLElement>()
+const inputText = ref('')
 
 function handleSend(q?: string) {
   const kw = (q || props.keyword || '').trim()
@@ -83,26 +83,17 @@ const DEFAULT_FOLLOWUPS = [
 
 <template>
   <div class="ai-chat">
-    <!-- empty state -->
-    <div v-if="messages.length === 0 && !loading" class="ai-empty">
-      <Sparkles :size="48" :stroke-width="1" class="ai-empty-icon" />
-      <div class="ai-empty-title">AI 智能搜索</div>
-      <div class="ai-empty-desc">在上方搜索框输入自然语言，AI 帮你搜索所有云盘和全网资源</div>
-      <div class="ai-empty-hints">
-        <button
-          v-for="hint in DEFAULT_FOLLOWUPS"
-          :key="hint"
-          class="ai-hint"
-          type="button"
-          @click="handleSend(hint)"
-        >
-          {{ hint }}
-        </button>
-      </div>
-    </div>
-
     <!-- messages -->
-    <div v-else ref="chatContainer" class="ai-messages">
+    <div ref="chatContainer" class="ai-messages">
+      <!-- empty -->
+      <div v-if="messages.length === 0 && !loading" class="ai-empty">
+        <Sparkles :size="48" :stroke-width="1" class="ai-empty-icon" />
+        <div class="ai-empty-title">AI 智能搜索</div>
+        <div class="ai-empty-desc">在下方输入框描述你想做什么，AI 帮你搜索和整理文件</div>
+      </div>
+
+      <!-- message list -->
+      <template v-else>
       <div
         v-for="msg in messages"
         :key="msg.id"
@@ -244,12 +235,36 @@ const DEFAULT_FOLLOWUPS = [
       <LoadingIndicator v-if="loading" />
     </div>
 
-    <!-- follow-up bar -->
-    <FollowUpBar
-      v-if="messages.length > 0 && !loading"
-      :suggestions="DEFAULT_FOLLOWUPS"
-      @select="handleFollowUp"
-    />
+    <!-- bottom bar -->
+    <div class="ai-bottom">
+      <div class="ai-suggestions">
+        <span class="ai-suggestions-label">试试问</span>
+        <button
+          v-for="hint in DEFAULT_FOLLOWUPS"
+          :key="hint"
+          class="ai-hint"
+          type="button"
+          @click="handleSend(hint)"
+        >
+          {{ hint }}
+        </button>
+      </div>
+      <div class="ai-input-bar">
+        <input
+          v-model="inputText"
+          class="ai-input"
+          placeholder="描述你想做什么..."
+          @keydown.enter="handleSend(inputText); inputText = ''"
+        />
+        <button
+          class="ai-send-btn"
+          :disabled="!inputText.trim() || loading"
+          @click="handleSend(inputText); inputText = ''"
+        >
+          发送
+        </button>
+      </div>
+    </div>
 
     <!-- footer -->
     <div v-if="messages.length > 0" class="ai-footer">
@@ -285,6 +300,17 @@ const DEFAULT_FOLLOWUPS = [
 .ai-msg-text :deep(strong) { font-weight: 600; }
 .ai-msg-text :deep(code) { padding: 1px 4px; font-size: 12px; background: var(--color-fill-2); border-radius: 3px; }
 .ai-msg-text :deep(a) { color: rgb(var(--primary-6)); }
+
+.ai-bottom { flex-shrink: 0; padding: 0 48px 12px; background: var(--color-bg-1); }
+.ai-suggestions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.ai-suggestions-label { font-size: 12px; color: var(--color-text-4); flex-shrink: 0; margin-right: 2px; }
+.ai-input-bar { display: flex; gap: 8px; }
+.ai-input { flex: 1; padding: 10px 16px; font-size: 14px; color: var(--color-text-1); background: var(--color-fill-1); border: 1px solid var(--color-border-2); border-radius: 10px; outline: none; font-family: inherit; }
+.ai-input:focus { border-color: rgb(var(--primary-6)); box-shadow: 0 0 0 2px rgba(var(--primary-6), 0.12); }
+.ai-input::placeholder { color: var(--color-text-4); }
+.ai-send-btn { padding: 8px 20px; font-size: 14px; font-weight: 500; color: #fff; background: rgb(var(--primary-6)); border: 0; border-radius: 10px; cursor: pointer; font-family: inherit; transition: opacity 0.15s; }
+.ai-send-btn:hover { opacity: 0.9; }
+.ai-send-btn:disabled { opacity: 0.4; cursor: default; }
 
 .ai-footer { display: flex; align-items: center; justify-content: space-between; padding: 8px 48px; border-top: 1px solid var(--color-border-2); background: var(--color-bg-1); }
 .ai-clear-btn { padding: 4px 12px; font-size: 12px; color: var(--color-text-4); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-family: inherit; }
