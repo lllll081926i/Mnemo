@@ -10,13 +10,19 @@ import SearchLinksCard from './aisearch/SearchLinksCard.vue'
 import SummaryCard from './aisearch/SummaryCard.vue'
 import LoadingIndicator from './aisearch/LoadingIndicator.vue'
 import FollowUpBar from './aisearch/FollowUpBar.vue'
+import ImportShareCard from './aisearch/ImportShareCard.vue'
+import DownloadCard from './aisearch/DownloadCard.vue'
+import DuplicateCard from './aisearch/DuplicateCard.vue'
+import StorageCard from './aisearch/StorageCard.vue'
+import OrganizeCard from './aisearch/OrganizeCard.vue'
+import BatchActionCard from './aisearch/BatchActionCard.vue'
 import { renderMarkdown } from './aisearch/markdown'
 import type { FileResult } from './aisearch/types'
 
 const props = defineProps<{ aiEnabled: boolean; keyword: string; trigger: number; phSearch: (kw: string) => Promise<any> }>()
 
 const appStore = useAppStore()
-const { messages, loading, sendMessage, clear } = useAISearchChat(props.phSearch)
+const { messages, loading, sendMessage, clear, confirmAction, cancelAction } = useAISearchChat(props.phSearch)
 const chatContainer = ref<HTMLElement>()
 
 function handleSend(q?: string) {
@@ -58,6 +64,9 @@ function handleFileNavigate(file: FileResult) {
 function handleRetryTool(_messageId: string, _toolType: string, input: any) {
   if (input?.keyword) handleSend(input.keyword)
 }
+
+function handleConfirmAction(msgId: string, partIndex: number) { confirmAction(msgId, partIndex) }
+function handleCancelAction(msgId: string, partIndex: number) { cancelAction(msgId, partIndex) }
 
 watch(() => props.trigger, () => {
   if (props.keyword.trim()) handleSend()
@@ -148,6 +157,82 @@ const DEFAULT_FOLLOWUPS = [
               :text="(part as any).text"
               :followups="(part as any).followups"
               @followup="handleFollowUp"
+            />
+
+            <!-- tool: importShare -->
+            <ImportShareCard
+              v-else-if="part.type === 'tool-importShare'"
+              :state="(part as any).state"
+              :input="(part as any).input"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @retry="handleRetryTool(msg.id, 'tool-importShare', (part as any).input)"
+            />
+
+            <!-- tool: downloadFiles -->
+            <DownloadCard
+              v-else-if="part.type === 'tool-downloadFiles'"
+              :state="(part as any).state"
+              :input="(part as any).input"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @retry="handleRetryTool(msg.id, 'tool-downloadFiles', (part as any).input)"
+            />
+
+            <!-- tool: findDuplicates -->
+            <DuplicateCard
+              v-else-if="part.type === 'tool-findDuplicates'"
+              :state="(part as any).state"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @navigate="handleFileNavigate"
+              @select="(files: FileResult[]) => handleSend('删除这些重复文件: ' + files.map(f => f.name).join(', '))"
+              @retry="handleRetryTool(msg.id, 'tool-findDuplicates', {})"
+            />
+
+            <!-- tool: analyzeStorage -->
+            <StorageCard
+              v-else-if="part.type === 'tool-analyzeStorage'"
+              :state="(part as any).state"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @navigate="handleFileNavigate"
+              @retry="handleRetryTool(msg.id, 'tool-analyzeStorage', {})"
+            />
+
+            <!-- tool: categorizeFiles -->
+            <OrganizeCard
+              v-else-if="part.type === 'tool-categorizeFiles'"
+              :state="(part as any).state"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @organize="(cats: any[]) => handleSend('帮我把文件按以下分类整理: ' + cats.map((c: any) => c.name + '→' + c.name + '文件夹').join(', '))"
+              @retry="handleRetryTool(msg.id, 'tool-categorizeFiles', {})"
+            />
+
+            <!-- tool: moveFiles -->
+            <BatchActionCard
+              v-else-if="part.type === 'tool-moveFiles'"
+              action="move"
+              :state="(part as any).state"
+              :files="(part as any).input?.files || []"
+              :target-dir="(part as any).input?.targetDir"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @confirm="handleConfirmAction(msg.id, pi)"
+              @cancel="handleCancelAction(msg.id, pi)"
+            />
+
+            <!-- tool: deleteFiles -->
+            <BatchActionCard
+              v-else-if="part.type === 'tool-deleteFiles'"
+              action="delete"
+              :state="(part as any).state"
+              :files="(part as any).input?.files || []"
+              :output="(part as any).output"
+              :error="(part as any).error"
+              @confirm="handleConfirmAction(msg.id, pi)"
+              @cancel="handleCancelAction(msg.id, pi)"
             />
           </template>
         </div>
