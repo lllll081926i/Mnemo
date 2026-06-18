@@ -61,6 +61,59 @@ export interface ToolSearchPanHubPart {
   error?: string
 }
 
+export interface ToolImportSharePart {
+  type: 'tool-importShare'
+  state: 'parsing' | 'listing' | 'saving' | 'done' | 'error'
+  input?: { url: string; password: string }
+  output?: { shareName: string; fileCount: number; savedCount: number; platform: string }
+  error?: string
+}
+
+export interface ToolDownloadFilesPart {
+  type: 'tool-downloadFiles'
+  state: 'running' | 'done' | 'error'
+  input?: { files: { name: string; fileId: string; driveId: string; userId: string }[] }
+  output?: { total: number; success: number }
+  error?: string
+}
+
+export interface ToolFindDuplicatesPart {
+  type: 'tool-findDuplicates'
+  state: 'scanning' | 'done' | 'error'
+  output?: { totalFiles: number; groups: { name: string; size: number; files: FileResult[] }[] }
+  error?: string
+}
+
+export interface ToolAnalyzeStoragePart {
+  type: 'tool-analyzeStorage'
+  state: 'scanning' | 'done' | 'error'
+  output?: { drives: { name: string; totalSize: number; fileCount: number; topLarge: FileResult[] }[]; oldestFiles: FileResult[]; unusedFiles: FileResult[] }
+  error?: string
+}
+
+export interface ToolCategorizeFilesPart {
+  type: 'tool-categorizeFiles'
+  state: 'planning' | 'done' | 'error'
+  output?: { categories: { name: string; pattern: string; fileCount: number; totalSize: number }[] }
+  error?: string
+}
+
+export interface ToolMoveFilesPart {
+  type: 'tool-moveFiles'
+  state: 'confirm' | 'running' | 'done' | 'error'
+  input?: { files: { name: string; fileId: string; driveId: string; userId: string }[]; targetDir: string }
+  output?: { total: number; success: number; failed: number }
+  error?: string
+}
+
+export interface ToolDeleteFilesPart {
+  type: 'tool-deleteFiles'
+  state: 'confirm' | 'running' | 'done' | 'error'
+  input?: { files: { name: string; fileId: string; driveId: string; userId: string }[] }
+  output?: { total: number; success: number; failed: number }
+  error?: string
+}
+
 export type MessagePart =
   | TextPart
   | ReasoningPart
@@ -68,6 +121,13 @@ export type MessagePart =
   | SummaryPart
   | ToolSearchMyFilesPart
   | ToolSearchPanHubPart
+  | ToolImportSharePart
+  | ToolDownloadFilesPart
+  | ToolFindDuplicatesPart
+  | ToolAnalyzeStoragePart
+  | ToolCategorizeFilesPart
+  | ToolMoveFilesPart
+  | ToolDeleteFilesPart
 
 export interface ChatMessage {
   id: string
