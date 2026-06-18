@@ -321,7 +321,14 @@ export function useAISearchChat(phSearchFn: (kw: string) => Promise<any>) {
                 const fileIds = files.map((f: any) => f.file_id)
                 updateToolPart(aiMsgId, 'tool-importShare', { url }, (p: any) => { p.state = 'saving' })
                 scrollBottom()
-                const result = await AliShare.ApiSaveShareFilesBatch(shareId, shareToken, account.userId, account.driveId, 'quark_root', fileIds)
+                // ensure Quark session is active (cookies may expire)
+        if (isQuark) {
+          const { default: UserDAL_ } = await import('../../user/userdal')
+          const ok = await UserDAL_.UserChange(account.userId)
+          if (!ok) throw new Error('夸克网盘登录已过期，请在设置页重新登录')
+        }
+
+        const result = await AliShare.ApiSaveShareFilesBatch(shareId, shareToken, account.userId, account.driveId, 'quark_root', fileIds)
                 updateToolPart(aiMsgId, 'tool-importShare', { url }, (p: any) => {
                   p.state = result === 'success' ? 'done' : 'error'
                   p.output = { shareName: (fileResp as any)?.share_name || files[0]?.name || '', fileCount: files.length, savedCount: result === 'success' ? files.length : 0, platform: platform === 'quark' ? '夸克网盘' : '阿里云盘' }
