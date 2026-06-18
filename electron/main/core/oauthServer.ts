@@ -50,7 +50,7 @@ export async function startOAuthServer(win: BrowserWindow): Promise<number> {
       }
     })
 
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(3003, '127.0.0.1', () => {
       const addr = server!.address()
       if (addr && typeof addr === 'object') {
         currentPort = addr.port
