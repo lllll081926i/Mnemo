@@ -14,7 +14,7 @@ import MotrixApplication from './aria/MotrixApplication'
 import { registerExternalDownloadProtocol } from './core/protocol'
 import { destroyDb } from './reedy/ReedyService'
 
-const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth']
+const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth', 'koodo-reader']
 
 type UserToken = {
   access_token: string;
@@ -378,7 +378,16 @@ export default class launch extends EventEmitter {
   private dispatchOAuthUrl(url: string) {
     if (!url) return
     if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() === false) {
-      AppWindow.mainWindow.webContents.send('cloud123-oauth-callback', url)
+      if (url.startsWith('koodo-reader://')) {
+        try {
+          const parsed = new URL(url)
+          const code = parsed.searchParams.get('code')
+          const state = parsed.searchParams.get('state')
+          if (code) AppWindow.mainWindow.webContents.send('oauth-callback', { code, state })
+        } catch {}
+      } else {
+        AppWindow.mainWindow.webContents.send('cloud123-oauth-callback', url)
+      }
       AppWindow.mainWindow.show()
       AppWindow.mainWindow.focus()
     } else {
