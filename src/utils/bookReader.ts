@@ -168,6 +168,7 @@ export function createReaderStyleConfig(options: BookReaderOptions) {
     appSkin: options.isDarkMode ? 'night' : 'default',
     isOSNight: 'no',
     fontFamily: options.fontFamily || '',
+    subFontFamily: options.subFontFamily || '',
     isBold: options.isBold ? 'yes' : 'no',
     isItalic: options.isItalic ? 'yes' : 'no',
     isUnderline: options.isUnderline ? 'yes' : 'no',

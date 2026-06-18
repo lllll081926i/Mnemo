@@ -10,6 +10,10 @@ export default class Config {
   static APPLE_PASSWORD = ''
   static APPLE_TEAM_ID = ''
 
+  // Supabase 认证
+  static SUPABASE_URL = ''
+  static SUPABASE_ANON_KEY = ''
+
   // TMDB 配置
   static TMDB_API_KEY = ''
 

@@ -17,6 +17,7 @@ import {
   List,
   Pin,
   PinOff,
+  Plus,
   RotateCcw,
   RotateCw,
   Search,
@@ -249,7 +250,7 @@ const aiMode = ref<'ask' | 'chat'>('ask')
 const aiProviderOverride = ref('')
 const rightTab = ref<'settings' | 'chat'>('settings')
 const leftPanelWidth = ref(300)
-const rightPanelWidth = ref(300)
+const rightPanelWidth = ref(400)
 const translateResult = ref('')
 const translateSource = ref('')
 const transLoading = ref(false)
@@ -260,6 +261,10 @@ const bilingualMode = ref(false)
 const azureTTSEnabled = ref(isAzureTTSEnabled())
 const aiIndexingStatus = ref<'idle' | 'indexing' | 'done' | 'error'>('idle')
 const aiIndexingText = ref('')
+const aiConvId = ref(String(Date.now()))
+const aiConvList = ref<Array<{ id: string; title: string; mode: 'ask' | 'chat'; createdAt: number }>>([])
+const aiShowConvList = ref(false)
+const aiShowSidebar = ref(true)
 
 const transProvider = ref(translators.defaultName)
 const azureVoice = ref(getSavedAzureVoice() || '')
@@ -945,9 +950,22 @@ function bindRenderedHook() {
       // 多次延迟覆盖，对抗引擎的异步写入
       const apply = () => {
         applyDoublePageCss(readerContainer.value!, readerLayoutMode.value)
+        const fontFamily = readerFontFamily.value === 'Built-in font' ? '' : readerFontFamily.value
         const iframes = readerContainer.value!.querySelectorAll('iframe')
         iframes.forEach((iframe) => {
           bindIframeColumnGuard(iframe as HTMLIFrameElement)
+          if (fontFamily) {
+            const doc = iframe.contentDocument
+            if (doc?.head) {
+              let fontStyle = doc.getElementById('reader-font-override') as HTMLStyleElement | null
+              if (!fontStyle) {
+                fontStyle = doc.createElement('style')
+                fontStyle.id = 'reader-font-override'
+                doc.head.appendChild(fontStyle)
+              }
+              fontStyle.textContent = `body *{font-family:"${fontFamily}",sans-serif!important}`
+            }
+          }
           if (readerLayoutMode.value === 'scroll') {
             const el = iframe as HTMLIFrameElement
             el.style.setProperty('overflow', 'visible', 'important')
@@ -1076,6 +1094,16 @@ function applyReaderStyles() {
     }
     style.textContent = `body *{color:${readerTextColor.value}!important}`
 
+    if (readerFontFamily.value !== 'Built-in font') {
+      let fontStyle = doc.querySelector('#reader-font-override') as HTMLStyleElement | null
+      if (!fontStyle) {
+        fontStyle = doc.createElement('style')
+        fontStyle.id = 'reader-font-override'
+        doc.head.appendChild(fontStyle)
+      }
+      fontStyle.textContent = `body *{font-family:"${readerFontFamily.value}",sans-serif!important}`
+    }
+
     let marginStyle = doc.querySelector('#reader-content-margin-override')
     if (!marginStyle) {
       marginStyle = doc.createElement('style')
@@ -1119,7 +1147,7 @@ function buildCurrentReaderOptions(): BookReaderOptions {
     backgroundColor: readerBackgroundColor.value,
     textColor: readerTextColor.value,
     fontFamily: readerFontFamily.value === 'Built-in font' ? '' : readerFontFamily.value,
-    subFontFamily: readerSubFontFamily.value === 'Built-in font' ? '' : readerSubFontFamily.value,
+    subFontFamily: readerFontFamily.value === 'Built-in font' ? '' : readerFontFamily.value,
     bookLayout: readerBookLayout.value,
     convertChinese: readerConvertChinese.value,
     textOrientation: readerTextOrientation.value,
@@ -1714,7 +1742,8 @@ function startPanelResize(side: 'left' | 'right', e: MouseEvent) {
   const onMove = (ev: MouseEvent) => {
     const delta = ev.clientX - startX
     const newWidth = side === 'left' ? startWidth + delta : startWidth - delta
-    const clamped = Math.max(220, Math.min(520, newWidth))
+    const maxW = side === 'left' ? 520 : 720
+    const clamped = Math.max(220, Math.min(maxW, newWidth))
     if (side === 'left') leftPanelWidth.value = clamped
     else rightPanelWidth.value = clamped
   }
@@ -1742,30 +1771,91 @@ function startTransResize(e: MouseEvent) {
   document.addEventListener('mouseup', onUp)
 }
 
+function aiConvKey(): string {
+  return `${props.book?.id || 'global'}_${aiConvId.value}`
+}
+
 async function loadAIHistory() {
   const requestId = ++aiHistoryLoadRequestId
-  const bookId = props.book?.id || 'global'
+  const convKey = aiConvKey()
   const mode = aiMode.value
-  await migrateLegacyAIHistory(bookId, mode).catch(() => {})
+  await migrateLegacyAIHistory(convKey, mode).catch(() => {})
   try {
-    const msgs = await loadAIConversationMessages(bookId, mode)
-    if (requestId !== aiHistoryLoadRequestId || mode !== aiMode.value) return
-    // Filter out old system-context messages
+    const msgs = await loadAIConversationMessages(convKey, mode)
+    if (requestId !== aiHistoryLoadRequestId || mode !== aiMode.value || convKey !== aiConvKey()) return
     aiMessages.value = msgs.filter((m) => !m.content.startsWith('你是阅读助手'))
   } catch {
     if (requestId === aiHistoryLoadRequestId) aiMessages.value = []
   }
+  // Load conv list from localStorage
+  try {
+    const raw = localStorage.getItem(`aiConvList.${props.book?.id || 'global'}`)
+    if (raw) aiConvList.value = JSON.parse(raw)
+  } catch { aiConvList.value = [] }
 }
 
 async function saveAIHistory() {
   try {
-    await replaceAIConversationMessages(props.book?.id || 'global', aiMode.value, aiMessages.value)
+    const convKey = aiConvKey()
+    await replaceAIConversationMessages(convKey, aiMode.value, aiMessages.value)
+    // Update conv list
+    const existing = aiConvList.value.find((c) => c.id === aiConvId.value)
+    const title = aiMessages.value[0]?.content?.slice(0, 30) || '新对话'
+    if (existing) {
+      existing.title = title
+      existing.mode = aiMode.value
+      existing.createdAt = Date.now()
+    } else if (aiMessages.value.length > 0) {
+      aiConvList.value.unshift({ id: aiConvId.value, title, mode: aiMode.value, createdAt: Date.now() })
+    }
+    if (aiConvList.value.length > 20) aiConvList.value = aiConvList.value.slice(0, 20)
+    localStorage.setItem(`aiConvList.${props.book?.id || 'global'}`, JSON.stringify(aiConvList.value))
   } catch {}
+}
+
+function newAIChat() {
+  saveAIHistory()
+  aiConvId.value = String(Date.now())
+  aiMessages.value = []
+  aiAnswer.value = ''
+  aiShowConvList.value = false
+  loadAIHistory()
+}
+
+function switchAIChat(convId: string, mode: 'ask' | 'chat') {
+  if (convId === aiConvId.value) {
+    aiShowConvList.value = false
+    return
+  }
+  saveAIHistory()
+  aiConvId.value = convId
+  aiMode.value = mode
+  aiMessages.value = []
+  aiAnswer.value = ''
+  aiShowConvList.value = false
+  loadAIHistory()
 }
 
 async function clearAIHistory() {
   aiMessages.value = []
   await saveAIHistory()
+  aiConvList.value = aiConvList.value.filter((c) => c.id !== aiConvId.value)
+  localStorage.setItem(`aiConvList.${props.book?.id || 'global'}`, JSON.stringify(aiConvList.value))
+}
+
+async function deleteAIConv(convId: string) {
+  try {
+    const convKey = `${props.book?.id || 'global'}_${convId}`
+    await replaceAIConversationMessages(convKey, 'ask', [])
+    await replaceAIConversationMessages(convKey, 'chat', [])
+  } catch {}
+  aiConvList.value = aiConvList.value.filter((c) => c.id !== convId)
+  localStorage.setItem(`aiConvList.${props.book?.id || 'global'}`, JSON.stringify(aiConvList.value))
+  if (convId === aiConvId.value) {
+    aiConvId.value = String(Date.now())
+    aiMessages.value = []
+    loadAIHistory()
+  }
 }
 
 function openAIAssistant() {
@@ -2022,6 +2112,18 @@ const providerOptions = [
   { value: 'ai-gateway', label: 'Vercel AI Gateway' }
 ]
 
+const availableProviderOptions = computed(() => {
+  const globalProvider = settingStore.apiAIModelProvider || ''
+  const hasKey = !!(settingStore.apiAIModelKey) || globalProvider === 'ollama'
+  if (!hasKey) return providerOptions.filter((p) => !p.value)
+  // Only show: default, the global provider, and ollama
+  return providerOptions.filter((p) => {
+    if (!p.value) return true
+    if (p.value === 'ollama') return true
+    return p.value === globalProvider
+  })
+})
+
 function handleAIKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
@@ -2032,8 +2134,16 @@ function handleAIKeydown(e: KeyboardEvent) {
 const aiSampleQuestions = [
   { mode: 'ask', emoji: '📖', text: '总结本章内容' },
   { mode: 'ask', emoji: '📃', text: '本章的关键点是什么' },
+  { mode: 'ask', emoji: '🔍', text: '解释本章的核心概念' },
+  { mode: 'ask', emoji: '👤', text: '分析本章主要人物' },
+  { mode: 'ask', emoji: '📝', text: '用一句话概括本章' },
+  { mode: 'ask', emoji: '💡', text: '本章的主题思想是什么' },
   { mode: 'chat', emoji: '📰', text: '推荐几本类似的书' },
-  { mode: 'chat', emoji: '🗞️', text: '介绍一下这本书的作者' }
+  { mode: 'chat', emoji: '🗞️', text: '介绍一下这本书的作者' },
+  { mode: 'chat', emoji: '🏆', text: '这本书获得过哪些奖项' },
+  { mode: 'chat', emoji: '🎯', text: '这本书适合什么读者' },
+  { mode: 'chat', emoji: '📊', text: '评价一下这本书的写作风格' },
+  { mode: 'chat', emoji: '🔗', text: '这本书属于什么文学流派' }
 ]
 
 function openBookLookupPopup(mode: BookLookupMode) {
@@ -2628,13 +2738,23 @@ watch(
   }
 )
 
+let lastCustomBg = 'rgba(255,255,255,1)'
+let lastCustomFg = 'rgba(0,0,0,1)'
+
 watch([readerMode], () => {
   if (readerMode.value === 'dark') {
+    lastCustomBg = readerBackgroundColor.value
+    lastCustomFg = readerTextColor.value
     readerBackgroundColor.value = 'rgba(44,47,49,1)'
     readerTextColor.value = 'rgba(255,255,255,1)'
+  } else if (readerMode.value === 'eye') {
+    lastCustomBg = readerBackgroundColor.value
+    lastCustomFg = readerTextColor.value
+    readerBackgroundColor.value = 'rgba(244,236,216,1)'
+    readerTextColor.value = 'rgba(74,69,48,1)'
   } else {
-    readerBackgroundColor.value = 'rgba(255,255,255,1)'
-    readerTextColor.value = 'rgba(0,0,0,1)'
+    readerBackgroundColor.value = lastCustomBg
+    readerTextColor.value = lastCustomFg
   }
   saveReaderPreferences()
 })
@@ -3083,7 +3203,8 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- koodo-style Right Panel (SettingPanel) -->
-      <div :class="['edge-panel', 'panel-right', 'setting-panel', isRightPanelVisible ? 'open' : '']" @mouseleave="hidePanel('right')">
+      <div :class="['edge-panel', 'panel-right', 'setting-panel', isRightPanelVisible ? 'open' : '']" :style="{ width: rightPanelWidth + 'px' }" @mouseleave="hidePanel('right')">
+        <div class="panel-resize-handle panel-resize-left" @mousedown="startPanelResize('right', $event)"></div>
         <div class="panel-head">
           <ReaderPanelButton class="panel-pin" :active="lockedPanels.right" :title="lockedPanels.right ? '取消锁定' : '锁定面板'" @click="togglePanelLock('right')">
             <Pin v-if="lockedPanels.right" :size="14" :stroke-width="1.8" />
@@ -3171,6 +3292,16 @@ onBeforeUnmount(() => {
                 <Palette :size="14" />
               </label>
             </div>
+          </div>
+
+          <!-- Theme (纸白/护眼/夜间) -->
+          <div class="setting-section" style="padding-top: 4px">
+            <div class="setting-section-title">{{ t('theme') }}</div>
+            <a-radio-group v-model="readerMode" type="button" size="small">
+              <a-radio value="paper">{{ t('theme.paper') }}</a-radio>
+              <a-radio value="eye">{{ t('theme.eye') }}</a-radio>
+              <a-radio value="dark">{{ t('theme.dark') }}</a-radio>
+            </a-radio-group>
           </div>
 
           <!-- Font Size (match koodo SliderList) -->
@@ -3265,17 +3396,18 @@ onBeforeUnmount(() => {
               <a-option value="Built-in font">Built-in font</a-option>
               <a-option value="Times New Roman">Times New Roman</a-option>
               <a-option value="Georgia">Georgia</a-option>
+              <a-option value="Garamond">Garamond</a-option>
+              <a-option value="Baskerville">Baskerville</a-option>
+              <a-option value="Palatino">Palatino</a-option>
               <a-option value="Helvetica">Helvetica</a-option>
-            </a-select>
-          </div>
-
-          <div class="setting-section">
-            <div class="setting-section-title">{{ t('cjk.font.family') }}</div>
-            <a-select v-model="readerSubFontFamily" size="small" style="width: 100%">
-              <a-option value="Built-in font">Built-in font</a-option>
-              <a-option value="Times New Roman">Times New Roman</a-option>
-              <a-option value="Georgia">Georgia</a-option>
-              <a-option value="Helvetica">Helvetica</a-option>
+              <a-option value="PingFang SC">PingFang SC (苹方)</a-option>
+              <a-option value="Microsoft YaHei">Microsoft YaHei (微软雅黑)</a-option>
+              <a-option value="SimSun">SimSun (宋体)</a-option>
+              <a-option value="KaiTi">KaiTi (楷体)</a-option>
+              <a-option value="Heiti SC">Heiti SC (黑体)</a-option>
+              <a-option value="Source Han Serif SC">Source Han Serif SC (思源宋体)</a-option>
+              <a-option value="Noto Serif CJK SC">Noto Serif CJK SC</a-option>
+              <a-option value="Hiragino Mincho ProN">Hiragino Mincho (明朝)</a-option>
             </a-select>
           </div>
 
@@ -3510,15 +3642,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Theme (纸白/护眼/夜间) — unique feature, kept after settings -->
-          <div class="setting-section" style="padding-top: 10px; border-top: 1px solid var(--panel-border)">
-            <div class="setting-section-title">{{ t('theme') }}</div>
-            <a-radio-group v-model="readerMode" type="button" size="small">
-              <a-radio value="paper">{{ t('theme.paper') }}</a-radio>
-              <a-radio value="eye">{{ t('theme.eye') }}</a-radio>
-              <a-radio value="dark">{{ t('theme.dark') }}</a-radio>
-            </a-radio-group>
-          </div>
+
 
           <!-- Selection Action -->
           <template v-if="isReader">
@@ -3601,70 +3725,104 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div v-if="rightTab === 'chat'" class="panel-body panel-chat">
-          <div v-if="!isAIConfigured()" class="thread-empty">
-            <div class="thread-empty-icon"><Sparkles :size="24" :stroke-width="1.5" /></div>
-            <h3>未配置 AI 模型</h3>
-            <p>请到 设置 → API 密钥 中配置</p>
+          <div class="chat-header">
+            <div class="chat-header-left">
+              <button class="chat-header-btn" title="历史记录" @click="aiShowSidebar = !aiShowSidebar">
+                <List :size="14" :stroke-width="1.8" />
+              </button>
+              <Sparkles :size="14" :stroke-width="1.8" />
+              <span class="chat-header-title">AI 阅读助手</span>
+            </div>
+            <div class="chat-header-right">
+              <button class="chat-header-btn" title="新建对话" @click="newAIChat">
+                <Plus :size="14" :stroke-width="1.8" />
+              </button>
+            </div>
           </div>
-          <template v-else>
-            <div class="chat-viewport">
-              <div v-if="aiStatusText" class="chat-status">{{ aiStatusText }}</div>
-              <div v-if="!aiMessages.length && !aiAnswer" class="thread-empty">
-                <div class="thread-empty-icon"><BookOpen :size="24" :stroke-width="1.5" /></div>
-                <h3>{{ aiMode === 'ask' ? '询问本书内容' : '和 AI 聊聊这本书' }}</h3>
-                <p>{{ aiMode === 'ask' ? '根据已读内容获得问答' : '讨论书籍、作者或阅读建议' }}</p>
-                <div class="thread-samples">
-                  <button v-for="q in aiSampleQuestions.filter((s) => s.mode === aiMode)" :key="q.text" class="thread-sample-btn" @click="askAI(q.text)">{{ q.emoji }} {{ q.text }}</button>
+          <div class="chat-body">
+            <div v-show="aiShowSidebar" class="chat-sidebar">
+              <div class="chat-sidebar-head">
+                <span class="chat-sidebar-title">对话历史</span>
+                <button class="chat-header-btn" title="新建" @click="newAIChat"><Plus :size="13" :stroke-width="1.8" /></button>
+              </div>
+              <div class="chat-sidebar-list">
+                <div v-if="!aiConvList.length" class="chat-sidebar-empty">暂无对话</div>
+                <div v-for="c in aiConvList" :key="c.id" :class="['chat-conv-item', aiConvId === c.id ? 'active' : '']" @click="switchAIChat(c.id, c.mode)">
+                  <div class="chat-conv-info">
+                    <span class="chat-conv-mode">{{ c.mode === 'ask' ? '📖' : '💡' }}</span>
+                    <span class="chat-conv-title">{{ c.title }}</span>
+                  </div>
+                  <button class="chat-conv-delete" title="删除" @click.stop="deleteAIConv(c.id)"><Trash2 :size="10" /></button>
                 </div>
               </div>
-              <div v-else class="chat-messages">
-                <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['chat-msg', msg.role]">
-                  <div :class="['chat-bubble', msg.role]">
-                    <div class="chat-bubble-content" v-html="renderAIMarkdown(msg.content)"></div>
+            </div>
+            <div class="chat-main">
+              <div v-if="!isAIConfigured()" class="thread-empty">
+                <div class="thread-empty-icon"><Sparkles :size="24" :stroke-width="1.5" /></div>
+                <h3>未配置 AI 模型</h3>
+                <p>请到 设置 → API 密钥 中配置</p>
+              </div>
+              <template v-else>
+                <div class="chat-viewport">
+                  <div v-if="aiStatusText" class="chat-status">{{ aiStatusText }}</div>
+                  <div v-if="!aiMessages.length && !aiAnswer" class="thread-empty">
+                    <div class="thread-empty-icon"><BookOpen :size="24" :stroke-width="1.5" /></div>
+                    <h3>{{ aiMode === 'ask' ? '询问本书内容' : '和 AI 聊聊这本书' }}</h3>
+                    <p>{{ aiMode === 'ask' ? '根据已读内容获得问答' : '讨论书籍、作者或阅读建议' }}</p>
+                    <div class="thread-samples">
+                      <button v-for="q in aiSampleQuestions.filter((s) => s.mode === aiMode)" :key="q.text" class="thread-sample-btn" @click="askAI(q.text)">{{ q.emoji }} {{ q.text }}</button>
+                    </div>
                   </div>
-                  <div v-if="msg.role === 'assistant'" class="chat-msg-actions">
-                    <button title="复制" @click="copyAIMessage(msg.content)"><Copy :size="12" :stroke-width="1.8" /></button>
-                    <button v-if="idx === aiMessages.length - 1" title="重试" @click="retryLastAI"><RotateCw :size="12" :stroke-width="1.8" /></button>
+                  <div v-else class="chat-messages">
+                    <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['chat-msg', msg.role]">
+                      <div :class="['chat-bubble', msg.role]">
+                        <div class="chat-bubble-content" v-html="renderAIMarkdown(msg.content)"></div>
+                      </div>
+                      <div v-if="msg.role === 'assistant'" class="chat-msg-actions">
+                        <button title="复制" @click="copyAIMessage(msg.content)"><Copy :size="12" :stroke-width="1.8" /></button>
+                        <button v-if="idx === aiMessages.length - 1" title="重试" @click="retryLastAI"><RotateCw :size="12" :stroke-width="1.8" /></button>
+                      </div>
+                    </div>
+                    <div v-if="aiStreaming && !aiAnswer" class="chat-msg assistant">
+                      <div class="chat-bubble assistant thinking-bubble">
+                        <span class="thinking-dot">●</span>
+                        <span class="thinking-dot">●</span>
+                        <span class="thinking-dot">●</span>
+                      </div>
+                    </div>
+                    <div v-if="aiAnswer" class="chat-msg assistant">
+                      <div class="chat-bubble assistant">
+                        <div class="chat-bubble-content">
+                          <span v-html="renderAIMarkdown(aiAnswer)"></span>
+                          <span class="chat-cursor">|</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+                  <div class="chat-disclaimer">AI 可能出错。请以本书内容为准。</div>
                 </div>
-                <div v-if="aiStreaming && !aiAnswer" class="chat-msg assistant">
-                  <div class="chat-bubble assistant thinking-bubble">
-                    <span class="thinking-dot">●</span>
-                    <span class="thinking-dot">●</span>
-                    <span class="thinking-dot">●</span>
-                  </div>
-                </div>
-                <div v-if="aiAnswer" class="chat-msg assistant">
-                  <div class="chat-bubble assistant">
-                    <div class="chat-bubble-content">
-                      <span v-html="renderAIMarkdown(aiAnswer)"></span>
-                      <span class="chat-cursor">|</span>
+                <div class="chat-composer">
+                  <div class="chat-composer-inner">
+                    <div class="chat-composer-actions">
+                      <a-select v-if="isAIConfigured()" v-model="aiProviderOverride" size="mini" class="composer-provider-select" :disabled="aiStreaming">
+                        <a-option v-for="p in availableProviderOptions" :key="p.value" :value="p.value">{{ p.label === '默认 (全局设置)' ? '默认' : p.label }}</a-option>
+                      </a-select>
+                      <button class="composer-mode-btn" :class="{ active: aiMode === 'ask' }" title="阅读问答" @click="toggleAIMode('ask')">📖</button>
+                      <button class="composer-mode-btn" :class="{ active: aiMode === 'chat' }" title="自由聊天" @click="toggleAIMode('chat')">💡</button>
+                      <button class="composer-clear-btn" title="清空记录" @click="clearAIHistory"><Trash2 :size="13" /></button>
+                    </div>
+                    <div class="chat-composer-input-row">
+                      <textarea v-model="aiInput" :placeholder="aiMode === 'ask' ? '基于本章提问...' : '输入消息...'" rows="1" class="composer-input" @keydown="handleAIKeydown" :disabled="aiStreaming"></textarea>
+                      <button class="composer-send-btn" :disabled="!aiInput.trim() || aiStreaming" @click="askAI(aiInput)">
+                        <span v-if="aiStreaming" class="composer-send-stop">■</span>
+                        <ChevronRight v-else :size="18" :stroke-width="2" />
+                      </button>
                     </div>
                   </div>
                 </div>
-              </div>
-              <div class="chat-disclaimer">AI 可能出错。请以本书内容为准。</div>
+              </template>
             </div>
-            <div class="chat-composer">
-              <div class="chat-composer-inner">
-                <div class="chat-composer-actions">
-                  <a-select v-if="isAIConfigured()" v-model="aiProviderOverride" size="mini" class="composer-provider-select" :disabled="aiStreaming">
-                    <a-option v-for="p in providerOptions" :key="p.value" :value="p.value">{{ p.label === '默认 (全局设置)' ? '默认' : p.label }}</a-option>
-                  </a-select>
-                  <button class="composer-mode-btn" :class="{ active: aiMode === 'ask' }" title="阅读问答" @click="toggleAIMode('ask')">📖</button>
-                  <button class="composer-mode-btn" :class="{ active: aiMode === 'chat' }" title="自由聊天" @click="toggleAIMode('chat')">💡</button>
-                  <button class="composer-clear-btn" title="清空记录" @click="clearAIHistory"><Trash2 :size="13" /></button>
-                </div>
-                <div class="chat-composer-input-row">
-                  <textarea v-model="aiInput" :placeholder="aiMode === 'ask' ? '基于本章提问...' : '输入消息...'" rows="1" class="composer-input" @keydown="handleAIKeydown" :disabled="aiStreaming"></textarea>
-                  <button class="composer-send-btn" :disabled="!aiInput.trim() || aiStreaming" @click="askAI(aiInput)">
-                    <span v-if="aiStreaming" class="composer-send-stop">■</span>
-                    <ChevronRight v-else :size="18" :stroke-width="2" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
+          </div>
         </div>
       </div>
 
@@ -4494,7 +4652,6 @@ onBeforeUnmount(() => {
 
 /* === RIGHT PANEL (koodo setting-panel) === */
 .panel-right.setting-panel {
-  width: 299px;
   height: 100%;
   top: 0;
   right: 0;
@@ -4508,7 +4665,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 .panel-right.setting-panel:not(.open) {
-  transform: translateX(309px);
+  transform: translateX(110%);
   opacity: 0;
   pointer-events: none;
 }
@@ -4516,6 +4673,21 @@ onBeforeUnmount(() => {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
+}
+
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.panel-resize-left {
+  left: 0;
+}
+.panel-resize-handle:hover {
+  background: rgba(var(--primary-6), 0.3);
 }
 
 .panel-head {
@@ -5337,6 +5509,145 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
 }
+.chat-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+.chat-sidebar {
+  width: 160px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border-2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid var(--color-border-2);
+  flex-shrink: 0;
+}
+.chat-sidebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-3);
+}
+.chat-sidebar-empty {
+  font-size: 12px;
+  color: var(--color-text-4);
+  text-align: center;
+  padding: 20px 8px;
+}
+.chat-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-border-2);
+  flex-shrink: 0;
+}
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-2);
+}
+.chat-header-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.chat-header-right {
+  display: flex;
+  gap: 2px;
+}
+.chat-header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+.chat-header-btn:hover {
+  background: var(--color-fill-2);
+  color: var(--color-text-1);
+}
+
+.chat-conv-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  gap: 4px;
+  border-radius: 4px;
+  margin: 0 4px;
+}
+.chat-conv-item:hover {
+  background: var(--color-fill-1);
+}
+.chat-conv-item.active {
+  background: rgba(var(--primary-6), 0.08);
+  color: rgb(var(--primary-6));
+}
+.chat-conv-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  flex: 1;
+}
+.chat-conv-mode {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.chat-conv-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-2);
+}
+.chat-conv-delete {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  border-radius: 3px;
+  color: var(--color-text-4);
+  cursor: pointer;
+}
+.chat-conv-item:hover .chat-conv-delete {
+  display: flex;
+}
+.chat-conv-delete:hover {
+  background: rgba(var(--danger-6), 0.12);
+  color: rgb(var(--danger-6));
+}
 
 /* Chat viewport — scrollable message area */
 .chat-viewport {
@@ -5531,50 +5842,59 @@ onBeforeUnmount(() => {
 .chat-composer {
   flex-shrink: 0;
   border-top: 1px solid var(--color-border-2);
-  padding: 8px 6px 10px;
+  padding: 8px 8px 6px;
 }
 .chat-composer-inner {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 .chat-composer-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+}
+.composer-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 .composer-provider-select {
-  width: 120px;
+  width: 110px;
   font-size: 11px;
 }
 .composer-mode-btn {
-  width: 28px;
-  height: 24px;
+  width: 26px;
+  height: 22px;
   border: 1px solid var(--color-border-2);
   border-radius: 4px;
-  background: var(--color-bg-2);
+  background: transparent;
   cursor: pointer;
   font-size: 13px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  flex-shrink: 0;
 }
 .composer-mode-btn.active {
   border-color: rgb(var(--primary-6));
   background: rgba(var(--primary-6), 0.1);
 }
 .composer-clear-btn {
-  margin-left: auto;
   border: none;
   background: transparent;
   color: var(--color-text-3);
   cursor: pointer;
-  padding: 2px;
-  opacity: 0.5;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 .composer-clear-btn:hover {
-  opacity: 1;
+  background: var(--color-fill-2);
+  color: var(--color-text-1);
 }
 
 .chat-composer-input-row {

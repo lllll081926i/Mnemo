@@ -90,6 +90,10 @@ onUnmounted(() => {
           <template #icon><IconFont name="iconrobot" /></template>
           账户设置
         </a-menu-item>
+        <a-menu-item key="SettingAPI">
+          <template #icon><IconFont name="iconlock" /></template>
+          AI 模型
+        </a-menu-item>
         <a-menu-item key="SettingSecurity">
           <template #icon><IconFont name="iconchrome" /></template>
           安全设置
@@ -138,10 +142,6 @@ onUnmounted(() => {
           <template #icon><IconFont name="iconchuanshu" /></template>
           远程Aria
         </a-menu-item>
-        <a-menu-item key="SettingAPI">
-          <template #icon><IconFont name="iconlock" /></template>
-          API 密钥
-        </a-menu-item>
         <a-menu-item key="SettingLog">
           <template #icon><IconFont name="icondebug" /></template>
           运行日志
@@ -167,6 +167,12 @@ onUnmounted(() => {
             <a-divider :size="2" orientation="center" class="settinghr">应用设置</a-divider>
           </div>
           <SettingUI />
+        </section>
+        <section id="SettingAPI" class="settings-section">
+          <div>
+            <a-divider :size="2" orientation="center" class="settinghr">AI 模型</a-divider>
+          </div>
+          <SettingAPI />
         </section>
         <section id="SettingAccount" class="settings-section">
           <div>
@@ -246,12 +252,6 @@ onUnmounted(() => {
             <a-divider :size="2" orientation="center" class="settinghr">远程Aria</a-divider>
           </div>
           <SettingAria />
-        </section>
-        <section id="SettingAPI" class="settings-section">
-          <div>
-            <a-divider :size="2" orientation="center" class="settinghr">API 密钥</a-divider>
-          </div>
-          <SettingAPI />
         </section>
         <section id="SettingLog" class="settings-section">
           <div>

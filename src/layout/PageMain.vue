@@ -53,8 +53,8 @@ const appStore = useAppStore()
 const showAccountLogin = ref(false)
 const accountUser = ref<{ email: string } | null>(null)
 try {
-  const token = localStorage.getItem('app_user_token')
-  if (token) accountUser.value = { email: localStorage.getItem('app_user_email') || '用户' }
+  const authed = localStorage.getItem('app_user_authed')
+  if (authed === '1') accountUser.value = { email: localStorage.getItem('app_user_email') || '用户' }
 } catch {}
 const settingStore = useSettingStore()
 const winStore = useWinStore()

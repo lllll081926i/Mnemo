@@ -205,11 +205,12 @@ const skinOptions = [
   { value: 'night', label: '黑夜模式' },
 ] as const
 
-const managerAppearanceClass = computed(() => [
-  `book-manager-skin-${managerPreferences.value.appSkin}`,
-  managerPreferences.value.isDisableCrop ? 'cover-no-crop' : '',
-  managerPreferences.value.isCustomSystemCSS ? 'custom-css-enabled' : '',
-])
+const managerAppearanceClass = computed(() => {
+  return [
+    managerPreferences.value.isDisableCrop ? 'cover-no-crop' : '',
+    managerPreferences.value.isCustomSystemCSS ? 'custom-css-enabled' : '',
+  ]
+})
 
 const managerAppearanceStyle = computed<CSSProperties>(() => {
   const prefs = managerPreferences.value
@@ -2367,6 +2368,18 @@ watch(() => managerPreferences.value.isPreventSleep, (enabled) => {
 </template>
 
 <style scoped>
+.library-settings-toggle {
+  margin-top: 4px;
+  text-align: center;
+}
+.library-settings-toggle a {
+  font-size: 12px;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+.library-settings-toggle a:hover { color: rgb(var(--primary-6)); }
+</style>
+<style scoped>
 .book-library {
   height: 100%;
   overflow: hidden;
@@ -2393,32 +2406,6 @@ watch(() => managerPreferences.value.isPreventSleep, (enabled) => {
 .book-library > * {
   position: relative;
   z-index: 1;
-}
-
-.book-library.book-manager-skin-light {
-  color-scheme: light;
-  --color-bg-1: #f8f8f6;
-  --color-bg-2: rgba(255, 255, 255, .92);
-  --color-text-1: #303133;
-  --color-text-2: #606266;
-  --color-text-3: #8a8f98;
-  --color-border: rgba(40, 44, 52, .12);
-  --color-fill-1: rgba(255, 255, 255, .72);
-  --color-fill-2: rgba(53, 61, 71, .08);
-  --color-fill-3: rgba(53, 61, 71, .12);
-}
-
-.book-library.book-manager-skin-night {
-  color-scheme: dark;
-  --color-bg-1: #16191d;
-  --color-bg-2: rgba(31, 35, 41, .94);
-  --color-text-1: #eef0f4;
-  --color-text-2: #c0c5cf;
-  --color-text-3: #89909d;
-  --color-border: rgba(255, 255, 255, .12);
-  --color-fill-1: rgba(255, 255, 255, .06);
-  --color-fill-2: rgba(255, 255, 255, .09);
-  --color-fill-3: rgba(255, 255, 255, .14);
 }
 
 .book-library.cover-no-crop .book-card-item-cover img,

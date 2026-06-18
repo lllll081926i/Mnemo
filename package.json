@@ -1,7 +1,7 @@
 {
   "name": "boxplayer",
   "description": "BoxPlayer",
-  "version": "4.0.23",
+  "version": "4.0.45",
   "main": "dist/electron/main/index.js",
   "author": {
     "name": "gaozhangmin",
@@ -162,8 +162,11 @@
     "vue"
   ],
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
     "@types/better-sqlite3": "^7.6.13",
+    "TagCloud": "2.5.0",
     "better-sqlite3": "^12.11.1",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^4.4.3"
   }
 }

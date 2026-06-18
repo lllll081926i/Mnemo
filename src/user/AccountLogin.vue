@@ -1,84 +1,110 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { X, Loader2, Github, Chrome, Mail } from 'lucide-vue-next'
+import { createClient } from '@supabase/supabase-js'
 import Config from '../config'
 import message from '../utils/message'
 
 const props = defineProps<{ visible: boolean }>()
-const emit = defineEmits<{ 'update:visible': [v: boolean]; login: [user: { email: string; token: string }] }>()
+const emit = defineEmits<{ 'update:visible': [v: boolean]; login: [user: { email: string }] }>()
 
 const loading = ref(false)
 const emailInput = ref('')
-const emailSent = ref(false)
+const codeSent = ref(false)
 const emailCode = ref('')
 
-const AUTH_BASE = Config.AUTH_API_BASE || 'http://localhost:3000'
+const CALLBACK_URL = 'boxplayer-auth://callback'
 
-const TOKEN_KEY = 'app_user_token'
-const EMAIL_KEY = 'app_user_email'
+const supabase = Config.SUPABASE_URL && Config.SUPABASE_ANON_KEY
+  ? createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
+  : null
 
-function saveAuth(email: string, token: string) {
-  localStorage.setItem(TOKEN_KEY, token)
-  localStorage.setItem(EMAIL_KEY, email)
-  emit('login', { email, token })
+function saveUser(email: string) {
+  localStorage.setItem('app_user_email', email)
+  localStorage.setItem('app_user_authed', '1')
+  emit('login', { email })
 }
 
-function handleOAuth(provider: 'github' | 'google') {
-  const url = `${AUTH_BASE}/auth/${provider}?source=desktop`
-  if (window.WebOpenWindow) {
-    window.WebOpenWindow({ url, title: `${provider} 登录` })
-  } else {
-    window.open(url, '_blank')
-  }
-}
-
-async function handleEmailSend() {
-  const email = emailInput.value.trim()
-  if (!email?.includes('@')) { message.warning('请输入有效的邮箱地址'); return }
+// ── OAuth ──
+async function handleOAuth(provider: 'github' | 'google') {
+  if (!supabase) { message.error('未配置 Supabase'); return }
   loading.value = true
   try {
-    const resp = await fetch(`${AUTH_BASE}/auth/email/send-code`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: CALLBACK_URL,
+        skipBrowserRedirect: false,
+      },
     })
-    const data = await resp.json()
-    if (resp.ok) { emailSent.value = true; message.success('验证码已发送') }
-    else message.error(data.message || '发送失败')
-  } catch { message.error('网络请求失败') }
+    if (error) { message.error(error.message) }
+    else if (data.url) {
+      if (window.WebOpenWindow) window.WebOpenWindow({ url: data.url, title: `${provider} 登录` })
+      else window.open(data.url, '_blank')
+    }
+  } catch (e: any) { message.error(e?.message || 'OAuth 失败') }
+  finally { loading.value = false }
+}
+
+// ── Email OTP ──
+async function handleEmailSend() {
+  const email = emailInput.value.trim()
+  if (!email?.includes('@')) { message.warning('请输入有效邮箱'); return }
+  if (!supabase) { message.error('未配置 Supabase'); return }
+  loading.value = true
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: true },
+    })
+    if (error) message.error(error.message)
+    else { codeSent.value = true; message.success('验证码已发送到邮箱') }
+  } catch (e: any) { message.error(e?.message || '发送失败') }
   finally { loading.value = false }
 }
 
 async function handleEmailVerify() {
   const email = emailInput.value.trim()
-  const code = emailCode.value.trim()
-  if (!code) { message.warning('请输入验证码'); return }
+  const token = emailCode.value.trim()
+  if (!token) { message.warning('请输入验证码'); return }
+  if (!supabase) { message.error('未配置 Supabase'); return }
   loading.value = true
   try {
-    const resp = await fetch(`${AUTH_BASE}/auth/email/verify`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code }),
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
     })
-    const data = await resp.json()
-    if (resp.ok) { saveAuth(data.email || email, data.token); message.success('登录成功'); emit('update:visible', false) }
-    else message.error(data.message || '验证失败')
-  } catch { message.error('网络请求失败') }
+    if (error) { message.error(error.message) }
+    else if (data.user) {
+      saveUser(data.user.email || email)
+      message.success('登录成功')
+      emit('update:visible', false)
+    }
+  } catch (e: any) { message.error(e?.message || '验证失败') }
   finally { loading.value = false }
 }
 
-function setupOAuthListener() {
+// ── OAuth callback from Electron ──
+function setupCallbackListener() {
   if (!window.Electron?.ipcRenderer) return
-  const handler = (_event: any, config: any) => {
-    if (config?.token && config?.email) {
-      saveAuth(config.email, config.token)
+  const handler = async (_e: any, params: { access_token?: string; refresh_token?: string }) => {
+    if (!params.access_token || !supabase) return
+    const { data, error } = await supabase.auth.setSession({
+      access_token: params.access_token,
+      refresh_token: params.refresh_token || '',
+    })
+    if (!error && data.user) {
+      saveUser(data.user.email || '')
       message.success('登录成功')
       emit('update:visible', false)
     }
   }
   window.Electron.ipcRenderer.on('auth-callback', handler)
-  onUnmounted(() => { window.Electron.ipcRenderer?.removeListener('auth-callback', handler) })
+  onUnmounted(() => window.Electron.ipcRenderer?.removeListener('auth-callback', handler))
 }
 
-onMounted(setupOAuthListener)
+onMounted(setupCallbackListener)
 </script>
 
 <template>
@@ -99,7 +125,7 @@ onMounted(setupOAuthListener)
 
         <div class="al-divider"><span>或使用邮箱</span></div>
 
-        <template v-if="!emailSent">
+        <template v-if="!codeSent">
           <div class="al-field">
             <Mail :size="14" :stroke-width="1.5" class="al-field-icon" />
             <input v-model="emailInput" type="email" class="al-input" placeholder="输入邮箱地址" />

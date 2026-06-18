@@ -11,6 +11,7 @@ import { registerMediaImageCacheIpc } from '../mediaImageCache'
 import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort } from '../aria/runtime'
 import { pathToFileURL } from 'url'
+import { requestPanHub } from './panHubRequest'
 import {
   getBookMeta,
   isBookIndexed,
@@ -186,6 +187,7 @@ export default class ipcEvent {
     this.handleWebSetProgressBar()
     this.handleWebShutDown()
     this.handleWebSetProxy()
+    this.handlePanHubRequest()
     this.handleOfficePreviewConvertToPdf()
     this.handleOpenDataLoaderConvertPdf()
     this.handleWebOpenWindow()
@@ -715,6 +717,10 @@ export default class ipcEvent {
         session.defaultSession.setProxy({})
       }
     })
+  }
+
+  private static handlePanHubRequest() {
+    ipcMain.handle('PanHub:request', async (_event, data) => requestPanHub(data))
   }
 
   private static handleOfficePreviewConvertToPdf() {

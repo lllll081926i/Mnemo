@@ -380,10 +380,12 @@ export default class launch extends EventEmitter {
     if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() === false) {
       if (url.startsWith('boxplayer-auth://')) {
         try {
-          const parsed = new URL(url)
+          // Supabase OAuth redirects with hash fragment: boxplayer-auth://callback#access_token=xxx&refresh_token=yyy
+          const hash = url.includes('#') ? url.split('#')[1] : ''
+          const params = new URLSearchParams(hash)
           AppWindow.mainWindow.webContents.send('auth-callback', {
-            token: parsed.searchParams.get('token') || '',
-            email: parsed.searchParams.get('email') || '',
+            access_token: params.get('access_token') || '',
+            refresh_token: params.get('refresh_token') || '',
           })
         } catch {}
       } else {

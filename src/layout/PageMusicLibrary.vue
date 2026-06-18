@@ -801,8 +801,8 @@ onMounted(async () => {
   height: 100%;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
-  background: #111114;
-  color: #fff;
+  background: var(--color-bg-1);
+  color: var(--color-text-1);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -819,8 +819,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   padding: 18px 12px 0;
-  background: rgba(255,255,255,0.02);
-  border-right: 1px solid rgba(255,255,255,0.06);
+  background: var(--color-fill-1);
+  border-right: 1px solid var(--color-border);
   overflow: hidden;
 }
 
@@ -843,13 +843,13 @@ onMounted(async () => {
 .aml-sidebar-brand-title {
   font-size: 18px;
   font-weight: 700;
-  color: #fff;
+  color: var(--color-text-1);
 }
 
 .aml-sidebar-brand-sub {
   margin-top: 2px;
   font-size: 12px;
-  color: rgba(255,255,255,0.3);
+  color: var(--color-text-3);
 }
 
 .aml-sidebar-item {
@@ -860,13 +860,13 @@ onMounted(async () => {
   border-radius: 8px;
   font-size: 14px;
   font-weight: 400;
-  color: rgba(255,255,255,0.65);
+  color: var(--color-text-2);
   cursor: pointer;
   transition: all 0.12s;
 
   &:hover {
-    background: rgba(255,255,255,0.04);
-    color: rgba(255,255,255,0.85);
+    background: var(--color-fill-2);
+    color: var(--color-text-1);
   }
 
   &.active {
@@ -883,7 +883,7 @@ onMounted(async () => {
 .aml-sidebar-divider {
   margin: 16px 8px;
   height: 1px;
-  background: rgba(255,255,255,0.06);
+  background: var(--color-border);
 }
 
 .aml-sidebar-scan {
@@ -896,7 +896,7 @@ onMounted(async () => {
 .aml-sidebar-scan-title {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(255,255,255,0.35);
+  color: var(--color-text-3);
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
@@ -949,7 +949,7 @@ onMounted(async () => {
 
 .aml-sidebar-lastscan {
   font-size: 11px;
-  color: rgba(255,255,255,0.2);
+  color: var(--color-text-4);
 }
 
 /* --- Content Area --- */
@@ -989,12 +989,12 @@ onMounted(async () => {
   padding: 4px;
   border-radius: 6px;
   cursor: pointer;
-  color: rgba(255,255,255,0.5);
+  color: var(--color-text-3);
   transition: all 0.15s;
 
   &:hover {
-    color: rgba(255,255,255,0.9);
-    background: rgba(255,255,255,0.06);
+    color: var(--color-text-1);
+    background: var(--color-fill-2);
   }
 }
 
@@ -1010,7 +1010,7 @@ onMounted(async () => {
 
 .aml-title-sub {
   font-size: 13px;
-  color: rgba(255,255,255,0.4);
+  color: var(--color-text-3);
   white-space: nowrap;
 }
 
@@ -1026,19 +1026,19 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: rgba(255,255,255,0.06);
+  background: var(--color-fill-2);
   border-radius: 8px;
   width: 200px;
   transition: background 0.15s;
 
   &:focus-within {
-    background: rgba(255,255,255,0.1);
+    background: var(--color-fill-3);
     width: 260px;
   }
 }
 
 .aml-search-icon {
-  color: rgba(255,255,255,0.3);
+  color: var(--color-text-3);
   flex-shrink: 0;
 }
 
@@ -1047,24 +1047,24 @@ onMounted(async () => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--color-text-1);
   font-size: 13px;
   font-family: inherit;
   min-width: 0;
 
-  &::placeholder { color: rgba(255,255,255,0.3); }
+  &::placeholder { color: var(--color-text-3); }
 }
 
 .aml-search-clear {
   background: transparent;
   border: none;
-  color: rgba(255,255,255,0.3);
+  color: var(--color-text-3);
   cursor: pointer;
   font-size: 12px;
   padding: 0;
   line-height: 1;
 
-  &:hover { color: rgba(255,255,255,0.7); }
+  &:hover { color: var(--color-text-1); }
 }
 
 /* Scan progress bar */
@@ -1079,7 +1079,7 @@ onMounted(async () => {
 .aml-scan-track {
   flex: 0 0 180px;
   height: 3px;
-  background: rgba(255,255,255,0.06);
+  background: var(--color-fill-2);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -1100,7 +1100,7 @@ onMounted(async () => {
 
 .aml-scan-text {
   font-size: 11px;
-  color: rgba(255,255,255,0.4);
+  color: var(--color-text-3);
   font-weight: 500;
 }
 
@@ -1114,7 +1114,7 @@ onMounted(async () => {
 
   &::-webkit-scrollbar { width: 6px; }
   &::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.06);
+    background: var(--color-fill-3);
     border-radius: 3px;
   }
 }
@@ -1129,7 +1129,7 @@ onMounted(async () => {
 .aml-section-label {
   font-size: 15px;
   font-weight: 600;
-  color: rgba(255,255,255,0.9);
+  color: var(--color-text-1);
   margin-bottom: 14px;
   display: flex;
   align-items: center;
@@ -1144,14 +1144,14 @@ onMounted(async () => {
   height: 28px;
   border-radius: 50%;
   border: none;
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.5);
+  background: var(--color-fill-2);
+  color: var(--color-text-3);
   cursor: pointer;
   transition: all 0.15s;
 
   &:hover {
-    background: rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.8);
+    background: var(--color-fill-3);
+    color: var(--color-text-1);
   }
 }
 
@@ -1164,7 +1164,7 @@ onMounted(async () => {
   padding-bottom: 8px;
 
   &::-webkit-scrollbar { height: 4px; }
-  &::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 2px; }
+  &::-webkit-scrollbar-thumb { background: var(--color-fill-3); border-radius: 2px; }
 }
 
 .aml-card-h {
@@ -1180,11 +1180,11 @@ onMounted(async () => {
   height: 140px;
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255,255,255,0.04);
+  background: var(--color-fill-2);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.15);
+  color: var(--color-text-4);
   transition: transform 0.2s;
 
   img {
@@ -1193,7 +1193,7 @@ onMounted(async () => {
     object-fit: contain;
     object-position: center;
     display: block;
-    background: rgba(0,0,0,0.25);
+    background: var(--color-fill-2);
   }
 }
 
@@ -1205,13 +1205,13 @@ onMounted(async () => {
   object-fit: contain;
   object-position: center;
   display: block;
-  background: rgba(0,0,0,0.25);
+  background: var(--color-fill-2);
 }
 
 .aml-card-h-title {
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255,255,255,0.85);
+  color: var(--color-text-1);
   margin-top: 8px;
   white-space: nowrap;
   overflow: hidden;
@@ -1221,7 +1221,7 @@ onMounted(async () => {
 
 .aml-card-h-sub {
   font-size: 11px;
-  color: rgba(255,255,255,0.4);
+  color: var(--color-text-3);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -1253,11 +1253,11 @@ onMounted(async () => {
   aspect-ratio: 1;
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255,255,255,0.04);
+  background: var(--color-fill-2);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.1);
+  color: var(--color-text-4);
   transition: transform 0.2s;
   position: relative;
 
@@ -1270,14 +1270,14 @@ onMounted(async () => {
     object-fit: contain;
     object-position: center;
     display: block;
-    background: rgba(0,0,0,0.25);
+    background: var(--color-fill-2);
   }
 }
 
 .aml-card-title {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(255,255,255,0.85);
+  color: var(--color-text-1);
   margin-top: 9px;
   white-space: nowrap;
   overflow: hidden;
@@ -1286,7 +1286,7 @@ onMounted(async () => {
 
 .aml-card-sub {
   font-size: 12px;
-  color: rgba(255,255,255,0.35);
+  color: var(--color-text-3);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -1300,7 +1300,7 @@ onMounted(async () => {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.25);
+  border: 2px solid var(--color-border);
   background: transparent;
   display: flex;
   align-items: center;
@@ -1335,14 +1335,14 @@ onMounted(async () => {
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.1s;
-  color: rgba(255,255,255,0.85);
+  color: var(--color-text-1);
 
-  &:hover { background: rgba(255,255,255,0.03); }
+  &:hover { background: var(--color-fill-2); }
 }
 
 .aml-track-idx {
   font-size: 13px;
-  color: rgba(255,255,255,0.3);
+  color: var(--color-text-3);
   font-variant-numeric: tabular-nums;
   text-align: center;
   width: 32px;
@@ -1354,11 +1354,11 @@ onMounted(async () => {
   height: 44px;
   border-radius: 6px;
   overflow: hidden;
-  background: rgba(255,255,255,0.04);
+  background: var(--color-fill-2);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.1);
+  color: var(--color-text-4);
   flex-shrink: 0;
 
   img {
@@ -1367,7 +1367,7 @@ onMounted(async () => {
     object-fit: contain;
     object-position: center;
     display: block;
-    background: rgba(0,0,0,0.25);
+    background: var(--color-fill-2);
   }
 }
 
@@ -1388,7 +1388,7 @@ onMounted(async () => {
 
 .aml-track-artist {
   font-size: 12px;
-  color: rgba(255,255,255,0.35);
+  color: var(--color-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1397,7 +1397,7 @@ onMounted(async () => {
 .aml-track-album,
 .aml-track-source {
   font-size: 12px;
-  color: rgba(255,255,255,0.3);
+  color: var(--color-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1417,19 +1417,19 @@ onMounted(async () => {
 }
 
 .aml-empty-icon {
-  color: rgba(255,255,255,0.1);
+  color: var(--color-text-4);
   margin-bottom: 16px;
 }
 
 .aml-empty-title {
   font-size: 17px;
   font-weight: 600;
-  color: rgba(255,255,255,0.4);
+  color: var(--color-text-2);
 }
 
 .aml-empty-sub {
   font-size: 13px;
-  color: rgba(255,255,255,0.2);
+  color: var(--color-text-4);
   margin-top: 6px;
 }
 
@@ -1438,7 +1438,7 @@ onMounted(async () => {
 .aml-player-panel {
   flex: 0 0 auto;
   height: 100%;
-  border-left: 1px solid rgba(255,255,255,0.04);
+  border-left: 1px solid var(--color-border);
   overflow: hidden;
 }
 
@@ -1452,13 +1452,13 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.15);
+  color: var(--color-text-4);
   z-index: 2;
   transition: background 0.15s, color 0.15s;
 
   &:hover {
-    background: rgba(255,255,255,0.02);
-    color: rgba(255,255,255,0.4);
+    background: var(--color-fill-2);
+    color: var(--color-text-2);
   }
 }
 
@@ -1473,8 +1473,8 @@ onMounted(async () => {
   height: 100%;
   overflow: hidden;
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: #000;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-2);
 }
 
 .aml-player-empty {
@@ -1485,20 +1485,20 @@ onMounted(async () => {
   justify-content: center;
   padding: 24px;
   text-align: center;
-  color: rgba(255,255,255,0.12);
+  color: var(--color-text-4);
 }
 
 .aml-player-empty-title {
   margin-top: 14px;
   font-size: 15px;
   font-weight: 600;
-  color: rgba(255,255,255,0.3);
+  color: var(--color-text-3);
 }
 
 .aml-player-empty-sub {
   margin-top: 4px;
   font-size: 12px;
-  color: rgba(255,255,255,0.15);
+  color: var(--color-text-4);
 }
 
 /* Folder context menu */
@@ -1515,11 +1515,11 @@ onMounted(async () => {
   border: none;
   background: transparent;
   font-size: 13px;
-  color: rgba(0,0,0,0.85);
+  color: var(--color-text-1);
   cursor: pointer;
   font-family: inherit;
 
-  &:hover { background: rgba(0,0,0,0.05); }
+  &:hover { background: var(--color-fill-2); }
   &.danger { color: #FF2D55; }
   &:disabled { opacity: 0.3; cursor: default; }
 }

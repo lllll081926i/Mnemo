@@ -216,18 +216,15 @@ async function runConnectionTest() {
       </div>
     </div>
 
-    <!-- AI 助手 开关 -->
-    <div class='settingcard'>
+    <!-- 服务商 + API 配置 -->
+    <div :class="['settingcard', disabledClass]">
       <div class='settinghead'>AI 助手</div>
       <div class='settingspace'></div>
       <div class='settingrow'>
         <span>启用 AI 助手</span>
         <a-switch v-model:model-value='aiEnabled' />
       </div>
-    </div>
-
-    <!-- 服务商 + API 配置 -->
-    <div :class="['settingcard', disabledClass]">
+      <div class='settingspace'></div>
       <div class='settinghead'>服务商 &amp; API 配置</div>
       <div class='settingspace'></div>
       <div class='settingrow'>
