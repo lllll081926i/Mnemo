@@ -32,7 +32,9 @@ function cleanOldKeys(): void {
 }
 
 export function isVIP(): boolean {
-  try { return localStorage.getItem('app_user_authed') === '1' } catch { return false }
+  try {
+    return localStorage.getItem('app_user_authed') === '1' || localStorage.getItem('app_user_pro') === '1'
+  } catch { return false }
 }
 
 export function getUsageCount(feature: FeatureName): number {

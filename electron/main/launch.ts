@@ -378,9 +378,15 @@ export default class launch extends EventEmitter {
   private dispatchOAuthUrl(url: string) {
     if (!url) return
     if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() === false) {
-      if (url.startsWith('boxplayer-auth://')) {
+      if (url.startsWith('boxplayer-auth://payment-success')) {
         try {
-          // Supabase OAuth redirects with hash fragment: boxplayer-auth://callback#access_token=xxx&refresh_token=yyy
+          const params = new URLSearchParams(url.includes('?') ? url.split('?')[1] : '')
+          AppWindow.mainWindow.webContents.send('payment-callback', {
+            checkout_id: params.get('checkout_id') || '',
+          })
+        } catch {}
+      } else if (url.startsWith('boxplayer-auth://')) {
+        try {
           const hash = url.includes('#') ? url.split('#')[1] : ''
           const params = new URLSearchParams(hash)
           AppWindow.mainWindow.webContents.send('auth-callback', {
