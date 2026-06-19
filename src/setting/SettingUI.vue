@@ -114,10 +114,9 @@ async function handleUpgrade() {
       body: JSON.stringify({ product_id: Config.CREEM_PRODUCT_ID, customer: { email: accountEmail.value || undefined }, metadata: { app_user: 'boxplayer' } }),
     })
     const data = await resp.json()
-    console.log('Creem checkout response:', JSON.stringify(data))
     if (data.checkout_url) {
       openExternal(data.checkout_url)
-      const chkId = data.id || data.checkout_id || ''
+      const chkId = data.id || ''
       if (chkId) {
         let attempts = 0
         const poll = setInterval(async () => {
