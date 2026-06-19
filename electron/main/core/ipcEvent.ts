@@ -1232,5 +1232,15 @@ export default class ipcEvent {
       return { ok: true }
     })
 
+    ipcMain.handle('payment:start-server', async () => {
+      const { startPaymentServer } = await import('./oauthServer')
+      const win = BrowserWindow.getAllWindows()[0]
+      return startPaymentServer(win)
+    })
+    ipcMain.handle('payment:stop-server', async () => {
+      const { stopPaymentServer } = await import('./oauthServer')
+      stopPaymentServer()
+    })
+
   }
 }
