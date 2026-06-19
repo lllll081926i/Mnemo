@@ -221,9 +221,12 @@ onMounted(() => {
             <li>TMDB + 豆瓣电影发现</li>
             <li>优先技术支持</li>
           </ul>
-          <button class="pricing-btn pricing-btn-pro" :disabled="upgrading" @click="handleUpgrade">
+          <button v-if="isLoggedIn" class="pricing-btn pricing-btn-pro" :disabled="upgrading" @click="handleUpgrade">
             <Loader2 v-if="upgrading" :size="14" class="spin" />
             <span v-else>开始购买</span>
+          </button>
+          <button v-else class="pricing-btn pricing-btn-login" @click="message.info('请先使用上方 GitHub / Google / 邮箱登录后再购买')">
+            登录后购买
           </button>
         </div>
       </div>
@@ -282,6 +285,7 @@ onMounted(() => {
 .pricing-btn-pro { color: #fff; background: linear-gradient(135deg, #f59e0b, #eab308); border: 0; }
 .pricing-btn-pro:hover:not(:disabled) { opacity: .9; }
 .pricing-btn-pro:disabled { opacity: .5; cursor: default; }
+.pricing-btn-login { color: #fff; background: var(--color-text-4); border: 0; }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

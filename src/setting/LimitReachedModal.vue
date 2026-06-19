@@ -9,6 +9,7 @@ defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ 'update:visible': [v: boolean] }>()
 
 const upgrading = ref(false)
+const isLoggedIn = ref(localStorage.getItem('app_user_authed') === '1')
 
 async function handleUpgrade() {
   if (!Config.CREEM_API_KEY || !Config.CREEM_PRODUCT_ID) { message.error('Creem 未配置'); return }
@@ -54,8 +55,11 @@ async function handleUpgrade() {
             <li>AI 阅读 · 朗读 · 翻译</li>
             <li>全网资源一键保存</li>
           </ul>
-          <button class="lim-btn" :disabled="upgrading" @click="handleUpgrade">
+          <button v-if="isLoggedIn" class="lim-btn" :disabled="upgrading" @click="handleUpgrade">
             <Loader2 v-if="upgrading" :size="14" class="lim-spin" /> <span v-else>升级 Pro</span>
+          </button>
+          <button v-else class="lim-btn lim-btn-disabled" @click="message.info('请先登录后再购买（设置 → 应用账户）')">
+            登录后购买
           </button>
         </div>
       </div>
