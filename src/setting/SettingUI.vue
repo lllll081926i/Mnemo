@@ -114,10 +114,10 @@ async function handleUpgrade() {
       body: JSON.stringify({ product_id: Config.CREEM_PRODUCT_ID, customer: { email: accountEmail.value || undefined }, metadata: { app_user: 'boxplayer' } }),
     })
     const data = await resp.json()
+    console.log('Creem checkout response:', JSON.stringify(data))
     if (data.checkout_url) {
       openExternal(data.checkout_url)
-      // Poll for payment completion every 5s, up to 20 times
-      const chkId = data.id || ''
+      const chkId = data.id || data.checkout_id || ''
       if (chkId) {
         let attempts = 0
         const poll = setInterval(async () => {
@@ -133,7 +133,7 @@ async function handleUpgrade() {
           } catch {}
         }, 5000)
       }
-    } else message.error(data.message || '支付链接创建失败')
+    } else message.error(data.message || `创建支付链接失败: ${resp.status}`)
   } catch (e: any) { message.error(e?.message || '网络请求失败') }
   finally { upgrading.value = false }
 }
