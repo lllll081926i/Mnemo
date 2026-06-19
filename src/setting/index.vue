@@ -7,7 +7,6 @@ import SettingDanmaku from './SettingDanmaku.vue'
 import SettingPan from './SettingPan.vue'
 import SettingUI from './SettingUI.vue'
 import SettingAccount from './SettingAccount.vue'
-import SettingAppAccount from './SettingAppAccount.vue'
 import SettingDown from './SettingDown.vue'
 import SettingDebug from './SettingDebug.vue'
 import SettingUpload from './SettingUpload.vue'
@@ -43,7 +42,6 @@ onMounted(() => {
 
   const sectionIds = [
     'SettingUI',
-    'SettingAppAccount',
     'SettingAccount',
     'SettingSecurity',
     'SettingPlay',
@@ -87,10 +85,6 @@ onUnmounted(() => {
         <a-menu-item key="SettingUI">
           <template #icon><IconFont name="iconui" /></template>
           应用设置
-        </a-menu-item>
-        <a-menu-item key="SettingAppAccount">
-          <template #icon><IconFont name="iconuser" /></template>
-          应用账户
         </a-menu-item>
         <a-menu-item key="SettingAccount">
           <template #icon><IconFont name="iconrobot" /></template>
@@ -173,12 +167,6 @@ onUnmounted(() => {
             <a-divider :size="2" orientation="center" class="settinghr">应用设置</a-divider>
           </div>
           <SettingUI />
-        </section>
-        <section id="SettingAppAccount" class="settings-section">
-          <div>
-            <a-divider :size="2" orientation="center" class="settinghr">应用账户</a-divider>
-          </div>
-          <SettingAppAccount />
         </section>
         <section id="SettingAPI" class="settings-section">
           <div>

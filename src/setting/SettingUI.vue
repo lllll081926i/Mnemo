@@ -3,6 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import useSettingStore from './settingstore'
 import MySwitch from '../layout/MySwitch.vue'
 import LimitReachedModal from './LimitReachedModal.vue'
+import { createClient } from '@supabase/supabase-js'
+import Config from '../config'
+import { openExternal } from '../utils/electronhelper'
+import { Github, Chrome, Mail, Loader2, LogOut } from 'lucide-vue-next'
 import ServerHttp from '../aliapi/server'
 import os from 'os'
 import { getAppNewPath, getResourcesPath } from '../utils/electronhelper'
@@ -27,6 +31,8 @@ try {
 const showUpgradeModal = ref(false)
 
 onMounted(() => {
+  setupAuthCallback()
+  setupPaymentCallback()
   if (localStorage.getItem('boxplayer_show_pricing') === '1') {
     localStorage.removeItem('boxplayer_show_pricing')
     if (!isPro.value) showUpgradeModal.value = true
@@ -38,8 +44,108 @@ function handleLogout() {
   localStorage.removeItem('app_user_authed')
   isLoggedIn.value = false
   accountEmail.value = ''
+  supabase?.auth.signOut().catch(() => {})
   message.success('已退出登录')
 }
+
+const loading = ref(false)
+const showEmail = ref(false)
+const codeSent = ref(false)
+const emailCode = ref('')
+const authEmail = ref('')
+const upgrading = ref(false)
+
+const CALLBACK_URL = 'boxplayer-auth://callback'
+const PAYMENT_CALLBACK = 'boxplayer-auth://payment-success'
+
+const supabase = Config.SUPABASE_URL && Config.SUPABASE_ANON_KEY
+  ? createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY) : null
+
+function saveLogin(email: string) {
+  localStorage.setItem('app_user_email', email)
+  localStorage.setItem('app_user_authed', '1')
+  accountEmail.value = email
+  isLoggedIn.value = true
+}
+
+async function handleOAuth(provider: 'github' | 'google') {
+  if (!supabase) { message.error('未配置 Supabase'); return }
+  loading.value = true
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider, options: { redirectTo: CALLBACK_URL, skipBrowserRedirect: true },
+    })
+    if (error) message.error(error.message)
+    else if (data.url) openExternal(data.url)
+  } finally { loading.value = false }
+}
+
+async function handleEmailSend() {
+  const email = authEmail.value.trim()
+  if (!email?.includes('@')) { message.warning('请输入有效邮箱'); return }
+  if (!supabase) { message.error('未配置 Supabase'); return }
+  loading.value = true
+  try {
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
+    if (error) message.error(error.message)
+    else { codeSent.value = true; message.success('验证码已发送') }
+  } finally { loading.value = false }
+}
+
+async function handleEmailVerify() {
+  const email = authEmail.value.trim()
+  const token = emailCode.value.trim()
+  if (!token) { message.warning('请输入验证码'); return }
+  if (!supabase) return
+  loading.value = true
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'email' })
+    if (error) message.error(error.message)
+    else if (data.user) { saveLogin(data.user.email || email); message.success('登录成功') }
+  } finally { loading.value = false }
+}
+
+async function handleUpgrade() {
+  if (!Config.CREEM_API_KEY || !Config.CREEM_PRODUCT_ID) { message.error('Creem 未配置'); return }
+  upgrading.value = true
+  try {
+    const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
+    const resp = await fetch(`${apiBase}/v1/checkouts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': Config.CREEM_API_KEY },
+      body: JSON.stringify({ product_id: Config.CREEM_PRODUCT_ID, success_url: PAYMENT_CALLBACK, customer: { email: accountEmail.value || undefined }, metadata: { app_user: 'boxplayer' } }),
+    })
+    const data = await resp.json()
+    if (data.checkout_url) openExternal(data.checkout_url)
+    else message.error(data.message || '支付链接创建失败')
+  } catch (e: any) { message.error(e?.message || '网络请求失败') }
+  finally { upgrading.value = false }
+}
+
+function setupAuthCallback() {
+  if (!window.Electron?.ipcRenderer) return
+  const handler = async (_e: any, params: { access_token?: string; refresh_token?: string }) => {
+    if (!params.access_token || !supabase) return
+    const { data, error } = await supabase.auth.setSession({ access_token: params.access_token, refresh_token: params.refresh_token || '' })
+    if (!error && data.user) { saveLogin(data.user.email || ''); message.success('登录成功') }
+  }
+  window.Electron.ipcRenderer.on('auth-callback', handler)
+}
+
+function setupPaymentCallback() {
+  if (!window.Electron?.ipcRenderer) return
+  const handler = async (_e: any, params: { checkout_id?: string }) => {
+    if (params.checkout_id && Config.CREEM_API_KEY) {
+      try {
+        const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
+        const resp = await fetch(`${apiBase}/v1/checkouts/${params.checkout_id}`, { headers: { 'x-api-key': Config.CREEM_API_KEY } })
+        const data = await resp.json()
+        if (data?.status === 'completed') { localStorage.setItem('app_user_pro', '1'); isPro.value = true; message.success('Pro 已激活！') }
+      } catch {}
+    }
+  }
+  window.Electron.ipcRenderer.on('payment-callback', handler)
+}
+
 const cb = (val: any) => {
   settingStore.updateStore(val)
 }
@@ -97,8 +203,7 @@ const handleImportAsar = () => {
       <div class='appver'>BoxPlayer {{ getAppVersion }} <span class="appver-badge" :class="{ pro: isPro }">{{ isPro ? 'PRO' : '开源版' }}</span></div>
       <div class="appver-actions">
         <span v-if="isLoggedIn" class="appver-email">{{ accountEmail }}</span>
-        <button v-if="!isLoggedIn" class="appver-login" @click="document.getElementById('SettingAppAccount')?.scrollIntoView({behavior:'smooth'})">登录</button>
-        <button v-if="isLoggedIn" class="appver-logout" @click="handleLogout">退出</button>
+        <button v-if="isLoggedIn" class="appver-logout" @click="handleLogout"><LogOut :size="12" /> 退出</button>
         <button v-if="!isPro" class="appver-upgrade" @click="showUpgradeModal = true">升级专业版</button>
       </div>
       <div class='settings-app-subtitle'>统一配置桌面外观、启动行为、更新策略与系统集成体验</div>
@@ -119,6 +224,36 @@ const handleImportAsar = () => {
       </a-button>
     </div>
     <div class='settingspace'></div>
+    <div class='settinghead'>账号登录</div>
+    <div class='settingrow' style='flex-direction:column;align-items:stretch;gap:8px'>
+      <template v-if="isLoggedIn">
+        <div style='display:flex;align-items:center;gap:10px'>
+          <span style='font-size:14px;font-weight:500;color:var(--color-text-1)'>{{ accountEmail }}</span>
+          <button class="appver-logout" @click="handleLogout"><LogOut :size="12" /> 退出</button>
+        </div>
+      </template>
+      <template v-else>
+        <div style='display:flex;gap:8px'>
+          <button class="sa-provider sa-gh" :disabled="loading" @click="handleOAuth('github')" title="GitHub"><Github :size="18" /></button>
+          <button class="sa-provider sa-go" :disabled="loading" @click="handleOAuth('google')" title="Google"><Chrome :size="18" /></button>
+          <button class="sa-provider sa-em" :class="{ active: showEmail }" :disabled="loading" @click="showEmail = !showEmail" title="邮箱"><Mail :size="18" /></button>
+        </div>
+      </template>
+      <div v-if="showEmail && !isLoggedIn" style='display:flex;gap:6px'>
+        <template v-if="!codeSent">
+          <input v-model="authEmail" type="email" placeholder="邮箱地址" class="sa-input" style='flex:1' />
+          <button class="sa-send-btn" :disabled="loading || !authEmail.trim()" @click="handleEmailSend">
+            <Loader2 v-if="loading" :size="13" class="spin" /><span v-else>发送验证码</span>
+          </button>
+        </template>
+        <template v-else>
+          <input v-model="emailCode" type="text" placeholder="验证码" maxlength="6" class="sa-input" style='flex:1' />
+          <button class="sa-send-btn" :disabled="loading || emailCode.length < 4" @click="handleEmailVerify">
+            <Loader2 v-if="loading" :size="13" class="spin" /><span v-else>验证并登录</span>
+          </button>
+        </template>
+      </div>
+    </div>
     <div class='settingspace'></div>
     <div class='settinghead'>界面颜色</div>
     <div class='settingrow'>
@@ -273,4 +408,21 @@ const handleImportAsar = () => {
 .appver-logout:hover{color:rgb(var(--danger-6));border-color:rgb(var(--danger-6))}
 .appver-upgrade{padding:3px 12px;font-size:11px;font-weight:600;color:#fff;background:linear-gradient(135deg,#f59e0b,#eab308);border:0;border-radius:6px;cursor:pointer;font-family:inherit}
 .appver-upgrade:hover{opacity:.9}
+
+.sa-provider{display:flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;border:1px solid var(--color-border);border-radius:50%;cursor:pointer;font-family:inherit;transition:all .15s;flex-shrink:0}
+.sa-provider:hover:not(:disabled){transform:translateY(-1px)}
+.sa-provider:disabled{opacity:.4;cursor:default}
+.sa-gh{background:#24292e;color:#fff;border-color:#24292e}
+.sa-gh:hover:not(:disabled){box-shadow:0 2px 8px rgba(36,41,46,.3)}
+.sa-go{background:var(--color-bg-1);color:var(--color-text-3)}
+.sa-go:hover:not(:disabled){color:var(--color-text-1);border-color:var(--color-border-2)}
+.sa-em{background:var(--color-bg-1);color:var(--color-text-3)}
+.sa-em:hover:not(:disabled),.sa-em.active{color:rgb(var(--primary-6));border-color:rgb(var(--primary-6))}
+.sa-input{padding:6px 10px;font-size:12px;color:var(--color-text-1);background:var(--color-fill-1);border:1px solid var(--color-border);border-radius:6px;outline:none;font-family:inherit}
+.sa-input:focus{border-color:rgb(var(--primary-6))}
+.sa-send-btn{display:flex;align-items:center;gap:4px;padding:6px 12px;font-size:12px;font-weight:500;color:#fff;background:rgb(var(--primary-6));border:0;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0}
+.sa-send-btn:hover:not(:disabled){opacity:.9}
+.sa-send-btn:disabled{opacity:.4;cursor:default}
+.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
