@@ -251,6 +251,37 @@ const handleImportAsar = () => {
         </template>
       </div>
     </div>
+
+    <div class='settingspace'></div>
+    <div class='settinghead'>功能对比</div>
+    <div class='settingrow features-grid'>
+      <div class="feat-section feat-free">
+        <div class="feat-label">开源版 · 永久免费</div>
+        <ul class="feat-list">
+          <li>网盘文件管理（浏览/上传/下载）</li>
+          <li>视频播放 & 音乐播放</li>
+          <li>本地书籍阅读（PDF/EPUB/Mobi等）</li>
+          <li>多网盘同时连接（阿里/百度/夸克/115…）</li>
+          <li>AI 智能搜索 — 5次/天</li>
+          <li>全网资源搜索 — 5次/天</li>
+          <li>社区支持</li>
+        </ul>
+      </div>
+      <div class="feat-section feat-pro">
+        <div class="feat-label feat-label-pro">专业版 · $10/月</div>
+        <ul class="feat-list">
+          <li class="feat-pro-item">AI 智能搜索 · <strong>无限次</strong></li>
+          <li class="feat-pro-item">全网资源搜索 & 一键保存 · <strong>无限次</strong></li>
+          <li class="feat-pro-item">AI 文件整理（查重/分类/空间分析）</li>
+          <li class="feat-pro-item">AI 阅读助手（PDF/EPUB 上下文问答）</li>
+          <li class="feat-pro-item">语音朗读（5000字/天，多音色）</li>
+          <li class="feat-pro-item">即时翻译（5000字/天，3引擎）</li>
+          <li class="feat-pro-item">TMDB + 豆瓣电影发现</li>
+          <li class="feat-pro-item">优先技术支持</li>
+        </ul>
+        <button v-if="!isPro && isLoggedIn" class="arco-btn arco-btn-primary arco-btn-size-small" @click="showUpgradeModal = true" style="width:100%;margin-top:8px">升级到专业版</button>
+      </div>
+    </div>
     <div class='settingspace'></div>
     <div class='settinghead'>界面颜色</div>
     <div class='settingrow'>
@@ -420,6 +451,18 @@ const handleImportAsar = () => {
 .sa-send-btn{display:flex;align-items:center;gap:4px;padding:6px 12px;font-size:12px;font-weight:500;color:#fff;background:rgb(var(--primary-6));border:0;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0}
 .sa-send-btn:hover:not(:disabled){opacity:.9}
 .sa-send-btn:disabled{opacity:.4;cursor:default}
+
+.features-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.feat-section{padding:14px;border:1px solid var(--color-border);border-radius:10px;background:var(--color-fill-1)}
+.feat-pro{background:linear-gradient(180deg,rgba(245,158,11,.06),var(--color-fill-1) 50%);border-color:rgba(245,158,11,.3)}
+.feat-label{font-size:13px;font-weight:700;color:var(--color-text-2);margin-bottom:10px}
+.feat-label-pro{color:#b45309}
+.feat-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.feat-list li{font-size:11px;color:var(--color-text-3);padding-left:16px;position:relative;line-height:1.4}
+.feat-list li::before{content:'✓';position:absolute;left:0;color:rgb(var(--success-6));font-weight:700;font-size:10px}
+.feat-pro-item{color:var(--color-text-2)!important}
+.feat-pro-item::before{color:rgb(var(--primary-6))!important}
+.feat-pro-item strong{color:rgb(var(--primary-6))}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
