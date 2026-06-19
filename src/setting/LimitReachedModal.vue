@@ -18,10 +18,10 @@ async function handleUpgrade() {
     const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
     const resp = await fetch(`${apiBase}/v1/checkouts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': Config.CREEM_API_KEY },
-      body: JSON.stringify({ productId: Config.CREEM_PRODUCT_ID, successUrl: 'boxplayer-auth://payment-success' }),
+      body: JSON.stringify({ product_id: Config.CREEM_PRODUCT_ID, success_url: 'boxplayer-auth://payment-success' }),
     })
     const data = await resp.json()
-    if (data.checkoutUrl) openExternal(data.checkoutUrl)
+    if (data.checkout_url) openExternal(data.checkout_url)
     else message.error(data.message || '支付链接创建失败')
   } catch { message.error('网络请求失败') }
   finally { upgrading.value = false }

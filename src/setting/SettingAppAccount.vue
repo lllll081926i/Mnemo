@@ -91,15 +91,15 @@ async function handleUpgrade() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': Config.CREEM_API_KEY },
       body: JSON.stringify({
-        productId: Config.CREEM_PRODUCT_ID,
-        successUrl: PAYMENT_CALLBACK,
+        product_id: Config.CREEM_PRODUCT_ID,
+        success_url: PAYMENT_CALLBACK,
         customer: { email: email || undefined },
         metadata: { app_user: 'boxplayer' },
       }),
     })
     const data = await resp.json()
-    if (data.checkoutUrl) {
-      openExternal(data.checkoutUrl)
+    if (data.checkout_url) {
+      openExternal(data.checkout_url)
     } else {
       message.error(data.message || '创建支付链接失败')
     }
@@ -112,7 +112,8 @@ function setupPaymentCallback() {
   const handler = async (_e: any, params: { checkout_id?: string }) => {
     if (params.checkout_id && Config.CREEM_API_KEY) {
       try {
-        const resp = await fetch(`https://api.creem.io/v1/checkouts/${params.checkout_id}`, {
+        const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
+        const resp = await fetch(`${apiBase}/v1/checkouts/${params.checkout_id}`, {
           headers: { 'x-api-key': Config.CREEM_API_KEY },
         })
         const data = await resp.json()
