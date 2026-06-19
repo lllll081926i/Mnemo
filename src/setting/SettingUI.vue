@@ -1,7 +1,8 @@
 <script setup lang='ts'>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import useSettingStore from './settingstore'
 import MySwitch from '../layout/MySwitch.vue'
+import LimitReachedModal from './LimitReachedModal.vue'
 import ServerHttp from '../aliapi/server'
 import os from 'os'
 import { getAppNewPath, getResourcesPath } from '../utils/electronhelper'
@@ -14,6 +15,24 @@ import { Sleep } from '../utils/format'
 
 const platform = window.platform
 const settingStore = useSettingStore()
+
+const isPro = ref(localStorage.getItem('app_user_pro') === '1')
+const isLoggedIn = ref(localStorage.getItem('app_user_authed') === '1')
+const showUpgradeModal = ref(false)
+
+onMounted(() => {
+  if (localStorage.getItem('boxplayer_show_pricing') === '1') {
+    localStorage.removeItem('boxplayer_show_pricing')
+    if (!isPro.value) showUpgradeModal.value = true
+  }
+})
+
+function handleLogout() {
+  localStorage.removeItem('app_user_email')
+  localStorage.removeItem('app_user_authed')
+  isLoggedIn.value = false
+  message.success('已退出登录')
+}
 const cb = (val: any) => {
   settingStore.updateStore(val)
 }
@@ -68,7 +87,13 @@ const handleImportAsar = () => {
   <div class='settingcard'>
     <div class='settings-app-hero'>
       <div class='settings-app-badge'>Application</div>
-      <div class='appver'>BoxPlayer {{ getAppVersion }}</div>
+      <div class='appver'>BoxPlayer {{ getAppVersion }} <span class="appver-badge" :class="{ pro: isPro }">{{ isPro ? 'PRO' : '开源版' }}</span></div>
+      <div class="appver-actions">
+        <span v-if="isLoggedIn" class="appver-email">{{ localStorage.getItem('app_user_email') || '' }}</span>
+        <button v-if="!isLoggedIn" class="appver-login" @click="document.getElementById('SettingAppAccount')?.scrollIntoView({behavior:'smooth'})">登录</button>
+        <button v-if="isLoggedIn" class="appver-logout" @click="handleLogout">退出</button>
+        <button v-if="!isPro" class="appver-upgrade" @click="showUpgradeModal = true">升级专业版</button>
+      </div>
       <div class='settings-app-subtitle'>统一配置桌面外观、启动行为、更新策略与系统集成体验</div>
     </div>
     <div class='settings-app-actions'>
@@ -173,6 +198,7 @@ const handleImportAsar = () => {
       </div>
     </div>
   </div>
+  <LimitReachedModal :visible="showUpgradeModal" @update:visible="showUpgradeModal = $event" />
 </template>
 
 <style scoped>
@@ -229,4 +255,15 @@ const handleImportAsar = () => {
     font-size: 24px;
   }
 }
+
+.appver-badge{display:inline-block;margin-left:8px;padding:1px 8px;font-size:10px;font-weight:700;color:var(--color-text-3);background:var(--color-fill-2);border:1px solid var(--color-border);border-radius:5px;vertical-align:middle}
+.appver-badge.pro{color:#b45309;background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.35)}
+.appver-actions{display:flex;align-items:center;gap:8px;margin-top:8px}
+.appver-email{font-size:12px;color:var(--color-text-3)}
+.appver-login{padding:3px 10px;font-size:11px;color:rgb(var(--primary-6));background:transparent;border:1px solid rgb(var(--primary-6));border-radius:5px;cursor:pointer;font-family:inherit}
+.appver-login:hover{background:rgba(var(--primary-6),.08)}
+.appver-logout{padding:3px 10px;font-size:11px;color:var(--color-text-4);background:transparent;border:1px solid var(--color-border);border-radius:5px;cursor:pointer;font-family:inherit}
+.appver-logout:hover{color:rgb(var(--danger-6));border-color:rgb(var(--danger-6))}
+.appver-upgrade{padding:3px 12px;font-size:11px;font-weight:600;color:#fff;background:linear-gradient(135deg,#f59e0b,#eab308);border:0;border-radius:6px;cursor:pointer;font-family:inherit}
+.appver-upgrade:hover{opacity:.9}
 </style>
