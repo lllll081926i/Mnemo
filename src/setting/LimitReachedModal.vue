@@ -9,7 +9,8 @@ defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ 'update:visible': [v: boolean] }>()
 
 const upgrading = ref(false)
-const isLoggedIn = ref(localStorage.getItem('app_user_authed') === '1')
+const isLoggedIn = ref(false)
+try { isLoggedIn.value = localStorage.getItem('app_user_authed') === '1' } catch {}
 
 async function handleUpgrade() {
   if (!Config.CREEM_API_KEY || !Config.CREEM_PRODUCT_ID) { message.error('Creem 未配置'); return }

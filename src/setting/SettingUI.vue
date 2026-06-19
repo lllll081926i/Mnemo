@@ -16,8 +16,14 @@ import { Sleep } from '../utils/format'
 const platform = window.platform
 const settingStore = useSettingStore()
 
-const isPro = ref(localStorage.getItem('app_user_pro') === '1')
-const isLoggedIn = ref(localStorage.getItem('app_user_authed') === '1')
+const isPro = ref(false)
+const isLoggedIn = ref(false)
+const accountEmail = ref('')
+try {
+  isPro.value = localStorage.getItem('app_user_pro') === '1'
+  isLoggedIn.value = localStorage.getItem('app_user_authed') === '1'
+  accountEmail.value = localStorage.getItem('app_user_email') || ''
+} catch {}
 const showUpgradeModal = ref(false)
 
 onMounted(() => {
@@ -31,6 +37,7 @@ function handleLogout() {
   localStorage.removeItem('app_user_email')
   localStorage.removeItem('app_user_authed')
   isLoggedIn.value = false
+  accountEmail.value = ''
   message.success('已退出登录')
 }
 const cb = (val: any) => {
@@ -89,7 +96,7 @@ const handleImportAsar = () => {
       <div class='settings-app-badge'>Application</div>
       <div class='appver'>BoxPlayer {{ getAppVersion }} <span class="appver-badge" :class="{ pro: isPro }">{{ isPro ? 'PRO' : '开源版' }}</span></div>
       <div class="appver-actions">
-        <span v-if="isLoggedIn" class="appver-email">{{ localStorage.getItem('app_user_email') || '' }}</span>
+        <span v-if="isLoggedIn" class="appver-email">{{ accountEmail }}</span>
         <button v-if="!isLoggedIn" class="appver-login" @click="document.getElementById('SettingAppAccount')?.scrollIntoView({behavior:'smooth'})">登录</button>
         <button v-if="isLoggedIn" class="appver-logout" @click="handleLogout">退出</button>
         <button v-if="!isPro" class="appver-upgrade" @click="showUpgradeModal = true">升级专业版</button>

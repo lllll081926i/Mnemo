@@ -11,9 +11,14 @@ const emailInput = ref('')
 const showEmail = ref(false)
 const codeSent = ref(false)
 const emailCode = ref('')
-const userEmail = ref(localStorage.getItem('app_user_email') || '')
-const isLoggedIn = ref(localStorage.getItem('app_user_authed') === '1')
-const isPro = ref(localStorage.getItem('app_user_pro') === '1')
+const userEmail = ref('')
+const isLoggedIn = ref(false)
+const isPro = ref(false)
+try {
+  userEmail.value = localStorage.getItem('app_user_email') || ''
+  isLoggedIn.value = localStorage.getItem('app_user_authed') === '1'
+  isPro.value = localStorage.getItem('app_user_pro') === '1'
+} catch {}
 const upgrading = ref(false)
 const showUpgradeModal = ref(false)
 
