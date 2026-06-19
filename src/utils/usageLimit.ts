@@ -66,6 +66,7 @@ export function checkAndIncrement(feature: FeatureName, amount = 1): UsageCheckR
 
   const current = getUsageCount(feature)
   if (current + amount > effectiveLimit) {
+    try { localStorage.setItem('boxplayer_show_pricing', '1') } catch {}
     return { allowed: false, message: vip ? cfg.vipMessage || cfg.freeMessage : cfg.freeMessage }
   }
 

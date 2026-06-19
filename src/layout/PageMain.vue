@@ -38,6 +38,7 @@ import PageGlobalSearch from './PageGlobalSearch.vue'
 import UserInfo from '../user/UserInfo.vue'
 import UserLogin from '../user/UserLogin.vue'
 import ShutDown from '../setting/ShutDown.vue'
+import LimitReachedModal from '../setting/LimitReachedModal.vue'
 
 import MyModal from './MyModal.vue'
 import { B64decode } from '../utils/format'
@@ -48,6 +49,13 @@ const alipayImage = 'images/alipay.jpg'
 const cryptoDonationAddress = '0xb0a3f7254e97a8bd398b1ab7f70eb48b0dc68eaf'
 const panVisible = ref(true)
 const mediaNavVisible = ref(true)
+const showLimitModal = ref(false)
+setInterval(() => {
+  if (localStorage.getItem('boxplayer_show_pricing') === '1') {
+    localStorage.removeItem('boxplayer_show_pricing')
+    showLimitModal.value = true
+  }
+}, 2000)
 const appStore = useAppStore()
 const settingStore = useSettingStore()
 const winStore = useWinStore()
@@ -576,7 +584,9 @@ onUnmounted(() => {
       <MyModal />
     </a-layout-footer>
   </a-layout>
-</template>
+
+    <LimitReachedModal :visible="showLimitModal" @update:visible="showLimitModal = $event" />
+  </template>
 
 <style>
 #xbyhead {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { Github, Chrome, Mail, Loader2, LogOut } from 'lucide-vue-next'
 import { createClient } from '@supabase/supabase-js'
 import Config from '../config'
@@ -140,7 +140,14 @@ function setupCallbackListener() {
   onUnmounted(() => window.Electron.ipcRenderer?.removeListener('auth-callback', handler))
 }
 
-onMounted(() => { setupCallbackListener(); setupPaymentCallback() })
+onMounted(() => {
+  setupCallbackListener()
+  setupPaymentCallback()
+  if (localStorage.getItem('boxplayer_show_pricing') === '1') {
+    localStorage.removeItem('boxplayer_show_pricing')
+    nextTick(() => document.getElementById('SettingAppAccount')?.scrollIntoView({ behavior: 'smooth' }))
+  }
+})
 </script>
 
 <template>
@@ -183,7 +190,7 @@ onMounted(() => { setupCallbackListener(); setupPaymentCallback() })
         <div class="pricing-col">
           <div class="pricing-col-header">
             <div class="pricing-col-name">开源版</div>
-            <div class="pricing-col-price"><b>¥25</b> / 年</div>
+            <div class="pricing-col-price"><b>免费</b></div>
           </div>
           <ul class="pricing-features">
             <li>网盘文件管理（浏览/上传/下载）</li>
@@ -201,8 +208,7 @@ onMounted(() => { setupCallbackListener(); setupPaymentCallback() })
           <div class="pricing-col-badge">推荐</div>
           <div class="pricing-col-header">
             <div class="pricing-col-name">专业版</div>
-            <div class="pricing-col-price"><b>¥9.99</b> / 月</div>
-            <div class="pricing-col-sub">或 ¥99 / 年</div>
+            <div class="pricing-col-price"><b>$10</b> / 月</div>
           </div>
           <ul class="pricing-features">
             <li><strong>开源版全部功能</strong></li>
