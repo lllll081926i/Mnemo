@@ -263,8 +263,8 @@ const handleImportAsar = () => {
   }
 }
 
-.appver-badge{display:inline-block;margin-left:8px;padding:1px 8px;font-size:10px;font-weight:700;color:var(--color-text-3);background:var(--color-fill-2);border:1px solid var(--color-border);border-radius:5px;vertical-align:middle}
-.appver-badge.pro{color:#b45309;background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.35)}
+.appver-badge{display:inline-block;margin-left:10px;padding:3px 12px;font-size:12px;font-weight:700;letter-spacing:.05em;color:var(--color-text-3);background:var(--color-fill-2);border:1px solid var(--color-border);border-radius:6px;vertical-align:middle}
+.appver-badge.pro{color:#b45309;background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.4);box-shadow:0 1px 3px rgba(245,158,11,.15)}
 .appver-actions{display:flex;align-items:center;gap:8px;margin-top:8px}
 .appver-email{font-size:12px;color:var(--color-text-3)}
 .appver-login{padding:3px 10px;font-size:11px;color:rgb(var(--primary-6));background:transparent;border:1px solid rgb(var(--primary-6));border-radius:5px;cursor:pointer;font-family:inherit}

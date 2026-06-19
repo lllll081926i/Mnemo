@@ -165,6 +165,8 @@ onMounted(() => {
       <span v-if="!isLoggedIn" class="sa-hint">GitHub / Google / 邮箱登录</span>
     </div>
 
+    <div class="sa-section-title">账号登录</div>
+
     <template v-if="isLoggedIn">
       <div class="sa-logged">
         <span class="sa-email">{{ userEmail }}</span>
@@ -270,6 +272,9 @@ onMounted(() => {
 .sa-email-box button { display: flex; align-items: center; gap: 3px; padding: 7px 12px; font-size: 12px; font-weight: 500; color: #fff; background: rgb(var(--primary-6)); border: 0; border-radius: 7px; cursor: pointer; font-family: inherit; white-space: nowrap; }
 .sa-email-box button:hover:not(:disabled) { opacity: .9; }
 .sa-email-box button:disabled { opacity: .4; cursor: default; }
+
+/* Section title */
+.sa-section-title { font-size: 13px; font-weight: 600; color: var(--color-text-3); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border); }
 
 /* Version badge */
 .sa-version { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
