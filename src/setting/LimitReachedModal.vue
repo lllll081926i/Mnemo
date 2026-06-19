@@ -15,7 +15,8 @@ async function handleUpgrade() {
   if (!Config.CREEM_API_KEY || !Config.CREEM_PRODUCT_ID) { message.error('Creem 未配置'); return }
   upgrading.value = true
   try {
-    const resp = await fetch('https://api.creem.io/v1/checkouts', {
+    const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
+    const resp = await fetch(`${apiBase}/v1/checkouts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': Config.CREEM_API_KEY },
       body: JSON.stringify({ productId: Config.CREEM_PRODUCT_ID, successUrl: 'boxplayer-auth://payment-success' }),
     })

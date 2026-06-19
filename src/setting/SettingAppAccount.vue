@@ -86,7 +86,8 @@ async function handleUpgrade() {
   upgrading.value = true
   try {
     const email = userEmail.value || emailInput.value.trim()
-    const resp = await fetch('https://api.creem.io/v1/checkouts', {
+    const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
+    const resp = await fetch(`${apiBase}/v1/checkouts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': Config.CREEM_API_KEY },
       body: JSON.stringify({
