@@ -56,7 +56,6 @@ const authEmail = ref('')
 const upgrading = ref(false)
 
 const CALLBACK_URL = 'boxplayer-auth://callback'
-const PAYMENT_CALLBACK = 'http://localhost:3004/payment-success'
 
 const supabase = Config.SUPABASE_URL && Config.SUPABASE_ANON_KEY
   ? createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY) : null
@@ -109,13 +108,10 @@ async function handleUpgrade() {
   if (!Config.CREEM_API_KEY || !Config.CREEM_PRODUCT_ID) { message.error('Creem 未配置'); return }
   upgrading.value = true
   try {
-    if (window.Electron?.ipcRenderer) await window.Electron.ipcRenderer.invoke('payment:start-server')
-  } catch {}
-  try {
     const apiBase = Config.CREEM_API_KEY.startsWith('creem_test_') ? 'https://test-api.creem.io' : 'https://api.creem.io'
     const resp = await fetch(`${apiBase}/v1/checkouts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': Config.CREEM_API_KEY },
-      body: JSON.stringify({ product_id: Config.CREEM_PRODUCT_ID, success_url: PAYMENT_CALLBACK, customer: { email: accountEmail.value || undefined }, metadata: { app_user: 'boxplayer' } }),
+      body: JSON.stringify({ product_id: Config.CREEM_PRODUCT_ID, customer: { email: accountEmail.value || undefined }, metadata: { app_user: 'boxplayer' } }),
     })
     const data = await resp.json()
     if (data.checkout_url) openExternal(data.checkout_url)
