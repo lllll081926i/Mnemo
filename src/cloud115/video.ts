@@ -1,5 +1,6 @@
 import UserDAL from '../user/userdal'
 import message from '../utils/message'
+import { DRIVE115_DOWN_AGENT } from './constants'
 import { apiDrive115FileDetailResult } from './filecmd'
 
 type Drive115VideoUrlItem = {
@@ -9,6 +10,7 @@ type Drive115VideoUrlItem = {
   definition?: number | string
   definition_n?: number | string
   title?: string
+  headers?: Record<string, string>
 }
 
 type Drive115VideoPlayData = {
@@ -46,6 +48,11 @@ type Drive115PickCodeResult = {
 
 const pickCodeCache = new Map<string, { pick_code: string; play_long: number }>()
 
+const buildDrive115Headers = (accessToken: string) => ({
+  Authorization: `Bearer ${accessToken}`,
+  'User-Agent': DRIVE115_DOWN_AGENT
+})
+
 export const apiDrive115VideoPlay = async (user_id: string, pick_code: string): Promise<Drive115VideoPlayData | string> => {
   let token = UserDAL.GetUserToken(user_id)
   if (!token?.access_token) {
@@ -62,13 +69,15 @@ export const apiDrive115VideoPlay = async (user_id: string, pick_code: string): 
   const url = `${PLAY_URL}?${params.toString()}`
   try {
     const resp = await fetch(url, {
-      headers: { Authorization: `Bearer ${token.access_token}` }
+      headers: buildDrive115Headers(token.access_token)
     })
     if (!resp.ok) return '获取播放地址失败'
     const data = (await resp.json()) as Drive115VideoPlayResp
     if (data?.code !== 0 || !data?.data) {
       return data?.message || '获取播放地址失败'
     }
+    const headers = buildDrive115Headers(token.access_token)
+    data.data.video_url = (data.data.video_url || []).map(item => ({ ...item, headers }))
     return data.data
   } catch (err: any) {
     message.error('获取播放地址失败 ' + (err?.message || ''))
@@ -92,7 +101,7 @@ export const apiDrive115VideoHistory = async (user_id: string, pick_code: string
   const url = `${HISTORY_URL}?${params.toString()}`
   try {
     const resp = await fetch(url, {
-      headers: { Authorization: `Bearer ${token.access_token}` }
+      headers: buildDrive115Headers(token.access_token)
     })
     if (!resp.ok) return 0
     const data = (await resp.json()) as Drive115VideoHistoryResp
@@ -129,7 +138,7 @@ export const apiDrive115VideoHistoryUpdate = async (
     const resp = await fetch(HISTORY_URL, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token.access_token}`,
+        ...buildDrive115Headers(token.access_token),
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body

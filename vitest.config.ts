@@ -22,6 +22,7 @@ export default defineConfig({
       'src/aliapi/__tests__/**/*.test.ts',
       'src/pikpak/__tests__/**/*.test.ts',
       'src/quark/__tests__/**/*.test.ts',
+      'src/guangya/__tests__/**/*.test.ts',
       'src/dropbox/__tests__/**/*.test.ts',
       'src/onedrive/__tests__/**/*.test.ts',
       'src/box/__tests__/**/*.test.ts',

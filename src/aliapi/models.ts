@@ -16,6 +16,7 @@ export interface IVideoPreviewUrl {
   expire_time: number
   width: number
   height: number
+  headers?: Record<string, string>
   qualities: {
     html: string
     quality: string
@@ -24,6 +25,8 @@ export interface IVideoPreviewUrl {
     label: string
     value: string
     url: string
+    type?: string
+    headers?: Record<string, string>
   }[]
   subtitles: {
     language: string
