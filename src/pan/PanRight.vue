@@ -100,9 +100,10 @@ const isOfflineDownloadSupported = computed(() => {
 const handleOfflineDownload = () => {
   if (!isOfflineDownloadSupported.value) return
   const isRoot = !panfileStore.DirID || panfileStore.DirID.includes('root')
+  const isDrive115 = isDrive115User(panTreeStore.user_id || '') || (panTreeStore.drive_id || panfileStore.DriveID) === 'drive115'
   modalCloud123OfflineDownload({
-    dirId: isRoot ? '' : panfileStore.DirID,
-    dirName: isRoot ? '默认（来自:离线下载）' : panfileStore.DirName
+    dirId: isRoot ? (isDrive115 ? '0' : '') : panfileStore.DirID,
+    dirName: isRoot ? (isDrive115 ? '根目录' : '默认（来自:离线下载）') : panfileStore.DirName
   })
 }
 

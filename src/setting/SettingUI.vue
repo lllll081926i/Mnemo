@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import useSettingStore from './settingstore'
 import MySwitch from '../layout/MySwitch.vue'
 import LimitReachedModal from './LimitReachedModal.vue'
-import { createClient } from '@supabase/supabase-js'
 import { openExternal } from '../utils/electronhelper'
 import { CheckCircle2, Chrome, Crown, Github, Gift, Loader2, LogOut, Mail, RefreshCw } from 'lucide-vue-next'
 import ServerHttp from '../aliapi/server'
@@ -15,10 +14,7 @@ import { modalUpdateLog } from '../utils/modal'
 import fs from 'node:fs'
 import message from '../utils/message'
 import { Sleep } from '../utils/format'
-
-const SUPABASE_URL = 'https://ltqipofjjqjlbbfsgihi.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_VzoE4CzxiTaNpFVkFUc8cA_XARw0T3r'
-const BOXPLAYER_SITE_URL = 'https://xbysite.pages.dev'
+import { BOXPLAYER_SITE_URL, fetchBoxPlayerSubscription, getBoxPlayerSupabase } from '../utils/boxplayerAuth'
 
 const platform = window.platform
 const settingStore = useSettingStore()
@@ -74,8 +70,7 @@ const CALLBACK_URL = 'boxplayer-auth://callback'
 const PRICING_URL = `${BOXPLAYER_SITE_URL}/pricing/`
 const PAYMENT_POLL_DELAYS = [0, 2000, 5000, 10000, 20000]
 
-const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
+const supabase = getBoxPlayerSupabase()
 
 function saveLogin(email: string) {
   localStorage.setItem('app_user_email', email)
@@ -88,12 +83,7 @@ function saveLogin(email: string) {
 async function syncProStatus() {
   if (!isLoggedIn.value || !supabase) return false
   try {
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-    if (!token) return false
-    const response = await fetch(`${BOXPLAYER_SITE_URL}/api/me/subscription`, { headers: { Authorization: `Bearer ${token}` } })
-    if (!response.ok) return false
-    const subscription = await response.json()
+    const subscription = await fetchBoxPlayerSubscription()
     isPro.value = subscription.isPro === true
     if (isPro.value) {
       localStorage.setItem('app_user_pro', '1')
@@ -101,7 +91,9 @@ async function syncProStatus() {
       localStorage.removeItem('app_user_pro')
     }
     return isPro.value
-  } catch {}
+  } catch (e: any) {
+    message.error(e?.message || '同步专业版状态失败')
+  }
   return false
 }
 

@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Github, Chrome, Mail, Loader2, LogOut, X, Gift } from 'lucide-vue-next'
-import { createClient } from '@supabase/supabase-js'
 import message from '../utils/message'
 import { openExternal } from '../utils/electronhelper'
-
-const SUPABASE_URL = 'https://ltqipofjjqjlbbfsgihi.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_VzoE4CzxiTaNpFVkFUc8cA_XARw0T3r'
-const BOXPLAYER_SITE_URL = 'https://xbysite.pages.dev'
+import { BOXPLAYER_SITE_URL, fetchBoxPlayerSubscription, getBoxPlayerSupabase } from '../utils/boxplayerAuth'
 
 const loading = ref(false)
 const emailInput = ref('')
@@ -30,9 +26,7 @@ const showUpgradeModal = ref(false)
 const CALLBACK_URL = 'boxplayer-auth://callback'
 const PRICING_URL = `${BOXPLAYER_SITE_URL}/pricing/`
 
-const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null
+const supabase = getBoxPlayerSupabase()
 
 function saveLogin(email: string) {
   localStorage.setItem('app_user_email', email)
@@ -149,18 +143,13 @@ async function handleRedeemCode() {
 async function refreshSubscription() {
   if (!supabase || !isLoggedIn.value) return
   try {
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-    if (!token) return
-    const resp = await fetch(`${BOXPLAYER_SITE_URL}/api/me/subscription`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!resp.ok) return
-    const sub = await resp.json()
+    const sub = await fetchBoxPlayerSubscription()
     isPro.value = Boolean(sub.isPro)
     if (isPro.value) localStorage.setItem('app_user_pro', '1')
     else localStorage.removeItem('app_user_pro')
-  } catch {}
+  } catch (e: any) {
+    message.error(e?.message || '同步专业版状态失败')
+  }
 }
 
 function setupPaymentCallback() {

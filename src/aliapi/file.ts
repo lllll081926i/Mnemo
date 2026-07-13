@@ -521,6 +521,12 @@ export default class AliFile {
     if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       return '暂无转码信息'
     }
+    if (isCloud139User(user_id) || drive_id === 'cloud139') {
+      return '暂无转码信息'
+    }
+    if (isCloud189User(user_id) || drive_id === 'cloud189') {
+      return '暂无转码信息'
+    }
     if (isCloud123User(user_id) || drive_id === 'cloud123') {
       const transcode = await apiCloud123TranscodeList(user_id, file_id)
       if (typeof transcode === 'string') return transcode
@@ -750,7 +756,7 @@ export default class AliFile {
 
   static async ApiAudioPreviewUrl(user_id: string, drive_id: string, file_id: string): Promise<IDownloadUrl | string> {
     if (!user_id || !drive_id || !file_id) return '参数错误'
-    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') return '暂无转码信息'
+    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isCloud139User(user_id) || drive_id === 'cloud139' || isCloud189User(user_id) || drive_id === 'cloud189' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') return '暂无转码信息'
 
     const url = 'v2/file/get_audio_play_info'
 
@@ -798,7 +804,7 @@ export default class AliFile {
 
   static async ApiOfficePreViewUrl(user_id: string, drive_id: string, file_id: string): Promise<IOfficePreViewUrl | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
-    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') return undefined
+    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isCloud139User(user_id) || drive_id === 'cloud139' || isCloud189User(user_id) || drive_id === 'cloud189' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') return undefined
     const url = 'v2/file/get_office_preview_url'
     const postData = { drive_id: drive_id, file_id: file_id, url_expire_sec: 14400 }
     const resp = await AliHttp.Post(url, postData, user_id, '')
@@ -922,7 +928,7 @@ export default class AliFile {
 
   static async ApiFileGetPathString(user_id: string, drive_id: string, file_id: string, dirsplit: string): Promise<string> {
     if (!user_id || !drive_id || !file_id) return ''
-    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') {
+    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isCloud139User(user_id) || drive_id === 'cloud139' || isCloud189User(user_id) || drive_id === 'cloud189' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') {
       const pathList = TreeStore.GetDirPath(drive_id, file_id)
       const pathNames = pathList.map((item) => item.name).filter((name) => name)
       return pathNames.join(dirsplit)
@@ -959,7 +965,7 @@ export default class AliFile {
 
   static async ApiFileGetFolderSize(user_id: string, drive_id: string, file_id: string): Promise<IAliGetForderSizeModel | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
-    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') {
+    if (isCloud123User(user_id) || drive_id === 'cloud123' || isPikPakUser(user_id) || drive_id === 'pikpak' || isGuangyaUser(user_id) || drive_id === 'guangya' || isCloud139User(user_id) || drive_id === 'cloud139' || isCloud189User(user_id) || drive_id === 'cloud189' || isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') {
       return { size: 0, folder_count: 0, file_count: 0, reach_limit: undefined }
     }
     const url = 'adrive/v1/file/get_folder_size_info'

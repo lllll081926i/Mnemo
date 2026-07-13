@@ -339,7 +339,8 @@ export async function createProxyServer(port: number) {
         proxyInfo
       })) {
         // 获取地址
-        let data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', selectQuality)
+        const refreshQuality = content_disposition === 'inline' ? 'Origin' : selectQuality
+        let data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', refreshQuality)
         console.error('proxy getRawUrl', data)
         if (typeof data != 'string' && data.url) {
           let subtitleData = data.subtitles.find((sub: any) => sub.language === 'chi') || data.subtitles[0]

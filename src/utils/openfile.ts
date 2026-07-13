@@ -12,7 +12,7 @@ import message from './message'
 import { modalArchive, modalArchivePassword, modalSelectPanDir, modalSelectVideoQuality } from './modal'
 import PlayerUtils from './playerhelper'
 import { getEncType, getProxyUrl, getRawUrl } from './proxyhelper'
-import { isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser } from '../aliapi/utils'
+import { isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser } from '../aliapi/utils'
 
 async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo | undefined> {
   const explicitUserId = (file as any).user_id as string | undefined
@@ -32,7 +32,9 @@ async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo |
     || (driveId === 'onedrive' && isOneDriveUser(currentToken))
     || (driveId === 'box' && isBoxUser(currentToken))
     || (driveId === 'guangya' && isGuangyaUser(currentToken))
-    || (!['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya'].includes(driveId) && isAliyunUser(currentToken))
+    || (driveId === 'cloud139' && isCloud139User(currentToken))
+    || (driveId === 'cloud189' && isCloud189User(currentToken))
+    || (!['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(currentToken))
   )
   if (matchesCurrent && currentToken?.access_token) return currentToken
 
@@ -46,7 +48,9 @@ async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo |
     || (driveId === 'onedrive' && isOneDriveUser(token))
     || (driveId === 'box' && isBoxUser(token))
     || (driveId === 'guangya' && isGuangyaUser(token))
-    || (!['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya'].includes(driveId) && isAliyunUser(token))
+    || (driveId === 'cloud139' && isCloud139User(token))
+    || (driveId === 'cloud189' && isCloud189User(token))
+    || (!['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(token))
   ))
   if (!matched?.user_id) return currentToken || undefined
   return await UserDAL.GetUserTokenFromDB(matched.user_id) || undefined
@@ -85,7 +89,7 @@ function buildSiblingVideoPlaylist(file: IAliGetFileModel, provided?: IPageVideo
 }
 
 const TEXT_PREVIEW_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv', 'nfo', 'srt', 'vtt', 'ass', 'ssa'])
-const PDF_PREVIEW_DRIVES = new Set(['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya'])
+const PDF_PREVIEW_DRIVES = new Set(['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya', 'cloud139', 'cloud189'])
 const EPUB_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const DOCX_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const OFFICE_TO_PDF_DRIVES = PDF_PREVIEW_DRIVES

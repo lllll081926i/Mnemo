@@ -9,8 +9,8 @@ import type { OpenRouterModelInfo } from '../services/ai/providers/OpenRouterPro
 import { GATEWAY_MODELS } from '../services/ai/constants'
 import { isPro } from '../utils/usageLimit'
 import { openExternal } from '../utils/electronhelper'
+import { BOXPLAYER_SITE_URL } from '../utils/boxplayerAuth'
 
-const BOXPLAYER_SITE_URL = 'https://xbysite.pages.dev'
 const PRICING_URL = `${BOXPLAYER_SITE_URL}/pricing/`
 
 const settingStore = useSettingStore()

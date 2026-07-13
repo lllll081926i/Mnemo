@@ -67,8 +67,8 @@ const handleSelectDir = () => {
   modalSelectPanDir('offline', form.dirId, (user_id: string, drive_id: string, selectFile: any) => {
     if (!selectFile || selectFile.isDir !== true) return
     if (selectFile.file_id && String(selectFile.file_id).includes('root')) {
-      snapshot.dirId = ''
-      snapshot.dirName = '默认（来自:离线下载）'
+      snapshot.dirId = drive_id === 'drive115' ? '0' : ''
+      snapshot.dirName = drive_id === 'drive115' ? '根目录' : '默认（来自:离线下载）'
     } else {
       snapshot.dirId = String(selectFile.file_id || '')
       snapshot.dirName = selectFile.name || '已选择'
@@ -148,7 +148,7 @@ const handleCreate = async () => {
             @search="handleSelectDir"
           />
           <div style="margin-top: 6px; color: var(--color-text-3); font-size: 12px">
-            当前 provider：{{ providerLabel }}。根目录不支持离线下载，未选择时将保存到“来自:离线下载”文件夹。
+            当前 provider：{{ providerLabel }}。115 网盘可选择根目录；其他网盘未选择时将保存到默认离线下载目录。
           </div>
         </a-form-item>
         <div style="display: flex; justify-content: flex-end; gap: 8px">

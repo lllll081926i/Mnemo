@@ -47,7 +47,7 @@ const formRequest = async (user_id: string, path: string, fields: Record<string,
 export const apiDrive115OfflineCreate = async (user_id: string, url: string, dirID?: string): Promise<Drive115OfflineCreateResult> => {
   try {
     const fields: Record<string, string> = { urls: url }
-    if (dirID && !dirID.includes('root')) fields.wp_path_id = dirID
+    if (dirID) fields.wp_path_id = dirID.includes('root') ? '0' : dirID
     const data = await formRequest(user_id, 'add_task_urls', fields)
     const items = Array.isArray(data?.data) ? data.data : []
     const taskIds = items

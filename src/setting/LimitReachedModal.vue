@@ -3,8 +3,8 @@ import { ref, watch } from 'vue'
 import { X, Loader2, Sparkles } from 'lucide-vue-next'
 import { openExternal } from '../utils/electronhelper'
 import message from '../utils/message'
+import { BOXPLAYER_SITE_URL } from '../utils/boxplayerAuth'
 
-const BOXPLAYER_SITE_URL = 'https://xbysite.pages.dev'
 const PRICING_URL = `${BOXPLAYER_SITE_URL}/pricing/`
 
 const props = defineProps<{ visible: boolean }>()

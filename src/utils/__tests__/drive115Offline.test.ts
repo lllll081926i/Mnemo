@@ -34,6 +34,20 @@ describe('115 offline download API', () => {
     expect(new URLSearchParams(request.body as string).get('wp_path_id')).toBe('12345')
   })
 
+  it('passes wp_path_id=0 when saving to the 115 root folder', async () => {
+    getUserToken.mockReturnValue({ access_token: 'token-115' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      state: true,
+      code: 0,
+      data: [{ state: true, code: 0, info_hash: 'hash-root' }]
+    }), { status: 200 }))
+
+    await apiDrive115OfflineCreate('115_user', 'https://example.com/file.zip', 'drive115_root')
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit
+    expect(new URLSearchParams(request.body as string).get('wp_path_id')).toBe('0')
+  })
+
   it('maps task list status and progress', async () => {
     getUserToken.mockReturnValue({ access_token: 'token-115' })
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
