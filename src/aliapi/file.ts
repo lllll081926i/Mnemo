@@ -14,7 +14,7 @@ import { apiCloud123TranscodeList } from '../cloud123/video'
 import { apiDrive115FileDetail } from '../cloud115/filecmd'
 import { apiDrive115DownUrl } from '../cloud115/download'
 import { mapDrive115DetailToAliModel } from '../cloud115/dirfilelist'
-import { apiDrive115VideoHistoryUpdate, apiDrive115VideoPlay, getDrive115PickCode } from '../cloud115/video'
+import { apiDrive115VideoHistoryUpdate, apiDrive115VideoPlay, apiDrive115VideoSubtitle, getDrive115PickCode } from '../cloud115/video'
 import { apiBaiduFileList } from '../cloudbaidu/dirfilelist'
 import { apiBaiduFileMetas, mapBaiduMetaToAliFileItem } from '../cloudbaidu/filecmd'
 import { apiPikPakDownloadInfo, apiPikPakFileDetail, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
@@ -570,6 +570,7 @@ export default class AliFile {
       if (!meta?.pick_code) return meta?.error || '获取文件详情失败'
       const playInfo = await apiDrive115VideoPlay(user_id, meta.pick_code)
       if (typeof playInfo === 'string') return playInfo
+      const subtitles = await apiDrive115VideoSubtitle(user_id, meta.pick_code)
       const data: IVideoPreviewUrl = {
         drive_id: drive_id,
         file_id: file_id,
@@ -627,6 +628,10 @@ export default class AliFile {
         if (first.headers) data.headers = first.headers
       }
       data.duration = Math.floor(Number(playInfo.play_long || meta.play_long || 0))
+      data.subtitles = subtitles.map((subtitle) => ({
+        ...subtitle,
+        headers: playInfo.video_url?.[0]?.headers
+      }))
       return data
     }
     let url = ''

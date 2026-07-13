@@ -31,6 +31,7 @@ export interface IVideoPreviewUrl {
   subtitles: {
     language: string
     url: string
+    headers?: Record<string, string>
   }[]
 }
 

@@ -2369,10 +2369,21 @@ const getVideoInfo = async (art: Artplayer) => {
     if (subtitles.length > 0) {
       embedSubSelector = []
       for (let i = 0; i < subtitles.length; i++) {
+        const subtitle = subtitles[i]
+        const subtitleUrl = subtitle.headers
+          ? getProxyUrl({
+            user_id: pageVideo.user_id,
+            drive_id: pageVideo.drive_id,
+            file_id: pageVideo.file_id,
+            proxy_kind: 'subtitle',
+            proxy_url: subtitle.url,
+            proxy_headers: JSON.stringify(subtitle.headers)
+          })
+          : subtitle.url
         embedSubSelector.push({
-          html: '内嵌:  ' + subtitles[i].language,
-          name: subtitles[i].language,
-          url: subtitles[i].url,
+          html: '内嵌:  ' + subtitle.language,
+          name: subtitle.language,
+          url: subtitleUrl,
           default: i === 0
         })
       }

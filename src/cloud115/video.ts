@@ -2,6 +2,9 @@ import UserDAL from '../user/userdal'
 import message from '../utils/message'
 import { DRIVE115_DOWN_AGENT } from './constants'
 import { apiDrive115FileDetailResult } from './filecmd'
+import { mapDrive115SubtitleItems, type Drive115SubtitleSource } from './subtitle'
+
+export { mapDrive115SubtitleItems } from './subtitle'
 
 type Drive115VideoUrlItem = {
   url: string
@@ -38,6 +41,7 @@ type Drive115VideoHistoryResp = {
 }
 
 const PLAY_URL = 'https://proapi.115.com/open/video/play'
+const SUBTITLE_URL = 'https://proapi.115.com/open/video/subtitle'
 const HISTORY_URL = 'https://proapi.115.com/open/video/history'
 
 type Drive115PickCodeResult = {
@@ -82,6 +86,28 @@ export const apiDrive115VideoPlay = async (user_id: string, pick_code: string): 
   } catch (err: any) {
     message.error('获取播放地址失败 ' + (err?.message || ''))
     return '获取播放地址失败'
+  }
+}
+
+export const apiDrive115VideoSubtitle = async (user_id: string, pick_code: string): Promise<Drive115SubtitleSource[]> => {
+  let token = UserDAL.GetUserToken(user_id)
+  if (!token?.access_token) {
+    const dbToken = await UserDAL.GetUserTokenFromDB(user_id)
+    if (dbToken) token = dbToken
+  }
+  if (!token?.access_token || !pick_code) return []
+  try {
+    const resp = await fetch(`${SUBTITLE_URL}?${new URLSearchParams({ pick_code }).toString()}`, {
+      headers: buildDrive115Headers(token.access_token)
+    })
+    if (!resp.ok) return []
+    const body = await resp.json()
+    if (body?.code !== 0 || !body?.data) return []
+    const data = body.data
+    const items = Array.isArray(data) ? data : data.list || data.subtitles || data.subtitle_list || []
+    return mapDrive115SubtitleItems(items)
+  } catch {
+    return []
   }
 }
 

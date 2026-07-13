@@ -8,6 +8,7 @@ import {
 } from '../utils/subtitleApi'
 import type { SubtitleSearchResult } from '../utils/subtitleApi'
 import message from '../utils/message'
+import { getAutoSubtitleTrackId } from '../utils/mpvSubtitleTrack'
 import { Captions, Flag, ListVideo, Pause, Play, Settings2, SkipBack, SkipForward } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -55,6 +56,7 @@ const playlistTab = ref<'playlist' | 'chapters'>('playlist')
 const noticeText = ref('')
 const audioTrackId = ref(-1)
 const subtitleTrackId = ref(-1)
+let autoSelectedSubtitleTrackId: number | undefined
 const secondarySubtitleTrackId = ref(-1)
 const subtitleDelay = ref(0)
 const subtitleScale = ref(1)
@@ -437,6 +439,11 @@ const applyStatusResult = (result: any) => {
   if (Array.isArray(result.trackStatus?.tracks)) tracks.value = result.trackStatus.tracks
   if (typeof result.trackStatus?.audioId === 'number') audioTrackId.value = result.trackStatus.audioId
   if (typeof result.trackStatus?.subtitleId === 'number') subtitleTrackId.value = result.trackStatus.subtitleId
+  const autoSubtitleTrackId = getAutoSubtitleTrackId(tracks.value, subtitleTrackId.value, Boolean(props.externalSubtitle?.url))
+  if (autoSubtitleTrackId != null && autoSubtitleTrackId !== autoSelectedSubtitleTrackId) {
+    autoSelectedSubtitleTrackId = autoSubtitleTrackId
+    void control('setSubtitleTrack', autoSubtitleTrackId)
+  }
   statusText.value = duration.value > 0 ? `${formatTime(position.value)} / ${formatTime(duration.value)}` : ''
   if (result.status?.playing || position.value > 0 || frameCount.value > 0) errorText.value = ''
   handleIntroOutroSkip()
@@ -458,6 +465,7 @@ const load = async () => {
 
   loading.value = true
   loaded.value = false
+  autoSelectedSubtitleTrackId = undefined
   pendingResumePosition = props.startPosition && props.startPosition > 0 ? Math.floor(props.startPosition) : 0
   introSkipped.value = false
   outroTriggered.value = false

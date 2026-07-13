@@ -1295,7 +1295,9 @@ const loginSuccess = (token: ITokenInfo) => {
             <div id="loginframediv" class="loginframe">
               <a-spin class="loading" :size="32" v-if='loginLoading' tip="加载中，请稍后..." />
               <div class="qrcodeframe" v-if="!loginLoading">
-                <AntQRCode :value="cloud189QrUrl || 'cloud189'" :size="250" />
+                <div class="cloud189-qrcode-wrap">
+                  <AntQRCode :value="cloud189QrUrl || 'cloud189'" :size="250" color="#000" bg-color="#fff" />
+                </div>
                 <a-alert banner center :show-icon="false" :type="cloud189QrStatusType">
                   {{ cloud189Tips }}
                 </a-alert>
@@ -1438,6 +1440,11 @@ const loginSuccess = (token: ITokenInfo) => {
       padding: 5px;
       box-shadow: grey 0 0 10px;
       margin: 40px 15px 15px 15px;
+    }
+
+    .cloud189-qrcode-wrap {
+      display: flex;
+      justify-content: center;
     }
 
     .loading {
