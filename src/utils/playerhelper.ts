@@ -13,10 +13,6 @@ import { getEncType, getProxyUrl } from './proxyhelper'
 import { CleanStringForCmd } from './filehelper'
 import Db from './db'
 import { humanTime } from './format'
-import { IPageVideo } from '../store/appstore'
-import { Input, InputNumber, Modal } from '@arco-design/web-vue'
-import { h } from 'vue'
-import path from 'path'
 import { isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
 import { apiDrive115FileDetailResult } from '../cloud115/filecmd'
 import { apiDrive115VideoHistory } from '../cloud115/video'
@@ -30,7 +26,7 @@ import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../onedrive/dirf
 import { apiBoxFileList, mapBoxItemToAliModel } from '../box/dirfilelist'
 import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../guangya/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from './webdavClient'
-import { buildDirectPlayerInvocation, buildPlayerCommand, formatPlayerArg, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
+import { buildDirectPlayerInvocation, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
 import { findBestSubtitleMatch } from './subtitleMatching'
 
 const canUseAliyunFileList = (userId: string) => isAliyunUser(userId)
@@ -39,129 +35,6 @@ const currentPlayerPlatform = () => (is.windows() ? 'win32' : is.macOS() ? 'darw
 const PlayerUtils = {
   filterSubtitleFile(name: string, subTitlesList: IAliGetFileModel[]) {
     return findBestSubtitleMatch(name, subTitlesList)
-  },
-
-  async getVideoDanmuList(pageVideo: IPageVideo, option: any, pos: number) {
-    let name = ''
-    // console.log('getVideoDanmuList', pageVideo, option, pos)
-    if (option.matchType === 'folder') {
-      name = pageVideo.parent_file_name
-    } else {
-      name = pageVideo.file_name
-    }
-    let searchName = name
-      .replace(/\b(19|20)\d{2}\b/g, '')
-      .replace(/\b(360p|480p|720p|1080p|2160p|\d+K)\b/gi, '')
-      .replace(path.extname(name), '')
-      .replace('.', '')
-    let numMatch = searchName.match(/(\d{1,3}).*/) || searchName.match(/S(\d+)E(\d+)/i)
-    let num = numMatch ? parseInt(numMatch[1] || numMatch[2]) : pos + 1
-    console.log('search', searchName, num)
-    pageVideo.play_esposide = num
-    if (option.sourceType == 'auto' && option.matchEsp == 'auto') {
-      return { name: searchName, pos: num }
-    }
-    if (option.sourceType == 'input') {
-      return new Promise((resolve) => {
-        let sourceUrl = ''
-        // 输入网址
-        Modal.open({
-          title: '输入弹幕的网址（支持主流视频网址）',
-          bodyStyle: {
-            minWidth: '500px'
-          },
-          content: () =>
-            h(Input, {
-              type: 'text',
-              tabindex: '-1',
-              allowClear: true,
-              placeholder: '输入弹幕的网址',
-              onChange(value, ev) {
-                sourceUrl = value
-              }
-            }),
-          okText: '确认',
-          cancelText: '取消',
-          onOk: async (e: any) => {
-            console.log('sourceUrl', sourceUrl)
-            resolve(sourceUrl)
-            return true
-          },
-          onCancel(e: any) {
-            resolve('')
-            return true
-          }
-        })
-      })
-    }
-    if (option.sourceType == 'search') {
-      return new Promise((resolve) => {
-        let name = ''
-        Modal.open({
-          title: '输入搜索的关键字，空格分割集数',
-          bodyStyle: {
-            minWidth: '400px'
-          },
-          content: () =>
-            h(Input, {
-              type: 'text',
-              tabindex: '-1',
-              allowClear: true,
-              placeholder: '输入搜索的关键字，空格分割集数',
-              onChange(value, ev) {
-                name = value
-              }
-            }),
-          okText: '确认',
-          cancelText: '取消',
-          onOk: async (e: any) => {
-            let pos = parseInt(name.split(' ')[1]) || 1
-            pageVideo.play_esposide = pos
-            resolve({ name, pos })
-            return true
-          },
-          onCancel(e: any) {
-            resolve({})
-            return true
-          }
-        })
-      })
-    }
-    if (option.matchEsp == 'input') {
-      return new Promise((resolve) => {
-        let espisode: any = 1
-        Modal.open({
-          title: '输入需要匹配的集数',
-          bodyStyle: {
-            minWidth: '400px'
-          },
-          content: () =>
-            h(InputNumber, {
-              defaultValue: pageVideo.play_esposide ? pageVideo.play_esposide : 1,
-              tabindex: '-1',
-              allowClear: true,
-              mode: 'button',
-              step: 1,
-              placeholder: '输入需要匹配的集数',
-              onChange(value, ev) {
-                espisode = value
-              }
-            }),
-          okText: '确认',
-          cancelText: '取消',
-          onOk: async (e: any) => {
-            pageVideo.play_esposide = espisode
-            resolve({ name, pos: espisode })
-            return true
-          },
-          onCancel(e: any) {
-            pageVideo.play_esposide = num
-            resolve({ name: searchName, pos: num })
-            return true
-          }
-        })
-      })
-    }
   },
 
   async getPlayCursor(user_id: string, drive_id: string, file_id: string) {
@@ -447,9 +320,8 @@ const PlayerUtils = {
 
   commandSpawn(commandStr: string, playArgs: any, options: SpawnOptions, exitCallBack: any) {
     const childProcess: any = spawn(commandStr, playArgs, {
-      shell: true,
-      windowsVerbatimArguments: true,
-      ...options
+      ...options,
+      shell: false
     })
     childProcess.unref()
     if (exitCallBack) {
@@ -471,8 +343,7 @@ const PlayerUtils = {
     const isMPV = isMpvCommand(command)
     const isPotplayer = command.toLowerCase().includes('potplayer')
     const directMpvControl = (useSettingStore().uiVideoEnablePlayerList || useSettingStore().uiVideoPlayerHistory) && isMPV
-    const argsToStr = (args: string) => formatPlayerArg(currentPlayerPlatform(), args, directMpvControl)
-    const commandStr = buildPlayerCommand(currentPlayerPlatform(), command)
+    const argsToStr = (args: string) => String(args)
     const directInvocation = buildDirectPlayerInvocation(currentPlayerPlatform(), command)
     // 构造播放参数
     let { file, subTitleFile, rawData, quality } = otherArgs
@@ -640,7 +511,7 @@ const PlayerUtils = {
     if (directMpvControl) {
       await this.mpvPlayer(token, directInvocation.binary, [...directInvocation.args, ...playArgs], otherArgs, options, exitCallBack)
     } else {
-      this.commandSpawn(commandStr, playArgs, options, exitCallBack)
+      this.commandSpawn(directInvocation.binary, [...directInvocation.args, ...playArgs], options, exitCallBack)
     }
   }
 }

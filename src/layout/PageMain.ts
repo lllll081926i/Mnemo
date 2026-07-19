@@ -10,7 +10,6 @@ import PanDAL from '../pan/pandal'
 import UploadingDAL from '../transfer/uploadingdal'
 import { Sleep } from '../utils/format'
 import { createProxyServer } from '../utils/proxyhelper'
-import cache from '../utils/cache'
 
 export function PageMain() {
   if (window.WinMsg) return
@@ -97,7 +96,6 @@ let lockResourceDirSizeTime = false
 let chkClearDownLogTime = 0
 let chkTokenTime = 0
 let chkTaskTime = 0
-let chkDanmuTime = 0
 
 /**
  * 时间事件，一但被调用每秒执行一次 <br/>
@@ -173,13 +171,6 @@ function timeEvent() {
   if (nowTime - runTime > 6 && chkTaskTime >= 2) {
     chkTaskTime = 0
     useFootStore().aUpdateTask()
-  }
-
-  // 清理弹幕缓存，300s检查一次
-  chkDanmuTime++
-  if (nowTime - runTime > 6 && chkDanmuTime >= 60 * 5) {
-    chkDanmuTime = 0
-    cache.clearOutDate()
   }
 
   // 刷新下载速度

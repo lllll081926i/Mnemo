@@ -102,43 +102,6 @@ export interface IAliFileItem {
 }
 
 
-export interface IAliOtherFollowingModel {
-  avatar: string
-  description: string
-  is_following: boolean
-  nick_name: string
-  phone: string
-  user_id: string
-  follower_count: number
-}
-
-interface IAliMyFollowingMessageModel {
-  action: string
-  content: {
-    file_id_list: string[]
-    share: { popularity: number; popularity_emoji: string; popularity_str: string; share_id: string; share_pwd: string }
-  }
-  created: number
-  createdstr: string
-  creator: IAliOtherFollowingModel
-  creator_id: string
-  display_action: string
-  sequence_id: number
-}
-
-
-export interface IAliMyFollowingModel {
-  avatar: string
-  description: string
-  has_unread_message: boolean
-  is_following: boolean
-  latest_messages: IAliMyFollowingMessageModel[]
-  nick_name: string
-  phone: string
-  user_id: string
-  SearchName: string
-}
-
 export interface IAliShareBottleFish {
   bottleId: string;
   bottleName: string;

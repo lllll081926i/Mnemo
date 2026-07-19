@@ -11,6 +11,7 @@ export interface EngineClientOptions {
 export default class EngineClient {
   options: Required<EngineClientOptions>
   client!: any
+  private clientPromise?: Promise<any>
 
   constructor (options: EngineClientOptions = {}) {
     this.options = {
@@ -25,13 +26,16 @@ export default class EngineClient {
   connect (): void {
     const { host, port, secret } = this.options
     ;(globalThis as any).self ||= globalThis
-    const runtimeRequire = eval('require') as NodeRequire
-    const Aria2 = runtimeRequire('aria2-lib')
-    this.client = new Aria2({ host, port, secret } as any)
+    this.clientPromise = import('aria2-lib').then(({ default: Aria2 }) => {
+      this.client = new Aria2({ host, port, secret } as any)
+      return this.client
+    })
   }
 
   async call (method: string, ...args: any[]): Promise<any> {
-    return (this.client as any).call(method, ...args).catch((err: any) => {
+    if (!this.clientPromise) this.connect()
+    const client = await this.clientPromise
+    return client.call(method, ...args).catch((err: any) => {
       logger.warn(`[motrix] aria2 RPC ${method} fail: ${err?.message}`)
     })
   }

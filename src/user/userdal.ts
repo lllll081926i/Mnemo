@@ -2,7 +2,7 @@ import DB from '../utils/db'
 import AliUser from '../aliapi/user'
 import message from '../utils/message'
 import useUserStore, { ITokenInfo } from './userstore'
-import { useAppStore, useFootStore, useMyFollowingStore, useMyShareStore, useOtherFollowingStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
+import { useAppStore, useFootStore, useMyShareStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
 import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
 import { refreshCloud123AccessToken } from '../utils/cloud123'
@@ -524,8 +524,6 @@ export default class UserDAL {
       PanDAL.aReLoadQuickFile(token.user_id)
       useAppStore().resetTab(useSettingStore().uiDefaultTab || 'pan')
       useMyShareStore().$reset()
-      useMyFollowingStore().$reset()
-      useOtherFollowingStore().$reset()
       useFootStore().mSaveUserInfo(token)
       message.success('加载用户成功!', 2, loadingKey)
     } catch (err: any) {

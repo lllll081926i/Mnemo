@@ -3,7 +3,7 @@ import path from 'path'
 import is from 'electron-is'
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, safeStorage, session, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
-import { exec, execFile } from 'child_process'
+import { execFile } from 'child_process'
 import { ShowError } from './dialog'
 import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
 import { createHash } from 'crypto'
@@ -573,8 +573,7 @@ export default class ipcEvent {
   private static handleWebShutDown() {
     ipcMain.on('WebShutDown', (event, data) => {
       if (is.macOS()) {
-        const shutdownCmd = 'osascript -e \'tell application "System Events" to shut down\''
-        exec(shutdownCmd, (err: any) => {
+        execFile('osascript', ['-e', 'tell application "System Events" to shut down'], (err: any) => {
           if (data.quitApp) {
             try {
               app.exit()
@@ -585,10 +584,12 @@ export default class ipcEvent {
           }
         })
       } else {
-        const cmdArguments = ['shutdown']
+        let command = 'shutdown'
+        const cmdArguments: string[] = []
         if (is.linux()) {
           if (data.sudo) {
-            cmdArguments.unshift('sudo')
+            command = 'sudo'
+            cmdArguments.push('shutdown')
           }
           cmdArguments.push('-h')
           cmdArguments.push('now')
@@ -599,9 +600,7 @@ export default class ipcEvent {
           cmdArguments.push('-t 0')
         }
 
-        const finalcmd = cmdArguments.join(' ')
-
-        exec(finalcmd, (err: any) => {
+        execFile(command, cmdArguments, (err: any) => {
           if (data.quitApp) {
             try {
               app.exit()

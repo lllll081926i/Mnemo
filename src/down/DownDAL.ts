@@ -14,7 +14,6 @@ import {
   IsAria2cRemote
 } from '../utils/aria2c'
 import { humanSize, humanSizeSpeed } from '../utils/format'
-import { Howl } from 'howler'
 import DBDown from '../utils/dbdown'
 import fsPromises from 'fs/promises'
 import { DecodeEncName } from '../aliapi/utils'
@@ -95,11 +94,14 @@ export interface IAriaDownProgress {
 
 /** 存盘的时机：默认 10 时进行 */
 let SaveTimeWait = 0
-const sound = new Howl({
-  src: ['./audio/download_finished.mp3'], // 音频文件路径
-  autoplay: false, // 是否自动播放
-  volume: 1.0 // 音量，范围 0.0 ~ 1.0
-})
+let completionSound: HTMLAudioElement | undefined
+const playCompletionSound = () => {
+  if (typeof Audio === 'undefined') return
+  completionSound ||= new Audio('./audio/download_finished.mp3')
+  if (!completionSound.paused) return
+  completionSound.currentTime = 0
+  void completionSound.play().catch(() => undefined)
+}
 
 const buildAriaTaskGid = (file: IAliGetFileModel) => {
   const source = `${file.drive_id || ''}|${file.file_id || ''}|${file.size || 0}`
@@ -510,9 +512,7 @@ export default class DownDAL {
           downingStore.mUpdateDownState(downingItem, 'valid')
           const check = AriaHashFile(downingItem)
           if (check.Check) {
-            if (useSettingStore().downFinishAudio && !sound.playing()) {
-              sound.play()
-            }
+            if (useSettingStore().downFinishAudio) playCompletionSound()
             downingStore.mUpdateDownState(downingItem, 'downed')
             window.WebToElectron?.({ cmd: 'downloadCompleted', fileName: Info.name })
           } else {

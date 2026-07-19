@@ -4,10 +4,6 @@ export function isMpvCommand(command: string): boolean {
   return (command || '').toLowerCase().includes('mpv')
 }
 
-export function shellQuote(value: string): string {
-  return `'${String(value).replaceAll("'", "'\\''")}'`
-}
-
 export function shellSplit(command: string): string[] {
   const result: string[] = []
   let current = ''
@@ -42,24 +38,14 @@ export function shellSplit(command: string): string[] {
   return result
 }
 
-export function buildPlayerCommand(platform: PlayerPlatform, command: string): string {
-  if (platform === 'darwin') return `open -a ${shellQuote(command)} ${command.includes('mpv.app') ? '--args ' : ''}`
-  if (platform === 'linux' && !command.includes('/') && !command.includes('\\')) return command
-  return platform === 'win32' ? `"${command}"` : shellQuote(command)
-}
-
 export function buildDirectPlayerInvocation(platform: PlayerPlatform, command: string): { binary: string; args: string[] } {
-  if (platform !== 'linux') return { binary: command, args: [] }
+  if (platform === 'darwin') return { binary: 'open', args: ['-a', command, ...(command.includes('mpv.app') ? ['--args'] : [])] }
+  if (platform === 'win32') return { binary: command, args: [] }
   const parts = shellSplit(command)
   return {
     binary: parts[0] || command,
     args: parts.slice(1)
   }
-}
-
-export function formatPlayerArg(platform: PlayerPlatform, value: string, directSpawn = false): string {
-  if (directSpawn) return String(value)
-  return platform === 'win32' ? `"${value}"` : shellQuote(value)
 }
 
 export function redactMpvArgs(args: any[]): any[] {

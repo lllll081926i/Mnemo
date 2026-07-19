@@ -5,8 +5,7 @@ import AliHttp from './alihttp'
 import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
 import { IAliUserDriveCapacity, IAliUserDriveDetails } from './models'
-import { GetSignature, isCloud123User } from './utils'
-import getUuid from 'uuid-by-string'
+import { GetDeviceId, GetSignature, isCloud123User } from './utils'
 import { useSettingStore } from '../store'
 import { refreshCloud123AccessToken } from '../utils/cloud123'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
@@ -108,7 +107,7 @@ export default class AliUser {
       token.pin_setup = resp.body.pin_setup
       token.is_first_login = resp.body.is_first_login
       token.need_rp_verify = resp.body.need_rp_verify
-      token.device_id = getUuid(resp.body.user_id.toString(), 5)
+      token.device_id = GetDeviceId(resp.body.user_id.toString())
       window.WebUserToken({
         user_id: token.user_id,
         name: token.user_name,

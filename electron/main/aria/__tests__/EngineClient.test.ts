@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 
+const ariaCall = vi.fn().mockResolvedValue({})
+
 vi.mock('aria2-lib', () => ({
   default: vi.fn().mockImplementation(() => ({
     open: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
-    call: vi.fn().mockResolvedValue({}),
+    call: ariaCall,
     on: vi.fn(),
     setMaxListeners: vi.fn()
   }))
@@ -30,5 +32,14 @@ describe('EngineClient', () => {
     const { default: EngineClient } = await import('../EngineClient')
     const client = new EngineClient({ port: 16800, secret: 'test' })
     expect(() => client.init()).not.toThrow()
+  })
+
+  it('waits for the dynamically loaded RPC client before calling it', async () => {
+    const { default: EngineClient } = await import('../EngineClient')
+    const client = new EngineClient({ port: 16800, secret: 'test' })
+    client.init()
+
+    await expect(client.call('getGlobalStat')).resolves.toEqual({})
+    expect(ariaCall).toHaveBeenCalledWith('getGlobalStat')
   })
 })

@@ -440,7 +440,6 @@ export async function createProxyServer(port: number) {
         const agentServer = httpRequest.request(proxyUrl, {
           method: clientReq.method,
           headers: upstreamHeaders,
-          rejectUnauthorized: false,
           agent: ~proxyUrl.indexOf('https') ? httpsAgent : httpAgent
         }, (httpResp: any) => {
           console.error('httpResp.headers', httpResp.statusCode, httpResp.headers)

@@ -5,8 +5,7 @@ import UserDAL from '../user/userdal'
 import Config from '../config'
 import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
-import { GetSignature } from '../aliapi/utils'
-import getUuid from 'uuid-by-string'
+import { GetDeviceId, GetSignature } from '../aliapi/utils'
 import AliUser from '../aliapi/user'
 import AliHttp from '../aliapi/alihttp'
 import { Input, Modal, Space } from '@arco-design/web-vue'
@@ -1180,7 +1179,7 @@ const loginStepFirst = async (msg: string) => {
   resultPromise
     .then((result: any) => {
       try {
-        const deviceId = getUuid(result.userId.toString(), 5)
+        const deviceId = GetDeviceId(result.userId.toString())
         const { signature } = GetSignature(0, result.userId.toString(), deviceId)
         const token: ITokenInfo = {
           tokenfrom: 'aliyun',

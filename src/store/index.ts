@@ -17,9 +17,6 @@ import usePanFileStore from '../pan/panfilestore'
 import type { IOtherShareLinkModel } from '../share/share/OtherShareStore'
 import useOtherShareStore from '../share/share/OtherShareStore'
 import useMyShareStore from '../share/share/MyShareStore'
-import useMyFollowingStore from '../share/following/MyFollowingStore'
-import type { FollowingState } from '../share/following/OtherFollowingStore'
-import useOtherFollowingStore from '../share/following/OtherFollowingStore'
 
 import useUploadingStore from '../down/UploadingStore'
 import useUploadedStore from '../down/UploadedStore'
@@ -48,9 +45,6 @@ export {
   IOtherShareLinkModel,
   useMyShareStore,
   useOtherShareStore,
-  useOtherFollowingStore,
-  FollowingState,
-  useMyFollowingStore,
   useFootStore,
   AsyncModel,
   useUploadingStore,

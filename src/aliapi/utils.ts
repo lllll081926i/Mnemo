@@ -7,8 +7,8 @@ import AliHttp from './alihttp'
 import AliFile from './file'
 import { IAliBatchResult } from './models'
 
-import { SHA256 } from 'crypto-js'
-import { ecdsaSign, publicKeyCreate } from 'secp256k1'
+import { SHA1, SHA256 } from 'crypto-js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { IAliFileItem, IAliGetFileModel } from './alimodels'
 import { decodeName, encodeName } from '../module/flow-enc/utils'
 import path from 'path'
@@ -239,6 +239,12 @@ export function isNonAliyunProvider(user: string | { user_id?: string; tokenfrom
   )
 }
 
+export function GetDeviceId(userId: string): string {
+  const hash = SHA1(userId).toString()
+  const variant = ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16)
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`
+}
+
 export function GetSignature(nonce: number, user_id: string, deviceId: string) {
   const toHex = (bytes: Uint8Array) => {
     const hashArray = Array.from(bytes) // convert buffer to byte array
@@ -256,9 +262,9 @@ export function GetSignature(nonce: number, user_id: string, deviceId: string) {
     return u8
   }
   const privateKey = toU8(SHA256(user_id))
-  const publicKey = '04' + toHex(publicKeyCreate(privateKey))
+  const publicKey = '04' + toHex(secp256k1.getPublicKey(privateKey, true))
   const appId = ''
-  const signature = toHex(ecdsaSign(toU8(SHA256(`${appId}:${deviceId}:${user_id}:${nonce}`)), privateKey).signature) + '01'
+  const signature = toHex(secp256k1.sign(toU8(SHA256(`${appId}:${deviceId}:${user_id}:${nonce}`)), privateKey, { prehash: false, lowS: true })) + '01'
   return { signature, publicKey }
 }
 

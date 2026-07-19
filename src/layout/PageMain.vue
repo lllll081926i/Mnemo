@@ -89,10 +89,6 @@ const handleMaxClick = (_e: any) => {
   if (window.WebToElectron) window.WebToElectron({ cmd: 'maxsize' })
 }
 
-const handleGlobalSearch = () => {
-  appStore.toggleTab('search')
-}
-
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestAlt('1', state.KeyDownEvent, () => appStore.toggleTab('pan'))) return
   if (TestAlt('2', state.KeyDownEvent, () => appStore.toggleTab('down'))) return

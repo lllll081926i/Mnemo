@@ -1,8 +1,6 @@
 import { EventEmitter } from 'node:events'
-import { Client as SSDPClient, SsdpHeaders } from 'node-ssdp'
-import dgram from 'dgram'
+import createSsdp, { type SSDP, type Service } from '@achingbrain/ssdp'
 import Player from './player'
-import { XMLParser } from 'fast-xml-parser'
 
 export interface DeviceInfo {
   name: string;
@@ -13,42 +11,54 @@ export interface DeviceInfo {
 }
 
 class Dlna extends EventEmitter {
-  private ssdpClient: any
+  private ssdpClient?: SSDP
+  private ssdpClientPromise?: Promise<SSDP>
+  private searchController?: AbortController
   private casts: { [name: string]: DeviceInfo } = {}
 
-  constructor() {
-    super()
-    try {
-      this.ssdpClient = new SSDPClient()
-    } catch {}
+  private getClient() {
+    if (this.ssdpClient) return Promise.resolve(this.ssdpClient)
+    this.ssdpClientPromise ||= createSsdp().then((client) => {
+      this.ssdpClient = client
+      client.on('error', (error) => this.emit('error', error))
+      return client
+    })
+    return this.ssdpClientPromise
   }
 
   search() {
-    if (!this.ssdpClient) return
-    this.ssdpClient.search('urn:schemas-upnp-org:device:MediaRenderer:1')
-    this.ssdpClient.on('response', (headers: SsdpHeaders, statusCode: number, info: dgram.RemoteInfo) => {
-      if (!headers.LOCATION) return
-      fetch(headers.LOCATION).then(res => res.text()).then((body) => {
-        let service = new XMLParser({ ignoreAttributes: false }).parse(body)
-        console.log('service', service)
-        const device = service.root.device
-        if (!service.root || !device || !device.friendlyName) return
-        const name = device.friendlyName
-        const host = info.address
-        const xml = headers.LOCATION!!
-        if (!this.casts[name]) {
-          this.casts[name] = { name: name, host: host, xml: xml, info: device }
-          return this.listen(this.casts[name])
-        }
-        if (this.casts[name] && !this.casts[name].host) {
-          this.casts[name].host = host
-          this.casts[name].xml = xml
-          return this.listen(this.casts[name])
-        }
-      }).catch(err => {
-        console.error(err)
-      })
-    })
+    this.searchController?.abort()
+    const controller = new AbortController()
+    this.searchController = controller
+    void this.discover(controller)
+  }
+
+  private async discover(controller: AbortController) {
+    try {
+      const client = await this.getClient()
+      if (controller.signal.aborted) return
+      for await (const service of client.discover({ serviceType: 'urn:schemas-upnp-org:device:MediaRenderer:1', signal: controller.signal })) {
+        this.addService(service)
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) this.emit('error', error)
+    }
+  }
+
+  private addService(service: Service<any>) {
+    const device = service.details?.device
+    const name = String(device?.friendlyName || '').trim()
+    if (!name) return
+    const xml = service.location.toString()
+    const host = service.location.hostname
+    if (!this.casts[name]) {
+      this.casts[name] = { name, host, xml, info: device }
+      this.listen(this.casts[name])
+    } else if (!this.casts[name].host) {
+      this.casts[name].host = host
+      this.casts[name].xml = xml
+      this.listen(this.casts[name])
+    }
   }
 
   listen(device: DeviceInfo) {
@@ -60,9 +70,12 @@ class Dlna extends EventEmitter {
 
   destroy() {
     this.casts = {}
-    this.ssdpClient.stop()
-    this.ssdpClient.removeAllListeners('response')
-    if (global.gc) global.gc()
+    this.searchController?.abort()
+    this.searchController = undefined
+    const client = this.ssdpClient
+    this.ssdpClient = undefined
+    this.ssdpClientPromise = undefined
+    if (client) void client.stop().catch((error) => this.emit('error', error))
   }
 }
 

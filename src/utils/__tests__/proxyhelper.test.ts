@@ -13,13 +13,13 @@ describe('buildUpstreamProxyHeaders', () => {
       authorization: 'Bearer local-token',
       'user-agent': 'Mozilla/5.0'
     }, JSON.stringify({
-      'X-Emby-Authorization': 'MediaBrowser Token="server-token"',
-      'X-Emby-Token': 'server-token'
+      'X-Provider-Authorization': 'Bearer provider-token',
+      'X-Provider-Token': 'provider-token'
     }))
 
     expect(headers.range).toBe('bytes=32768-33051')
-    expect(headers['x-emby-authorization']).toBe('MediaBrowser Token="server-token"')
-    expect(headers['x-emby-token']).toBe('server-token')
+    expect(headers['x-provider-authorization']).toBe('Bearer provider-token')
+    expect(headers['x-provider-token']).toBe('provider-token')
     expect(headers['accept-encoding']).toBe('identity')
     expect(headers.host).toBeUndefined()
     expect(headers.connection).toBeUndefined()

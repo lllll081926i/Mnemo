@@ -11,16 +11,18 @@ import AliUploadHashPool from './uploadhashpool'
 import nodehttps from 'https'
 import type { ClientRequest } from 'http'
 import path from 'path'
-import { Howl } from 'howler'
 import { useSettingStore } from '../store'
 import FlowEnc from '../module/flow-enc'
 import { getFlowEnc } from '../utils/proxyhelper'
 
-const sound = new Howl({
-  src: ['./audio/upload_finished.mp3'], // 音频文件路径
-  autoplay: false, // 是否自动播放
-  volume: 1.0 // 音量，范围 0.0 ~ 1.0
-})
+let completionSound: HTMLAudioElement | undefined
+const playCompletionSound = () => {
+  if (typeof Audio === 'undefined') return
+  completionSound ||= new Audio('./audio/upload_finished.mp3')
+  if (!completionSound.paused) return
+  completionSound.currentTime = 0
+  void completionSound.play().catch(() => undefined)
+}
 
 const filePosMap = new Map<number, number>()
 let UploadSpeedTotal = 0
@@ -57,9 +59,7 @@ export default class AliUploadDisk {
         fileui.Info.up_file_id = ''
         fileui.Info.up_upload_id = ''
         if (isSuccess) {
-          if (useSettingStore().downFinishAudio && !sound.playing()) {
-            sound.play()
-          }
+          if (useSettingStore().downFinishAudio) playCompletionSound()
           return 'success'
         } else return '合并文件时出错，请重试'
       })
@@ -133,9 +133,7 @@ export default class AliUploadDisk {
     return AliUpload.UploadFileComplete(fileui.user_id, fileui.drive_id, fileui.Info.up_file_id, fileui.Info.up_upload_id, fileui.File.size, uploadInfo.sha1)
       .then(async (isSuccess) => {
         if (isSuccess) {
-          if (useSettingStore().downFinishAudio && !sound.playing()) {
-            sound.play()
-          }
+          if (useSettingStore().downFinishAudio) playCompletionSound()
           return 'success'
         } else return '合并文件时出错，请重试'
       })
@@ -156,8 +154,6 @@ export default class AliUploadDisk {
 
       let option = {
         method: 'PUT',
-        strictSSL: false,
-        rejectUnauthorized: false,
         timeout: 15000,
         headers: {
           'Content-Type': '',

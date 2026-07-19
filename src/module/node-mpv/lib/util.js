@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import ErrorHandler from './error'
 import { stat } from 'node:fs'
 
@@ -40,7 +40,7 @@ const util = {
         // the name of the ipc command was changed in mpv version 0.17.0 to '--input-ipc-server'
         // that's why we have to check which mpv version is running
         // asks for the mpv version
-        exec(options.binary + ' --version',
+        execFile(options.binary || 'mpv', ['--version'],
           { encoding: 'utf8' }, (err, stdout, stderr) => {
             // if any error occurs reject it
             if (err) {
@@ -134,7 +134,6 @@ const util = {
       time_update: 1,
       binary: null,
       spawnOptions: {
-        shell: true,
         windowsVerbatimArguments: true
       }
     }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.js?url'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { KeyboardState, useAppStore, useKeyboardStore } from '../store'
 import { TestAlt, TestKey } from '../utils/keyboardhelper'
 import message from '../utils/message'
