@@ -26,10 +26,6 @@ const cb = (val: any) => settingStore.updateStore(val)
       <div class="ui-plain-control"><MySwitch :value="settingStore.uiShowPanPath" @update:value="cb({ uiShowPanPath: $event })" /></div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">显示媒体信息</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.uiShowPanMedia" @update:value="cb({ uiShowPanMedia: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">文件夹预览</span>
       <div class="ui-plain-control"><MySwitch :value="settingStore.uiFolderPreviewEnabled" @update:value="cb({ uiFolderPreviewEnabled: $event })" /></div>
     </div>

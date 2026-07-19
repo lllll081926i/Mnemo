@@ -1,7 +1,6 @@
 import Dexie from 'dexie'
 import { ITokenInfo } from '../user/userstore'
 import { IOtherShareLinkModel } from '../share/share/OtherShareStore'
-import { IMusicTrack } from '../types/music'
 
 class MNEMODB3 extends Dexie {
   iobject: Dexie.Table<object, string>
@@ -12,7 +11,6 @@ class MNEMODB3 extends Dexie {
 
   itoken: Dexie.Table<ITokenInfo, string>
   iothershare: Dexie.Table<IOtherShareLinkModel, string>
-  imusic_track: Dexie.Table<IMusicTrack, string>
 
   constructor() {
     super('MNEMO3Database')
@@ -146,6 +144,18 @@ class MNEMODB3 extends Dexie {
         ibook_ai_message: null
       })
 
+    this.version(17)
+      .stores({
+        iobject: '',
+        istring: '',
+        inumber: '',
+        ibool: '',
+        icache: '',
+        itoken: 'user_id',
+        iothershare: 'share_id',
+        imusic_track: null
+      })
+
     this.iobject = this.table('iobject')
     this.istring = this.table('istring')
     this.inumber = this.table('inumber')
@@ -154,7 +164,6 @@ class MNEMODB3 extends Dexie {
 
     this.itoken = this.table('itoken')
     this.iothershare = this.table('iothershare')
-    this.imusic_track = this.table('imusic_track')
   }
 
   async getValueString(key: string): Promise<string> {
@@ -281,53 +290,6 @@ class MNEMODB3 extends Dexie {
   async saveOtherShare(share: IOtherShareLinkModel): Promise<string | void> {
     if (!this.isOpen()) await this.open().catch(() => {})
     return this.iothershare.put(share, share.share_id).catch(() => {})
-  }
-
-  async saveMusicTracks(tracks: IMusicTrack[]): Promise<string | void> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    if (!tracks.length) return
-    return this.imusic_track.bulkPut(tracks).catch(() => {})
-  }
-
-  async getMusicTrackById(id: string): Promise<IMusicTrack | undefined> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.get(id)
-  }
-
-  async getAllMusicTracks(): Promise<IMusicTrack[]> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.toArray()
-  }
-
-  async getMusicTracksByDrive(user_id: string, drive_id: string): Promise<IMusicTrack[]> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.where({ user_id, drive_id }).toArray()
-  }
-
-  async deleteMusicTrack(id: string): Promise<void> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.delete(id)
-  }
-
-  async deleteMusicTracksByIds(ids: string[]): Promise<number> {
-    if (!ids || ids.length === 0) return 0
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.bulkDelete(ids).then(() => ids.length).catch(() => 0)
-  }
-
-  async deleteMusicTracksByDrive(user_id: string, drive_id: string): Promise<number> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.where({ user_id, drive_id }).delete()
-  }
-
-  async clearMusicTracks(): Promise<void> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.clear()
-  }
-
-  async countMusicTracks(): Promise<number> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.imusic_track.count()
   }
 
 }

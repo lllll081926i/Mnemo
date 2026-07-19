@@ -12,7 +12,6 @@ import UploadingDAL from '../transfer/uploadingdal'
 import { Sleep } from '../utils/format'
 import { createProxyServer } from '../utils/proxyhelper'
 import cache from '../utils/cache'
-import WebDavServer from '../module/webdav'
 
 export function PageMain() {
   if (window.WinMsg) return
@@ -73,20 +72,6 @@ export function PageMain() {
         DebugLog.mSaveDanger('AppCacheDALDB', err)
       })
 
-      // 启动WebDav
-      if (useSettingStore().webDavAutoEnable) {
-        await WebDavServer.config({
-          port: useSettingStore().webDavPort,
-          hostname: useSettingStore().webDavHost,
-          requireAuthentification: false
-        }).start().then(() => {
-          useSettingStore().webDavEnable = WebDavServer.isStarted()
-        }).catch((err: any) => {
-          useSettingStore().webDavEnable = false
-        })
-      } else {
-        useSettingStore().webDavEnable = false
-      }
       // 开启定时任务
       setTimeout(timeEvent, 1000)
     })

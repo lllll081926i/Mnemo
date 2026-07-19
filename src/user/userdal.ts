@@ -15,7 +15,6 @@ import { applyBoxQuota, refreshBoxAccessToken } from '../box/auth'
 import { refreshCloud189Token } from '../cloud189/auth'
 import { fetchGuangyaUserInfo, refreshGuangyaAccessToken } from '../guangya/auth'
 import { GetDriveType, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isNonAliyunProvider, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
-import { promptAutoScanForUser } from '../utils/libraryAutoScanPrompt'
 import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
 import { getDriveProviderSidebarEntries } from '../utils/driveProvider'
@@ -529,12 +528,6 @@ export default class UserDAL {
       useOtherFollowingStore().$reset()
       useFootStore().mSaveUserInfo(token)
       message.success('加载用户成功!', 2, loadingKey)
-      if (isInteractive) {
-        const label = token.nick_name || token.user_name || token.user_id
-        promptAutoScanForUser(token.user_id, label).catch(() => {
-          /* ignore */
-        })
-      }
     } catch (err: any) {
       useFootStore().mSaveLoading('')
       await DB.saveValueString('uiDefaultUser', previousDefaultUserId)

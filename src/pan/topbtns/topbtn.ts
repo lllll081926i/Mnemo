@@ -1,7 +1,6 @@
 import { IAliGetFileModel } from '../../aliapi/alimodels'
 import AliFile from '../../aliapi/file'
 import AliFileCmd from '../../aliapi/filecmd'
-import { handleFilesDeleted } from '../../utils/libraryDeleteHooks'
 import { IAliFileResp, NewIAliFileResp } from '../../aliapi/dirfilelist'
 import AliTrash from '../../aliapi/trash'
 import { IPageVideoXBT } from '../../store/appstore'
@@ -324,11 +323,6 @@ export async function menuTrashSelectFile(istree: boolean, isDelete: boolean, is
         await PanDAL.aReLoadOneDirToRefreshTree(selectedData.user_id, selectedData.drive_id, selectedData.dirID, selectedData.albumId)
         TreeStore.ClearDirSize(selectedData.drive_id, selectedData.selectedParentKeys)
       }
-    }
-    if (!ispic && successList && successList.length > 0) {
-      handleFilesDeleted(selectedData.user_id, selectedData.drive_id, successList).catch(() => {
-        /* ignore */
-      })
     }
   } catch (err: any) {
     message.error(err.message)

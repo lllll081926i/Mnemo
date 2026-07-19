@@ -5,7 +5,8 @@ import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
 
-const STORAGE_KEY = 'MediaLibrary_WebDavConnections'
+const STORAGE_KEY = 'mnemo.webdav.connections'
+const LEGACY_STORAGE_KEY = 'MediaLibrary_WebDavConnections'
 
 export interface WebDavConnectionConfig {
   id: string
@@ -113,10 +114,15 @@ export const getWebDavConnectionId = (driveId?: string) => {
 
 export const getWebDavConnections = (): WebDavConnectionConfig[] => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
+    if (!Array.isArray(parsed)) return []
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+    }
+    return parsed
   } catch (error) {
     console.error('读取 WebDAV 连接配置失败:', error)
     return []

@@ -443,11 +443,7 @@ export default class AliDirFileList {
 
   private static async _ApiDirFileListOnePage(orderby: string, order: string, dir: IAliFileResp, type: string, pageIndex: number, refresh: boolean = true): Promise<boolean> {
     let url = 'adrive/v3/file/list'
-    if (useSettingStore().uiShowPanMedia == false) {
-      url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + ')'
-    } else {
-      url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + '%2Cuser_meta%2Cvideo_media_metadata(duration%2Cwidth%2Cheight%2Ctime)%2Cvideo_preview_metadata%2Fduration%2Cimage_media_metadata)'
-    }
+    url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + ')'
     let postData: any = {
       drive_id: dir.m_drive_id,
       parent_file_id: (dir.dirID === 'resource_root' || dir.dirID === 'backup_root' || dir.dirID.includes('root')) ? 'root' : dir.dirID,
@@ -533,8 +529,7 @@ export default class AliDirFileList {
 
   private static async _ApiFavorFileListOnePage(orderby: string, order: string, dir: IAliFileResp, pageIndex: number): Promise<boolean> {
     let url = 'v2/file/list_by_custom_index_key'
-    if (useSettingStore().uiShowPanMedia == false) url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + ')'
-    else url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + '%2Cuser_meta%2Cvideo_media_metadata(duration%2Cwidth%2Cheight%2Ctime)%2Cvideo_preview_metadata%2Fduration%2Cimage_media_metadata)'
+    url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + ')'
 
     const postData = {
       drive_id: dir.m_drive_id,
@@ -583,8 +578,7 @@ export default class AliDirFileList {
 
   // static async _ApiSearchFileListOnePage(orderby: string, order: string, dir: IAliFileResp, pageIndex: number): Promise<boolean> {
   //   let url = 'adrive/v3/file/search'
-  //   if (useSettingStore().uiShowPanMedia == false) url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + ')'
-  //   else url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + '%2Cuser_meta%2Cvideo_media_metadata(duration%2Cwidth%2Cheight%2Ctime)%2Cvideo_preview_metadata%2Fduration%2Cimage_media_metadata)'
+  //   url += '?jsonmask=next_marker%2Citems(' + AliDirFileList.ItemJsonmask + ')'
   //
   //   let query = ''
   //   let drive_id_list = []

@@ -98,20 +98,10 @@ export interface SettingState {
 
   // 网盘设置
   uiShowPanPath: boolean
-  uiShowPanMedia: boolean
   uiShowPanRootFirst: string
   uiFolderSize: boolean
   uiFolderPreviewEnabled: boolean
   uiFolderPreviewAutoHide: number
-  uiLibraryAutoScanMusic: boolean
-  uiLibraryAutoScanVideo: boolean
-  uiLibraryIncrementalScan: boolean
-  uiLibraryScanIntervalHours: number
-  uiLibraryAutoScanPromptedUsers: string[]
-  uiLibraryAutoScanMusicDisabledUsers: string[]
-  uiLibraryAutoScanVideoDisabledUsers: string[]
-  uiLibraryFollowManualScans: boolean
-  uiMusicAutoScanFolders: { user_id: string; drive_id: string; file_id: string; name: string; path?: string }[]
   uiFileOrderDuli: string
   uiTimeFolderFormate: string
   uiTimeFolderIndex: number
@@ -156,14 +146,6 @@ export interface SettingState {
   downIngoredList: string[]
   downFinishAudio: boolean
   downAutoStart: boolean
-
-  // webdav
-  webDavEnable: boolean
-  webDavAutoEnable: boolean
-  webDavHost: string
-  webDavPort: number
-  webDavListCache: number
-  webDavStrategy: string
 
   // 高级选项
   debugDirSize: string
@@ -273,20 +255,10 @@ const setting: SettingState = {
 
   // 网盘设置
   uiShowPanPath: true,
-  uiShowPanMedia: false,
   uiShowPanRootFirst: 'all',
   uiFolderSize: true,
   uiFolderPreviewEnabled: true,
   uiFolderPreviewAutoHide: 6,
-  uiLibraryAutoScanMusic: false,
-  uiLibraryAutoScanVideo: false,
-  uiLibraryIncrementalScan: true,
-  uiLibraryScanIntervalHours: 24,
-  uiLibraryAutoScanPromptedUsers: [],
-  uiLibraryAutoScanMusicDisabledUsers: [],
-  uiLibraryAutoScanVideoDisabledUsers: [],
-  uiLibraryFollowManualScans: true,
-  uiMusicAutoScanFolders: [],
   uiFileOrderDuli: 'null',
   uiTimeFolderFormate: 'yyyy-MM-dd HH-mm-ss',
   uiTimeFolderIndex: 1,
@@ -336,14 +308,6 @@ const setting: SettingState = {
   downIngoredList: ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading'],
   downFinishAudio: true,
   downAutoStart: true,
-
-  // webdav
-  webDavEnable: false,
-  webDavAutoEnable: false,
-  webDavHost: '127.0.0.1',
-  webDavPort: 8888,
-  webDavListCache: 10,
-  webDavStrategy: 'redirect',
 
   // 高级选项
   debugCacheSize: '',
@@ -461,36 +425,10 @@ function _loadSetting(val: any) {
 
   // 网盘设置
   setting.uiShowPanPath = defaultBool(val.uiShowPanPath, true)
-  setting.uiShowPanMedia = defaultBool(val.uiShowPanMedia, false)
   setting.uiShowPanRootFirst = defaultValue(val.uiShowPanRootFirst, ['all', 'backup', 'resource'])
   setting.uiFolderSize = defaultBool(val.uiFolderSize, true)
   setting.uiFolderPreviewEnabled = defaultBool(val.uiFolderPreviewEnabled, true)
   setting.uiFolderPreviewAutoHide = defaultNumber(val.uiFolderPreviewAutoHide, 6)
-  setting.uiLibraryAutoScanMusic = defaultBool(val.uiLibraryAutoScanMusic, false)
-  setting.uiLibraryAutoScanVideo = defaultBool(val.uiLibraryAutoScanVideo, false)
-  setting.uiLibraryIncrementalScan = defaultBool(val.uiLibraryIncrementalScan, true)
-  setting.uiLibraryScanIntervalHours = defaultNumberSub(val.uiLibraryScanIntervalHours, 24, 1, 24 * 30)
-  setting.uiLibraryAutoScanPromptedUsers = Array.isArray(val.uiLibraryAutoScanPromptedUsers)
-    ? val.uiLibraryAutoScanPromptedUsers.filter((s: unknown) => typeof s === 'string')
-    : []
-  setting.uiLibraryAutoScanMusicDisabledUsers = Array.isArray(val.uiLibraryAutoScanMusicDisabledUsers)
-    ? val.uiLibraryAutoScanMusicDisabledUsers.filter((s: unknown) => typeof s === 'string')
-    : []
-  setting.uiLibraryAutoScanVideoDisabledUsers = Array.isArray(val.uiLibraryAutoScanVideoDisabledUsers)
-    ? val.uiLibraryAutoScanVideoDisabledUsers.filter((s: unknown) => typeof s === 'string')
-    : []
-  setting.uiLibraryFollowManualScans = defaultBool(val.uiLibraryFollowManualScans, true)
-  setting.uiMusicAutoScanFolders = Array.isArray(val.uiMusicAutoScanFolders)
-    ? val.uiMusicAutoScanFolders
-        .filter((f: any) => f && typeof f.user_id === 'string' && typeof f.drive_id === 'string' && typeof f.file_id === 'string')
-        .map((f: any) => ({
-          user_id: String(f.user_id),
-          drive_id: String(f.drive_id),
-          file_id: String(f.file_id),
-          name: typeof f.name === 'string' ? f.name : '',
-          path: typeof f.path === 'string' ? f.path : ''
-        }))
-    : []
   setting.uiFileOrderDuli = defaultString(val.uiFileOrderDuli, 'null')
   setting.uiTimeFolderFormate = defaultString(val.uiTimeFolderFormate, 'yyyy-MM-dd HH-mm-ss').replace('mm-dd', 'MM-dd').replace('HH-MM', 'HH-mm')
   setting.uiTimeFolderIndex = defaultNumber(val.uiTimeFolderIndex, 1)
@@ -526,14 +464,6 @@ function _loadSetting(val: any) {
   setting.downIngoredList = val.downIngoredList && val.downIngoredList.length > 0 ? val.downIngoredList : ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading']
   setting.downFinishAudio = defaultBool(val.downFinishAudio, true)
   setting.downAutoStart = defaultBool(val.downAutoStart, true)
-
-  // webdav
-  setting.webDavEnable = defaultBool(val.webDavEnable, false)
-  setting.webDavAutoEnable = defaultBool(val.webDavAutoEnable, false)
-  setting.webDavHost = defaultString(val.webDavHost, '127.0.0.1')
-  setting.webDavPort = defaultNumber(val.webDavPort, 12000)
-  setting.webDavListCache = defaultNumber(val.webDavListCache, 10)
-  setting.webDavStrategy = defaultValue(val.webDavStrategy, ['redirect', 'proxy'])
 
   // 高级选项
   setting.debugDirSize = defaultString(val.debugDirSize, '')
@@ -669,8 +599,7 @@ const useSettingStore = defineStore('setting', {
       if (Object.hasOwn(partial, 'uiLaunchStart')) {
         window.WebToElectron({ cmd: { launchStart: this.uiLaunchStart, launchStartShow: this.uiLaunchStartShow } })
       }
-      if (Object.hasOwn(partial, 'uiShowPanMedia')
-        || Object.hasOwn(partial, 'uiFolderSize')
+      if (Object.hasOwn(partial, 'uiFolderSize')
         || Object.hasOwn(partial, 'uiFileOrderDuli')) {
         await PanDAL.aReLoadOneDirToShow('', 'refresh', false)
       }

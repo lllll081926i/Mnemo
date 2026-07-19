@@ -2,19 +2,13 @@
 import { menuCopySelectedFile, menuCreatShare, menuDownload, menuTrashSelectFile } from '../topbtns/topbtn'
 import { modalRename, modalShuXing } from '../../utils/modal'
 import PanDAL from '../pandal'
-import { usePanTreeStore, useAppStore } from '../../store'
+import { usePanTreeStore } from '../../store'
 import TreeStore from '../../store/treestore'
-import { MediaScanner } from '../../utils/mediaScanner'
-import MusicScanner from '../../utils/musicScanner'
-import message from '../../utils/message'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { isAliyunUser as isAliyunAccountUser, isBoxUser, isCloud123User, isDropboxUser, isGuangyaUser, isOneDriveUser } from '../../aliapi/utils'
 
 const istree = true
 const pantreeStore = usePanTreeStore()
-const appStore = useAppStore()
-const mediaScanner = MediaScanner.getInstance()
-const musicScanner = MusicScanner.getInstance()
 const isCloudUser = computed(() => isCloud123User(pantreeStore.user_id || '') || pantreeStore.drive_id === 'cloud123')
 const isAliyunAccount = computed(() => isAliyunAccountUser(pantreeStore.user_id || ''))
 const isDropbox = computed(() => isDropboxUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'dropbox')
@@ -53,69 +47,6 @@ const handleExpandAll = (isExpand: boolean) => {
   })()
   pantreeStore.mTreeExpandAll(diridList, isExpand)
 }
-
-const buildSelectedFolder = () => {
-  const selectDir = pantreeStore.selectDir
-  if (!selectDir || !selectDir.file_id) {
-    message.warning('请先选择要扫描的文件夹')
-    return null
-  }
-  const folder = {
-    __v_skip: true,
-    drive_id: pantreeStore.drive_id,
-    file_id: selectDir.file_id,
-    parent_file_id: selectDir.parent_file_id || '',
-    name: selectDir.name,
-    namesearch: (selectDir.name || '').toLowerCase(),
-    ext: '',
-    mime_type: '',
-    mime_extension: '',
-    category: 'folder',
-    icon: 'iconfolder',
-    file_count: 0,
-    size: 0,
-    sizeStr: '',
-    time: Date.now(),
-    timeStr: new Date().toLocaleString(),
-    starred: false,
-    isDir: true,
-    thumbnail: '',
-    path: (selectDir as any).path || ''
-  } as any
-  return folder
-}
-
-// 扫描类型勾选
-const scanVideo = ref(true)
-const scanAudio = ref(false)
-const isScanning = computed(() => mediaScanner.isCurrentlyScanning || musicScanner.isScanning)
-
-const handleStartScan = async () => {
-  const folder = buildSelectedFolder()
-  if (!folder) return
-  if (isScanning.value) { message.warning('正在扫描中，请稍后...'); return }
-  if (!scanVideo.value && !scanAudio.value) { message.warning('请至少勾选一种扫描类型'); return }
-
-  const userId = pantreeStore.user_id || ''
-  const tasks: Promise<any>[] = []
-
-  if (scanVideo.value && !mediaScanner.isCurrentlyScanning) {
-    message.info(`开始扫描 "${folder.name}" 视频`)
-    appStore.toggleTab('media')
-    tasks.push(mediaScanner.scanFolder(folder, pantreeStore.drive_id).catch(e => console.error('视频扫描失败:', e)))
-  }
-  if (scanAudio.value && !musicScanner.isScanning) {
-    if (!userId) { message.error('未识别到当前账号，无法扫描'); return }
-    appStore.toggleTab('music')
-    tasks.push(musicScanner.scanFolder(folder, userId).then(r => message.success(`音频扫描完成：收录 ${r.found} 首`)).catch(e => console.error('音频扫描失败:', e)))
-  }
-  await Promise.allSettled(tasks)
-}
-
-// 检查是否选中了有效的文件夹
-const isSelectedFolder = computed(() => {
-  return pantreeStore.selectDir && pantreeStore.selectDir.file_id && pantreeStore.selectDir.file_id !== ''
-})
 
 </script>
 
@@ -156,36 +87,6 @@ const isSelectedFolder = computed(() => {
         <template #icon><IconFont name="iconrss" /></template>
         <template #default>快传</template>
       </a-doption>
-
-      <!-- 扫描数据 -->
-      <a-dsubmenu v-if="isSelectedFolder" class="rightmenu" trigger="hover">
-        <template #default>
-          <div @click.stop="() => {}">
-            <span class="arco-dropdown-option-icon">
-              <IconFont name="iconscan" style="opacity: 0.8" />
-            </span>
-            扫描数据
-          </div>
-        </template>
-        <template #content>
-          <a-doption @click.stop="scanVideo = !scanVideo">
-            <template #icon>
-              <IconFont :name="scanVideo ? 'iconcheckbox-full' : 'iconfangkuang'" :style="scanVideo ? 'color: rgb(var(--primary-6))' : ''" />
-            </template>
-            <template #default>视频</template>
-          </a-doption>
-          <a-doption @click.stop="scanAudio = !scanAudio">
-            <template #icon>
-              <IconFont :name="scanAudio ? 'iconcheckbox-full' : 'iconfangkuang'" :style="scanAudio ? 'color: rgb(var(--primary-6))' : ''" />
-            </template>
-            <template #default>音频</template>
-          </a-doption>
-          <a-doption @click="handleStartScan">
-            <template #icon><IconFont name="iconstart" /></template>
-            <template #default>开始扫描</template>
-          </a-doption>
-        </template>
-      </a-dsubmenu>
 
       <a-dsubmenu id="leftpansubmove" class="rightmenu" trigger="hover">
         <template #default>

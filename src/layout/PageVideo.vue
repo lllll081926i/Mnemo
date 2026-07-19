@@ -1,7 +1,5 @@
 <script setup lang='ts'>
 import { KeyboardState, useAppStore, useKeyboardStore, usePanFileStore, useSettingStore } from '../store'
-import { useMediaLibraryStore } from '../store/medialibrary'
-import type { MediaLibraryItem } from '../types/media'
 import { h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Button, Input, Modal, Option as AOption, Select } from '@arco-design/web-vue'
 import Artplayer from 'artplayer'
@@ -72,7 +70,6 @@ import {
 } from '../media-server/contentGateway'
 
 const appStore = useAppStore()
-const mediaStore = useMediaLibraryStore()
 const mediaServerRegistry = useMediaServerRegistryStore()
 const pageVideo = appStore.pageVideo!
 const isTop = ref(false)
@@ -2962,39 +2959,6 @@ const updateVideoTime = async (positionSeconds = ArtPlayerRef?.currentTime || 0,
     pageVideo.file_id,
     positionSeconds
   )
-  updateContinueWatching(positionSeconds, durationSeconds)
-}
-
-const findMediaItemByFileId = (fileId: string): MediaLibraryItem | undefined => {
-  for (const item of mediaStore.mediaItems) {
-    if (item.driveFiles?.some(file => file.id === fileId)) {
-      return item
-    }
-    const season = item.seasons?.find(s =>
-      s.episodes?.some(ep => ep.driveFiles?.some(file => file.id === fileId))
-    )
-    if (season) {
-      const episode = season.episodes?.find(ep => ep.driveFiles?.some(file => file.id === fileId))
-      if (episode) {
-        return {
-          ...item,
-          id: `${item.id}_${season.seasonNumber}_${episode.episodeNumber}`
-        }
-      }
-    }
-  }
-  return undefined
-}
-
-const updateContinueWatching = (positionSeconds = ArtPlayerRef?.currentTime || 0, durationSeconds = ArtPlayerRef?.duration || 0) => {
-  const fileId = pageVideo.file_id
-  const item = findMediaItemByFileId(fileId)
-  if (!item) return
-  const duration = durationSeconds || 0
-  const progress = duration > 0 ? positionSeconds / duration : 0
-  item.watchProgress = Math.max(0, Math.min(1, progress))
-  item.lastWatched = new Date()
-  mediaStore.addToContinueWatching(item)
 }
 
 const handleMpvEmbeddedStatus = async (status: any) => {
