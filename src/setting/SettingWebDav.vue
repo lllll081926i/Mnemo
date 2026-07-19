@@ -1,304 +1,172 @@
-<script setup lang='ts'>
-import useSettingStore from './settingstore'
-import MySwitch from '../layout/MySwitch.vue'
-import WebDavServer from '../module/webdav'
-import { reactive, ref } from 'vue'
+<script setup lang="ts">
+import { computed, ref } from 'vue'
 import message from '../utils/message'
-import { IUser } from 'webdav-server/lib/index.v2'
-import { Sleep } from '../utils/format'
-import AppCache from '../utils/appcache'
-import { getUserData, openExternal } from '../utils/electronhelper'
-import path from 'path'
-import { getIPAddress } from '../utils/proxyhelper'
+import UserDAL from '../user/userdal'
+import useUserStore from '../user/userstore'
+import { createWebDavConnection, createWebDavUserToken, getWebDavConnections, removeWebDavConnection, saveWebDavConnection, testWebDavConnection, type WebDavConnectionConfig } from '../utils/webdavClient'
 
-const cb = (val: any) => {
-  if (Object.hasOwn(val, 'webDavPort') && val.webDavPort !== settingStore.webDavPort) {
-    WebDavServer.config({ port: val.webDavPort })
-  }
-  if (Object.hasOwn(val, 'webDavHost') && val.webDavHost !== settingStore.webDavHost) {
-    WebDavServer.config({ port: val.webDavHost })
-  }
-  settingStore.updateStore(val)
+type WebDavForm = Pick<WebDavConnectionConfig, 'name' | 'url' | 'username' | 'password' | 'rootPath'>
+
+const connections = ref<WebDavConnectionConfig[]>(getWebDavConnections())
+const editingId = ref('')
+const formVisible = ref(connections.value.length === 0)
+const saving = ref(false)
+const testingId = ref('')
+const form = ref<WebDavForm>({ name: '', url: '', username: '', password: '', rootPath: '/' })
+
+const isEditing = computed(() => !!editingId.value)
+const useUser = useUserStore()
+
+const refreshConnections = () => {
+  connections.value = getWebDavConnections()
 }
 
-const settingStore = useSettingStore()
-const loading = ref(false)
-const options = ref<IUser[]>([])
-// 弹窗
-const addVisible = ref(false)
-const okLoading = ref(false)
-const formRef = ref()
-const selectUser = ref()
-const form = reactive({
-  webDavUsername: '',
-  webDavPassword: '',
-  webDavPath: '/',
-  webDavRights: ['all']
-})
+const resetForm = () => {
+  editingId.value = ''
+  formVisible.value = connections.value.length === 0
+  form.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
+}
 
-const handleWebDav = async (newVal: any) => {
-  if (!WebDavServer) {
-    message.error('【WebDav】:服务初始化失败，请重启软件')
-    cb({ webDavEnable: false })
-    return false
+const startCreate = () => {
+  editingId.value = ''
+  formVisible.value = true
+  form.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
+}
+
+const startEdit = (connection: WebDavConnectionConfig) => {
+  editingId.value = connection.id
+  formVisible.value = true
+  form.value = {
+    name: connection.name,
+    url: connection.url,
+    username: connection.username,
+    password: connection.password,
+    rootPath: connection.rootPath
   }
+}
+
+const saveConnection = async () => {
+  if (saving.value) return
+  if (!form.value.name.trim() || !form.value.url.trim() || !form.value.username.trim() || !form.value.password.trim()) {
+    message.error('请填写 WebDAV 名称、地址、用户名和密码')
+    return
+  }
+
+  saving.value = true
   try {
-    let status: boolean = true
-    if (newVal) {
-      status = await WebDavServer.config({
-        port: settingStore.webDavPort,
-        hostname: settingStore.webDavHost,
-        requireAuthentification: false
-      }).start()
-      if (status) {
-        message.success('【WebDav】:服务已启动')
-        cb({ webDavEnable: true })
-      } else {
-        message.error('【WebDav】:服务启动失败')
-        cb({ webDavEnable: false })
-      }
-    } else {
-      await WebDavServer.stop()
-      message.success('【WebDav】:服务已关闭')
-      cb({ webDavEnable: false })
+    const current = connections.value.find((item) => item.id === editingId.value)
+    const created = createWebDavConnection(form.value)
+    const connection = current ? { ...created, id: current.id, createdAt: current.createdAt } : created
+    await testWebDavConnection(connection)
+    saveWebDavConnection(connection)
+    refreshConnections()
+    if (useUser.user_id === `webdav:${connection.id}`) {
+      await UserDAL.UserLogin(createWebDavUserToken(connection))
     }
-    await Sleep(200)
-    return status
+    message.success(current ? 'WebDAV 已更新' : 'WebDAV 已添加')
+    resetForm()
   } catch (error: any) {
-    message.error(`【WebDav】:${error}`)
-    return false
+    message.error(`连接 WebDAV 服务器失败: ${error?.message || '未知错误'}`)
+  } finally {
+    saving.value = false
   }
 }
 
-const handleGetLocalIp = () => {
-  if (settingStore.webDavHost.includes('127')) {
-    let localIp = getIPAddress()
-    cb({ webDavHost: localIp })
+const testConnection = async (connection: WebDavConnectionConfig) => {
+  if (testingId.value) return
+  testingId.value = connection.id
+  try {
+    await testWebDavConnection(connection)
+    message.success('WebDAV 连接正常')
+  } catch (error: any) {
+    message.error(`WebDAV 连接失败: ${error?.message || '未知错误'}`)
+  } finally {
+    testingId.value = ''
+  }
+}
+
+const openConnection = async (connection: WebDavConnectionConfig) => {
+  try {
+    await UserDAL.UserLogin(createWebDavUserToken(connection), true)
+  } catch (error: any) {
+    message.error(`打开 WebDAV 失败: ${error?.message || '未知错误'}`)
+  }
+}
+
+const deleteConnection = async (connection: WebDavConnectionConfig) => {
+  removeWebDavConnection(connection.id)
+  if (useUser.user_id === `webdav:${connection.id}`) {
+    await UserDAL.UserLogOff(`webdav:${connection.id}`)
   } else {
-    cb({ webDavHost: '127.0.0.1' })
+    await UserDAL.UserClearFromDB(`webdav:${connection.id}`)
   }
-}
-
-const handleGetUsers = (visible: boolean) => {
-  if (visible) {
-    loading.value = true
-    setTimeout(async () => {
-      options.value = await WebDavServer.getAllUser()
-      loading.value = false
-    }, 200)
-  }
-}
-
-const handleChangeUser = async (value: any) => {
-  if (value) {
-    selectUser.value = await WebDavServer.getUser(value)
-  }
-}
-
-const handleAddUser = () => {
-  addVisible.value = true
-  form.webDavUsername = ''
-  form.webDavPassword = ''
-  form.webDavPath = '/'
-  form.webDavRights = ['all']
-}
-const handleModifyUser = () => {
-  if (selectUser.value) {
-    addVisible.value = true
-    form.webDavUsername = selectUser.value.username
-    form.webDavPassword = selectUser.value.password || ''
-    form.webDavPath = selectUser.value.path || ''
-    form.webDavRights = selectUser.value.rights
-  } else {
-    message.error('未选择用户')
-  }
-}
-const handleDelUser = () => {
-  if (selectUser.value) {
-    WebDavServer.delUser(selectUser.value.username)
-  } else {
-    message.error('未选择用户')
-  }
-}
-const handleAddOk = async () => {
-  formRef.value.validate(async (data: any) => {
-    if (data) return
-    // 添加用户
-    const success = await WebDavServer.setUser(form.webDavUsername, form.webDavPassword, form.webDavPath, form.webDavRights, false)
-    if (success) {
-      message.success('添加用户成功')
-    } else {
-      message.error('添加用户失败')
-    }
-    addVisible.value = false
-  })
-}
-
-const handleRightsOption = (value: any) => {
-  if (value) {
-    if (value.includes('all') || value.length >= 2) {
-      form.webDavRights = ['all']
-    }
-  }
-}
-const handleAddCancel = () => {
-  addVisible.value = false
-  if (okLoading.value) okLoading.value = false
-  formRef.value.resetFields()
-}
-const handleBeforeClose = () => {
-  if (okLoading.value) okLoading.value = false
-  formRef.value.resetFields()
-}
-const handleJumpPath = () => {
-  const userData = getUserData()
-  openExternal(path.join(userData, 'Cache'))
+  refreshConnections()
+  if (editingId.value === connection.id) resetForm()
+  message.success('WebDAV 已删除')
 }
 </script>
 
 <template>
-  <div class='settingcard'>
-    <div class='settinghead'>WebDav设置</div>
-    <div class='settingrow'>
-      <MySwitch v-model:value='settingStore.webDavEnable' :beforeChange='handleWebDav'>
-        开启WebDav服务
-      </MySwitch>
-    </div>
-    <div class='settingrow'>
-      <MySwitch :value="settingStore.webDavAutoEnable"
-                @update:value="cb({ webDavAutoEnable: $event })">
-        自动启动WebDav服务
-      </MySwitch>
-    </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>主机(Host)</div>
-    <div class='settingrow'>
-      <a-input-search tabindex="-1"
-                      :disabled="settingStore.webDavEnable"
-                      style="width: 320px;"
-                      v-model.trim='settingStore.webDavHost'
-                      button-text='ip'
-                      allow-clear
-                      search-button
-                      @search="handleGetLocalIp"
-                      placeholder="地址（IP）" @update:model-value='cb({ webDavHost: $event })'>
-        <template #prefix> http://</template>
-        <template #suffix> /webdav</template>
-      </a-input-search>
-    </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>端口(Port)</div>
-    <div class='settingrow'>
-      <a-input-number
-        :disabled="settingStore.webDavEnable"
-        tabindex='-1' :style="{ width: '320px' }"
-        placeholder='默认：2000'
-        :model-value='settingStore.webDavPort'
-        @update:model-value='cb({ webDavPort: $event })' />
-    </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>目录缓存时间(秒)</div>
-    <div class='settingrow'>
-      <a-input-number
-        tabindex='-1' :style="{ width: '320px' }"
-        hide-button placeholder='默认：40s'
-        :model-value='settingStore.webDavListCache'
-        @update:model-value='cb({ webDavListCache: $event })' />
-    </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>资源访问策略</div>
-    <div class='settingrow'>
-      <a-select tabindex="-1" :style="{ width: '320px' }"
-                :model-value="settingStore.webDavStrategy"
-                :popup-container="'#SettingDiv'"
-                @update:model-value="cb({ webDavStrategy: $event })">
-        <a-option value='redirect'>302重定向</a-option>
-        <a-option value='proxy'>本地代理</a-option>
-      </a-select>
-    </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>用户列表（修改和查看）</div>
-    <div class='settingrow'>
-      <a-select @popup-visible-change='handleGetUsers'
-                @change='handleChangeUser'
-                :field-names="{ key: 'uid', value: 'username', label: 'username'}"
-                :virtual-list-props='{height:120}'
-                :options='options'
-                :style="{width:'320px'}"
-                placeholder='选择一个用户'
-                :popup-container="'#SettingDiv'"
-                :loading='loading' allow-clear
-                :allow-search='{ retainInputValue: true }' scrollbar>
-      </a-select>
-    </div>
-    <a-modal modal-class='modalclass' :footer='false'
-             v-model:visible='addVisible' title='添加一个用户' unmountOnClose
-             @cancel='handleAddCancel' @before-close='handleBeforeClose'>
-      <a-space direction='vertical' size='large' :style="{width: '400px'}">
-        <a-form ref='formRef' auto-label-width :model='form'>
-          <a-form-item field='webDavUsername' label='用户名' :rules="{ required: true, message:'用户名必填'}">
-            <a-input tabindex='-1'
-                     v-model.trim='form.webDavUsername'
-                     placeholder='用户名(Username)'
-                     allow-clear />
-          </a-form-item>
-          <a-form-item field='webDavPassword' label='密码'
-                       :rules="[
-                         { required: true, message:'密码必填'},
-                         { minLength: 6, message: '密码最小长度为6个字符' }
-                       ]">
-            <a-input
-              tabindex='-1'
-              v-model.trim='form.webDavPassword'
-              placeholder='密码(Password)'
-              allow-clear />
-          </a-form-item>
-          <a-form-item field='webDavPath' label='挂载路径' :rules="{ required: true, message:'挂载路径必填'}">
-            <a-input v-model.trim='form.webDavPath' placeholder='挂载路径(Path)' />
-          </a-form-item>
-          <a-form-item field='webDavRights' label='挂载权限' :rules="{ required: true, message:'挂载权限必填'}">
-            <a-select v-model='form.webDavRights'
-                      @change='handleRightsOption'
-                      multiple :max-tag-count='3'
-                      placeholder='挂载权限(Rights)'>
-              <a-option value='all'>全部权限</a-option>
-              <a-option value='canRead'>可读</a-option>
-              <a-option value='canWrite'>可写</a-option>
-            </a-select>
-          </a-form-item>
-        </a-form>
-      </a-space>
-      <div class='modalfoot'>
-        <div class='modalfoot-spacer'></div>
-        <a-button v-if='!okLoading' type='outline' size='small' @click='handleAddCancel'>取消</a-button>
-        <a-button type='primary' size='small' :loading='okLoading' @click='handleAddOk'>添加</a-button>
+  <div class="ui-plain-list webdav-settings">
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">WebDAV 连接</span>
+      <div class="ui-plain-control">
+        <a-button size="small" type="outline" @click="startCreate">添加 WebDAV</a-button>
       </div>
-    </a-modal>
-    <div class='settingspace'></div>
-    <div class='settingrow'>
-      <a-button type='primary' status='normal' size='small' tabindex='-1' @click='handleAddUser'>添加</a-button>
-      <a-button type='primary' status='success' size='small' @click='handleModifyUser'>修改</a-button>
-      <a-popconfirm content='确认要删除当前用户？' @ok='handleDelUser'>
-        <a-button type='primary' status='danger' size='small'>删除</a-button>
-      </a-popconfirm>
     </div>
-    <template v-if="settingStore.webDavStrategy === 'proxy'">
-      <div class='settingspace'></div>
-      <div class="settinghead">
-        缓存大小
-        <span class="opblue cache-size-badge">( {{ settingStore.debugCacheSize }} )</span>
+
+    <template v-if="formVisible">
+      <div class="ui-plain-row">
+        <label class="ui-plain-label" for="webdav-name">连接名称</label>
+        <div class="ui-plain-control"><a-input id="webdav-name" v-model="form.name" class="ui-control-md" placeholder="必填，用于区分连接" allow-clear /></div>
       </div>
-      <div class="settingrow">
-        <a-button type='outline' size='small' @click='handleJumpPath'>打开位置</a-button>
-        <a-popconfirm content="确认要清理缓存？" @ok="AppCache.aClearCache()">
-          <a-button type="outline" size="small" status="danger">清理缓存</a-button>
-        </a-popconfirm>
+      <div class="ui-plain-row">
+        <label class="ui-plain-label" for="webdav-url">WebDAV 地址</label>
+        <div class="ui-plain-control"><a-input id="webdav-url" v-model="form.url" class="ui-control-lg" placeholder="https://example.com/dav" allow-clear /></div>
+      </div>
+      <div class="ui-plain-row">
+        <label class="ui-plain-label" for="webdav-username">用户名</label>
+        <div class="ui-plain-control"><a-input id="webdav-username" v-model="form.username" class="ui-control-md" allow-clear /></div>
+      </div>
+      <div class="ui-plain-row">
+        <label class="ui-plain-label" for="webdav-password">密码</label>
+        <div class="ui-plain-control"><a-input-password id="webdav-password" v-model="form.password" class="ui-control-md" allow-clear /></div>
+      </div>
+      <div class="ui-plain-row">
+        <label class="ui-plain-label" for="webdav-root-path">挂载路径</label>
+        <div class="ui-plain-control"><a-input id="webdav-root-path" v-model="form.rootPath" class="ui-control-sm" placeholder="/" allow-clear /></div>
+      </div>
+      <div class="ui-plain-row">
+        <span class="ui-plain-label"></span>
+        <div class="ui-plain-control">
+          <a-button size="small" type="primary" :loading="saving" @click="saveConnection">{{ isEditing ? '保存' : '连接' }}</a-button>
+          <a-button size="small" type="outline" @click="resetForm">取消</a-button>
+        </div>
+      </div>
+    </template>
+
+    <template v-for="connection in connections" :key="connection.id">
+      <div v-if="editingId !== connection.id" class="ui-plain-row webdav-connection-row">
+        <span class="ui-plain-label">{{ connection.name }}</span>
+        <div class="ui-plain-control">
+          <span class="webdav-connection-url" :title="connection.url">{{ connection.url }}</span>
+          <a-button size="small" type="text" @click="openConnection(connection)">打开</a-button>
+          <a-button size="small" type="text" @click="testConnection(connection)">{{ testingId === connection.id ? '测试中' : '测试' }}</a-button>
+          <a-button size="small" type="text" @click="startEdit(connection)">编辑</a-button>
+          <a-button size="small" type="text" status="danger" @click="deleteConnection(connection)">删除</a-button>
+        </div>
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.modalfoot-spacer { flex: 1; }
-.cache-size-badge { margin-left: 12px; padding: 0 12px; }
+.webdav-connection-url {
+  display: inline-block;
+  max-width: min(32vw, 260px);
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

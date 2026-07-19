@@ -2,17 +2,16 @@ import { AppWindow, createElectronWindow, createReaderWindow, Referer, ua } from
 import path from 'path'
 import is from 'electron-is'
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, net, powerSaveBlocker, session, shell } from 'electron'
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { exec, execFile, spawn, SpawnOptions } from 'child_process'
-import os from 'os'
 import { ShowError } from './dialog'
 import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
 import { registerMediaImageCacheIpc } from '../mediaImageCache'
 import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort } from '../aria/runtime'
-import { pathToFileURL } from 'url'
 import { requestPanHub } from './panHubRequest'
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
+import { convert as convertOpenDataLoaderPdf, type ConvertOptions as OpenDataLoaderPdfOptions } from '@opendataloader/pdf'
 import {
   getBookMeta,
   isBookIndexed,
@@ -36,12 +35,7 @@ import {
 
 let psbId: any
 
-const QUARK_DOWNLOAD_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch'
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
-}
+const QUARK_DOWNLOAD_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch'
 
 function pathToFileUrl(filePath: string): string {
   const normalized = path.resolve(filePath).replace(/\\/g, '/')
@@ -79,17 +73,7 @@ function findSoffice(): string {
 function convertOfficeFileToPdf(soffice: string, inputPath: string, outDir: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const userInstall = path.join(outDir, 'lo-profile').replace(/\\/g, '/')
-    const args = [
-      '--headless',
-      '--nologo',
-      '--nofirststartwizard',
-      `-env:UserInstallation=file://${userInstall}`,
-      '--convert-to',
-      'pdf',
-      '--outdir',
-      outDir,
-      inputPath
-    ]
+    const args = ['--headless', '--nologo', '--nofirststartwizard', `-env:UserInstallation=file://${userInstall}`, '--convert-to', 'pdf', '--outdir', outDir, inputPath]
     execFile(soffice, args, { windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error((stderr || stdout || err.message || '').trim() || 'LibreOffice 转换失败'))
@@ -100,70 +84,48 @@ function convertOfficeFileToPdf(soffice: string, inputPath: string, outDir: stri
   })
 }
 
-async function runBundledCloudDriveCli(args: string[]) {
-  const modulePath = path.join(app.getAppPath(), 'clouddrive-cli', 'core', 'commands.mjs')
-  const mod = await import(pathToFileURL(modulePath).href)
-  return mod.runBoxPlayerCli(args)
-}
-
-function pushCliOption(argv: string[], flag: string, value: unknown) {
-  if (value === undefined || value === null || value === '' || value === false) return
-  if (value === true) {
-    argv.push(flag)
-    return
-  }
-  argv.push(flag, String(value))
-}
-
-function buildOpenDataLoaderPdfArgv(data: any): string[] {
-  const inputPath = String(data?.inputPath || '')
+function buildOpenDataLoaderPdfOptions(data: any): OpenDataLoaderPdfOptions {
   const outputDir = String(data?.outputDir || '')
-  if (!inputPath) throw new Error('请选择要转换的 PDF 文件或文件夹')
-  // if (!outputDir) throw new Error('请选择输出文件夹')
-  const argv = ['docs', 'convert', inputPath, '--output', outputDir, '--json']
-  if (!data?.format) argv.push('--pdf-format', 'json,html,markdown,text')
-  const optionMap: Array<[string, string]> = [
-    ['format', '--pdf-format'],
-    ['password', '--pdf-password'],
-    ['contentSafetyOff', '--pdf-content-safety-off'],
-    ['replaceInvalidChars', '--pdf-replace-invalid-chars'],
-    ['tableMethod', '--pdf-table-method'],
-    ['readingOrder', '--pdf-reading-order'],
-    ['markdownPageSeparator', '--pdf-markdown-page-separator'],
-    ['textPageSeparator', '--pdf-text-page-separator'],
-    ['htmlPageSeparator', '--pdf-html-page-separator'],
-    ['imageOutput', '--pdf-image-output'],
-    ['imageFormat', '--pdf-image-format'],
-    ['imageDir', '--pdf-image-dir'],
-    ['pages', '--pdf-pages'],
-    ['hybrid', '--pdf-hybrid'],
-    ['hybridMode', '--pdf-hybrid-mode'],
-    ['hybridUrl', '--pdf-hybrid-url'],
-    ['hybridTimeout', '--pdf-hybrid-timeout'],
-    ['hybridHancomAiRegionlistStrategy', '--pdf-hybrid-hancom-ai-regionlist-strategy'],
-    ['hybridHancomAiOcrStrategy', '--pdf-hybrid-hancom-ai-ocr-strategy'],
-    ['hybridHancomAiImageCache', '--pdf-hybrid-hancom-ai-image-cache'],
-    ['threads', '--pdf-threads'],
+  const options: OpenDataLoaderPdfOptions = {
+    outputDir,
+    format: data?.format || 'json,html,markdown,text',
+    quiet: true
+  }
+  const optionKeys: Array<keyof OpenDataLoaderPdfOptions> = [
+    'password',
+    'contentSafetyOff',
+    'replaceInvalidChars',
+    'tableMethod',
+    'readingOrder',
+    'markdownPageSeparator',
+    'textPageSeparator',
+    'htmlPageSeparator',
+    'imageOutput',
+    'imageFormat',
+    'imageDir',
+    'pages',
+    'hybrid',
+    'hybridMode',
+    'hybridUrl',
+    'hybridTimeout',
+    'hybridHancomAiRegionlistStrategy',
+    'hybridHancomAiOcrStrategy',
+    'hybridHancomAiImageCache',
+    'threads'
   ]
-  for (const [key, flag] of optionMap) pushCliOption(argv, flag, data?.[key])
-  const booleanMap: Array<[string, string]> = [
-    ['sanitize', '--pdf-sanitize'],
-    ['keepLineBreaks', '--pdf-keep-line-breaks'],
-    ['useStructTree', '--pdf-use-struct-tree'],
-    ['markdownWithHtml', '--pdf-markdown-with-html'],
-    ['includeHeaderFooter', '--pdf-include-header-footer'],
-    ['detectStrikethrough', '--pdf-detect-strikethrough'],
-    ['hybridFallback', '--pdf-hybrid-fallback'],
-    ['toStdout', '--pdf-to-stdout'],
-    ['verbose', '--pdf-verbose'],
-  ]
-  for (const [key, flag] of booleanMap) pushCliOption(argv, flag, data?.[key] === true)
-  return argv
+  for (const key of optionKeys) {
+    const value = data?.[key]
+    if (value !== undefined && value !== null && value !== '') (options as any)[key] = value
+  }
+  const booleanKeys: Array<keyof OpenDataLoaderPdfOptions> = ['sanitize', 'keepLineBreaks', 'useStructTree', 'markdownWithHtml', 'includeHeaderFooter', 'detectStrikethrough', 'hybridFallback', 'toStdout']
+  for (const key of booleanKeys) {
+    if (data?.[key] === true) (options as any)[key] = true
+  }
+  return options
 }
 
 export default class ipcEvent {
-  private constructor() {
-  }
+  private constructor() {}
 
   static handleEvents() {
     this.handleWebToElectron()
@@ -197,15 +159,8 @@ export default class ipcEvent {
     this.handleWebCloseLyric()
     this.handleWebConfigureGlobalHotkeys()
     this.handleWebOpenUrl()
-    this.handleExportCliTokens()
-    this.handleInstallCli()
     this.handlePowerSaveBlocker()
     this.handleMpvEmbedded()
-    if (app.isPackaged) {
-      this.installCli(true).catch((err: any) => {
-        console.warn('Auto install BoxPlayer CLI failed', err?.message || err)
-      })
-    }
     registerMediaImageCacheIpc()
     this.handleReedy()
   }
@@ -230,8 +185,7 @@ export default class ipcEvent {
         try {
           app.relaunch({ args: process.argv.slice(1).concat(['--relaunch']) })
           app.exit(0)
-        } catch {
-        }
+        } catch {}
       } else if (data.cmd && data.cmd === 'exit') {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.destroy()
@@ -239,8 +193,7 @@ export default class ipcEvent {
         }
         try {
           app.exit(0)
-        } catch {
-        }
+        } catch {}
       } else if (data.cmd && data.cmd === 'minsize') {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
       } else if (data.cmd && data.cmd === 'open-reader-window') {
@@ -253,8 +206,7 @@ export default class ipcEvent {
             mainWindow.maximize()
           }
         }
-      } else if (data.cmd && (Object.hasOwn(data.cmd, 'launchStart')
-        || Object.hasOwn(data.cmd, 'launchStartShow'))) {
+      } else if (data.cmd && (Object.hasOwn(data.cmd, 'launchStart') || Object.hasOwn(data.cmd, 'launchStartShow'))) {
         const launchStart = data.cmd.launchStart
         const launchStartShow = data.cmd.launchStartShow
         const appName = path.basename(process.execPath)
@@ -267,10 +219,7 @@ export default class ipcEvent {
         if (is.macOS()) {
           settings.openAsHidden = !launchStartShow
         } else {
-          settings.args = [
-            '--processStart', `${appName}`,
-            '--process-start-args', `"--hidden"`
-          ]
+          settings.args = ['--processStart', `${appName}`, '--process-start-args', `"--hidden"`]
           !launchStartShow && settings.args.push('--openAsHidden')
         }
         app.setLoginItemSettings(settings)
@@ -300,7 +249,10 @@ export default class ipcEvent {
             title: '下载完成',
             body: data.fileName ? `${data.fileName} 已下载完成` : '文件下载完成'
           })
-          n.on('click', () => { AppWindow.mainWindow?.show(); AppWindow.mainWindow?.focus() })
+          n.on('click', () => {
+            AppWindow.mainWindow?.show()
+            AppWindow.mainWindow?.focus()
+          })
           n.show()
         }
       } else {
@@ -400,7 +352,7 @@ export default class ipcEvent {
           windowsVerbatimArguments: true,
           ...data.options
         }
-        const argsToStr = (args: string) => is.windows() ? `"${args}"` : `'${args}'`
+        const argsToStr = (args: string) => (is.windows() ? `"${args}"` : `'${args}'`)
         if ((is.windows() || is.macOS()) && !existsSync(data.command)) {
           event.returnValue = { error: '找不到文件' + data.command }
           ShowError('找不到文件', data.command)
@@ -449,8 +401,7 @@ export default class ipcEvent {
       try {
         const themeJson = getUserDataPath('theme.json')
         writeFileSync(themeJson, `{"theme":"${data.theme || ''}"}`, 'utf-8')
-      } catch {
-      }
+      } catch {}
     })
   }
 
@@ -498,7 +449,7 @@ export default class ipcEvent {
           response.on('end', async () => {
             const body = Buffer.concat(chunks).toString('utf8')
             const setCookie = response.headers['set-cookie']
-            const setCookieList = Array.isArray(setCookie) ? setCookie : (setCookie ? [String(setCookie)] : [])
+            const setCookieList = Array.isArray(setCookie) ? setCookie : setCookie ? [String(setCookie)] : []
             for (const rawCookie of setCookieList) {
               const cookie = ipcEvent.parseSetCookie(rawCookie, 'https://pan.quark.cn')
               if (cookie) {
@@ -533,10 +484,12 @@ export default class ipcEvent {
       })
       const url = `https://drive-pc.quark.cn/1/clouddrive/file/download?${params.toString()}`
       const existingCookies = await session.defaultSession.cookies.get({ domain: 'quark.cn' })
-      const cookieHeader = String(data?.cookie || '') || existingCookies
-        .filter((cookie) => cookie.name && cookie.value)
-        .map((cookie) => `${cookie.name}=${cookie.value}`)
-        .join('; ')
+      const cookieHeader =
+        String(data?.cookie || '') ||
+        existingCookies
+          .filter((cookie) => cookie.name && cookie.value)
+          .map((cookie) => `${cookie.name}=${cookie.value}`)
+          .join('; ')
 
       return await new Promise((resolve) => {
         const request = net.request({
@@ -557,7 +510,7 @@ export default class ipcEvent {
           response.on('end', async () => {
             const body = Buffer.concat(chunks).toString('utf8')
             const setCookie = response.headers['set-cookie']
-            const setCookieList = Array.isArray(setCookie) ? setCookie : (setCookie ? [String(setCookie)] : [])
+            const setCookieList = Array.isArray(setCookie) ? setCookie : setCookie ? [String(setCookie)] : []
             for (const rawCookie of setCookieList) {
               const cookie = ipcEvent.parseSetCookie(rawCookie, 'https://pan.quark.cn')
               if (cookie) {
@@ -580,7 +533,10 @@ export default class ipcEvent {
   }
 
   private static parseSetCookie(rawCookie: string, defaultUrl: string) {
-    const parts = rawCookie.split(';').map((part) => part.trim()).filter(Boolean)
+    const parts = rawCookie
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
     const [nameValue, ...attrs] = parts
     if (!nameValue || !nameValue.includes('=')) return undefined
     const [name, ...valueParts] = nameValue.split('=')
@@ -647,8 +603,7 @@ export default class ipcEvent {
       app.relaunch()
       try {
         app.exit()
-      } catch {
-      }
+      } catch {}
     })
   }
 
@@ -662,7 +617,6 @@ export default class ipcEvent {
     ipcMain.on('WebSetProgressBar', (event, data) => {
       if (AppWindow.mainWindow && !AppWindow.mainWindow.isDestroyed()) {
         if (data.pro) {
-
           AppWindow.mainWindow.setProgressBar(data.pro, { mode: data.mode || 'normal' })
         } else AppWindow.mainWindow.setProgressBar(-1)
       }
@@ -677,8 +631,7 @@ export default class ipcEvent {
           if (data.quitApp) {
             try {
               app.exit()
-            } catch {
-            }
+            } catch {}
           }
           if (err) {
             // donothing
@@ -705,8 +658,7 @@ export default class ipcEvent {
           if (data.quitApp) {
             try {
               app.exit()
-            } catch {
-            }
+            } catch {}
           }
           if (err) {
             // donothing
@@ -747,7 +699,9 @@ export default class ipcEvent {
           }
         }
 
-        const hash = createHash('sha1').update(sourceUrl + fileName).digest('hex')
+        const hash = createHash('sha1')
+          .update(sourceUrl + fileName)
+          .digest('hex')
         const previewRoot = path.join(app.getPath('userData'), 'office-preview')
         const workDir = path.join(previewRoot, hash)
         mkdirSync(workDir, { recursive: true })
@@ -777,23 +731,16 @@ export default class ipcEvent {
         const baseName = path.basename(inputPath, path.extname(inputPath))
         const hash = createHash('sha1').update(inputPath).digest('hex').slice(0, 12)
         const outputDir = path.join(app.getPath('userData'), 'pdf-tools-output', `${baseName}-${hash}`)
-        try { rmSync(outputDir, { recursive: true, force: true }) } catch {}
+        try {
+          rmSync(outputDir, { recursive: true, force: true })
+        } catch {}
         mkdirSync(outputDir, { recursive: true })
-        const argv = buildOpenDataLoaderPdfArgv({ ...data, outputDir })
-        const result = await runBundledCloudDriveCli(argv)
-        const stdout = result.stdout || ''
-        const stderr = result.stderr || ''
+        const options = buildOpenDataLoaderPdfOptions({ ...data, outputDir })
+        const stdout = await convertOpenDataLoaderPdf(inputPath, options)
         let body: any = stdout.trim()
         try {
           body = stdout ? JSON.parse(stdout) : {}
-        } catch {
-        }
-        if (result.exitCode !== 0) {
-          const errMsg = typeof body === 'object' ? body?.error?.message || body?.error || stdout || stderr : (stdout || stderr)
-          console.error('[opendataloader:convertPdf] CLI failed', { exitCode: result.exitCode, stdout, stderr })
-          return { ok: false, error: errMsg, exitCode: result.exitCode, stderr }
-        }
-
+        } catch {}
         const fmtMap: { [k: string]: 'json' | 'html' | 'md' | 'text' } = {
           '.json': 'json',
           '.html': 'html',
@@ -803,7 +750,11 @@ export default class ipcEvent {
           '.txt': 'text'
         }
         const contents: { json: any; html: string; md: string; text: string; files: any[] } = {
-          json: null, html: '', md: '', text: '', files: []
+          json: null,
+          html: '',
+          md: '',
+          text: '',
+          files: []
         }
         const walk = (dir: string): string[] => {
           const out: string[] = []
@@ -830,7 +781,11 @@ export default class ipcEvent {
             const text = readFileSync(filePath, 'utf8')
             entry.size = text.length
             if (kind === 'json' && !contents.json) {
-              try { contents.json = JSON.parse(text) } catch { contents.json = text }
+              try {
+                contents.json = JSON.parse(text)
+              } catch {
+                contents.json = text
+              }
             } else if (kind === 'html' && !contents.html) contents.html = text
             else if (kind === 'md' && !contents.md) contents.md = text
             else if (kind === 'text' && !contents.text) contents.text = text
@@ -839,7 +794,7 @@ export default class ipcEvent {
           }
         }
 
-        const merged = (body && typeof body === 'object') ? { ...body, ...contents } : contents
+        const merged = body && typeof body === 'object' ? { ...body, ...contents } : contents
         if (!contents.json && !contents.html && !contents.md && !contents.text) {
           console.warn('[opendataloader:convertPdf] empty output, files=', allFiles, 'stdout=', stdout.slice(0, 500))
         }
@@ -858,7 +813,7 @@ export default class ipcEvent {
     if (winWidth < 1080) winWidth = 1080
     ipcMain.on('WebOpenWindow', (event, data) => {
       const win = createElectronWindow(winWidth, AppWindow.winHeight, true, 'main2', data.theme, true, data.page === 'PageMusic' ? 'music' : undefined)
-      win.on('ready-to-show', function() {
+      win.on('ready-to-show', function () {
         win.webContents.send('setPage', data)
         win.setTitle('预览窗口')
         win.show()
@@ -930,7 +885,9 @@ export default class ipcEvent {
   private static handleWebConfigureGlobalHotkeys() {
     ipcMain.handle('WebConfigureGlobalHotkeys', (event, bindings: Array<{ action: string; accelerator: string; enabled?: boolean }>) => {
       for (const accelerator of ipcEvent.globalHotkeyAccelerators) {
-        try { globalShortcut.unregister(accelerator) } catch {}
+        try {
+          globalShortcut.unregister(accelerator)
+        } catch {}
       }
       ipcEvent.globalHotkeyAccelerators = []
       if (!Array.isArray(bindings) || !bindings.length) return { ok: true, registered: [], failed: [] }
@@ -987,7 +944,7 @@ export default class ipcEvent {
         }
       })
 
-      win.on('ready-to-show', function() {
+      win.on('ready-to-show', function () {
         win.setTitle('预览窗口')
         win.show()
       })
@@ -997,174 +954,6 @@ export default class ipcEvent {
         httpReferrer: Referer
       })
     })
-  }
-
-  private static handleExportCliTokens() {
-    ipcMain.handle('ExportCliTokens', async (_event, data: { accounts: any[] }) => {
-      try {
-        const cliDir = path.join(os.homedir(), '.clouddrive-cli')
-        const tokensPath = path.join(cliDir, 'tokens.json')
-        const configPath = path.join(cliDir, 'config.json')
-        mkdirSync(cliDir, { recursive: true })
-
-        let existing: { accounts: any[] } = { accounts: [] }
-        try {
-          const raw = require('fs').readFileSync(tokensPath, 'utf8')
-          existing = JSON.parse(raw)
-          if (!Array.isArray(existing.accounts)) existing.accounts = []
-        } catch {
-          existing = { accounts: [] }
-        }
-
-        existing.accounts = Array.isArray(data.accounts) ? data.accounts : []
-
-        let config: { defaults: Record<string, string> } = { defaults: {} }
-        try {
-          const raw = readFileSync(configPath, 'utf8')
-          config = JSON.parse(raw)
-          if (!config.defaults || typeof config.defaults !== 'object') config.defaults = {}
-        } catch {
-          config = { defaults: {} }
-        }
-
-        const accountKeys = new Set(existing.accounts.map((account) => `${account.provider}/${account.accountId}`))
-        for (const [provider, accountId] of Object.entries(config.defaults)) {
-          if (!accountKeys.has(`${provider}/${accountId}`)) delete config.defaults[provider]
-        }
-        for (const account of existing.accounts) {
-          if (account.provider && account.accountId && !config.defaults[account.provider]) {
-            config.defaults[account.provider] = account.accountId
-          }
-        }
-
-        writeFileSync(tokensPath, JSON.stringify(existing, null, 2) + '\n', { mode: 0o600 })
-        writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
-        return { ok: true, exported: (data.accounts || []).length, path: tokensPath }
-      } catch (e: any) {
-        return { ok: false, error: e?.message || 'Export failed' }
-      }
-    })
-  }
-
-  private static handleInstallCli() {
-    ipcMain.handle('InstallCli', async () => {
-      return this.installCli(false)
-    })
-  }
-
-  private static async installCli(silent: boolean) {
-      try {
-        const cliSrcDir = is.dev()
-          ? path.join(app.getAppPath(), 'scripts')
-          : path.join(process.resourcesPath, 'cli')
-        const nodeExe = (() => {
-          const p = process.execPath.toLowerCase()
-          if (p.endsWith('electron') || p.endsWith('electron.exe') || p.includes('electron.app')) return null
-          return process.execPath
-        })()
-
-        if (is.macOS() || is.linux()) {
-          const homeDir = os.homedir()
-          const installDir = path.join(homeDir, '.local', 'bin')
-          mkdirSync(installDir, { recursive: true })
-
-          for (const name of ['clouddrive-cli', 'clouddrive-mcp']) {
-            const scriptFile = path.join(cliSrcDir, `${name}.mjs`)
-            if (!existsSync(scriptFile)) {
-              return { ok: false, error: `CLI script not found: ${scriptFile}` }
-            }
-            const linkPath = path.join(installDir, name)
-            const nodeCommand = nodeExe
-              ? `ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(nodeExe)} ${shellQuote(scriptFile)} "$@"`
-              : `exec node ${shellQuote(scriptFile)} "$@"`
-            const wrapper = `#!/bin/sh\n${nodeCommand}\n`
-            writeFileSync(linkPath, wrapper, { mode: 0o755 })
-            try { chmodSync(linkPath, 0o755) } catch { /* ignore */ }
-          }
-
-          // 将 ~/.local/bin 写入 shell 配置（如尚未添加）
-          const pathLine = `\n# BoxPlayer CLI\nexport PATH="$HOME/.local/bin:$PATH"\n`
-          const profiles = ['.zshrc', '.bashrc', '.bash_profile'].map((f) => path.join(homeDir, f))
-          let updatedProfile = ''
-          for (const p of profiles) {
-            try {
-              if (existsSync(p)) {
-                const content = readFileSync(p, 'utf8')
-                if (!content.includes('.local/bin')) {
-                  writeFileSync(p, content + pathLine)
-                  updatedProfile = path.basename(p)
-                  break
-                } else {
-                  updatedProfile = path.basename(p)
-                  break
-                }
-              }
-            } catch { /* ignore */ }
-          }
-
-          const hint = updatedProfile
-            ? `重启终端（或运行 source ~/.${updatedProfile}）后执行：`
-            : `请确保 ~/.local/bin 已加入 PATH，然后执行：`
-
-          return {
-            ok: true,
-            auto: silent,
-            message: `已安装到 ${installDir}\n${hint} clouddrive-cli auth list`,
-            paths: [
-              path.join(installDir, 'clouddrive-cli'),
-              path.join(installDir, 'clouddrive-mcp'),
-            ],
-          }
-        }
-
-        if (is.windows()) {
-          const installDir = path.join(os.homedir(), 'AppData', 'Local', 'BoxPlayer', 'bin')
-          mkdirSync(installDir, { recursive: true })
-
-          for (const name of ['clouddrive-cli', 'clouddrive-mcp']) {
-            const scriptFile = path.join(cliSrcDir, `${name}.mjs`)
-            if (!existsSync(scriptFile)) {
-              return { ok: false, error: `CLI script not found: ${scriptFile}` }
-            }
-            const nodeCmd = nodeExe ? nodeExe : 'node'
-            const envLine = nodeExe ? 'set ELECTRON_RUN_AS_NODE=1\n' : ''
-            const batContent = `@echo off\nsetlocal\n${envLine}"${nodeCmd}" "${scriptFile}" %*\n`
-            writeFileSync(path.join(installDir, `${name}.cmd`), batContent)
-          }
-
-          const pathKey = 'HKCU\\Environment'
-          const currentPath = process.env.PATH || ''
-          if (!currentPath.includes(installDir)) {
-            const { execSync } = await import('child_process')
-            try {
-              execSync(`setx PATH "${currentPath};${installDir}"`)
-            } catch {
-            }
-          }
-
-          return {
-            ok: true,
-            auto: silent,
-            message: `已安装到 ${installDir}\n重启终端后运行: clouddrive-cli auth list`,
-            paths: [
-              path.join(installDir, 'clouddrive-cli.cmd'),
-              path.join(installDir, 'clouddrive-mcp.cmd'),
-            ],
-            note: '如命令不可用，请手动将该目录加入系统 PATH',
-          }
-        }
-
-        return { ok: false, error: 'Unsupported platform' }
-      } catch (e: any) {
-        if (e?.code === 'EACCES' || e?.code === 'EPERM') {
-          return {
-            ok: false,
-            error: '权限不足，无法写入命令行安装目录。\n请在设置页手动安装，或确认 ~/.local/bin / %LOCALAPPDATA% 可写。',
-            needsElevation: true,
-          }
-        }
-        return { ok: false, error: e?.message || 'Install failed' }
-      }
   }
 
   private static powerSaveBlockerId: number | null = null
@@ -1212,12 +1001,22 @@ export default class ipcEvent {
       return { ok: true }
     })
 
-    ipcMain.handle('reedy:write-memory', (_event, args: {
-      scope: string; scope_key: string; key: string; summary: string
-      source_message_id?: string; embedding?: number[]
-    }) => {
-      return writeMemory(args as any)
-    })
+    ipcMain.handle(
+      'reedy:write-memory',
+      (
+        _event,
+        args: {
+          scope: string
+          scope_key: string
+          key: string
+          summary: string
+          source_message_id?: string
+          embedding?: number[]
+        }
+      ) => {
+        return writeMemory(args as any)
+      }
+    )
 
     ipcMain.handle('reedy:search-memories', (_event, scope: string, scopeKey: string, queryEmbedding: number[] | null, topK: number, recencyWeight?: number) => {
       return searchMemories(scope as any, scopeKey, queryEmbedding, topK, recencyWeight)
@@ -1281,6 +1080,5 @@ export default class ipcEvent {
       const { stopPaymentServer } = await import('./oauthServer')
       stopPaymentServer()
     })
-
   }
 }

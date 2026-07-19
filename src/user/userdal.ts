@@ -2,16 +2,7 @@ import DB from '../utils/db'
 import AliUser from '../aliapi/user'
 import message from '../utils/message'
 import useUserStore, { ITokenInfo } from './userstore'
-import {
-  useAppStore,
-  useFootStore,
-  useMyFollowingStore,
-  useMyShareStore,
-  useOtherFollowingStore,
-  usePanFileStore,
-  usePanTreeStore,
-  useSettingStore
-} from '../store'
+import { useAppStore, useFootStore, useMyFollowingStore, useMyShareStore, useOtherFollowingStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
 import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
 import { refreshCloud123AccessToken } from '../utils/cloud123'
@@ -23,71 +14,24 @@ import { applyOneDriveQuota, refreshOneDriveAccessToken } from '../onedrive/auth
 import { applyBoxQuota, refreshBoxAccessToken } from '../box/auth'
 import { refreshCloud189Token } from '../cloud189/auth'
 import { fetchGuangyaUserInfo, refreshGuangyaAccessToken } from '../guangya/auth'
-import { isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isNonAliyunProvider, isOneDriveUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
+import { isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isNonAliyunProvider, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import { promptAutoScanForUser } from '../utils/libraryAutoScanPrompt'
+import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
+import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
 
 export const UserTokenMap = new Map<string, ITokenInfo>()
 
 export default class UserDAL {
-  private static cliSyncTimer: ReturnType<typeof setTimeout> | undefined
-
-  private static toCliProvider(token: ITokenInfo): string {
-    return token.tokenfrom === 'aliyun' || token.tokenfrom === 'unknown' ? 'aliyun' : token.tokenfrom
-  }
-
-  private static toCliAccount(token: ITokenInfo) {
-    const provider = this.toCliProvider(token)
-    const accountId = provider === 'aliyun' ? `aliyun_${token.user_id}` : token.user_id
-    return {
-      provider,
-      accountId,
-      displayName: token.nick_name || token.user_name || token.name || token.user_id,
-      token: {
-        access_token: token.access_token,
-        refresh_token: token.refresh_token,
-        token_type: token.token_type || 'Bearer',
-        expires_in: token.expires_in,
-        expire_time: token.expire_time,
-        device_id: token.device_id,
-        signature: token.signature,
-        user_id: token.user_id,
-        user_name: token.user_name,
-        nick_name: token.nick_name,
-        default_drive_id: token.default_drive_id,
-        default_sbox_drive_id: token.default_sbox_drive_id,
-        resource_drive_id: token.resource_drive_id,
-        backup_drive_id: token.backup_drive_id,
-        sbox_drive_id: token.sbox_drive_id,
-        pic_drive_id: token.pic_drive_id,
-        open_api_access_token: token.open_api_access_token,
-        open_api_refresh_token: token.open_api_refresh_token,
-        open_api_token_type: token.open_api_token_type,
-      },
-    }
-  }
-
-  static async SyncCliAccountsToCli(): Promise<{ ok?: boolean; exported?: number; path?: string; error?: string } | null> {
-    if (!window.TvBoxInvoke) return null
-    const userList = await DB.getUserAll()
-    const accounts = userList
-      .filter((token) => token.user_id)
-      .map((token) => this.toCliAccount(token))
-    return await window.TvBoxInvoke('ExportCliTokens', { accounts }) as { ok?: boolean; exported?: number; path?: string; error?: string } | null
-  }
-
-  private static scheduleCliAccountSync() {
-    if (!window.TvBoxInvoke) return
-    if (this.cliSyncTimer) clearTimeout(this.cliSyncTimer)
-    this.cliSyncTimer = setTimeout(() => {
-      this.cliSyncTimer = undefined
-      this.SyncCliAccountsToCli().catch((err: any) => {
-        DebugLog.mSaveWarning('SyncCliAccountsToCli', err?.message || err)
-      })
-    }, 1000)
-  }
-
   private static async ensureTokenReady(token: ITokenInfo): Promise<ITokenInfo | null> {
     try {
+      if (isWebDavUser(token)) {
+        const connection = getWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
+        return connection ? token : null
+      }
+      if (isS3User(token)) {
+        const connection = getS3Connection(getS3ConnectionId(token.default_drive_id || token.user_id))
+        return connection ? token : null
+      }
       if (isCloud123User(token)) {
         const expireTime = new Date(token.expire_time || 0).getTime()
         if (!token.access_token || (expireTime && expireTime <= Date.now())) {
@@ -274,9 +218,7 @@ export default class UserDAL {
     if (!hasLogin) {
       useUserStore().userShowLogin = true
     }
-    this.scheduleCliAccountSync()
   }
-
 
   static async aRefreshAllUserToken() {
     const tokenList = await DB.getUserAll()
@@ -456,7 +398,6 @@ export default class UserDAL {
     return user
   }
 
-
   static async ClearUserTokenMap() {
     UserTokenMap.clear()
   }
@@ -480,7 +421,6 @@ export default class UserDAL {
     return list.sort((a, b) => a.name.localeCompare(b.name))
   }
 
-
   static SaveUserToken(token: ITokenInfo) {
     if (token.user_id) {
       UserTokenMap.set(token.user_id, token)
@@ -488,13 +428,10 @@ export default class UserDAL {
         .then(() => {
           window.WinMsgToUpload({ cmd: 'ClearUserToken' })
           window.WinMsgToDownload({ cmd: 'ClearUserToken' })
-          UserDAL.scheduleCliAccountSync()
         })
-        .catch(() => {
-        })
+        .catch(() => {})
     }
   }
-
 
   static async UserLogin(token: ITokenInfo, isInteractive: boolean = false) {
     const loadingKey = 'userlogin_' + Date.now().toString()
@@ -543,6 +480,10 @@ export default class UserDAL {
       await applyOneDriveQuota(token)
     } else if (isBoxUser(token)) {
       await applyBoxQuota(token)
+    } else if (isWebDavUser(token)) {
+      token.default_drive_id = token.default_drive_id || token.user_id
+    } else if (isS3User(token)) {
+      token.default_drive_id = token.default_drive_id || token.user_id
     } else if (isNonAliyunProvider(token)) {
       // 已知非阿里云盘 provider 但未在上面 if 链命中,跳过 aliyun 兜底
     } else {
@@ -591,7 +532,9 @@ export default class UserDAL {
     message.success('加载用户成功!', 2, loadingKey)
     if (isInteractive && token.user_id) {
       const label = token.nick_name || token.user_name || token.user_id
-      promptAutoScanForUser(token.user_id, label).catch(() => { /* ignore */ })
+      promptAutoScanForUser(token.user_id, label).catch(() => {
+        /* ignore */
+      })
     }
   }
 
@@ -652,6 +595,16 @@ export default class UserDAL {
       await PanDAL.aReLoadOneDirToShow(token.default_drive_id || 'box', 'box_root', true)
       return
     }
+    if (isWebDavUser(token)) {
+      await PanDAL.aReLoadWebDavDrive(token)
+      await PanDAL.aReLoadOneDirToShow(token.default_drive_id || token.user_id, '/', true)
+      return
+    }
+    if (isS3User(token)) {
+      await PanDAL.aReLoadS3Drive(token)
+      await PanDAL.aReLoadOneDirToShow(token.default_drive_id || token.user_id, '/', true)
+      return
+    }
     // 刷新网盘数据
     if (!useSettingStore().securityHideResourceDrive) {
       await PanDAL.aReLoadResourceDrive(token)
@@ -661,7 +614,7 @@ export default class UserDAL {
     }
     if (useSettingStore().uiShowPanRootFirst === 'resource') {
       await PanDAL.aReLoadOneDirToShow(token.resource_drive_id, 'resource_root', true)
-    } else if (useSettingStore().uiShowPanRootFirst === 'backup')  {
+    } else if (useSettingStore().uiShowPanRootFirst === 'backup') {
       await PanDAL.aReLoadOneDirToShow(token.backup_drive_id, 'backup_root', true)
     } else {
       await PanDAL.aReLoadOneDirToShow(token.resource_drive_id, 'resource_root', true)
@@ -675,9 +628,13 @@ export default class UserDAL {
 
     let newUserID = ''
     for (const [user_id, token] of UserTokenMap) {
-      const isLogin = (isDrive115User(token) || isBaiduUser(token) || isPikPakUser(token) || isQuarkUser(token) || isDropboxUser(token) || isOneDriveUser(token) || isBoxUser(token))
-        ? !!token.user_id
-        : (token.user_id && (await AliUser.ApiTokenRefreshAccount(token, false)))
+      const isLogin = isWebDavUser(token)
+        ? !!token.user_id && !!getWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
+        : isS3User(token)
+          ? !!token.user_id && !!getS3Connection(getS3ConnectionId(token.default_drive_id || token.user_id))
+          : isDrive115User(token) || isBaiduUser(token) || isPikPakUser(token) || isQuarkUser(token) || isDropboxUser(token) || isOneDriveUser(token) || isBoxUser(token)
+            ? !!token.user_id
+            : token.user_id && (await AliUser.ApiTokenRefreshAccount(token, false))
       if (isLogin) {
         await this.UserLogin(token)
         newUserID = user_id
@@ -697,7 +654,6 @@ export default class UserDAL {
     DB.deleteUser(user_id)
     UserTokenMap.delete(user_id)
   }
-
 
   static async UserChange(user_id: string): Promise<boolean> {
     if (!UserTokenMap.has(user_id)) return false
@@ -771,6 +727,10 @@ export default class UserDAL {
         }
       }
       isLogin = !!token.access_token && !!token.user_id
+    } else if (isWebDavUser(token)) {
+      isLogin = !!token.user_id && !!getWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
+    } else if (isS3User(token)) {
+      isLogin = !!token.user_id && !!getS3Connection(getS3ConnectionId(token.default_drive_id || token.user_id))
     } else {
       isLogin = !!(token.user_id && (await AliUser.ApiTokenRefreshAccount(token, false)))
     }
@@ -781,7 +741,6 @@ export default class UserDAL {
     await this.UserLogin(token).catch()
     return true
   }
-
 
   static async UserRefreshByUserFace(user_id: string, force: boolean): Promise<boolean> {
     const token = UserDAL.GetUserToken(user_id)
@@ -826,15 +785,10 @@ export default class UserDAL {
         return true
       } else {
         // 仅刷新个人信息
-        await Promise.all([
-          AliUser.ApiUserInfo(token),
-          AliUser.ApiUserPic(token),
-          AliUser.ApiUserVip(token)
-        ])
+        await Promise.all([AliUser.ApiUserInfo(token), AliUser.ApiUserPic(token), AliUser.ApiUserVip(token)])
         UserDAL.SaveUserToken(token)
         return true
       }
-
     } else {
       // 刷新token和session
       if (token.user_id) {
@@ -887,7 +841,6 @@ export default class UserDAL {
           await AliUser.ApiSessionRefreshAccount(token, true)
           await AliUser.OpenApiTokenRefreshAccount(token, true)
         }
-
       } else {
         return false
       }
@@ -909,11 +862,7 @@ export default class UserDAL {
         await applyBoxQuota(token)
       } else {
         // 刷新用户信息
-        await Promise.all([
-          AliUser.ApiUserInfo(token),
-          AliUser.ApiUserPic(token),
-          AliUser.ApiUserVip(token)
-        ])
+        await Promise.all([AliUser.ApiUserInfo(token), AliUser.ApiUserPic(token), AliUser.ApiUserVip(token)])
       }
       useUserStore().userLogin(token.user_id)
       UserDAL.SaveUserToken(token)

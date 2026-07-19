@@ -13,13 +13,10 @@
   "npmRebuild": false,
   "buildDependenciesFromSource": true,
   "directories": { "output": "release" },
-  "files": [ "dist" ],
+  "files": ["dist"],
   "extraResources": [
-    { "from": "./static/engine/aria2.conf", "to": "./engine/aria2.conf"},
-    { "from": "./static/crx", "to": "./crx"},
-    { "from": "./scripts/clouddrive-cli.mjs", "to": "./cli/clouddrive-cli.mjs"},
-    { "from": "./scripts/clouddrive-mcp.mjs", "to": "./cli/clouddrive-mcp.mjs"},
-    { "from": "./clouddrive-cli", "to": "./clouddrive-cli"}
+    { "from": "./static/engine/aria2.conf", "to": "./engine/aria2.conf" },
+    { "from": "./static/crx", "to": "./crx" }
   ],
   "mac": {
     "icon": "./static/images/icon.icns",
@@ -32,13 +29,13 @@
     "entitlements": "./build/entitlements.mac.plist",
     "entitlementsInherit": "./build/entitlements.mac.plist",
     "extraResources": [
-      { "from": "./static/images/icon.icns", "to": "./images/icon.icns"},
-      { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png"},
-      { "from": "./static/engine/darwin/${arch}", "to": "./engine/darwin/${arch}"}
+      { "from": "./static/images/icon.icns", "to": "./images/icon.icns" },
+      { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png" },
+      { "from": "./static/engine/darwin/${arch}", "to": "./engine/darwin/${arch}" }
     ],
     "target": [
-      { "target": "dmg", "arch": [ "x64", "arm64" ] },
-      { "target": "zip", "arch": [ "x64", "arm64" ] }
+      { "target": "dmg", "arch": ["x64", "arm64"] },
+      { "target": "zip", "arch": ["x64", "arm64"] }
     ],
     "notarize": true
   },
@@ -48,15 +45,15 @@
     "category": "Network",
     "artifactName": "boxplayer-${version}-linux-${arch}.${ext}",
     "extraResources": [
-      { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png"},
-      { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png"},
-      { "from": "./static/images/icon_256x256.png", "to": "./images/icon_256x256.png"},
-      { "from": "./static/engine/linux/${arch}", "to": "./engine/linux/${arch}"}
+      { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png" },
+      { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
+      { "from": "./static/images/icon_256x256.png", "to": "./images/icon_256x256.png" },
+      { "from": "./static/engine/linux/${arch}", "to": "./engine/linux/${arch}" }
     ],
     "target": [
-      { "target": "AppImage", "arch": [  "x64", "arm64"] },
-      { "target": "deb", "arch": [ "x64",  "arm64"] },
-      { "target": "pacman", "arch": [ "x64", "arm64"] }
+      { "target": "AppImage", "arch": ["x64", "arm64"] },
+      { "target": "deb", "arch": ["x64", "arm64"] },
+      { "target": "pacman", "arch": ["x64", "arm64"] }
     ]
   },
   "deb": {
@@ -67,13 +64,11 @@
     "artifactName": "boxplayer-${version}-win-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker",
     "extraResources": [
-      { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png"},
-      { "from": "./static/images/icon_256x256.ico", "to": "./images/icon_256x256.ico"},
-      { "from": "./static/engine/win32/${arch}", "to": "./engine/win32/${arch}", "filter": ["**/*", "!mpv{,/**}"]}
+      { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
+      { "from": "./static/images/icon_256x256.ico", "to": "./images/icon_256x256.ico" },
+      { "from": "./static/engine/win32/${arch}", "to": "./engine/win32/${arch}", "filter": ["**/*", "!mpv{,/**}"] }
     ],
-    "target": [
-      { "target": "nsis", "arch": [ "x64" ] }
-    ]
+    "target": [{ "target": "nsis", "arch": ["x64"] }]
   },
   "dmg": {
     "title": "BoxPlayer",

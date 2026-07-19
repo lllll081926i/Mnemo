@@ -31,105 +31,61 @@ const handleSaveLogCopy = () => {
 </script>
 
 <template>
-  <div class="settingcard">
-    <div class="settings-log-header">
-      <div>
-        <div class="settings-log-kicker">Diagnostics</div>
-        <div class="settinghead">运行日志</div>
+  <div class="ui-plain-list">
+    <div class="ui-plain-row ui-plain-row--top">
+      <span class="ui-plain-label">运行日志</span>
+      <div class="ui-plain-control">
+        <a-list
+          :bordered="false"
+          :max-height="logHeight"
+          :style="{ height: logHeight + 'px' }"
+          :data="DebugLog.logList"
+          class="loglist"
+          :data-refresh="logStore.logTime"
+          :virtual-list-props="{
+            height: logHeight,
+            threshold: 50
+          }"
+        >
+          <template #item="{ item, index }">
+            <a-list-item :key="index">
+              <a-typography-text :type="item.logtype">[{{ item.logtime }}]</a-typography-text>
+              {{ item.logmessage }}
+            </a-list-item>
+          </template>
+        </a-list>
+        <a-button type="outline" size="small" @click="handleSaveLogRefresh">刷新</a-button>
+        <a-button type="outline" size="small" @click="handleSaveLogClear">清空日志</a-button>
+        <a-button type="outline" size="small" @click="handleSaveLogCopy">复制日志</a-button>
       </div>
-      <div class="settings-log-caption">用于排查启动、网络、播放器与同步相关问题</div>
-    </div>
-    <a-list
-      :bordered="false"
-      :max-height="logHeight"
-      :style="{ height: logHeight + 'px' }"
-      :data="DebugLog.logList"
-      class="loglist"
-      :data-refresh="logStore.logTime"
-      :virtual-list-props="{
-        height: logHeight,
-        threshold: 50
-      }">
-      <template #item="{ item, index }">
-        <a-list-item :key="index">
-          <a-typography-text :type="item.logtype"> [{{ item.logtime }}] </a-typography-text>
-          {{ item.logmessage }}
-        </a-list-item>
-      </template>
-    </a-list>
-
-    <div class="settingspace"></div>
-    <div class="settingrow">
-      <a-button type="outline" size="small" @click="handleSaveLogRefresh">刷新</a-button>
-      <a-button type="outline" size="small" @click="handleSaveLogClear">清空日志</a-button>
-      <a-button type="outline" size="small" @click="handleSaveLogCopy">复制日志</a-button>
     </div>
   </div>
 </template>
 
 <style>
-.loglist {
-  box-sizing: content-box;
+.settings-page .loglist {
+  width: 100%;
+  max-height: 420px;
+  box-sizing: border-box;
   overflow: hidden;
-  border: 1px solid rgba(120, 138, 165, 0.2);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.38);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--border-light);
+  border-radius: 0;
+  background: transparent;
 }
-.settings-log-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-.settings-log-kicker {
-  display: inline-flex;
-  margin-bottom: 8px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(88, 130, 255, 0.12);
-  color: var(--color-primary-6);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.settings-log-caption {
-  color: var(--color-text-3);
-  font-size: 13px;
-  line-height: 1.6;
-  text-align: right;
-}
-.loglist .arco-list {
+
+.settings-page .loglist .arco-list {
   height: 100%;
-  overflow-y: hidden !important;
+  overflow-y: hidden;
 }
-.loglist .arco-list-item {
-  padding: 8px 12px !important;
+
+.settings-page .loglist .arco-list-item {
+  padding: 6px 10px;
   font-size: 12px;
-  color: var(--color-text-2);
+  color: var(--text-secondary);
 }
-html.dark .loglist .arco-list-item {
-  color: rgba(232, 238, 249, 0.88);
-}
-html.dark .loglist .arco-list-item .arco-typography {
-  color: inherit;
-}
-.loglist .arco-list-item-content {
+
+.settings-page .loglist .arco-list-item-content {
   user-select: text;
   -webkit-user-drag: none;
-}
-html.dark .loglist {
-  border-color: rgba(140, 158, 183, 0.18);
-  background: rgba(22, 27, 36, 0.78);
-}
-html.dark .settings-log-kicker {
-  background: rgba(120, 160, 255, 0.2);
-  color: #dbe6ff;
-}
-html.dark .settings-log-caption {
-  color: rgba(236, 242, 255, 0.62);
 }
 </style>

@@ -17,6 +17,7 @@ import { getEncPassword, getEncType } from '../utils/proxyhelper'
 
 export function GetDriveID(user_id: string, drive: string): string {
   if ((drive || '').startsWith('webdav:')) return drive
+  if ((drive || '').startsWith('s3:')) return drive
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
     if (isCloud123User(user_id)) {
@@ -68,6 +69,9 @@ export function GetDriveID(user_id: string, drive: string): string {
 export function GetDriveType(user_id: string, drive_id: string): any {
   if ((drive_id || '').startsWith('webdav:')) {
     return { title: 'WebDAV', name: 'webdav', key: '/' }
+  }
+  if ((drive_id || '').startsWith('s3:')) {
+    return { title: 'S3', name: 's3', key: '/' }
   }
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
@@ -205,19 +209,33 @@ export function isBoxUser(user: string | { user_id?: string; tokenfrom?: string 
   return user_id.startsWith('box_')
 }
 
+export function isWebDavUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
+  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
+  if (tokenfrom === 'webdav') return true
+  return user_id.startsWith('webdav:')
+}
+
+export function isS3User(user: string | { user_id?: string; tokenfrom?: string }): boolean {
+  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
+  if (tokenfrom === 's3') return true
+  return user_id.startsWith('s3:')
+}
+
 export function isNonAliyunProvider(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   return (
-    isCloud123User(user)
-    || isDrive115User(user)
-    || isCloud139User(user)
-    || isCloud189User(user)
-    || isGuangyaUser(user)
-    || isBaiduUser(user)
-    || isPikPakUser(user)
-    || isQuarkUser(user)
-    || isDropboxUser(user)
-    || isOneDriveUser(user)
-    || isBoxUser(user)
+    isCloud123User(user) ||
+    isDrive115User(user) ||
+    isCloud139User(user) ||
+    isCloud189User(user) ||
+    isGuangyaUser(user) ||
+    isBaiduUser(user) ||
+    isPikPakUser(user) ||
+    isQuarkUser(user) ||
+    isDropboxUser(user) ||
+    isOneDriveUser(user) ||
+    isBoxUser(user) ||
+    isWebDavUser(user) ||
+    isS3User(user)
   )
 }
 
@@ -225,9 +243,7 @@ export function GetSignature(nonce: number, user_id: string, deviceId: string) {
   const toHex = (bytes: Uint8Array) => {
     const hashArray = Array.from(bytes) // convert buffer to byte array
     // convert bytes to hex string
-    return hashArray
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
   }
   const toU8 = (wordArray: CryptoJS.lib.WordArray) => {
     const words = wordArray.words
@@ -254,20 +270,22 @@ export function EncodeEncName(user_id: string, name: string, isDir: boolean, enc
     const securityPassword = getEncPassword(user_id, encType, inputpassword)
     const securityEncType = settingStore.securityEncType
     if (!isDir) {
-      return splitFolder.map(name => {
-        let plainName = ''
-        let basename = path.basename(name)
-        let extname = path.extname(name)
-        if (mime.lookup(extname) && !settingStore.securityEncFileNameHideExt) {
-          plainName = basename.replace(extname, '')
-        } else {
-          plainName = basename
-          extname = ''
-        }
-        return encodeName(securityPassword, securityEncType, plainName) + extname
-      }).join('/')
+      return splitFolder
+        .map((name) => {
+          let plainName = ''
+          let basename = path.basename(name)
+          let extname = path.extname(name)
+          if (mime.lookup(extname) && !settingStore.securityEncFileNameHideExt) {
+            plainName = basename.replace(extname, '')
+          } else {
+            plainName = basename
+            extname = ''
+          }
+          return encodeName(securityPassword, securityEncType, plainName) + extname
+        })
+        .join('/')
     } else {
-      return splitFolder.map(name => encodeName(securityPassword, securityEncType, name)).join('/')
+      return splitFolder.map((name) => encodeName(securityPassword, securityEncType, name)).join('/')
     }
   } else {
     return name
@@ -351,11 +369,12 @@ async function _ApiBatch(postData: string, user_id: string, share_token: string,
         const respi = responses[i]
         const logmsg = (respi.body.code || '') + ' ' + (respi.body.message || '')
         if (!logmsg.includes('File under sync control')) DebugLog.mSaveDanger(logmsg)
-        if (respi.body && respi.body.code) result.error.push({
-          id: respi.body.id || respi.id,
-          code: respi.body.code,
-          message: respi.body.message
-        })
+        if (respi.body && respi.body.code)
+          result.error.push({
+            id: respi.body.id || respi.id,
+            code: respi.body.code,
+            message: respi.body.message
+          })
       }
     }
   } else if (!AliHttp.HttpCodeBreak(resp.code)) {
@@ -396,8 +415,7 @@ export async function ApiBatch(title: string, batchList: string[], user_id: stri
     postData += '],"resource":"file"}'
     allTask.push(_ApiBatch(postData, user_id, share_token, result))
   }
-  if (allTask.length > 0) await Promise.all(allTask).catch(() => {
-  })
+  if (allTask.length > 0) await Promise.all(allTask).catch(() => {})
 
   if (result.async_task.length > 0) {
     if (title != '' || share_token != '') message.warning(title + ' 异步执行中(' + result.async_task.length + ')', 2, loadingKey)
@@ -428,7 +446,6 @@ export async function ApiBatch(title: string, batchList: string[], user_id: stri
     }
   }
 
-
   if (title != '' || share_token != '') {
     if (result.error.length == 0) {
       if (result.async_task.length > 0) {
@@ -451,7 +468,6 @@ export async function ApiBatch(title: string, batchList: string[], user_id: stri
   return result
 }
 
-
 export function ApiBatchMaker(url: string, idList: string[], bodymake: (file_id: string) => any): string[] {
   if (!idList || idList.length == 0) return []
   const batchList: string[] = []
@@ -460,13 +476,15 @@ export function ApiBatchMaker(url: string, idList: string[], bodymake: (file_id:
     const id = idList[i]
     if (batchSet.has(id)) continue
     batchSet.add(id)
-    batchList.push(JSON.stringify({
-      body: bodymake(id),
-      headers: { 'Content-Type': 'application/json' },
-      id: id,
-      method: 'POST',
-      url
-    }))
+    batchList.push(
+      JSON.stringify({
+        body: bodymake(id),
+        headers: { 'Content-Type': 'application/json' },
+        id: id,
+        method: 'POST',
+        url
+      })
+    )
   }
   batchSet.clear()
   return batchList
@@ -480,13 +498,15 @@ export function ApiBatchMaker2(url: string, idList: string[], namelist: string[]
     const id = idList[i]
     if (batchSet.has(id)) continue
     batchSet.add(id)
-    batchList.push(JSON.stringify({
-      body: bodymake(id, namelist[i]),
-      headers: { 'Content-Type': 'application/json' },
-      id: id,
-      method: 'POST',
-      url
-    }))
+    batchList.push(
+      JSON.stringify({
+        body: bodymake(id, namelist[i]),
+        headers: { 'Content-Type': 'application/json' },
+        id: id,
+        method: 'POST',
+        url
+      })
+    )
   }
   batchSet.clear()
   return batchList
@@ -538,7 +558,6 @@ export async function ApiGetAsyncTask(user_id: string, async_task_id: string): P
   }
   return 'error'
 }
-
 
 export async function ApiGetAsyncTaskUnzip(user_id: string, drive_id: string, file_id: string, domain_id: string, task_id: string): Promise<string> {
   if (!user_id || !task_id) return 'error'

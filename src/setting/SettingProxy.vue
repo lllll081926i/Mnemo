@@ -61,125 +61,40 @@ const handleProxyConn = async () => {
 </script>
 
 <template>
-  <div class="settingcard">
-    <div class="settings-proxy-intro">
-      <div class="settings-proxy-kicker">Network</div>
-      <div class="settings-proxy-copy">为更新、接口请求和文件传输配置统一代理。建议先测试连通性，再启用全局代理。</div>
+  <div class="ui-plain-list">
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">代理类型</span>
+      <div class="ui-plain-control">
+        <a-select size="small" :model-value="settingStore.proxyType" @update:model-value="cb({ proxyType: $event })">
+          <a-option value="none">None</a-option>
+          <a-option value="http">HTTP</a-option>
+          <a-option value="https">HTTPS</a-option>
+          <a-option value="socks5">SOCKS5</a-option>
+          <a-option value="socks5h">SOCKS5H</a-option>
+        </a-select>
+      </div>
     </div>
-    <div class="settinghead">代理类型</div>
-    <div class="settingrow">
-      <a-select tabindex="-1" :style="{ width: '168px' }" :model-value="settingStore.proxyType" :popup-container="'#SettingDiv'" @update:model-value="cb({ proxyType: $event })">
-        <a-option value="none">None</a-option>
-        <a-option value="http">HTTP</a-option>
-        <a-option value="https">HTTPS</a-option>
-        <a-option value="socks5">SOCKS5</a-option>
-        <a-option value="socks5h">SOCKS5H</a-option>
-      </a-select>
-      <a-popover position="right">
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class="opred">HTTP</span>
-            <hr />
-            代理服务器支持的代理类型
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">代理服务器</span>
+      <div class="ui-plain-control ui-inline-fields">
+        <a-input class="ui-control-md" size="small" placeholder="地址或域名" :model-value="settingStore.proxyHost" @update:model-value="cb({ proxyHost: $event })" />
+        <a-input-number class="ui-control-sm" size="small" hide-button placeholder="端口" :model-value="settingStore.proxyPort" @update:model-value="cb({ proxyPort: $event })" />
+      </div>
     </div>
-    <div class="settingspace"></div>
-
-    <a-row class="grid-demo">
-      <a-col flex="252px">
-        <div class="settinghead">代理地址(Host IP 或 域名)</div>
-        <div class="settingrow">
-          <a-input tabindex="-1" :style="{ width: '168px' }" placeholder="代理主机的IP或域名" :model-value="settingStore.proxyHost" @update:model-value="cb({ proxyHost: $event })" />
-        </div>
-      </a-col>
-      <a-col flex="180px">
-        <div class="settinghead">代理端口(Port)</div>
-        <div class="settingrow">
-          <a-input-number tabindex="-1" :style="{ width: '168px' }" hide-button placeholder="常见 8888,1080" :model-value="settingStore.proxyPort" @update:model-value="cb({ proxyPort: $event })" />
-        </div>
-      </a-col>
-      <a-col flex="auto"> </a-col>
-    </a-row>
-    <div class="settingspace"></div>
-    <a-row class="grid-demo">
-      <a-col flex="252px">
-        <div class="settinghead">用户名</div>
-        <div class="settingrow">
-          <a-input tabindex="-1" :style="{ width: '168px' }" placeholder="没有不填" :model-value="settingStore.proxyUserName" @update:model-value="cb({ proxyUserName: $event })" />
-        </div>
-      </a-col>
-      <a-col flex="180px">
-        <div class="settinghead">密码</div>
-        <div class="settingrow">
-          <a-input tabindex="-1" :style="{ width: '168px' }" placeholder="没有不填" :model-value="settingStore.proxyPassword" @update:model-value="cb({ proxyPassword: $event })" />
-        </div>
-      </a-col>
-      <a-col flex="auto"> </a-col>
-    </a-row>
-
-    <div class="settingspace"></div>
-    <div class="settingrow">
-      <a-button type="primary" size="small" tabindex="-1" :loading="proxyLoading" @click="handleProxyConn">测试</a-button>
-      <span style="margin-left: 8px; font-size: 12px; color: var(--color-text-3)">请先测试成功后再启用代理</span>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">用户名</span>
+      <div class="ui-plain-control"><a-input class="ui-control-md" size="small" :model-value="settingStore.proxyUserName" @update:model-value="cb({ proxyUserName: $event })" /></div>
     </div>
-    <div class="settingspace"></div>
-    <div class="settinghead">是否启用代理</div>
-    <div class="settingrow">
-      <MySwitch :value="settingStore.proxyUseProxy" @update:value="cb({ proxyUseProxy: $event })">使用代理访问网络</MySwitch>
-      <a-popover position="right">
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class="opred">关闭</span>
-            <hr />
-            支持http/https/sock5代理，<br />
-            胡乱设置会导致小白羊不能联网<br />
-            <hr />
-            当前http和sock5代理(非TLS)兼容较好<br /><br />
-            https代理，只支持单向证书模式的代理，<br />
-            因为双向证书模式需要附加证书文件所以不支持
-            <hr />
-            开启后会强制小白羊的所有请求使用代理(包括上传/下载文件)<br />不会影响电脑上的其他软件
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">密码</span>
+      <div class="ui-plain-control"><a-input class="ui-control-md" size="small" type="password" :model-value="settingStore.proxyPassword" @update:model-value="cb({ proxyPassword: $event })" /></div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">启用代理</span>
+      <div class="ui-plain-control">
+        <MySwitch :value="settingStore.proxyUseProxy" @update:value="cb({ proxyUseProxy: $event })" />
+        <a-button type="outline" size="small" :loading="proxyLoading" @click="handleProxyConn">测试</a-button>
+      </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.settings-proxy-intro {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.settings-proxy-kicker {
-  display: inline-flex;
-  align-self: flex-start;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(88, 130, 255, 0.12);
-  color: var(--color-primary-6);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.settings-proxy-copy {
-  max-width: 580px;
-  color: var(--color-text-2);
-  font-size: 14px;
-  line-height: 1.7;
-}
-
-:global(html.dark) .settings-proxy-kicker {
-  background: rgba(120, 160, 255, 0.2);
-  color: #dbe6ff;
-}
-</style>

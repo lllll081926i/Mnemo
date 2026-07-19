@@ -17,7 +17,7 @@ describe('aria utils', () => {
   it('resolves dev engine binaries from the static engine directory', async () => {
     const { getAria2BinPath, getAria2ConfPath } = await import('../utils')
 
-    expect(getAria2BinPath('darwin', 'arm64')).toBe('/Users/test/aliyunpan/static/engine/darwin/arm64/aria2c')
-    expect(getAria2ConfPath('darwin', 'arm64')).toBe('/Users/test/aliyunpan/static/engine/darwin/arm64/aria2.conf')
+    expect(getAria2BinPath('darwin', 'arm64').replace(/\\/g, '/')).toMatch(/\/Users\/test\/aliyunpan\/static\/engine\/darwin\/arm64\/aria2c$/)
+    expect(getAria2ConfPath('darwin', 'arm64').replace(/\\/g, '/')).toMatch(/\/Users\/test\/aliyunpan\/static\/engine\/darwin\/arm64\/aria2\.conf$/)
   })
 })

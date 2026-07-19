@@ -1,4 +1,4 @@
-<script setup lang='ts'>
+<script setup lang="ts">
 import { computed, h, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ITokenInfo, useSettingStore, useUserStore } from '../store'
 import UserDAL from '../user/userdal'
@@ -21,8 +21,9 @@ import { Cloud189QrState, pollCloud189QrLogin, requestCloud189QrCode } from '../
 import { GuangyaSmsState, generateGuangyaDid, requestGuangyaSmsCode, submitGuangyaSmsCode } from '../guangya/auth'
 import { DROPBOX_APP_KEY, buildDropboxAuthUrl, createDropboxPkceVerifier, exchangeDropboxCodeForToken } from '../dropbox/auth'
 import { ONEDRIVE_CLIENT_ID, buildOneDriveAuthUrl, createOneDrivePkceVerifier, exchangeOneDriveCodeForToken } from '../onedrive/auth'
-import { BOX_CLIENT_ID, buildBoxAuthUrl, createBoxPkceVerifier, exchangeBoxCodeForToken } from '../box/auth'
 import { getDriveProviderMeta } from '../utils/driveProvider'
+import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
+import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
 
 const useUser = useUserStore()
@@ -39,10 +40,10 @@ const qrCodeUrl = ref('')
 const qrCodeStatusType = ref()
 const qrCodeStatusTips = ref()
 
-type LoginProvider = 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'box'
+type LoginProvider = 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'webdav' | 's3'
 
 const loginProvider = ref<LoginProvider>('aliyun')
-const loginProviders: LoginProvider[] = ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'box']
+const loginProviders: LoginProvider[] = ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'webdav', 's3']
 const getLoginProviderMeta = (provider: LoginProvider) => getDriveProviderMeta(provider)
 const activeLoginProviderMeta = computed(() => getLoginProviderMeta(loginProvider.value))
 const cloud123Code = ref('')
@@ -78,10 +79,10 @@ const onedriveClientId = ref('')
 const onedriveVerifier = ref('')
 const onedriveLoading = ref(false)
 const onedriveAuthUrl = ref('')
-const boxClientId = ref('')
-const boxVerifier = ref('')
-const boxLoading = ref(false)
-const boxAuthUrl = ref('')
+const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
+const webDavLoading = ref(false)
+const s3Form = ref({ name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true })
+const s3Loading = ref(false)
 const drive115ClientId = ref(DRIVE115_APP_ID || '')
 const drive115Verifier = ref('')
 const drive115Uid = ref('')
@@ -129,12 +130,25 @@ const clearOpenTimers = () => {
 
 const handleModalOpen = () => {
   const stored = localStorage.getItem('login_provider')
-  if (stored === 'cloud123' || stored === 'aliyun' || stored === '115' || stored === '139' || stored === '189' || stored === 'guangya' || stored === 'baidu' || stored === 'pikpak' || stored === 'quark' || stored === 'dropbox' || stored === 'onedrive' || stored === 'box') {
+  if (
+    stored === 'cloud123' ||
+    stored === 'aliyun' ||
+    stored === '115' ||
+    stored === '139' ||
+    stored === '189' ||
+    stored === 'guangya' ||
+    stored === 'baidu' ||
+    stored === 'pikpak' ||
+    stored === 'quark' ||
+    stored === 'dropbox' ||
+    stored === 'onedrive' ||
+    stored === 'webdav' ||
+    stored === 's3'
+  ) {
     loginProvider.value = stored
   }
   dropboxAppKey.value = localStorage.getItem('dropbox_app_key') || DROPBOX_APP_KEY
   onedriveClientId.value = localStorage.getItem('onedrive_client_id') || ONEDRIVE_CLIENT_ID
-  boxClientId.value = localStorage.getItem('box_client_id') || BOX_CLIENT_ID
   if (loginProvider.value === 'cloud123') {
     handleOpenCloud123()
   } else if (loginProvider.value === 'baidu') {
@@ -155,15 +169,17 @@ const handleModalOpen = () => {
     handleOpenDropbox()
   } else if (loginProvider.value === 'onedrive') {
     handleOpenOneDrive()
-  } else if (loginProvider.value === 'box') {
-    handleOpenBox()
+  } else if (loginProvider.value === 'webdav') {
+    loginLoading.value = false
+  } else if (loginProvider.value === 's3') {
+    loginLoading.value = false
   } else {
     handleOpen()
   }
 }
 
 const handleOauthCallback = (event: any) => {
-  if (loginProvider.value !== 'cloud123' && loginProvider.value !== 'baidu' && loginProvider.value !== 'dropbox' && loginProvider.value !== 'onedrive' && loginProvider.value !== 'box') return
+  if (loginProvider.value !== 'cloud123' && loginProvider.value !== 'baidu' && loginProvider.value !== 'dropbox' && loginProvider.value !== 'onedrive') return
   const url = event?.detail || ''
   if (!url) return
   try {
@@ -180,8 +196,6 @@ const handleOauthCallback = (event: any) => {
         submitDropboxCode(code)
       } else if (loginProvider.value === 'onedrive') {
         submitOneDriveCode(code)
-      } else if (loginProvider.value === 'box') {
-        submitBoxCode(code)
       }
     }
   } catch {
@@ -221,13 +235,14 @@ watch(loginProvider, () => {
     handleOpenDropbox()
   } else if (loginProvider.value === 'onedrive') {
     handleOpenOneDrive()
-  } else if (loginProvider.value === 'box') {
-    handleOpenBox()
+  } else if (loginProvider.value === 'webdav') {
+    loginLoading.value = false
+  } else if (loginProvider.value === 's3') {
+    loginLoading.value = false
   } else {
     handleOpen()
   }
 })
-
 
 const cb = (val: any) => {
   settingStore.updateStore(val)
@@ -242,13 +257,13 @@ function b64decode(e: string) {
 }
 
 function readData(e: string) {
-  return new Promise<string>(function(resolve, reject) {
+  return new Promise<string>(function (resolve, reject) {
     const n = b64decode(e)
     const i = new FileReader()
-    i.onloadend = function(e) {
+    i.onloadend = function (e) {
       resolve((e?.target?.result as string | undefined) || '')
     }
-    i.onerror = function(e) {
+    i.onerror = function (e) {
       return reject(e)
     }
     i.readAsText(n, 'gbk')
@@ -413,9 +428,52 @@ const handleClose = () => {
   onedriveVerifier.value = ''
   onedriveLoading.value = false
   onedriveAuthUrl.value = ''
-  boxVerifier.value = ''
-  boxLoading.value = false
-  boxAuthUrl.value = ''
+  webDavForm.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
+  webDavLoading.value = false
+  s3Form.value = { name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true }
+  s3Loading.value = false
+}
+
+const submitWebDavLogin = async () => {
+  const form = webDavForm.value
+  if (!form.name.trim() || !form.url.trim() || !form.username.trim() || !form.password.trim()) {
+    message.error('请填写 WebDAV 名称、地址、用户名和密码')
+    return
+  }
+
+  webDavLoading.value = true
+  try {
+    const connection = createWebDavConnection(form)
+    await testWebDavConnection(connection)
+    saveWebDavConnection(connection)
+    await UserDAL.UserLogin(createWebDavUserToken(connection), true)
+    useUser.userShowLogin = false
+  } catch (error: any) {
+    message.error(`连接 WebDAV 服务器失败: ${error?.message || '未知错误'}`)
+  } finally {
+    webDavLoading.value = false
+  }
+}
+
+const submitS3Login = async () => {
+  if (s3Loading.value) return
+  const form = s3Form.value
+  if (!form.name.trim() || !form.bucket.trim() || !form.accessKeyId.trim() || !form.secretAccessKey.trim()) {
+    message.error('请填写 S3 名称、Bucket、Access Key 和 Secret Key')
+    return
+  }
+  s3Loading.value = true
+  try {
+    const connection = createS3Connection(form)
+    await testS3Connection(connection)
+    saveS3Connection(connection)
+    await UserDAL.UserLogin(createS3UserToken(connection), true)
+    useUser.userShowLogin = false
+  } catch (error: any) {
+    message.error(`连接 S3 失败: ${error?.message || '未知错误'}`)
+  } finally {
+    s3Loading.value = false
+  }
 }
 
 const handleOpenCloud123 = () => {
@@ -484,25 +542,6 @@ const handleOpenOneDrive = async () => {
 
 const handleReopenOneDrive = () => {
   handleOpenOneDrive().catch((err: any) => message.error(err?.message || '打开 OneDrive 授权页失败'))
-}
-
-const handleOpenBox = async () => {
-  loginLoading.value = false
-  const clientId = (boxClientId.value || localStorage.getItem('box_client_id') || BOX_CLIENT_ID).trim()
-  if (!clientId) {
-    message.warning('请先在 src/box/auth.ts 填写 BOX_CLIENT_ID')
-    return
-  }
-  boxClientId.value = clientId
-  localStorage.setItem('box_client_id', clientId)
-  boxVerifier.value = createBoxPkceVerifier()
-  const authUrl = await buildBoxAuthUrl(clientId, boxVerifier.value)
-  boxAuthUrl.value = authUrl
-  window.Electron.shell.openExternal(authUrl)
-}
-
-const handleReopenBox = () => {
-  handleOpenBox().catch((err: any) => message.error(err?.message || '打开 Box 授权页失败'))
 }
 
 const submitCloud123Code = async () => {
@@ -588,28 +627,6 @@ const submitOneDriveCode = async (code: string) => {
     message.error('OneDrive 登录失败')
   } finally {
     onedriveLoading.value = false
-  }
-}
-
-const submitBoxCode = async (code: string) => {
-  if (boxLoading.value) return
-  const clientId = boxClientId.value.trim()
-  if (!clientId || !boxVerifier.value) {
-    message.error('Box 授权信息已失效，请重新打开授权页面')
-    return
-  }
-  boxLoading.value = true
-  try {
-    const token = await exchangeBoxCodeForToken(code, clientId, boxVerifier.value)
-    if (token) {
-      await UserDAL.UserLogin(token, true)
-      useUserStore().userShowLogin = false
-    }
-  } catch (error) {
-    console.error('Box 登录失败:', error)
-    message.error('Box 登录失败')
-  } finally {
-    boxLoading.value = false
   }
 }
 
@@ -934,8 +951,7 @@ const loginStepFirst = async (msg: string) => {
   let data: { bizExt?: string; code?: string } = {}
   try {
     data = JSON.parse(msg)
-  } catch {
-  }
+  } catch {}
   if (!data.bizExt && !data.code) {
     refreshStepTips('error', 1)
     DebugLog.mSaveDanger('登录失败：' + msg)
@@ -943,98 +959,100 @@ const loginStepFirst = async (msg: string) => {
   }
   const resultPromise = data.code
     ? AliUser.LoginByOAuthCode(data.code).then((resp: any) => {
-      if (!AliHttp.IsSuccess(resp.code)) throw new Error(resp.body?.message || resp.body?.code || `OAuth code exchange failed: ${resp.code}`)
-      const body = resp.body?.token_info || resp.body?.tokenInfo || resp.body
-      return {
-        accessToken: body.accessToken || body.access_token,
-        refreshToken: body.refreshToken || body.refresh_token,
-        tokenType: body.tokenType || body.token_type,
-        expiresIn: body.expiresIn || body.expires_in,
-        userId: body.userId || body.user_id,
-        userName: body.userName || body.user_name,
-        avatar: body.avatar,
-        nickName: body.nickName || body.nick_name,
-        defaultSboxDriveId: body.defaultSboxDriveId || body.default_sbox_drive_id,
-        role: body.role,
-        status: body.status,
-        expireTime: body.expireTime || body.expire_time,
-        state: body.state,
-        dataPinSetup: body.dataPinSetup || body.data_pin_setup,
-        isFirstLogin: body.isFirstLogin || body.is_first_login,
-        needRpVerify: body.needRpVerify || body.need_rp_verify
+        if (!AliHttp.IsSuccess(resp.code)) throw new Error(resp.body?.message || resp.body?.code || `OAuth code exchange failed: ${resp.code}`)
+        const body = resp.body?.token_info || resp.body?.tokenInfo || resp.body
+        return {
+          accessToken: body.accessToken || body.access_token,
+          refreshToken: body.refreshToken || body.refresh_token,
+          tokenType: body.tokenType || body.token_type,
+          expiresIn: body.expiresIn || body.expires_in,
+          userId: body.userId || body.user_id,
+          userName: body.userName || body.user_name,
+          avatar: body.avatar,
+          nickName: body.nickName || body.nick_name,
+          defaultSboxDriveId: body.defaultSboxDriveId || body.default_sbox_drive_id,
+          role: body.role,
+          status: body.status,
+          expireTime: body.expireTime || body.expire_time,
+          state: body.state,
+          dataPinSetup: body.dataPinSetup || body.data_pin_setup,
+          isFirstLogin: body.isFirstLogin || body.is_first_login,
+          needRpVerify: body.needRpVerify || body.need_rp_verify
+        }
+      })
+    : readData(data.bizExt || '').then((jsonstr: string) => JSON.parse(jsonstr).pds_login_result)
+  resultPromise
+    .then((result: any) => {
+      try {
+        const deviceId = getUuid(result.userId.toString(), 5)
+        const { signature } = GetSignature(0, result.userId.toString(), deviceId)
+        const token: ITokenInfo = {
+          tokenfrom: 'aliyun',
+          access_token: result.accessToken,
+          refresh_token: result.refreshToken,
+          session_expires_in: 0,
+          open_api_token_type: '',
+          open_api_access_token: '',
+          open_api_refresh_token: '',
+          open_api_expires_in: 0,
+          expires_in: result.expiresIn,
+          token_type: result.tokenType,
+          user_id: result.userId,
+          user_name: result.userName,
+          avatar: result.avatar,
+          nick_name: result.nickName,
+          default_drive_id: '',
+          default_sbox_drive_id: result.defaultSboxDriveId,
+          resource_drive_id: '',
+          backup_drive_id: '',
+          sbox_drive_id: '',
+          role: result.role,
+          status: result.status,
+          expire_time: result.expireTime,
+          state: result.state,
+          pin_setup: result.dataPinSetup,
+          is_first_login: result.isFirstLogin,
+          need_rp_verify: result.needRpVerify,
+          name: '',
+          spu_id: '',
+          is_expires: false,
+          used_size: 0,
+          total_size: 0,
+          free_size: 0,
+          space_expire: false,
+          spaceinfo: '',
+          pic_drive_id: '',
+          vipname: '',
+          vipexpire: '',
+          vipIcon: '',
+          device_id: deviceId,
+          signature: signature,
+          signInfo: {
+            signMon: -1,
+            signDay: -1
+          }
+        }
+        loginToken.value = token
+        if (settingStore.uiEnableOpenApiType === 'custom') {
+          client_id.value = settingStore.uiOpenApiClientId.trim()
+          client_secret.value = settingStore.uiOpenApiClientSecret.trim()
+        } else {
+          client_id.value = ALIYUN_APP_ID
+          client_secret.value = ALIYUN_APP_SECRET
+        }
+        refreshStepTips('process', 2)
+        loginStepSecond(token)
+      } catch (err: any) {
+        refreshStepTips('error', 1)
+        message.error('登录失败：' + (err.message || '解析失败'))
+        DebugLog.mSaveDanger('登录失败：' + (err.message || '解析失败'), JSON.stringify(err))
       }
     })
-    : readData(data.bizExt || '').then((jsonstr: string) => JSON.parse(jsonstr).pds_login_result)
-  resultPromise.then((result: any) => {
-    try {
-      const deviceId = getUuid(result.userId.toString(), 5)
-      const { signature } = GetSignature(0, result.userId.toString(), deviceId)
-      const token: ITokenInfo = {
-        tokenfrom: 'aliyun',
-        access_token: result.accessToken,
-        refresh_token: result.refreshToken,
-        session_expires_in: 0,
-        open_api_token_type: '',
-        open_api_access_token: '',
-        open_api_refresh_token: '',
-        open_api_expires_in: 0,
-        expires_in: result.expiresIn,
-        token_type: result.tokenType,
-        user_id: result.userId,
-        user_name: result.userName,
-        avatar: result.avatar,
-        nick_name: result.nickName,
-        default_drive_id: '',
-        default_sbox_drive_id: result.defaultSboxDriveId,
-        resource_drive_id: '',
-        backup_drive_id: '',
-        sbox_drive_id: '',
-        role: result.role,
-        status: result.status,
-        expire_time: result.expireTime,
-        state: result.state,
-        pin_setup: result.dataPinSetup,
-        is_first_login: result.isFirstLogin,
-        need_rp_verify: result.needRpVerify,
-        name: '',
-        spu_id: '',
-        is_expires: false,
-        used_size: 0,
-        total_size: 0,
-        free_size: 0,
-        space_expire: false,
-        spaceinfo: '',
-        pic_drive_id: '',
-        vipname: '',
-        vipexpire: '',
-        vipIcon: '',
-        device_id: deviceId,
-        signature: signature,
-        signInfo: {
-          signMon: -1,
-          signDay: -1
-        }
-      }
-      loginToken.value = token
-      if (settingStore.uiEnableOpenApiType === 'custom') {
-        client_id.value = settingStore.uiOpenApiClientId.trim()
-        client_secret.value = settingStore.uiOpenApiClientSecret.trim()
-      } else {
-        client_id.value = ALIYUN_APP_ID
-        client_secret.value = ALIYUN_APP_SECRET
-      }
-      refreshStepTips('process', 2)
-      loginStepSecond(token)
-    } catch (err: any) {
+    .catch((err: any) => {
       refreshStepTips('error', 1)
-      message.error('登录失败：' + (err.message || '解析失败'))
-      DebugLog.mSaveDanger('登录失败：' + (err.message || '解析失败'), JSON.stringify(err))
-    }
-  }).catch((err: any) => {
-    refreshStepTips('error', 1)
-    message.error('登录结果读取失败：' + (err?.message || '请重试'))
-    DebugLog.mSaveDanger('Aliyun login result read failed', err)
-  })
+      message.error('登录结果读取失败：' + (err?.message || '请重试'))
+      DebugLog.mSaveDanger('Aliyun login result read failed', err)
+    })
 }
 
 const loginStepSecond = async (token: ITokenInfo) => {
@@ -1068,21 +1086,21 @@ const loginStepSecond = async (token: ITokenInfo) => {
       const result = await AliUser.OpenApiQrCodeStatus(codeUrl)
       if (!result || typeof result !== 'object') return
       const { authCode, statusCode, statusType, statusTips } = result
-    if (!statusCode) {
-      refreshQrCodeStatus()
-      clearInterval(intervalId.value)
-      return
-    }
-    refreshQrCodeStatus(codeUrl, statusType, statusTips)
-    if (statusCode === 'QRCodeExpired') {
-      clearInterval(intervalId.value)
-      refreshQrCodeStatus()
-      return
-    }
+      if (!statusCode) {
+        refreshQrCodeStatus()
+        clearInterval(intervalId.value)
+        return
+      }
+      refreshQrCodeStatus(codeUrl, statusType, statusTips)
+      if (statusCode === 'QRCodeExpired') {
+        clearInterval(intervalId.value)
+        refreshQrCodeStatus()
+        return
+      }
       if (authCode && statusCode === 'LoginSuccess') {
-      // 构造请求体
-      await AliUser.OpenApiLoginByAuthCode(token, client_id.value, client_secret.value, authCode)
-      loginSuccess(token)
+        // 构造请求体
+        await AliUser.OpenApiLoginByAuthCode(token, client_id.value, client_secret.value, authCode)
+        loginSuccess(token)
         clearInterval(intervalId.value)
       }
     } catch (err: any) {
@@ -1100,26 +1118,27 @@ const handlerChangeType = () => {
     Modal.open({
       title: '输入开发者账号',
       bodyStyle: { minWidth: '340px' },
-      content: () => h(Space, { direction: 'vertical' }, () => [
-        h(Input, {
-          type: 'text',
-          tabindex: '-1',
-          allowClear: true,
-          modelValue: settingStore.uiOpenApiClientId.trim(),
-          style: { width: '340px' },
-          placeholder: '客户端ID',
-          'onUpdate:modelValue': (e) => cb({ uiOpenApiClientId: e.trim() })
-        }),
-        h(Input, {
-          type: 'text',
-          tabindex: '-1',
-          allowClear: true,
-          modelValue: settingStore.uiOpenApiClientSecret.trim(),
-          style: { width: '340px' },
-          placeholder: '客户端密钥',
-          'onUpdate:modelValue': (e) => cb({ uiOpenApiClientSecret: e.trim() })
-        })
-      ]),
+      content: () =>
+        h(Space, { direction: 'vertical' }, () => [
+          h(Input, {
+            type: 'text',
+            tabindex: '-1',
+            allowClear: true,
+            modelValue: settingStore.uiOpenApiClientId.trim(),
+            style: { width: '340px' },
+            placeholder: '客户端ID',
+            'onUpdate:modelValue': (e) => cb({ uiOpenApiClientId: e.trim() })
+          }),
+          h(Input, {
+            type: 'text',
+            tabindex: '-1',
+            allowClear: true,
+            modelValue: settingStore.uiOpenApiClientSecret.trim(),
+            style: { width: '340px' },
+            placeholder: '客户端密钥',
+            'onUpdate:modelValue': (e) => cb({ uiOpenApiClientSecret: e.trim() })
+          })
+        ]),
       okText: '确认',
       cancelText: '取消',
       onBeforeOk: async (e: any) => {
@@ -1171,23 +1190,13 @@ const loginSuccess = (token: ITokenInfo) => {
       refreshQrCodeStatus()
     })
 }
-
 </script>
 
 <template>
-  <a-modal title="网盘账号登录" v-model:visible='useUser.userShowLogin'
-           :mask-closable='false' unmount-on-close :footer='false'
-           class='userloginmodal' @before-open='handleModalOpen' @close='handleClose'>
+  <a-modal title="网盘账号登录" v-model:visible="useUser.userShowLogin" :mask-closable="false" unmount-on-close :footer="false" class="userloginmodal" @before-open="handleModalOpen" @close="handleClose">
     <div class="modalbody login-modal-body">
       <aside class="login-provider-sidebar">
-        <button
-          v-for="provider in loginProviders"
-          :key="provider"
-          class="login-provider-side-item"
-          :class="{ active: loginProvider === provider }"
-          :title="getLoginProviderMeta(provider).label"
-          @click="loginProvider = provider"
-        >
+        <button v-for="provider in loginProviders" :key="provider" class="login-provider-side-item" :class="{ active: loginProvider === provider }" :title="getLoginProviderMeta(provider).label" @click="loginProvider = provider">
           <span v-if="getLoginProviderMeta(provider).icon" class="login-provider-icon">
             <img :src="getLoginProviderMeta(provider).icon" :alt="getLoginProviderMeta(provider).label" />
           </span>
@@ -1208,208 +1217,202 @@ const loginSuccess = (token: ITokenInfo) => {
             <a-step description="扫码或账号登录">第一次扫码</a-step>
             <a-step description="手机授权">第二次扫码</a-step>
           </a-steps>
-          <div id='logindiv'>
-            <div class='logincontent'>
-            <div id="loginframediv" class="loginframe">
-              <a-spin class="loading" :size="32" v-if='loginLoading' tip="加载中，请稍后..." />
-              <Webview id="loginiframe" v-show='!loginLoading && loginCur === 1'
-                       plugins nodeintegration disablewebsecurity
-                       webpreferences="allowRunningInsecureContent"
-                       src="about:blank" style="width: 100%; height: 400px; border: none; overflow: hidden" />
-              <div class="qrcodeframe" v-if="loginCur === 2 && !loginLoading">
-                <a-image
-                  width='250'
-                  height='250'
-                  :hide-footer='true'
-                  :preview='false'
-                  :show-loader="true"
-                  @click="handleRefreshQrCodeUrl"
-                  style="display:inline-block;"
-                  :src="qrCodeUrl">
-                </a-image>
-                <a-alert banner center :show-icon="false" :type='qrCodeStatusType'>
-                  {{ qrCodeStatusTips }}
-                </a-alert>
-              </div>
-            </div>
-          </div>
-        </div>
-        </div>
-
-      <div v-else-if="loginProvider === 'cloud123'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="browser-login-hint">
-              <p style="margin: 32px 0 8px; font-size: 15px;">已在系统浏览器中打开 123 网盘授权页面</p>
-              <p style="color: var(--color-text-3); font-size: 13px;">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-              <a-button style="margin-top: 16px;" @click="handleReopenCloud123">重新打开浏览器</a-button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-else-if="loginProvider === '115'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div id="loginframediv" class="loginframe">
-              <a-spin class="loading" :size="32" v-if='loginLoading' tip="加载中，请稍后..." />
-              <div class="qrcodeframe" v-if="!loginLoading">
-                <a-image
-                  width='250'
-                  height='250'
-                  :hide-footer='true'
-                  :preview='false'
-                  :show-loader="true"
-                  @click="handleRefresh115Qr"
-                  style="display:inline-block;"
-                  :src="qrCodeUrl">
-                </a-image>
-                <a-alert banner center :show-icon="false" :type="qrCodeStatusType || 'info'">
-                  {{ drive115Tips }}
-                </a-alert>
-              </div>
-            </div>
-            <div class="cloud123-code">
-              <a-input v-model="drive115ClientId" placeholder="App ID（client_id）" allow-clear
-                       @change="handleStorageChange" />
-              <a-button type="primary" :loading="drive115Loading" @click="handleRefresh115Qr">刷新二维码</a-button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-else-if="loginProvider === '139'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="pikpak-login-form">
-              <a-textarea v-model="cloud139Authorization" placeholder="粘贴 139 云盘 Authorization（Basic 后面的完整值也可以）" :auto-size="{ minRows: 4, maxRows: 6 }" allow-clear />
-              <a-button type="primary" long :loading="cloud139Loading" @click="submitCloud139Login">登录 139 云盘</a-button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-else-if="loginProvider === '189'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div id="loginframediv" class="loginframe">
-              <a-spin class="loading" :size="32" v-if='loginLoading' tip="加载中，请稍后..." />
-              <div class="qrcodeframe" v-if="!loginLoading">
-                <div class="cloud189-qrcode-wrap">
-                  <AntQRCode :value="cloud189QrUrl || 'cloud189'" :size="250" color="#000" bg-color="#fff" />
+          <div id="logindiv">
+            <div class="logincontent">
+              <div id="loginframediv" class="loginframe">
+                <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
+                <Webview id="loginiframe" v-show="!loginLoading && loginCur === 1" plugins nodeintegration disablewebsecurity webpreferences="allowRunningInsecureContent" src="about:blank" style="width: 100%; height: 400px; border: none; overflow: hidden" />
+                <div class="qrcodeframe" v-if="loginCur === 2 && !loginLoading">
+                  <a-image width="250" height="250" :hide-footer="true" :preview="false" :show-loader="true" @click="handleRefreshQrCodeUrl" style="display: inline-block" :src="qrCodeUrl"></a-image>
+                  <a-alert banner center :show-icon="false" :type="qrCodeStatusType">
+                    {{ qrCodeStatusTips }}
+                  </a-alert>
                 </div>
-                <a-alert banner center :show-icon="false" :type="cloud189QrStatusType">
-                  {{ cloud189Tips }}
-                </a-alert>
               </div>
             </div>
-            <div class="quark-login-toolbar" v-if="!loginLoading">
-              <a-button type="primary" :loading="cloud189Loading" @click="handleOpen189">刷新二维码</a-button>
-            </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'guangya'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="pikpak-login-form">
-              <a-input v-model="guangyaPhone" placeholder="手机号，例如 +86 13800138000" allow-clear />
-              <a-input v-model="guangyaCode" placeholder="短信验证码" allow-clear @press-enter="submitGuangyaLogin" />
-              <a-space direction="vertical" fill>
-                <a-button type="outline" long :loading="guangyaLoading" @click="sendGuangyaSmsCode">{{ guangyaSmsState ? '重新发送验证码' : '发送验证码' }}</a-button>
-                <a-button type="primary" long :loading="guangyaLoading" @click="submitGuangyaLogin">登录光鸭云盘</a-button>
-              </a-space>
+        <div v-else-if="loginProvider === 'cloud123'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="browser-login-hint">
+                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 123 网盘授权页面</p>
+                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
+                <a-button style="margin-top: 16px" @click="handleReopenCloud123">重新打开浏览器</a-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'baidu'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="browser-login-hint">
-              <p style="margin: 32px 0 8px; font-size: 15px;">已在系统浏览器中打开百度网盘授权页面</p>
-              <p style="color: var(--color-text-3); font-size: 13px;">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-              <a-button style="margin-top: 16px;" @click="handleReopenBaidu">重新打开浏览器</a-button>
+        <div v-else-if="loginProvider === '115'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div id="loginframediv" class="loginframe">
+                <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
+                <div class="qrcodeframe" v-if="!loginLoading">
+                  <a-image width="250" height="250" :hide-footer="true" :preview="false" :show-loader="true" @click="handleRefresh115Qr" style="display: inline-block" :src="qrCodeUrl"></a-image>
+                  <a-alert banner center :show-icon="false" :type="qrCodeStatusType || 'info'">
+                    {{ drive115Tips }}
+                  </a-alert>
+                </div>
+              </div>
+              <div class="cloud123-code">
+                <a-input v-model="drive115ClientId" placeholder="App ID（client_id）" allow-clear @change="handleStorageChange" />
+                <a-button type="primary" :loading="drive115Loading" @click="handleRefresh115Qr">刷新二维码</a-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'pikpak'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="pikpak-login-form">
-              <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
-              <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear @press-enter="submitPikPakLogin" />
-              <a-button type="primary" long :loading="pikpakLoading" @click="submitPikPakLogin">登录 PikPak</a-button>
+        <div v-else-if="loginProvider === '139'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="pikpak-login-form">
+                <a-textarea v-model="cloud139Authorization" placeholder="粘贴 139 云盘 Authorization（Basic 后面的完整值也可以）" :auto-size="{ minRows: 4, maxRows: 6 }" allow-clear />
+                <a-button type="primary" long :loading="cloud139Loading" @click="submitCloud139Login">登录 139 云盘</a-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'quark'">
-        <div id='logindiv'>
-          <div class='logincontent quark-logincontent'>
-            <a-spin class="loading" :size="32" v-if='loginLoading' tip="加载中，请稍后..." />
-            <div class="qrcodeframe" v-if="!loginLoading">
-              <a-image
-                width='250'
-                height='250'
-                :hide-footer='true'
-                :preview='false'
-                :show-loader="true"
-                @click="handleOpenQuark"
-                style="display:inline-block;"
-                :src="quarkQrImageUrl">
-              </a-image>
-              <a-alert banner center :show-icon="false" :type="quarkQrStatusType">
-                {{ quarkTips }}
-              </a-alert>
-            </div>
-            <div class="quark-login-toolbar" v-if="!loginLoading">
-              <a-button type="primary" :loading="quarkLoading" @click="handleOpenQuark">刷新二维码</a-button>
+        <div v-else-if="loginProvider === '189'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div id="loginframediv" class="loginframe">
+                <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
+                <div class="qrcodeframe" v-if="!loginLoading">
+                  <div class="cloud189-qrcode-wrap">
+                    <AntQRCode :value="cloud189QrUrl || 'cloud189'" :size="250" color="#000" bg-color="#fff" />
+                  </div>
+                  <a-alert banner center :show-icon="false" :type="cloud189QrStatusType">
+                    {{ cloud189Tips }}
+                  </a-alert>
+                </div>
+              </div>
+              <div class="quark-login-toolbar" v-if="!loginLoading">
+                <a-button type="primary" :loading="cloud189Loading" @click="handleOpen189">刷新二维码</a-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'dropbox'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="browser-login-hint">
-              <p style="margin: 32px 0 8px; font-size: 15px;">已在系统浏览器中打开 Dropbox 授权页面</p>
-              <p style="color: var(--color-text-3); font-size: 13px;">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-              <a-button style="margin-top: 16px;" :loading="dropboxLoading" @click="handleReopenDropbox">重新打开浏览器</a-button>
+        <div v-else-if="loginProvider === 'guangya'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="pikpak-login-form">
+                <a-input v-model="guangyaPhone" placeholder="手机号，例如 +86 13800138000" allow-clear />
+                <a-input v-model="guangyaCode" placeholder="短信验证码" allow-clear @press-enter="submitGuangyaLogin" />
+                <a-space direction="vertical" fill>
+                  <a-button type="outline" long :loading="guangyaLoading" @click="sendGuangyaSmsCode">{{ guangyaSmsState ? '重新发送验证码' : '发送验证码' }}</a-button>
+                  <a-button type="primary" long :loading="guangyaLoading" @click="submitGuangyaLogin">登录光鸭云盘</a-button>
+                </a-space>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'onedrive'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="browser-login-hint">
-              <p style="margin: 32px 0 8px; font-size: 15px;">已在系统浏览器中打开 OneDrive 授权页面</p>
-              <p style="color: var(--color-text-3); font-size: 13px;">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-              <a-button style="margin-top: 16px;" :loading="onedriveLoading" @click="handleReopenOneDrive">重新打开浏览器</a-button>
+        <div v-else-if="loginProvider === 'baidu'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="browser-login-hint">
+                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开百度网盘授权页面</p>
+                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
+                <a-button style="margin-top: 16px" @click="handleReopenBaidu">重新打开浏览器</a-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="loginProvider === 'box'">
-        <div id='logindiv'>
-          <div class='logincontent'>
-            <div class="browser-login-hint">
-              <p style="margin: 32px 0 8px; font-size: 15px;">已在系统浏览器中打开 Box 授权页面</p>
-              <p style="color: var(--color-text-3); font-size: 13px;">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-              <a-button style="margin-top: 16px;" :loading="boxLoading" @click="handleReopenBox">重新打开浏览器</a-button>
+        <div v-else-if="loginProvider === 'pikpak'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="pikpak-login-form">
+                <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
+                <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear @press-enter="submitPikPakLogin" />
+                <a-button type="primary" long :loading="pikpakLoading" @click="submitPikPakLogin">登录 PikPak</a-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+
+        <div v-else-if="loginProvider === 'quark'">
+          <div id="logindiv">
+            <div class="logincontent quark-logincontent">
+              <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
+              <div class="qrcodeframe" v-if="!loginLoading">
+                <a-image width="250" height="250" :hide-footer="true" :preview="false" :show-loader="true" @click="handleOpenQuark" style="display: inline-block" :src="quarkQrImageUrl"></a-image>
+                <a-alert banner center :show-icon="false" :type="quarkQrStatusType">
+                  {{ quarkTips }}
+                </a-alert>
+              </div>
+              <div class="quark-login-toolbar" v-if="!loginLoading">
+                <a-button type="primary" :loading="quarkLoading" @click="handleOpenQuark">刷新二维码</a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 'dropbox'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="browser-login-hint">
+                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 Dropbox 授权页面</p>
+                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
+                <a-button style="margin-top: 16px" :loading="dropboxLoading" @click="handleReopenDropbox">重新打开浏览器</a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 'onedrive'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="browser-login-hint">
+                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 OneDrive 授权页面</p>
+                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
+                <a-button style="margin-top: 16px" :loading="onedriveLoading" @click="handleReopenOneDrive">重新打开浏览器</a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 'webdav'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <form class="webdav-login-form" @submit.prevent="submitWebDavLogin">
+                <a-input v-model="webDavForm.name" placeholder="连接名称（必填）" allow-clear />
+                <a-input v-model="webDavForm.url" placeholder="WebDAV 地址，例如 https://example.com/dav" allow-clear />
+                <a-input v-model="webDavForm.username" placeholder="用户名" allow-clear />
+                <a-input-password v-model="webDavForm.password" placeholder="密码" allow-clear />
+                <a-input v-model="webDavForm.rootPath" placeholder="挂载路径，默认 /" allow-clear />
+                <a-button html-type="submit" type="primary" long :loading="webDavLoading">连接 WebDAV</a-button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 's3'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <form class="s3-login-form" @submit.prevent="submitS3Login">
+                <a-input v-model="s3Form.name" class="s3-field-wide" placeholder="连接名称（必填且不可重复）" allow-clear />
+                <a-input v-model="s3Form.endpoint" class="s3-field-wide" placeholder="Endpoint（AWS 官方可留空）" allow-clear />
+                <a-input v-model="s3Form.region" placeholder="Region" allow-clear />
+                <a-input v-model="s3Form.bucket" placeholder="Bucket" allow-clear />
+                <a-input v-model="s3Form.accessKeyId" placeholder="Access Key ID" allow-clear />
+                <a-input-password v-model="s3Form.secretAccessKey" placeholder="Secret Access Key" allow-clear />
+                <a-input-password v-model="s3Form.sessionToken" class="s3-field-wide" placeholder="Session Token（可选）" allow-clear />
+                <a-input v-model="s3Form.rootPrefix" placeholder="根前缀（可选）" allow-clear />
+                <label class="s3-path-style">
+                  <a-switch v-model="s3Form.forcePathStyle" size="small" />
+                  路径样式
+                </label>
+                <a-button class="s3-field-wide" html-type="submit" type="primary" long :loading="s3Loading">连接 S3</a-button>
+              </form>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   </a-modal>
@@ -1432,7 +1435,7 @@ const loginSuccess = (token: ITokenInfo) => {
       overflow: hidden;
       position: relative;
       width: 100%;
-      height: 100%
+      height: 100%;
     }
 
     .qrcodeframe {
@@ -1501,7 +1504,9 @@ const loginSuccess = (token: ITokenInfo) => {
   border-radius: 6px;
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.15s, color 0.15s;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
 }
 
 .login-provider-side-item:hover {
@@ -1609,6 +1614,36 @@ const loginSuccess = (token: ITokenInfo) => {
   margin: 64px auto 0;
 }
 
+.webdav-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 300px;
+  margin: 34px auto 0;
+}
+
+.s3-login-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  width: 330px;
+  margin: 28px auto 0;
+  text-align: left;
+}
+
+.s3-field-wide {
+  grid-column: 1 / -1;
+}
+
+.s3-path-style {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
 .quark-logincontent {
   height: 430px !important;
   min-height: 430px !important;
@@ -1620,5 +1655,4 @@ const loginSuccess = (token: ITokenInfo) => {
   gap: 8px;
   padding: 8px 0;
 }
-
 </style>

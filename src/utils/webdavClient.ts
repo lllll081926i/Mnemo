@@ -3,6 +3,7 @@ import fsPromises from 'fs/promises'
 import { createClient, type FileStat } from 'webdav'
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
+import type { ITokenInfo } from '../user/userstore'
 
 const STORAGE_KEY = 'MediaLibrary_WebDavConnections'
 
@@ -16,11 +17,7 @@ export interface WebDavConnectionConfig {
   createdAt: string
 }
 
-const VIDEO_EXTENSIONS = new Set([
-  '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v',
-  '.mpg', '.mpeg', '.3gp', '.rmvb', '.asf', '.divx', '.xvid', '.ts',
-  '.m2ts', '.mts', '.vob', '.ogv', '.dv'
-])
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.rmvb', '.asf', '.divx', '.xvid', '.ts', '.m2ts', '.mts', '.vob', '.ogv', '.dv'])
 
 const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, '')
 
@@ -77,7 +74,7 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
   const updatedAt = stat.lastmod
   const time = updatedAt ? new Date(updatedAt).getTime() : Date.now()
   const driveId = `webdav:${config.id}`
-  const iconInfo = isDir ? ['folder', 'iconfile-folder'] : getFileIcon(isDir ? 'folder' : (VIDEO_EXTENSIONS.has(`.${ext}`) ? 'video' : 'others'), ext, ext, mimeType, size)
+  const iconInfo = isDir ? ['folder', 'iconfile-folder'] : getFileIcon(isDir ? 'folder' : VIDEO_EXTENSIONS.has(`.${ext}`) ? 'video' : 'others', ext, ext, mimeType, size)
 
   return {
     __v_skip: true,
@@ -132,7 +129,7 @@ const saveWebDavConnections = (connections: WebDavConnectionConfig[]) => {
 
 export const saveWebDavConnection = (config: WebDavConnectionConfig) => {
   const list = getWebDavConnections()
-  const index = list.findIndex(item => item.id === config.id)
+  const index = list.findIndex((item) => item.id === config.id)
   if (index >= 0) {
     list[index] = config
   } else {
@@ -142,29 +139,26 @@ export const saveWebDavConnection = (config: WebDavConnectionConfig) => {
 }
 
 export const removeWebDavConnection = (id: string) => {
-  const list = getWebDavConnections().filter(item => item.id !== id)
+  const list = getWebDavConnections().filter((item) => item.id !== id)
   saveWebDavConnections(list)
 }
 
 export const getWebDavConnection = (id: string) => {
-  return getWebDavConnections().find(item => item.id === id)
+  return getWebDavConnections().find((item) => item.id === id)
 }
 
-export const createWebDavConnection = (input: {
-  name: string
-  url: string
-  username: string
-  password: string
-  rootPath?: string
-}): WebDavConnectionConfig => {
+export const createWebDavConnection = (input: { name: string; url: string; username: string; password: string; rootPath?: string }): WebDavConnectionConfig => {
+  if (!input.name.trim()) throw new Error('请填写 WebDAV 连接名称')
   const normalizedUrl = normalizeUrl(input.url)
   const normalizedRoot = normalizeWebDavPath(input.rootPath || '/')
   const timestamp = Date.now().toString()
   const idSeed = `${normalizedUrl}|${input.username}|${normalizedRoot}|${timestamp}`
-  const id = btoa(idSeed).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)
+  const id = btoa(idSeed)
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 24)
   return {
     id,
-    name: input.name.trim() || new URL(normalizedUrl).host,
+    name: input.name.trim(),
     url: normalizedUrl,
     username: input.username.trim(),
     password: input.password,
@@ -172,6 +166,50 @@ export const createWebDavConnection = (input: {
     createdAt: new Date().toISOString()
   }
 }
+
+export const createWebDavUserToken = (connection: WebDavConnectionConfig): ITokenInfo => ({
+  tokenfrom: 'webdav',
+  access_token: '',
+  refresh_token: '',
+  session_expires_in: 0,
+  open_api_token_type: '',
+  open_api_access_token: '',
+  open_api_refresh_token: '',
+  open_api_expires_in: 0,
+  signature: '',
+  device_id: '',
+  expires_in: 0,
+  token_type: '',
+  user_id: `webdav:${connection.id}`,
+  user_name: connection.username || connection.name,
+  avatar: '',
+  nick_name: connection.name,
+  default_drive_id: `webdav:${connection.id}`,
+  default_sbox_drive_id: '',
+  resource_drive_id: '',
+  backup_drive_id: '',
+  sbox_drive_id: '',
+  role: '',
+  status: '',
+  expire_time: '',
+  state: '',
+  pin_setup: false,
+  is_first_login: false,
+  need_rp_verify: false,
+  name: connection.name,
+  spu_id: '',
+  is_expires: false,
+  used_size: 0,
+  total_size: 0,
+  free_size: 0,
+  space_expire: false,
+  spaceinfo: '',
+  vipname: '',
+  vipIcon: '',
+  vipexpire: '',
+  pic_drive_id: '',
+  signInfo: { signMon: -1, signDay: -1 }
+})
 
 export const buildWebDavDownloadUrl = (config: WebDavConnectionConfig, relativePath: string): string => {
   const requestPath = joinDavPath(config.rootPath, relativePath)
@@ -184,7 +222,7 @@ export const buildWebDavDownloadUrl = (config: WebDavConnectionConfig, relativeP
   baseUrl.pathname = `/${encodedPath}`
   if (config.username) baseUrl.username = config.username
   if (config.password) baseUrl.password = config.password
-  const urlString =  baseUrl.toString()
+  const urlString = baseUrl.toString()
   return urlString
 }
 
@@ -215,7 +253,7 @@ const fetchWebDavApiToken = async (config: WebDavConnectionConfig): Promise<stri
     })
   })
   if (!response.ok) throw new Error(`WebDAV 登录失败 (${response.status})`)
-  const payload = await response.json().catch(() => null) as any
+  const payload = (await response.json().catch(() => null)) as any
   const token = payload?.data?.token
   if (!token) throw new Error(payload?.message || '获取 WebDAV token 失败')
   return token
@@ -239,7 +277,7 @@ export const getWebDavPlayUrl = async (config: WebDavConnectionConfig, relativeP
     body: JSON.stringify({ path: relativePath })
   })
   if (!response.ok) throw new Error(`获取 WebDAV 播放地址失败 (${response.status})`)
-  const payload = await response.json().catch(() => null) as any
+  const payload = (await response.json().catch(() => null)) as any
   const rawUrl = payload?.data?.raw_url
   if (!rawUrl || typeof rawUrl !== 'string') {
     throw new Error(payload?.message || '获取 WebDAV 播放地址失败')
@@ -257,24 +295,18 @@ export const getWebDavDownloadUrl = async (config: WebDavConnectionConfig, relat
   }
 }
 
-export const listWebDavDirectory = async (
-  config: WebDavConnectionConfig,
-  relativePath = '/'
-): Promise<IAliGetFileModel[]> => {
+export const listWebDavDirectory = async (config: WebDavConnectionConfig, relativePath = '/'): Promise<IAliGetFileModel[]> => {
   const normalizedRelativePath = normalizeWebDavPath(relativePath)
   const requestPath = joinDavPath(config.rootPath, normalizedRelativePath)
   const client = createWebDavClient(config)
-  const stats = await client.getDirectoryContents(requestPath) as FileStat[]
-  return stats
-    .filter((stat) => normalizeWebDavPath(stat.filename) !== normalizeWebDavPath(requestPath))
-    .map((stat) => toAliModel(config, stat))
+  const stats = (await client.getDirectoryContents(requestPath)) as FileStat[]
+  return stats.filter((stat) => normalizeWebDavPath(stat.filename) !== normalizeWebDavPath(requestPath)).map((stat) => toAliModel(config, stat))
 }
-
 
 export const statWebDavPath = async (config: WebDavConnectionConfig, relativePath: string) => {
   const client = createWebDavClient(config)
   const requestPath = joinDavPath(config.rootPath, relativePath)
-  return await client.stat(requestPath) as FileStat
+  return (await client.stat(requestPath)) as FileStat
 }
 
 export const copyWebDavPath = async (config: WebDavConnectionConfig, sourcePath: string, targetPath: string) => {

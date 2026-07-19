@@ -18,6 +18,7 @@ import { apiDrive115TrashBatch, apiDrive115TrashDelete, apiDrive115TrashRestore 
 import { apiBaiduCopy, apiBaiduDelete, apiBaiduMove, apiBaiduRename } from '../cloudbaidu/filemanager'
 import { apiBaiduCreateDir, buildBaiduUploadPath } from '../cloudbaidu/upload'
 import { copyWebDavPath, createWebDavDirectory, deleteWebDavPath, getWebDavConnection, getWebDavConnectionId, isWebDavDrive, moveWebDavPath, normalizeWebDavPath, renameWebDavPath } from '../utils/webdavClient'
+import { copyS3Path, createS3Directory, deleteS3Path, getS3Connection, getS3ConnectionId, getS3ObjectInfo, isS3Drive, moveS3Path, normalizeS3RelativePath, renameS3Path } from '../utils/s3Client'
 import { apiPikPakCopyBatch, apiPikPakMkdir, apiPikPakMoveBatch, apiPikPakRename, apiPikPakTrashBatch, apiPikPakTrashDelete, apiPikPakTrashRestore } from '../pikpak/filecmd'
 import { apiQuarkMkdir, apiQuarkMoveBatch, apiQuarkRename, apiQuarkTrashBatch } from '../quark/filecmd'
 import { apiCloud139CopyBatch, apiCloud139Mkdir, apiCloud139MoveBatch, apiCloud139Rename, apiCloud139TrashBatch } from '../cloud139/filecmd'
@@ -59,11 +60,7 @@ export default class AliFileCmd {
     }
     return file_id
   }
-  static async ApiCreatNewForder(
-    user_id: string, drive_id: string,
-    parent_file_id: string, creatDirName: string,
-    encType: string = '', check_name_mode: string = 'refuse'
-  ): Promise<{ file_id: string; error: string }> {
+  static async ApiCreatNewForder(user_id: string, drive_id: string, parent_file_id: string, creatDirName: string, encType: string = '', check_name_mode: string = 'refuse'): Promise<{ file_id: string; error: string }> {
     const result = { file_id: '', error: '新建文件夹失败' }
     if (!user_id || !drive_id || !parent_file_id) return result
     if (isWebDavDrive(drive_id)) {
@@ -74,6 +71,18 @@ export default class AliFileCmd {
       const targetPath = normalizeWebDavPath(`${parentPath}/${creatDirName}`)
       try {
         await createWebDavDirectory(connection, targetPath)
+        return { file_id: targetPath, error: '' }
+      } catch (error: any) {
+        return { file_id: '', error: error?.message || result.error }
+      }
+    }
+    if (isS3Drive(drive_id)) {
+      const connection = getS3Connection(getS3ConnectionId(drive_id))
+      if (!connection) return result
+      const parentPath = parent_file_id.includes('root') ? '/' : parent_file_id
+      const targetPath = normalizeS3RelativePath(`${parentPath}/${creatDirName}`)
+      try {
+        await createS3Directory(connection, targetPath)
         return { file_id: targetPath, error: '' }
       } catch (error: any) {
         return { file_id: '', error: error?.message || result.error }
@@ -143,9 +152,8 @@ export default class AliFileCmd {
     return result
   }
 
-
   static async ApiTrashBatch(user_id: string, drive_id: string, file_idList: string[]): Promise<string[]> {
-    if (isWebDavDrive(drive_id)) {
+    if (isWebDavDrive(drive_id) || isS3Drive(drive_id)) {
       return []
     }
     if (isCloud123User(user_id) || drive_id === 'cloud123') {
@@ -188,7 +196,6 @@ export default class AliFileCmd {
     return ApiBatchSuccess('放入回收站', batchList, user_id, '')
   }
 
-
   static async ApiDeleteBatch(user_id: string, drive_id: string, file_idList: string[]): Promise<string[]> {
     if (isWebDavDrive(drive_id)) {
       const connection = getWebDavConnection(getWebDavConnectionId(drive_id))
@@ -207,8 +214,25 @@ export default class AliFileCmd {
       }
       return successList
     }
+    if (isS3Drive(drive_id)) {
+      const connection = getS3Connection(getS3ConnectionId(drive_id))
+      if (!connection) {
+        message.error('S3 连接不存在，请重新连接')
+        return []
+      }
+      const successList: string[] = []
+      for (const file_id of file_idList) {
+        try {
+          await deleteS3Path(connection, file_id)
+          successList.push(file_id)
+        } catch (error) {
+          console.error('S3 删除失败:', error)
+        }
+      }
+      return successList
+    }
     if (isCloud123User(user_id) || drive_id === 'cloud123') {
-      message.error("暂不支持彻底删除，请移步至官方客户端操作")
+      message.error('暂不支持彻底删除，请移步至官方客户端操作')
       return []
     }
     if (isDrive115User(user_id) || drive_id === 'drive115') {
@@ -249,13 +273,19 @@ export default class AliFileCmd {
     return ApiBatchSuccess('彻底删除', batchList, user_id, '')
   }
 
-
-  static async ApiRenameBatch(user_id: string, drive_id: string, file_idList: string[], names: string[]): Promise<{
-    file_id: string;
-    parent_file_id: string;
-    name: string;
-    isDir: boolean
-  }[]> {
+  static async ApiRenameBatch(
+    user_id: string,
+    drive_id: string,
+    file_idList: string[],
+    names: string[]
+  ): Promise<
+    {
+      file_id: string
+      parent_file_id: string
+      name: string
+      isDir: boolean
+    }[]
+  > {
     if (isWebDavDrive(drive_id)) {
       const connection = getWebDavConnection(getWebDavConnectionId(drive_id))
       if (!connection) return []
@@ -269,6 +299,24 @@ export default class AliFileCmd {
           successList.push({ file_id: targetPath, parent_file_id: normalizeWebDavPath(targetPath.split('/').slice(0, -1).join('/')), name, isDir: true })
         } catch (error) {
           console.error('WebDAV 重命名失败:', error)
+        }
+      }
+      return successList
+    }
+    if (isS3Drive(drive_id)) {
+      const connection = getS3Connection(getS3ConnectionId(drive_id))
+      if (!connection) return []
+      const successList: { file_id: string; parent_file_id: string; name: string; isDir: boolean }[] = []
+      for (let i = 0, maxi = file_idList.length; i < maxi; i++) {
+        const file_id = file_idList[i]
+        const name = names[i] || ''
+        if (!file_id || !name) continue
+        try {
+          const info = await getS3ObjectInfo(connection, file_id)
+          const targetPath = await renameS3Path(connection, file_id, name)
+          successList.push({ file_id: targetPath, parent_file_id: normalizeS3RelativePath(targetPath.split('/').slice(0, -1).join('/')), name, isDir: info.isDir })
+        } catch (error) {
+          console.error('S3 重命名失败:', error)
         }
       }
       return successList
@@ -329,11 +377,7 @@ export default class AliFileCmd {
     }
     if (isCloud139User(user_id) || drive_id === 'cloud139' || isCloud189User(user_id) || drive_id === 'cloud189' || isGuangyaUser(user_id) || drive_id === 'guangya') {
       const successList: { file_id: string; parent_file_id: string; name: string; isDir: boolean }[] = []
-      const rename = isGuangyaUser(user_id) || drive_id === 'guangya'
-        ? apiGuangyaRename
-        : isCloud139User(user_id) || drive_id === 'cloud139'
-          ? apiCloud139Rename
-          : apiCloud189Rename
+      const rename = isGuangyaUser(user_id) || drive_id === 'guangya' ? apiGuangyaRename : isCloud139User(user_id) || drive_id === 'cloud139' ? apiCloud139Rename : apiCloud189Rename
       for (let i = 0, maxi = file_idList.length; i < maxi; i++) {
         const file_id = file_idList[i]
         const name = names[i] || ''
@@ -389,15 +433,16 @@ export default class AliFileCmd {
     if (batchList.length == 0) return Promise.resolve([])
     const successList: { file_id: string; parent_file_id: string; name: string; isDir: boolean }[] = []
     const result = await ApiBatch(file_idList.length <= 1 ? '' : '批量重命名', batchList, user_id, '')
-    result.reslut.map((t) => successList.push({
-      file_id: t.file_id!,
-      name: t.name!,
-      parent_file_id: t.parent_file_id!,
-      isDir: t.type !== 'folder'
-    }))
+    result.reslut.map((t) =>
+      successList.push({
+        file_id: t.file_id!,
+        name: t.name!,
+        parent_file_id: t.parent_file_id!,
+        isDir: t.type !== 'folder'
+      })
+    )
     return successList
   }
-
 
   static async ApiFavorBatch(user_id: string, drive_id: string, isfavor: boolean, ismessage: boolean, file_idList: string[]): Promise<string[]> {
     if (isGuangyaUser(user_id) || drive_id === 'guangya') return []
@@ -408,10 +453,9 @@ export default class AliFileCmd {
     return ApiBatchSuccess(ismessage ? (isfavor ? '收藏文件' : '取消收藏') : '', batchList, user_id, '')
   }
 
-
   static async ApiTrashCleanBatch(user_id: string, drive_id: string, ismessage: boolean, file_idList: string[]): Promise<string[]> {
     if (isCloud123User(user_id) || drive_id === 'cloud123') {
-      message.error("暂不支持彻底删除，请移步至官方客户端操作")
+      message.error('暂不支持彻底删除，请移步至官方客户端操作')
       return []
     }
     if (isDrive115User(user_id) || drive_id === 'drive115') {
@@ -436,7 +480,6 @@ export default class AliFileCmd {
     })
     return ApiBatchSuccess(ismessage ? '从回收站删除' : '', batchList, user_id, '')
   }
-
 
   static async ApiTrashRestoreBatch(user_id: string, drive_id: string, ismessage: boolean, file_idList: string[]): Promise<string[]> {
     if (isCloud123User(user_id) || drive_id === 'cloud123') {
@@ -484,7 +527,7 @@ export default class AliFileCmd {
   }
 
   static async ApiFileColorBatch(user_id: string, drive_id: string, description: string, color: string, file_idList: string[]) {
-    if (isWebDavDrive(drive_id)) return
+    if (isWebDavDrive(drive_id) || isS3Drive(drive_id)) return
     if (isCloud123User(user_id) || drive_id === 'cloud123') return
     if (isDrive115User(user_id) || drive_id === 'drive115') return
     if (isBaiduUser(user_id) || drive_id === 'baidu') return
@@ -521,14 +564,16 @@ export default class AliFileCmd {
     usePanFileStore().mColorFiles(color, successList)
   }
 
-
-  static async ApiRecoverBatch(user_id: string, resumeList: {
-    drive_id: string;
-    file_id: string;
-    content_hash: string;
-    size: number;
-    name: string
-  }[]): Promise<string[] | string> {
+  static async ApiRecoverBatch(
+    user_id: string,
+    resumeList: {
+      drive_id: string
+      file_id: string
+      content_hash: string
+      size: number
+      name: string
+    }[]
+  ): Promise<string[] | string> {
     const successList: string[] = []
     if (!resumeList || resumeList.length == 0) return Promise.resolve(successList)
 
@@ -542,7 +587,6 @@ export default class AliFileCmd {
         const url2 = 'adrive/v1/file/checkResumeTask'
         const resp2 = await AliHttp.Post(url2, { task_id }, user_id, '')
         if (AliHttp.IsSuccess(resp2.code)) {
-
           if (resp2.body.state == 'running') continue
           if (resp2.body.state == 'done') {
             const results = resp2.body.results as any[]
@@ -566,7 +610,6 @@ export default class AliFileCmd {
     return successList
   }
 
-
   static async ApiMoveBatch(user_id: string, drive_id: string, file_idList: string[], to_drive_id: string, to_parent_file_id: string, to_parent_description: string = ''): Promise<string[]> {
     if (isWebDavDrive(drive_id)) {
       if (drive_id !== to_drive_id) {
@@ -584,6 +627,25 @@ export default class AliFileCmd {
           successList.push(file_id)
         } catch (error) {
           console.error('WebDAV 移动失败:', error)
+        }
+      }
+      return successList
+    }
+    if (isS3Drive(drive_id)) {
+      if (drive_id !== to_drive_id) {
+        message.error('S3 暂不支持跨来源移动')
+        return []
+      }
+      const connection = getS3Connection(getS3ConnectionId(drive_id))
+      if (!connection) return []
+      const targetParent = to_parent_file_id.includes('root') ? '/' : normalizeS3RelativePath(to_parent_file_id)
+      const successList: string[] = []
+      for (const file_id of file_idList) {
+        try {
+          await moveS3Path(connection, file_id, normalizeS3RelativePath(`${targetParent}/${file_id.split('/').pop() || ''}`))
+          successList.push(file_id)
+        } catch (error) {
+          console.error('S3 移动失败:', error)
         }
       }
       return successList
@@ -628,23 +690,24 @@ export default class AliFileCmd {
     }
     if (to_parent_file_id.includes('root')) to_parent_file_id = 'root'
     const batchList = ApiBatchMaker('/file/move', file_idList, (file_id: string) => {
-      if (drive_id == to_drive_id) return {
-        drive_id: drive_id,
-        file_id: file_id,
-        to_parent_file_id: to_parent_file_id,
-        auto_rename: true
-      }
-      else return {
-        drive_id: drive_id,
-        file_id: file_id,
-        to_drive_id: to_drive_id,
-        to_parent_file_id: to_parent_file_id,
-        auto_rename: true
-      }
+      if (drive_id == to_drive_id)
+        return {
+          drive_id: drive_id,
+          file_id: file_id,
+          to_parent_file_id: to_parent_file_id,
+          auto_rename: true
+        }
+      else
+        return {
+          drive_id: drive_id,
+          file_id: file_id,
+          to_drive_id: to_drive_id,
+          to_parent_file_id: to_parent_file_id,
+          auto_rename: true
+        }
     })
     return ApiBatchSuccess(file_idList.length <= 1 ? '移动' : '批量移动', batchList, user_id, '')
   }
-
 
   static async ApiCopyBatch(user_id: string, drive_id: string, file_idList: string[], to_drive_id: string, to_parent_file_id: string, to_parent_description: string = ''): Promise<string[]> {
     if (isWebDavDrive(drive_id)) {
@@ -663,6 +726,25 @@ export default class AliFileCmd {
           successList.push(file_id)
         } catch (error) {
           console.error('WebDAV 复制失败:', error)
+        }
+      }
+      return successList
+    }
+    if (isS3Drive(drive_id)) {
+      if (drive_id !== to_drive_id) {
+        message.error('S3 暂不支持跨来源复制')
+        return []
+      }
+      const connection = getS3Connection(getS3ConnectionId(drive_id))
+      if (!connection) return []
+      const targetParent = to_parent_file_id.includes('root') ? '/' : normalizeS3RelativePath(to_parent_file_id)
+      const successList: string[] = []
+      for (const file_id of file_idList) {
+        try {
+          await copyS3Path(connection, file_id, normalizeS3RelativePath(`${targetParent}/${file_id.split('/').pop() || ''}`))
+          successList.push(file_id)
+        } catch (error) {
+          console.error('S3 复制失败:', error)
         }
       }
       return successList
@@ -704,7 +786,10 @@ export default class AliFileCmd {
       return apiDropboxCopyBatch(user_id, file_idList, to_parent_file_id.includes('root') ? 'dropbox_root' : to_parent_file_id, to_parent_description)
     }
     if (isOneDriveUser(user_id) || drive_id === 'onedrive') {
-      const list = usePanFileStore().GetSelected().filter((item) => file_idList.includes(item.file_id)).map((item) => ({ file_id: item.file_id, name: item.name }))
+      const list = usePanFileStore()
+        .GetSelected()
+        .filter((item) => file_idList.includes(item.file_id))
+        .map((item) => ({ file_id: item.file_id, name: item.name }))
       return apiOneDriveCopyBatch(user_id, to_parent_file_id.includes('root') ? 'onedrive_root' : to_parent_file_id, list.length ? list : file_idList.map((file_id) => ({ file_id, name: '' })))
     }
     if (isBoxUser(user_id) || drive_id === 'box') {
@@ -712,23 +797,24 @@ export default class AliFileCmd {
     }
     if (to_parent_file_id.includes('root')) to_parent_file_id = 'root'
     const batchList = ApiBatchMaker('/file/copy', file_idList, (file_id: string) => {
-      if (drive_id == to_drive_id) return {
-        drive_id: drive_id,
-        file_id: file_id,
-        to_parent_file_id: to_parent_file_id,
-        auto_rename: true
-      }
-      else return {
-        drive_id: drive_id,
-        file_id: file_id,
-        to_drive_id: to_drive_id,
-        to_parent_file_id: to_parent_file_id,
-        auto_rename: true
-      }
+      if (drive_id == to_drive_id)
+        return {
+          drive_id: drive_id,
+          file_id: file_id,
+          to_parent_file_id: to_parent_file_id,
+          auto_rename: true
+        }
+      else
+        return {
+          drive_id: drive_id,
+          file_id: file_id,
+          to_drive_id: to_drive_id,
+          to_parent_file_id: to_parent_file_id,
+          auto_rename: true
+        }
     })
     return ApiBatchSuccess(file_idList.length <= 1 ? '复制' : '批量复制', batchList, user_id, '')
   }
-
 
   static async ApiGetFileBatch(user_id: string, drive_id: string, file_idList: string[]): Promise<IAliGetFileModel[]> {
     if (isCloud123User(user_id) || drive_id === 'cloud123') {

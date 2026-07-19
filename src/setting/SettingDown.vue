@@ -1,207 +1,63 @@
-<script setup lang='ts'>
+<script setup lang="ts">
 import useSettingStore from './settingstore'
 import MySwitch from '../layout/MySwitch.vue'
 import { AriaGlobalSpeed } from '../utils/aria2c'
 
 const settingStore = useSettingStore()
-
 const cb = async (val: any) => {
   await settingStore.updateStore(val)
-  // 限速实时生效
-  if (Object.hasOwn(val, 'downGlobalSpeed') || Object.hasOwn(val, 'downGlobalSpeedM')) {
-    await AriaGlobalSpeed()
-  }
+  if (Object.hasOwn(val, 'downGlobalSpeed') || Object.hasOwn(val, 'downGlobalSpeedM')) await AriaGlobalSpeed()
 }
-
 const handleSelectDownSavePath = () => {
-  if (window.WebShowOpenDialogSync) {
-    window.WebShowOpenDialogSync(
-      {
-        title: '选择一个文件夹，把所有文件下载到此文件夹内',
-        buttonLabel: '选择',
-        properties: ['openDirectory', 'createDirectory'],
-        defaultPath: settingStore.downSavePath
-      },
-      (result: string[] | undefined) => {
-        if (result && result[0]) {
-          settingStore.updateStore({ downSavePath: result[0] })
-        }
-      }
-    )
-  }
+  window.WebShowOpenDialogSync?.({ title: '选择下载文件夹', buttonLabel: '选择', properties: ['openDirectory', 'createDirectory'], defaultPath: settingStore.downSavePath }, (result: string[] | undefined) => {
+    if (result?.[0]) settingStore.updateStore({ downSavePath: result[0] })
+  })
 }
 </script>
 
 <template>
-  <div class='settingcard'>
-    <div class='settinghead'>下载引擎</div>
-    <div class='settingrow'>
-      <span>使用 aria2c 下载模块</span>
-      <a-popover position='bottom'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            当前：<span class='opred'>固定使用 aria2c</span>
-            <hr />
-            下载任务统一走 Download aria2 引擎，原生下载器实验分支已停用。
-          </div>
-        </template>
-      </a-popover>
+  <div class="ui-plain-list">
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">下载位置</span>
+      <div class="ui-plain-control"><a-input-search class="ui-control-lg" size="small" :readonly="true" button-text="更改" search-button :model-value="settingStore.downSavePath" @search="handleSelectDownSavePath" /></div>
     </div>
-  </div>
-
-  <div class='settingcard'>
-    <div class='settinghead'>下载文件保存的位置</div>
-    <div class='settingrow'>
-      <a-input-search tabindex='-1' class='down-path-input' :readonly='true' button-text='更改' search-button
-                      :model-value='settingStore.downSavePath' @search='handleSelectDownSavePath' />
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">默认使用此路径</span>
+      <div class="ui-plain-control"><MySwitch :value="settingStore.downSavePathDefault" @update:value="cb({ downSavePathDefault: $event })" /></div>
     </div>
-    <div class='settingrow'>
-      <MySwitch :value='settingStore.downSavePathDefault' @update:value='cb({ downSavePathDefault: $event })'> 新建下载任务时
-        默认使用此路径
-      </MySwitch>
-      <a-popover position='bottom'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class='opred'>开启</span>
-            <hr />
-            推荐开启，点击下载按钮直接下载不询问<br /><br />
-            关闭此设置后，点击下载按钮会弹窗提示选择保存路径
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">按网盘路径保存</span>
+      <div class="ui-plain-control"><MySwitch :value="settingStore.downSavePathFull" @update:value="cb({ downSavePathFull: $event })" /></div>
     </div>
-    <div class='settingrow'>
-      <MySwitch :value='settingStore.downSavePathFull' @update:value='cb({ downSavePathFull: $event })'> 新建下载任务时
-        按照网盘完整路径保存
-      </MySwitch>
-      <a-popover position='bottom'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class='opred'>开启</span>
-            <hr />
-            推荐开启，因为关闭此设置后，遇到重名的文件会下载失败
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">跳过违规文件</span>
+      <div class="ui-plain-control"><MySwitch :value="settingStore.downSaveBreakWeiGui" @update:value="cb({ downSaveBreakWeiGui: $event })" /></div>
     </div>
-    <div class='settingrow'>
-      <MySwitch :value='settingStore.downSaveBreakWeiGui' @update:value='cb({ downSaveBreakWeiGui: $event })'> 新建下载任务时
-        自动跳过违规文件
-      </MySwitch>
-      <a-popover position='bottom'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class='opred'>开启</span>
-            <hr />
-            推荐开启，遇到违规文件跳过不下载<br /><br />
-            关闭此设置后，会正常的下载，3MB的违规视频文件
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">最大并行任务</span>
+      <div class="ui-plain-control"><a-input-number class="ui-control-xs" size="small" :min="1" :max="5" :model-value="settingStore.downFileMax" @update:model-value="cb({ downFileMax: $event })" /></div>
     </div>
-  </div>
-
-  <div class='settingcard'>
-    <div class='settinghead'>下载时 最大并行任务数</div>
-    <div class='settingrow'>
-      <a-input-number
-        tabindex='-1' :style="{ width: '252px' }"
-        mode='button'
-        :min='1' :max='5' :step='1'
-        :model-value='settingStore.downFileMax'
-        @update:model-value='cb({ downFileMax: $event })'>
-        <template #prefix> 同时下载</template>
-        <template #suffix> 个文件</template>
-      </a-input-number>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">每文件线程</span>
+      <div class="ui-plain-control">
+        <a-select class="ui-control-sm" size="small" :model-value="settingStore.downThreadMax" @update:model-value="cb({ downThreadMax: $event })">
+          <a-option v-for="item in [1, 2, 4, 8, 16, 24, 32]" :key="item" :value="item">{{ item }} 个线程</a-option>
+        </a-select>
+      </div>
     </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>下载时 每个文件的线程</div>
-    <div class='settingrow'>
-      <a-select tabindex='-1' :style="{ width: '252px' }" :model-value='settingStore.downThreadMax'
-                :popup-container="'#SettingDiv'" @update:model-value='cb({ downThreadMax: $event })'>
-        <a-option :value='1'>每个文件使用 1 个线程</a-option>
-        <a-option :value='2'>每个文件使用 2 个线程</a-option>
-        <a-option :value='4'>每个文件使用 4 个线程</a-option>
-        <a-option :value='8'>每个文件使用 8 个线程</a-option>
-        <a-option :value='16'>每个文件使用16个线程</a-option>
-        <a-option :value='24'>每个文件使用24个线程</a-option>
-        <a-option :value='32'>每个文件使用32个线程</a-option>
-      </a-select>
-      <a-popover position='right'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class='opred'>4个线程</span>
-            <hr />
-            下载线程太多，时间久了账号容易被限速<br /><br />
-            请设置为可以跑满 你的宽带的 最小值
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">每服务器连接数</span>
+      <div class="ui-plain-control"><a-input-number class="ui-control-xs" size="small" :min="1" :max="64" :model-value="settingStore.ariaMaxConnectionPerServer" @update:model-value="cb({ ariaMaxConnectionPerServer: $event })" /></div>
     </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>每服务器最大连接数 <span style="font-weight:400;color:var(--color-text-3);font-size:12px">Max Connection Per Server</span></div>
-    <div class='settingrow'>
-      <a-input-number
-        tabindex='-1' :style="{ width: '252px' }"
-        mode='button'
-        :min='1' :max='64' :step='1'
-        :model-value='settingStore.ariaMaxConnectionPerServer'
-        @update:model-value='cb({ ariaMaxConnectionPerServer: $event })'>
-        <template #prefix> 每服务器</template>
-        <template #suffix> 个连接</template>
-      </a-input-number>
-      <a-popover position='right'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            默认：<span class='opred'>16</span>
-            <hr />
-            控制 aria2 对单个服务器打开的最大连接数<br />
-            增大可提高单文件下载速度，但过度增加可能被限速
-          </div>
-        </template>
-      </a-popover>
-    </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>下载时 总下载速度限制</div>
-    <div class='settingrow'>
-      <a-input-number
-        tabindex='-1' :style="{ width: '128px' }"
-        mode='button' :min='0'
-        :max="settingStore.downGlobalSpeedM == 'MB' ? 100 : 999"
-        :step="settingStore.downGlobalSpeedM == 'MB' ? 4 : 40"
-        :model-value='settingStore.downGlobalSpeed'
-        @update:model-value='cb({ downGlobalSpeed: $event })'>
-      </a-input-number>
-      <div class='down-divider'></div>
-      <a-radio-group type='button'
-                     tabindex='-1' :model-value='settingStore.downGlobalSpeedM'
-                     @update:model-value='cb({ downGlobalSpeedM: $event, downGlobalSpeed: 0 })'>
-        <a-radio tabindex='-1' value='MB'>MB/s</a-radio>
-        <a-radio tabindex='-1' value='KB'>KB/s</a-radio>
-      </a-radio-group>
-      <a-popover position='bottom'>
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div :style="{ width: '360px' }">
-            默认：<span class='opred'>0 (不限速，满速下载)</span>
-            <hr />
-            <span class='opred'>0-100MB/s</span> 百兆宽带最高跑到 12MB/s<br />
-            <span class='opred'>0-999KB/s</span> 超慢的宽带请选择KB/s (1MB/s=1000KB/s)<br />
-            适当的限速可以不影响其他人上网
-          </div>
-        </template>
-      </a-popover>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">下载限速</span>
+      <div class="ui-plain-control">
+        <a-input-number class="ui-control-sm" size="small" :min="0" :model-value="settingStore.downGlobalSpeed" @update:model-value="cb({ downGlobalSpeed: $event })" />
+        <a-radio-group type="button" size="small" :model-value="settingStore.downGlobalSpeedM" @update:model-value="cb({ downGlobalSpeedM: $event, downGlobalSpeed: 0 })">
+          <a-radio value="MB">MB/s</a-radio>
+          <a-radio value="KB">KB/s</a-radio>
+        </a-radio-group>
+      </div>
     </div>
   </div>
 </template>
-
-<style>
-.down-path-input { max-width: 420px; }
-.down-divider { height: 32px; border-left: 1px solid var(--color-neutral-3); }
-</style>

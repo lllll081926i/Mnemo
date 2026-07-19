@@ -69,6 +69,16 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
     label: 'Box',
     icon: 'images/drive-icons/box.svg'
   },
+  webdav: {
+    key: 'webdav',
+    label: 'WebDAV',
+    icon: ''
+  },
+  s3: {
+    key: 's3',
+    label: 'S3',
+    icon: ''
+  },
   unknown: {
     key: 'unknown',
     label: '未知网盘',

@@ -7,6 +7,7 @@ import fixPath from 'fix-path'
 import { release } from 'os'
 import { getResourcesPath, getStaticPath } from './utils/mainfile'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { EventEmitter } from 'node:events'
 import exception from './core/exception'
 import ipcEvent from './core/ipcEvent'
@@ -111,6 +112,12 @@ export default class launch extends EventEmitter {
 
   setInitArgv() {
     fixPath()
+    // Dev: isolate userData so a stale lockfile/second instance cannot kill the window.
+    if (process.env.VITE_DEV_SERVER_URL) {
+      try {
+        app.setPath('userData', join(app.getPath('appData'), 'Mnemo-dev'))
+      } catch {}
+    }
     if (release().startsWith('6.1')) {
       app.disableHardwareAcceleration()
     }

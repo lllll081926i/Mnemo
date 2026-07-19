@@ -439,7 +439,7 @@ function _loadSetting(val: any) {
   console.log('_loadSetting', val)
   // 应用设置
   setting.uiTheme = defaultValue(val.uiTheme, ['system', 'light', 'dark'])
-  setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'media', 'media-server', 'music'])
+  setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'down', 'share', 'setting'])
   setting.uiImageMode = defaultValue(val.uiImageMode, ['fill', 'width', 'web'])
   setting.uiExitOnClose = defaultBool(val.uiExitOnClose, false)
   setting.uiLaunchAutoCheckUpdate = defaultBool(val.uiLaunchAutoCheckUpdate, false)

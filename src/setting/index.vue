@@ -1,715 +1,379 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
-import { useAppStore } from '../store'
-import SettingPlay from './SettingPlay.vue'
-import SettingMediaServerPlayback from './SettingMediaServerPlayback.vue'
-import SettingDanmaku from './SettingDanmaku.vue'
-import SettingFeedback from './SettingFeedback.vue'
-import SettingPan from './SettingPan.vue'
-import SettingUI from './SettingUI.vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component, watch } from 'vue'
+import { Cloud, FolderCog, MonitorCog, Network, ShieldCheck, SlidersHorizontal, X } from 'lucide-vue-next'
+import { useAppStore, useUserStore } from '../store'
+import { isAliyunUser } from '../aliapi/utils'
+import SettingAliyun from './SettingAliyun.vue'
 import SettingAccount from './SettingAccount.vue'
-import SettingDown from './SettingDown.vue'
 import SettingDebug from './SettingDebug.vue'
-import SettingUpload from './SettingUpload.vue'
-import SettingAria from './SettingAria.vue'
+import SettingDown from './SettingDown.vue'
 import SettingLog from './SettingLog.vue'
+import SettingPan from './SettingPan.vue'
+import SettingPlay from './SettingPlay.vue'
 import SettingProxy from './SettingProxy.vue'
-import SettingWebDav from './SettingWebDav.vue'
 import SettingSecurity from './SettingSecurity.vue'
-import SettingDownloadAdvanced from './SettingDownloadAdvanced.vue'
-import SettingAPI from './SettingAPI.vue'
+import SettingUI from './SettingUI.vue'
+import SettingUpload from './SettingUpload.vue'
+import SettingWebDav from './SettingWebDav.vue'
+import SettingS3 from './SettingS3.vue'
+
+type SettingSectionKey = 'general' | 'account-security' | 'files-playback' | 'transfer' | 'aliyun' | 'advanced'
+
+interface SettingPanel {
+  component: Component
+}
+
+interface SettingSection {
+  key: SettingSectionKey
+  label: string
+  icon: Component
+  panels: SettingPanel[]
+}
 
 const appStore = useAppStore()
+const userStore = useUserStore()
 
-let observer: any
+const sections: SettingSection[] = [
+  {
+    key: 'general',
+    label: '通用',
+    icon: MonitorCog,
+    panels: [{ component: SettingUI }]
+  },
+  {
+    key: 'account-security',
+    label: '账号与安全',
+    icon: ShieldCheck,
+    panels: [{ component: SettingAccount }, { component: SettingWebDav }, { component: SettingS3 }, { component: SettingSecurity }]
+  },
+  {
+    key: 'files-playback',
+    label: '文件与播放',
+    icon: FolderCog,
+    panels: [{ component: SettingPan }, { component: SettingPlay }]
+  },
+  {
+    key: 'transfer',
+    label: '传输',
+    icon: SlidersHorizontal,
+    panels: [{ component: SettingDown }, { component: SettingUpload }]
+  },
+  {
+    key: 'aliyun',
+    label: '阿里网盘',
+    icon: Cloud,
+    panels: [{ component: SettingAliyun }]
+  },
+  {
+    key: 'advanced',
+    label: '网络与高级',
+    icon: Network,
+    panels: [{ component: SettingProxy }, { component: SettingDebug }, { component: SettingLog }]
+  }
+]
+const visibleSections = computed(() => sections.filter((section) => section.key !== 'aliyun' || isAliyunUser(userStore.user_id || userStore.GetUserToken)))
 
-const hideSetting = computed(() => appStore.appTab !== 'setting')
+const legacySectionMap: Record<string, SettingSectionKey> = {
+  SettingUI: 'general',
+  SettingAccount: 'account-security',
+  SettingSecurity: 'account-security',
+  SettingPan: 'files-playback',
+  SettingPlay: 'files-playback',
+  SettingDown: 'transfer',
+  SettingUpload: 'transfer',
+  SettingProxy: 'advanced',
+  SettingDebug: 'advanced',
+  SettingLog: 'advanced'
+}
 
-onMounted(() => {
-  const root = document.getElementById('SettingObserver')
+const normalizeSectionKey = (key: string): SettingSectionKey => {
+  if (visibleSections.value.some((item) => item.key === key)) return key as SettingSectionKey
+  return legacySectionMap[key] || 'general'
+}
+
+const activeKey = ref<SettingSectionKey>('general')
+const settingsScroll = ref<HTMLElement | null>(null)
+let sectionObserver: IntersectionObserver | undefined
+
+const syncActiveSection = (key: SettingSectionKey) => {
+  activeKey.value = key
+  if (appStore.GetAppTabMenu !== key) appStore.toggleTabMenu('setting', key)
+}
+
+const scrollToSection = async (key: SettingSectionKey, behavior: ScrollBehavior = 'smooth') => {
+  syncActiveSection(key)
+  await nextTick()
+  document.getElementById(`setting-${key}`)?.scrollIntoView({ block: 'start', behavior })
+}
+
+watch(
+  () => [appStore.appTab, appStore.GetAppTabMenu] as const,
+  ([tab, menu]) => {
+    if (tab !== 'setting') return
+    const normalized = normalizeSectionKey(menu || '')
+    if (normalized !== menu) appStore.toggleTabMenu('setting', normalized)
+    activeKey.value = normalized
+  },
+  { immediate: true }
+)
+
+onMounted(async () => {
+  await nextTick()
+  const root = settingsScroll.value
   if (!root) return
-
-  observer = new IntersectionObserver(
+  sectionObserver = new IntersectionObserver(
     (entries) => {
-      if (entries.length > 0 && entries[0].isIntersecting) {
-        appStore.toggleTabSetting('setting', entries[0].target.id)
-      }
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+      const key = visible?.target.getAttribute('data-settings-section') as SettingSectionKey | null
+      if (key) syncActiveSection(key)
     },
-    {
-      root,
-      threshold: 0.5
-    }
+    { root, rootMargin: '-16% 0px -70% 0px', threshold: [0, 0.1, 0.5] }
   )
-
-  const sectionIds = [
-    'SettingUI',
-    'SettingAccount',
-    'SettingSecurity',
-    'SettingPlay',
-    'SettingMediaServerPlayback',
-    'SettingDanmaku',
-    'SettingFeedback',
-    'SettingPan',
-    'SettingDown',
-    'SettingDownloadAdvanced',
-    'SettingUpload',
-    'SettingWebDav',
-    'SettingDebug',
-    'SettingProxy',
-    'SettingAria',
-    'SettingAPI',
-    'SettingLog'
-  ]
-
-  sectionIds.forEach((id) => {
-    const element = document.getElementById(id)
-    if (element instanceof Element) {
-      observer.observe(element)
-    }
-  })
+  root.querySelectorAll<HTMLElement>('[data-settings-section]').forEach((section) => sectionObserver?.observe(section))
+  if (appStore.appTab === 'setting') scrollToSection(activeKey.value, 'auto')
 })
 
-onUnmounted(() => {
-  if (observer) observer.disconnect()
-})
+onBeforeUnmount(() => sectionObserver?.disconnect())
+
+const closeSettings = () => appStore.closeSettings()
 </script>
 
 <template>
-  <a-layout class="settings-shell">
-    <a-layout-sider hide-trigger :width="188" class="xbyleft settings-sider" tabindex="-1" @keydown.tab.prevent="() => true">
-      <div class='headdesc settings-side-title'>
-        <span class="settings-side-kicker">Preferences</span>
-        <strong>设置中心</strong>
-        <small>统一管理应用、播放、网盘、安全和网络能力</small>
-      </div>
-      <a-menu :selected-keys="[appStore.GetAppTabMenu]" :style="{ width: '100%' }" class="xbyleftmenu"
-              @update:selected-keys="appStore.toggleTabMenu('setting', $event[0])">
-        <a-menu-item key="SettingUI">
-          <template #icon><IconFont name="iconui" /></template>
-          应用设置
-        </a-menu-item>
-        <a-menu-item key="SettingAccount">
-          <template #icon><IconFont name="iconrobot" /></template>
-          账户设置
-        </a-menu-item>
-        <a-menu-item key="SettingAPI">
-          <template #icon><IconFont name="iconlock" /></template>
-          AI 模型
-        </a-menu-item>
-        <a-menu-item key="SettingFeedback">
-          <template #icon><IconFont name="iconbulb" /></template>
-          功能与反馈
-        </a-menu-item>
-        <a-menu-item key="SettingSecurity">
-          <template #icon><IconFont name="iconchrome" /></template>
-          安全设置
-        </a-menu-item>
-        <a-menu-item key="SettingPlay">
-          <template #icon><IconFont name="iconshipin" /></template>
-          播放器
-        </a-menu-item>
-        <a-menu-item key="SettingMediaServerPlayback">
-          <template #icon><IconFont name="iconshipin" /></template>
-          媒体服务器
-        </a-menu-item>
-        <a-menu-item key="SettingDanmaku">
-          <template #icon><IconFont name="iconshipin" /></template>
-          弹幕库
-        </a-menu-item>
-        <a-menu-item key="SettingPan">
-          <template #icon><IconFont name="iconfile-folder" /></template>
-          网盘设置
-        </a-menu-item>
-        <a-menu-item key="SettingDown">
-          <template #icon><IconFont name="icondownload" /></template>
-          下载文件
-        </a-menu-item>
-        <a-menu-item key="SettingDownloadAdvanced">
-          <template #icon><IconFont name="iconcloud-download" /></template>
-          高级下载
-        </a-menu-item>
-        <a-menu-item key="SettingUpload">
-          <template #icon><IconFont name="iconupload" /></template>
-          上传文件
-        </a-menu-item>
-        <a-menu-item key='SettingWebDav'>
-          <template #icon><IconFont name="iconchuanshu2" /></template>
-          WebDav
-        </a-menu-item>
-        <a-menu-item key="SettingDebug">
-          <template #icon><IconFont name="iconlogoff" /></template>
-          高级选项
-        </a-menu-item>
-        <a-menu-item key="SettingProxy">
-          <template #icon><IconFont name="iconyuanduanfuzhi" /></template>
-          网络代理
-        </a-menu-item>
-        <a-menu-item key="SettingAria">
-          <template #icon><IconFont name="iconchuanshu" /></template>
-          远程Aria
-        </a-menu-item>
-        <a-menu-item key="SettingLog">
-          <template #icon><IconFont name="icondebug" /></template>
-          运行日志
-        </a-menu-item>
-      </a-menu>
-    </a-layout-sider>
-    <a-layout-content id="SettingObserver" class="xbyright fullscroll settings-content" tabindex="-1" @keydown.tab.prevent="() => true">
-      <div id="SettingDiv" class="settings-content-inner">
-<!--        <div class="settings-hero">-->
-<!--          <div>-->
-<!--            <div class="settings-hero-kicker">BoxPlayer Workspace</div>-->
-<!--            <h2>按照你的使用方式定制整个 App</h2>-->
-<!--            <p>从界面风格到播放方式、从网盘策略到安全控制，所有配置集中在这里完成。</p>-->
-<!--          </div>-->
-<!--          <div class="settings-hero-meta">-->
-<!--            <span>12 个模块</span>-->
-<!--            <span>即时生效</span>-->
-<!--          </div>-->
-<!--        </div>-->
+  <div class="settings-page ui-page-shell">
+    <aside class="settings-sidebar ui-page-rail">
+      <nav class="settings-nav" aria-label="设置分类">
+        <button v-for="item in visibleSections" :key="item.key" type="button" class="settings-nav-item" :class="{ active: activeKey === item.key }" :aria-current="activeKey === item.key ? 'location' : undefined" @click="scrollToSection(item.key)">
+          <component :is="item.icon" :size="17" :stroke-width="1.8" class="settings-nav-icon" />
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
+    </aside>
 
-        <section id="SettingUI" class="settings-section"><SettingUI /></section>
-        <section id="SettingAccount" class="settings-section"><SettingAccount /></section>
-        <section id="SettingAPI" class="settings-section"><SettingAPI /></section>
-        <section id="SettingSecurity" class="settings-section"><SettingSecurity /></section>
-        <section id="SettingPlay" class="settings-section"><SettingPlay /></section>
-        <section id="SettingMediaServerPlayback" class="settings-section"><SettingMediaServerPlayback /></section>
-        <section id="SettingDanmaku" class="settings-section"><SettingDanmaku /></section>
-        <section id="SettingFeedback" class="settings-section"><SettingFeedback /></section>
-        <section id="SettingPan" class="settings-section"><SettingPan /></section>
-        <section id="SettingDown" class="settings-section"><SettingDown /></section>
-        <section id="SettingDownloadAdvanced" class="settings-section"><SettingDownloadAdvanced /></section>
-        <section id="SettingUpload" class="settings-section"><SettingUpload /></section>
-        <section id='SettingWebDav' class="settings-section"><SettingWebDav /></section>
-        <section id="SettingDebug" class="settings-section"><SettingDebug /></section>
-        <section id="SettingProxy" class="settings-section"><SettingProxy /></section>
-        <section id="SettingAria" class="settings-section"><SettingAria /></section>
-        <section id="SettingLog" class="settings-section">
-          <div v-if="hideSetting" style="min-height: 602px"></div>
-          <SettingLog v-else />
-        </section>
-        <div style="height: 28px"></div>
+    <main class="settings-main">
+      <header class="settings-header">
+        <h1>设置</h1>
+        <button type="button" class="settings-close" title="关闭设置" aria-label="关闭设置" @click="closeSettings">
+          <X :size="17" :stroke-width="1.9" />
+        </button>
+      </header>
+
+      <div ref="settingsScroll" class="settings-scroll ui-page-content">
+        <div class="settings-content ui-content-column">
+          <section v-for="section in visibleSections" :id="`setting-${section.key}`" :key="section.key" class="settings-section" :data-settings-section="section.key">
+            <header class="settings-section-heading">
+              <component :is="section.icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
+              <h2>{{ section.label }}</h2>
+            </header>
+            <component v-for="(panel, index) in section.panels" :is="panel.component" :key="index" />
+          </section>
+        </div>
       </div>
-    </a-layout-content>
-  </a-layout>
+    </main>
+  </div>
 </template>
 
 <style>
-.settings-shell {
-  height: 100%;
-  background:
-    radial-gradient(circle at top left, rgba(106, 154, 255, 0.18), transparent 24%),
-    radial-gradient(circle at top right, rgba(255, 197, 122, 0.14), transparent 22%),
-    linear-gradient(180deg, #f5f7fb 0%, #eef2f7 100%);
+.settings-page {
+  width: 100%;
+  color: var(--text-primary);
+  background: var(--bg-surface);
 }
 
-#SettingObserver {
-  background: transparent;
-  padding: 0 26px 0 18px !important;
+body:not([arco-theme='dark']) .settings-page,
+body:not([arco-theme='dark']) .settings-main,
+body:not([arco-theme='dark']) .settings-content {
+  color: #111827;
+  background: #fff;
 }
 
-.settings-sider {
-  padding: 20px 16px 20px 20px;
-  background:
-    radial-gradient(circle at top left, rgba(96, 165, 250, 0.14), transparent 34%),
-    linear-gradient(180deg, rgba(249, 251, 255, 0.84), rgba(239, 244, 252, 0.74)) !important;
-  border-right: 1px solid rgba(148, 163, 184, 0.14);
-  backdrop-filter: blur(26px) saturate(140%);
-  box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.58),
-    12px 0 32px rgba(148, 163, 184, 0.08);
+body:not([arco-theme='dark']) .settings-sidebar {
+  background: #f8fafc;
+  border-right-color: #e5e7eb;
 }
 
-.settings-side-title {
+.settings-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 2px 4px 18px;
-  padding: 16px 16px 18px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.74), transparent 46%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(241, 246, 255, 0.68));
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  box-shadow:
-    0 20px 42px rgba(86, 104, 136, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border-light);
 }
 
-.settings-side-kicker {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #6d7c95;
+.settings-close,
+.settings-nav-item {
+  font: inherit;
+  border: 0;
+  cursor: pointer;
 }
 
-.settings-side-title strong {
-  font-size: 24px;
-  line-height: 1.15;
-  color: #162033;
+.settings-nav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  padding: 8px 0;
+  overflow: auto;
 }
 
-.settings-side-title small {
+.settings-nav-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 14px;
+  color: var(--text-secondary);
+  text-align: left;
+  background: transparent;
+  border-left: 3px solid transparent;
+}
+
+.settings-nav-item:hover {
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.settings-nav-item.active {
+  color: var(--color-primary);
+  background: transparent;
+  border-left-color: var(--color-primary);
+}
+
+.settings-nav-icon {
+  justify-self: center;
+}
+
+.settings-nav-item > span {
+  overflow: hidden;
+  color: inherit;
   font-size: 12px;
-  line-height: 1.6;
-  color: #64748b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-surface);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 clamp(18px, 3vw, 32px);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.settings-header h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.settings-close {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.settings-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.settings-scroll {
+  flex: 1 1 auto;
+  scrollbar-gutter: stable;
 }
 
 .settings-content {
-  padding-block: 18px 28px !important;
-}
-
-.settings-content-inner {
-  position: relative;
-  width: min(1180px, 100%);
-  margin: 0 auto;
-}
-
-.settings-hero {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin: 2px 0 26px;
-  padding: 24px 28px;
-  border-radius: 30px;
-  background:
-    radial-gradient(circle at top left, rgba(109, 154, 255, 0.2), transparent 26%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.84), rgba(245, 248, 255, 0.66));
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow:
-    0 24px 48px rgba(78, 97, 128, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(24px) saturate(130%);
-}
-
-.settings-hero-kicker {
-  margin-bottom: 8px;
-  color: #5670a5;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.settings-hero h2 {
-  margin: 0;
-  color: #182237;
-  font-size: 34px;
-  line-height: 1.08;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-}
-
-.settings-hero p {
-  max-width: 720px;
-  margin: 10px 0 0;
-  color: #68758b;
-  font-size: 15px;
-  line-height: 1.8;
-}
-
-.settings-hero-meta {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.settings-hero-meta span {
-  padding: 8px 14px;
-  border-radius: 999px;
-  color: #2b3a59;
-  font-size: 13px;
-  font-weight: 700;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(255, 255, 255, 0.86);
+  padding-top: 8px;
+  padding-bottom: 24px;
 }
 
 .settings-section {
-  position: relative;
-  margin-top: 32px;
-}
-
-.settingcard {
-  padding: 26px 28px;
-  margin: 18px 0;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  user-select: none;
-  -webkit-user-drag: none;
-  box-shadow: 0 4px 16px rgba(78, 97, 128, 0.08);
-}
-
-.settingcard .iconbulb,
-.settingrow .iconbulb {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 20px;
-  width: 20px;
-  margin-left: 6px;
-  border-radius: 999px;
-  color: #b7791f;
-  font-size: 13px;
-  background: rgba(255, 196, 82, 0.18);
-  cursor: help;
-  flex-shrink: 0;
-}
-html.dark .settingcard .iconbulb,
-html.dark .settingrow .iconbulb {
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.14);
-}
-
-.settinghead {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 10px;
   width: 100%;
-  margin-bottom: 12px;
-  padding: 0 0 12px 0;
-  color: #1a2740;
-  font-size: 16px;
-  line-height: 1.4;
-  font-weight: 700;
-  user-select: none;
-  word-break: keep-all;
+  scroll-margin-top: 12px;
 }
 
-.settinghead > :deep(*) {
-  flex: 0 0 auto;
+.settings-section + .settings-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
 }
 
-.settinghead::after {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  display: block;
-  width: 112px;
-  max-width: 100%;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.78), rgba(125, 211, 252, 0.22));
-  opacity: 0.9;
-  content: '';
-}
-
-.settingrow {
+.settings-section-heading {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding-top: 4px;
-  max-width: 760px;
-  margin-right: auto;
-  color: #4b5565;
-  line-height: 1.75;
+  gap: 8px;
+  min-height: 26px;
+  margin: 0 0 3px;
+  color: var(--text-primary);
 }
 
-.settingspace {
-  height: 22px;
-  user-select: none;
+.settings-section-heading svg {
+  color: var(--color-primary);
 }
 
-.hrspace {
-  padding-top: 8px;
-}
-
-.opred,
-.oporg,
-.opblue {
-  padding: 0 2px;
-  color: rgb(211, 80, 75);
-  background: rgba(211, 80, 75, 0.1);
-}
-
-.arco-popover-content hr {
-  opacity: 0.2;
-  border-top: none;
-}
-
-.xbyleftmenu {
-  padding: 10px;
-  border-radius: 28px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(245, 248, 255, 0.42));
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.82),
-    0 18px 36px rgba(105, 124, 154, 0.08);
-}
-
-.xbyleftmenu .arco-menu-inner {
-  padding: 0 !important;
-}
-
-.xbyleftmenu .arco-menu-item {
-  position: relative;
-  height: 48px;
-  margin-bottom: 6px !important;
-  padding: 0 14px !important;
-  border-radius: 18px;
-  color: #4f5f79;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
-}
-
-.xbyleftmenu .arco-menu-item:hover {
-  background: rgba(255, 255, 255, 0.72) !important;
-  color: #1f2f4c !important;
-  box-shadow: 0 10px 24px rgba(148, 163, 184, 0.12);
-  transform: translateX(2px);
-}
-
-.xbyleftmenu .arco-menu-selected {
-  background:
-    linear-gradient(135deg, rgba(191, 219, 254, 0.9), rgba(255, 255, 255, 0.92)) !important;
-  color: #1d4ed8 !important;
-  box-shadow:
-    0 14px 28px rgba(82, 140, 255, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.82);
-}
-
-.xbyleftmenu .arco-menu-selected::before {
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  bottom: 10px;
-  width: 4px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #3b82f6, #60a5fa);
-  content: '';
-}
-
-.xbyleftmenu .arco-menu-icon {
-  font-size: 17px;
-  margin-right: 12px !important;
-  opacity: 0.92;
-}
-
-.settingcard .arco-input-wrapper,
-.settingcard .arco-input,
-.settingcard .arco-select-view,
-.settingcard .arco-textarea-wrapper,
-.settingcard .arco-input-number,
-.settingcard .arco-picker,
-.settingcard .arco-picker-size-medium,
-.settingcard .arco-input-group-wrapper,
-.settingcard .arco-input-search {
-  border-radius: 16px !important;
-}
-
-.settingcard .arco-input-wrapper,
-.settingcard .arco-select-view,
-.settingcard .arco-textarea-wrapper,
-.settingcard .arco-input-number,
-.settingcard .arco-picker,
-.settingcard .arco-picker-size-medium {
-  background: rgba(255, 255, 255, 0.66) !important;
-  border-color: rgba(148, 163, 184, 0.22) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-.settingcard .arco-btn {
-  border-radius: 14px;
-  font-weight: 700;
-}
-
-.settingcard .arco-radio-group-button .arco-radio-button {
-  border-radius: 14px;
-  margin-right: 8px;
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.settingcard .arco-radio-group-button .arco-radio-button:hover {
-  border-color: rgba(var(--primary-6), 0.35);
-}
-
-.settingcard .arco-radio-group-button .arco-radio-button.arco-radio-checked {
-  background: rgb(var(--primary-6));
-  border-color: rgb(var(--primary-6));
-}
-
-.settingcard .arco-radio-group-button .arco-radio-button-content {
-  font-weight: 700;
-  color: var(--color-text-2);
-}
-
-.settingcard .arco-radio-group-button .arco-radio-checked .arco-radio-button-content {
-  color: #fff;
-}
-
-.settingcard .arco-switch {
-  transform: translateY(1px);
-}
-
-.settingcard .arco-divider-text {
-  padding: 0 10px;
-  color: #2a3a56;
+.settings-section-heading h2 {
+  margin: 0;
+  color: inherit;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.settings-page .arco-input,
+.settings-page input,
+.settings-page textarea,
+.settings-page .arco-select-view-value,
+.settings-page .arco-btn {
+  color: var(--text-primary);
+}
+
+.settings-page .arco-input-wrapper,
+.settings-page .arco-select-view {
   background: transparent;
+  border-color: var(--border-light);
 }
 
-.settingcard .arco-divider-line {
-  border-color: rgba(148, 163, 184, 0.18);
+.settings-page .arco-input-wrapper:focus-within,
+.settings-page .arco-select-view:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
-body[arco-theme='dark'] .settings-shell {
-  background:
-    radial-gradient(circle at top left, rgba(74, 108, 179, 0.26), transparent 24%),
-    radial-gradient(circle at top right, rgba(155, 116, 54, 0.18), transparent 22%),
-    linear-gradient(180deg, #0e131a 0%, #121822 100%);
-}
-
-body[arco-theme='dark'] .settings-sider {
-  background:
-    radial-gradient(circle at top left, rgba(96, 165, 250, 0.08), transparent 34%),
-    linear-gradient(180deg, rgba(28, 32, 42, 0.9), rgba(20, 24, 33, 0.84)) !important;
-  border-color: rgba(255, 255, 255, 0.06) !important;
-  box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.04),
-    12px 0 30px rgba(0, 0, 0, 0.22) !important;
-  backdrop-filter: blur(24px) saturate(135%);
-}
-
-body[arco-theme='dark'] .settings-side-title {
-  background:
-    radial-gradient(circle at top left, rgba(96, 165, 250, 0.08), transparent 42%),
-    linear-gradient(180deg, rgba(28, 32, 42, 0.92), rgba(20, 24, 33, 0.86)) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    0 18px 36px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
-}
-
-body[arco-theme='dark'] .settings-hero {
-  background: rgba(18, 24, 34, 0.74) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
-}
-body[arco-theme='dark'] .settingcard {
-  background: rgba(255, 255, 255, 0.045) !important;
-  border-color: rgba(255, 255, 255, 0.07) !important;
-  box-shadow: 0 18px 48px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.052);
-  backdrop-filter: blur(20px) saturate(1.12);
-}
-
-body[arco-theme='dark'] .xbyleftmenu {
-  background:
-    linear-gradient(180deg, rgba(28, 32, 42, 0.92), rgba(20, 24, 33, 0.88)) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 18px 36px rgba(0, 0, 0, 0.24) !important;
-  backdrop-filter: blur(22px) saturate(130%);
-}
-
-body[arco-theme='dark'] .xbyleftmenu .arco-menu {
-  background: transparent !important;
-}
-
-body[arco-theme='dark'] .xbyleftmenu .arco-menu-inner {
-  background: transparent !important;
-}
-
-body[arco-theme='dark'] .settings-side-kicker,
-body[arco-theme='dark'] .settings-side-title small,
-body[arco-theme='dark'] .settings-hero-kicker,
-body[arco-theme='dark'] .settings-hero p,
-body[arco-theme='dark'] .settingrow {
-  color: rgba(191, 201, 216, 0.76) !important;
-}
-
-body[arco-theme='dark'] .settings-side-title strong,
-body[arco-theme='dark'] .settings-hero h2,
-body[arco-theme='dark'] .settinghead,
-body[arco-theme='dark'] .settingcard .arco-divider-text,
-body[arco-theme='dark'] .xbyleftmenu .arco-menu-item {
-  color: rgba(244, 247, 252, 0.96) !important;
-}
-
-body[arco-theme='dark'] .xbyleftmenu .arco-menu-item {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
-}
-
-body[arco-theme='dark'] .settinghead::after {
-  background: linear-gradient(90deg, var(--app-mineradio-accent, #00f5d4), rgba(0,245,212,.18));
-}
-
-body[arco-theme='dark'] .xbyleftmenu .arco-menu-item:hover {
-  background:
-    linear-gradient(180deg, rgba(42, 48, 62, 0.8), rgba(29, 34, 46, 0.72)) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 12px 28px rgba(0, 0, 0, 0.2);
-}
-
-body[arco-theme='dark'] .xbyleftmenu .arco-menu-selected {
-  background:
-    linear-gradient(135deg, rgba(0,245,212,.10), rgba(8,9,11,.80)) !important;
-  border-color: rgba(0,245,212,.22) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    inset 0 0 0 1px rgba(0,245,212,.14),
-    0 14px 30px rgba(0,245,212,.10) !important;
-}
-
-body[arco-theme='dark'] .xbyleftmenu .arco-menu-selected::before {
-  background: linear-gradient(180deg, var(--app-mineradio-accent, #00f5d4), #8ff5ea);
-}
-
-body[arco-theme='dark'] .settingcard .arco-input-wrapper,
-body[arco-theme='dark'] .settingcard .arco-select-view,
-body[arco-theme='dark'] .settingcard .arco-textarea-wrapper,
-body[arco-theme='dark'] .settingcard .arco-input-number,
-body[arco-theme='dark'] .settingcard .arco-picker,
-body[arco-theme='dark'] .settingcard .arco-picker-size-medium {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-}
-
-body[arco-theme='dark'] .settingcard .arco-radio-group-button .arco-radio-button {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-body[arco-theme='dark'] .settingcard .arco-radio-group-button .arco-radio-button:hover {
-  border-color: rgba(var(--primary-6), 0.4);
-}
-body[arco-theme='dark'] .settingcard .arco-radio-group-button .arco-radio-button-content {
-  color: rgba(220, 226, 240, 0.7);
-}
-body[arco-theme='dark'] .settingcard .arco-radio-group-button .arco-radio-checked {
-  background: rgb(var(--primary-6));
-  border-color: rgb(var(--primary-6));
-}
-body[arco-theme='dark'] .settingcard .arco-radio-group-button .arco-radio-checked .arco-radio-button-content {
-  color: #fff;
-}
-
-@media (max-width: 1080px) {
-  .settings-hero {
-    flex-direction: column;
-    align-items: flex-start;
+@media (max-width: 760px) {
+  .settings-page {
+    grid-template-columns: 176px minmax(0, 1fr);
   }
 
-  #SettingObserver {
-    padding: 0 16px !important;
+  .settings-nav-item {
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 7px;
+    padding-inline: 8px;
   }
 
-  .settingrow {
-    max-width: 100%;
+  .settings-content,
+  .settings-header {
+    padding-right: 18px;
+    padding-left: 18px;
   }
 }
 </style>

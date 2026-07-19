@@ -71,16 +71,14 @@ export function createMainWindow() {
       AppWindow.winWidth = configData.width
       AppWindow.winHeight = configData.height
     }
-  } catch {
-  }
+  } catch {}
   try {
     const themeJson = getUserDataPath('theme.json')
     if (existsSync(themeJson)) {
       const themeData = JSON.parse(readFileSync(themeJson, 'utf-8'))
       AppWindow.winTheme = themeData.theme
     }
-  } catch {
-  }
+  } catch {}
   if (AppWindow.winWidth <= 0) {
     try {
       const size = screen.getPrimaryDisplay().workAreaSize
@@ -104,18 +102,14 @@ export function createMainWindow() {
   }
 
   AppWindow.mainWindow.on('resize', () => {
-    debounceResize(function() {
+    debounceResize(function () {
       try {
-        if (AppWindow.mainWindow
-          && !AppWindow.mainWindow.isMaximized()
-          && !AppWindow.mainWindow.isMinimized()
-          && !AppWindow.mainWindow.isFullScreen()) {
+        if (AppWindow.mainWindow && !AppWindow.mainWindow.isMaximized() && !AppWindow.mainWindow.isMinimized() && !AppWindow.mainWindow.isFullScreen()) {
           const s = AppWindow.mainWindow!.getSize()
           const configJson = getUserDataPath('config.json')
           writeFileSync(configJson, `{"width":${s[0].toString()},"height": ${s[1].toString()}}`, 'utf-8')
         }
-      } catch {
-      }
+      } catch {}
     }, 3000)
   })
 
@@ -137,7 +131,7 @@ export function createMainWindow() {
   setTimeout(showMainPage, 500)
   setTimeout(showMainPage, 1500)
 
-  AppWindow.mainWindow.on('ready-to-show', function() {
+  AppWindow.mainWindow.on('ready-to-show', function () {
     showMainPage()
     AppWindow.mainWindow!.setTitle('BoxPlayer')
     if (is.windows() && process.argv && process.argv.join(' ').indexOf('--openAsHidden') < 0) {
@@ -152,7 +146,7 @@ export function createMainWindow() {
     creatDownloadPort()
   })
 
-  AppWindow.mainWindow.webContents.on('render-process-gone', function(event, details) {
+  AppWindow.mainWindow.webContents.on('render-process-gone', function (event, details) {
     if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed') {
       ShowErrorAndRelaunch('(⊙o⊙)？小白羊遇到错误崩溃了', details.reason)
     }
@@ -166,7 +160,7 @@ export function createTray() {
   const trayMenuTemplate = [
     {
       label: '显示主界面',
-      click: function() {
+      click: function () {
         if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
           if (AppWindow.mainWindow.isMinimized()) AppWindow.mainWindow.restore()
           AppWindow.mainWindow.show()
@@ -177,38 +171,8 @@ export function createTray() {
       }
     },
     {
-      label: '安装命令行工具',
-      click: async function() {
-        const { ipcMain, dialog } = await import('electron')
-        const win = AppWindow.mainWindow
-        try {
-          const result = await win?.webContents.executeJavaScript(
-            `window.TvBoxInvoke('InstallCli', {})`
-          )
-          if (result?.ok) {
-            dialog.showMessageBox({
-              type: 'info',
-              title: '安装成功',
-              message: result.message || '命令行工具已安装',
-              detail: (result.paths || []).join('\n'),
-            })
-          } else if (result?.needsElevation) {
-            dialog.showMessageBox({
-              type: 'warning',
-              title: '权限不足',
-              message: result.error,
-            })
-          } else {
-            dialog.showErrorBox('安装失败', result?.error || '未知错误')
-          }
-        } catch (e: any) {
-          dialog.showErrorBox('安装失败', e?.message || '未知错误')
-        }
-      }
-    },
-    {
       label: '彻底退出并停止下载',
-      click: function() {
+      click: function () {
         if (AppWindow.mainWindow) {
           AppWindow.mainWindow.destroy()
           AppWindow.mainWindow = undefined
@@ -319,18 +283,14 @@ function handleWebView(win: BrowserWindow) {
   // 处理DevTools
   win.webContents.on('before-input-event', (_, input: Electron.Input) => {
     if (input.type === 'keyDown' && input.control && input.shift && input.key === 'F12') {
-      win.webContents.isDevToolsOpened()
-        ? win.webContents.closeDevTools()
-        : win.webContents.openDevTools({ mode: 'undocked' })
+      win.webContents.isDevToolsOpened() ? win.webContents.closeDevTools() : win.webContents.openDevTools({ mode: 'undocked' })
     }
   })
   // 处理webview跳转
   win.webContents.addListener('did-attach-webview', (event, webContent) => {
     webContent.on('before-input-event', (_, input: Electron.Input) => {
       if (input.type === 'keyDown' && input.control && input.shift && input.key === 'F12') {
-        webContent.isDevToolsOpened()
-          ? webContent.closeDevTools()
-          : webContent.openDevTools({ mode: 'undocked' })
+        webContent.isDevToolsOpened() ? webContent.closeDevTools() : webContent.openDevTools({ mode: 'undocked' })
       }
     })
     // 不允许的网址则阻止页面跳转并拉取浏览器展示页面
@@ -424,7 +384,7 @@ function handleWinCmd(win: BrowserWindow) {
 }
 
 function creatUploadPort() {
-  debounceUpload(function() {
+  debounceUpload(function () {
     if (AppWindow.mainWindow && AppWindow.uploadWindow && AppWindow.uploadWindow.isDestroyed() == false) {
       const { port1, port2 } = new MessageChannelMain()
       AppWindow.mainWindow.webContents.postMessage('setUploadPort', undefined, [port1])
@@ -434,7 +394,7 @@ function creatUploadPort() {
 }
 
 function creatDownloadPort() {
-  debounceDownload(function() {
+  debounceDownload(function () {
     if (AppWindow.mainWindow && AppWindow.downloadWindow && AppWindow.downloadWindow.isDestroyed() == false) {
       const { port1, port2 } = new MessageChannelMain()
       AppWindow.mainWindow.webContents.postMessage('setDownloadPort', undefined, [port1])
@@ -443,23 +403,21 @@ function creatDownloadPort() {
   }, 1000)
 }
 
-
 function createUpload() {
   if (AppWindow.uploadWindow && AppWindow.uploadWindow.isDestroyed() == false) return
   AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false)
 
-  AppWindow.uploadWindow.on('ready-to-show', function() {
+  AppWindow.uploadWindow.on('ready-to-show', function () {
     creatUploadPort()
     AppWindow.uploadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'upload' } })
     AppWindow.uploadWindow!.setTitle('boxplayer上传进程')
   })
 
-  AppWindow.uploadWindow.webContents.on('render-process-gone', function(event, details) {
+  AppWindow.uploadWindow.webContents.on('render-process-gone', function (event, details) {
     if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed' || details.reason == 'integrity-failure') {
       try {
         AppWindow.uploadWindow?.destroy()
-      } catch {
-      }
+      } catch {}
       AppWindow.uploadWindow = undefined
       createUpload()
     }
@@ -472,18 +430,17 @@ function createDownload() {
   if (AppWindow.downloadWindow && AppWindow.downloadWindow.isDestroyed() == false) return
   AppWindow.downloadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false)
 
-  AppWindow.downloadWindow.on('ready-to-show', function() {
+  AppWindow.downloadWindow.on('ready-to-show', function () {
     creatDownloadPort()
     AppWindow.downloadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'download' } })
     AppWindow.downloadWindow!.setTitle('boxplayer下载进程')
   })
 
-  AppWindow.downloadWindow.webContents.on('render-process-gone', function(event, details) {
+  AppWindow.downloadWindow.webContents.on('render-process-gone', function (event, details) {
     if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed' || details.reason == 'integrity-failure') {
       try {
         AppWindow.downloadWindow?.destroy()
-      } catch {
-      }
+      } catch {}
       AppWindow.downloadWindow = undefined
       createDownload()
     }

@@ -27,6 +27,7 @@ import { apiOneDriveSearch, filterOneDriveSearchResults, mapOneDriveSearchItems,
 import { apiBoxFileList, mapBoxItemToAliModel } from '../box/dirfilelist'
 import { apiBoxSearch, mapBoxSearchItems, parseBoxSearchId } from '../box/search'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
+import { getS3Connection, getS3ConnectionId, isS3Drive, listS3Directory } from '../utils/s3Client'
 import { OrderDir } from '../utils/filenameorder'
 
 export interface PanSelectedData {
@@ -40,20 +41,20 @@ export interface PanSelectedData {
   fileDescription: string
   parentDirDescription: string
   selectedKeys: string[]
-  selectedParentKeys: string[],
+  selectedParentKeys: string[]
 }
 
 const RefreshLock = new Set<string>()
 const Drive115TrashPaging = new Map<string, { offset: number; total: number; limit: number; loading: boolean }>()
 
 const hydrateDropboxThumbnails = async (user_id: string, items: any[]): Promise<any[]> => {
-  const candidates = items
-    .filter((item) => !item.isDir && !item.thumbnail && (item.category === 'image' || item.category === 'video'))
-    .slice(0, 40)
-  await Promise.all(candidates.map(async (item) => {
-    const thumbnail = await apiDropboxThumbnail(user_id, item.file_id).catch(() => '')
-    if (thumbnail) item.thumbnail = thumbnail
-  }))
+  const candidates = items.filter((item) => !item.isDir && !item.thumbnail && (item.category === 'image' || item.category === 'video')).slice(0, 40)
+  await Promise.all(
+    candidates.map(async (item) => {
+      const thumbnail = await apiDropboxThumbnail(user_id, item.file_id).catch(() => '')
+      if (thumbnail) item.thumbnail = thumbnail
+    })
+  )
   return items
 }
 
@@ -342,6 +343,59 @@ export default class PanDAL {
     useFootStore().mSaveLoading('')
   }
 
+  static async aReLoadWebDavDrive(token: ITokenInfo): Promise<void> {
+    const { user_id } = token
+    const drive_id = token.default_drive_id || user_id
+    const connection = getWebDavConnection(getWebDavConnectionId(drive_id))
+    const pantreeStore = usePanTreeStore()
+    pantreeStore.mSaveUser(user_id, drive_id, '', '', '')
+    pantreeStore.drive_id = drive_id
+    if (!user_id || !connection) return
+
+    useFootStore().mSaveLoading(`加载 ${connection.name} 文件夹...`)
+    try {
+      const list = await listWebDavDirectory(connection, '/')
+      const driveType = GetDriveType(user_id, drive_id)
+      const dirs = list
+        .filter((item) => item.isDir)
+        .map((item) => ({
+          file_id: item.file_id,
+          drive_id,
+          parent_file_id: driveType.key,
+          path: item.path,
+          name: item.name,
+          description: '',
+          time: item.time,
+          size: 0
+        }))
+      await TreeStore.ConvertToOneDriver(user_id, drive_id, dirs, false, true)
+      PanDAL.RefreshPanTreeAllNode(drive_id)
+    } finally {
+      useFootStore().mSaveLoading('')
+    }
+  }
+
+  static async aReLoadS3Drive(token: ITokenInfo): Promise<void> {
+    const { user_id } = token
+    const drive_id = token.default_drive_id || user_id
+    const connection = getS3Connection(getS3ConnectionId(drive_id))
+    const pantreeStore = usePanTreeStore()
+    pantreeStore.mSaveUser(user_id, drive_id, '', '', '')
+    pantreeStore.drive_id = drive_id
+    if (!user_id || !connection) return
+
+    useFootStore().mSaveLoading(`加载 ${connection.name} 文件夹...`)
+    try {
+      const list = await listS3Directory(connection, '/')
+      const driveType = GetDriveType(user_id, drive_id)
+      const dirs = list.filter((item) => item.isDir).map((item) => ({ file_id: item.file_id, drive_id, parent_file_id: driveType.key, path: item.path, name: item.name, description: '', time: item.time, size: 0 }))
+      await TreeStore.ConvertToOneDriver(user_id, drive_id, dirs, false, true)
+      PanDAL.RefreshPanTreeAllNode(drive_id)
+    } finally {
+      useFootStore().mSaveLoading('')
+    }
+  }
+
   static async aReLoadBackupDrive(token: ITokenInfo): Promise<void> {
     const { user_id, default_drive_id, resource_drive_id, backup_drive_id, pic_drive_id } = token
     const drive_id = backup_drive_id
@@ -397,7 +451,6 @@ export default class PanDAL {
     useFootStore().mSaveLoading('')
   }
 
-
   static RefreshPanTreeAllNode(drive_id: string) {
     const OneDriver = TreeStore.GetDriver(drive_id)
     if (!OneDriver) return
@@ -439,12 +492,10 @@ export default class PanDAL {
     return [dir]
   }
 
-
   static aTreeScrollToDir(dirID: string) {
     usePanTreeStore().mSaveTreeScrollTo(dirID)
     usePanFileStore().mSaveFileScrollTo(dirID)
   }
-
 
   static async aReLoadOneDirToShow(drive_id: string, file_id: string, selfExpand: boolean, album_id: string = ''): Promise<boolean> {
     const panTreeStore = usePanTreeStore()
@@ -556,7 +607,6 @@ export default class PanDAL {
     return PanDAL.GetDirFileList(panTreeStore.user_id, dir.drive_id, dir.file_id, dir.name, dir.album_id)
   }
 
-
   static GetDirFileList(user_id: string, drive_id: string, dirID: string, dirName: string, albumID: string = '', hasFiles: boolean = true): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       if (dirID == 'search') {
@@ -605,10 +655,43 @@ export default class PanDAL {
         return
       }
 
+      if (isS3Drive(drive_id)) {
+        const connection = getS3Connection(getS3ConnectionId(drive_id))
+        if (!connection) {
+          if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
+          message.warning('S3 连接不存在，请重新连接')
+          resolve(false)
+          return
+        }
+        const requestPath = dirID === '/' ? '/' : dirID
+        listS3Directory(connection, requestPath)
+          .then(async (allItems) => {
+            const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
+            const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName || (dirID === '/' ? connection.name : dirID.split('/').pop() || connection.name))
+            dir.items = items
+            dir.itemsKey = new Set(items.map((item) => item.file_id))
+            dir.next_marker = ''
+            dir.itemsTotal = items.length
+            const panfileStore = usePanFileStore()
+            panfileStore.mSaveDirFileLoadingPart(0, dir, dir.itemsTotal || 0)
+            if (!TreeStore.GetDriver(drive_id)) await TreeStore.ConvertToOneDriver(user_id, drive_id, [], false, true)
+            await TreeStore.SaveOneDirFileList(dir, hasFiles)
+            if (hasFiles) panfileStore.mSaveDirFileLoadingFinish(drive_id, dirID, dir.items, dir.itemsTotal || 0)
+            PanDAL.RefreshPanTreeAllNode(drive_id)
+            resolve(true)
+          })
+          .catch((err: any) => {
+            if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
+            message.warning('列出 S3 文件夹失败 ' + (err?.message || ''))
+            resolve(false)
+          })
+        return
+      }
+
       if (isCloud123User(user_id)) {
         const isTrash = dirID === 'trash'
         const isSearch = dirID.startsWith('search')
-        const parentFileId = dirID === 'cloud_root' ? 0 : (isTrash ? 0 : dirID)
+        const parentFileId = dirID === 'cloud_root' ? 0 : isTrash ? 0 : dirID
         let searchData = ''
         let searchMode = 0
         if (isSearch) {
@@ -745,9 +828,7 @@ export default class PanDAL {
         const orderParts = orderKey.split(' ')
         const baiduOrder = orderParts[0] === 'updated_at' ? 'time' : orderParts[0] === 'size' ? 'size' : 'name'
         const baiduDesc = orderParts[1] === 'desc' ? 1 : 0
-        const request = isSearch
-          ? apiBaiduSearch(user_id, dirID.substring('search'.length).trim(), '/', true)
-          : apiBaiduFileList(user_id, dirPath, baiduOrder, 0, 1000, baiduDesc)
+        const request = isSearch ? apiBaiduSearch(user_id, dirID.substring('search'.length).trim(), '/', true) : apiBaiduFileList(user_id, dirPath, baiduOrder, 0, 1000, baiduDesc)
         request
           .then((list) => {
             const allItems = list.map((item) => mapBaiduFileToAliModel(item, drive_id, parentPath))
@@ -816,9 +897,7 @@ export default class PanDAL {
       if (isQuarkUser(user_id)) {
         const isSearch = dirID.startsWith('search')
         const parentId = dirID === 'quark_root' ? '0' : dirID
-        const request = isSearch
-          ? apiQuarkSearch(user_id, dirID.substring('search'.length).trim(), 200).then((items) => ({ items, total: items.length }))
-          : apiQuarkFileList(user_id, parentId, 200)
+        const request = isSearch ? apiQuarkSearch(user_id, dirID.substring('search'.length).trim(), 200).then((items) => ({ items, total: items.length })) : apiQuarkFileList(user_id, parentId, 200)
         request
           .then(({ items: list, total }) => {
             const allItems = list.map((item) => mapQuarkFileToAliModel(item, drive_id, isSearch ? 'quark_root' : dirID))
@@ -852,14 +931,10 @@ export default class PanDAL {
         const is139 = isCloud139User(user_id)
         const rootId = is139 ? 'cloud139_root' : 'cloud189_root'
         const parentId = dirID === rootId ? (is139 ? '/' : '-11') : dirID
-        const request = is139
-          ? apiCloud139FileList(user_id, parentId, 200).then((items) => ({ items, total: items.length }))
-          : apiCloud189FileList(user_id, parentId, 200).then((items) => ({ items, total: items.length }))
+        const request = is139 ? apiCloud139FileList(user_id, parentId, 200).then((items) => ({ items, total: items.length })) : apiCloud189FileList(user_id, parentId, 200).then((items) => ({ items, total: items.length }))
         request
           .then(({ items: list, total }) => {
-            const allItems = is139
-              ? (list as any[]).map((item) => mapCloud139FileToAliModel(item, drive_id, dirID))
-              : (list as any[]).map((item) => mapCloud189FileToAliModel(item, drive_id, dirID))
+            const allItems = is139 ? (list as any[]).map((item) => mapCloud139FileToAliModel(item, drive_id, dirID)) : (list as any[]).map((item) => mapCloud189FileToAliModel(item, drive_id, dirID))
             const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
             const order = TreeStore.GetDirOrder(drive_id, dirID).replace('ext ', 'updated_at ')
             const orders = order.split(' ')
@@ -1142,11 +1217,9 @@ export default class PanDAL {
     })
   }
 
-
   static aReLoadOneDirToRefreshTree(user_id: string, drive_id: string, dirID: string, albumID?: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      if (dirID == 'favorite' || dirID.startsWith('color')
-        || dirID.startsWith('search') || dirID.startsWith('video')) {
+      if (dirID == 'favorite' || dirID.startsWith('color') || dirID.startsWith('search') || dirID.startsWith('video')) {
         resolve(true)
         return
       }
@@ -1226,7 +1299,6 @@ export default class PanDAL {
     pantreeStore.mSaveQuick(arr)
   }
 
-
   static deleteQuickFile(key: string) {
     if (!key) return
     const pantreeStore = usePanTreeStore()
@@ -1240,20 +1312,17 @@ export default class PanDAL {
     pantreeStore.mSaveQuick(newArray)
   }
 
-
   static getQuickFileList() {
     const pantreeStore = usePanTreeStore()
     const jsonstr = localStorage.getItem('FileQuick-' + pantreeStore.user_id)
     return jsonstr ? JSON.parse(jsonstr) : []
   }
 
-
   static aReLoadQuickFile(user_id: string) {
     const jsonstr = localStorage.getItem('FileQuick-' + user_id)
     const arr = jsonstr ? JSON.parse(jsonstr) : []
     usePanTreeStore().mSaveQuick(arr)
   }
-
 
   static async aUpdateDirFileSize(drive_id: string): Promise<void> {
     const pantreeStore = usePanTreeStore()

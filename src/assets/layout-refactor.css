@@ -1,0 +1,1049 @@
+/*
+ * Application layout primitives.
+ *
+ * This file owns reusable geometry only. Feature pages must compose these
+ * primitives instead of introducing page-specific rails, card containers, or
+ * competing fixed-height shells. Colours remain in design-tokens.css.
+ */
+
+:root {
+  --layout-header-height: 48px;
+  --layout-footer-height: 0px;
+  --layout-rail-width: 220px;
+  --layout-page-gutter: clamp(18px, 3vw, 32px);
+  --layout-content-width: 960px;
+  --layout-row-label-width: 220px;
+  --layout-row-gap: 16px;
+  --layout-row-min-height: 42px;
+  --ui-font-size: 13px;
+  --ui-font-size-small: 12px;
+  --ui-line-height: 1.5;
+  --ui-control-height: 32px;
+  --ui-control-radius: 4px;
+}
+
+/* Bridge legacy Arco variables to the semantic token layer while old pages migrate. */
+body,
+body[arco-theme='dark'],
+html.dark body {
+  color: var(--text-primary) !important;
+  background: var(--bg-base) !important;
+  caret-color: var(--text-primary);
+  --color-text-1: var(--text-primary) !important;
+  --color-text-2: var(--text-secondary) !important;
+  --color-text-3: var(--text-tertiary) !important;
+  --color-text-4: var(--text-disabled) !important;
+  --color-bg-1: var(--bg-surface) !important;
+  --color-bg-2: var(--bg-base) !important;
+  --color-bg-3: var(--bg-subtle) !important;
+  --color-bg-popup: var(--bg-surface) !important;
+  --color-fill-1: var(--bg-hover) !important;
+  --color-fill-2: var(--bg-subtle) !important;
+  --color-border-1: var(--border-lighter) !important;
+  --color-border-2: var(--border-light) !important;
+}
+
+/* Typography and functional controls share one semantic baseline across pages. */
+#xbybody,
+.arco-modal,
+.arco-dropdown,
+.arco-select-dropdown,
+.arco-popover-popup-content {
+  color: var(--text-primary);
+  font-size: var(--ui-font-size);
+  line-height: var(--ui-line-height);
+}
+
+#xbybody :where(.arco-typography, .arco-menu-item, .arco-form-label, .arco-checkbox-label, .arco-radio-label, .arco-switch-text, .arco-tag, .arco-badge-status-text),
+body :where(.arco-dropdown-option, .arco-select-option, .arco-popover-title, .arco-modal-header-title) {
+  color: var(--text-primary) !important;
+}
+
+#xbybody :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker),
+body :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker) {
+  color: var(--text-primary) !important;
+  background: var(--control-bg) !important;
+  border-color: var(--control-border) !important;
+  border-radius: var(--ui-control-radius) !important;
+  box-shadow: none !important;
+}
+
+body :where(.arco-input, .arco-textarea, .arco-input-number-input, .arco-select-view-value, .arco-picker-input input) {
+  color: var(--text-primary) !important;
+  font-size: var(--ui-font-size) !important;
+}
+
+body :where(.arco-input, .arco-textarea, .arco-input-number-input, .arco-select-view-value, .arco-picker-input input)::placeholder {
+  color: var(--control-placeholder) !important;
+  opacity: 1;
+}
+
+body :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker):hover {
+  border-color: var(--control-border-hover) !important;
+}
+
+body :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker).arco-input-focus,
+body .arco-select-view.arco-select-view-focus,
+body .arco-picker-focused {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 16%, transparent) !important;
+}
+
+#xbybody :where(.arco-btn),
+body :where(.arco-modal .arco-btn, .arco-popover-popup-content .arco-btn) {
+  min-height: var(--ui-control-height);
+  color: var(--text-primary) !important;
+  font-size: var(--ui-font-size) !important;
+  line-height: 1 !important;
+  border-color: var(--control-border) !important;
+  border-radius: var(--ui-control-radius) !important;
+  background: var(--control-bg) !important;
+  box-shadow: none !important;
+}
+
+#xbybody :where(.arco-btn):hover,
+body :where(.arco-modal .arco-btn, .arco-popover-popup-content .arco-btn):hover {
+  color: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+  background: var(--bg-hover) !important;
+}
+
+#xbybody .arco-btn.arco-btn-primary,
+body :where(.arco-modal .arco-btn.arco-btn-primary, .arco-popover-popup-content .arco-btn.arco-btn-primary) {
+  color: var(--text-inverse) !important;
+  border-color: var(--color-primary) !important;
+  background: var(--color-primary) !important;
+}
+
+#xbybody .arco-btn.arco-btn-primary:hover,
+body :where(.arco-modal .arco-btn.arco-btn-primary, .arco-popover-popup-content .arco-btn.arco-btn-primary):hover {
+  color: var(--text-inverse) !important;
+  border-color: var(--color-primary-hover) !important;
+  background: var(--color-primary-hover) !important;
+}
+
+#xbybody .arco-btn.arco-btn-text {
+  color: var(--text-link) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+#xbybody .arco-btn.arco-btn-text:hover {
+  color: var(--color-primary) !important;
+  background: var(--bg-hover) !important;
+}
+
+#xbybody :where(.arco-btn, .arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-number, .arco-picker).arco-disabled,
+#xbybody :where(.arco-btn)[disabled] {
+  color: var(--text-disabled) !important;
+  border-color: var(--border-light) !important;
+  background: var(--bg-subtle) !important;
+  opacity: 1 !important;
+}
+
+body :where(.arco-dropdown, .arco-select-dropdown, .arco-popover-popup-content, .arco-modal) {
+  color: var(--text-primary) !important;
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-light) !important;
+  border-radius: 6px !important;
+  box-shadow: var(--shadow-sm) !important;
+  backdrop-filter: none !important;
+}
+
+body :where(.arco-dropdown-option, .arco-select-option) {
+  min-height: var(--ui-control-height) !important;
+  margin: 0 !important;
+  padding: 0 10px !important;
+  color: var(--text-primary) !important;
+  font-size: var(--ui-font-size) !important;
+  line-height: var(--ui-control-height) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+body :where(.arco-dropdown-option, .arco-select-option):hover,
+body .arco-select-option.selected {
+  color: var(--color-primary) !important;
+  background: var(--bg-hover) !important;
+  box-shadow: none !important;
+}
+
+/* Flat page/rail/list primitives. Never add card backgrounds or elevation. */
+.ui-page-shell {
+  display: grid;
+  grid-template-columns: var(--layout-rail-width) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ui-page-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border-light);
+}
+
+.ui-page-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ui-content-column {
+  box-sizing: border-box;
+  width: min(100%, var(--layout-content-width));
+  min-height: 100%;
+  padding: 18px var(--layout-page-gutter) 32px;
+}
+
+/* Arco workspaces keep the library layout element but share the same rail geometry. */
+.ui-workspace-shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.ui-workspace-rail {
+  flex: 0 0 var(--layout-rail-width);
+  width: var(--layout-rail-width);
+  min-width: var(--layout-rail-width);
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-light);
+}
+
+.ui-workspace-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.ui-rail-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.ui-rail-heading strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.ui-plain-list {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-plain-row {
+  display: grid;
+  grid-template-columns: minmax(160px, var(--layout-row-label-width)) minmax(0, 1fr);
+  gap: var(--layout-row-gap);
+  align-items: center;
+  min-height: var(--layout-row-min-height);
+  padding: 3px 0;
+}
+
+.ui-plain-label {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ui-plain-control {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ui-plain-control :where(.arco-input-wrapper, .arco-select-view, .arco-input-number, .arco-picker, .arco-textarea-wrapper) {
+  width: min(100%, 260px);
+}
+
+.ui-plain-control .ui-control-xs {
+  width: 76px !important;
+}
+.ui-plain-control .ui-control-sm {
+  width: 120px !important;
+}
+.ui-plain-control .ui-control-md {
+  width: 220px !important;
+}
+.ui-plain-control .ui-control-lg {
+  width: min(100%, 420px) !important;
+}
+.ui-plain-control .ui-control-grow {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.ui-inline-fields {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-plain-row--top {
+  align-items: start;
+  padding-block: 5px;
+}
+
+@media (max-width: 760px) {
+  .ui-page-shell {
+    grid-template-columns: 176px minmax(0, 1fr);
+  }
+
+  .ui-plain-row {
+    grid-template-columns: minmax(120px, 36%) minmax(0, 1fr);
+    gap: 10px;
+  }
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Shell: shared header / body / footer geometry */
+.arco-layout {
+  height: 100% !important;
+  background: var(--bg-base) !important;
+}
+
+#xbyhead {
+  flex-shrink: 0 !important;
+  height: var(--layout-header-height) !important;
+  min-height: var(--layout-header-height) !important;
+  max-height: var(--layout-header-height) !important;
+  padding: 0 12px !important;
+  background: var(--bg-surface) !important;
+  border-bottom: 1px solid var(--border-light) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+#xbyhead2 {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  height: var(--layout-header-height) !important;
+  min-height: var(--layout-header-height) !important;
+}
+
+#xbyhead2 .title {
+  margin: 0 8px 0 4px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--text-primary) !important;
+  white-space: nowrap !important;
+}
+
+#xbyhead2 .arco-menu-horizontal {
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  height: var(--layout-header-height) !important;
+  line-height: var(--layout-header-height) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+
+#xbyhead2 > .flexauto {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+#xbyhead2 > :not(.arco-menu-horizontal):not(.flexauto) {
+  flex-shrink: 0 !important;
+}
+
+#xbyhead2 .arco-menu-horizontal .arco-menu-inner {
+  display: flex !important;
+  align-items: stretch !important;
+  height: var(--layout-header-height) !important;
+  padding: 0 !important;
+}
+
+#xbyhead2 .arco-menu-horizontal .arco-menu-item {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  height: var(--layout-header-height) !important;
+  margin: 0 !important;
+  padding: 0 16px !important;
+  color: var(--text-secondary) !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#xbyhead2 .arco-menu-horizontal .arco-menu-item:hover {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#xbyhead2 .arco-menu-horizontal .arco-menu-item.arco-menu-selected {
+  color: var(--color-primary) !important;
+  font-weight: 600 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#xbyhead2 .arco-menu-selected-label {
+  left: 16px !important;
+  right: 16px !important;
+  bottom: 0 !important;
+  height: 2px !important;
+  background: var(--color-primary) !important;
+}
+
+#xbyhead2 .arco-btn-text {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: var(--text-secondary) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#xbyhead2 .arco-btn-text:hover,
+#xbyhead2 .arco-btn-text.active {
+  color: var(--text-primary) !important;
+  background: var(--bg-subtle) !important;
+  box-shadow: none !important;
+}
+
+#xbyhead2 .arco-btn-text[title*='关闭']:hover {
+  color: #fff !important;
+  background: #ef4444 !important;
+}
+
+#xbyhead2 .head-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border-light);
+  flex: 0 0 auto;
+}
+
+#xbybody {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  background: var(--bg-base) !important;
+}
+
+#xbybody > .arco-tabs,
+#xbybody > .hidetabs,
+#xbybody .hidetabs.arco-tabs {
+  height: 100% !important;
+}
+
+#xbybody .arco-tabs-content,
+#xbybody .arco-tabs-content-list,
+#xbybody .arco-tabs-pane,
+#xbybody .arco-tabs-content-item {
+  height: 100% !important;
+}
+
+#xbybody .arco-tabs-pane {
+  overflow: hidden !important;
+}
+
+#xbybody .arco-tabs-pane.arco-tabs-pane-active {
+  animation: ui-page-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ui-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hidetabs,
+.hidetabs > .arco-tabs-content,
+.hidetabs .arco-tabs-content-list,
+.hidetabs .arco-tabs-pane {
+  min-height: 0;
+  height: 100%;
+}
+
+.hidetabs > .arco-tabs-nav {
+  display: none !important;
+}
+
+/* Shared page rails */
+.xbyleft,
+.settings-sider {
+  width: var(--layout-rail-width) !important;
+  min-width: var(--layout-rail-width) !important;
+  background: var(--bg-surface) !important;
+  border-right: 1px solid var(--border-light) !important;
+  box-shadow: none !important;
+}
+
+.xbyright {
+  min-width: 0 !important;
+  background: var(--bg-surface) !important;
+}
+
+.headdesc {
+  height: auto !important;
+  min-height: 38px !important;
+  padding: 12px 16px !important;
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.xbyleftmenu.arco-menu .arco-menu-inner {
+  padding: 8px 0 !important;
+}
+
+.xbyleftmenu.arco-menu .arco-menu-item {
+  display: flex !important;
+  align-items: center !important;
+  height: 36px !important;
+  margin: 0 !important;
+  padding: 0 16px !important;
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+  line-height: 38px !important;
+  border-left: 3px solid transparent !important;
+  border-radius: 0 !important;
+}
+
+.xbyleftmenu.arco-menu .arco-menu-item:hover {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+}
+
+.xbyleftmenu.arco-menu .arco-menu-item.arco-menu-selected {
+  color: var(--color-primary) !important;
+  font-weight: 600 !important;
+  background: transparent !important;
+  border-left-color: var(--color-primary) !important;
+}
+
+.xbyleftmenu.arco-menu .arco-menu-item.arco-menu-selected::after {
+  display: none !important;
+}
+
+.xbyleftmenu.arco-menu .arco-menu-item .arco-menu-icon {
+  width: 22px !important;
+  margin-right: 8px !important;
+  color: inherit !important;
+}
+
+/* Split / pan shell */
+.MySplit {
+  height: 100% !important;
+  width: 100% !important;
+  background: var(--bg-surface);
+}
+
+.MySplit .arco-split-pane {
+  overflow: hidden !important;
+  height: 100% !important;
+  transition:
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.MySplit .arco-split-pane-first,
+.MySplit .arco-split-pane-second {
+  will-change: width, flex-basis;
+}
+
+.MySplit.is-collapsed .splitline {
+  width: 0 !important;
+  border-left-width: 0 !important;
+}
+
+.MySplit .splitline {
+  width: 4px !important;
+  border-left: 1px solid var(--border-light) !important;
+  border-right: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+}
+
+.MySplit .splitline:hover,
+.MySplit .splitline.resize {
+  background: color-mix(in srgb, var(--color-primary) 45%, transparent) !important;
+  border-left-color: transparent !important;
+}
+
+/* Pan left */
+.pan-left {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pan-left .treeleft {
+  flex: 1 1 auto !important;
+  height: auto !important;
+}
+
+.pan-drive-switcher {
+  flex-shrink: 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-surface);
+}
+
+.pan-drive-switcher-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pan-drive-switcher-btn:hover {
+  background: var(--bg-hover);
+}
+
+.pan-drive-switcher-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.pan-drive-switcher-btn .meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pan-drive-switcher-btn .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.pan-drive-menu {
+  width: var(--pan-drive-menu-width, var(--layout-rail-width));
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 4px;
+}
+
+.pan-drive-menu-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.pan-drive-menu-item,
+.pan-drive-menu-login {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  gap: 8px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--ui-font-size-small);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.pan-drive-menu-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pan-drive-menu-item small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.pan-drive-menu-item .current {
+  color: var(--color-primary);
+}
+
+.pan-drive-menu-item:hover,
+.pan-drive-menu-item.active,
+.pan-drive-menu-login:hover {
+  color: var(--color-primary);
+  background: var(--bg-hover);
+}
+
+.pan-drive-menu-login {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-link);
+}
+
+.pan-drive-menu-empty {
+  padding: 10px 8px;
+  color: var(--text-secondary);
+  font-size: var(--ui-font-size-small);
+}
+
+.pan-tree-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 18px 16px;
+  color: var(--text-secondary);
+  font-size: var(--ui-font-size-small);
+  line-height: var(--ui-line-height);
+}
+
+.pan-tree-empty > .iconfont {
+  color: var(--color-primary);
+  font-size: 22px;
+}
+
+.pan-tree-empty strong {
+  color: var(--text-primary);
+  font-size: var(--ui-font-size);
+}
+
+.headswitch {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 8px !important;
+  background: var(--bg-surface) !important;
+}
+
+.headswitch .bghr {
+  display: none !important;
+}
+
+.headswitch .sw {
+  width: 100% !important;
+  margin: 0 !important;
+  background: transparent !important;
+}
+
+.mantine-root {
+  display: flex !important;
+  width: 100% !important;
+  padding: 3px !important;
+  background: var(--bg-subtle) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+}
+
+.mantine-item {
+  flex: 1 1 0 !important;
+  margin: 0 !important;
+  border-radius: 6px !important;
+}
+
+.mantine-item:not(.mantine-item-active):hover {
+  background: transparent !important;
+}
+
+.mantine-label {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 28px !important;
+  padding: 4px 8px !important;
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+}
+
+.mantine-label-active {
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+}
+
+.mantine-bgblock {
+  top: 3px !important;
+  bottom: 3px !important;
+  height: auto !important;
+  background: var(--bg-surface) !important;
+  border-radius: 6px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.treeleft {
+  display: flex !important;
+  flex-direction: column !important;
+  height: calc(100% - 94px) !important;
+  min-height: 0 !important;
+  margin-left: 0 !important;
+  padding: 0 4px 8px !important;
+  overflow: hidden !important;
+}
+
+.treeleft .hidetabs,
+.treeleft .arco-tabs,
+.treeleft .arco-tabs-content,
+.treeleft .arco-tabs-content-list,
+.treeleft .arco-tabs-pane {
+  height: 100% !important;
+}
+
+.dirtree,
+.quicktree {
+  height: 100% !important;
+}
+
+.dirtree .ant-tree-node-content-wrapper,
+.quicktree .ant-tree-node-content-wrapper,
+.colortree .ant-tree-node-content-wrapper {
+  min-height: 30px !important;
+  border-radius: 8px !important;
+}
+
+.dirtree .ant-tree-node-content-wrapper:hover,
+.quicktree .ant-tree-node-content-wrapper:hover {
+  background: var(--bg-hover) !important;
+}
+
+.ant-tree-node-selected .ant-tree-node-content-wrapper {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+}
+
+.dirtree .iconfont.iconfile-folder,
+.quicktree .iconfont.iconfile-folder,
+.ant-tree .iconfile-folder {
+  color: #fbbf24 !important;
+}
+
+/* Pan right */
+.xbyright {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: var(--bg-surface) !important;
+}
+
+.toppanbtns {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-height: 40px !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 4px 16px !important;
+  border-bottom: 1px solid var(--border-light) !important;
+  box-sizing: border-box !important;
+}
+
+.toppanbtn {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+}
+
+.toppanbtn .arco-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 10px !important;
+  color: var(--color-primary) !important;
+  font-size: 13px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  background: transparent !important;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+/* A shared compact action style for pan, transfer and share toolbars. */
+#xbybody .toppanbtn .arco-btn {
+  min-height: 30px !important;
+  padding: 0 9px !important;
+  color: var(--text-link) !important;
+  background: var(--control-bg) !important;
+  border: 1px solid var(--control-border) !important;
+  border-radius: var(--ui-control-radius) !important;
+}
+
+#xbybody .toppanbtn .arco-btn:hover,
+#xbybody .toppanbtn .arco-btn:focus-visible {
+  color: var(--color-primary) !important;
+  background: var(--bg-hover) !important;
+  border-color: var(--color-primary) !important;
+}
+
+#xbybody .toppanbtn .arco-btn.danger,
+#xbybody .toppanbtn .arco-btn.arco-btn-status-danger {
+  color: var(--color-error) !important;
+  border-color: color-mix(in srgb, var(--color-error) 42%, var(--control-border)) !important;
+}
+
+#xbybody .toppanbtn .arco-btn.danger:hover,
+#xbybody .toppanbtn .arco-btn.arco-btn-status-danger:hover {
+  color: var(--text-inverse) !important;
+  background: var(--color-error) !important;
+  border-color: var(--color-error) !important;
+}
+
+.toppanbtn .arco-btn:hover,
+.toppanbtn .arco-btn:active {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+  box-shadow: none !important;
+}
+
+body[arco-theme='dark'] .toppanbtn .arco-btn {
+  color: var(--color-primary) !important;
+  background: transparent !important;
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent) !important;
+  box-shadow: none !important;
+}
+
+body[arco-theme='dark'] .toppanbtn .arco-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.toppanbtn .arco-input-search {
+  width: 192px !important;
+}
+
+.toppanbtn .arco-input-search .arco-input-wrapper {
+  height: 30px !important;
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-light) !important;
+  border-radius: 8px !important;
+}
+
+.toppanbtn .arco-input-search .arco-input-wrapper.arco-input-focus {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 12%, transparent) !important;
+}
+
+.toppannavitem {
+  color: var(--color-primary) !important;
+  font-size: 13px !important;
+  border-radius: 6px !important;
+}
+
+.toppannavitem:hover {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+}
+
+.toppanarea {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  margin: 0 !important;
+  padding: 0 16px !important;
+  color: var(--text-secondary) !important;
+  background: var(--bg-surface) !important;
+  border-top: 1px solid var(--border-lighter) !important;
+  border-bottom: 1px solid var(--border-lighter) !important;
+  box-sizing: border-box !important;
+}
+
+.toppanarea .selectInfo,
+.toppanarea .cell {
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+}
+
+.toppanarea .qujian,
+.toppanarea .cell.active {
+  color: var(--color-primary) !important;
+}
+
+/* file list fills remaining height */
+#panfilelist,
+.toppanlist {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+}
+
+.fileitem {
+  min-height: 44px !important;
+  border-bottom: 1px solid var(--border-lighter) !important;
+}
+
+.fileitem:hover {
+  background: var(--bg-hover) !important;
+}
+
+.fileitem.selected {
+  background: var(--listselectbg) !important;
+}
+
+.fileitem:hover .filename {
+  color: var(--color-primary) !important;
+}

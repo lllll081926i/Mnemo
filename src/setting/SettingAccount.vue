@@ -1,40 +1,20 @@
-<script setup lang='ts'>
+<script setup lang="ts">
 import message from '../utils/message'
 import UserDAL, { UserTokenMap } from '../user/userdal'
-import { ITokenInfo, useSettingStore, useUserStore } from '../store'
-import { copyToClipboard, openExternal } from '../utils/electronhelper'
+import { ITokenInfo } from '../store'
+import { copyToClipboard } from '../utils/electronhelper'
 import Db from '../utils/db'
 import fs from 'node:fs'
 import path from 'path'
 import { decodeName, encodeName } from '../module/flow-enc/utils'
 import { localPwd } from '../utils/aria2c'
 
-const settingStore = useSettingStore()
-
-const cb = (val: any) => {
-  settingStore.updateStore(val)
-}
-
-const openWebUrl = (type: string) => {
-  switch (type) {
-    case 'developer':
-      openExternal('https://www.aliyundrive.com/developer')
-      break
-    case 'pkce':
-      openExternal('https://www.yuque.com/aliyundrive/zpfszx/eam8ls1lmawwwksv')
-      break
-    case 'AList':
-      openExternal('https://alist.nn.ci/tool/aliyundrive/request.html')
-      break
-  }
-}
-
 const copyCookies = async () => {
-  let cookies = await window.WebGetCookies({ url: 'https://www.aliyundrive.com' }) as []
-  if (cookies.length == 0) cookies = await window.WebGetCookies({ url: 'https://www.aliyundrive.com' }) as []
+  let cookies = (await window.WebGetCookies({ url: 'https://www.aliyundrive.com' })) as []
+  if (cookies.length == 0) cookies = (await window.WebGetCookies({ url: 'https://www.aliyundrive.com' })) as []
   if (cookies.length > 0) {
     let cookiesText = ''
-    cookies.forEach(cookie => {
+    cookies.forEach((cookie) => {
       cookiesText += cookie['name'] + '=' + cookie['value'] + ';'
     })
     copyToClipboard(cookiesText)
@@ -45,53 +25,58 @@ const copyCookies = async () => {
 }
 
 const handlerAccountImport = () => {
-  window.WebShowOpenDialogSync({
-    title: '选择需要导入的账户文件',
-    buttonLabel: '导入选中的账户文件',
-    filters: [{ name: 'user.db', extensions: ['db'] }],
-    properties: ['openFile', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
-  }, async (files: string[] | undefined) => {
-    if (files && files.length > 0) {
-      try {
-        // 获取内容
-        let userList: ITokenInfo[] = []
-        let uniqueUserIds = new Set()
-        for (let filePath of files) {
-          let readData = fs.readFileSync(filePath, 'utf-8')
-          let parsedData: any = JSON.parse(<string>decodeName(localPwd, 'aesctr', readData))
-          if (Array.isArray(parsedData) && parsedData.every(item => item.hasOwnProperty('access_token'))) {
-            let filteredData: ITokenInfo[] = parsedData.filter((item: ITokenInfo) => {
-              if (!uniqueUserIds.has(item.user_id)) {
-                uniqueUserIds.add(item.user_id)
-                return true
-              }
-              return false
-            })
-            userList.push(...filteredData)
-          }
-        }
-        if (userList.length > 0) {
-          // 设置UserTokenMap
-          for (let token of userList) {
-            if (token.user_id) {
-              UserTokenMap.set(token.user_id, token)
+  window.WebShowOpenDialogSync(
+    {
+      title: '选择需要导入的账户文件',
+      buttonLabel: '导入选中的账户文件',
+      filters: [{ name: 'user.db', extensions: ['db'] }],
+      properties: ['openFile', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
+    },
+    async (files: string[] | undefined) => {
+      if (files && files.length > 0) {
+        try {
+          // 获取内容
+          let userList: ITokenInfo[] = []
+          let uniqueUserIds = new Set()
+          for (let filePath of files) {
+            let readData = fs.readFileSync(filePath, 'utf-8')
+            let parsedData: any = JSON.parse(<string>decodeName(localPwd, 'aesctr', readData))
+            if (Array.isArray(parsedData) && parsedData.every((item) => item.hasOwnProperty('access_token'))) {
+              let filteredData: ITokenInfo[] = parsedData.filter((item: ITokenInfo) => {
+                if (!uniqueUserIds.has(item.user_id)) {
+                  uniqueUserIds.add(item.user_id)
+                  return true
+                }
+                return false
+              })
+              userList.push(...filteredData)
             }
           }
-          // 导入到数据库
-          Db.saveUserBatch(userList).then(() => {
-            window.WinMsgToUpload({ cmd: 'ClearUserToken' })
-            window.WinMsgToDownload({ cmd: 'ClearUserToken' })
-          }).catch()
-          await UserDAL.UserLogin(userList[0])
-          message.success('导入用户账户数据成功')
-        } else {
+          if (userList.length > 0) {
+            // 设置UserTokenMap
+            for (let token of userList) {
+              if (token.user_id) {
+                UserTokenMap.set(token.user_id, token)
+              }
+            }
+            // 导入到数据库
+            Db.saveUserBatch(userList)
+              .then(() => {
+                window.WinMsgToUpload({ cmd: 'ClearUserToken' })
+                window.WinMsgToDownload({ cmd: 'ClearUserToken' })
+              })
+              .catch()
+            await UserDAL.UserLogin(userList[0])
+            message.success('导入用户账户数据成功')
+          } else {
+            message.error('数据错误，导入用户账户数据失败')
+          }
+        } catch (err) {
           message.error('数据错误，导入用户账户数据失败')
         }
-      } catch (err) {
-        message.error('数据错误，导入用户账户数据失败')
       }
     }
-  })
+  )
 }
 
 const handlerAccountExport = () => {
@@ -114,55 +99,20 @@ const handlerAccountExport = () => {
     )
   }
 }
-
-const handlerExportCliTokens = async () => {
-  const result = await UserDAL.SyncCliAccountsToCli()
-  if (result?.ok) {
-    message.success(`已导出 ${result.exported} 个账号到 ${result.path}`)
-  } else {
-    message.error(`导出失败：${result?.error || '未知错误'}`)
-  }
-}
 </script>
 
 <template>
-  <div class='settingcard'>
-    <div class='settinghead'>阿里云盘账号</div>
-    <div class='settingrow'>
-      <a-button type='outline' size='small' tabindex='-1' @click='copyCookies()'>
-        复制当前账号Cookies
-      </a-button>
+  <div class="ui-plain-list">
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">当前账号 Cookie</span>
+      <div class="ui-plain-control"><a-button type="outline" size="small" tabindex="-1" @click="copyCookies">复制</a-button></div>
     </div>
-    <div class='settingspace'></div>
-    <div class='settinghead'>账号导入导出
-      <a-popover position="bottom">
-        <IconFont name="iconbulb" />
-        <template #content>
-          <div>
-            可以一键恢复所有账户的数据（加密）<br />
-            <hr />
-            <div class="hrspace"></div>
-            <span class="opred">批量导入导出所有账户的数据</span><br />
-          </div>
-        </template>
-      </a-popover>
-    </div>
-    <div class="settingrow">
-      <a-button type='outline' status="danger" size='small' tabindex='-1'
-                @click='handlerAccountExport'>
-        导出账号
-      </a-button>
-      <a-button type='outline' size='small' status="success" tabindex='-1' @click='handlerAccountImport'>
-        导入账号
-      </a-button>
-      <a-button type='outline' size='small' tabindex='-1'
-                @click='handlerExportCliTokens'>
-        导出到 CLI
-      </a-button>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">账号数据</span>
+      <div class="ui-plain-control">
+        <a-button type="outline" size="small" status="danger" tabindex="-1" @click="handlerAccountExport">导出</a-button>
+        <a-button type="outline" size="small" status="success" tabindex="-1" @click="handlerAccountImport">导入</a-button>
+      </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-
-</style>

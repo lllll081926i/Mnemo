@@ -1,5 +1,5 @@
-<script setup lang='ts'>
-import { computed, ref, watchEffect } from 'vue'
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 
 import { Tree as AntdTree } from 'ant-design-vue'
 import usePanTreeStore, { PanTreeState } from './pantreestore'
@@ -7,6 +7,8 @@ import MySwitchTab from '../layout/MySwitchTab.vue'
 import { KeyboardState, useAppStore, useKeyboardStore, usePanFileStore, useSettingStore, useWinStore } from '../store'
 import PanDAL from './pandal'
 import UserDAL from '../user/userdal'
+import type { ITokenInfo } from '../user/userstore'
+import useUserStore from '../user/userstore'
 import { onHideRightMenuScroll, onShowRightMenu, TestCtrl } from '../utils/keyboardhelper'
 import DirLeftMenu from './menus/DirLeftMenu.vue'
 import FolderPreviewPopover from './menus/FolderPreviewPopover.vue'
@@ -14,16 +16,18 @@ import { TreeNodeData } from '../store/treestore'
 import { dropMoveSelectedFile } from './topbtns/topbtn'
 import message from '../utils/message'
 import { modalUpload } from '../utils/modal'
-import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
+import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 
 const treeref = ref()
 const inputselectType = ref('backup')
 const winStore = useWinStore()
-const treeHeight = computed(() => winStore.height - 42 - 56 - 24 - 4)
-const quickHeight = computed(() => winStore.height - 42 - 56 - 24 - 4 - 280 - 28)
+// header 48 + drive switcher ~50 + segmented ~44 + paddings
+const treeHeight = computed(() => Math.max(220, winStore.height - 48 - 50 - 44 - 24))
+const quickHeight = computed(() => Math.max(160, winStore.height - 48 - 50 - 44 - 24 - 210))
 const appStore = useAppStore()
 const pantreeStore = usePanTreeStore()
 const settingStore = useSettingStore()
+const userStore = useUserStore()
 const isCloudUser = computed(() => isCloud123User(pantreeStore.user_id || ''))
 const isAliyunAccount = computed(() => isAliyunUser(pantreeStore.user_id || UserDAL.GetUserToken(pantreeStore.user_id || '')))
 
@@ -82,7 +86,16 @@ watchEffect(() => {
 const handleTreeRightClick = (e: { event: MouseEvent; node: any }) => {
   const { parent = undefined, key } = e.node
   if (key.startsWith('search')) return
-  const isSingleRootDrive = isCloud123User(pantreeStore.user_id || '') || isDrive115User(pantreeStore.user_id || '') || isBaiduUser(pantreeStore.user_id || '') || isPikPakUser(pantreeStore.user_id || '') || isDropboxUser(pantreeStore.user_id || '') || isOneDriveUser(pantreeStore.user_id || '') || isBoxUser(pantreeStore.user_id || '')
+  const isSingleRootDrive =
+    isCloud123User(pantreeStore.user_id || '') ||
+    isDrive115User(pantreeStore.user_id || '') ||
+    isBaiduUser(pantreeStore.user_id || '') ||
+    isPikPakUser(pantreeStore.user_id || '') ||
+    isDropboxUser(pantreeStore.user_id || '') ||
+    isOneDriveUser(pantreeStore.user_id || '') ||
+    isBoxUser(pantreeStore.user_id || '') ||
+    isWebDavUser(pantreeStore.user_id || '') ||
+    isS3User(pantreeStore.user_id || '')
   if (!isSingleRootDrive && key.length < 40) return
   pantreeStore.mTreeSelected(e)
   onShowRightMenu('leftpanmenu', e.event.clientX, e.event.clientY)
@@ -161,51 +174,49 @@ const handleQuickSelect = (index: number) => {
 }
 const filterTreeData = computed(() => {
   const isCloudUser = isCloud123User(pantreeStore.user_id || '') || isPikPakUser(pantreeStore.user_id || '') || isDropboxUser(pantreeStore.user_id || '') || isOneDriveUser(pantreeStore.user_id || '') || isBoxUser(pantreeStore.user_id || '')
-  const isWebDavNode = (item: any) => (item?.drive_id || '').startsWith('webdav:')
   const baseList = isCloudUser
     ? pantreeStore.treeData.filter((item) => {
-      if (isWebDavNode(item)) return false
-      if (item.key === 'backup_root') return false
-      if (item.key === 'resource_root') return false
-      if (item.key === 'pic_root') return false
-      if ((isPikPakUser(pantreeStore.user_id || '') || isDropboxUser(pantreeStore.user_id || '') || isOneDriveUser(pantreeStore.user_id || '') || isBoxUser(pantreeStore.user_id || '')) && (item.key === 'video' || item.key === 'recover' || item.key === 'favorite')) return false
-      return true
-    })
+        if (item.key === 'backup_root') return false
+        if (item.key === 'resource_root') return false
+        if (item.key === 'pic_root') return false
+        if (
+          (isPikPakUser(pantreeStore.user_id || '') || isDropboxUser(pantreeStore.user_id || '') || isOneDriveUser(pantreeStore.user_id || '') || isBoxUser(pantreeStore.user_id || '')) &&
+          (item.key === 'video' || item.key === 'recover' || item.key === 'favorite')
+        )
+          return false
+        return true
+      })
     : pantreeStore.treeData.filter((item) => {
-      if (isWebDavNode(item)) return false
-      if (!isAliyunAccount.value && (item.key === 'backup_root' || item.key === 'resource_root')) {
-        return false
-      }
-      if (isBaiduUser(pantreeStore.user_id || '') && item.key === 'trash') {
-        return false
-      }
-      if (!isAliyunAccount.value && (item.key === 'pic_root' || item.key === 'video' || item.key === 'favorite' || item.key === 'recover')) {
-        return false
-      }
-      if (useSettingStore().securityHideBackupDrive && item.key === 'backup_root') {
-        return false
-      }
-      if (useSettingStore().securityHideResourceDrive && item.key === 'resource_root') {
-        return false
-      }
-      if (useSettingStore().securityHidePicDrive && item.key === 'pic_root') {
-        return false
-      }
-      if (!usePanTreeStore().resource_drive_id && item.key === 'resource_root') {
-        return false
-      }
-      return true
-    })
+        if (!isAliyunAccount.value && (item.key === 'backup_root' || item.key === 'resource_root')) {
+          return false
+        }
+        if (isBaiduUser(pantreeStore.user_id || '') && item.key === 'trash') {
+          return false
+        }
+        if (!isAliyunAccount.value && (item.key === 'pic_root' || item.key === 'video' || item.key === 'favorite' || item.key === 'recover')) {
+          return false
+        }
+        if (useSettingStore().securityHideBackupDrive && item.key === 'backup_root') {
+          return false
+        }
+        if ((useSettingStore().securityHideBackupDrive || useSettingStore().securityHideResourceDrive) && item.key === 'resource_root') {
+          return false
+        }
+        if (useSettingStore().securityHidePicDrive && item.key === 'pic_root') {
+          return false
+        }
+        if (!usePanTreeStore().resource_drive_id && item.key === 'resource_root') {
+          return false
+        }
+        return true
+      })
 
   return baseList
 })
 
 const folderPreviewRef = ref<{ open: (target: HTMLElement, params: any) => void; leave: () => void; cancel: () => void } | null>(null)
 
-const SPECIAL_KEYS = new Set([
-  'trash', 'recover', 'favorite', 'video', 'pic_root',
-  'backup_root', 'resource_root'
-])
+const SPECIAL_KEYS = new Set(['trash', 'recover', 'favorite', 'video', 'pic_root', 'backup_root', 'resource_root'])
 
 const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
   if (!settingStore.uiFolderPreviewEnabled) return false
@@ -218,7 +229,20 @@ const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
     // leaf placeholder, but still might be a real folder; only block if no drive_id
   }
   const userId = pantreeStore.user_id || ''
-  const isSingleRootDrive = isCloud123User(userId) || isDrive115User(userId) || isBaiduUser(userId) || isPikPakUser(userId) || isDropboxUser(userId) || isOneDriveUser(userId) || isBoxUser(userId) || isQuarkUser(userId) || isCloud139User(userId) || isCloud189User(userId) || isGuangyaUser(userId)
+  const isSingleRootDrive =
+    isCloud123User(userId) ||
+    isDrive115User(userId) ||
+    isBaiduUser(userId) ||
+    isPikPakUser(userId) ||
+    isDropboxUser(userId) ||
+    isOneDriveUser(userId) ||
+    isBoxUser(userId) ||
+    isWebDavUser(userId) ||
+    isS3User(userId) ||
+    isQuarkUser(userId) ||
+    isCloud139User(userId) ||
+    isCloud189User(userId) ||
+    isGuangyaUser(userId)
   if (!isSingleRootDrive && key.length < 40) return false
   return true
 }
@@ -247,140 +271,210 @@ const onTreeScroll = () => {
   onHideRightMenuScroll()
   folderPreviewRef.value?.cancel()
 }
-</script>
 
+const driveSwitcherLabel = computed(() => {
+  const userId = pantreeStore.user_id || ''
+  const driveId = pantreeStore.drive_id || ''
+  if (!userId) return '选择网盘账号'
+  try {
+    const token = UserDAL.GetUserToken(userId)
+    const nick = token?.nick_name || token?.user_name || userId
+    const driveTitle = GetDriveType(userId, driveId)?.title || '网盘'
+    return `${driveTitle} · ${nick}`
+  } catch {
+    return '网盘账号'
+  }
+})
+
+const driveAccounts = ref<ITokenInfo[]>([])
+const isSwitchingDrive = ref(false)
+const isDriveSwitcherOpen = ref(false)
+const driveSwitcherRef = ref<HTMLElement | null>(null)
+const driveSwitcherWidth = ref(220)
+let driveSwitcherObserver: ResizeObserver | undefined
+
+onMounted(() => {
+  if (!driveSwitcherRef.value) return
+  const syncWidth = () => {
+    driveSwitcherWidth.value = Math.round(driveSwitcherRef.value?.getBoundingClientRect().width || 220)
+  }
+  syncWidth()
+  driveSwitcherObserver = new ResizeObserver(syncWidth)
+  driveSwitcherObserver.observe(driveSwitcherRef.value)
+})
+
+onBeforeUnmount(() => driveSwitcherObserver?.disconnect())
+
+const refreshDriveAccounts = async (visible: boolean) => {
+  isDriveSwitcherOpen.value = visible
+  if (!visible) return
+  driveAccounts.value = await UserDAL.GetUserListFromDB().catch(() => UserDAL.GetUserList())
+}
+
+const handleSwitchDriveAccount = async (userId: string) => {
+  if (!userId || userId === userStore.user_id || isSwitchingDrive.value) return
+  isSwitchingDrive.value = true
+  try {
+    const changed = await UserDAL.UserChange(userId)
+    if (!changed) message.error('切换网盘账号失败，请重新登录')
+  } finally {
+    isSwitchingDrive.value = false
+  }
+}
+
+const handleOpenDriveLogin = () => {
+  userStore.userShowLogin = true
+}
+</script>
 <template>
-  <div style='width: 100%; height: 100%; overflow: hidden; min-width: 300px' tabindex='-1'
-       @keydown.tab.prevent='() => true'>
-    <div class='headswitch'>
-      <div class='bghr'></div>
-      <div class='sw'>
-        <MySwitchTab :name="'panleft'" :tabs='switchValues' :value='appStore.GetAppTabMenu'
-                     @update:value="(val:string)=>appStore.toggleTabMenu('pan', val)" />
+  <aside class="pan-left" tabindex="-1" @keydown.tab.prevent="() => true">
+    <a-dropdown trigger="click" position="br" @popup-visible-change="refreshDriveAccounts">
+      <div ref="driveSwitcherRef" class="pan-drive-switcher">
+        <button type="button" class="pan-drive-switcher-btn" :aria-expanded="isDriveSwitcherOpen">
+          <span class="meta">
+            <IconFont name="iconyunpan" class="drive-icon" />
+            <span class="label">{{ driveSwitcherLabel }}</span>
+          </span>
+          <IconFont name="icondown" />
+        </button>
+      </div>
+      <template #content>
+        <div class="pan-drive-menu" :style="{ '--pan-drive-menu-width': `${driveSwitcherWidth}px` }">
+          <div v-if="driveAccounts.length" class="pan-drive-menu-list">
+            <button v-for="account in driveAccounts" :key="account.user_id" type="button" class="pan-drive-menu-item" :class="{ active: account.user_id === userStore.user_id }" :disabled="isSwitchingDrive" @click="handleSwitchDriveAccount(account.user_id)">
+              <IconFont name="iconyunpan" />
+              <span>{{ account.nick_name || account.user_name || account.user_id }}</span>
+              <small>{{ account.tokenfrom || '网盘' }}</small>
+              <IconFont v-if="account.user_id === userStore.user_id" name="iconrsuccess" class="current" />
+            </button>
+          </div>
+          <div v-else class="pan-drive-menu-empty">还没有登录网盘账号</div>
+          <button type="button" class="pan-drive-menu-login" @click="handleOpenDriveLogin">登录网盘账号</button>
+        </div>
+      </template>
+    </a-dropdown>
+    <div class="headswitch">
+      <div class="bghr"></div>
+      <div class="sw">
+        <MySwitchTab :name="'panleft'" :tabs="switchValues" :value="appStore.GetAppTabMenu" @update:value="(val: string) => appStore.toggleTabMenu('pan', val)" />
       </div>
     </div>
-    <div class='treeleft'>
-      <a-tabs type='text' :direction="'horizontal'" class='hidetabs' :justify='true'
-              :active-key='appStore.GetAppTabMenu'>
-        <a-tab-pane key='wangpan' title='1'>
+    <div class="treeleft">
+      <a-tabs type="text" :direction="'horizontal'" class="hidetabs" :justify="true" :active-key="appStore.GetAppTabMenu">
+        <a-tab-pane key="wangpan" title="1">
+          <div v-if="!pantreeStore.user_id" class="pan-tree-empty">
+            <IconFont name="iconyunpan" />
+            <strong>登录后查看网盘文件</strong>
+            <span>回收站、全盘搜索和文件目录会在登录后显示</span>
+            <a-button type="primary" size="small" @click="handleOpenDriveLogin">登录网盘账号</a-button>
+          </div>
           <AntdTree
-            ref='treeref'
-            :tabindex='-1'
-            :focusable='false'
-            class='dirtree'
+            v-else
+            ref="treeref"
+            :tabindex="-1"
+            :focusable="false"
+            class="dirtree"
             block-node
             selectable
-            :auto-expand-parent='false'
+            :auto-expand-parent="false"
             show-icon
-            :height='treeHeight'
+            :height="treeHeight"
             :style="{ height: treeHeight + 'px' }"
-            :item-height='30'
-            :show-line='{ showLeafIcon: false }'
-            :open-animation='{}'
-            :expanded-keys='pantreeStore.treeExpandedKeys'
-            :selected-keys='pantreeStore.treeSelectedKeys'
-            :tree-data='filterTreeData'
-            @select='(_:any[],e:any)=>pantreeStore.mTreeSelected(e, false)'
-            @expand='(_:any[],e:any)=>pantreeStore.mTreeExpand(e.node.key)'
-            @right-click='handleTreeRightClick'
-            @scroll='onTreeScroll'>
+            :item-height="30"
+            :show-line="{ showLeafIcon: false }"
+            :open-animation="{}"
+            :expanded-keys="pantreeStore.treeExpandedKeys"
+            :selected-keys="pantreeStore.treeSelectedKeys"
+            :tree-data="filterTreeData"
+            @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, false)"
+            @expand="(_: any[], e: any) => pantreeStore.mTreeExpand(e.node.key)"
+            @right-click="handleTreeRightClick"
+            @scroll="onTreeScroll">
             <template #switcherIcon>
-              <i class='ant-tree-switcher-icon iconfont Arrow' />
+              <i class="ant-tree-switcher-icon iconfont Arrow" />
             </template>
             <template #icon>
               <IconFont name="iconfile-folder" />
             </template>
-            <template #title='{ dataRef }'>
-              <span v-if="String(dataRef.key).length == 40 || String(dataRef.key).includes('root')"
-                    class='dirtitle treedragnode'
-                    @drop='onRowItemDrop($event, dataRef)'
-                    @dragover='onRowItemDragOver'
-                    @dragenter='onRowItemDragEnter'
-                    @dragleave='onRowItemDragLeave'
-                    @mouseenter='(ev:MouseEvent)=>onTreeNodeEnter(ev, dataRef)'
-                    @mouseleave='onTreeNodeLeave'>
+            <template #title="{ dataRef }">
+              <span
+                v-if="String(dataRef.key).length == 40 || String(dataRef.key).includes('root') || String(dataRef.drive_id || '').startsWith('webdav:') || String(dataRef.drive_id || '').startsWith('s3:')"
+                class="dirtitle treedragnode"
+                @drop="onRowItemDrop($event, dataRef)"
+                @dragover="onRowItemDragOver"
+                @dragenter="onRowItemDragEnter"
+                @dragleave="onRowItemDragLeave"
+                @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)"
+                @mouseleave="onTreeNodeLeave">
                 {{ dataRef.title }}
               </span>
-              <span v-else
-                    class='dirtitle'
-                    @mouseenter='(ev:MouseEvent)=>onTreeNodeEnter(ev, dataRef)'
-                    @mouseleave='onTreeNodeLeave'>
+              <span v-else class="dirtitle" @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)" @mouseleave="onTreeNodeLeave">
                 {{ dataRef.title }}
               </span>
             </template>
           </AntdTree>
         </a-tab-pane>
-        <a-tab-pane key='kuaijie' title='2'>
+        <a-tab-pane key="kuaijie" title="2">
           <AntdTree
-            :tabindex='-1'
-            :focusable='false'
-            class='colortree'
+            :tabindex="-1"
+            :focusable="false"
+            class="colortree"
             block-node
             selectable
-            :auto-expand-parent='false'
+            :auto-expand-parent="false"
             show-icon
             :style="{ marginLeft: '-18px' }"
-            :item-height='30'
-            :show-line='false'
-            :open-animation='{}'
-            :selected-keys='pantreeStore.treeSelectedKeys'
-            :tree-data='colorTreeData'
-            @select='(_:any[],e:any)=>pantreeStore.mTreeSelected(e, true)'>
-            <template #icon='{ dataRef }'>
-              <IconFont name="iconwbiaoqian" :class='dataRef.namesearch' />
+            :item-height="30"
+            :show-line="false"
+            :open-animation="{}"
+            :selected-keys="pantreeStore.treeSelectedKeys"
+            :tree-data="colorTreeData"
+            @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, true)">
+            <template #icon="{ dataRef }">
+              <IconFont name="iconwbiaoqian" :class="dataRef.namesearch" />
             </template>
-            <template #title='{ dataRef }'>
+            <template #title="{ dataRef }">
               <span :class="'dirtitle ' + dataRef.namesearch">标记 · {{ dataRef.title }}</span>
             </template>
           </AntdTree>
-          <div class='quickdrop'
-               @drop='onQuickDrop($event)'
-               @dragover='onRowItemDragOver'
-               @dragenter='onRowItemDragEnter'
-               @dragleave='onRowItemDragLeave'>
-            把右侧的文件夹拖放到这里<br />
-            创建快捷方式(Ctrl 1-9)
+          <div class="quicktree-area" @drop="onQuickDrop($event)" @dragover="onRowItemDragOver" @dragenter="onRowItemDragEnter" @dragleave="onRowItemDragLeave">
+            <AntdTree
+              :tabindex="-1"
+              :focusable="false"
+              class="quicktree"
+              block-node
+              selectable
+              :auto-expand-parent="false"
+              show-icon
+              :height="quickHeight"
+              :style="{ height: quickHeight + 'px', marginLeft: '-18px' }"
+              :item-height="30"
+              :show-line="false"
+              :open-animation="{}"
+              :selected-keys="pantreeStore.treeSelectedKeys"
+              :tree-data="pantreeStore.quickData"
+              @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, true)">
+              <template #icon>
+                <IconFont name="iconfile-folder" />
+              </template>
+              <template #title="{ dataRef }">
+                <div class="quickitem" @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)" @mouseleave="onTreeNodeLeave">
+                  <span class="quicktitle" :title="dataRef.namesearch">
+                    {{ dataRef.title }}
+                  </span>
+                  <span class="quickbtn">
+                    <a-button type="text" size="mini" @click.stop="handleQuickDelete(dataRef.key)">删除</a-button>
+                  </span>
+                </div>
+              </template>
+            </AntdTree>
           </div>
-          <AntdTree
-            :tabindex='-1'
-            :focusable='false'
-            class='quicktree'
-            block-node
-            selectable
-            :auto-expand-parent='false'
-            show-icon
-            :height='quickHeight'
-            :style="{ height: quickHeight + 'px', marginLeft: '-18px' }"
-            :item-height='30'
-            :show-line='false'
-            :open-animation='{}'
-            :selected-keys='pantreeStore.treeSelectedKeys'
-            :tree-data='pantreeStore.quickData'
-            @select='(_:any[],e:any)=>pantreeStore.mTreeSelected(e, true)'>
-            <template #icon>
-              <IconFont name="iconfile-folder" />
-            </template>
-            <template #title='{ dataRef }'>
-              <div class="quickitem"
-                   @mouseenter='(ev:MouseEvent)=>onTreeNodeEnter(ev, dataRef)'
-                   @mouseleave='onTreeNodeLeave'>
-                 <span class='quicktitle' :title='dataRef.namesearch'>
-                {{ dataRef.title }}
-              </span>
-                <span class='quickbtn'>
-                <a-button type='text' size='mini' @click.stop='handleQuickDelete(dataRef.key)'>
-                  删除
-                </a-button>
-              </span>
-              </div>
-            </template>
-          </AntdTree>
         </a-tab-pane>
       </a-tabs>
     </div>
-    <DirLeftMenu :inputselectType='inputselectType' />
-    <FolderPreviewPopover ref='folderPreviewRef' />
-  </div>
+    <DirLeftMenu :inputselectType="inputselectType" />
+    <FolderPreviewPopover ref="folderPreviewRef" />
+  </aside>
 </template>
 
 <style lang="less">
@@ -399,7 +493,7 @@ const onTreeScroll = () => {
 .ant-tree.ant-tree-show-line li:not(:last-child)::before {
   border-left: 1px dashed #d9d9d9;
   top: 10px;
-  left: 11px
+  left: 11px;
 }
 
 .dirtree .iconfont,
@@ -532,20 +626,6 @@ body[arco-theme='dark'] .ant-tree-node-selected .ant-tree-title > span {
   height: 180px;
   flex-shrink: 0;
   flex-grow: 0;
-}
-
-.quickdrop {
-  height: 50px;
-  flex-shrink: 0;
-  flex-grow: 0;
-  border: 3px dotted var(--color-border-2);
-  display: flex;
-  margin-left: -18px;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-3);
-  text-align: center;
-  line-height: 1.3;
 }
 
 .quicktree .ant-tree-icon__customize .iconfont {

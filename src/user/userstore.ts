@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia'
 import UserDAL from './userdal'
 
-
 export interface ITokenInfo {
-  tokenfrom: 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'box' | 'unknown'
+  tokenfrom: 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'box' | 'webdav' | 's3' | 'unknown'
 
   access_token: string
   refresh_token: string
@@ -48,12 +47,11 @@ export interface ITokenInfo {
   vipIcon: string
   vipexpire: string
 
-
   pic_drive_id: string
 
   signInfo: {
-    signMon: number;
-    signDay: number;
+    signMon: number
+    signDay: number
   }
 }
 

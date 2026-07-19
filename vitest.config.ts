@@ -6,7 +6,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@shared': path.resolve(__dirname, 'shared'),
-      '@main':   path.resolve(__dirname, 'electron/main')
+      '@main': path.resolve(__dirname, 'electron/main')
     }
   },
   test: {
@@ -26,8 +26,7 @@ export default defineConfig({
       'src/cloud139/__tests__/**/*.test.ts',
       'src/dropbox/__tests__/**/*.test.ts',
       'src/onedrive/__tests__/**/*.test.ts',
-      'src/box/__tests__/**/*.test.ts',
-      'clouddrive-cli/__tests__/**/*.test.ts',
-    ],
-  },
+      'src/box/__tests__/**/*.test.ts'
+    ]
+  }
 })

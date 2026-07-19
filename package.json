@@ -1,7 +1,7 @@
 {
   "name": "boxplayer",
   "description": "BoxPlayer",
-  "version": "5.0.4",
+  "version": "5.0.7",
   "main": "dist/electron/main/index.js",
   "packageManager": "pnpm@10.32.1",
   "author": {
@@ -10,10 +10,6 @@
   },
   "homepage": "https://github.com/gaozhangmin/boxplayer",
   "license": "GPL-3.0",
-  "bin": {
-    "clouddrive-cli": "scripts/clouddrive-cli.mjs",
-    "clouddrive-mcp": "scripts/clouddrive-mcp.mjs"
-  },
   "scripts": {
     "secrets:generate": "node scripts/generate-secrets.mjs --mode=local",
     "predev": "node scripts/generate-secrets.mjs --mode=local",
@@ -28,10 +24,8 @@
     "build:linux": "pnpm run build && node build-linux.mjs",
     "build:windows": "pnpm run build && electron-builder --win",
     "build:all": "node build-all.mjs",
-    "build:clouddrive-cli": "node scripts/build-clouddrive-cli-package.mjs",
     "pretest": "node scripts/generate-secrets.mjs --mode=local",
-    "test": "vitest run electron/main/aria/__tests__ src/down/motrix-integration src/utils/__tests__/aria2EnginePolicy.test.ts src/utils/__tests__/aria2Rpc.test.ts",
-    "test:clouddrive-cli": "vitest run clouddrive-cli/__tests__"
+    "test": "vitest run electron/main/aria/__tests__ src/down/motrix-integration src/utils/__tests__/aria2EnginePolicy.test.ts src/utils/__tests__/aria2Rpc.test.ts"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -41,10 +35,14 @@
     "@ai-sdk/openai-compatible": "^2.0.49",
     "@arco-design/web-vue": "2.55.1",
     "@arco-themes/vue-gi-demo": "^0.0.48",
+    "@aws-sdk/client-s3": "^3.1090.0",
+    "@aws-sdk/lib-storage": "^3.1090.0",
+    "@aws-sdk/s3-request-presigner": "^3.1090.0",
     "@electron/notarize": "^3.1.1",
     "@motrix/nat-api": "0.3.4",
     "@opendataloader/pdf": "^2.4.7",
     "@supabase/supabase-js": "^2.108.2",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/crypto-js": "^4.2.2",
     "@types/fast-levenshtein": "^0.0.4",
@@ -60,9 +58,9 @@
     "@types/uuid": "^9.0.8",
     "@vitejs/plugin-vue": "^5.0.4",
     "@vitejs/plugin-vue-jsx": "^3.1.0",
+    "@vue/compiler-sfc": "^3.4.21",
     "@vue/runtime-core": "3.4.21",
     "@vue/runtime-dom": "3.4.21",
-    "TagCloud": "2.5.0",
     "ai": "^6.0.197",
     "ant-design-vue": "4.1.2",
     "aria2-lib": "1.0.1",
@@ -132,6 +130,8 @@
     "secp256k1": "^5.0.0",
     "semver": "^7.6.0",
     "socks-proxy-agent": "^8.0.3",
+    "TagCloud": "2.5.0",
+    "tailwindcss": "^4.3.3",
     "terser": "^5.30.3",
     "three": "^0.185.0",
     "thunky": "^1.1.0",
@@ -147,8 +147,8 @@
     "vite-plugin-electron": "0.15.6",
     "vite-plugin-electron-renderer": "0.14.5",
     "vitest": "^2.1.9",
-    "vue": "3.4.21",
-    "vue-tsc": "^2.0.10",
+    "vue": "^3.4.21",
+    "vue-tsc": "^2.2.12",
     "webdav": "5.9.0",
     "webdav-server": "^2.6.2",
     "whacko": "^0.19.1",
@@ -170,9 +170,6 @@
     "vue3",
     "vue"
   ],
-  "dependencies": {
-    "qrcode-terminal": "^0.12.0"
-  },
   "pnpm": {
     "overrides": {
       "@electron/get": "3.1.0"
