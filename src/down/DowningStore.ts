@@ -19,6 +19,8 @@ export interface DowningState {
 
   ListDataShow: Item[]
 
+  AccountFilter: string
+
   ListSelected: Set<string>
 
   ListOrderKey: string
@@ -35,6 +37,7 @@ const useDowningStore = defineStore('downing', {
     ListLoading: false,
     ListDataRaw: [],
     ListDataShow: [],
+    AccountFilter: '',
     ListSelected: new Set<string>(),
     ListOrderKey: 'DownID',
     ListFocusKey: '',
@@ -102,6 +105,12 @@ const useDowningStore = defineStore('downing', {
       this.mRefreshListDataShow(true)
     },
 
+    mSetAccountFilter(accountId: string) {
+      if (this.AccountFilter == accountId) return
+      this.$patch({ AccountFilter: accountId, ListSelected: new Set<string>(), ListFocusKey: '', ListSelectKey: '' })
+      this.mRefreshListDataShow(true)
+    },
+
     mOrderListData(value: string) {
       this.$patch({ ListOrderKey: value, ListSelected: new Set<string>(), ListFocusKey: '', ListSelectKey: '' })
       this.ListDataRaw = this.mGetOrder(value, this.ListDataRaw)
@@ -123,10 +132,11 @@ const useDowningStore = defineStore('downing', {
         this.ListDataShow = ListDataShow
         return
       }
+      const filterSource = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
       if (this.ListSearchKey) {
 
         let searchlist: Item[] = []
-        let results = fuzzysort.go(this.ListSearchKey, this.ListDataRaw, {
+        let results = fuzzysort.go(this.ListSearchKey, filterSource, {
           threshold: -200000,
           keys: ['Info.name'],
           scoreFn: (a) => Math.max(a[0] ? a[0].score : -200000, a[1] ? a[1].score : -200000)
@@ -137,7 +147,7 @@ const useDowningStore = defineStore('downing', {
         Object.freeze(searchlist)
         this.ListDataShow = searchlist
       } else {
-        let ListDataShow = this.ListDataRaw.concat()
+        let ListDataShow = filterSource.concat()
         Object.freeze(ListDataShow)
         this.ListDataShow = ListDataShow
       }
@@ -251,7 +261,7 @@ const useDowningStore = defineStore('downing', {
      */
     async mStartDowning() {
       const gids: string[] = []
-      const DowningList = this.ListDataRaw
+      const DowningList = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
       for (const downID of this.ListSelected) {
         const selectedDown: IStateDownFile | undefined = DowningList.find(down => down.DownID === downID)
         if (selectedDown?.Info.offlineProvider) continue
@@ -268,7 +278,7 @@ const useDowningStore = defineStore('downing', {
      */
     async mStartAllDowning() {
       const gids: string[] = []
-      const DowningList = this.ListDataRaw
+      const DowningList = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
       for (let j = 0; j < DowningList.length; j++) {
         const down = DowningList[j].Down
         if (DowningList[j].Info.offlineProvider) continue
@@ -309,7 +319,7 @@ const useDowningStore = defineStore('downing', {
      */
     async mStopAllDowning() {
       const gidList: string[] = []
-      const DowningList = this.ListDataRaw
+      const DowningList = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
       for (let j = 0; j < DowningList.length; j++) {
         const down = DowningList[j].Down
         if (down.IsCompleted) continue
@@ -360,15 +370,16 @@ const useDowningStore = defineStore('downing', {
      */
     async mDeleteAllDowning() {
       const gidList: string[] = []
-      const DowningList = this.ListDataRaw
+      const DowningList = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
       for (let j = 0; j < DowningList.length; j++) {
         DowningList[j].Down.DownState = '待删除'
         if (!DowningList[j].Info.offlineProvider) {
           gidList.push(DowningList[j].Info.GID)
         }
       }
-      await DownDAL.deleteDowning(true, DowningList, gidList)
-      DowningList.splice(0, DowningList.length)
+      await DownDAL.deleteDowning(!this.AccountFilter, DowningList, gidList)
+      if (this.AccountFilter) this.ListDataRaw = this.ListDataRaw.filter((item) => item.Info.user_id != this.AccountFilter)
+      else this.ListDataRaw.splice(0, this.ListDataRaw.length)
       this.ListSelected = new Set<string>()
       this.mRefreshListDataShow(true)
     },

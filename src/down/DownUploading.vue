@@ -8,6 +8,7 @@ import { Tooltip as AntdTooltip } from 'ant-design-vue'
 import UploadingDAL from '../transfer/uploadingdal'
 import { TestButton } from '../utils/mosehelper'
 import { xorWith } from 'lodash'
+import { getDriveAccountLabel } from '../utils/driveAccount'
 
 const viewlist = ref()
 const appStore = useAppStore()
@@ -262,7 +263,10 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
       </div>
     </div>
     <div class="toolbar-spacer"></div>
-    <div class="cell tiquma">瞬时速度</div>
+    <div v-if="!uploadingStore.AccountFilter && !uploadingStore.showTaskID" class="cell account">账号</div>
+    <div class="downsize transfer-column-heading">大小</div>
+    <div class="downprogress transfer-column-heading">进度</div>
+    <div class="downspeed transfer-column-heading">速度</div>
     <div class="cell pr"></div>
   </div>
   <div class="toppanlist" style="position: relative" :style="{ height: winStore.GetListHeight }" @keydown.space.prevent="() => true">
@@ -311,6 +315,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
                 {{ item.name }}
               </div>
             </div>
+            <div v-if="!uploadingStore.AccountFilter && !uploadingStore.showTaskID" class="cell account" :title="getDriveAccountLabel(item.user_id)">{{ getDriveAccountLabel(item.user_id) }}</div>
             <div class="downsize">{{ item.sizeStr }}</div>
             <div class="downprogress">
               <div class="transfering-state">

@@ -1,11 +1,41 @@
 <script setup lang="ts">
-import { useAppStore } from '../store'
+import { computed, ref, watch } from 'vue'
+import { useAppStore, useDownedStore, useDowningStore, useUploadedStore, useUploadingStore, useUserStore } from '../store'
 import DownDowning from './DownDowning.vue'
 import DownDowned from './DownDowned.vue'
 import DownUploading from './DownUploading.vue'
 import DownUploaded from './DownUploaded.vue'
+import { loadDriveAccountOptions, type DriveAccountOption } from '../utils/driveAccount'
+import UploadingDAL from '../transfer/uploadingdal'
 
 const appStore = useAppStore()
+const userStore = useUserStore()
+const downingStore = useDowningStore()
+const downedStore = useDownedStore()
+const uploadingStore = useUploadingStore()
+const uploadedStore = useUploadedStore()
+const accounts = ref<DriveAccountOption[]>([])
+const activeAccountId = ref('')
+
+const hasExternalTasks = computed(() => [...downingStore.ListDataRaw, ...downedStore.ListDataRaw].some((item) => !item.Info.user_id || item.Info.user_id == 'external'))
+const applyAccountFilter = (userId: string) => {
+  activeAccountId.value = userId
+  downingStore.mSetAccountFilter(userId)
+  downedStore.mSetAccountFilter(userId)
+  uploadedStore.mSetAccountFilter(userId)
+  uploadingStore.mSetAccountFilter(userId)
+  if (uploadingStore.showTaskID) UploadingDAL.mUploadingShowTaskBack()
+}
+
+watch(
+  [() => appStore.appTab, () => userStore.user_id],
+  async ([activeTab]) => {
+    if (activeTab != 'down') return
+    accounts.value = await loadDriveAccountOptions()
+    if (activeAccountId.value && !accounts.value.some((account) => account.user_id == activeAccountId.value) && activeAccountId.value != 'external') applyAccountFilter('')
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -29,6 +59,22 @@ const appStore = useAppStore()
           已上传
         </a-menu-item>
       </a-menu>
+      <div class="rail-filter-group">账号筛选</div>
+      <div class="rail-filter-list">
+        <button type="button" class="rail-filter-item" :class="{ active: !activeAccountId }" @click="applyAccountFilter('')">
+          <IconFont name="iconcloud" />
+          <span>全部账号</span>
+        </button>
+        <button v-for="account in accounts" :key="account.user_id" type="button" class="rail-filter-item" :class="{ active: activeAccountId == account.user_id }" :title="`${account.providerLabel} · ${account.name}`" @click="applyAccountFilter(account.user_id)">
+          <img v-if="account.icon" :src="account.icon" alt="" />
+          <IconFont v-else name="iconcloud" />
+          <span>{{ account.providerLabel }} · {{ account.name }}</span>
+        </button>
+        <button v-if="hasExternalTasks" type="button" class="rail-filter-item" :class="{ active: activeAccountId == 'external' }" @click="applyAccountFilter('external')">
+          <IconFont name="iconlink2" />
+          <span>外部链接</span>
+        </button>
+      </div>
     </a-layout-sider>
     <a-layout-content class="xbyright ui-workspace-content">
       <div class="content-body">

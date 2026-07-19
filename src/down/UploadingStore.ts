@@ -6,6 +6,8 @@ export interface IUploadingModel {
   UploadID: number
   TaskID: number
 
+  user_id: string
+
 
   localFilePath: string
 
@@ -34,6 +36,10 @@ export interface UploadingState {
 
   ListDataShow: Item[]
 
+  ListDataRaw: Item[]
+
+  AccountFilter: string
+
 
   ListSelected: Set<number>
 
@@ -55,6 +61,8 @@ const useUploadingStore = defineStore('uploading', {
   state: (): UploadingState => ({
     ListLoading: false,
     ListDataShow: [],
+    ListDataRaw: [],
+    AccountFilter: '',
     ListSelected: new Set<number>(),
     ListFocusKey: 0,
     ListSelectKey: 0,
@@ -65,7 +73,7 @@ const useUploadingStore = defineStore('uploading', {
 
   getters: {
     ListDataUploadingCount(state: State): number {
-      return state.ListDataShow.length
+      return state.ListDataRaw.length
     },
 
     IsListSelected(state: State): boolean {
@@ -86,7 +94,7 @@ const useUploadingStore = defineStore('uploading', {
 
     aLoadListData(TaskID: number, TaskName: string, list: Item[], count: number) {
       KEY = TaskID ? 'UploadID' : 'TaskID'
-      this.ListDataShow = list
+      this.ListDataRaw = list
 
 
       if (this.showTaskID == TaskID) {
@@ -117,7 +125,13 @@ const useUploadingStore = defineStore('uploading', {
 
     mShowTask(TaskID: number, TaskName: string) {
       KEY = TaskID ? 'UploadID' : 'TaskID'
-      this.$patch({ showTaskID: TaskID, ShowTaskName: TaskName, ListSelected: new Set<number>(), ListFocusKey: 0, ListSelectKey: 0, ListDataShow: [] })
+      this.$patch({ showTaskID: TaskID, ShowTaskName: TaskName, ListSelected: new Set<number>(), ListFocusKey: 0, ListSelectKey: 0, ListDataRaw: [], ListDataShow: [] })
+    },
+
+    mSetAccountFilter(accountId: string) {
+      if (this.AccountFilter == accountId) return
+      this.$patch({ AccountFilter: accountId, ListSelected: new Set<number>(), ListFocusKey: 0, ListSelectKey: 0 })
+      this.mRefreshListDataShow(true)
     },
 
     mRefreshListDataShow(refreshRaw: boolean) {
@@ -127,6 +141,10 @@ const useUploadingStore = defineStore('uploading', {
         this.ListDataShow = listDataShow
         return
       }
+      const filterSource = this.AccountFilter ? this.ListDataRaw.filter((item) => item.user_id == this.AccountFilter) : this.ListDataRaw
+      const listDataShow = filterSource.concat()
+      Object.freeze(listDataShow)
+      this.ListDataShow = listDataShow
       const freezeList = this.ListDataShow
       const oldSelected = this.ListSelected
       const newSelected = new Set<number>()
@@ -193,7 +211,7 @@ const useUploadingStore = defineStore('uploading', {
 
     mDeleteFiles(idList: number[]) {
       const fileMap = new Set(idList)
-      const listDataRaw = this.ListDataShow
+      const listDataRaw = this.ListDataRaw
       const newDataList: Item[] = []
       for (let i = 0, maxi = listDataRaw.length; i < maxi; i++) {
         const item = listDataRaw[i]
@@ -201,7 +219,7 @@ const useUploadingStore = defineStore('uploading', {
           newDataList.push(item)
         }
       }
-      this.ListDataShow = newDataList
+      this.ListDataRaw = newDataList
       this.mRefreshListDataShow(true)
     }
   }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { KeyboardState, MouseState, useAppStore, useDowningStore, useKeyboardStore, useMouseStore, useUserStore, useUploadingStore, useWinStore } from '../store'
+import { KeyboardState, MouseState, useAppStore, useDowningStore, useKeyboardStore, useMouseStore, useUploadingStore, useWinStore } from '../store'
 import { onHideRightMenuScroll, onShowRightMenu, RefreshScroll, RefreshScrollTo, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
 import { TestButton } from '../utils/mosehelper'
@@ -8,6 +8,7 @@ import { xorWith } from 'lodash'
 import UrlDownloadModal from './UrlDownloadModal.vue'
 import TaskDetailDrawer from './TaskDetailDrawer.vue'
 import DragDropZone from '../components/DragDropZone.vue'
+import { getDriveAccountLabel } from '../utils/driveAccount'
 
 const viewlist = ref()
 const inputsearch = ref()
@@ -18,7 +19,6 @@ const taskDetailGid = ref('')
 const appStore = useAppStore()
 const winStore = useWinStore()
 const downingStore = useDowningStore()
-const userStore = useUserStore()
 const isDowning = computed(() => downingStore.ListDataDowningCount > 0)
 watch(isDowning, (value, oldValue) => {
   if (value !== oldValue && window.WebToElectron) {
@@ -307,6 +307,11 @@ const handleTaskDetail = () => {
         </a-button>
         <a-button shape="square" v-if="!rangIsSelecting && downingStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
       </div>
+      <div class="toolbar-spacer"></div>
+      <div v-if="!downingStore.AccountFilter" class="cell account">账号</div>
+      <div class="cell filesize transfer-column-heading">大小</div>
+      <div class="downprogress transfer-column-heading">进度</div>
+      <div class="downspeed transfer-column-heading">速度</div>
     </div>
     <div class="toppanlist" @keydown.space.prevent="() => true">
       <a-list
@@ -343,12 +348,13 @@ const handleTaskDetail = () => {
               <div class="fileicon">
                 <IconFont :name="item.Info.icon" aria-hidden="true" />
               </div>
-              <div class="filename">
+            <div class="filename">
                 <div :title="item.Info.localFilePath">
                   {{ item.Info.name }}
-                </div>
               </div>
-              <div class="cell filesize">{{ item.Info.sizestr }}</div>
+            </div>
+            <div v-if="!downingStore.AccountFilter" class="cell account" :title="getDriveAccountLabel(item.Info.user_id)">{{ getDriveAccountLabel(item.Info.user_id) }}</div>
+            <div class="cell filesize">{{ item.Info.sizestr }}</div>
               <div class="downprogress">
                 <div class="transfering-state">
                   <p class="text-state">{{ item.Down.DownState }}</p>

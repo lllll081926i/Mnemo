@@ -13,6 +13,8 @@ export interface UploadedState {
 
   ListDataShow: Item[]
 
+  AccountFilter: string
+
   ListSelected: Set<number>
 
   ListOrderKey: number
@@ -34,6 +36,7 @@ const useUploadedStore = defineStore('uploaded', {
     ListLoading: false,
     ListDataRaw: [],
     ListDataShow: [],
+    AccountFilter: '',
     ListSelected: new Set<number>(),
     ListOrderKey: 0,
     ListFocusKey: 0,
@@ -85,9 +88,10 @@ const useUploadedStore = defineStore('uploaded', {
         this.ListDataShow = listDataShow
         return
       }
+      const filterSource = this.AccountFilter ? this.ListDataRaw.filter((item) => item.user_id == this.AccountFilter) : this.ListDataRaw
       if (this.ListSearchKey) {
         let searchlist: Item[] = []
-        let results = fuzzysort.go(this.ListSearchKey, this.ListDataRaw, {
+        let results = fuzzysort.go(this.ListSearchKey, filterSource, {
           threshold: -200000,
           keys: ['TaskName'],
           scoreFn: (a) => Math.max(a[0] ? a[0].score : -200000, a[1] ? a[1].score : -200000)
@@ -98,7 +102,7 @@ const useUploadedStore = defineStore('uploaded', {
         Object.freeze(searchlist)
         this.ListDataShow = searchlist
       } else {
-        let ListDataShow = this.ListDataRaw.concat()
+        let ListDataShow = filterSource.concat()
         Object.freeze(ListDataShow)
         this.ListDataShow = ListDataShow
       }
@@ -116,6 +120,12 @@ const useUploadedStore = defineStore('uploaded', {
 
     mSearchListData(value: string) {
       this.$patch({ ListSelected: new Set<number>(), ListFocusKey: 0, ListSelectKey: 0, ListSearchKey: value })
+      this.mRefreshListDataShow(true)
+    },
+
+    mSetAccountFilter(accountId: string) {
+      if (this.AccountFilter == accountId) return
+      this.$patch({ AccountFilter: accountId, ListSelected: new Set<number>(), ListFocusKey: 0, ListSelectKey: 0 })
       this.mRefreshListDataShow(true)
     },
 

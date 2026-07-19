@@ -14,6 +14,7 @@ import { humanSize } from '../utils/format'
 import { TestButton } from '../utils/mosehelper'
 import fs from 'node:fs'
 import { xorWith } from 'lodash'
+import { getDriveAccountLabel } from '../utils/driveAccount'
 
 const viewlist = ref()
 const inputsearch = ref()
@@ -301,6 +302,9 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
       <a-button shape="square" v-if="!rangIsSelecting && uploadedStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
     </div>
     <div class="toolbar-spacer"></div>
+    <div v-if="!uploadedStore.AccountFilter" class="cell account">账号</div>
+    <div class="downsize transfer-column-heading">大小</div>
+    <div class="transfer-action-heading">操作</div>
     <div class="cell pr"></div>
   </div>
   <div class="toppanlist" :style="{ height: winStore.GetListHeight }" @keydown.space.prevent="() => true">
@@ -347,6 +351,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
                 {{ item.TaskName }}
               </div>
             </div>
+            <div v-if="!uploadedStore.AccountFilter" class="cell account" :title="getDriveAccountLabel(item.user_id)">{{ getDriveAccountLabel(item.user_id) }}</div>
             <div class="downsize">{{ humanSize(item.ChildTotalSize) }}</div>
             <div class="downedbtn">
               <a-button type="text" tabindex="-1" title="定位到网盘" @click.prevent.stop="onSelectFile(item, 'pan')">

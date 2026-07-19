@@ -19,6 +19,8 @@ export interface DownState {
 
   ListDataShow: Item[]
 
+  AccountFilter: string
+
   ListSelected: Set<string>
 
   ListOrderKey: string
@@ -37,6 +39,7 @@ const useDownStore = defineStore('down', {
     ListLoading: false,
     ListDataRaw: [],
     ListDataShow: [],
+    AccountFilter: '',
     ListSelected: new Set<string>(),
     ListOrderKey: 'DownID',
     ListFocusKey: '',
@@ -103,6 +106,12 @@ const useDownStore = defineStore('down', {
       this.mRefreshListDataShow(true)
     },
 
+    mSetAccountFilter(accountId: string) {
+      if (this.AccountFilter == accountId) return
+      this.$patch({ AccountFilter: accountId, ListSelected: new Set<string>(), ListFocusKey: '', ListSelectKey: '' })
+      this.mRefreshListDataShow(true)
+    },
+
     mOrderListData(value: string) {
       this.$patch({ ListOrderKey: value, ListSelected: new Set<string>(), ListFocusKey: '', ListSelectKey: '' })
       this.ListDataRaw = this.mGetOrder(value, this.ListDataRaw)
@@ -124,9 +133,10 @@ const useDownStore = defineStore('down', {
         this.ListDataShow = ListDataShow
         return
       }
+      const filterSource = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
       if (this.ListSearchKey) {
         let searchlist: Item[] = []
-        let results = fuzzysort.go(this.ListSearchKey, this.ListDataRaw, {
+        let results = fuzzysort.go(this.ListSearchKey, filterSource, {
           threshold: -200000,
           keys: ['Info.name'],
           scoreFn: (a) => Math.max(a[0] ? a[0].score : -200000, a[1] ? a[1].score : -200000)
@@ -137,7 +147,7 @@ const useDownStore = defineStore('down', {
         Object.freeze(searchlist)
         this.ListDataShow = searchlist
       } else {
-        let ListDataShow = this.ListDataRaw.concat()
+        let ListDataShow = filterSource.concat()
         Object.freeze(ListDataShow)
         this.ListDataShow = ListDataShow
       }
@@ -239,9 +249,11 @@ const useDownStore = defineStore('down', {
      * 删除全部
      */
     async mDeleteAllDowned() {
-      await DownDAL.deleteDowned(true, this.ListDataRaw)
+      const deleteList = this.AccountFilter ? this.ListDataRaw.filter((item) => item.Info.user_id == this.AccountFilter) : this.ListDataRaw
+      await DownDAL.deleteDowned(!this.AccountFilter, deleteList)
       this.ListSelected = new Set<string>()
-      this.ListDataRaw.splice(0, this.ListDataRaw.length)
+      if (this.AccountFilter) this.ListDataRaw = this.ListDataRaw.filter((item) => item.Info.user_id != this.AccountFilter)
+      else this.ListDataRaw.splice(0, this.ListDataRaw.length)
       this.mRefreshListDataShow(true)
     },
 

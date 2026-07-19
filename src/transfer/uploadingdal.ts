@@ -82,12 +82,13 @@ export default class UploadingDAL {
         }
       }
     } else {
-      let TaskIDList: number[] = all ? [] : Array.from(uploadingStore.ListSelected)
+      const scopedAll = all && !!uploadingStore.AccountFilter
+      let TaskIDList: number[] = all ? (scopedAll ? uploadingStore.ListDataShow.map((item) => item.TaskID) : []) : Array.from(uploadingStore.ListSelected)
       TaskIDList = await UploadingData.UploadingStartTask(TaskIDList, isToStart)
 
       if (!isToStart) {
         if (all) {
-          window.WinMsgToUpload({ cmd: 'UploadCmd', Command: 'stop', IsAll: true, UploadIDList: [], TaskIDList: [] })
+          window.WinMsgToUpload({ cmd: 'UploadCmd', Command: 'stop', IsAll: !scopedAll, UploadIDList: [], TaskIDList: scopedAll ? TaskIDList : [] })
         } else {
           window.WinMsgToUpload({
             cmd: 'UploadCmd',
@@ -159,10 +160,11 @@ export default class UploadingDAL {
         })
       }
     } else {
-      let TaskIDList: number[] = all ? [] : Array.from(useUploadingStore().ListSelected)
+      const scopedAll = all && !!uploadingStore.AccountFilter
+      let TaskIDList: number[] = all ? (scopedAll ? uploadingStore.ListDataShow.map((item) => item.TaskID) : []) : Array.from(useUploadingStore().ListSelected)
       TaskIDList = await UploadingData.UploadingDeleteTask(TaskIDList)
       if (all) {
-        window.WinMsgToUpload({ cmd: 'UploadCmd', Command: 'delete', IsAll: true, UploadIDList: [], TaskIDList: [] })
+        window.WinMsgToUpload({ cmd: 'UploadCmd', Command: 'delete', IsAll: !scopedAll, UploadIDList: [], TaskIDList: scopedAll ? TaskIDList : [] })
       } else {
         window.WinMsgToUpload({
           cmd: 'UploadCmd',

@@ -6,6 +6,7 @@ import { Tooltip as AntdTooltip } from 'ant-design-vue'
 import { IStateDownFile } from './DownDAL'
 import { TestButton } from '../utils/mosehelper'
 import { xorWith } from 'lodash'
+import { getDriveAccountLabel } from '../utils/driveAccount'
 
 const viewlist = ref()
 const inputsearch = ref()
@@ -244,6 +245,10 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
       <a-button shape="square" v-if="!rangIsSelecting && downedStore.ListSelected.size > 0 && downedStore.ListSelected.size < downedStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">反向选择</a-button>
       <a-button shape="square" v-if="!rangIsSelecting && downedStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
     </div>
+    <div class="toolbar-spacer"></div>
+    <div v-if="!downedStore.AccountFilter" class="cell account">账号</div>
+    <div class="cell filesize transfer-column-heading">大小</div>
+    <div class="transfer-action-heading">操作</div>
   </div>
   <div class="toppanlist" @keydown.space.prevent="() => true">
     <a-list
@@ -285,6 +290,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
                 {{ item.Info.name }}
               </div>
             </div>
+            <div v-if="!downedStore.AccountFilter" class="cell account" :title="getDriveAccountLabel(item.Info.user_id)">{{ getDriveAccountLabel(item.Info.user_id) }}</div>
             <div class="cell filesize">{{ item.Info.sizestr }}</div>
             <div class="toppanbtn">
               <a title="打开文件" v-if="!item.Info.ariaRemote" @click="handleOpenFile(item)"><IconFont name="iconwenjian" /></a>

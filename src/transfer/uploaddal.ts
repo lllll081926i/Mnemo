@@ -25,11 +25,11 @@ export default class UploadDAL {
 
   static async UploadedDelete(all: boolean) {
     if (clickWait('UploadedDelete', -1)) return
-    if (all) {
+    const uploadedStore = useUploadedStore()
+    if (all && !uploadedStore.AccountFilter) {
       await DBUpload.clearUploadedAll()
     } else {
-      const uploadedStore = useUploadedStore()
-      const keys = Array.from(uploadedStore.ListSelected)
+      const keys = all ? uploadedStore.ListDataShow.map((item) => item.TaskID) : Array.from(uploadedStore.ListSelected)
       await DBUpload.deleteUploadedBatch(keys)
     }
     await this.aReloadUploaded()

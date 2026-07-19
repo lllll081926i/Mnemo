@@ -225,7 +225,7 @@ export default class UploadingData {
       if (!task.isDir) {
 
         if (task.Children.length == 1) {
-          const item = UploadingData.UploadingShowOneItem(task.Children[0], now, task.localFilePath, task.TaskID, true)
+          const item = UploadingData.UploadingShowOneItem(task.Children[0], now, task.localFilePath, task.TaskID, task.user_id, true)
           showList.push(item)
         }
       } else {
@@ -257,6 +257,7 @@ export default class UploadingData {
         showList.push({
           UploadID: task.TaskID,
           TaskID: task.TaskID,
+          user_id: task.user_id,
           localFilePath: path.join(task.localFilePath, task.localFilePath.endsWith(':\\') ? '' : task.TaskName),
           name: task.TaskName,
           sizeStr: humanSize(task.ChildTotalSize),
@@ -275,7 +276,7 @@ export default class UploadingData {
     return { showList: showList, count: UploadingTaskList.size }
   }
 
-  static UploadingShowOneItem(item: IStateUploadTaskFile, now: number, localFilePath: string, TaskID: number, isShowTask: boolean): IUploadingModel {
+  static UploadingShowOneItem(item: IStateUploadTaskFile, now: number, localFilePath: string, TaskID: number, userId: string, isShowTask: boolean): IUploadingModel {
     const info = UploadingInfoList.get(item.UploadID)
     if (info && !UploadingInfoStop.has(item.UploadID)) {
 
@@ -296,6 +297,7 @@ export default class UploadingData {
       return {
         UploadID: isShowTask ? TaskID : item.UploadID,
         TaskID: TaskID,
+        user_id: userId,
         localFilePath: path.join(localFilePath, item.partPath),
         name: item.partPath || item.name,
         sizeStr: item.sizeStr,
@@ -313,6 +315,7 @@ export default class UploadingData {
       return {
         UploadID: isShowTask ? TaskID : item.UploadID,
         TaskID: TaskID,
+        user_id: userId,
         localFilePath: path.join(localFilePath, item.partPath),
         name: item.partPath || item.name,
         sizeStr: item.sizeStr,
@@ -339,7 +342,7 @@ export default class UploadingData {
     for (let j = 0, maxj = childrenList.length; j < maxj; j++) {
       const item = childrenList[j]
 
-      showList.push(UploadingData.UploadingShowOneItem(item, now, task.localFilePath, task.TaskID, false))
+      showList.push(UploadingData.UploadingShowOneItem(item, now, task.localFilePath, task.TaskID, task.user_id, false))
       if (showList.length > 999) break
     }
     return { showList: showList, count: task.Children.length }
