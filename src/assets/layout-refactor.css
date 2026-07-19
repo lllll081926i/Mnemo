@@ -1116,6 +1116,7 @@ body,
   align-items: center !important;
   gap: 8px !important;
   width: 100% !important;
+  min-width: 0 !important;
   min-height: 40px !important;
   max-width: none !important;
   margin: 0 !important;
@@ -1126,9 +1127,11 @@ body,
 
 .toppanbtn {
   display: inline-flex !important;
+  flex: 0 1 auto !important;
   flex-wrap: wrap !important;
   align-items: center !important;
   gap: 6px !important;
+  min-width: 0 !important;
   margin: 0 !important;
 }
 
@@ -1287,7 +1290,7 @@ body,
   white-space: nowrap !important;
   background: transparent !important;
   border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent) !important;
-  border-radius: 8px !important;
+  border-radius: var(--ui-control-radius) !important;
   box-shadow: none !important;
 }
 
@@ -1347,7 +1350,7 @@ body[arco-theme='dark'] .toppanbtn .arco-btn:hover {
   height: 30px !important;
   background: var(--bg-surface) !important;
   border: 1px solid var(--border-light) !important;
-  border-radius: 8px !important;
+  border-radius: var(--ui-control-radius) !important;
 }
 
 .toppanbtn .arco-input-search .arco-input-wrapper.arco-input-focus {
@@ -1358,7 +1361,19 @@ body[arco-theme='dark'] .toppanbtn .arco-btn:hover {
 .toppannavitem {
   color: var(--color-primary) !important;
   font-size: 13px !important;
-  border-radius: 6px !important;
+  border-radius: var(--ui-control-radius) !important;
+}
+
+/* The legacy stylesheet grouped adjacent actions into segmented controls.
+ * Mnemo toolbars use independent, capability-gated actions with explicit gaps. */
+.toppanbtn > .arco-btn + .arco-btn {
+  border-left: 1px solid var(--control-border) !important;
+}
+
+.toppanbtn > .arco-btn:not(:first-child),
+.toppanbtn > .arco-btn:not(:last-child) {
+  border-radius: var(--ui-control-radius) !important;
+  border-right: 1px solid var(--control-border) !important;
 }
 
 .toppannavitem:hover {
