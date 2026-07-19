@@ -145,7 +145,7 @@ const handleClickBottleFish = async () => {
       <IconFont name="iconplus" />
       创建相册
     </a-button>
-    <a-dropdown v-if="!dirtype.includes('pic') && capabilities.upload" trigger="hover" class="rightmenu" position="bl">
+    <a-dropdown v-if="isShowBtn && !dirtype.includes('pic') && capabilities.upload" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconupload" />
         上传

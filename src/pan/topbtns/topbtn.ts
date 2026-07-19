@@ -39,11 +39,21 @@ const getCurrentUploadContext = (parentFileId = '') => {
   return { pantreeStore, currentDirId, provider, capabilities: getDriveProviderCapabilities(provider) }
 }
 
+const isUploadTargetDirectory = (directoryId: string) => {
+  if (!directoryId) return false
+  if (directoryId.startsWith('color') || directoryId.startsWith('search')) return false
+  return !['favorite', 'recover', 'trash'].includes(directoryId)
+}
+
 export async function uploadLocalPaths(files: string[] | undefined, parentFileId = '', encType = ''): Promise<void> {
   if (!files?.length) return
   const { pantreeStore, currentDirId, provider, capabilities } = getCurrentUploadContext(parentFileId)
   if (!pantreeStore.user_id || !pantreeStore.drive_id || !currentDirId) {
     message.error('上传操作失败 父文件夹错误')
+    return
+  }
+  if (!isUploadTargetDirectory(currentDirId)) {
+    message.error('当前视图不能上传，请先进入网盘文件夹')
     return
   }
   if (!capabilities.upload) {
@@ -91,6 +101,10 @@ export function handleUpload(uploadType: string, encType: string = '') {
   const { pantreeStore, currentDirId, provider, capabilities } = getCurrentUploadContext()
   if (!pantreeStore.user_id || !pantreeStore.drive_id || !currentDirId) {
     message.error('上传操作失败 父文件夹错误')
+    return
+  }
+  if (!isUploadTargetDirectory(currentDirId)) {
+    message.error('当前视图不能上传，请先进入网盘文件夹')
     return
   }
   if (!capabilities.upload) {

@@ -53,7 +53,7 @@ describe('drive provider capabilities', () => {
   })
 
   it('exposes only upload paths that have a provider implementation', () => {
-    for (const provider of ['aliyun', 'cloud123', '115', 'guangya', 'baidu', 'dropbox', 'onedrive', 'box']) {
+    for (const provider of ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'box']) {
       const capabilities = getDriveProviderCapabilities(provider)
       expect(capabilities.upload, provider).toBe(true)
       expect(capabilities.uploadMode, provider).toBe('queue')
@@ -65,7 +65,7 @@ describe('drive provider capabilities', () => {
       expect(capabilities.uploadMode, provider).toBe('direct')
     }
 
-    for (const provider of ['pikpak', 'quark', '139', '189', 'unknown']) {
+    for (const provider of ['unknown']) {
       const capabilities = getDriveProviderCapabilities(provider)
       expect(capabilities.upload, provider).toBe(false)
       expect(capabilities.uploadMode, provider).toBe('none')

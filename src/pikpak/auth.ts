@@ -3,6 +3,8 @@ import type { ITokenInfo } from '../user/userstore'
 import { humanSize } from '../utils/format'
 import { PIKPAK_CLIENT_ID, PIKPAK_CLIENT_SECRET } from '../secrets.generated'
 
+export { PIKPAK_CLIENT_ID }
+
 const PIKPAK_API_HOST = 'https://api-drive.mypikpak.com'
 const PIKPAK_USER_HOST = 'https://user.mypikpak.com'
 const CLIENT_VERSION = '1.47.1'

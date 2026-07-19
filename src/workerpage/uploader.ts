@@ -20,6 +20,10 @@ import DropboxUploadDisk from '../dropbox/upload'
 import OneDriveUploadDisk from '../onedrive/upload'
 import GuangyaUploadDisk from '../guangya/uploaddisk'
 import BoxUploadDisk from '../box/upload'
+import PikPakUploadDisk from '../pikpak/upload'
+import QuarkUploadDisk from '../quark/upload'
+import Cloud139UploadDisk from '../cloud139/upload'
+import Cloud189UploadDisk from '../cloud189/upload'
 import { getDriveProviderCapabilities, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
 
 type UploadDiskHandler = (fileui: IUploadingUI) => Promise<string>
@@ -33,7 +37,14 @@ const failUpload = (fileui: IUploadingUI, message: string, code = 505) => {
 const runUploadDisk = async (fileui: IUploadingUI, handler: UploadDiskHandler): Promise<void> => {
   await checkFileSize(fileui)
   if (fileui.Info.uploadState === 'error') return
-  const uploadResult = await handler(fileui)
+  let uploadResult = ''
+  try {
+    uploadResult = await handler(fileui)
+  } catch (error: any) {
+    if (!fileui.IsRunning) fileui.Info.uploadState = '已暂停'
+    else failUpload(fileui, error?.message || '上传请求失败')
+    return
+  }
   if (uploadResult === 'success') {
     fileui.Info.uploadState = 'success'
   } else if (!fileui.IsRunning || uploadResult === '已暂停') {
@@ -69,6 +80,10 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
   if (provider === 'dropbox') return runUploadDisk(fileui, DropboxUploadDisk.UploadOneFile)
   if (provider === 'onedrive') return runUploadDisk(fileui, OneDriveUploadDisk.UploadOneFile)
   if (provider === 'box') return runUploadDisk(fileui, BoxUploadDisk.UploadOneFile)
+  if (provider === 'pikpak') return runUploadDisk(fileui, PikPakUploadDisk.UploadOneFile)
+  if (provider === 'quark') return runUploadDisk(fileui, QuarkUploadDisk.UploadOneFile)
+  if (provider === '139') return runUploadDisk(fileui, Cloud139UploadDisk.UploadOneFile)
+  if (provider === '189') return runUploadDisk(fileui, Cloud189UploadDisk.UploadOneFile)
   if (provider !== 'aliyun') {
     failUpload(fileui, `${getDriveProviderLabel(provider)} 暂不支持队列上传`)
     return
