@@ -1,12 +1,11 @@
 import { AppWindow, createElectronWindow, Referer, ua } from './window'
 import path from 'path'
 import is from 'electron-is'
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, net, powerSaveBlocker, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, session, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
-import { exec, execFile, spawn, SpawnOptions } from 'child_process'
+import { exec, execFile } from 'child_process'
 import { ShowError } from './dialog'
 import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
-import { registerMediaImageCacheIpc } from '../mediaImageCache'
 import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort, parseElectronProxyRules, syncMotrixApplicationProxy } from '../aria/runtime'
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
@@ -114,8 +113,6 @@ export default class ipcEvent {
     this.handleWebShowSaveDialogSync()
     this.handleWebShowItemInFolder()
     this.handleWebPlatformSync()
-    this.handleWebSpawnSync()
-    this.handleWebExecSync()
     this.handleWebSaveTheme()
     this.handleWebClearCookies()
     this.handleWebGetCookies()
@@ -132,14 +129,9 @@ export default class ipcEvent {
     this.handleOfficePreviewConvertToPdf()
     this.handleOpenDataLoaderConvertPdf()
     this.handleWebOpenWindow()
-    this.handleWebOpenLyric()
-    this.handleWebSendLyric()
-    this.handleWebCloseLyric()
-    this.handleWebConfigureGlobalHotkeys()
     this.handleWebOpenUrl()
     this.handlePowerSaveBlocker()
     this.handleMpvEmbedded()
-    registerMediaImageCacheIpc()
   }
 
   private static handleMpvEmbedded() {
@@ -314,59 +306,6 @@ export default class ipcEvent {
         appPath: appPath,
         asarPath: asarPath,
         argv0: process.argv0
-      }
-    })
-  }
-
-  private static handleWebSpawnSync() {
-    ipcMain.on('WebSpawnSync', (event, data) => {
-      try {
-        const options: SpawnOptions = {
-          shell: true,
-          stdio: 'ignore',
-          windowsVerbatimArguments: true,
-          ...data.options
-        }
-        const argsToStr = (args: string) => (is.windows() ? `"${args}"` : `'${args}'`)
-        if ((is.windows() || is.macOS()) && !existsSync(data.command)) {
-          event.returnValue = { error: '找不到文件' + data.command }
-          ShowError('找不到文件', data.command)
-        } else {
-          let command
-          if (is.macOS()) {
-            command = `open -a ${argsToStr(data.command)} ${data.command.includes('mpv.app') ? '--args ' : ''}`
-          } else {
-            command = `${argsToStr(data.command)}`
-          }
-          const subProcess = spawn(command, data.args, options)
-          subProcess.unref()
-          event.returnValue = {
-            pid: subProcess.pid,
-            subProcess: subProcess,
-            execCmd: data,
-            options: options,
-            exitCode: subProcess.exitCode
-          }
-        }
-      } catch (err: any) {
-        event.returnValue = { error: err }
-      }
-    })
-  }
-
-  private static handleWebExecSync() {
-    ipcMain.on('WebExecSync', (event, data) => {
-      try {
-        const cmdArguments = []
-        cmdArguments.push(data.command)
-        if (data.args) cmdArguments.push(...data.args)
-        const finalCmd = cmdArguments.join(' ')
-        exec(finalCmd, (err: any) => {
-          event.returnValue = err
-        })
-        event.returnValue = ''
-      } catch (err: any) {
-        event.returnValue = { error: err }
       }
     })
   }
@@ -795,99 +734,6 @@ export default class ipcEvent {
         win.setTitle('预览窗口')
         win.show()
       })
-    })
-  }
-
-  private static lyricWin: BrowserWindow | null = null
-  private static globalHotkeyAccelerators: string[] = []
-
-  private static handleWebOpenLyric() {
-    ipcMain.on('WebOpenLyric', () => {
-      if (ipcEvent.lyricWin && !ipcEvent.lyricWin.isDestroyed()) {
-        ipcEvent.lyricWin.show()
-        return
-      }
-      const win = new BrowserWindow({
-        show: false,
-        width: 960,
-        height: 180,
-        center: true,
-        frame: false,
-        transparent: true,
-        hasShadow: false,
-        resizable: true,
-        skipTaskbar: true,
-        alwaysOnTop: true,
-        backgroundColor: '#00000000',
-        webPreferences: {
-          nodeIntegration: true,
-          contextIsolation: false,
-          webSecurity: false,
-          sandbox: false,
-          preload: getAsarPath('dist/electron/preload/index.js')
-        }
-      })
-      win.removeMenu()
-      win.setAlwaysOnTop(true, 'screen-saver')
-      if (!app.isPackaged && process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL + '/desktop-lyrics.html')
-      else win.loadFile(getStaticPath('desktop-lyrics.html'))
-      win.on('ready-to-show', () => win.show())
-      win.on('closed', () => {
-        ipcEvent.lyricWin = null
-      })
-      ipcEvent.lyricWin = win
-    })
-  }
-
-  private static handleWebSendLyric() {
-    ipcMain.on('WebSendLyric', (_event, data) => {
-      if (!ipcEvent.lyricWin || ipcEvent.lyricWin.isDestroyed()) return
-      if (data?.clickThrough !== undefined) ipcEvent.lyricWin.setIgnoreMouseEvents(!!data.clickThrough, { forward: true })
-      ipcEvent.lyricWin.webContents.send('lyricData', data)
-    })
-  }
-
-  private static handleWebCloseLyric() {
-    ipcMain.on('WebCloseLyric', () => {
-      if (ipcEvent.lyricWin && !ipcEvent.lyricWin.isDestroyed()) {
-        ipcEvent.lyricWin.close()
-        ipcEvent.lyricWin = null
-      }
-    })
-  }
-
-  private static handleWebConfigureGlobalHotkeys() {
-    ipcMain.handle('WebConfigureGlobalHotkeys', (event, bindings: Array<{ action: string; accelerator: string; enabled?: boolean }>) => {
-      for (const accelerator of ipcEvent.globalHotkeyAccelerators) {
-        try {
-          globalShortcut.unregister(accelerator)
-        } catch {}
-      }
-      ipcEvent.globalHotkeyAccelerators = []
-      if (!Array.isArray(bindings) || !bindings.length) return { ok: true, registered: [], failed: [] }
-      const sender = BrowserWindow.fromWebContents(event.sender)
-      const registered: string[] = []
-      const failed: string[] = []
-      for (const binding of bindings) {
-        const accelerator = String(binding?.accelerator || '').trim()
-        const action = String(binding?.action || '').trim()
-        if (!accelerator || !action || binding.enabled === false) continue
-        try {
-          const ok = globalShortcut.register(accelerator, () => {
-            const win = sender && !sender.isDestroyed() ? sender : AppWindow.mainWindow
-            win?.webContents.send('WebGlobalHotkey', { action, accelerator })
-          })
-          if (ok) {
-            registered.push(accelerator)
-            ipcEvent.globalHotkeyAccelerators.push(accelerator)
-          } else {
-            failed.push(accelerator)
-          }
-        } catch {
-          failed.push(accelerator)
-        }
-      }
-      return { ok: failed.length === 0, registered, failed }
     })
   }
 

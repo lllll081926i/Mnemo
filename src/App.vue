@@ -17,7 +17,6 @@ import PageSheet from './layout/PageSheet.vue'
 import PageImage from './layout/PageImage.vue'
 import PageVideo from './layout/PageVideo.vue'
 import PageMusic from './layout/PageMusic.vue'
-import PageLyric from './lyric/PageLyric.vue'
 import PageWorker from './layout/PageWorker.vue'
 
 function shouldShowPageLoadingSplash() {
@@ -53,7 +52,6 @@ export default {
       if (appStore.appPage == 'PageImage') return h(PageImage)
       if (appStore.appPage == 'PageVideo') return h(PageVideo)
       if (appStore.appPage == 'PageMusic') return h(PageMusic)
-      if (appStore.appPage == 'PageLyric') return h(PageLyric)
       if (appStore.appPage == 'PageWorker') return h(PageWorker)
       if (shouldShowPageLoadingSplash()) return h(PageLoading)
       return h('div', { class: 'desktop-loading-empty' })

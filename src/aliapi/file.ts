@@ -31,7 +31,7 @@ import { ITokenInfo } from '../user/userstore'
 import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, isWebDavDrive } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive } from '../utils/s3Client'
 import { getAlipanVideoPromotionReason } from '../utils/alipanPromotion'
-import { getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
+import { canUseAliyunPreviewApi, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
 
 const parseBaiduPath = (file_path: string) => {
   let p = file_path || '/'
@@ -682,7 +682,7 @@ export default class AliFile {
       data.subtitles = subtitles
       return data
     }
-    if (provider !== 'aliyun') return `${getDriveProviderLabel(provider)} 暂无转码信息`
+    if (!canUseAliyunPreviewApi(provider)) return `${getDriveProviderLabel(provider)} 暂无转码信息`
     let url = ''
     let need_open_api = true
     if (need_open_api) {
@@ -799,25 +799,8 @@ export default class AliFile {
 
   static async ApiAudioPreviewUrl(user_id: string, drive_id: string, file_id: string): Promise<IDownloadUrl | string> {
     if (!user_id || !drive_id || !file_id) return '参数错误'
-    if (
-      isCloud123User(user_id) ||
-      drive_id === 'cloud123' ||
-      isPikPakUser(user_id) ||
-      drive_id === 'pikpak' ||
-      isGuangyaUser(user_id) ||
-      drive_id === 'guangya' ||
-      isCloud139User(user_id) ||
-      drive_id === 'cloud139' ||
-      isCloud189User(user_id) ||
-      drive_id === 'cloud189' ||
-      isDropboxUser(user_id) ||
-      drive_id === 'dropbox' ||
-      isOneDriveUser(user_id) ||
-      drive_id === 'onedrive' ||
-      isBoxUser(user_id) ||
-      drive_id === 'box'
-    )
-      return '暂无转码信息'
+    const provider = await resolveFileProvider(user_id, drive_id)
+    if (!canUseAliyunPreviewApi(provider)) return `${getDriveProviderLabel(provider)} 暂无转码信息`
 
     const url = 'v2/file/get_audio_play_info'
 
@@ -861,25 +844,8 @@ export default class AliFile {
 
   static async ApiOfficePreViewUrl(user_id: string, drive_id: string, file_id: string): Promise<IOfficePreViewUrl | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
-    if (
-      isCloud123User(user_id) ||
-      drive_id === 'cloud123' ||
-      isPikPakUser(user_id) ||
-      drive_id === 'pikpak' ||
-      isGuangyaUser(user_id) ||
-      drive_id === 'guangya' ||
-      isCloud139User(user_id) ||
-      drive_id === 'cloud139' ||
-      isCloud189User(user_id) ||
-      drive_id === 'cloud189' ||
-      isDropboxUser(user_id) ||
-      drive_id === 'dropbox' ||
-      isOneDriveUser(user_id) ||
-      drive_id === 'onedrive' ||
-      isBoxUser(user_id) ||
-      drive_id === 'box'
-    )
-      return undefined
+    const provider = await resolveFileProvider(user_id, drive_id)
+    if (!canUseAliyunPreviewApi(provider)) return undefined
     const url = 'v2/file/get_office_preview_url'
     const postData = { drive_id: drive_id, file_id: file_id, url_expire_sec: 14400 }
     const resp = await AliHttp.Post(url, postData, user_id, '')
@@ -1071,24 +1037,8 @@ export default class AliFile {
 
   static async ApiFileGetFolderSize(user_id: string, drive_id: string, file_id: string): Promise<IAliGetForderSizeModel | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
-    if (
-      isCloud123User(user_id) ||
-      drive_id === 'cloud123' ||
-      isPikPakUser(user_id) ||
-      drive_id === 'pikpak' ||
-      isGuangyaUser(user_id) ||
-      drive_id === 'guangya' ||
-      isCloud139User(user_id) ||
-      drive_id === 'cloud139' ||
-      isCloud189User(user_id) ||
-      drive_id === 'cloud189' ||
-      isDropboxUser(user_id) ||
-      drive_id === 'dropbox' ||
-      isOneDriveUser(user_id) ||
-      drive_id === 'onedrive' ||
-      isBoxUser(user_id) ||
-      drive_id === 'box'
-    ) {
+    const provider = await resolveFileProvider(user_id, drive_id)
+    if (!canUseAliyunPreviewApi(provider)) {
       return { size: 0, folder_count: 0, file_count: 0, reach_limit: undefined }
     }
     const url = 'adrive/v1/file/get_folder_size_info'

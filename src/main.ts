@@ -151,8 +151,6 @@ window.Electron.ipcRenderer.on('setPage', (_event: any, args: any) => {
     appStore.pageVideo = args.data
   } else if (args.page == 'PageMusic') {
     appStore.pageMusic = args.data
-  } else if (args.page == 'PageLyric') {
-    // Desktop lyric window - just toggle page, no data needed
   }
   if (args.page) appStore.togglePage(args.page)
 })
@@ -170,6 +168,3 @@ window.Electron.ipcRenderer.on('cloud123-oauth-callback', (_event: any, url: str
   if (!url) return
   window.dispatchEvent(new CustomEvent('cloud123-oauth-callback', { detail: url }))
 })
-try {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-} catch {}

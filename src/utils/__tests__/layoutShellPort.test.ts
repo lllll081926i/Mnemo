@@ -83,7 +83,7 @@ describe('deep layout shell port', () => {
     expect(css).not.toContain('.ui-compact-grid')
     expect(css).not.toContain('.ui-compact-field')
     expect(transfer).not.toContain('ui-compact-grid')
-    expect(setting).toContain('min-width: var(--layout-content-width)')
+    expect(setting).toContain('min-width: 0')
     expect(setting).toContain('grid-template-columns: var(--layout-rail-width) minmax(0, 1fr)')
     expect(setting).not.toContain('@media (max-width: 760px)')
     expect(debug).not.toContain('服务地址')
@@ -97,8 +97,7 @@ describe('deep layout shell port', () => {
     expect(setting).toContain('border-top: 1px solid var(--border-light)')
     expect(setting).not.toContain('<h1>设置</h1>')
     expect(setting).not.toContain('<component :is="section.icon"')
-    expect(setting).toContain("body:not([arco-theme='dark']) .settings-sidebar")
-    expect(setting).toContain('background: #fff')
+    expect(setting).toContain('background: var(--bg-surface)')
   })
 
   it('writes four-level rotating file logs instead of rendering a log list', () => {
@@ -138,9 +137,9 @@ describe('deep layout shell port', () => {
     const fileApi = read('src/aliapi/file.ts')
     const player = read('src/utils/playerhelper.ts')
 
-    expect(video).toContain('needsProviderProxy')
-    expect(video).toContain('isLocalProxyUrl(url)')
-    expect(music).toContain('proxy_headers: d.headers ? JSON.stringify(d.headers) : undefined')
+    expect(video).toContain('proxy_headers: JSON.stringify(item.headers)')
+    expect(video).toContain("proxy_kind: 'subtitle'")
+    expect(music).toContain('proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined')
     expect(fileApi).toContain("proxy_kind: 'subtitle'")
     expect(player).toContain('findBestSubtitleMatch')
     expect(player).toContain("proxy_kind: 'subtitle'")

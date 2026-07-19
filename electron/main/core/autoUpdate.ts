@@ -6,9 +6,20 @@ import is from 'electron-is'
 const UPDATE_CHECK_DELAY_MS = 8000
 
 type AutoUpdateLogger = Pick<typeof console, 'info' | 'warn'>
-type AutoUpdateDialog = Pick<typeof dialog, 'showMessageBox'>
+type AutoUpdateDialog = {
+  showMessageBox: (options: Electron.MessageBoxOptions) => Promise<{ response: number }>
+}
+type AutoUpdaterAdapter = {
+  autoDownload: boolean
+  autoInstallOnAppQuit: boolean
+  allowPrerelease: boolean
+  on: (event: 'update-available' | 'update-downloaded' | 'error', listener: (value: any) => void) => unknown
+  checkForUpdates: () => Promise<unknown>
+  downloadUpdate: () => Promise<unknown>
+  quitAndInstall: (isSilent?: boolean, isForceRunAfter?: boolean) => void
+}
 type AutoUpdateControllerOptions = {
-  updater: typeof autoUpdater
+  updater: AutoUpdaterAdapter
   dialog: AutoUpdateDialog
   logger: AutoUpdateLogger
   currentVersion: string

@@ -1,7 +1,6 @@
 import { AppWindow, createMainWindow, createTray } from './core/window'
-import { app, ipcMain, protocol, session } from 'electron'
+import { app, ipcMain, session } from 'electron'
 import { registerAutoUpdate } from './core/autoUpdate'
-import { registerMediaImageCacheProtocol } from './mediaImageCache'
 import is from 'electron-is'
 import fixPath from 'fix-path'
 import { release } from 'os'
@@ -39,6 +38,17 @@ const getUrlPath = (url: string) => {
     return new URL(url).pathname
   } catch {
     return ''
+  }
+}
+
+const isHost = (hostname: string, domain: string) => hostname === domain || hostname.endsWith(`.${domain}`)
+
+const parseRequestUrl = (url: string) => {
+  try {
+    const parsed = new URL(url)
+    return { hostname: parsed.hostname.toLowerCase(), pathname: parsed.pathname }
+  } catch {
+    return { hostname: '', pathname: '' }
   }
 }
 
@@ -121,16 +131,8 @@ export default class launch extends EventEmitter {
     if (release().startsWith('6.1')) {
       app.disableHardwareAcceleration()
     }
-    process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-
-    app.commandLine.appendSwitch('no-sandbox')
-    app.commandLine.appendSwitch('disable-web-security')
     app.commandLine.appendSwitch('disable-renderer-backgrounding')
-    app.commandLine.appendSwitch('disable-site-isolation-trials')
-    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure,BlockInsecurePrivateNetworkRequests')
     app.commandLine.appendSwitch('ignore-connections-limit', 'bj29-enet.cn-beijing.data.alicloudccp.com,bj29-hz.cn-hangzhou.data.alicloudccp.com,bj29.cn-beijing.data.alicloudccp.com,alicloudccp.com,api.aliyundrive.com,aliyundrive.com,api.alipan.com,alipan.com')
-    app.commandLine.appendSwitch('ignore-certificate-errors')
     app.commandLine.appendSwitch('wm-window-animations-disabled')
     app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
     app.commandLine.appendSwitch('force_high_performance_gpu')
@@ -139,18 +141,6 @@ export default class launch extends EventEmitter {
     if (is.windows()) {
       app.setAppUserModelId('com.mnemo.app')
     }
-    // mscache: 协议必须在 app.ready 之前注册 scheme 特权
-    protocol.registerSchemesAsPrivileged([
-      {
-        scheme: 'mscache',
-        privileges: {
-          standard: true,
-          secure: true,
-          supportFetchAPI: true,
-          bypassCSP: true
-        }
-      }
-    ])
     this.hasExitArgv(process.argv)
   }
 
@@ -184,7 +174,6 @@ export default class launch extends EventEmitter {
     app
       .whenReady()
       .then(() => {
-        registerMediaImageCacheProtocol()
         this.registerProtocol()
         try {
           const localVersion = getResourcesPath('localVersion')
@@ -199,19 +188,20 @@ export default class launch extends EventEmitter {
         } catch (err) {
         }
         session.defaultSession.webRequest.onBeforeSendHeaders((details, cb) => {
-          const shouldGieeReferer = details.url.indexOf('gitee.com') > 0
-          const shouldBaidu = /baidu|baidupcs|bdstatic|bcebos/i.test(details.url)
-          const should115 = /(^https?:\/\/[^/]*115\.com\/)/i.test(details.url) || /(^https?:\/\/[^/]*115cdn\.net\/)/i.test(details.url)
-          const shouldBiliBili = details.url.indexOf('bilibili.com') > 0
-          const shouldQQTv = details.url.indexOf('v.qq.com') > 0 || details.url.indexOf('video.qq.com') > 0
-          const shouldQuark = /(^https?:\/\/[^/]*quark\.cn\/)/i.test(details.url)
-          const shouldQuarkDownload = shouldQuark && details.url.includes('drive-pc.quark.cn/1/clouddrive/file/download')
-          const shouldQuarkOssDownload = shouldQuark && /(^https?:\/\/[^/]*\.pds\.quark\.cn\/)/i.test(details.url)
+          const { hostname, pathname } = parseRequestUrl(details.url)
+          const shouldGieeReferer = isHost(hostname, 'gitee.com')
+          const shouldBaidu = ['baidu.com', 'baidupcs.com', 'bdstatic.com', 'bcebos.com'].some((domain) => isHost(hostname, domain))
+          const should115 = isHost(hostname, '115.com') || isHost(hostname, '115cdn.net')
+          const shouldBiliBili = isHost(hostname, 'bilibili.com')
+          const shouldQQTv = hostname === 'v.qq.com' || hostname === 'video.qq.com'
+          const shouldQuark = isHost(hostname, 'quark.cn')
+          const shouldQuarkDownload = hostname === 'drive-pc.quark.cn' && pathname.includes('/1/clouddrive/file/download')
+          const shouldQuarkOssDownload = hostname.endsWith('.pds.quark.cn')
           const quarkUrlPath = shouldQuarkOssDownload ? getUrlPath(details.url) : ''
-          const shouldAliPanOrigin =   details.url.indexOf('.aliyundrive.com') > 0 || details.url.indexOf('.alipan.com') > 0
+          const shouldAliPanOrigin = isHost(hostname, 'aliyundrive.com') || isHost(hostname, 'alipan.com')
           const shouldAliReferer = !shouldQuark && !shouldQQTv && !shouldBiliBili && !shouldGieeReferer && (!details.referrer || details.referrer.trim() === '' || /(\/localhost:)|(^file:\/\/)|(\/127.0.0.1:)/.exec(details.referrer) !== null)
-          const shouldToken = shouldAliPanOrigin && details.url.includes('download')
-          const shouldOpenApiToken = details.url.includes('adrive/v1.0') || details.url.includes('adrive/v1.1')
+          const shouldToken = shouldAliPanOrigin && pathname.includes('download')
+          const shouldOpenApiToken = shouldAliPanOrigin && (pathname.includes('/adrive/v1.0') || pathname.includes('/adrive/v1.1'))
           const forbidUrl = details.url.includes('younoyes') || details.url.includes('onatoshi')
           const hasAuthorizationHeader = Object.keys(details.requestHeaders || {}).some((key) => key.toLowerCase() === 'authorization')
           const fallbackAccessToken = this.userToken?.access_token || ''

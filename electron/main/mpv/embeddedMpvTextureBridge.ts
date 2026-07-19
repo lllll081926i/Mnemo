@@ -259,12 +259,15 @@ export class EmbeddedMpvTextureBridge {
         handleBuffer.writeBigUInt64LE(textureInfo.handle)
         handle = process.platform === 'darwin' ? { ioSurface: handleBuffer } : { ntHandle: handleBuffer }
         const startImport = performance.now()
+        const pixelFormat: 'bgra' | 'rgba' | 'rgbaf16' | 'nv12' = ['bgra', 'rgba', 'rgbaf16'].includes(textureInfo.format)
+          ? textureInfo.format as 'bgra' | 'rgba' | 'rgbaf16'
+          : 'rgba'
         imported = sharedTexture.importSharedTexture({
           textureInfo: {
             handle,
             codedSize: { width: textureInfo.width, height: textureInfo.height },
             visibleRect: { x: 0, y: 0, width: textureInfo.width, height: textureInfo.height },
-            pixelFormat: textureInfo.format === 'nv12' ? 'rgba' : textureInfo.format
+            pixelFormat
           }
         })
         const startSend = performance.now()

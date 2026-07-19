@@ -1,11 +1,4 @@
 /* eslint-disable no-unused-vars */
-declare namespace NodeJS {
-  interface ProcessEnv {
-    NODE_ENV: 'development' | 'production'
-    readonly VITE_DEV_SERVER_HOST: string
-    readonly VITE_DEV_SERVER_PORT: string
-  }
-}
 declare interface Window {
   Electron: any
   platform: any
@@ -13,8 +6,6 @@ declare interface Window {
   WebToElectron: any
   WebToWindow: any
   WebToElectronCB: any
-  WebSpawnSync: any
-  WebExecSync: any
   WebShowOpenDialogSync: any
   WebShowSaveDialogSync: any
   WebShowItemInFolder: any
@@ -32,11 +23,6 @@ declare interface Window {
   WebQuarkDownloadUrl: any
   WebSetCookies: any
   WebOpenWindow: any
-  WebOpenLyric: any
-  WebSendLyric: any
-  WebCloseLyric: any
-  WebConfigureGlobalHotkeys: any
-  WebOnGlobalHotkey: any
   WebOpenUrl: any
   WebShutDown: any
   WebSetProxy: any
@@ -52,9 +38,6 @@ declare interface Window {
     onClear: (callback: () => void) => void
     removeClearListener: () => void
   }
-  MsImageCacheSyncConfig: any
-  MsImageCacheStats: () => Promise<{ totalBytes: number; servers: unknown[] }>
-  MsImageCacheClear: (serverId?: string) => Promise<{ cleared: number }>
   TvBoxInvoke: (channel: string, data?: unknown) => Promise<unknown>
   IsMainPage: boolean
 }

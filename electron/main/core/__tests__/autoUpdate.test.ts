@@ -21,9 +21,9 @@ describe('createAutoUpdateController', () => {
     createAutoUpdateController({
       updater,
       dialog,
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), warn: vi.fn() },
       currentVersion: '4.0.11-beta',
-      isPackaged: true,
+      isPackaged: true
     })
 
     updater.emit('update-available', { version: '4.0.12-beta', releaseNotes: '修复若干问题' })
@@ -45,9 +45,9 @@ describe('createAutoUpdateController', () => {
     createAutoUpdateController({
       updater,
       dialog,
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), warn: vi.fn() },
       currentVersion: '4.0.11-beta',
-      isPackaged: true,
+      isPackaged: true
     })
 
     updater.emit('update-downloaded', { version: '4.0.12-beta' })

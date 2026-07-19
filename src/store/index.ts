@@ -13,7 +13,6 @@ import type { ITokenInfo } from '../user/userstore'
 import useUserStore from '../user/userstore'
 import usePanTreeStore from '../pan/pantreestore'
 import usePanFileStore from '../pan/panfilestore'
-import useMusicPlayerStore from './musicplayerstore'
 
 import type { IShareSiteGroupModel, IShareSiteModel } from './serverstore'
 import useServerStore from './serverstore'
@@ -48,7 +47,6 @@ export {
   ITokenInfo,
   usePanTreeStore,
   usePanFileStore,
-  useMusicPlayerStore,
   useServerStore,
   IOtherShareLinkModel,
   IShareSiteModel,

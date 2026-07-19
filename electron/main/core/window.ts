@@ -120,10 +120,6 @@ export function createMainWindow() {
     }
   })
 
-  AppWindow.mainWindow.on('closed', (event: any) => {
-    app.quit()
-  })
-
   AppWindow.mainWindow.webContents.once('dom-ready', showMainPage)
   AppWindow.mainWindow.webContents.once('did-finish-load', showMainPage)
   setTimeout(showMainPage, 500)
@@ -218,12 +214,11 @@ export function createElectronWindow(width: number, height: number, center: bool
       nodeIntegration: true,
       nodeIntegrationInWorker: true,
       sandbox: false,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       contextIsolation: false,
       backgroundThrottling: false,
       enableWebSQL: true,
-      disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure',
       preload: getAsarPath('dist/electron/preload/index.js')
     }
   })
@@ -285,13 +280,34 @@ function disableDevTools(webContent: Electron.WebContents) {
   if (webContent.isDevToolsOpened()) webContent.closeDevTools()
 }
 
+const isAllowedLoginUrl = (value: string) => {
+  if (value === 'about:blank') return true
+  try {
+    const url = new URL(value)
+    const hostname = url.hostname.toLowerCase()
+    return url.protocol === 'https:' && ['auth.aliyundrive.com', 'passport.aliyundrive.com', 'www.aliyundrive.com'].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+  } catch {
+    return false
+  }
+}
+
 function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
   if (allowDevTools) {
     registerDevToolsShortcut(win.webContents)
   } else {
     disableDevTools(win.webContents)
   }
-  win.webContents.on('will-attach-webview', (_event, webPreferences) => {
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!isAllowedLoginUrl(params.src)) {
+      event.preventDefault()
+      return
+    }
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+    webPreferences.webSecurity = true
+    webPreferences.allowRunningInsecureContent = false
     if (!allowDevTools) webPreferences.devTools = false
   })
   // 处理webview跳转
@@ -303,25 +319,17 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
     }
     // 不允许的网址则阻止页面跳转并拉取浏览器展示页面
     webContent.setWindowOpenHandler((details) => {
-      let url = details.url
-      if (!/(aliyundrive|alipan).com\/s\/[0-9a-zA-Z_]{11,}/.test(url)) {
-        webContent.loadURL(url)
-      } else {
-        win.webContents.send('webview-new-window', webContent.id, details)
-      }
+      if (isAllowedLoginUrl(details.url)) webContent.loadURL(details.url)
       return { action: 'deny' }
     })
     webContent.on('will-redirect', (e, url) => {
-      if (/(aliyundrive|alipan).com\/s\/[0-9a-zA-Z_]{11,}/.test(url)) {
+      if (!isAllowedLoginUrl(url)) {
         e.preventDefault()
-        win.webContents.send('webview-redirect', webContent.id, url)
       }
     })
     // 拦截链接跳转
     webContent.on('will-navigate', (e, url) => {
-      if (/(aliyundrive|alipan).com\/s\/[0-9a-zA-Z_]{11,}/.test(url)) {
-        e.preventDefault()
-      }
+      if (!isAllowedLoginUrl(url)) e.preventDefault()
     })
   })
 }

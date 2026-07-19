@@ -23,16 +23,9 @@ declare global {
     WebClearCookies: any
     WebShutDown: any
     WebOpenWindow: any
-    WebOpenLyric: () => void
-    WebSendLyric: (data: any) => void
-    WebCloseLyric: () => void
-    WebConfigureGlobalHotkeys: (data: any) => Promise<any>
-    WebOnGlobalHotkey: (callback: (data: any) => void) => (() => void)
     WebOpenUrl: any
     WebShowOpenDialogSync: any
     WebShowItemInFolder: any
-    WebExecSync: any
-    WebSpawnSync: any
     WebPlatformSync: any
     UploadPort: any
     DownloadPort: any
@@ -60,8 +53,5 @@ declare global {
     speedLimte: number
     WebSetProgressBar: any
     TvBoxInvoke: (channel: string, data: unknown) => Promise<unknown>
-    MsImageCacheSyncConfig: any
-    MsImageCacheStats: () => Promise<{ totalBytes: number; servers: unknown[] }>
-    MsImageCacheClear: (serverId?: string) => Promise<{ cleared: number }>
   }
 }

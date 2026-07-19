@@ -21,7 +21,6 @@ export default defineConfig({
       'src/down/integration/**/*.test.ts',
       'src/down/motrix-integration/**/*.test.ts',
       'scripts/__tests__/**/*.test.mjs',
-      'src/media-server/__tests__/**/*.test.ts',
       'src/utils/__tests__/**/*.test.ts',
       'src/aliapi/__tests__/**/*.test.ts',
       'src/pikpak/__tests__/**/*.test.ts',

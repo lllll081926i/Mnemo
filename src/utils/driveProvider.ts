@@ -261,6 +261,8 @@ export const resolveDriveProvider = (context: DriveProviderContext | string = {}
   return 'unknown'
 }
 
+export const canUseAliyunPreviewApi = (context: DriveProviderContext | string = {}) => resolveDriveProvider(context) === 'aliyun'
+
 export const buildDriveProviderUserId = (provider: DriveProvider, accountId: string | number): string => {
   const value = String(accountId ?? '').trim()
   if (!value) return ''

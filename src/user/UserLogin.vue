@@ -1423,7 +1423,7 @@ const loginSuccess = (token: ITokenInfo) => {
             <div class="logincontent">
               <div id="loginframediv" class="loginframe">
                 <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
-                <Webview id="loginiframe" v-show="!loginLoading && loginCur === 1" plugins nodeintegration disablewebsecurity webpreferences="allowRunningInsecureContent" src="about:blank" style="width: 100%; height: 400px; border: none; overflow: hidden" />
+                <Webview id="loginiframe" v-show="!loginLoading && loginCur === 1" src="about:blank" style="width: 100%; height: 400px; border: none; overflow: hidden" />
                 <div class="qrcodeframe" v-if="loginCur === 2 && !loginLoading">
                   <a-image width="250" height="250" :hide-footer="true" :preview="false" :show-loader="true" @click="handleRefreshQrCodeUrl" style="display: inline-block" :src="qrCodeUrl"></a-image>
                   <a-alert banner center :show-icon="false" :type="qrCodeStatusType">

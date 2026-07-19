@@ -90,23 +90,6 @@ export interface IPageVideo {
   expire_time: number
   play_cursor: number
   play_esposide?: number
-  media_url?: string
-  media_headers?: Record<string, string>
-  media_server_id?: string
-  media_server_item_id?: string
-  media_server_source_id?: string
-  media_server_source_label?: string
-  media_server_play_session_id?: string
-  media_server_source_options?: Array<{ id: string; label: string; subLabel?: string }>
-  media_server_video_label?: string
-  media_server_audio_label?: string
-  media_server_subtitle_label?: string
-  media_server_video_options?: Array<{ streamIndex: number; label: string }>
-  media_server_audio_options?: Array<{ streamIndex: number; label: string }>
-  media_server_subtitle_options?: Array<{ streamIndex: number; label: string }>
-  media_server_playlist_label?: string
-  media_server_episode_playlist?: Array<{ id: string; title: string }>
-  media_server_chapters?: Array<{ start: number; end: number; title: string }>
   custom_playlist_label?: string
   custom_playlist?: IPageVideoPlaylistEntry[]
 }

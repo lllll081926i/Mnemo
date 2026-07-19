@@ -34,20 +34,6 @@ ipcRenderer.on('MainSendToken', function(event, arg) {
   }
 })
 
-window.WebSpawnSync = function(data: any, callback: any) {
-  try {
-    const backData = ipcRenderer.sendSync('WebSpawnSync', data)
-    callback(backData)
-  } catch {
-  }
-}
-window.WebExecSync = function(data: any, callback: any) {
-  try {
-    const backData = ipcRenderer.sendSync('WebExecSync', data)
-    callback(backData)
-  } catch {
-  }
-}
 window.WebShowOpenDialogSync = function(config: any, callback: any) {
   try {
     const backData = ipcRenderer.sendSync('WebShowOpenDialogSync', config)
@@ -157,40 +143,6 @@ window.WebOpenWindow = function(data: any) {
   try {
     ipcRenderer.send('WebOpenWindow', data)
   } catch {
-  }
-}
-window.WebOpenLyric = function() {
-  try {
-    ipcRenderer.send('WebOpenLyric')
-  } catch {
-  }
-}
-window.WebSendLyric = function(data: any) {
-  try {
-    ipcRenderer.send('WebSendLyric', data)
-  } catch {
-  }
-}
-window.WebCloseLyric = function() {
-  try {
-    ipcRenderer.send('WebCloseLyric')
-  } catch {
-  }
-}
-window.WebConfigureGlobalHotkeys = async function(data: any) {
-  try {
-    return await ipcRenderer.invoke('WebConfigureGlobalHotkeys', data)
-  } catch {
-    return { ok: false, error: 'global hotkey ipc failed' }
-  }
-}
-window.WebOnGlobalHotkey = function(callback: any) {
-  try {
-    const listener = (_event: any, data: any) => callback?.(data)
-    ipcRenderer.on('WebGlobalHotkey', listener)
-    return () => ipcRenderer.removeListener('WebGlobalHotkey', listener)
-  } catch {
-    return () => {}
   }
 }
 window.WebOpenUrl = function(data: any) {
@@ -328,28 +280,6 @@ window.WebMpvSharedTexture = {
   },
   removeClearListener: () => {
     mpvSharedTextureClearCallback = null
-  }
-}
-
-window.MsImageCacheSyncConfig = function(configs: any[]) {
-  try {
-    ipcRenderer.send('MsImageCache:syncConfig', configs)
-  } catch {}
-}
-
-window.MsImageCacheStats = async function() {
-  try {
-    return await ipcRenderer.invoke('MsImageCache:stats')
-  } catch {
-    return { totalBytes: 0, servers: [] }
-  }
-}
-
-window.MsImageCacheClear = async function(serverId?: string) {
-  try {
-    return await ipcRenderer.invoke('MsImageCache:clear', serverId ? { serverId } : {})
-  } catch {
-    return { cleared: 0 }
   }
 }
 
