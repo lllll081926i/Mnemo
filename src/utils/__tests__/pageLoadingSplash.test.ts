@@ -16,6 +16,7 @@ describe('app startup rendering', () => {
     expect(app).not.toContain('PAGE_LOADING_SPLASH_MIN_MS')
     expect(appStore).not.toContain('PageLoading')
     expect(app).toContain("return h('div', { class: 'desktop-loading-empty' })")
+    expect(app).toContain("const PageWorker = defineAsyncComponent(() => import('./layout/PageWorker.vue'))")
     expect(windowSource).not.toContain('splash')
     expect(windowSource).not.toContain('?splash=')
     expect(windowSource).toContain('export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true)')

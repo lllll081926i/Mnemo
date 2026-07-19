@@ -1,5 +1,5 @@
 <script lang="ts">
-import { h } from 'vue'
+import { defineAsyncComponent, h } from 'vue'
 import { useAppStore } from './store'
 import PageMain from './layout/PageMain.vue'
 import './assets/global.css'
@@ -7,16 +7,17 @@ import './assets/design-tokens.css'
 import './assets/fileitem.css'
 import './assets/antd.css'
 import './assets/layout-refactor.css'
-import PageVideoXBTVue from './layout/PageVideoXBT.vue'
-import PageCode from './layout/PageCode.vue'
-import PageOffice from './layout/PageOffice.vue'
-import PagePdf from './layout/PagePdf.vue'
-import PageDocx from './layout/PageDocx.vue'
-import PageSheet from './layout/PageSheet.vue'
-import PageImage from './layout/PageImage.vue'
-import PageVideo from './layout/PageVideo.vue'
-import PageMusic from './layout/PageMusic.vue'
-import PageWorker from './layout/PageWorker.vue'
+
+const PageVideoXBTVue = defineAsyncComponent(() => import('./layout/PageVideoXBT.vue'))
+const PageCode = defineAsyncComponent(() => import('./layout/PageCode.vue'))
+const PageOffice = defineAsyncComponent(() => import('./layout/PageOffice.vue'))
+const PagePdf = defineAsyncComponent(() => import('./layout/PagePdf.vue'))
+const PageDocx = defineAsyncComponent(() => import('./layout/PageDocx.vue'))
+const PageSheet = defineAsyncComponent(() => import('./layout/PageSheet.vue'))
+const PageImage = defineAsyncComponent(() => import('./layout/PageImage.vue'))
+const PageVideo = defineAsyncComponent(() => import('./layout/PageVideo.vue'))
+const PageMusic = defineAsyncComponent(() => import('./layout/PageMusic.vue'))
+const PageWorker = defineAsyncComponent(() => import('./layout/PageWorker.vue'))
 
 export default {
   setup() {
