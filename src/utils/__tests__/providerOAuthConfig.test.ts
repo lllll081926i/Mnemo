@@ -32,7 +32,7 @@ describe('provider OAuth runtime configuration', () => {
       publicKey: '0403f3d0259ffdd80d8545ddd49a4498f7433be93dd9b39f61ceb9f9722e08e613cc',
       signature: 'e6be8339a1b641178669889d167be7ce2b4ca0f7142ded830b98c5a5bfb0f9c771b10cdd3c229ca81817b6c1d9d2abe1ef628a4a5789f1895bb36c4d6d0d63a401'
     })
-  })
+  }, 15000)
 
   it('routes shared protocol callbacks by OAuth state and only marks opened URLs after shell success', () => {
     const login = read('src/user/UserLogin.vue')

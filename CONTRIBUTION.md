@@ -1,4 +1,4 @@
-### 小白羊v3版本源码帮助
+### Mnemov3版本源码帮助
 
 v3采用 ts + vue3 + vite + electron 模板开发
 
@@ -11,9 +11,8 @@ https://github.com/gaozhangmin/aliyunpan.git
 #### 2.打开代码目录，安装依赖
 
 ```cmd
-npm install pnpm -g
-pnpm install
-pnpm config set registry https://registry.npmmirror.com
+npm install
+npm config set registry https://registry.npmmirror.com
 ```
 
 #### 3.环境配置
@@ -80,7 +79,7 @@ export default class Config {
 #### 4.开发调试运行
 
 ```cmd
-pnpm run dev
+npm run dev
 ```
 
 执行命令后会调起electron窗口，配合vscode正常开发调试即可
@@ -88,7 +87,7 @@ pnpm run dev
 #### 5.打包
 
 ```cmd
-pnpm run build:electron
+npm run build:electron
 ```
 
 #### 6.配置管理命令

@@ -14,8 +14,8 @@ release
 
 localVersion
 
-# 包管理器锁文件 - 只保留 pnpm-lock.yaml
-package-lock.json
+# 包管理器锁文件 - 只保留 package-lock.json（npm）
+pnpm-lock.yaml
 yarn.lock
 
 # 环境变量和敏感配置文件
@@ -29,8 +29,6 @@ config/keys.json
 scripts/
 !scripts/
 scripts/*
-!scripts/clouddrive-cli.mjs
-!scripts/clouddrive-mcp.mjs
 !scripts/koodo-reader-smoke.mjs
 !scripts/generate-secrets.mjs
 !scripts/version-utils.mjs
