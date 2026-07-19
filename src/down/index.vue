@@ -40,7 +40,7 @@ watch(
 
 <template>
   <a-layout class="ui-workspace-shell">
-    <a-layout-sider hide-trigger :width="220" class="xbyleft ui-workspace-rail">
+    <a-layout-sider hide-trigger :width="192" class="xbyleft ui-workspace-rail transfer-rail">
       <a-menu class="xbyleftmenu rail-menu" :selected-keys="[appStore.GetAppTabMenu]" @update:selected-keys="appStore.toggleTabMenu('down', $event[0])">
         <a-menu-item key="DowningRight">
           <template #icon><IconFont name="icondownload" /></template>
@@ -90,6 +90,10 @@ watch(
 </template>
 
 <style scoped>
+.transfer-rail {
+  --layout-rail-width: 192px;
+}
+
 .content-body {
   flex: 1;
   min-height: 0;

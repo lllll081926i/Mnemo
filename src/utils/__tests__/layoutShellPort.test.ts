@@ -64,8 +64,9 @@ describe('deep layout shell port', () => {
     expect(css).toContain('overflow: hidden !important')
   })
 
-  it('down/share/setting use 220 rail shells', () => {
-    expect(read('src/down/index.vue')).toContain(':width="220"')
+  it('keeps the transfer rail compact while share and setting use the standard shell', () => {
+    expect(read('src/down/index.vue')).toContain(':width="192"')
+    expect(read('src/down/index.vue')).toContain('--layout-rail-width: 192px')
     expect(read('src/share/index.vue')).toContain(':width="220"')
     expect(read('src/setting/index.vue')).toContain('ui-page-shell')
     expect(read('src/assets/layout-refactor.css')).toContain('--layout-rail-width: 220px')
