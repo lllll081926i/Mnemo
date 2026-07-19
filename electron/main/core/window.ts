@@ -214,11 +214,12 @@ export function createElectronWindow(width: number, height: number, center: bool
       nodeIntegration: true,
       nodeIntegrationInWorker: true,
       sandbox: false,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
+      webSecurity: false,
+      allowRunningInsecureContent: true,
       contextIsolation: false,
       backgroundThrottling: false,
       enableWebSQL: true,
+      disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure',
       preload: getAsarPath('dist/electron/preload/index.js')
     }
   })
@@ -314,12 +315,13 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
-    webPreferences.webSecurity = true
-    webPreferences.allowRunningInsecureContent = false
+    webPreferences.webSecurity = false
+    webPreferences.allowRunningInsecureContent = true
     if (!allowDevTools) webPreferences.devTools = false
   })
   // 处理webview跳转
   win.webContents.addListener('did-attach-webview', (event, webContent) => {
+    void webContent.session.setProxy({ mode: 'direct' }).then(() => webContent.session.closeAllConnections())
     if (allowDevTools) {
       registerDevToolsShortcut(webContent)
     } else {

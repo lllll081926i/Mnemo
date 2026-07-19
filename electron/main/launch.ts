@@ -131,8 +131,14 @@ export default class launch extends EventEmitter {
     if (release().startsWith('6.1')) {
       app.disableHardwareAcceleration()
     }
+    process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+    app.commandLine.appendSwitch('no-sandbox')
     app.commandLine.appendSwitch('disable-renderer-backgrounding')
+    app.commandLine.appendSwitch('disable-site-isolation-trials')
+    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure,BlockInsecurePrivateNetworkRequests')
     app.commandLine.appendSwitch('ignore-connections-limit', 'bj29-enet.cn-beijing.data.alicloudccp.com,bj29-hz.cn-hangzhou.data.alicloudccp.com,bj29.cn-beijing.data.alicloudccp.com,alicloudccp.com,api.aliyundrive.com,aliyundrive.com,api.alipan.com,alipan.com')
+    app.commandLine.appendSwitch('ignore-certificate-errors')
     app.commandLine.appendSwitch('wm-window-animations-disabled')
     app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
     app.commandLine.appendSwitch('force_high_performance_gpu')

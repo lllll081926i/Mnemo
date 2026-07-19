@@ -22,6 +22,7 @@ export default defineConfig(({ command }) => {
   }
 
   const isBuild = command === 'build'
+  const devServerUrl = new URL(pkg.debug.env.VITE_DEV_SERVER_URL)
   return {
     resolve: {
       alias: sharedAlias,
@@ -94,14 +95,11 @@ export default defineConfig(({ command }) => {
       ]),
       renderer()
     ],
-    server:
-      process.env.VSCODE_DEBUG &&
-      (() => {
-        const url = new URL(pkg.debug.env.VITE_DEV_SERVER_URL)
-        return {
-          host: url.hostname,
-          port: +url.port
-        }
-      })()
+    server: {
+      host: devServerUrl.hostname,
+      port: Number(devServerUrl.port),
+      strictPort: true,
+      hmr: true
+    }
   }
 })
