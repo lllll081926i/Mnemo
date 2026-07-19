@@ -28,6 +28,17 @@ describe('deep layout shell port', () => {
     expect(code).toContain('await nextTick()')
   })
 
+  it('loads pinyin search support only for the main drive window', () => {
+    const html = read('index.html')
+    const mainRuntime = read('src/layout/PageMain.ts')
+    const utils = read('src/utils/utils.ts')
+
+    expect(html).not.toContain("src='/pinyinlite_full.min.js'")
+    expect(mainRuntime).toContain('await LoadPinyinLite()')
+    expect(utils).toContain("const PINYIN_LITE_URL = './pinyinlite_full.min.js'")
+    expect(utils).toContain("if (typeof pinyinlite !== 'function') return input.toLowerCase()")
+  })
+
   it('main shell only exposes pan/down/share/setting tabs', () => {
     const page = read('src/layout/PageMain.vue')
     const panes = [...page.matchAll(/a-tab-pane key=["']([^"']+)["']/g)].map((m) => m[1])

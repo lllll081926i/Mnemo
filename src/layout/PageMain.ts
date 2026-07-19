@@ -10,12 +10,14 @@ import PanDAL from '../pan/pandal'
 import UploadingDAL from '../transfer/uploadingdal'
 import { Sleep } from '../utils/format'
 import { createProxyServer } from '../utils/proxyhelper'
+import { LoadPinyinLite } from '../utils/utils'
 
 export function PageMain() {
   if (window.WinMsg) return
   window.WinMsg = WinMsg
   Promise.resolve()
     .then(async () => {
+      if (!(await LoadPinyinLite())) DebugLog.mSaveWarning('Pinyin search support could not be loaded; exact file-name search remains available')
       if (!(await useSettingStore().WebSetProxy())) DebugLog.mSaveWarning('Proxy settings were not applied because the manual proxy is incomplete')
       // 创建代理server
       if (!window.MainProxyServer) {

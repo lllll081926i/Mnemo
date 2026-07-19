@@ -1,4 +1,38 @@
 import { deflateRawSync, inflateRawSync } from 'zlib'
+
+const PINYIN_LITE_URL = './pinyinlite_full.min.js'
+let pinyinLitePromise: Promise<boolean> | undefined
+
+export function LoadPinyinLite(): Promise<boolean> {
+  if (typeof pinyinlite === 'function') return Promise.resolve(true)
+  if (typeof document === 'undefined') return Promise.resolve(false)
+  if (pinyinLitePromise) return pinyinLitePromise
+
+  pinyinLitePromise = new Promise<boolean>((resolve) => {
+    const script = document.createElement('script')
+    const timeout = window.setTimeout(() => finish(false), 10000)
+    const finish = (loaded: boolean) => {
+      window.clearTimeout(timeout)
+      script.removeEventListener('load', handleLoad)
+      script.removeEventListener('error', handleError)
+      resolve(loaded)
+    }
+    const handleLoad = () => finish(typeof pinyinlite === 'function')
+    const handleError = () => finish(false)
+
+    script.src = PINYIN_LITE_URL
+    script.async = true
+    script.dataset.mnemoPinyin = 'true'
+    script.addEventListener('load', handleLoad, { once: true })
+    script.addEventListener('error', handleError, { once: true })
+    document.head.append(script)
+  }).then((loaded) => {
+    if (!loaded) pinyinLitePromise = undefined
+    return loaded
+  })
+
+  return pinyinLitePromise
+}
 import crypto from 'crypto'
 import pkg from '../../package.json'
 import { getUserDataPath } from './electronhelper'
@@ -95,6 +129,7 @@ export function UnGzipObject(input: Buffer): object {
 
 export function HanToPin(input: string): string {
   if (!input) return ''
+  if (typeof pinyinlite !== 'function') return input.toLowerCase()
   // eslint-disable-next-line no-undef
   const arr = pinyinlite(input, { keepUnrecognized: true })
   const strarr = new Array<string>(arr.length * 2 + 1)
