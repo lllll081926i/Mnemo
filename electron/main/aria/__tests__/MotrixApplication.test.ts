@@ -32,14 +32,6 @@ vi.mock('aria2-lib', () => ({
   }))
 }))
 
-vi.mock('@motrix/nat-api', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    map: vi.fn().mockResolvedValue(undefined),
-    unmap: vi.fn().mockResolvedValue(undefined),
-    destroy: vi.fn().mockResolvedValue(undefined)
-  }))
-}))
-
 describe('MotrixApplication', () => {
   it('can be instantiated', async () => {
     const { default: MotrixApplication } = await import('../MotrixApplication')

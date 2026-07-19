@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted } from 'vue'
-import fs from 'fs'
-import path from 'path'
-import { Clock3, Folder, Trash2, UploadCloud, X } from 'lucide-vue-next'
+import { computed, reactive, ref } from 'vue'
+import { Folder, X } from 'lucide-vue-next'
 import DownDAL from './DownDAL'
 import { useSettingStore } from '../store'
 import message from '../utils/message'
 import { parseExternalDownloadPayload } from './integration/protocolPayload'
-import { parseTorrentMeta, type ParsedTorrentFile } from './integration/torrentMeta'
 
 const props = defineProps({
   visible: {
@@ -22,32 +19,9 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible'])
 
-type ExternalSourceType = 'url' | 'magnet' | 'torrent' | 'torrent-url'
-type TaskTab = 'uri' | 'torrent'
-
-interface LocalTorrentItem {
-  source: string
-  fileName: string
-  displayName: string
-  torrentBase64: string
-  files: ParsedTorrentFile[]
-  selectedFileIndexes: number[]
-}
-
-interface DownloadEntry {
-  source: string
-  sourceType: ExternalSourceType
-  fileName: string
-  torrentBase64?: string
-  selectFile?: string
-}
-
 const settingStore = useSettingStore()
 const okLoading = ref(false)
-const activeTab = ref<TaskTab>('uri')
 const showAdvanced = ref(false)
-const dragOver = ref(false)
-const localTorrent = ref<LocalTorrentItem | null>(null)
 const form = reactive({
   sources: '',
   fileName: '',
@@ -57,12 +31,10 @@ const form = reactive({
   authorization: '',
   referer: '',
   cookie: '',
-  allProxy: '',
-  newTaskShowDownloading: true
+  allProxy: ''
 })
 
 const maxSplit = computed(() => Math.max(1, settingStore.downThreadMax || 64, 64))
-const selectedFileSet = computed(() => new Set(localTorrent.value?.selectedFileIndexes || []))
 
 const defaultSavePath = () => {
   const ariaRemote = settingStore.ariaState === 'remote'
@@ -79,52 +51,23 @@ const resetForm = () => {
   form.referer = ''
   form.cookie = ''
   form.allProxy = ''
-  form.newTaskShowDownloading = true
-  localTorrent.value = null
   showAdvanced.value = false
-  activeTab.value = props.initialUrl ? 'uri' : 'uri'
 }
 
-const isTorrentUrl = (source: string) => {
-  if (!/^https?:\/\//i.test(source)) return false
-  try {
-    return decodeURIComponent(new URL(source).pathname).toLowerCase().endsWith('.torrent')
-  } catch {
-    return /\.torrent(?:\?|#|$)/i.test(source)
-  }
-}
-
-const parseSourceLines = () => {
-  return form.sources
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((source) => {
-      const sourceType: ExternalSourceType = /^magnet:\?/i.test(source)
-        ? 'magnet'
-        : isTorrentUrl(source)
-          ? 'torrent-url'
-          : 'url'
-      return { source, sourceType }
-    })
-}
+const parseSourceLines = () => form.sources
+  .split(/\r?\n/)
+  .map(line => line.trim())
+  .filter(Boolean)
 
 const normalizeSplit = () => {
-  const n = Number(form.split) || 1
-  form.split = Math.min(Math.max(1, n), maxSplit.value)
+  const value = Number(form.split) || 1
+  form.split = Math.min(Math.max(1, value), maxSplit.value)
 }
 
-const handleOpen = () => {
-  resetForm()
-}
-
-const handleHide = () => {
-  emit('update:visible', false)
-}
+const handleHide = () => emit('update:visible', false)
 
 const handleClose = () => {
   okLoading.value = false
-  dragOver.value = false
 }
 
 const handleSelectSavePath = () => {
@@ -134,94 +77,14 @@ const handleSelectSavePath = () => {
     defaultPath: form.savePath || defaultSavePath(),
     properties: ['openDirectory', 'createDirectory', 'showHiddenFiles', 'noResolveAliases', 'dontAddToRecent']
   }, (result: string[] | undefined) => {
-    if (result && result[0]) form.savePath = result[0]
+    if (result?.[0]) form.savePath = result[0]
   })
-}
-
-const buildTorrentItem = (filePath: string): LocalTorrentItem => {
-  const buf = fs.readFileSync(filePath)
-  const torrentBase64 = buf.toString('base64')
-  const parsed = parseTorrentMeta(buf)
-  const displayName = parsed.name || path.basename(filePath)
-  return {
-    source: filePath,
-    fileName: path.basename(filePath, path.extname(filePath)) || displayName || 'BT 种子任务',
-    displayName,
-    torrentBase64,
-    files: parsed.files,
-    selectedFileIndexes: parsed.files.map((file) => file.index)
-  }
-}
-
-const loadTorrentFile = (filePath: string) => {
-  try {
-    localTorrent.value = buildTorrentItem(filePath)
-    activeTab.value = 'torrent'
-  } catch (e: any) {
-    message.error('读取种子失败: ' + (e.message || filePath))
-  }
-}
-
-const handleImportTorrent = () => {
-  if (!window.WebShowOpenDialogSync) return
-  window.WebShowOpenDialogSync({
-    title: '选择 BT 种子文件',
-    defaultPath: form.savePath || defaultSavePath(),
-    filters: [{ name: 'Torrent', extensions: ['torrent'] }],
-    properties: ['openFile', 'showHiddenFiles', 'noResolveAliases', 'dontAddToRecent']
-  }, (result: string[] | undefined) => {
-    if (result?.[0]) loadTorrentFile(result[0])
-  })
-}
-
-const handleDrop = (event: DragEvent) => {
-  dragOver.value = false
-  const filePath = (event.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined)?.path
-  if (!filePath) return
-  if (!filePath.toLowerCase().endsWith('.torrent')) {
-    message.error('请先选择种子文件')
-    return
-  }
-  loadTorrentFile(filePath)
-}
-
-const handleRemoveTorrent = () => {
-  localTorrent.value = null
-}
-
-const toggleTorrentFile = (index: number) => {
-  if (!localTorrent.value) return
-  const selected = new Set(localTorrent.value.selectedFileIndexes)
-  if (selected.has(index)) selected.delete(index)
-  else selected.add(index)
-  localTorrent.value.selectedFileIndexes = [...selected].sort((a, b) => a - b)
-}
-
-const toggleAllTorrentFiles = (checked: boolean) => {
-  if (!localTorrent.value) return
-  localTorrent.value.selectedFileIndexes = checked ? localTorrent.value.files.map((file) => file.index) : []
-}
-
-const formatBytes = (value: number | string) => {
-  const n = typeof value === 'number' ? value : parseInt(value || '0')
-  if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB'
-  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB'
-  if (n >= 1024) return (n / 1024).toFixed(2) + ' KB'
-  return n + ' B'
 }
 
 const validateSources = () => {
-  if (activeTab.value === 'torrent') {
-    if (!localTorrent.value) return '请先选择种子文件'
-    if (!localTorrent.value.selectedFileIndexes.length) return '请至少选择一个种子文件'
-  } else {
-    const lines = parseSourceLines()
-    for (const item of lines) {
-      if (item.sourceType === 'magnet') continue
-      if (!/^https?:\/\//i.test(item.source)) return '仅支持 http/https、magnet 链接或本地 .torrent 文件'
-    }
-    if (!lines.length) return '请输入下载链接'
-  }
+  const sources = parseSourceLines()
+  if (!sources.length) return '请输入下载链接'
+  if (sources.some(source => !parseExternalDownloadPayload(source))) return '仅支持 HTTP/HTTPS 下载链接，不支持 magnet 或种子文件'
   if (!form.savePath.trim()) return '请选择保存目录'
   return ''
 }
@@ -232,34 +95,17 @@ const handleCreate = async () => {
     message.error(error)
     return
   }
+
   normalizeSplit()
   okLoading.value = true
-  const entries: DownloadEntry[] = []
-  if (activeTab.value === 'torrent' && localTorrent.value) {
-    const selected = localTorrent.value.selectedFileIndexes
-    entries.push({
-      source: localTorrent.value.source,
-      sourceType: 'torrent',
-      fileName: form.fileName.trim() || localTorrent.value.displayName || localTorrent.value.fileName,
-      torrentBase64: localTorrent.value.torrentBase64,
-      selectFile: selected.length === localTorrent.value.files.length ? undefined : selected.join(',')
-    })
-  } else {
-    entries.push(...parseSourceLines().map((item) => ({
-      ...item,
-      fileName: form.fileName.trim()
-    })))
-  }
-
+  const sources = parseSourceLines()
   let successCount = 0
-  for (const entry of entries) {
+
+  for (const source of sources) {
     const result = DownDAL.aAddExternalDownload({
-      source: entry.source,
-      sourceType: entry.sourceType,
+      source,
       savePath: form.savePath.trim(),
-      fileName: entries.length === 1 ? entry.fileName : '',
-      torrentBase64: entry.torrentBase64,
-      selectFile: entry.selectFile,
+      fileName: sources.length === 1 ? form.fileName.trim() : '',
       split: form.split,
       userAgent: form.userAgent.trim(),
       authorization: form.authorization.trim(),
@@ -270,6 +116,7 @@ const handleCreate = async () => {
     if (result.success) successCount++
     else message.error(result.message || '创建下载任务失败')
   }
+
   okLoading.value = false
   if (successCount > 0) {
     message.success(`已创建 ${successCount} 个下载任务`)
@@ -277,521 +124,232 @@ const handleCreate = async () => {
   }
 }
 
-onMounted(() => {
-  if (typeof window !== 'undefined' && window.onExternalDownloadOpen) {
-    window.onExternalDownloadOpen((payload: string) => {
-      const parsed = parseExternalDownloadPayload(payload)
-      if (!parsed) return
-      resetForm()
-      if (parsed.sourceType === 'torrent' && parsed.filePath) {
-        loadTorrentFile(parsed.filePath)
-        form.sources = ''
-      } else {
-        form.sources = parsed.source
-        activeTab.value = 'uri'
-      }
-      form.savePath = defaultSavePath()
-      emit('update:visible', true)
-    })
-  }
-})
 </script>
 
 <template>
   <a-modal
     :visible="props.visible"
-    modal-class="boxplayer-add-task-modal"
+    modal-class="download-task-modal"
     :footer="false"
     :unmount-on-close="true"
     :mask-closable="false"
     :closable="false"
-    :width="'67vw'"
+    :width="620"
     @cancel="handleHide"
-    @before-open="handleOpen"
+    @before-open="resetForm"
     @close="handleClose"
   >
-    <div class="boxplayer-add-task">
-      <button class="boxplayer-close" type="button" aria-label="Close" @click="handleHide">
-        <X :size="20" />
-      </button>
-      <div class="boxplayer-tabs">
-        <button
-          class="boxplayer-tab"
-          :class="{ active: activeTab === 'uri' }"
-          type="button"
-          @click="activeTab = 'uri'"
-        >
-          链接任务
+    <div class="download-task">
+      <header class="download-task-header">
+        <span>新建下载</span>
+        <button class="icon-button" type="button" title="关闭" aria-label="关闭" @click="handleHide">
+          <X :size="18" />
         </button>
-        <button
-          class="boxplayer-tab"
-          :class="{ active: activeTab === 'torrent' }"
-          type="button"
-          @click="activeTab = 'torrent'"
-        >
-          种子任务
-        </button>
-      </div>
+      </header>
 
-      <div class="boxplayer-body">
-        <div v-if="activeTab === 'uri'" class="uri-pane">
-          <a-textarea
-            v-model="form.sources"
-            class="boxplayer-uri-input"
-            :auto-size="{ minRows: 3, maxRows: 5 }"
-            placeholder="添加多个下载链接时，请确保每行只有一个链接（支持磁力链）"
-            @keydown.stop
-          />
-        </div>
-        <div v-else class="torrent-pane">
-          <div
-            v-if="!localTorrent"
-            class="torrent-drop"
-            :class="{ dragging: dragOver }"
-            @click="handleImportTorrent"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="handleDrop"
-          >
-            <UploadCloud :size="20" />
-            <span>将种子拖到此处，或点击选择</span>
-          </div>
-          <div v-else class="torrent-selected">
-            <div class="torrent-info-row">
-              <span class="torrent-name" :title="localTorrent.displayName">{{ localTorrent.displayName }}</span>
-              <button class="icon-btn" type="button" aria-label="移除种子" @click="handleRemoveTorrent">
-                <Trash2 :size="16" />
-              </button>
-            </div>
-            <div class="torrent-file-head">
-              <a-checkbox
-                :model-value="localTorrent.selectedFileIndexes.length === localTorrent.files.length"
-                :indeterminate="localTorrent.selectedFileIndexes.length > 0 && localTorrent.selectedFileIndexes.length < localTorrent.files.length"
-                @change="(checked:boolean) => toggleAllTorrentFiles(checked)"
-              />
-              <span class="torrent-file-title">文件名</span>
-              <span class="torrent-file-size">大小</span>
-            </div>
-            <div class="torrent-file-list">
-              <div
-                v-for="file in localTorrent.files"
-                :key="file.index"
-                class="torrent-file-item"
-                @click="toggleTorrentFile(file.index)"
-              >
-                <a-checkbox :model-value="selectedFileSet.has(file.index)" @click.stop="toggleTorrentFile(file.index)" />
-                <span class="torrent-file-title" :title="file.path">{{ file.path }}</span>
-                <span class="torrent-file-size">{{ formatBytes(file.length) }}</span>
-              </div>
-            </div>
-          </div>
+      <div class="download-task-body">
+        <a-textarea
+          v-model="form.sources"
+          class="source-input"
+          :auto-size="{ minRows: 3, maxRows: 6 }"
+          placeholder="每行一个 HTTP/HTTPS 下载链接"
+          @keydown.stop
+        />
+
+        <div class="form-grid">
+          <label for="download-name">重命名</label>
+          <a-input id="download-name" v-model.trim="form.fileName" placeholder="选填" />
+          <label for="download-split">分片数</label>
+          <a-input-number id="download-split" v-model="form.split" :min="1" :max="maxSplit" mode="button" @blur="normalizeSplit" />
         </div>
 
-        <div class="boxplayer-form-grid">
-          <label>重命名:</label>
-          <a-input v-model.trim="form.fileName" placeholder="选填" />
-          <label>分片数:</label>
-          <a-input-number
-            v-model="form.split"
-            :min="1"
-            :max="maxSplit"
-            mode="button"
-            @blur="normalizeSplit"
-          />
-        </div>
-
-        <div class="boxplayer-dir-row">
-          <label>存储路径:</label>
-          <div class="boxplayer-dir-input">
-            <button class="dir-prefix" type="button" aria-label="历史路径">
-              <Clock3 :size="18" />
-            </button>
-            <a-input v-model="form.savePath" readonly />
-            <button class="dir-suffix" type="button" aria-label="选择目录" @click="handleSelectSavePath">
-              <Folder :size="20" />
+        <div class="path-row">
+          <label for="download-path">存储路径</label>
+          <div class="path-input">
+            <a-input id="download-path" v-model="form.savePath" readonly />
+            <button class="path-button" type="button" title="选择目录" aria-label="选择目录" @click="handleSelectSavePath">
+              <Folder :size="18" />
             </button>
           </div>
         </div>
 
-        <div v-if="showAdvanced" class="boxplayer-advanced">
-          <div class="advanced-row">
-            <label>User-Agent:</label>
-            <a-textarea v-model="form.userAgent" :auto-size="{ minRows: 2, maxRows: 3 }" />
+        <div v-if="showAdvanced" class="advanced-settings">
+          <div class="form-grid advanced-grid">
+            <label for="download-agent">User-Agent</label>
+            <a-input id="download-agent" v-model="form.userAgent" />
+            <label for="download-referer">Referer</label>
+            <a-input id="download-referer" v-model="form.referer" />
           </div>
           <div class="advanced-row">
-            <label>Authorization:</label>
-            <a-textarea v-model="form.authorization" :auto-size="{ minRows: 2, maxRows: 3 }" />
+            <label for="download-authorization">Authorization</label>
+            <a-input id="download-authorization" v-model="form.authorization" />
           </div>
           <div class="advanced-row">
-            <label>Referer:</label>
-            <a-textarea v-model="form.referer" :auto-size="{ minRows: 2, maxRows: 3 }" />
+            <label for="download-cookie">Cookie</label>
+            <a-textarea id="download-cookie" v-model="form.cookie" :auto-size="{ minRows: 2, maxRows: 3 }" />
           </div>
           <div class="advanced-row">
-            <label>Cookie:</label>
-            <a-textarea v-model="form.cookie" :auto-size="{ minRows: 2, maxRows: 3 }" />
-          </div>
-          <div class="advanced-row">
-            <label>代理:</label>
-            <a-input v-model="form.allProxy" placeholder="[http://][USER:PASSWORD@]HOST[:PORT]" />
-          </div>
-          <div class="advanced-row advanced-check">
-            <span></span>
-            <a-checkbox v-model="form.newTaskShowDownloading">提交后跳转到下载中</a-checkbox>
+            <label for="download-proxy">代理</label>
+            <a-input id="download-proxy" v-model="form.allProxy" placeholder="[http://][USER:PASSWORD@]HOST[:PORT]" />
           </div>
         </div>
       </div>
 
-      <div class="boxplayer-footer">
+      <footer class="download-task-footer">
         <a-checkbox v-model="showAdvanced">高级选项</a-checkbox>
-        <div class="boxplayer-footer-actions">
-          <a-button size="small" @click="handleHide">取 消</a-button>
-          <a-button size="small" type="primary" :loading="okLoading" @click="handleCreate">提 交</a-button>
+        <div class="footer-actions">
+          <a-button size="small" @click="handleHide">取消</a-button>
+          <a-button size="small" type="primary" :loading="okLoading" @click="handleCreate">提交</a-button>
         </div>
-      </div>
+      </footer>
     </div>
   </a-modal>
 </template>
 
 <style scoped>
-:global(.boxplayer-add-task-modal) {
-  max-width: 632px;
-  min-width: 380px;
+:global(.download-task-modal) {
+  min-width: 420px;
   padding: 0;
   overflow: hidden;
   border-radius: 5px;
 }
 
-:global(.boxplayer-add-task-modal .arco-modal-header) {
+:global(.download-task-modal .arco-modal-header) {
   display: none;
 }
 
-:global(.boxplayer-add-task-modal .arco-modal-body) {
+:global(.download-task-modal .arco-modal-body) {
   padding: 0;
 }
 
-.boxplayer-add-task {
-  position: relative;
-  color: var(--color-text-2);
-  background: var(--color-bg-1);
+.download-task {
+  color: var(--mn-text-primary, #171a1f);
+  background: var(--mn-surface, #fff);
 }
 
-.boxplayer-close {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: var(--color-text-3);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.boxplayer-tabs {
-  display: flex;
-  gap: 48px;
-  margin: 0 24px;
-  padding-top: 24px;
-  border-bottom: 2px solid var(--color-border-2);
-}
-
-.boxplayer-tab {
-  position: relative;
-  height: 40px;
-  padding: 0;
-  color: var(--color-text-1);
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 40px;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.boxplayer-tab.active {
-  color: rgb(var(--primary-6));
-}
-
-.boxplayer-tab.active::after {
-  position: absolute;
-  right: 0;
-  bottom: -2px;
-  left: 0;
-  height: 3px;
-  background: rgb(var(--primary-6));
-  content: '';
-}
-
-.boxplayer-body {
-  padding: 20px 24px 24px;
-}
-
-.uri-pane {
-  margin-bottom: 16px;
-}
-
-.boxplayer-uri-input :deep(textarea) {
-  min-height: 100px;
-  padding: 10px 12px;
-  color: var(--color-text-2);
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 22px;
-  border-color: var(--color-border-2);
-  border-radius: 5px;
-  resize: none;
-}
-
-.boxplayer-uri-input :deep(textarea:focus),
-.boxplayer-uri-input :deep(textarea.arco-textarea-focus) {
-  border-color: rgb(var(--primary-6));
-}
-
-.boxplayer-uri-input :deep(textarea::placeholder) {
-  color: var(--color-text-4);
-}
-
-.torrent-drop {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100px;
-  gap: 8px;
-  color: var(--color-text-3);
-  font-size: 14px;
-  border: 2px dashed var(--color-border-2);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.torrent-drop.dragging,
-.torrent-drop:hover {
-  color: rgb(var(--primary-6));
-  border-color: rgb(var(--primary-6));
-}
-
-.torrent-selected {
-  min-height: 100px;
-}
-
-.torrent-info-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  align-items: center;
-  margin-bottom: 8px;
-  color: var(--color-text-2);
-  font-size: 14px;
-}
-
-.torrent-name,
-.torrent-file-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--color-text-3);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.torrent-file-head,
-.torrent-file-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 96px;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-
-.torrent-file-head {
-  color: var(--color-text-3);
-  background: var(--color-fill-1);
-  border: 1px solid var(--color-border-2);
-}
-
-.torrent-file-list {
-  max-height: 168px;
-  overflow-y: auto;
-  border: 1px solid var(--color-border-2);
-  border-top: 0;
-}
-
-.torrent-file-item {
-  color: var(--color-text-2);
-  cursor: pointer;
-}
-
-.torrent-file-item:hover {
-  background: var(--color-fill-1);
-}
-
-.torrent-file-size {
-  color: var(--color-text-3);
-  text-align: right;
-  white-space: nowrap;
-}
-
-.boxplayer-form-grid {
-  display: grid;
-  grid-template-columns: 80px minmax(0, 1fr) 72px 180px;
-  align-items: center;
-  gap: 16px 12px;
-  margin-top: 20px;
-}
-
-.boxplayer-form-grid label,
-.boxplayer-dir-row label,
-.advanced-row label {
-  color: var(--color-text-2);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.boxplayer-form-grid :deep(.arco-input-wrapper),
-.boxplayer-form-grid :deep(.arco-input-number),
-.boxplayer-dir-input :deep(.arco-input-wrapper) {
-  height: auto;
-  color: var(--color-text-2);
-  font-size: 14px;
-  background: var(--color-bg-2);
-  border-color: var(--color-border-2);
-  border-radius: 5px;
-}
-
-.boxplayer-form-grid :deep(.arco-input),
-.boxplayer-dir-input :deep(.arco-input) {
-  font-size: 14px;
-  font-weight: 400;
-}
-
-.boxplayer-form-grid :deep(.arco-input::placeholder) {
-  color: var(--color-text-4);
-}
-
-.boxplayer-form-grid :deep(.arco-input-number) {
-  width: 180px;
-}
-
-.boxplayer-dir-row {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  align-items: center;
-  margin-top: 16px;
-}
-
-.boxplayer-dir-input {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 48px;
-}
-
-.dir-prefix,
-.dir-suffix {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 36px;
-  color: var(--color-text-3);
-  background: var(--color-fill-1);
-  border: 1px solid var(--color-border-2);
-  cursor: pointer;
-}
-
-.dir-prefix {
-  border-radius: 5px 0 0 5px;
-}
-
-.dir-suffix {
-  border-radius: 0 5px 5px 0;
-}
-
-.boxplayer-dir-input :deep(.arco-input-wrapper) {
-  border-right: 0;
-  border-left: 0;
-  border-radius: 0;
-}
-
-.boxplayer-advanced {
-  display: grid;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.advanced-row {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  align-items: center;
-}
-
-.advanced-check {
-  align-items: center;
-}
-
-.boxplayer-footer {
+.download-task-header,
+.download-task-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 56px;
-  padding: 0 24px;
-  background: var(--color-fill-1);
+  min-height: 46px;
+  padding: 0 18px;
 }
 
-.boxplayer-footer :deep(.arco-checkbox-label) {
-  color: var(--color-text-2);
-  font-size: 14px;
-  font-weight: 400;
+.download-task-header {
+  color: var(--mn-text-primary, #171a1f);
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--mn-border, #e5e7eb);
 }
 
-.boxplayer-footer-actions {
+.download-task-body {
   display: flex;
+  flex-direction: column;
   gap: 12px;
+  padding: 16px 18px;
 }
 
-.boxplayer-footer-actions :deep(.arco-btn-primary) {
-  background: rgb(var(--primary-6));
+.source-input {
+  width: 100%;
 }
 
-@media (max-width: 720px) {
-  :global(.boxplayer-add-task-modal) {
+.form-grid {
+  display: grid;
+  grid-template-columns: 64px minmax(160px, 1fr) 52px 132px;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.form-grid label,
+.path-row > label,
+.advanced-row > label {
+  color: var(--mn-text-secondary, #4b5563);
+  font-size: 13px;
+}
+
+.path-row,
+.advanced-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.path-input {
+  display: flex;
+  min-width: 0;
+}
+
+.path-input :deep(.arco-input-wrapper) {
+  border-radius: 4px 0 0 4px;
+}
+
+.icon-button,
+.path-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--mn-text-secondary, #4b5563);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+.path-button {
+  width: 36px;
+  flex: 0 0 36px;
+  border: 1px solid var(--mn-border-strong, #cfd4dc);
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.icon-button:hover,
+.path-button:hover {
+  color: var(--mn-primary, #356ae6);
+  background: var(--mn-primary-soft, #eef4ff);
+}
+
+.advanced-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mn-border, #e5e7eb);
+}
+
+.advanced-grid {
+  grid-template-columns: 78px minmax(120px, 1fr) 52px minmax(120px, 1fr);
+}
+
+.advanced-row {
+  grid-template-columns: 78px minmax(0, 1fr);
+}
+
+.download-task-footer {
+  border-top: 1px solid var(--mn-border, #e5e7eb);
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  :global(.download-task-modal) {
     width: calc(100vw - 24px) !important;
     min-width: 0;
   }
 
-  .boxplayer-tabs {
-    gap: 24px;
-    margin: 0 16px;
-  }
-
-  .boxplayer-body,
-  .boxplayer-footer {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-
-  .boxplayer-form-grid,
-  .boxplayer-dir-row,
-  .advanced-row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .boxplayer-dir-input {
-    grid-template-columns: 40px minmax(0, 1fr) 40px;
+  .form-grid,
+  .advanced-grid {
+    grid-template-columns: 64px minmax(0, 1fr);
   }
 }
 </style>

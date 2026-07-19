@@ -10,7 +10,7 @@ const sharedAlias = {
   '@shared': path.resolve(__dirname, 'shared'),
   '@main':   path.resolve(__dirname, 'electron/main')
 }
-const electronMainExternal = [...Object.keys('dependencies' in pkg ? pkg.dependencies : {}), '@motrix/nat-api', 'aria2-lib']
+const electronMainExternal = [...Object.keys('dependencies' in pkg ? pkg.dependencies : {}), 'aria2-lib']
 
 // https://vitejs.dev/config/
 // @ts-ignore
@@ -22,7 +22,10 @@ export default defineConfig(({ command }) => {
 
   const isBuild = command === 'build'
   return {
-    resolve: { alias: sharedAlias },
+    resolve: {
+      alias: sharedAlias,
+      extensions: ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']
+    },
     build: {
       rollupOptions: {
         output: {

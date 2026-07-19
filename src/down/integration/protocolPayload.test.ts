@@ -2,14 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { parseExternalDownloadPayload } from './protocolPayload'
 
 describe('parseExternalDownloadPayload', () => {
-  it('accepts magnet links', () => {
-    expect(parseExternalDownloadPayload('magnet:?xt=urn:btih:abc'))
-      .toEqual({ source: 'magnet:?xt=urn:btih:abc', sourceType: 'magnet' })
+  it('rejects magnet links', () => {
+    expect(parseExternalDownloadPayload('magnet:?xt=urn:btih:abc')).toBeNull()
   })
 
-  it('accepts torrent URLs', () => {
-    expect(parseExternalDownloadPayload('https://example.com/a.torrent'))
-      .toEqual({ source: 'https://example.com/a.torrent', sourceType: 'torrent-url' })
+  it('rejects torrent URLs', () => {
+    expect(parseExternalDownloadPayload('https://example.com/a.torrent')).toBeNull()
   })
 
   it('accepts http URL', () => {
@@ -17,9 +15,8 @@ describe('parseExternalDownloadPayload', () => {
       .toEqual({ source: 'https://example.com/big.zip', sourceType: 'url' })
   })
 
-  it('accepts local torrent file path', () => {
-    expect(parseExternalDownloadPayload('/tmp/a.torrent'))
-      .toEqual({ source: '/tmp/a.torrent', sourceType: 'torrent', filePath: '/tmp/a.torrent' })
+  it('rejects local torrent file path', () => {
+    expect(parseExternalDownloadPayload('/tmp/a.torrent')).toBeNull()
   })
 
   it('rejects unsupported schemes', () => {

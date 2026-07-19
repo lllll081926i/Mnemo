@@ -255,24 +255,9 @@ export async function AriaApplyAdvancedOptions(): Promise<boolean> {
   if (!client) return false
   try {
     const settingStore = useSettingStore()
-    const btTracker = settingStore.ariaBtTracker.split(/[\r\n,]+/).filter(Boolean).join(',')
-    const uploadLimit = `${settingStore.ariaMaxOverallUploadLimit || 0}K`
     const options: Record<string, string> = {
-      ...(btTracker ? { 'bt-tracker': btTracker } : {}),
-      'max-overall-upload-limit': uploadLimit,
-      'seed-ratio': String(settingStore.ariaSeedRatio || 2),
-      'seed-time': String(settingStore.ariaSeedTime || 2880),
-      // ↓ Download 迁移选项
       'max-connection-per-server': String(settingStore.ariaMaxConnectionPerServer || 16),
-      'bt-force-encryption': settingStore.ariaBtForceEncryption ? 'true' : 'false',
-      'enable-upnp': settingStore.ariaEnableUpnp ? 'true' : 'false',
-      'listen-port': String(settingStore.ariaListenPort || 6881),
-      'dht-listen-port': String(settingStore.ariaDhtListenPort || 6881),
-      'bt-save-metadata': settingStore.ariaBtSaveMetadata ? 'true' : 'false',
-      'follow-torrent': settingStore.ariaBtAutoDownloadContent ? 'true' : 'false',
-      'follow-metalink': settingStore.ariaBtAutoDownloadContent ? 'true' : 'false',
-      'pause-metadata': settingStore.ariaBtAutoDownloadContent ? 'false' : 'true',
-      'continue': settingStore.ariaContinueDownload ? 'true' : 'false',
+      'continue': settingStore.ariaContinueDownload ? 'true' : 'false'
     }
     if (settingStore.ariaUserAgent) {
       options['user-agent'] = settingStore.ariaUserAgent
@@ -389,10 +374,9 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
     const info = file.Info
     const token = UserDAL.GetUserToken(info.user_id)
     const sourceType = info.sourceType || ''
-    const isExternalSource = sourceType === 'url' || sourceType === 'magnet' || sourceType === 'torrent' || sourceType === 'torrent-url'
-    const isBtSource = sourceType === 'magnet' || sourceType === 'torrent' || sourceType === 'torrent-url'
+    const isExternalSource = sourceType === 'url'
     const presetSource = typeof file.Down.DownUrl === 'string' ? file.Down.DownUrl.trim() : ''
-    const hasPresetDownloadUrl = /^https?:\/\//i.test(presetSource) || /^magnet:\?/i.test(presetSource) || sourceType === 'torrent'
+    const hasPresetDownloadUrl = /^https?:\/\//i.test(presetSource)
     if ((!token || !token.access_token) && !isExternalSource && !(info.drive_id === 'media_server' && hasPresetDownloadUrl)) return '账号失效，操作取消'
     if (info.isDir) {
       const dirFull = path.join(info.DownSavePath, info.name)
@@ -470,7 +454,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
       let downloadUrl = typeof file.Down.DownUrl === 'string' ? file.Down.DownUrl : ''
       downloadUrl = downloadUrl.trim()
       let resolvedDownloadHeaders: Record<string, string> = {}
-      if (downloadUrl && !isBtSource && downloadUrl.includes('x-oss-expires=')) {
+      if (downloadUrl && downloadUrl.includes('x-oss-expires=')) {
         const expires = downloadUrl.split('x-oss-expires=')[1].split('&')[0]
         const lastTime = parseInt(expires) - Date.now() / 1000
         const needTime = (info.size + 1) / 1024 / 1024
@@ -494,10 +478,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         }
         file.Down.DownUrl = downloadUrl
       }
-      if (sourceType === 'torrent') {
-        downloadUrl = ''
-        if (!info.torrentBase64) return '种子内容为空'
-      } else if (!downloadUrl) {
+      if (!downloadUrl) {
         console.warn('[aria2] no downloadUrl before addUri', info.drive_id, info.file_id)
         return '生成下载链接失败, 下载地址为空'
       }
@@ -506,11 +487,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         console.warn('[aria2] normalize url', info.drive_id, info.file_id)
         downloadUrl = safeUrl
       }
-      if (sourceType === 'magnet' && !/^magnet:\?/i.test(downloadUrl)) {
-        console.warn('[aria2] invalid magnet', info.drive_id, info.file_id, downloadUrl)
-        return '磁力链接无效'
-      }
-      if ((sourceType !== 'magnet' && sourceType !== 'torrent') && !/^https?:\/\//i.test(downloadUrl)) {
+      if (!/^https?:\/\//i.test(downloadUrl) || /\.torrent(?:[?#].*)?$/i.test(downloadUrl)) {
         console.warn('[aria2] invalid downloadUrl', info.drive_id, info.file_id, downloadUrl)
         return '生成下载链接失败, 下载地址无效'
       }
@@ -580,35 +557,10 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         userAgent,
         headers,
         outFileName,
-        sourceType,
-        selectFile: info.selectFile,
         allProxy: info.allProxy
       })
       const client = GetAria()
       if (!client) return 'Aria2未连接，请检查本地或远程Aria连接状态'
-      if (sourceType === 'torrent') {
-        let torrentError: any = undefined
-        const torrentResult: any = await callAriaClient(client, 'aria2.addTorrent', info.torrentBase64, [], addOptions, (error: unknown) => {
-          torrentError = error
-        })
-        const torrentGid = getAriaAddUriGid(torrentResult)
-        if (torrentGid) {
-          info.GID = torrentGid
-          return 'success'
-        }
-        if (isAriaDuplicateGidError(torrentResult) || isAriaDuplicateGidError(torrentError)) return 'success'
-        delete addOptions.gid
-        torrentError = undefined
-        const fallbackTorrentResult: any = await callAriaClient(client, 'aria2.addTorrent', info.torrentBase64, [], addOptions, (error: unknown) => {
-          torrentError = error
-        })
-        const fallbackTorrentGid = getAriaAddUriGid(fallbackTorrentResult)
-        if (fallbackTorrentGid) {
-          info.GID = fallbackTorrentGid
-          return 'success'
-        }
-        return '创建BT任务失败，稍后自动重试' + ((fallbackTorrentResult && fallbackTorrentResult.message) || (torrentError && torrentError.message) || (torrentResult && torrentResult.message) || '')
-      }
       const multicall = [
         ['aria2.forceRemove', info.GID],
         ['aria2.removeDownloadResult', info.GID],
@@ -677,10 +629,6 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
 
 export function AriaHashFile(downitem: IStateDownFile): { DownID: string; Check: boolean } {
   const DownID = downitem.DownID
-  const sourceType = downitem.Info.sourceType || ''
-  if (sourceType === 'magnet' || sourceType === 'torrent' || sourceType === 'torrent-url') {
-    return { DownID, Check: true }
-  }
   const dir = downitem.Info.DownSavePath
   const out = downitem.Info.ariaRemote ? downitem.Info.name : downitem.Info.name + '.td'
   const sha1 = downitem.Info.sha1

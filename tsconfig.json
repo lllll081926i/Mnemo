@@ -23,8 +23,5 @@
   ],
   "exclude": [
     "shared/__tests__"
-  ],
-  "references": [
-    { "path": "./tsconfig.node.json" }
   ]
 }

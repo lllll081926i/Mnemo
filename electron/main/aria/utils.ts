@@ -3,7 +3,7 @@ import { existsSync, lstatSync } from 'node:fs'
 import { app } from 'electron'
 import {
   IS_PORTABLE, PORTABLE_EXECUTABLE_DIR,
-  ENGINE_MAX_CONNECTION_PER_SERVER, IP_VERSION, RESOURCE_TAGS
+  ENGINE_MAX_CONNECTION_PER_SERVER, RESOURCE_TAGS
 } from '@shared/constants'
 import { engineBinMap, engineArchMap } from './configs/engine'
 import { getStaticPath } from '../utils/mainfile'
@@ -17,9 +17,6 @@ export const getUserDownloadsPath = (): string => app.getPath('downloads')
 export const getConfigBasePath = (): string => getUserDataPath()
 export const getSessionPath = (): string => join(getUserDataPath(), 'download.session')
 export const getEnginePidPath = (): string => join(getUserDataPath(), 'engine.pid')
-
-export const getDhtPath = (protocol: number): string =>
-  join(getUserDataPath(), protocol === IP_VERSION.V6 ? 'dht6.dat' : 'dht.dat')
 
 export const getEngineBin = (platform: string): string => engineBinMap[platform] || 'aria2c'
 export const getEngineArch = (platform: string, arch: string): string =>

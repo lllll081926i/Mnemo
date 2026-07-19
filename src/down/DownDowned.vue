@@ -1,24 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import {
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useDownedStore,
-  useKeyboardStore,
-  useMouseStore,
-  useWinStore
-} from '../store'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  RefreshScroll,
-  RefreshScrollTo,
-  TestCtrl,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../utils/keyboardhelper'
+import { KeyboardState, MouseState, useAppStore, useDownedStore, useKeyboardStore, useMouseStore, useWinStore } from '../store'
+import { onHideRightMenuScroll, onShowRightMenu, RefreshScroll, RefreshScrollTo, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
 import { IStateDownFile } from './DownDAL'
 import { TestButton } from '../utils/mosehelper'
@@ -65,7 +48,10 @@ const onSelectReverse = () => {
   downedStore.ListSelected.clear()
   downedStore.ListFocusKey = ''
   if (reverseSelect.length > 0) {
-    downedStore.mRangSelect(reverseSelect[0].DownID, reverseSelect.map(r => r.DownID))
+    downedStore.mRangSelect(
+      reverseSelect[0].DownID,
+      reverseSelect.map((r) => r.DownID)
+    )
   }
   downedStore.mRefreshListDataShow(false)
 }
@@ -78,7 +64,6 @@ const onSelectCancel = () => {
 
 const onSelectRang = (file_id: string) => {
   if (rangIsSelecting.value && rangSelectID.value != '') {
-
     let startid = rangSelectID.value
     let endid = ''
     const s: { [k: string]: any } = {}
@@ -115,15 +100,18 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'down') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      const className = mouseEvent.srcElement.className
-      if (className && className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        const className = mouseEvent.srcElement.className
+        if (className && className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
 })
 
 const handleSelectAll = () => downedStore.mSelectAll()
@@ -169,11 +157,9 @@ const handleSelect = (file_id: string, event: any, isCtrl: boolean = false) => {
 
 const handleDelete = async () => await downedStore.mDeleteDowned([...downedStore.ListSelected])
 
-const handleOpenFile = (file: IStateDownFile | null) =>
-  downedStore.mOpenUploadedFile(file, [...downedStore.ListSelected], false)
+const handleOpenFile = (file: IStateDownFile | null) => downedStore.mOpenUploadedFile(file, [...downedStore.ListSelected], false)
 
-const handleOpenDir = (file: IStateDownFile | null) =>
-  downedStore.mOpenUploadedFile(file, [...downedStore.ListSelected], true)
+const handleOpenDir = (file: IStateDownFile | null) => downedStore.mOpenUploadedFile(file, [...downedStore.ListSelected], true)
 
 const handleDeleteAll = async () => await downedStore.mDeleteAllDowned()
 
@@ -193,34 +179,28 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 </script>
 
 <template>
-  <div style="height: 7px"></div>
-  <div class='toppanbtns' style='height: 26px'>
-    <div style="min-height: 26px; max-width: 100%; flex-shrink: 0; flex-grow: 0">
-      <div class="toppannav">
-        <div class="toppannavitem" title="已下载">
-          <span> 已下载 </span>
-        </div>
-      </div>
+  <div class="toppanbtns">
+    <div class="toppanbtn" v-if="downedStore.IsListSelected">
+      <a-button type="text" size="small" tabindex="-1" @click="handleOpenFile(null)">
+        <IconFont name="iconwenjian" />
+        打开文件
+      </a-button>
+      <a-button type="text" size="small" tabindex="-1" @click="handleOpenDir(null)">
+        <IconFont name="iconfolder" />
+        打开目录
+      </a-button>
+      <a-button type="text" size="small" tabindex="-1" @click="handleDelete">
+        <IconFont name="icondelete" />
+        删除
+      </a-button>
     </div>
-    <div class='flex flexauto'></div>
-    <div class="flex flexnoauto cellcount" title="总共已下载完记录数">
-      <a-badge color="#637dff" :text="'总记录数 ' + downedStore.ListStats.count" />
+    <div class="toppanbtn" v-else>
+      <a-button type="text" size="small" tabindex="-1" @click="handleDeleteAll">
+        <IconFont name="icondelete" />
+        清除全部下载记录
+      </a-button>
     </div>
-  </div>
-  <div style="height: 14px"></div>
-  <div class="toppanbtns" style="height: 26px">
-    <div class="toppanbtn" v-show="downedStore.IsListSelected">
-      <a-button type="text" size="small" tabindex="-1" @click="handleOpenFile(null)"><IconFont name="iconwenjian" />打开文件</a-button>
-      <a-button type="text" size="small" tabindex="-1" @click="handleOpenDir(null)"><IconFont name="iconfolder" />打开目录</a-button>
-      <a-button type="text" size="small" tabindex="-1" @click="handleDelete"><IconFont name="icondelete" />删除</a-button>
-      <a-button type="text" size="small" tabindex="-1"><IconFont name="icondian" /></a-button>
-
-      <a-button type="text" size="small" tabindex="-1" @click="handleDeleteAll"><IconFont name="icondelete" />清除全部下载记录</a-button>
-    </div>
-    <div class="toppanbtn" v-show="!downedStore.IsListSelected">
-      <a-button type="text" size="small" tabindex="-1" @click="handleDeleteAll"><IconFont name="icondelete" />清除全部下载记录</a-button>
-    </div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="toppanbtn">
       <a-input-search
         tabindex="-1"
@@ -230,15 +210,13 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         placeholder="快速筛选"
         allow-clear
         v-model="downedStore.ListSearchKey"
-        @clear='(e:any)=>handleSearchInput("")'
-        @input="(val:any)=>handleSearchInput(val as string)"
+        @clear="(e: any) => handleSearchInput('')"
+        @input="(val: any) => handleSearchInput(val as string)"
         @press-enter="handleSearchEnter"
         @keydown.esc="($event.target as any).blur()"
       />
     </div>
-    <div></div>
   </div>
-  <div style="height: 9px"></div>
   <div class="toppanarea">
     <div style="margin: 0 3px">
       <AntdTooltip title="点击全选" placement="left">
@@ -248,10 +226,9 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
       </AntdTooltip>
     </div>
     <div class="selectInfo">{{ downedStore.ListDataSelectCountInfo }}</div>
-    <div style='margin: 0 2px'>
-      <AntdTooltip placement='rightTop' v-if="downedStore.ListDataShow.length > 0">
-        <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                  :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+    <div style="margin: 0 2px">
+      <AntdTooltip placement="rightTop" v-if="downedStore.ListDataShow.length > 0">
+        <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
           {{ rangIsSelecting ? '取消选择' : '区间选择' }}
         </a-button>
         <template #title>
@@ -264,18 +241,8 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           </div>
         </template>
       </AntdTooltip>
-      <a-button shape='square'
-                v-if='!rangIsSelecting && downedStore.ListSelected.size > 0 && downedStore.ListSelected.size < downedStore.ListDataShow.length'
-                type='text'
-                tabindex='-1'
-                class='qujian'
-                status='normal' @click='onSelectReverse'>
-        反向选择
-      </a-button>
-      <a-button shape='square' v-if='!rangIsSelecting && downedStore.ListSelected.size > 0' type='text' tabindex='-1' class='qujian'
-                status='normal' @click='onSelectCancel'>
-        取消已选
-      </a-button>
+      <a-button shape="square" v-if="!rangIsSelecting && downedStore.ListSelected.size > 0 && downedStore.ListSelected.size < downedStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">反向选择</a-button>
+      <a-button shape="square" v-if="!rangIsSelecting && downedStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
     </div>
   </div>
   <div class="toppanlist" @keydown.space.prevent="() => true">
@@ -302,13 +269,11 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           <div
             :class="'fileitem' + (downedStore.ListSelected.has(item.DownID) ? ' selected' : '') + (downedStore.ListFocusKey == item.DownID ? ' focus' : '')"
             @click="handleSelect(item.DownID, $event)"
-            @mouseover='onSelectRang(item.DownID)'
-            @contextmenu="(event:MouseEvent)=>handleRightClick({event,node:{key:item.DownID}} )"
+            @mouseover="onSelectRang(item.DownID)"
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.DownID } })"
           >
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.DownID] ? (rangSelectStart == item.DownID ? 'rangstart' : rangSelectEnd == item.DownID ? 'rangend' : 'rang') : '')">
-              <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
-                        @click.prevent.stop='handleSelect(item.DownID, $event, true)'>
+            <div :class="'rangselect ' + (rangSelectFiles[item.DownID] ? (rangSelectStart == item.DownID ? 'rangstart' : rangSelectEnd == item.DownID ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.DownID, $event, true)">
                 <IconFont :name="downedStore.ListSelected.has(item.DownID) ? 'iconrsuccess' : 'iconpic2'" />
               </a-button>
             </div>
@@ -321,10 +286,13 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
               </div>
             </div>
             <div class="cell filesize">{{ item.Info.sizestr }}</div>
-            <div class='toppanbtn'>
-              <a title='打开文件' v-if='!item.Info.ariaRemote' @click="handleOpenFile(item)"><IconFont name="iconwenjian" /></a>&nbsp;&nbsp;
-              <a title='打开目录' v-if='!item.Info.ariaRemote' @click="handleOpenDir(item)"><IconFont name="iconfolder" /></a>&nbsp;&nbsp;
-              <a title='删除' @click="handleDelete"><IconFont name="icondelete" /></a>&nbsp;&nbsp;
+            <div class="toppanbtn">
+              <a title="打开文件" v-if="!item.Info.ariaRemote" @click="handleOpenFile(item)"><IconFont name="iconwenjian" /></a>
+              &nbsp;&nbsp;
+              <a title="打开目录" v-if="!item.Info.ariaRemote" @click="handleOpenDir(item)"><IconFont name="iconfolder" /></a>
+              &nbsp;&nbsp;
+              <a title="删除" @click="handleDelete"><IconFont name="icondelete" /></a>
+              &nbsp;&nbsp;
             </div>
           </div>
         </div>
@@ -333,22 +301,18 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
     <a-dropdown id="downedrightmenu" class="rightmenu" :popup-visible="true" tabindex="-1" :draggable="false" style="z-index: -1; left: -200px; opacity: 0">
       <template #content>
         <a-doption @click="handleOpenFile(null)">
-          <template #icon> <IconFont name="iconwenjian" /> </template>
+          <template #icon><IconFont name="iconwenjian" /></template>
           <template #default>打开文件</template>
         </a-doption>
         <a-doption @click="handleOpenDir(null)">
-          <template #icon> <IconFont name="iconfolder" /> </template>
+          <template #icon><IconFont name="iconfolder" /></template>
           <template #default>打开目录</template>
         </a-doption>
         <a-doption @click="handleDelete" class="danger">
-          <template #icon> <IconFont name="icondelete" /> </template>
+          <template #icon><IconFont name="icondelete" /></template>
           <template #default>删除</template>
         </a-doption>
       </template>
     </a-dropdown>
   </div>
 </template>
-
-<style>
-
-</style>

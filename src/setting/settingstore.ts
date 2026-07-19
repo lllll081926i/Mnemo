@@ -135,18 +135,11 @@ export interface SettingState {
   downGlobalSpeedM: string
   downUseAria2c: boolean
 
-  // ↓ 新增：Download 迁移设置
-  ariaMaxConnectionPerServer: number    // 每服务器最大连接数
-  ariaContinueDownload: boolean         // 断点续传（continue=true）
-  ariaBtSaveMetadata: boolean           // 保存 BT 元数据
-  ariaBtForceEncryption: boolean        // BT 强制加密
-  ariaBtAutoDownloadContent: boolean    // 自动开始 BT 内容下载
-  ariaEnableUpnp: boolean               // UPnP/NAT-PMP 端口映射
-  ariaListenPort: number                // BT 监听端口
-  ariaDhtListenPort: number             // DHT 监听端口
-  ariaUserAgent: string                 // 全局 User-Agent
-  ariaRpcListenPort: number             // RPC 监听端口
-  ariaRpcSecret: string                 // RPC 密钥
+  ariaMaxConnectionPerServer: number
+  ariaContinueDownload: boolean
+  ariaUserAgent: string
+  ariaRpcListenPort: number
+  ariaRpcSecret: string
 
   // 任务通知
   ariaTaskNotification: boolean         // 下载完成声音通知
@@ -204,13 +197,6 @@ export interface SettingState {
   ariaState: string
   ariaLoading: boolean
 
-  ariaBtTracker: string
-  ariaTrackerSources: string[]
-  ariaAutoSyncTracker: boolean
-  ariaMaxOverallUploadLimit: number
-  ariaKeepSeeding: boolean
-  ariaSeedRatio: number
-  ariaSeedTime: number
   ariaResumeAllWhenLaunched: boolean
 
   // API 密钥 (BYOK)
@@ -343,15 +329,8 @@ const setting: SettingState = {
   downGlobalSpeedM: 'MB',
   downUseAria2c: true,
 
-  // ↓ 新增：Download 迁移设置 默认值
   ariaMaxConnectionPerServer: 16,
   ariaContinueDownload: true,
-  ariaBtSaveMetadata: true,
-  ariaBtForceEncryption: false,
-  ariaBtAutoDownloadContent: true,
-  ariaEnableUpnp: true,
-  ariaListenPort: 6881,
-  ariaDhtListenPort: 6881,
   ariaUserAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4577.63 Safari/537.36',
   ariaRpcListenPort: 16800,
   ariaRpcSecret: 'S4znWTaZYQi3cpRNb',
@@ -410,16 +389,6 @@ const setting: SettingState = {
   ariaState: 'local',
   ariaLoading: false,
 
-  ariaBtTracker: '',
-  ariaTrackerSources: [
-    'https://cdn.jsdelivr.net/gh/ngosang/trackerslist@master/trackers_best_ip.txt',
-    'https://cdn.jsdelivr.net/gh/ngosang/trackerslist@master/trackers_best.txt'
-  ],
-  ariaAutoSyncTracker: true,
-  ariaMaxOverallUploadLimit: 0,
-  ariaKeepSeeding: false,
-  ariaSeedRatio: 2,
-  ariaSeedTime: 2880,
   ariaResumeAllWhenLaunched: false,
 
   apiAIModelKey: '',
@@ -629,19 +598,6 @@ function _loadSetting(val: any) {
   setting.ariaState = defaultValue(val.ariaState, ['local', 'remote'])
   setting.ariaLoading = false
 
-  // BT / Tracker
-  setting.ariaBtTracker = defaultString(val.ariaBtTracker, '')
-  setting.ariaTrackerSources = Array.isArray(val.ariaTrackerSources) && val.ariaTrackerSources.length
-    ? val.ariaTrackerSources
-    : [
-        'https://cdn.jsdelivr.net/gh/ngosang/trackerslist@master/trackers_best_ip.txt',
-        'https://cdn.jsdelivr.net/gh/ngosang/trackerslist@master/trackers_best.txt'
-      ]
-  setting.ariaAutoSyncTracker = defaultBool(val.ariaAutoSyncTracker, true)
-  setting.ariaMaxOverallUploadLimit = defaultNumber(val.ariaMaxOverallUploadLimit, 0)
-  setting.ariaKeepSeeding = defaultBool(val.ariaKeepSeeding, false)
-  setting.ariaSeedRatio = defaultNumber(val.ariaSeedRatio, 2)
-  setting.ariaSeedTime = defaultNumber(val.ariaSeedTime, 2880)
   setting.ariaResumeAllWhenLaunched = defaultBool(val.ariaResumeAllWhenLaunched, false)
 
   // API 密钥
@@ -791,20 +747,6 @@ const useSettingStore = defineStore('setting', {
         }
       }
       window.WebSetProxy({ proxyUrl: proxy })
-    },
-    async syncBtTrackers(): Promise<void> {
-      try {
-        await (window as any).TvBoxInvoke('motrix:sync-trackers')
-      } catch (e: any) {
-        console.warn('[settingStore] syncBtTrackers failed', e?.message)
-      }
-    },
-    async getBtTrackers(): Promise<string> {
-      try {
-        return await (window as any).TvBoxInvoke('motrix:get-trackers') || ''
-      } catch {
-        return ''
-      }
     }
   }
 })

@@ -76,10 +76,7 @@ export interface IStateDownInfo {
   referer?: string
   userAgent?: string
   allProxy?: string
-  sourceType?: 'url' | 'magnet' | 'torrent' | 'torrent-url'
-  torrentBase64?: string
-  torrentUrl?: string
-  selectFile?: string
+  sourceType?: 'url'
   split?: number
   offlineProvider?: 'cloud123' | 'pikpak' | 'guangya' | 'drive115'
   offlineTaskId?: string
@@ -126,6 +123,7 @@ export default class DownDAL {
     const downingStore = useDowningStore()
     if (downingStore.ListLoading) return
     downingStore.ListLoading = true
+    await DBDown.deleteRemovedLocalBtTasks()
     const stateDownFiles = await DBDown.getDowningAll()
     // 首次从DB中加载数据，如果上次意外停止则重新开始，如果手动暂停则保持
     for (const stateDownFile of stateDownFiles) {
@@ -319,11 +317,8 @@ export default class DownDAL {
 
   static aAddExternalDownload(params: {
     source: string
-    sourceType: 'url' | 'magnet' | 'torrent' | 'torrent-url'
     savePath: string
     fileName?: string
-    torrentBase64?: string
-    selectFile?: string
     split?: number
     userAgent?: string
     authorization?: string
@@ -344,20 +339,21 @@ export default class DownDAL {
     }
 
     const source = params.source.trim()
+    if (!/^https?:\/\//i.test(source) || /\.torrent(?:[?#].*)?$/i.test(source)) {
+      return { success: false, message: '仅支持 HTTP/HTTPS 下载链接，不支持 magnet 或种子文件' }
+    }
     const inferredName = (() => {
       if (params.fileName?.trim()) return params.fileName.trim()
-      if (params.sourceType === 'magnet') return 'BT 磁力任务'
-      if (params.sourceType === 'torrent') return 'BT 种子任务'
       try {
         const url = new URL(source)
         const name = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '')
-        return name || (params.sourceType === 'torrent-url' ? 'BT 种子任务' : 'URL 下载任务')
+        return name || 'URL 下载任务'
       } catch {
-        return params.sourceType === 'torrent-url' ? 'BT 种子任务' : 'URL 下载任务'
+        return 'URL 下载任务'
       }
     })()
     const name = ClearFileName(inferredName)
-    const gid = buildUrlTaskGid(`${params.sourceType}|${source}|${params.torrentBase64 || ''}|${params.selectFile || ''}`)
+    const gid = buildUrlTaskGid(source)
     const downitem: IStateDownFile = {
       DownID: `${userID}|external|${gid}`,
       Info: {
@@ -371,7 +367,7 @@ export default class DownDAL {
         size: 0,
         sizestr: '',
         isDir: false,
-        icon: params.sourceType === 'url' ? 'iconcloud-download' : 'iconfile-bt',
+        icon: 'iconcloud-download',
         encType: '',
         sha1: '',
         crc64: '',
@@ -382,10 +378,7 @@ export default class DownDAL {
         referer: params.referer,
         userAgent: params.userAgent,
         allProxy: params.allProxy,
-        sourceType: params.sourceType,
-        torrentBase64: params.torrentBase64,
-        torrentUrl: params.sourceType === 'torrent-url' ? source : undefined,
-        selectFile: params.selectFile,
+        sourceType: 'url',
         split: params.split
       },
       Down: {

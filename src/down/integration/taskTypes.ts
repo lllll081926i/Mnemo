@@ -12,27 +12,6 @@ export interface DownloadTaskFile {
   selected: boolean
 }
 
-export interface DownloadPeer {
-  peerId: string
-  ip: string
-  port: number
-  bitfield: string
-  amChoking: boolean
-  peerChoking: boolean
-  downloadSpeed: number
-  uploadSpeed: number
-  seeder: boolean
-}
-
-export interface DownloadBitTorrent {
-  infoHash?: string
-  numSeeders?: number
-  seeder?: string
-  mode?: string
-  announceList?: string[][]
-  info?: { name: string }
-}
-
 export interface DownloadTask {
   gid: string
   status: DownloadTaskStatus
@@ -41,15 +20,11 @@ export interface DownloadTask {
   uploadLength: number
   downloadSpeed: number
   uploadSpeed: number
-  numSeeders: number
-  seeder: boolean
   connections: number
   numPieces: number
   pieceLength: number
   dir: string
   files: DownloadTaskFile[]
-  peers: DownloadPeer[]
-  bittorrent?: DownloadBitTorrent
   errorCode: string
   errorMessage: string
 }
@@ -80,19 +55,6 @@ export const normalizeTaskFiles = (files: any[] = []): DownloadTaskFile[] =>
     selected: toBoolean(file.selected)
   }))
 
-export const normalizePeers = (peers: any[] = []): DownloadPeer[] =>
-  peers.map((peer) => ({
-    peerId: String(peer.peerId || ''),
-    ip: String(peer.ip || ''),
-    port: toNumber(peer.port),
-    bitfield: String(peer.bitfield || ''),
-    amChoking: toBoolean(peer.amChoking),
-    peerChoking: toBoolean(peer.peerChoking),
-    downloadSpeed: toNumber(peer.downloadSpeed),
-    uploadSpeed: toNumber(peer.uploadSpeed),
-    seeder: toBoolean(peer.seeder)
-  }))
-
 export const normalizeAriaTask = (task: any): DownloadTask => ({
   gid: String(task?.gid || ''),
   status: String(task?.status || ''),
@@ -101,15 +63,11 @@ export const normalizeAriaTask = (task: any): DownloadTask => ({
   uploadLength: toNumber(task?.uploadLength),
   downloadSpeed: toNumber(task?.downloadSpeed),
   uploadSpeed: toNumber(task?.uploadSpeed),
-  numSeeders: toNumber(task?.numSeeders),
-  seeder: toBoolean(task?.seeder),
   connections: toNumber(task?.connections),
   numPieces: toNumber(task?.numPieces),
   pieceLength: toNumber(task?.pieceLength),
   dir: String(task?.dir || ''),
   files: normalizeTaskFiles(task?.files),
-  peers: normalizePeers(task?.peers),
-  bittorrent: task?.bittorrent,
   errorCode: String(task?.errorCode || ''),
   errorMessage: String(task?.errorMessage || '')
 })

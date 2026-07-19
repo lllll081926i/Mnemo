@@ -2,11 +2,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
-import {
-  NGOSANG_TRACKERS_BEST_CDN_URL,
-  NGOSANG_TRACKERS_BEST_IP_CDN_URL,
-  NGOSANG_TRACKERS_BEST_URL
-} from '@shared/constants'
 
 vi.mock('electron', () => ({
   app: {
@@ -36,31 +31,33 @@ describe('ConfigManager', () => {
   it('initializes user config with defaults', async () => {
     const { default: ConfigManager } = await import('../ConfigManager')
     const cm = new ConfigManager()
-    expect(cm.getUserConfig('auto-sync-tracker')).toBe(true)
-    expect(cm.getUserConfig('enable-upnp')).toBe(true)
-    expect(cm.getUserConfig('tracker-source')).toEqual([
-      NGOSANG_TRACKERS_BEST_IP_CDN_URL,
-      NGOSANG_TRACKERS_BEST_CDN_URL
-    ])
+    expect(cm.getUserConfig('protocols')).toEqual({ mo: true, motrix: true })
     expect(typeof cm.getUserConfig('locale')).toBe('string')
   })
 
-  it('migrates the old non-Motrix BT defaults', async () => {
+  it('removes obsolete BT and UPnP settings from existing config', async () => {
     fs.writeFileSync(path.join(tmpDir, 'user.json'), JSON.stringify({
       'auto-sync-tracker': false,
       'enable-upnp': false,
-      'tracker-source': [NGOSANG_TRACKERS_BEST_URL],
-      'last-sync-tracker-time': 123
+      'keep-seeding': true,
+      'protocols': { mo: true, motrix: true, magnet: true },
+      'proxy': { enable: true, server: 'http://127.0.0.1:7890', scope: ['download', 'update-trackers'] },
+      'locale': 'zh-CN'
+    }))
+    fs.writeFileSync(path.join(tmpDir, 'system.json'), JSON.stringify({
+      'bt-tracker': 'udp://tracker.example.com:80',
+      'dht-listen-port': 6881,
+      'rpc-listen-port': 16800
     }))
     const { default: ConfigManager } = await import('../ConfigManager')
     const cm = new ConfigManager()
-    expect(cm.getUserConfig('auto-sync-tracker')).toBe(true)
-    expect(cm.getUserConfig('enable-upnp')).toBe(true)
-    expect(cm.getUserConfig('tracker-source')).toEqual([
-      NGOSANG_TRACKERS_BEST_IP_CDN_URL,
-      NGOSANG_TRACKERS_BEST_CDN_URL
-    ])
-    expect(cm.getUserConfig('last-sync-tracker-time')).toBe(0)
+    expect(cm.getUserConfig('auto-sync-tracker')).toBeUndefined()
+    expect(cm.getUserConfig('enable-upnp')).toBeUndefined()
+    expect(cm.getUserConfig('keep-seeding')).toBeUndefined()
+    expect(cm.getUserConfig('protocols')).toEqual({ mo: true, motrix: true })
+    expect(cm.getUserConfig('proxy').scope).toEqual(['download'])
+    expect(cm.getSystemConfig('bt-tracker')).toBeUndefined()
+    expect(cm.getSystemConfig('dht-listen-port')).toBeUndefined()
   })
 
   it('setSystemConfig and getSystemConfig round-trips', async () => {
@@ -73,7 +70,7 @@ describe('ConfigManager', () => {
   it('setUserConfig and getUserConfig round-trips', async () => {
     const { default: ConfigManager } = await import('../ConfigManager')
     const cm = new ConfigManager()
-    cm.setUserConfig('keep-seeding', true)
-    expect(cm.getUserConfig('keep-seeding')).toBe(true)
+    cm.setUserConfig('theme', 'light')
+    expect(cm.getUserConfig('theme')).toBe('light')
   })
 })

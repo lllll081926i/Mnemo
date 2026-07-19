@@ -10,8 +10,7 @@ describe('buildAriaAddOptions', () => {
       referer: 'https://www.aliyundrive.com/drive',
       userAgent: 'Chrome',
       headers: ['Authorization: Bearer token'],
-      outFileName: 'movie.mkv',
-      sourceType: 'url'
+      outFileName: 'movie.mkv'
     })).toEqual({
       gid: 'g1',
       dir: '/tmp',
@@ -23,24 +22,7 @@ describe('buildAriaAddOptions', () => {
     })
   })
 
-  it('does not pass HTTP-only options to local torrent tasks', () => {
-    expect(buildAriaAddOptions({
-      gid: 'g1',
-      dir: '/tmp',
-      split: 4,
-      referer: 'https://www.aliyundrive.com/drive',
-      userAgent: 'Chrome',
-      headers: ['User-Agent: Chrome', 'Authorization: Bearer token'],
-      outFileName: 'movie.mkv',
-      sourceType: 'torrent'
-    })).toEqual({
-      gid: 'g1',
-      dir: '/tmp',
-      split: 4
-    })
-  })
-
-  it('passes selected torrent file indexes to BT tasks', () => {
+  it('adds proxy options to HTTP downloads', () => {
     expect(buildAriaAddOptions({
       gid: 'g1',
       dir: '/tmp',
@@ -48,14 +30,14 @@ describe('buildAriaAddOptions', () => {
       referer: '',
       userAgent: '',
       headers: [],
-      outFileName: '',
-      sourceType: 'torrent',
-      selectFile: '1,3'
+      outFileName: 'archive.zip',
+      allProxy: 'http://127.0.0.1:7890'
     })).toEqual({
       gid: 'g1',
       dir: '/tmp',
       split: 4,
-      'select-file': '1,3'
+      out: 'archive.zip',
+      'all-proxy': 'http://127.0.0.1:7890'
     })
   })
 })

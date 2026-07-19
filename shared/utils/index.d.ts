@@ -15,16 +15,8 @@ export declare const getFileExtension: (filename: string) => string;
 export declare const removeExtensionDot: (ext: string) => string;
 export declare const getFileNameFromFile: (file: any) => string;
 export declare const getTaskName: (task: any, opts?: any) => string;
-export declare const checkTaskIsBT: (task: any) => boolean;
-export declare const isMagnetTask: (task: any) => boolean;
-export declare const checkTaskIsSeeder: (task: any) => boolean;
 export declare const checkTaskTitleIsEmpty: (task: any) => boolean;
-export declare const isTorrent: (file: any) => boolean;
-export declare const getAsBase64: (file: File, callback: (base64: string) => void) => void;
-export declare const getTaskUri: (task: any, withTracker?: boolean) => string;
-export declare const buildMagnetLink: (task: any, withTracker?: boolean, btTracker?: string) => string;
-export declare const getFileSelection: (files: any[]) => string;
-export declare const listTorrentFiles: (files: any[]) => any[];
+export declare const getTaskUri: (task: any) => string;
 export declare const mergeTaskResult: (response: any[]) => any[];
 export declare const decodeThunderLink: (url: string) => string;
 export declare const splitTaskLinks: (links: string) => string[];
@@ -50,7 +42,6 @@ export declare const changeKeysToCamelCase: (obj: Record<string, any>) => Record
 export declare const changeKeysToKebabCase: (obj: Record<string, any>) => Record<string, any>;
 export declare const compactUndefined: <T>(arr: (T | undefined)[]) => T[];
 export declare const checkIsNeedRestart: (changed: Record<string, any>) => boolean;
-export declare const checkIsNeedRun: (enable: boolean, lastTime: number, interval: number) => boolean;
 export declare const parseHeader: (header: string) => Record<string, string>;
 export declare const buildRpcUrl: ({ port, secret }: {
     port: number;

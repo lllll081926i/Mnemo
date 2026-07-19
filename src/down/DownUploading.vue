@@ -1,21 +1,6 @@
 <script setup lang="ts">
-import {
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useDowningStore,
-  useKeyboardStore,
-  useMouseStore,
-  useWinStore
-} from '../store'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  TestCtrl,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../utils/keyboardhelper'
+import { KeyboardState, MouseState, useAppStore, useDowningStore, useKeyboardStore, useMouseStore, useWinStore } from '../store'
+import { onHideRightMenuScroll, onShowRightMenu, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
 import { computed, ref, watch } from 'vue'
 import useUploadingStore from './UploadingStore'
 
@@ -81,7 +66,10 @@ const onSelectReverse = () => {
   uploadingStore.ListSelected.clear()
   uploadingStore.ListFocusKey = -1
   if (reverseSelect.length > 0) {
-    uploadingStore.mRangSelect(reverseSelect[0].UploadID, reverseSelect.map(r => r.UploadID))
+    uploadingStore.mRangSelect(
+      reverseSelect[0].UploadID,
+      reverseSelect.map((r) => r.UploadID)
+    )
   }
   uploadingStore.mRefreshListDataShow(false)
 }
@@ -94,7 +82,6 @@ const onSelectCancel = () => {
 
 const onSelectRang = (file_id: number) => {
   if (rangIsSelecting.value && rangSelectID.value != -1) {
-
     let startid = rangSelectID.value
     let endid = -1
     const s: { [k: string]: any } = {}
@@ -131,15 +118,18 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'down') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      const className = mouseEvent.srcElement.className
-      if (className && className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        const className = mouseEvent.srcElement.className
+        if (className && className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
 })
 
 const handleRefresh = () => UploadingDAL.aReloadUploading()
@@ -195,30 +185,14 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 </script>
 
 <template>
-  <div style="height: 7px"></div>
-  <div class="toppanbtns" style="height: 26px">
-    <div style="min-height: 26px; max-width: 100%; flex-shrink: 0; flex-grow: 0">
-      <div class="toppannav">
-        <div class="toppannavitem" title="上传中">
-          <span @click="() => UploadingDAL.mUploadingShowTaskBack()"> 上传中 </span>
-        </div>
-        <div v-if="uploadingStore.showTaskID" class="toppannavitem" :title="uploadingStore.ShowTaskName">
-          <span> {{ uploadingStore.ShowTaskName }} </span>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div style="height: 14px"></div>
-  <div class="toppanbtns" style="height: 26px">
+  <div class="toppanbtns">
     <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" :disabled="uploadingStore.ListLoading" title="后退 Back Space"
-                @click="handleBack">
+      <a-button type="text" size="small" tabindex="-1" :disabled="uploadingStore.ListLoading" title="后退 Back Space" @click="handleBack">
         <template #icon>
           <IconFont name="iconarrow-left-2-icon" />
         </template>
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" :loading="uploadingStore.ListLoading" title="F5"
-                @click="handleRefresh">
+      <a-button type="text" size="small" tabindex="-1" :loading="uploadingStore.ListLoading" title="F5" @click="handleRefresh">
         <template #icon>
           <IconFont name="iconreload-1-icon" />
         </template>
@@ -226,26 +200,38 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
     </div>
 
     <div v-if="uploadingStore.IsListSelected" class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(false, true)"><IconFont name="iconstart" />开始
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(false, true)">
+        <IconFont name="iconstart" />
+        开始
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(false, false)"><IconFont name="iconpause" />暂停
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(false, false)">
+        <IconFont name="iconpause" />
+        暂停
       </a-button>
-      <a-button v-show="menuShowDir" type="text" size="small" tabindex="-1"
-                @click="() => UploadingDAL.mUploadingShowTask()"><IconFont name="icongengduo1" />查看
+      <a-button v-if="menuShowDir" type="text" size="small" tabindex="-1" @click="() => UploadingDAL.mUploadingShowTask()">
+        <IconFont name="icongengduo1" />
+        查看
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingDelete(false)"><IconFont name="icondelete" />清除
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingDelete(false)">
+        <IconFont name="icondelete" />
+        清除
       </a-button>
     </div>
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(true, true)"><IconFont name="iconstart" />开始全部
+    <div v-else class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(true, true)">
+        <IconFont name="iconstart" />
+        开始全部
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(true, false)"><IconFont name="iconpause" />暂停全部
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingStart(true, false)">
+        <IconFont name="iconpause" />
+        暂停全部
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingDelete(true)"><IconFont name="iconrest" />清空全部
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadingDAL.aUploadingDelete(true)">
+        <IconFont name="iconrest" />
+        清空全部
       </a-button>
     </div>
   </div>
-  <div style="height: 9px"></div>
   <div class="toppanarea">
     <div style="margin: 0 3px">
       <AntdTooltip title="点击全选" placement="left">
@@ -253,11 +239,10 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           <IconFont :name="uploadingStore.IsListSelectedAll ? 'iconrsuccess' : 'iconpic2'" />
         </a-button>
       </AntdTooltip>
-      <div class='selectInfo'>{{ uploadingStore.ListDataSelectCountInfo }}</div>
-      <div style='margin: 0 2px'>
-        <AntdTooltip placement='rightTop' v-if="uploadingStore.ListDataShow.length > 0">
-          <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                    :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+      <div class="selectInfo">{{ uploadingStore.ListDataSelectCountInfo }}</div>
+      <div style="margin: 0 2px">
+        <AntdTooltip placement="rightTop" v-if="uploadingStore.ListDataShow.length > 0">
+          <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
             {{ rangIsSelecting ? '取消选择' : '区间选择' }}
           </a-button>
           <template #title>
@@ -270,27 +255,17 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
             </div>
           </template>
         </AntdTooltip>
-        <a-button shape='square'
-                  v-if='!rangIsSelecting && uploadingStore.ListSelected.size > 0 && uploadingStore.ListSelected.size < uploadingStore.ListDataShow.length'
-                  type='text'
-                  tabindex='-1'
-                  class='qujian'
-                  status='normal' @click='onSelectReverse'>
+        <a-button shape="square" v-if="!rangIsSelecting && uploadingStore.ListSelected.size > 0 && uploadingStore.ListSelected.size < uploadingStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">
           反向选择
         </a-button>
-        <a-button shape='square' v-if='!rangIsSelecting && uploadingStore.ListSelected.size > 0' type='text'
-                  tabindex='-1' class='qujian'
-                  status='normal' @click='onSelectCancel'>
-          取消已选
-        </a-button>
+        <a-button shape="square" v-if="!rangIsSelecting && uploadingStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
       </div>
     </div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="cell tiquma">瞬时速度</div>
     <div class="cell pr"></div>
   </div>
-  <div class="toppanlist" style="position: relative" :style="{ height: winStore.GetListHeight }"
-       @keydown.space.prevent="() => true">
+  <div class="toppanlist" style="position: relative" :style="{ height: winStore.GetListHeight }" @keydown.space.prevent="() => true">
     <a-list
       ref="viewlist"
       :bordered="false"
@@ -306,7 +281,8 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
       style="width: 100%"
       :data="uploadingStore.ListDataShow"
       tabindex="-1"
-      @scroll="onHideRightMenuScroll">
+      @scroll="onHideRightMenuScroll"
+    >
       <template #empty>
         <a-empty description="没有 需要上传 的任务" />
       </template>
@@ -315,13 +291,12 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           <div
             :class="'fileitem ' + (uploadingStore.ListSelected.has(item.UploadID) ? ' selected' : '') + (uploadingStore.ListFocusKey == item.UploadID ? ' focus' : '') + (item.uploadState == 'hashing' || item.uploadState == 'running' ? ' running' : '')"
             @click="handleSelect(item.UploadID, $event)"
-            @mouseover='onSelectRang(item.UploadID)'
+            @mouseover="onSelectRang(item.UploadID)"
             @dblclick="UploadingDAL.aUploadingStartOne(item.UploadID)"
-            @contextmenu="(event:MouseEvent)=>handleRightClick({event,node:{key:item.UploadID}} )">
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.UploadID] ? (rangSelectStart == item.UploadID ? 'rangstart' : rangSelectEnd == item.UploadID ? 'rangend' : 'rang') : '')">
-              <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
-                        @click.prevent.stop='handleSelect(item.UploadID, $event, true)'>
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.UploadID } })"
+          >
+            <div :class="'rangselect ' + (rangSelectFiles[item.UploadID] ? (rangSelectStart == item.UploadID ? 'rangstart' : rangSelectEnd == item.UploadID ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.UploadID, $event, true)">
                 <IconFont :name="uploadingStore.ListSelected.has(item.UploadID) ? 'iconrsuccess' : 'iconpic2'" />
               </a-button>
             </div>
@@ -329,8 +304,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
               <IconFont :name="item.icon" aria-hidden="true" />
             </div>
             <div class="filename">
-              <div v-if="item.isDir && menuShowTask" :title="item.localFilePath"
-                   @click.stop="UploadingDAL.mUploadingShowTask(item.TaskID)">
+              <div v-if="item.isDir && menuShowTask" :title="item.localFilePath" @click.stop="UploadingDAL.mUploadingShowTask(item.TaskID)">
                 {{ item.name }}
               </div>
               <div v-else class="nopoint" :title="item.localFilePath">
@@ -342,12 +316,9 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
               <div class="transfering-state">
                 <p class="text-state">{{ item.uploadState }} {{ item.ProgressStr }}</p>
                 <div class="progress-total">
-                  <div
-                    :class="'progress-current ' + (item.uploadState == 'success' ? ' succeed' : item.uploadState == 'error' ? ' error' : item.uploadState == '已暂停' ? '' : ' active')"
-                    :style="{ width: item.Progress + '%' }"></div>
+                  <div :class="'progress-current ' + (item.uploadState == 'success' ? ' succeed' : item.uploadState == 'error' ? ' error' : item.uploadState == '已暂停' ? '' : ' active')" :style="{ width: item.Progress + '%' }"></div>
                 </div>
-                <p v-if="item.isDir && menuShowTask" class="text-error pointer" :title="item.errorMessage"
-                   @click.stop="UploadingDAL.mUploadingShowTask(item.TaskID)">{{ item.errorMessage }}</p>
+                <p v-if="item.isDir && menuShowTask" class="text-error pointer" :title="item.errorMessage" @click.stop="UploadingDAL.mUploadingShowTask(item.TaskID)">{{ item.errorMessage }}</p>
                 <p v-else class="text-error" :title="item.errorMessage">{{ item.errorMessage }}</p>
               </div>
             </div>
@@ -356,8 +327,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         </div>
       </template>
     </a-list>
-    <a-dropdown id="rightuploadingmenu" class="rightmenu" :popup-visible="true" tabindex="-1" :draggable="false"
-                style="z-index: -1; left: -200px; opacity: 0">
+    <a-dropdown id="rightuploadingmenu" class="rightmenu" :popup-visible="true" tabindex="-1" :draggable="false" style="z-index: -1; left: -200px; opacity: 0">
       <template #content>
         <a-doption @click="() => UploadingDAL.aUploadingStart(false, true)">
           <template #icon><IconFont name="iconstart" /></template>
@@ -385,139 +355,11 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 
 <style scoped>
 .fileitem .icondownload {
-  color: #bcb3b399;
+  color: var(--text-tertiary);
 }
 
 .fileitem .running .icondownload {
-  color: #2196f3;
-}
-
-.downprogress {
-  flex-grow: 0;
-  flex-shrink: 0;
-  width: 110px;
-  margin-right: 8px;
-}
-
-.downspeed {
-  flex-grow: 0;
-  flex-shrink: 0;
-  width: 130px;
-  overflow: hidden;
-  color: var(--color-text-4);
-  font-size: 25px;
-  text-align: right;
-  text-overflow: clip;
-  white-space: nowrap;
-  word-break: keep-all;
-}
-
-body[arco-theme='dark'] .downspeed {
-  color: #ffffff33;
-}
-
-@media only screen and (min-width: 900px) {
-  .downprogress {
-    width: 150px;
-  }
-}
-
-@media only screen and (min-width: 960px) {
-  .downprogress {
-    width: 170px;
-  }
-}
-
-@media only screen and (min-width: 1000px) {
-  .downprogress {
-    width: 180px;
-  }
-
-  .downspeed {
-    width: 150px;
-  }
-}
-
-.downsize {
-  flex-grow: 0;
-  flex-shrink: 0;
-  width: 84px;
-  margin-right: 16px;
-  font-size: 16px;
-  text-align: right;
-  color: var(--color-text-3);
-  text-overflow: clip;
-  white-space: nowrap;
-  word-break: keep-all;
-}
-
-.transfering-state {
-  display: block;
-  width: 100%;
-  overflow: visible;
-}
-
-.text-state {
-  max-width: 100%;
-  height: 16px;
-  margin: 0;
-  overflow: hidden;
-  color: var(--color-text-3);
-  font-size: 12px;
-  line-height: 16px;
-  white-space: nowrap;
-  -o-text-overflow: ellipsis;
-  text-overflow: ellipsis;
-}
-
-.text-error {
-  width: 100%;
-  height: 16px;
-  margin: 0;
-  overflow: visible;
-  color: #f35b51;
-  font-size: 12px;
-  line-height: 16px;
-  white-space: nowrap;
-}
-
-.progress-total {
-  position: relative;
-  width: 100%;
-  height: 3px;
-  margin-top: 2px;
-  background: #84858d14;
-  border-radius: 1.5px;
-}
-
-body[arco-theme='dark'] .progress-total {
-  background: #84858d;
-}
-
-.progress-total .progress-current {
-  position: absolute;
-  top: 0;
-  left: 0;
-  min-width: 6px;
-  max-width: 100%;
-  height: 100%;
-  background: #00000033;
-  border-radius: 1.5px;
-  -webkit-transition: width 0.3s ease, opacity 0.3s ease;
-  -o-transition: width 0.3s ease, opacity 0.3s ease;
-  transition: width 0.3s ease, opacity 0.3s ease;
-}
-
-.progress-total .progress-current.succeed {
-  background: #099970;
-}
-
-.progress-total .progress-current.error {
-  background: #f35b51;
-}
-
-.progress-total .progress-current.active {
-  background: linear-gradient(270deg, #ffba7a 0%, #ff74c7 8.56%, #637dff 26.04%, rgba(99, 125, 255, 0.2) 100%);
+  color: var(--color-primary);
 }
 
 .nopoint {

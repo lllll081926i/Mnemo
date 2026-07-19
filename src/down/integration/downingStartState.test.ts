@@ -52,15 +52,15 @@ describe('DowningStore start state', () => {
         ariaRemote: false,
         file_id: 'file-1',
         drive_id: 'external',
-        name: 'movie.torrent',
+        name: 'movie.mkv',
         size: 0,
         sizestr: '',
-        icon: 'iconfile-bt',
+        icon: 'iconcloud-download',
         isDir: false,
         encType: '',
         sha1: '',
         crc64: '',
-        sourceType: 'torrent'
+        sourceType: 'url'
       },
       Down: {
         DownState: '已暂停',

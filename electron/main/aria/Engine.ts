@@ -76,14 +76,7 @@ export default class Engine {
     ]
     if (sessionExist) result.push(`--input-file=${sessionPath}`)
 
-    const extraConfig: Record<string, any> = { ...this.systemConfig }
-    const keepSeeding = this.userConfig['keep-seeding']
-    const seedRatio = this.systemConfig['seed-ratio']
-    if (keepSeeding || seedRatio === 0) {
-      extraConfig['seed-ratio'] = 0
-      delete extraConfig['seed-time']
-    }
-    result.push(...transformConfig(extraConfig))
+    result.push(...transformConfig(this.systemConfig))
     return result
   }
 

@@ -7,7 +7,8 @@ export default defineConfig({
     alias: {
       '@shared': path.resolve(__dirname, 'shared'),
       '@main': path.resolve(__dirname, 'electron/main')
-    }
+    },
+    extensions: ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']
   },
   test: {
     environment: 'node',
@@ -15,6 +16,7 @@ export default defineConfig({
       'electron/main/core/__tests__/**/*.test.ts',
       'electron/main/aria/__tests__/**/*.test.ts',
       'shared/__tests__/**/*.test.ts',
+      'src/down/integration/**/*.test.ts',
       'src/down/motrix-integration/**/*.test.ts',
       'scripts/__tests__/**/*.test.mjs',
       'src/media-server/__tests__/**/*.test.ts',

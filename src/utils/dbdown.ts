@@ -104,6 +104,20 @@ class XBYDB3Down extends Dexie {
     if (!this.isOpen()) await this.open().catch(() => {})
     return this.idowned.where('Info.user_id').equals(useUserStore().user_id).delete()
   }
+
+  async deleteRemovedLocalBtTasks() {
+    if (!this.isOpen()) await this.open().catch(() => {})
+    const removedSourceTypes = new Set(['magnet', 'torrent', 'torrent-url'])
+    const isRemovedTask = (item: IStateDownFile) => removedSourceTypes.has(String((item.Info as any).sourceType || ''))
+    await this.transaction('rw', this.idowning, this.idowned, async () => {
+      const [downingKeys, downedKeys] = await Promise.all([
+        this.idowning.filter(isRemovedTask).primaryKeys(),
+        this.idowned.filter(isRemovedTask).primaryKeys()
+      ])
+      if (downingKeys.length) await this.idowning.bulkDelete(downingKeys as string[])
+      if (downedKeys.length) await this.idowned.bulkDelete(downedKeys as string[])
+    })
+  }
 }
 
 const DBDown = new XBYDB3Down()

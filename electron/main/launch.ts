@@ -12,7 +12,6 @@ import { EventEmitter } from 'node:events'
 import exception from './core/exception'
 import ipcEvent from './core/ipcEvent'
 import MotrixApplication from './aria/MotrixApplication'
-import { registerExternalDownloadProtocol } from './core/protocol'
 import { destroyDb } from './reedy/ReedyService'
 
 const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth', 'boxplayer-auth']
@@ -187,7 +186,6 @@ export default class launch extends EventEmitter {
       .whenReady()
       .then(() => {
         registerMediaImageCacheProtocol()
-        registerExternalDownloadProtocol(() => AppWindow.mainWindow)
         this.registerProtocol()
         try {
           const localVersion = getResourcesPath('localVersion')

@@ -16,8 +16,8 @@ export default class ProtocolManager extends EventEmitter {
   constructor (options: ProtocolManagerOptions = {}) {
     super()
     this.protocols = {
-      mo: true, motrix: true, magnet: true, thunder: false,
-      ...(options.protocols || {})
+      mo: options.protocols?.mo !== false,
+      motrix: options.protocols?.motrix !== false
     }
   }
 
@@ -34,10 +34,12 @@ export default class ProtocolManager extends EventEmitter {
   handle (url: string): void {
     if (!url) return
     const lower = url.toLowerCase()
-    if (/^https?:|^ftp:|^magnet:|^thunder:/i.test(lower)) {
+    if (/^https?:/i.test(lower)) {
       this.handleResourceProtocol(url)
     } else if (/^mo:|^motrix:/i.test(lower)) {
       this.handleMoProtocol(url)
+    } else if (/^(magnet|thunder|ftp):/i.test(lower)) {
+      return
     } else {
       logger.warn('[motrix] unsupported protocol: ' + url)
     }

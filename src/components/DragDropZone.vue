@@ -3,7 +3,6 @@ import { ref } from 'vue'
 
 const emit = defineEmits<{
   (e: 'drop-url', url: string): void
-  (e: 'drop-file', filePath: string, base64: string): void
 }>()
 
 const isDragging = ref(false)
@@ -28,7 +27,7 @@ const onDragOver = (e: DragEvent) => {
   e.preventDefault()
 }
 
-const onDrop = async (e: DragEvent) => {
+const onDrop = (e: DragEvent) => {
   e.preventDefault()
   dragCounter = 0
   isDragging.value = false
@@ -37,23 +36,8 @@ const onDrop = async (e: DragEvent) => {
   if (!dt) return
 
   const url = dt.getData('text/uri-list') || dt.getData('text/plain') || ''
-  if (url && (url.startsWith('http') || url.startsWith('magnet'))) {
-    emit('drop-url', url.trim())
-    return
-  }
-
-  const files = dt.files
-  if (files && files.length > 0) {
-    const file = files[0]
-    if (file.name.toLowerCase().endsWith('.torrent')) {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(',')[1] || ''
-        emit('drop-file', file.name, base64)
-      }
-      reader.readAsDataURL(file)
-    }
-  }
+  const source = url.trim()
+  if (/^https?:\/\//i.test(source) && !/\.torrent(?:[?#].*)?$/i.test(source)) emit('drop-url', source)
 }
 </script>
 

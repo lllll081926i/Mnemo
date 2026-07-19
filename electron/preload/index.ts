@@ -404,10 +404,6 @@ function isEleEditable(e: any): boolean {
 
 createRightMenu()
 
-window.onExternalDownloadOpen = (callback: (payload: string) => void) => {
-  ipcRenderer.on('external-download:open', (_event, payload: string) => callback(payload))
-}
-
 // fix: new-windows event
 ipcRenderer.on('webview-new-window', (e, webContentsId, details) => {
   const webview = document.getElementById('webview') as any

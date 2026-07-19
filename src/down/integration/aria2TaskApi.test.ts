@@ -7,19 +7,19 @@ vi.mock('../../utils/aria2c', () => ({
 }))
 
 import { AriaRawCall } from '../../utils/aria2c'
-import { batchPauseTasks, batchRemoveTasks, batchResumeTasks, buildSelectFileOption, normalizeTaskListResult } from './aria2TaskApi'
+import { batchPauseTasks, batchRemoveTasks, batchResumeTasks, normalizeTaskListResult } from './aria2TaskApi'
 
 describe('normalizeAriaTask', () => {
   it('normalizes aria2 task numbers that arrive as strings', () => {
     const task = normalizeAriaTask({
       gid: 'abc', status: 'active', totalLength: '2048',
       completedLength: '1024', downloadSpeed: '512', uploadSpeed: '128',
-      numSeeders: '2', seeder: 'true', dir: '/tmp/downloads', files: []
+      connections: '2', dir: '/tmp/downloads', files: []
     })
     expect(task).toMatchObject({
       gid: 'abc', status: 'active', totalLength: 2048,
       completedLength: 1024, downloadSpeed: 512, uploadSpeed: 128,
-      numSeeders: 2, seeder: true
+      connections: 2
     })
   })
 })
@@ -38,10 +38,6 @@ describe('normalizeTaskFiles', () => {
 })
 
 describe('aria2TaskApi helpers', () => {
-  it('builds aria2 select-file option from selected file indexes', () => {
-    expect(buildSelectFileOption([0, 2, Number.NaN, 4, -1])).toEqual({ 'select-file': '2,4' })
-  })
-
   it('normalizes task list results returned by aria2', () => {
     const list = normalizeTaskListResult([
       { gid: 'g1', totalLength: '9', completedLength: '3', files: [{ index: '1', path: '/tmp/a.bin', length: '9', selected: 'true' }] }

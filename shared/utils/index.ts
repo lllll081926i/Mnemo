@@ -1,8 +1,7 @@
 import { kebabCase, camelCase, isEmpty, pick, omitBy, isPlainObject } from 'lodash'
 import { userKeys, systemKeys, needRestartKeys } from '@shared/configKeys'
 import {
-  APP_THEME, GRAPHIC, NONE_SELECTED_FILES, SELECTED_ALL_FILES,
-  UNKNOWN_PEERID, UNKNOWN_PEERID_NAME, RESOURCE_TAGS,
+  APP_THEME, GRAPHIC, RESOURCE_TAGS,
   IMAGE_SUFFIXES, AUDIO_SUFFIXES, VIDEO_SUFFIXES, SUB_SUFFIXES, DOCUMENT_SUFFIXES,
   SUPPORT_RTL_LOCALES
 } from '@shared/constants'
@@ -77,67 +76,14 @@ export const getFileNameFromFile = (file: any): string =>
   getFileName(file?.path || '')
 
 export const getTaskName = (task: any, opts: any = {}): string => {
-  const bt = task?.bittorrent
-  if (bt?.info?.name) return bt.info.name
   const files = task?.files
   if (files?.length === 1) return getFileNameFromFile(files[0])
   return ''
 }
 
-export const checkTaskIsBT = (task: any): boolean => !!task?.bittorrent
-export const isMagnetTask = (task: any): boolean => !!(task?.bittorrent && !task.bittorrent.info)
-export const checkTaskIsSeeder = (task: any): boolean =>
-  !!(task?.bittorrent && task.seeder === 'true')
 export const checkTaskTitleIsEmpty = (task: any): boolean => !getTaskName(task)
 
-export const isTorrent = (file: any): boolean => {
-  const name = (file?.name || file?.path || '').toLowerCase()
-  return name.endsWith('.torrent')
-}
-
-export const getAsBase64 = (file: File, callback: (base64: string) => void): void => {
-  const reader = new FileReader()
-  reader.onload = () => {
-    const result = reader.result as string
-    const base64 = result.split(',')[1] || result
-    callback(base64)
-  }
-  reader.readAsDataURL(file)
-}
-
-export const getTaskUri = (task: any, withTracker = false): string => {
-  if (!checkTaskIsBT(task)) {
-    return task?.files?.[0]?.uris?.[0]?.uri || ''
-  }
-  return buildMagnetLink(task, withTracker)
-}
-
-export const buildMagnetLink = (task: any, withTracker = false, btTracker = ''): string => {
-  const infoHash = task?.infoHash || task?.bittorrent?.info?.infoHash
-  if (!infoHash) return ''
-  const name = task?.bittorrent?.info?.name || ''
-  let magnet = `magnet:?xt=urn:btih:${infoHash}`
-  if (name) magnet += `&dn=${encodeURIComponent(name)}`
-  if (withTracker && btTracker) {
-    btTracker.split(',').forEach((t: string) => { if (t) magnet += `&tr=${encodeURIComponent(t)}` })
-  }
-  return magnet
-}
-
-export const getFileSelection = (files: any[]): string => {
-  if (!files?.length) return NONE_SELECTED_FILES
-  const selected = files.filter((f) => f.selected === 'true' || f.selected === true)
-  if (selected.length === files.length) return SELECTED_ALL_FILES
-  if (selected.length === 0) return NONE_SELECTED_FILES
-  return selected.map((f) => f.index).join(',')
-}
-
-export const listTorrentFiles = (files: any[]): any[] =>
-  (files || []).map((f, i) => ({
-    ...f,
-    idx: i + 1,
-    extension: getFileExtension(f.path || '')
-  }))
+export const getTaskUri = (task: any): string => task?.files?.[0]?.uris?.[0]?.uri || ''
 
 export const mergeTaskResult = (response: any[]): any[] => {
   if (!Array.isArray(response)) return []
@@ -254,12 +200,6 @@ export const compactUndefined = <T>(arr: (T | undefined)[]): T[] =>
 
 export const checkIsNeedRestart = (changed: Record<string, any>): boolean =>
   Object.keys(changed).some((key) => needRestartKeys.includes(key))
-
-export const checkIsNeedRun = (enable: boolean, lastTime: number, interval: number): boolean => {
-  if (!enable) return false
-  if (!lastTime) return true
-  return Date.now() - lastTime > interval
-}
 
 export const parseHeader = (header: string): Record<string, string> => {
   if (!header) return {}

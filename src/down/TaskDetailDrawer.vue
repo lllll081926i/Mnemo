@@ -38,8 +38,6 @@ watch(
 
 const taskName = computed(() => {
   if (!task.value) return ''
-  const btName = task.value.bittorrent?.info?.name
-  if (btName) return btName
   const firstFile = task.value.files?.[0]?.path
   if (firstFile) {
     const parts = firstFile.replace(/\\/g, '/').split('/')
@@ -70,8 +68,6 @@ const formatSpeed = (value: number | string) => {
   return formatBytes(n) + '/s'
 }
 
-const isBt = computed(() => !!task.value?.bittorrent)
-
 const onClose = () => emit('update:visible', false)
 </script>
 
@@ -94,13 +90,7 @@ const onClose = () => emit('update:visible', false)
         <a-descriptions-item label='总大小'>{{ formatBytes(task.totalLength) }}</a-descriptions-item>
         <a-descriptions-item label='下载速度'>{{ formatSpeed(task.downloadSpeed) }}</a-descriptions-item>
         <a-descriptions-item label='上传速度'>{{ formatSpeed(task.uploadSpeed) }}</a-descriptions-item>
-        <template v-if='isBt'>
-          <a-descriptions-item label='做种数'>{{ task.numSeeders || '0' }}</a-descriptions-item>
-          <a-descriptions-item label='连接数'>{{ task.connections || '0' }}</a-descriptions-item>
-          <a-descriptions-item v-if='task.bittorrent?.infoHash' label='InfoHash' :span='2'>
-            <span class='hash-text'>{{ task.bittorrent.infoHash }}</span>
-          </a-descriptions-item>
-        </template>
+        <a-descriptions-item label='连接数'>{{ task.connections || '0' }}</a-descriptions-item>
         <a-descriptions-item label='保存路径' :span='2'>{{ task.dir }}</a-descriptions-item>
       </a-descriptions>
 
@@ -126,11 +116,6 @@ const onClose = () => emit('update:visible', false)
   text-align: center;
   color: var(--color-text-3);
   padding: 40px;
-}
-.hash-text {
-  font-family: monospace;
-  font-size: 11px;
-  word-break: break-all;
 }
 .task-files {
   margin-top: 16px;

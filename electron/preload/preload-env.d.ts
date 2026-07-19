@@ -57,5 +57,4 @@ declare interface Window {
   MsImageCacheClear: (serverId?: string) => Promise<{ cleared: number }>
   TvBoxInvoke: (channel: string, data?: unknown) => Promise<unknown>
   IsMainPage: boolean
-  onExternalDownloadOpen: (callback: (payload: string) => void) => void
 }

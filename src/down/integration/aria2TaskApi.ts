@@ -4,16 +4,10 @@ import type { DownloadTask, DownloadGlobalStat, DownloadTaskFile } from './taskT
 
 const TASK_FIELDS = [
   'gid', 'status', 'totalLength', 'completedLength', 'uploadLength',
-  'downloadSpeed', 'uploadSpeed', 'numSeeders', 'seeder', 'connections',
+  'downloadSpeed', 'uploadSpeed', 'connections',
   'numPieces', 'pieceLength', 'errorCode', 'errorMessage', 'dir',
-  'files', 'bittorrent', 'verifiedLength', 'verifyIntegrityPending'
+  'files', 'verifiedLength', 'verifyIntegrityPending'
 ] as const
-
-export const buildSelectFileOption = (indexes: number[]): { 'select-file': string } => ({
-  'select-file': indexes
-    .filter((index) => Number.isFinite(index) && index > 0)
-    .join(',')
-})
 
 export const normalizeTaskListResult = (tasks: any[] = []): DownloadTask[] =>
   tasks.map((task) => normalizeAriaTask(task))
@@ -62,10 +56,6 @@ export async function getTaskFiles(gid: string): Promise<DownloadTaskFile[]> {
   } catch {
     return []
   }
-}
-
-export async function changeTaskSelectedFiles(gid: string, indexes: number[]): Promise<void> {
-  await changeTaskOption(gid, buildSelectFileOption(indexes))
 }
 
 export async function changeTaskOption(gid: string, options: Record<string, string>): Promise<void> {

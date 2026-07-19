@@ -1,23 +1,6 @@
 <script setup lang="ts">
-import {
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useKeyboardStore,
-  useMouseStore,
-  usePanFileStore,
-  useWinStore
-} from '../store'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  RefreshScroll,
-  RefreshScrollTo,
-  TestCtrl,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../utils/keyboardhelper'
+import { KeyboardState, MouseState, useAppStore, useKeyboardStore, useMouseStore, usePanFileStore, useWinStore } from '../store'
+import { onHideRightMenuScroll, onShowRightMenu, RefreshScroll, RefreshScrollTo, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
 import { ref } from 'vue'
 import UploadDAL from '../transfer/uploaddal'
 
@@ -74,7 +57,10 @@ const onSelectReverse = () => {
   uploadedStore.ListSelected.clear()
   uploadedStore.ListFocusKey = -1
   if (reverseSelect.length > 0) {
-    uploadedStore.mRangSelect(reverseSelect[0].TaskID, reverseSelect.map(r => r.TaskID))
+    uploadedStore.mRangSelect(
+      reverseSelect[0].TaskID,
+      reverseSelect.map((r) => r.TaskID)
+    )
   }
   uploadedStore.mRefreshListDataShow(false)
 }
@@ -87,7 +73,6 @@ const onSelectCancel = () => {
 
 const onSelectRang = (file_id: number) => {
   if (rangIsSelecting.value && rangSelectID.value != -1) {
-
     let startid = rangSelectID.value
     let endid = -1
     const s: { [k: string]: any } = {}
@@ -124,17 +109,19 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'down') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      const className = mouseEvent.srcElement.className
-      if (className && className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        const className = mouseEvent.srcElement.className
+        if (className && className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
 })
-
 
 const handleRefresh = () => UploadDAL.aReloadUploaded()
 const handleSelectAll = () => uploadedStore.mSelectAll()
@@ -212,8 +199,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
       } else {
         message.error('文件可能已经被删除')
       }
-    } catch {
-    }
+    } catch {}
   }
   if (cmd == 'dir') {
     const full = item.localFilePath
@@ -224,14 +210,12 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
       } else {
         message.error('文件夹可能已经被删除')
       }
-    } catch {
-    }
+    } catch {}
   }
   if (cmd == 'delete') {
     UploadDAL.UploadedDelete(false)
   }
   if (cmd == 'pan') {
-
     if (item.TaskFileID) {
       AliFile.ApiGetFile(item.user_id, item.drive_id, item.TaskFileID).then(async (file) => {
         if (file) {
@@ -250,40 +234,27 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
 </script>
 
 <template>
-  <div style="height: 7px"></div>
-  <div class='toppanbtns' style='height: 26px'>
-    <div style="min-height: 26px; max-width: 100%; flex-shrink: 0; flex-grow: 0">
-      <div class="toppannav">
-        <div class="toppannavitem" title="已上传">
-          <span> 已上传 </span>
-        </div>
-      </div>
-    </div>
-    <div class='flex flexauto'></div>
-    <div style="flex-grow: 1"></div>
-  </div>
-  <div style="height: 14px"></div>
-  <div class="toppanbtns" style="height: 26px">
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" :loading="uploadedStore.ListLoading" title="F5"
-                @click="handleRefresh">
+  <div class="toppanbtns">
+    <div v-if="!uploadedStore.IsListSelected" class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" :loading="uploadedStore.ListLoading" title="F5" @click="handleRefresh">
         <template #icon>
           <IconFont name="iconreload-1-icon" />
         </template>
       </a-button>
-    </div>
-
-    <div v-if="uploadedStore.IsListSelected" class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadDAL.UploadedDelete(false)"><IconFont name="icondelete" />清除选中
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadDAL.UploadedDelete(true)">
+        <IconFont name="iconrest" />
+        清空全部已上传
       </a-button>
     </div>
 
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" @click="() => UploadDAL.UploadedDelete(true)"><IconFont name="iconrest" />清空全部已上传
+    <div v-else class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" @click="() => UploadDAL.UploadedDelete(false)">
+        <IconFont name="icondelete" />
+        清除选中
       </a-button>
     </div>
 
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="toppanbtn">
       <a-input-search
         tabindex="-1"
@@ -293,14 +264,13 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
         placeholder="快速筛选"
         allow-clear
         v-model="uploadedStore.ListSearchKey"
-        @clear='(e:any)=>handleSearchInput("")'
-        @input="(val:any)=>handleSearchInput(val as string)"
+        @clear="(e: any) => handleSearchInput('')"
+        @input="(val: any) => handleSearchInput(val as string)"
         @press-enter="handleSearchEnter"
         @keydown.esc="($event.target as any).blur()"
       />
     </div>
   </div>
-  <div style="height: 9px"></div>
   <div class="toppanarea">
     <div style="margin: 0 3px">
       <AntdTooltip title="点击全选" placement="left">
@@ -310,10 +280,9 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
       </AntdTooltip>
     </div>
     <div class="selectInfo">{{ uploadedStore.ListDataSelectCountInfo }}</div>
-    <div style='margin: 0 2px'>
-      <AntdTooltip placement='rightTop' v-if="uploadedStore.ListDataShow.length > 0">
-        <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                  :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+    <div style="margin: 0 2px">
+      <AntdTooltip placement="rightTop" v-if="uploadedStore.ListDataShow.length > 0">
+        <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
           {{ rangIsSelecting ? '取消选择' : '区间选择' }}
         </a-button>
         <template #title>
@@ -326,21 +295,12 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
           </div>
         </template>
       </AntdTooltip>
-      <a-button shape='square'
-                v-if='!rangIsSelecting && uploadedStore.ListSelected.size > 0 && uploadedStore.ListSelected.size < uploadedStore.ListDataShow.length'
-                type='text'
-                tabindex='-1'
-                class='qujian'
-                status='normal' @click='onSelectReverse'>
+      <a-button shape="square" v-if="!rangIsSelecting && uploadedStore.ListSelected.size > 0 && uploadedStore.ListSelected.size < uploadedStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">
         反向选择
       </a-button>
-      <a-button shape='square' v-if='!rangIsSelecting && uploadedStore.ListSelected.size > 0' type='text' tabindex='-1'
-                class='qujian'
-                status='normal' @click='onSelectCancel'>
-        取消已选
-      </a-button>
+      <a-button shape="square" v-if="!rangIsSelecting && uploadedStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
     </div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="cell pr"></div>
   </div>
   <div class="toppanlist" :style="{ height: winStore.GetListHeight }" @keydown.space.prevent="() => true">
@@ -360,7 +320,8 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
       :data="uploadedStore.ListDataShow"
       :loading="uploadedStore.ListLoading"
       tabindex="-1"
-      @scroll="onHideRightMenuScroll">
+      @scroll="onHideRightMenuScroll"
+    >
       <template #empty>
         <a-empty description="没有 已上传 的任务" />
       </template>
@@ -369,18 +330,17 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
           <div
             :class="'fileitem ' + (uploadedStore.ListSelected.has(item.TaskID) ? ' selected' : '') + (uploadedStore.ListFocusKey == item.TaskID ? ' focus' : '')"
             @click="handleSelect(item.TaskID, $event)"
-            @mouseover='onSelectRang(item.TaskID)'
+            @mouseover="onSelectRang(item.TaskID)"
             @dblclick="() => handleDbClick(item.TaskID)"
-            @contextmenu="(event:MouseEvent)=>handleRightClick({event,node:{key:item.TaskID}} )">
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.TaskID] ? (rangSelectStart == item.TaskID ? 'rangstart' : rangSelectEnd == item.TaskID ? 'rangend' : 'rang') : '')">
-              <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
-                        @click.prevent.stop='handleSelect(item.TaskID, $event, true)'>
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.TaskID } })"
+          >
+            <div :class="'rangselect ' + (rangSelectFiles[item.TaskID] ? (rangSelectStart == item.TaskID ? 'rangstart' : rangSelectEnd == item.TaskID ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.TaskID, $event, true)">
                 <IconFont :name="uploadedStore.ListSelected.has(item.TaskID) ? 'iconrsuccess' : 'iconpic2'" />
               </a-button>
             </div>
             <div class="fileicon">
-              <IconFont :name="(item.isDir ? 'iconfile-folder' : 'iconwenjian')" aria-hidden="true" />
+              <IconFont :name="item.isDir ? 'iconfile-folder' : 'iconwenjian'" aria-hidden="true" />
             </div>
             <div class="filename">
               <div class="nopoint" :title="item.localFilePath">
@@ -388,7 +348,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
               </div>
             </div>
             <div class="downsize">{{ humanSize(item.ChildTotalSize) }}</div>
-            <div className="downedbtn">
+            <div class="downedbtn">
               <a-button type="text" tabindex="-1" title="定位到网盘" @click.prevent.stop="onSelectFile(item, 'pan')">
                 <IconFont name="iconcloud" />
               </a-button>
@@ -398,8 +358,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
               <a-button type="text" tabindex="-1" title="打开文件夹" @click.prevent.stop="onSelectFile(item, 'dir')">
                 <IconFont name="iconfile-folder" />
               </a-button>
-              <a-button type="text" tabindex="-1" title="删除上传记录"
-                        @click.prevent.stop="onSelectFile(item, 'delete')">
+              <a-button type="text" tabindex="-1" title="删除上传记录" @click.prevent.stop="onSelectFile(item, 'delete')">
                 <IconFont name="icondelete" />
               </a-button>
             </div>
@@ -407,8 +366,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
         </div>
       </template>
     </a-list>
-    <a-dropdown id="rightuploadedmenu" class="rightmenu" :popup-visible="true" tabindex="-1" :draggable="false"
-                style="z-index: -1; left: -200px; opacity: 0">
+    <a-dropdown id="rightuploadedmenu" class="rightmenu" :popup-visible="true" tabindex="-1" :draggable="false" style="z-index: -1; left: -200px; opacity: 0">
       <template #content>
         <a-doption @click="() => onSelectFile(undefined, 'pan')">
           <template #icon><IconFont name="iconcloud" /></template>
@@ -431,49 +389,44 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
   </div>
 </template>
 
-<style>
+<style scoped>
 .downedbtn {
-  margin: 0 8px 0 0;
-  flex-shrink: 0;
-  flex-grow: 0;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-right: 8px;
   text-align: right;
 }
 
 .downedbtn > button {
-  min-width: 32px !important;
-  height: 30px !important;
-  min-height: 30px !important;
-  padding: 0px !important;
-  color: var(--color-text-4) !important;
-  font-size: 14px;
-  line-height: 30px !important;
-  border: none !important;
-  margin: 0 1px;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 0 !important;
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: var(--ui-control-radius) !important;
 }
 
 .downedbtn > button .iconfont {
-  font-size: 24px;
-  line-height: 30px;
+  font-size: 16px;
+  line-height: 28px;
 }
 
 .fileitem.selected .downedbtn > button {
-  color: rgb(var(--primary-6)) !important;
+  color: var(--color-primary) !important;
 }
 
 .downedbtn > button:hover,
 .downedbtn > button:active {
-  background: rgba(99, 125, 255, 0.2) !important;
-  color: rgb(var(--primary-6)) !important;
-}
-
-body[arco-theme='dark'] .downedbtn > button:hover,
-body[arco-theme='dark'] .downedbtn > button:active {
-  background: rgba(99, 125, 255, 0.3) !important;
-  color: rgb(var(--primary-6)) !important;
+  color: var(--color-primary) !important;
+  background: var(--bg-hover) !important;
 }
 
 .downedbtn > button:hover .iconfont,
 .downedbtn > button:active .iconfont {
-  color: rgb(var(--primary-6)) !important;
+  color: var(--color-primary) !important;
 }
 </style>

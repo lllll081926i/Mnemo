@@ -16,12 +16,24 @@ describe('ProtocolManager', () => {
   it('can be instantiated with protocols config', async () => {
     const { default: ProtocolManager } = await import('../ProtocolManager')
     const mgr = new ProtocolManager({ protocols: { magnet: true, mo: false } })
-    expect(mgr).toBeDefined()
+    expect(mgr.protocols).toEqual({ mo: false, motrix: true })
   })
 
   it('init() does not throw', async () => {
     const { default: ProtocolManager } = await import('../ProtocolManager')
-    const mgr = new ProtocolManager({ protocols: { magnet: true } })
+    const mgr = new ProtocolManager({ protocols: { mo: true } })
     expect(() => mgr.init()).not.toThrow()
+  })
+
+  it('ignores magnet resources after local BT support is removed', async () => {
+    const { default: ProtocolManager } = await import('../ProtocolManager')
+    const mgr = new ProtocolManager()
+    const sendCommandToAll = vi.fn()
+    ;(globalThis as any).motrixApplication = { sendCommandToAll }
+
+    mgr.handle('magnet:?xt=urn:btih:abc')
+
+    expect(sendCommandToAll).not.toHaveBeenCalled()
+    delete (globalThis as any).motrixApplication
   })
 })
