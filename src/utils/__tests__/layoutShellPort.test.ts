@@ -6,6 +6,16 @@ const root = process.cwd()
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8')
 
 describe('deep layout shell port', () => {
+  it('loads the Aliyun Office SDK only inside the Office preview window', () => {
+    const html = read('index.html')
+    const office = read('src/layout/PageOffice.vue')
+
+    expect(html).not.toContain('aliyun-web-office-sdk.min.js')
+    expect(office).toContain("const ALIYUN_OFFICE_SDK_URL = 'https://g.alicdn.com/IMM/office-js/1.1.5/aliyun-web-office-sdk.min.js'")
+    expect(office).toContain('loadAliyunOfficeSdk')
+    expect(office).toContain('office-preview-state')
+  })
+
   it('main shell only exposes pan/down/share/setting tabs', () => {
     const page = read('src/layout/PageMain.vue')
     const panes = [...page.matchAll(/a-tab-pane key=["']([^"']+)["']/g)].map((m) => m[1])

@@ -1,15 +1,56 @@
 <script setup lang="ts">
 import { KeyboardState, useAppStore, useKeyboardStore } from '../store'
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { TestAlt, TestKey } from '../utils/keyboardhelper'
 
-declare namespace aliyun {
-  class Config {
-    setToken(token: { token: string }): any
+interface AliyunOfficeSdk {
+  config(options: { mount: Element; url: string }): {
+    setToken(token: { token: string }): unknown
   }
+}
 
-  // eslint-disable-next-line no-unused-vars
-  function config({ mount, url }: { mount: Element; url: string }): Config
+const ALIYUN_OFFICE_SDK_URL = 'https://g.alicdn.com/IMM/office-js/1.1.5/aliyun-web-office-sdk.min.js'
+const officeWindow = window as Window & { aliyun?: AliyunOfficeSdk; _Global?: Record<string, unknown>; Global?: Record<string, unknown> }
+let officeSdkPromise: Promise<AliyunOfficeSdk> | undefined
+
+const loadAliyunOfficeSdk = (): Promise<AliyunOfficeSdk> => {
+  if (officeWindow.aliyun?.config) return Promise.resolve(officeWindow.aliyun)
+  if (officeSdkPromise) return officeSdkPromise
+
+  officeSdkPromise = new Promise<AliyunOfficeSdk>((resolve, reject) => {
+    const script = document.createElement('script')
+    const timeout = window.setTimeout(() => finish(() => reject(new Error('Office SDK 加载超时'))), 15000)
+
+    const finish = (callback: () => void) => {
+      window.clearTimeout(timeout)
+      script.removeEventListener('load', handleLoad)
+      script.removeEventListener('error', handleError)
+      callback()
+    }
+    const handleLoad = () => {
+      finish(() => {
+        if (!officeWindow.aliyun?.config) {
+          reject(new Error('Office SDK 初始化失败'))
+          return
+        }
+        officeWindow.Global = { ...(officeWindow._Global || {}) }
+        resolve(officeWindow.aliyun)
+      })
+    }
+    const handleError = () => finish(() => reject(new Error('Office SDK 加载失败')))
+
+    script.src = ALIYUN_OFFICE_SDK_URL
+    script.async = true
+    script.dataset.mnemoOfficeSdk = 'true'
+    script.addEventListener('load', handleLoad, { once: true })
+    script.addEventListener('error', handleError, { once: true })
+    document.head.append(script)
+  }).catch((error) => {
+    officeSdkPromise = undefined
+    throw error
+  })
+
+  return officeSdkPromise
 }
 
 const keyboardStore = useKeyboardStore()
@@ -41,23 +82,40 @@ const handleMaxClick = (_e: any) => {
   if (window.WebToWindow) window.WebToWindow({ cmd: 'maxsize' })
 }
 const appStore = useAppStore()
+const officeState = ref<'idle' | 'loading' | 'ready' | 'error'>(appStore.pageOffice?.access_token ? 'loading' : 'idle')
+const officeError = ref('')
+let titleTimer: number | undefined
+let titleRetryTimer: number | undefined
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', onKeyDown, true)
   if (appStore.pageOffice?.access_token) {
-    const docOptions = aliyun.config({
-      mount: document.querySelector('#doc-preview')!,
-      url: appStore.pageOffice?.preview_url || ''
-    })
-    docOptions.setToken({ token: appStore.pageOffice?.access_token || '' })
+    try {
+      const sdk = await loadAliyunOfficeSdk()
+      const mount = document.querySelector('#doc-preview-mount')
+      if (!mount) throw new Error('Office 预览容器不存在')
+      const docOptions = sdk.config({ mount, url: appStore.pageOffice.preview_url || '' })
+      docOptions.setToken({ token: appStore.pageOffice.access_token })
+      officeState.value = 'ready'
+    } catch (error: any) {
+      officeState.value = 'error'
+      officeError.value = error?.message || 'Office 预览加载失败'
+    }
   }
   const name = appStore.pageOffice?.file_name || '文档在线预览'
-  setTimeout(() => {
+  document.title = name
+  titleTimer = window.setTimeout(() => {
     document.title = name
   }, 1000)
-  setTimeout(() => {
+  titleRetryTimer = window.setTimeout(() => {
     document.title = name
   }, 10000)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown, true)
+  if (titleTimer !== undefined) window.clearTimeout(titleTimer)
+  if (titleRetryTimer !== undefined) window.clearTimeout(titleRetryTimer)
 })
 </script>
 
@@ -83,6 +141,10 @@ onMounted(() => {
     </a-layout-header>
     <a-layout-content style="height: calc(100vh - 42px); padding-top: 8px; background: #f2f4f7">
       <div id="doc-preview" class="doc-preview" style="width: 100%; height: 100%">
+        <div v-if="appStore.pageOffice?.access_token" id="doc-preview-mount" class="doc-preview-mount"></div>
+        <div v-if="appStore.pageOffice?.access_token && officeState !== 'ready'" class="office-preview-state" :class="{ error: officeState === 'error' }" aria-live="polite">
+          {{ officeState === 'error' ? officeError : '正在加载文档...' }}
+        </div>
         <iframe
           v-if="!appStore.pageOffice?.access_token"
           id="iframe-preview"
@@ -94,4 +156,27 @@ onMounted(() => {
   </a-layout>
 </template>
 
-<style></style>
+<style scoped>
+.doc-preview {
+  position: relative;
+}
+
+.doc-preview-mount {
+  width: 100%;
+  height: 100%;
+}
+
+.office-preview-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #4e5969;
+  background: #f2f4f7;
+  font-size: 14px;
+}
+
+.office-preview-state.error {
+  color: #c23934;
+}
+</style>
