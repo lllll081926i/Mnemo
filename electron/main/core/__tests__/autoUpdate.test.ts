@@ -21,7 +21,7 @@ describe('createAutoUpdateController', () => {
     ]))
   })
 
-  it('downloads an available update silently in the background', async () => {
+  it('asks before downloading an available update', async () => {
     const updater = new FakeUpdater()
     const dialog = {
       showMessageBox: vi.fn().mockResolvedValue({ response: 0 })
@@ -37,15 +37,46 @@ describe('createAutoUpdateController', () => {
 
     updater.emit('update-available', { version: '4.0.12-beta', releaseNotes: '修复若干问题' })
     await Promise.resolve()
+    await Promise.resolve()
 
-    expect(dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'info',
+      title: '检测到新版本',
+      message: '检测到新版本 4.0.12-beta，是否下载并安装？',
+      buttons: ['下载并安装', '暂不更新'],
+      defaultId: 0,
+      cancelId: 1
+    }))
     expect(updater.downloadUpdate).toHaveBeenCalledTimes(1)
     expect(updater.allowPrerelease).toBe(true)
     expect(updater.autoDownload).toBe(false)
-    expect(updater.autoInstallOnAppQuit).toBe(true)
+    expect(updater.autoInstallOnAppQuit).toBe(false)
   })
 
-  it('prompts to restart after an update is downloaded', async () => {
+  it('does not download when the user declines the update', async () => {
+    const updater = new FakeUpdater()
+    const dialog = {
+      showMessageBox: vi.fn().mockResolvedValue({ response: 1 })
+    }
+
+    createAutoUpdateController({
+      updater,
+      dialog,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      currentVersion: '4.0.11',
+      isPackaged: true
+    })
+
+    updater.emit('update-available', { version: '4.0.12' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(updater.downloadUpdate).not.toHaveBeenCalled()
+    updater.emit('update-downloaded', { version: '4.0.12' })
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('installs immediately after an accepted update is downloaded and relaunches the app', async () => {
     const updater = new FakeUpdater()
     const dialog = {
       showMessageBox: vi.fn().mockResolvedValue({ response: 0 })
@@ -59,16 +90,11 @@ describe('createAutoUpdateController', () => {
       isPackaged: true
     })
 
-    updater.emit('update-downloaded', { version: '4.0.12-beta' })
+    updater.emit('update-available', { version: '4.0.12-beta' })
     await Promise.resolve()
+    await Promise.resolve()
+    updater.emit('update-downloaded', { version: '4.0.12-beta' })
 
-    expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'info',
-      title: '更新已下载',
-      message: '新版本 4.0.12-beta 已在后台下载完成',
-      detail: '重启 App 即可完成更新安装。',
-      buttons: ['重启安装', '稍后']
-    }))
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true)
   })
 })

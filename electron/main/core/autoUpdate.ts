@@ -35,37 +35,60 @@ export function createAutoUpdateController(options: AutoUpdateControllerOptions)
   if (!isPackaged) return
 
   updater.autoDownload = false
-  updater.autoInstallOnAppQuit = true
+  updater.autoInstallOnAppQuit = false
   updater.allowPrerelease = currentVersion.includes('-')
 
-  let hasStartedDownload = false
-  let hasPromptedRestart = false
+  let acceptedVersion = ''
+  let isPromptOpen = false
+  let isDownloading = false
+  let isInstalling = false
 
   updater.on('update-available', (info: UpdateInfo) => {
-    if (hasStartedDownload) return
-    hasStartedDownload = true
-    logger.info('[auto-update] update available, downloading in background', info.version)
-    updater.downloadUpdate().catch((err: unknown) => {
-      logger.warn('[auto-update] download failed', err)
-    })
+    if (isPromptOpen || isDownloading || isInstalling) return
+    isPromptOpen = true
+    logger.info('[auto-update] update available', info.version)
+    dialog
+      .showMessageBox({
+        type: 'info',
+        title: '检测到新版本',
+        message: `检测到新版本 ${info.version}，是否下载并安装？`,
+        detail: '确认后将自动下载并启动安装程序，安装完成后会重新打开 Mnemo。',
+        buttons: ['下载并安装', '暂不更新'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      })
+      .then(({ response }) => {
+        isPromptOpen = false
+        if (response !== 0) {
+          logger.info('[auto-update] update declined', info.version)
+          return
+        }
+        acceptedVersion = info.version
+        isDownloading = true
+        logger.info('[auto-update] downloading accepted update', info.version)
+        return updater.downloadUpdate().catch((err: unknown) => {
+          acceptedVersion = ''
+          isDownloading = false
+          logger.warn('[auto-update] download failed', err)
+        })
+      })
+      .catch((err: unknown) => {
+        isPromptOpen = false
+        logger.warn('[auto-update] update prompt failed', err)
+      })
   })
 
   updater.on('update-downloaded', (info: UpdateInfo) => {
-    if (hasPromptedRestart) return
-    hasPromptedRestart = true
-    dialog.showMessageBox({
-      type: 'info',
-      title: '更新已下载',
-      message: `新版本 ${info.version} 已在后台下载完成`,
-      detail: '重启 App 即可完成更新安装。',
-      buttons: ['重启安装', '稍后'],
-      defaultId: 0,
-      cancelId: 1
-    }).then(({ response }) => {
-      if (response === 0) updater.quitAndInstall(false, true)
-    }).catch((err: unknown) => {
-      logger.warn('[auto-update] restart prompt failed', err)
-    })
+    if (isInstalling || !acceptedVersion || info.version !== acceptedVersion) return
+    isInstalling = true
+    logger.info('[auto-update] update downloaded, starting installer', info.version)
+    try {
+      updater.quitAndInstall(false, true)
+    } catch (err: unknown) {
+      isInstalling = false
+      logger.warn('[auto-update] installer launch failed', err)
+    }
   })
 
   updater.on('error', (err: unknown) => {
