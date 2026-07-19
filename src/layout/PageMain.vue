@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import { KeyboardState, useAppStore, useFootStore, useKeyboardStore, useMouseStore, useSettingStore, useUserStore, useWinStore } from '../store'
 import { Music, Pause, Play, SkipBack, SkipForward, Video } from 'lucide-vue-next'
 import { onHideRightMenu, TestAlt, TestCtrl, TestKey, TestShift } from '../utils/keyboardhelper'
 
-import Setting from '../setting/index.vue'
-import Share from '../share/index.vue'
-import Down from '../down/index.vue'
 import Pan from '../pan/index.vue'
 
 import UserInfo from '../user/UserInfo.vue'
@@ -15,6 +12,10 @@ import ShutDown from '../setting/ShutDown.vue'
 
 import MyModal from './MyModal.vue'
 import { throttle } from '../utils/debounce'
+
+const Down = defineAsyncComponent(() => import('../down/index.vue'))
+const Share = defineAsyncComponent(() => import('../share/index.vue'))
+const Setting = defineAsyncComponent(() => import('../setting/index.vue'))
 
 const panVisible = ref(true)
 const appStore = useAppStore()
@@ -230,7 +231,7 @@ onUnmounted(() => {
       </div>
     </a-layout-header>
     <a-layout-content id="mnemobody">
-      <a-tabs type="text" :direction="'horizontal'" class="hidetabs" :justify="true" :active-key="appStore.appTab">
+      <a-tabs type="text" :direction="'horizontal'" class="hidetabs" :justify="true" :active-key="appStore.appTab" lazy-load>
         <a-tab-pane key="pan" title="1">
           <Pan :visible="panVisible" />
         </a-tab-pane>
