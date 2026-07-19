@@ -1,636 +1,369 @@
-<script setup lang='ts'>
-import { computed, onMounted, ref, watch } from 'vue'
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { RefreshCw } from 'lucide-vue-next'
 import { useUserStore } from '../store'
 import UserDAL from '../user/userdal'
 import message from '../utils/message'
-import { modalUserRewardSpace, modalUserSpace } from '../utils/modal'
-import AliUser from '../aliapi/user'
 import { humanSize } from '../utils/format'
-import type { ITokenInfo } from './userstore'
-import { isAliyunUser, isBaiduUser } from '../aliapi/utils'
-import { useMediaLibraryStore } from '../store/medialibrary'
-import { Modal } from '@arco-design/web-vue'
-import { showAlipanMemberPromotion, showAlipanMemberQrPromotion } from '../utils/alipanPromotion'
-import { getDriveProviderIcon, getDriveProviderLabel, getDriveProviderMeta } from '../utils/driveProvider'
+import { getDriveProviderMeta } from '../utils/driveProvider'
 
 const userStore = useUserStore()
-const mediaLibraryStore = useMediaLibraryStore()
-const isAliyunAccount = computed(() => isAliyunUser(userStore.user_id || userStore.GetUserToken))
-const avatarErrorKeys = ref<Set<string>>(new Set())
-
-const handleUserChange = (val: any, user_id: string) => {
-  if (val) UserDAL.UserChange(user_id)
-}
-const handleRefreshUserInfo = () => {
-  UserDAL.UserRefreshByUserFace(userStore.user_id, false).then((success) => {
-    if (success) message.info('刷新用户信息成功')
-    else message.error('刷新用户信息失败')
-  })
-}
-
-const handleSign = () => {
-  AliUser.ApiUserSign(userStore.GetUserToken)
-}
-
-const handleUserSpace = () => {
-  modalUserSpace()
-}
-
-const handleUserRewardSpace = () => {
-  modalUserRewardSpace(userStore.user_id)
-}
-
-const handleAlipanMemberPromotion = () => {
-  showAlipanMemberPromotion('购买会员，平台返佣支持开发者。开通阿里云盘三方会员后，可享受高速下载通道和高清观影地址。', {
-    userId: userStore.user_id,
-    confirm: false
-  })
-}
-
-const handleAlipanAnnualMemberPromotion = () => {
-  showAlipanMemberQrPromotion('购买会员，平台返佣支持开发者。扫码购买更多 VIP、扩容空间等服务。')
-}
-
-const handleLogOff = () => {
-  UserDAL.UserLogOff(userStore.user_id)
-}
-
-const handleDeleteLocalAccount = (token: ITokenInfo) => {
-  Modal.confirm({
-    title: '彻底删除本地帐号',
-    content: `确定要彻底删除本地保存的帐号“${token.nick_name || token.user_name}”吗？同时会删除该帐号在媒体库中扫描过的文件源和相关媒体数据。`,
-    okText: '删除',
-    okButtonProps: { status: 'danger' },
-    cancelText: '取消',
-    onOk: async () => {
-      mediaLibraryStore.removeMediaSourceByUserId(token.user_id)
-      if (userStore.user_id === token.user_id) {
-        await UserDAL.UserLogOff(token.user_id)
-      } else {
-        await UserDAL.UserClearFromDB(token.user_id)
-      }
-      await refreshUserList()
-      message.success('已删除本地帐号')
-    }
-  })
-}
-
-const handleLogin = () => {
-  if (window.WebClearCookies) {
-    window.WebClearCookies({ origin: 'https://auth.aliyundrive.com', storages: ['cookies', 'localstorage'] })
-  }
-  localStorage.setItem('login_provider', 'aliyun')
-  useUserStore().userShowLogin = true
-}
-
-const activeProvider = ref<'aliyun' | 'cloud123' | '115' | 'baidu' | 'pikpak' | 'guangya' | 'dropbox' | 'onedrive' | 'box'>('aliyun')
-const userListState = ref<ITokenInfo[]>([])
-
-const refreshUserList = async () => {
-  userListState.value = await UserDAL.GetUserListFromDB()
-}
-
-const handleCloud123Login = () => {
-  localStorage.setItem('login_provider', 'cloud123')
-  useUserStore().userShowLogin = true
-}
-
-const handle115Login = () => {
-  localStorage.setItem('login_provider', '115')
-  useUserStore().userShowLogin = true
-}
-
-const handleBaiduLogin = () => {
-  localStorage.setItem('login_provider', 'baidu')
-  useUserStore().userShowLogin = true
-}
-
-const handlePikPakLogin = () => {
-  localStorage.setItem('login_provider', 'pikpak')
-  useUserStore().userShowLogin = true
-}
-
-const handleGuangyaLogin = () => {
-  localStorage.setItem('login_provider', 'guangya')
-  useUserStore().userShowLogin = true
-}
-
-const handleDropboxLogin = () => {
-  localStorage.setItem('login_provider', 'dropbox')
-  useUserStore().userShowLogin = true
-}
-
-const handleOneDriveLogin = () => {
-  localStorage.setItem('login_provider', 'onedrive')
-  useUserStore().userShowLogin = true
-}
-
-const handleBoxLogin = () => {
-  localStorage.setItem('login_provider', 'box')
-  useUserStore().userShowLogin = true
-}
-
-const userList = computed(() => {
-  return userListState.value
-})
-
-const getUserName = computed(() => {
-  let userName = userStore.GetUserToken.nick_name || userStore.GetUserToken.user_name
-  const limit = isAliyunAccount.value ? 3 : 10
-  if (userName.length > limit) {
-    return userName.substring(0, limit) + '...'
-  } else {
-    return userName
-  }
-})
-
-const baiduQuotaText = computed(() => {
-  const token = userStore.GetUserToken
-  if (!isBaiduUser(userStore.user_id || token)) return ''
-  const free = typeof token.free_size === 'number' ? humanSize(token.free_size) : ''
-  const expire = token.space_expire ? '是' : '否'
-  return `可用 ${free} · 7天内到期 ${expire}`
-})
+const activeAvatarFailed = ref(false)
+const refreshing = ref(false)
 
 const activeProviderMeta = computed(() => getDriveProviderMeta(userStore.GetUserToken.tokenfrom))
 const activeProviderIcon = computed(() => activeProviderMeta.value.icon)
-const getProviderLabel = (tokenfrom: string) => getDriveProviderLabel(tokenfrom)
-const getProviderIcon = (tokenfrom: string) => getDriveProviderIcon(tokenfrom)
+const activeAccountName = computed(() => userStore.GetUserToken.nick_name || userStore.GetUserToken.user_name || activeProviderMeta.value.label)
+const activeAccountDetail = computed(() => {
+  const account = userStore.GetUserToken.user_name || ''
+  return account && account !== activeAccountName.value ? account : ''
+})
+const activeAvatarUrl = computed(() => (activeAvatarFailed.value ? '' : userStore.GetUserToken.avatar || ''))
+const activeAvatarText = computed(() => activeAccountName.value.trim().substring(0, 2) || activeProviderMeta.value.label.substring(0, 2))
 
-const getAvatarKey = (token: ITokenInfo) => `${token.user_id || token.user_name || 'current'}:${token.avatar || ''}`
-
-const hasUsableAvatar = (token: ITokenInfo) => {
-  return !!token.avatar && !avatarErrorKeys.value.has(getAvatarKey(token))
-}
-
-const handleAvatarError = (token: ITokenInfo) => {
-  const next = new Set(avatarErrorKeys.value)
-  next.add(getAvatarKey(token))
-  avatarErrorKeys.value = next
-}
-
-const getAvatarText = (token: ITokenInfo) => {
-  const name = token.nick_name || token.user_name || getProviderLabel(token.tokenfrom)
-  return name.substring(0, 2).toUpperCase()
-}
-
-const getQuotaPercent = (token: ITokenInfo) => {
-  if (!token.total_size) return 0
-  const percent = token.used_size / token.total_size
-  if (!Number.isFinite(percent)) return 0
-  return Math.max(0, Math.min(1, percent))
-}
-
-onMounted(() => {
-  refreshUserList().catch(() => {})
+const activeQuotaStats = computed(() => {
+  const token = userStore.GetUserToken
+  const total = Math.max(0, Number(token.total_size) || 0)
+  const rawUsed = Math.max(0, Number(token.used_size) || 0)
+  const rawRemaining = Math.max(0, Number(token.free_size) || 0)
+  const used = total > 0 && rawUsed === 0 && rawRemaining > 0 ? Math.max(0, total - rawRemaining) : Math.min(rawUsed, total || rawUsed)
+  const remaining = total > 0 ? Math.max(0, rawRemaining > 0 ? Math.min(rawRemaining, total) : total - used) : rawRemaining
+  return { total, used, remaining }
 })
 
+const activeQuotaPercent = computed(() => {
+  const { total, used } = activeQuotaStats.value
+  if (!total) return 0
+  return Math.max(0, Math.min(1, used / total))
+})
+
+const activeQuotaText = computed(() => {
+  const { total, used, remaining } = activeQuotaStats.value
+  if (total > 0) return `已用 ${humanSize(used)}，剩余 ${humanSize(remaining)}，总容量 ${humanSize(total)}`
+  return userStore.GetUserToken.spaceinfo || '该网盘暂未返回容量信息'
+})
+
+const handleRefreshUserInfo = async () => {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    const success = await UserDAL.UserRefreshByUserFace(userStore.user_id, false)
+    if (success) message.info('账号信息已刷新')
+    else message.error('刷新账号信息失败')
+  } catch {
+    message.error('刷新账号信息失败')
+  } finally {
+    refreshing.value = false
+  }
+}
+
+const handleAddAccount = () => {
+  userStore.userShowLogin = true
+}
+
 watch(
-  () => userStore.user_id,
+  () => [userStore.user_id, userStore.GetUserToken.avatar],
   () => {
-    refreshUserList().catch(() => {})
+    activeAvatarFailed.value = false
   },
   { immediate: true }
 )
-
 </script>
 
 <template>
-  <a-popover position='br' trigger='hover'>
-    <div v-if='userStore.userLogined' class='user-avatar-trigger' :title='activeProviderMeta.label'>
-      <a-avatar :size='28' class='user-avatar-placeholder'>
-        <img
-          v-if='hasUsableAvatar(userStore.GetUserToken)'
-          :src='userStore.GetUserToken.avatar'
-          @error='handleAvatarError(userStore.GetUserToken)'
-        />
-        <span v-else>{{ getAvatarText(userStore.GetUserToken) }}</span>
+  <a-popover v-if="userStore.userLogined" position="br" trigger="hover">
+    <button type="button" class="current-drive-trigger" :title="`${activeProviderMeta.label} · ${activeAccountName}`" :aria-label="`当前网盘：${activeProviderMeta.label}，${activeAccountName}`">
+      <a-avatar :size="28" class="current-drive-avatar">
+        <img v-if="activeAvatarUrl" :src="activeAvatarUrl" alt="" @error="activeAvatarFailed = true" />
+        <img v-else-if="activeProviderIcon" :src="activeProviderIcon" alt="" />
+        <span v-else>{{ activeAvatarText }}</span>
       </a-avatar>
-      <span v-if='activeProviderIcon' class='user-drive-badge'>
-        <img :src='activeProviderIcon' :alt='activeProviderMeta.label' />
+      <span v-if="activeAvatarUrl && activeProviderIcon" class="current-drive-badge" aria-hidden="true">
+        <img :src="activeProviderIcon" alt="" />
       </span>
-    </div>
-    <a-avatar v-else :size='28' style='margin-right: 12px' :style="{ backgroundColor: '#3370ff' }">登录</a-avatar>
+    </button>
 
     <template #content>
-      <div v-if='userStore.userLogined' style='width: 430px'>
-        <a-row class='userinfo-row' justify='space-between' align='center'>
-          <a-col class='userinfo-left' flex='1'>
-            <div class='username' :class="{ 'username-wide': !isAliyunAccount }">
-              <img
-                v-if='activeProviderIcon'
-                class='user-provider-heading-icon'
-                :src='activeProviderIcon'
-                :alt='activeProviderMeta.label'
-              />
-              Hi {{ getUserName }}
-              <span v-if='userStore.GetUserToken.vipIcon'>
-                <img width='65'
-                     :src='userStore.GetUserToken.vipIcon'
-                     :title='userStore.GetUserToken.vipname + "，过期时间："+ userStore.GetUserToken.vipexpire'
-                     alt='会员信息' />
-              </span>
-            </div>
-          </a-col>
-          <a-col flex='none'>
-            <a-button type='text' size='small' tabindex='-1'
-                      style='min-width: 20px; padding: 0 8px'
-                      title='刷新账号信息'
-                      @click='handleRefreshUserInfo()'>刷新
-            </a-button>
-            <a-button v-if='isAliyunAccount' type='text' size='small' tabindex='-1'
-                      style='min-width: 20px; padding: 0 8px'
-                      title='每日签到'
-                      @click='handleSign()'>签到
-            </a-button>
-            <a-button type='text' size='small' tabindex='-1'
-                      style='min-width: 20px; padding: 0 8px'
-                      title='退出该账号'
-                      @click='handleLogOff()'> 退出
-            </a-button>
-          </a-col>
-        </a-row>
-
-        <a-row class='userinfo-row' justify='space-between' align='center'>
-          <a-col class='userinfo-left' flex='1'>
-            <span class='userspace'>{{ userStore.GetUserToken.spaceinfo }}</span>
-            <span v-if="isBaiduUser(userStore.user_id || userStore.GetUserToken) && baiduQuotaText" class='userspace userspace-sub'>
-              {{ baiduQuotaText }}
+      <div class="current-drive-panel">
+        <div class="current-drive-panel-head">
+          <div class="current-drive-panel-avatar" aria-hidden="true">
+            <img v-if="activeProviderIcon" :src="activeProviderIcon" alt="" />
+            <span v-else>{{ activeProviderMeta.label.substring(0, 1) }}</span>
+          </div>
+          <div class="current-drive-identity">
+            <strong :title="activeAccountName">{{ activeAccountName }}</strong>
+            <span :title="activeAccountDetail || activeProviderMeta.label">
+              {{ activeProviderMeta.label }}
+              <template v-if="activeAccountDetail">· {{ activeAccountDetail }}</template>
             </span>
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='none'>
-            <a-button v-if='isAliyunAccount' type='text' size='small' tabindex='-1' style='min-width: 20px; padding: 0 8px' status='warning'
-                      @click='handleUserSpace()'>容量详情
-            </a-button>
-            <a-button v-if='isAliyunAccount' type='text' size='small' tabindex='-1' style='min-width: 20px; padding: 0 8px' status='success'
-                      @click='handleUserRewardSpace()'>福利兑换
-            </a-button>
-            <a-button v-if='isAliyunAccount' type='text' size='small' tabindex='-1' style='min-width: 20px; padding: 0 8px' status='success'
-                      title='年费会员购买'
-                      @click='handleAlipanAnnualMemberPromotion()'>年费会员购买
-            </a-button>
-            <a-button v-if='isAliyunAccount' type='text' size='small' tabindex='-1' style='min-width: 20px; padding: 0 8px' status='success'
-                      title='三方APP权益购买'
-                      @click='handleAlipanMemberPromotion()'>三方APP权益购买
-            </a-button>
-          </a-col>
-        </a-row>
+          </div>
+          <button type="button" class="current-drive-refresh" title="刷新账号信息" aria-label="刷新账号信息" :disabled="refreshing" @click="handleRefreshUserInfo">
+            <RefreshCw :size="14" :class="{ rotating: refreshing }" />
+          </button>
+        </div>
 
-        <a-list style='margin: 12px 0 24px 0' :max-height='300' size='small' :data='userList' class='userlist'
-                :data-refresh='userStore.user_id'>
-          <template #header>
-            <div class='userspace'>切换到其他账号</div>
-          </template>
-          <template #item='{ item, index }'>
-            <a-list-item :key='index'>
-              <div class='user-list-row'>
-                <div class='user-quota' :title='item.spaceinfo'>
-                  <a-progress type='circle' size='mini' status='warning' :percent='getQuotaPercent(item)' />
-                </div>
-                <div class='user-drive-icon' :title='getProviderLabel(item.tokenfrom)'>
-                  <img v-if='getProviderIcon(item.tokenfrom)' :src='getProviderIcon(item.tokenfrom)' :alt='getProviderLabel(item.tokenfrom)' />
-                  <span v-else>{{ getProviderLabel(item.tokenfrom).substring(0, 1) }}</span>
-                </div>
-                <div class='user-list-main'>
-                  <span class='user-list-name' :title='item.user_name'>{{ item.nick_name ? item.nick_name : item.user_name }}</span>
-                  <span class='user-provider' :title='getProviderLabel(item.tokenfrom)'>{{ getProviderLabel(item.tokenfrom) }}</span>
-                </div>
-                <div class='user-list-actions'>
-                  <a-switch size='small' :model-value='userStore.user_id == item.user_id' title='切换到这个账号'
-                            tabindex='-1' @change='handleUserChange($event, item.user_id) '>
-                    <template #checked> 当前</template>
-                    <template #unchecked> 选我</template>
-                  </a-switch>
-                  <a-button
-                    type='text'
-                    size='small'
-                    status='danger'
-                    tabindex='-1'
-                    title='彻底删除本地保存的该帐号'
-                    @click='handleDeleteLocalAccount(item)'
-                  >
-                    删除
-                  </a-button>
-                </div>
-              </div>
-            </a-list-item>
-          </template>
-        </a-list>
-
-        <a-row justify='center'>
-          <a-button type='outline' size='small' tabindex='-1' style='margin: 0 0 8px 0' title='Alt+L'
-                    @click='handleLogin()'> 登录一个新账号
-          </a-button>
-        </a-row>
-      </div>
-      <div v-else style='width: 250px'>
-        <a-tabs size='small' v-model:active-key='activeProvider'>
-          <a-tab-pane key='aliyun' title='阿里云盘' />
-          <a-tab-pane key='cloud123' title='123网盘' />
-          <a-tab-pane key='115' title='115网盘' />
-          <a-tab-pane key='baidu' title='百度网盘' />
-          <a-tab-pane key='pikpak' title='PikPak' />
-          <a-tab-pane key='guangya' title='光鸭云盘' />
-          <a-tab-pane key='dropbox' title='Dropbox' />
-          <a-tab-pane key='onedrive' title='OneDrive' />
-          <a-tab-pane key='box' title='Box' />
-        </a-tabs>
-        <a-row align='stretch'>
-          <a-col flex='60px'>
-            <a-avatar :size='56'
-            ><img
-              src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAACInSURBVHhe7Z2HexzHkcUHOYMIJCWREmXKpERbkhVs2Xf33T9/353vfCfLSiYlSiQl5oicQYSr36uumd4FQAJE4C6wD5jpVN3T06+6OuzsbNvy8vJm0cKJRXtyWzihaCnACUdLAU44WgpwwtFSgBOOlgKccLQU4ISjpQAnHC0FOOFoKcAJR0sBTjhO3GcBbW1tfnhAcUWxWWxaK2zaieMk4dgrAGR3tLcX7R3txdLScrFoB+7a+lqxvrYhGdK6OjuLvt7eor+/r+jr6yk21jeK9Y2NY68Qx1YBIL2js6OYmJwunjydKKamZ4u1teemEO1SCkxA1f/95BZgo+g0ZRgdGS7OnB4vxsdGSmU4jjh2CtBOb7fj3oOHxd17D4sNI669vcMON/27AYqwscGxXnR0dBRvn3+zeOfcW1ICyjtOOFYK0N3VVTybmCqu37glEiFvt6TvBMpZX1+XUr1/6WJxemy0WH3+PKU2P46NAkD+tes3iqcTk/JvR7yb+DgUo3gGA40KdoqjHuRZXX1enD07Xly5/F7x/PlaSmluHAsF6LSe/tU3V4uV1VUbvztSrAPiwpxD+qlTQ0V/X1/R29tjFsJXwes2xi+vrBSLi0vFzMyclGGnYWNtbU15P//kI/mbHU2vABD+5T++FxmY/BwQS/zZM+PFuXNvFCPDwymFvh9WgJ4vG+ABw/TMbPHg0ePiyZMJTQhDUQIMCV1dncUXn/2heN7kStDUCtDd3VV8/e01W9ot1ZAf5vr0+Ghx5YNLshB7WdLR61lFrBnRP9iwMmHzCq6VWwOUYGCgv/j049/pWs2KplUAev6duw+Ku/cfWm/sSrEV+R99+IEmbJC4H6A8zCuu/vDTlrnFc5sMXnjnvK0Q3tz3dV4XmnIruN1IWFxaKX69e18mOgD5kPLnP31q6/f9kw8o48z4WPHF52bubeKXWxGu/evtezZ/WN0yV2gWNJ0C0M6bNl4z4897JMQwCfz8s4+1k4eJ3i+ibJSgv7+/+OyTD2VdQglIZy7w081ftJPYjGgqBYCP9fXN4v7jZ8XK8rLW5oG1tfXitxcvFEMDA5r87QfMJzY2N7QqYAgAKNTw0GBx8d23da0AdZiZndPRjFagaRSApl1b2yjmFpaLqcnJmkkfy7yenq7iwtvnD2TMv2fziv/665fFV19/X/z3/36VUtwSvHvhbU0IN7KhgN7PXKR+FdIMaAoFEPnWq6fnltQz5+fna3obS73Ll96rIeVVQG+eW1gofjaTzlq/p6dbPf/GzV9LS8A13r/0G10zQF0mpqZr4poFDa8AJfnzi0aCETQ7K6JCARiP6ZFjI6f2tU+v8uz/m++uFb09PWX59OpHj5+WloVrjI2OqtfncwGWjU+fTdYMS82Ahq5tTj4z/zZ66Fxt72e8P2/LMDZ2XhUUB4Ff/v1bv05WPn4mev+8dr20AlzrPB8OZXMNiJ80K8DuYTOhYRWgJN/MvkixP9yFxcVaBdhYL86eHtc84FUAcWz7/t9X32oJuV0PJo5J3m2WnaYEXOvsmTFzq/kGdZqaMevU1rIA+0ZJ/jw7fISc8OWVZbmhAJhgTDHjdZjj3YKeCplzNp/46//8XeTX7ybmZbLk/OXXu8Uvtu7HWvDwCPsA+TCAEVqwlUOmnw2PhlMA2g7yZ4x8rCk9n12/LhvnWYPnvZ/GHxsdkR8yd3uot07PFt/884fi62+uShnynh/k128fMym8e+9B8eU/vtNkcdTmHXk65bAt3dVZ7Uw2OhpqK7iWfMb8Nlvvr1ij39MMG5Lql1pMyvb60Sw6xJNBfMhTb/IhdHV1tfiXP39ePH7yrPj19l2bZHanVAfXZPyvz09e5guDAwPFe795J8U2NhpGASCFdf703KJMLL2U44cff5SpzXv+YYElH8s8tn0ZVrA+PFzy8NGTHZ8xqIcsR1KOf/nTpw3/aWFDDAE5+fR8Ztk09tIy46krwmEC0thG5tO9f//XL9L6f8Os0XrxwaX3rDdfKFZWVtXzXwbqypDFnGKmbsXSiHjtCkD7sLWqpZ6ZfBFuf2z49PX1iRyOg0KU52Z8Xeaea370u/eLz/7woeLzFQVKcOHtc8Wfv/hUQwGKQr4X1Yk05g99PXufnB41XusQQN/wMd+XdvyVsFq12QqAPf+79+5rDsD4Xz9mE/+iRt5ueUg5fGA0PDykJeTIqWGZ/hf1cOrH0MRykIdFJienpRwMDTm4HkryW5sDsD+BsjQyXpsCBPmxyUNMRr8UYLNtU+tqCGMecPPWTT3TH0oA+ZcuXSotRT3INzzQk0JbQQ5I30svDUUAs2biv/nuavk8AuT39nYXH5s1abdrNzr54LUMAXnP79Bz+jSsEyK4PkglGAogWs/0K6EWjLWeXnsQ/xxzbQTTU7c7XmbKtwPyyquhot5ibMoidNpKoBnIB0euAFBYkQ/LTgATv5Jf824mP6STholmKzgHvfFFZntv1O4NXNtn+JVScj3quLnNsNOoOFIFoKmei/wl9XxIblMVoDlRbXFqSDvUOZFJkZ3bbLDEJG47YD0OC1xxZWVFlquEVbinu+tQFe+gcWQKQDvR8+cWfJPHAeWQRJM528RI2IOlixXo6uqoMdnqhWbqt4eVdJg90a69tIQCxL1YHe1yPbZS2Ouw8jpxJApAE8nsG/nq6TQa/9ZO9G5vQqpiESmsJiw97tbvyFHO0pLvFdQjol40ROwHFM/nCLUKsGkT0t6WAuSgedaMBMjv0OZ+NFjyE8TEB9NpTkCSVIKT+bEAzPbrCUUBdkabJmuHhbn5hRoFYMgZGhxoKUCApqHnz2rMJ5QaKxpIY7RP8toszvs+h6frbKcYyrs6OrXLFg0cjb+wUEtECYt6/nxdJR4kuBZfHqHcuC514nMAhoBmwqEpAM0i8jH7NFJJkNGNJYBZxfm2r02fS71wwLz7LElptmIvBgeHSgUA7AlMT/MgxtZboXQ9wFle+2DAPsDjp89qrollGh8ZOVSLcxg4FAVQw1tDzC4sq+dr0hdkpoP+7r4K0gOTc0tgVbOAyzogfmhosGYYUG80BdgJq1iA2sscCB49elqnAJvF2NiIWasTrgC0tchPH+kSAYEVCe4h7MQiQ6DSELy2wi/DDBIYDfYChoeGRHo+DHA8efJkixWQZTGsrB7cJ3I8T3D77j27ll8XUBe8fBWNOjYTDlQBaA4t9SC/vUPEeSyjfOrN3maCj/4GZxwxxQpaDURkzBNcCUZHR0sFABD/9OnTmrgAxCwtH9w3d9ZtQnL7zn1tMwewSG+9cVZWoNlwYApA89LzeW6f3bA2Zm40urWJU5lIdPFassOV470Jv/gsVwjm2j+Nffr0eMHHtbkVQAlu375d7ssHSFs1C8BrXvYLev/33//oyp0UijqwNfzO2zwk2hzbvzkORAFoCt/kWZapBpupgQRn0uS8TwP1fQsQTjTq7CDBZVWMKYHbCpeE7HHMbTbeEre4uFg8ePBAHxzlwFwzGcV9VUD+zV9uF7Nzc9b7q2ZDEc+/9YbSmxEHogDq+YvpU7pEvPd4eTzOuTO4FSh3A5UujrdRGneI9oqS7h/bvnH2rMXbNZIcgPhnz57ZBO1RjSVAjtXA0hJDQYrcAyCXB0K3+yYyj63x+BdWoBmxbwVg2TOvnl/1bned6JIeWl5kRayn4/WZP67185wh8yqoQqz8bALBXODCO+/oA5lcCSAIJbh165YUUkppQAmwUDx5lF/iRdDH0HZ8d/XH4s79BzVrfK7J5/4fXbl8IMPL68K+ngeAfDf7Ro4dNQVlpOCLNlevEakmD/OQWiYmR+kWXVeG5IhLDPJ+v6nJKevxj7eM/VgJrvXGG2/YcDEuPwcme3ior+juqh7pzsEwEc/233/4uLh567bi8kkf8Ic+LhTn3jrrew1NildWgOj5EM8RKAuzxiVe43RK1zkEiEsTRaLgQlEpH5DfWffM5kjOPK43ENNZPHr8qJgwRaC31tTFhGOeMDIyUgzZEpKveTOJ6+3pLAb6ah8W4Z5mZmb1prHHT2xVYXHblckHUOds3L908d2mf2PYKylA9Hw9GSNGsgZSszltNH2ZYnKekpDyxcWJD39AIuFJwKfLmUcWxCT4csgTI+yJLQW3e4IY0kIZcGXazWIwPHSZn/Hb2kE9WRYgDR3blUPPv3jh7eLdC+f1PYVmx54VIMinbaB5SyPZkfhxJPIUjz/2dSWE6/ldqkLIMycohwI5KY85PiWQpEhdXFiwNXq1SVNftwBE5i54mTzKwzr/o9+/X4wMDzX9y6ECe1IAJ58dvnZrds9mzVY1nHNRegUamXRzy+QUFpIbJj3yybWTzL1Sylg58ikSn0tRL+ry8OEjbQ+jFC8i9mWAeI41I3t8fKy4cvmiqhvDynHArhXAx/z0BAxHyhX01CtBcsr0stfpbGnIpzhBGSqylWInuRZBnAcCnuiKQz4gKRG/9nxNu4N8aodgbtJ3UoiyjuY6yW16cvgtG+9Pjwwfm16fY1cKUEO+wd2KVLW7eeuVILwgidC6CCqvDwmWkpWDAiRvmRdI1H06C3gViQer5KS5QvhYTp3m5uaKhfkFfW+Px7hehJ6eHr0xfGBgoBgcHNQ8Z2ig91j1+hwvVQAnP5/t0xAsk6yRa7jwviuZiHfGyjQpjMow1/+TfMqgiJCum0QaquxJnlRbSfg8weTt5DlVUCmvuvNncwOSeMKYnUveDB7xnTxroKUhxfsTv5B/arCv6T7g2QteqABbya9E5SuDkEaTI+MNLkS6t7ujZNH9ni+DIlwJtsDSlEL+nBTiES8Li7RKCeSmWHkUbx753WYQ6cWyUmgvRgb7jzX5YEcFEPls71ojbVoDBWcOGsqJyBuYeG/R1LgRNJclGwqSRdnJm50ClCuVGcQoNrmSq0cZSTmU78NAKq1KNhAT1ySk+ieLQKJfwwL2z8Onw9bz9/tQqef2tuJgFSEr2EDYVgEwf9rbhwg1nbebc+pEOuIWM0QgNWoeroeSICKRzqeIPN41b+O11UuPfK/bxAtlPOqG22/P596xIuxR8KAoXzzlK2gjp4Z046/jnrbDFgVgq3R+iU0edvEgBq3FFVdyc6AQgGg0nImXnseXrBMrIEYZHpI8eXmZwpKRzf49u3A0SqkQ2cVyfzMgJxc/R6wszpwe049QDNhkk9VKJXn0qFEACJxf5GPTeD6Pk1Plrt9MRUZkdZNaIxpJBslXRQjs4689Xy/u3b+nHr/fNXuzIBSBXUcswvuXL+rLJK/r84RSAajU/KJ/0UF8JaJRipwUV4zEJXL2ZzmSvPNckm2u0inThRWPWXz4+Ike44J4FO4kgjbn7SYX3jmnN5C+jq1lKUAN+YpVWgZMWG2kuKxORNVAFiEBJdAunfkZ52/e+kVjfPT6HOSrP14Gl0uBRoLdmlTf7jE+Y9jufun9/f29xacf/15KsZt7Pii0LS4ubuY9vwaqh5ksc7kBq5tkon5b5D2DCNeMPD7tswxqCCvj559vyKrU93pkeKSKepw6dUqbML29vfqYF0XZCUzWes2EDvQ13vP41G15ecWW0gvF1PSMWbxnaju+21CvCMy9aOM/fvqR0o5KCdqeTU4HnU5UVi+vg5twr1BtpaOOVZ6odO0NkB/Cf7z+k+Jz8gmj9ZD85ptv6mPb6AV5GduBBu7p6tTn+yhVI4J71/2nRnrybKK49cttPadYrwjcN/jLHz/RKuEokBSgqgRtzsy/BF7CijJicUqlUCDLQzlU3HcKAWl8Y+b6Tzf0oUo9+cTx0MbZs2dlAV5GekBydrnTo0MNS/524P5Rhjv3HkgR+L5jvRKgGH82JTiKOYEZHf4MqeGpSw0HSrQTCUYyRDv5dY1ezhGCYMK8MKmzuP/ggR6iqCcfwi9fvlycOXNGirBb8gGig/09TUU+gGCeP+C9Q1/86TP583ugjSD+p5+P5jcIxIguL+bxOPAa1ckX5IabxzngX/zlJFock71nvEQ5G8chmoa4cuWKxvi9Pk7tisJ38Zvre3g5IL6vt6f4t798bm1Ra/k60iqJl1Hm1uEwIAUoLyGP93D/2rZP54irQLiKo94yDsTaSQ91JnE+YLlz565IJh1wo/R23u2zrSXZJRhWmh10Ah5P+yKZ+2gL2qrLlPuH6zcP/T5LmxwEyZdIpVu7GgDOmZQLuJzCybUDa0D67OysnpnLtZjefv78eSnFq5IP/Nn8V8/fKEAJeD39lQ9+qz2BAPMEHj97OjFVTiAPA2lxDuMVifjhhv7vJJFAg9fOTEMJgOTTQWyHaTbP6KHhAd2sLe3GxnjT9qvPcrmiGsUv3fRgOHjz7Blb+vbXtAsPpN69+0A/gn1Y8D1fuqzIdiUg5ArB8sVcS6CtN/W2hoArh+SVwd3wP19b1ZuzWdsG6P3nzp3b85i/HXKrchzAsu/9y3VWwCaEvISCXyU7LDijastk7GEaIokySD+Sxz8YUrQhJHA9LUman+/sz/pTwwkoC72fx7L3Y/qPK2iToYH+LVaA/ZGnzyakDIcB9ibdJ1J82ieU/Jpi6FBAUeFCtHNJOA4epmgr5hdq35/DTfGt3v2Y/uMOlOCtN/mWcdVGWFCea8wt6UHC1ArKjUXISmt84mpgQT4LgGyScU1SCRnHhsi/9eVN3Bzbuy0F2BnsbPL7B/m+AG04r7epHpIF4FLat1fQSRWSk/iUq1RWBvgtPYlsAetaPuAIBQiTzxDwMmDy2DzKj1yRmgXUmUlc/fEi0E78Ekn4AeXwNPJhPZHcNjE545dKBNuVuSoe+/clYAqlM5Yg9f/IU4d1I//6zzdEHkAeP2v/F00AIf/GjRs11gP5+vcB01P4WldfT2O+lJG68+NWX371rZa7QG8QGxos+MVxZv07ASXhF0nYFwizz1L6j598qF9HS01wYNAcgCVV2aOD/ARVwU7OBxNF/CmiFFOiQNpa9mNKgd1OYsIC0HAczWoBII/fHSiP7m49/bQb8FlAPQc8xZy380HB5wBJraAInx92Mc3sgc/+uXw5STSHTQSXDTlH/cOUshhNSOLrQv07kdXyhzR3ss4P0eYzNx76oJ/jk15ICQg7zSWR5mhbgDkBjvIm2STSwiuitv8cKtq998OmuawCzCmvLyYTseaXDy9pwKPNhXSsRJKtJFpocMjWQJeekcfHv3FIf8/6vR24+GDdYzhcC+yM0+r6TQdZAJEsfsOFU8gMJUhAM4zkmDPoHMOG4uVTuIXmgOYAUgI7RDr80ZMT68nZFqI647vK9qJcLTQSfAhACTSGB+vmQmwKhhcVURgH+S1EI0Gcy7XQ+IgtQKMM6jzg8wFHkO8S+INgC5sm6BExxYMqXwvNAX8eABiDNcMBY3tilqG/3cJOvbtOuftAtXJtKUEzQZ8FlLBAqQT2hx/EEIEiIO96EUQnLcFXeVtoEpixT4Yf8hKBQbh29ILnhEoJ/OyOucgjXr+J1UJDw+hy1uFRSITncwLxnPjmcCVwQV8FemIyGC00EXwVYPw53U45BycpAcOBWQJ9YGR/Dvc57bgpxL8yt9As8Ed66LrWlf0v0cnJoOGAv4ptc1NYKe4q0eJTthaaBMkCQB4+JzJoDcKlFm0bnqxo+xPf+FK6J7XQZEifBhp9qYtDvgi2kEh1hkW23vxBGFiirEOy+S6PoIItNAnaxR9k8meBjHpBvhQkLayDFMe8elYtxosWmg6+58dAAJ+JVCc0EV36DBYoLYFBS0VSy+GBEzm2AoXh6R6eDJLytFADniDiaShwlM3jO4GJv/K6eOAVfySkOIAl2NDr2ALuC+tRfwOQznN+165dKx4+fKg3gRHHDZ9UheCe+XobzwDSDlPTs8WNm78Wf/vyaz1PuNtH6PaLdvV60z6fxpmffxENKWgBw0Iy/BYl44DMBkrgGiHik/hO4IZ4JHxmZqa4c+dOcfXqVf2qB28H4/WtWAca4jgrQ9wapNMh7tx9UPzj238W//GffyuuXruu3yigjcISHAXaJqdmbeSvG/txrLaa4CVunexKSm6aM4g0+0ecMWVxedm0+cXfb4/JIzescqyM4eHh9N7+tVIR8F+8eFGPlJd5zG30p4Kxcl9/d63oTk8FU3deBjE40K+3hGhvxToFph/5uN/twFPBf/j9B3rXYLTBQSF9GOT932rBOc3pLAbXHNJSis4BKo3yxHsBeScQKsGmERXlWXYe6w6Sc8RNo+0xN+Clzjn55AkZjkYfLsq6Wj07O/lKfOpEKY0XXz5Lv2zCI948/bvdPZEHJafteLEGXxTJv2Z3kDALMEMrK6AGl89RUoZH44ITrhuropSu+FQOKwMaYmFxUaTOzs7JTzpPvGpXse6mdwJ1oiH4XgDfLOJnX/D39/K49d5fLnHQUC9O98IXOfnpmsmpafmxgHu5zyCen5/lO5Qcp8dGizOnR/SlUdIPGm0T07NlqWVVVRkLo3R6xNsIT4mqhPkxHawFFG1RpQKQbK5yWZDvD4p4yzdjysBv7qMQ9IbQ/jh2Qtx4bklOnRouzoyP6fd6400hWKLDfmUMJju+psX39ycmp0X4pLnUTQqxC7OObBzcl4YHU/DBgYFiQD9BX+gFWLz97DBfGNU2mSkAnuod/hGTkLxSBBc0J8mZ49EWYwLlS5hTnPzISBm812DaUARmvPwYI8TlDbebxqPheL0aX7wYt56CMozbYbl1ye2Gnr2CekhRzc+9iHA76OkrK6tm6SwtWYHdEs5BnqFE9pARz28Y0fPd9PPSiK5i0OY5hA8TbVM2BGglYEg8Obgw8VEBc2gA/0awNawEaWpHKY5MUgKRapElCUmYEN6qcdv0Yw5zphCz8zZcLOxtuKB8yOZ6uMNDA6YMrhDD1rhAppV6p6rsBC7FPYZZnzWLBeGTRvjsnC9fZQWo9y7qFXXjsgNpGBscGtR3AF1BkfN0WoZ76MUa8AKsl1X2ACALoBdApJsRWfhxUrXwEaFQipJIlo8EqYOl+8MjFXHkJM3L9jBweeLkM4fehG/TLMOCLMOrDBfe6N7wiI6OmmWwY2x8VI0LaFzSgUhNZS7btSYnpooJM+tTdlC9IH231/bru1nn+4Bh2qmM93IT5tpWFOXjUip1Zl5zFD0/UFoAKpBfEqXYID5qmFLzCqcYnSkBPWZ/gJ1FGkGlIug+SzXZlB8QLq+MSbF/yicGRaCxafxyuLDeyJARb9UMQnZDCoRouDBSxsZdIfj9YTCRCJ+cmNa4jlnPFW4nRNlxkEcTVTPr9HJWAmHWca0wc+2eUXI1W2oPAzJHTT5om2IOQAWzG80vX84JgCrm/ngNrMPyy7UGq0QUG8OBP11Egrn8J0G3MileiPLllICIIIVNFKwDysB6W0TRS3F1jZ0RykBvww+87Fcw6+by20LRyzHreRqlm2Nlel5QE9blTd7cXiZ8R2T2c8gCePsbFebKqyQHN6JGSZUNeNB7sG413ZTHJFh0DAeKrLI7VGzkkLDFuVsvKhCZFCcsAP45mzegDCw5mZjlvfdFhHJv4GUycUAsPyrFpI0ejpunqYJxD3FP5vpVHCYq6JLGPLl6u/1XTI+afGAWwBSAynIj9Q3h9a/aPb8V83KvDs+ve7YEUZqLWiDmBKQmQc+DY8GyqEhP+TPpMq8ulV0giIZ41stYh/lXGC5ADeF26FfDEtnsQbC/IaKQwZJYnrJ+FqfyVc1U15o7qGS8CCZ8r498UA4BHkraGpVUpEMV141UscpmUX6vcbOAImlseSPG81ukmsNO5bBgBVVDAnA/5Xu4LCbE7SAR+YqCFGUH1/aJG79GwvwBhZhndaEyqkmd53OyIZTrsF07OGCED2PW+e2gNI5zgYTy+uRNcdSGodGVAFnKR846u53YPYjojXVemmXk974+8oErgHx2MC7itRuIGwxEFbOOl5AizHESQSgDTeISJMkSpD+lV+JJOtwIGZK3aqOICIcyA/ggykP4dbVsbF9YYN/BlMGO5fQbgpj14TSOsy6nrqiCfhYekiVlqL20XF0slU2bRXyZx+AiVU211OPHq18z+cCXgSng8Oq7tltKbWJ5k54Qt+p0l8HkgcgNLAExdtJjA+2JFKUqV5YPr6fLJyuSEs1J0hWIU3q6mnqf+pniQHkfCW4dYrjwt3HzWQRyHBrL/fIC9fGHXixQ1tGRiTkowxyPt+swUTbX7wlvm3b1+rq7iv7XaPZzmCGsuwmvqs5S7JTosY7auYLfssfgTxnUGF6AyCfO2tGJChmLTd7SNbhXknIVE2UACXicO6mRywqHpAQz13sfJDNXCGWID6x8IrcVqm95cff6lapyuV9QisUqiX+5bIyxw9dd9DUI+cBso1eamxFhUTGrcH7jZXUtPuRdxqMlSBq9Vox7r7EoQ9ZUloEG8ecLzR9jsRdqjjJ4DpVBzpSYfF6mnRDB8SSDK4LLSlJlc4TSSV6+QBUiTfLK68BPmTXKkbLkkoqigEDut2uTnXX+QG93WZdGgL4c6pVnnLRbzSqOL1nYvJ0cJkeUNjVSFjl2gn9nxenwhnJ/NIxI4c/kvEFSIeblmp4j9SLB3FQZPxt0HScBpaMcplpS5HJqRlXYpJFPYcnbSZe1kLtABdrhO4hxadXf7jMehSvFEghqD0IBz+j352BDrae7oyHG/Hq4BVDl6ysWhNkZT3bTeOPQ/aSb0pkGCLnkR05hOySukME8XMWbzi2DvEnQaxXSCJNe5paY4Brjl7a6+L2kQsyVHIqCQFleyFduyPsB6uTtbyclKEFBqT0QYaHT02nkN5DZz5H6BZVWOEM0GK41KukW3HrfVQJpBMmmRlUKPSzP4f0z0vhjNc21SrI9MSGk8ZorIlGWFCu5SiaTNiBkIVXIvVskMpEqDdfrQ72UVvKe3U+IJyinrmWHySCmnt+g5ANG4GQGVH2/J7sBVTfdSIA01r24ARFXI+blkFfy8iJAiLwZ0R6l9BhjlQvxVGDk8quSVl7IYzgZXLySK2uZHDxeFw9FfXFVPXOjjIDfgcUr4Bmi7toKB5V47hXh3UZ+fwOa/Rz6erhXT8bA/VZhEUvF1Wqkmd/CKMd2N6RG5KSAHcgkMRUjnxKSLzVlmaWMkV/bJik/rqcDMtgRhSZHSibXDuLsKJUgBDmTZkLtIpT7VLSAv/bWrEbIm0/l67/KUGPZklelmt3v6e4U+bXWr/Hg7ZDgN+ouwFUyA5kWjEkGj91Y5C3lLU5KEGVK2JqMKDucFKKVoDJClCATOV8d6N8b3QRwxIQFXD5FZo1L2S5HIB1WVvXqOodkDBIrM3h8VlwCdfcMXmzKnAC5JcGpKCffe36jkw948Yc3ngW8eYkgkFU+GQBaiZuiUdhw0SZMJqaMqQi1KIhyEKXojBBEqpCDRtZwYAmqD0IIIGt5XZ4zcclqEMRgJHEgP4ObhVGCMg9lSY578SgQeV2eCP6Tx+C5kx8ZuRHr8VhGyOfHoJqBfFBtBWcgghtgacNN6UbjhkI6lCI5HESlkdEReVJD+bMFHi1lwK+YBAIuKiHoFlEKej1ity8avUTkTdFcI6rtJXBOiZKzk7Ym44KOyBf+Cl6GuxVEtOrFBzvs8HWbAtfKNDLalpdXvHPsUOe47RJ1spG+q1uWkJ3Uwi/JqWRLFwvmJm+5NbwFFu//ZfH4XwplcO9uUCPONVJ9iONXwHfaTWxMFMX/A5pP7l/dS9slAAAAAElFTkSuQmCC'
-            /></a-avatar>
-          </a-col>
-          <a-col flex='auto'>
-            <span class='username'>Welcome</span>
-            <br />
-            <span class='userspace'>还没登录账号?</span>
-          </a-col>
-        </a-row>
-        <a-divider />
-        <a-row justify='center'>
-          <a-button
-            v-if="activeProvider === 'aliyun'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            title='Alt+L'
-            @click='handleLogin()'
-          >
-            登录一个新账号
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'cloud123'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handleCloud123Login()'
-          >
-            登录 123 网盘
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === '115'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handle115Login()'
-          >
-            登录 115 网盘
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'baidu'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handleBaiduLogin()'
-          >
-            登录 百度网盘
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'pikpak'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handlePikPakLogin()'
-          >
-            登录 PikPak
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'guangya'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handleGuangyaLogin()'
-          >
-            登录 光鸭云盘
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'dropbox'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handleDropboxLogin()'
-          >
-            登录 Dropbox
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'onedrive'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handleOneDriveLogin()'
-          >
-            登录 OneDrive
-          </a-button>
-          <a-button
-            v-else-if="activeProvider === 'box'"
-            type='outline'
-            size='small'
-            tabindex='-1'
-            style='margin: 0 0 8px 0'
-            @click='handleBoxLogin()'
-          >
-            登录 Box
-          </a-button>
-        </a-row>
+        <div v-if="activeQuotaStats.total > 0" class="current-drive-quota" :title="activeQuotaText">
+          <div class="current-drive-quota-title">
+            <span>空间占用</span>
+            <strong>{{ Math.round(activeQuotaPercent * 100) }}%</strong>
+          </div>
+          <a-progress :percent="activeQuotaPercent" :show-text="false" size="small" />
+          <div class="current-drive-quota-stats">
+            <div>
+              <span>已用</span>
+              <strong>{{ humanSize(activeQuotaStats.used) }}</strong>
+            </div>
+            <div>
+              <span>剩余</span>
+              <strong>{{ humanSize(activeQuotaStats.remaining) }}</strong>
+            </div>
+            <div>
+              <span>总容量</span>
+              <strong>{{ humanSize(activeQuotaStats.total) }}</strong>
+            </div>
+          </div>
+        </div>
+        <div v-else class="current-drive-quota-empty">{{ activeQuotaText }}</div>
       </div>
     </template>
   </a-popover>
+
+  <button v-else type="button" class="current-drive-add" @click="handleAddAccount">
+    <IconFont name="iconadd" />
+    <span>添加网盘</span>
+  </button>
 </template>
+
 <style>
-.username {
+.current-drive-trigger,
+.current-drive-add {
   display: inline-flex;
   align-items: center;
-  width: 150px;
-  overflow: hidden;
-  font-size: 18px;
-  white-space: nowrap;
-  word-break: keep-all;
-  text-overflow: ellipsis;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  font: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ui-control-radius);
+  cursor: pointer;
 }
 
-.username-wide {
-  width: 220px;
+.current-drive-trigger:hover,
+.current-drive-trigger:focus-visible,
+.current-drive-add:hover,
+.current-drive-add:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
 }
 
-.userinfo-row {
-  width: 100%;
-}
-
-.user-provider {
-  color: var(--color-text-3);
-  font-size: 12px;
-  white-space: nowrap;
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.user-avatar-trigger {
+.current-drive-trigger {
   position: relative;
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
   width: 40px;
-  height: 32px;
-  margin-right: 4px;
+  padding: 0;
 }
 
-.user-drive-badge {
-  position: absolute;
-  right: 2px;
-  bottom: 1px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-border-2);
-  border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+.current-drive-add {
+  gap: 6px;
+  color: var(--text-link);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.user-drive-badge img,
-.user-drive-icon img,
-.user-provider-heading-icon {
+.current-drive-avatar {
+  color: var(--text-inverse);
+  font-size: 11px;
+  font-weight: 650;
+  background: var(--color-primary);
+}
+
+.current-drive-avatar img,
+.current-drive-badge img,
+.current-drive-panel-avatar img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
-.user-provider-heading-icon {
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
-  margin-right: 6px;
+.current-drive-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  padding: 1px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
 }
 
-.user-avatar-placeholder {
-  background: #3370ff;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.userinfo-left {
-  display: flex;
-  align-items: center;
-  min-width: 150px;
-}
-
-.userspace {
-  margin: 0;
-  display: inline-block;
-  max-width: 170px;
-  line-height: 30px;
-  overflow: hidden;
-  color: #8a9ca5;
-  white-space: nowrap;
-  word-break: keep-all;
-  text-overflow: clip;
-}
-
-.userspace-sub {
-  display: block;
-  line-height: 20px;
-  font-size: 12px;
-  color: #a6b1b9;
-}
-
-.userlist {
-  width: 100%;
-}
-
-.userlist .arco-list-header,
-.userlist .arco-list-item {
-  flex-shrink: 0;
+.current-drive-panel {
   box-sizing: border-box;
-  height: 38px;
-  padding: 6px 12px !important;
-  line-height: 22px !important;
-  overflow: hidden;
+  width: min(300px, calc(100vw - 24px));
+  padding: 4px 2px 2px;
+  color: var(--text-primary);
 }
 
-.userlist .arco-list-item .arco-list-item-content {
-  display: block;
-  width: 100%;
-}
-
-.user-list-row {
+.current-drive-panel-head {
   display: flex;
   align-items: center;
-  width: 100%;
   min-width: 0;
-  gap: 8px;
+  padding: 4px 2px 12px;
+  gap: 10px;
 }
 
-.user-quota {
-  flex: 0 0 24px;
+.current-drive-panel-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--ui-control-radius);
 }
 
-.user-drive-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 24px;
+.current-drive-panel-avatar img {
   width: 24px;
   height: 24px;
-  color: var(--color-text-2);
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--color-fill-1);
-  border: 1px solid var(--color-border-2);
-  border-radius: 6px;
 }
 
-.user-drive-icon img {
-  width: 18px;
-  height: 18px;
-}
-
-.user-list-main {
-  display: flex;
-  align-items: center;
-  flex: 1 1 0;
+.current-drive-identity {
+  display: grid;
+  flex: 1 1 auto;
   min-width: 0;
-  gap: 8px;
+  gap: 3px;
 }
 
-.user-list-name {
+.current-drive-identity strong,
+.current-drive-identity span {
   display: block;
-  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
-  word-break: keep-all;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.user-list-actions {
+.current-drive-identity strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.current-drive-identity span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.current-drive-refresh {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ui-control-radius);
+  cursor: pointer;
+}
+
+.current-drive-refresh:hover,
+.current-drive-refresh:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.current-drive-refresh:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.current-drive-refresh .rotating {
+  animation: current-drive-refresh-spin 700ms linear infinite;
+}
+
+.current-drive-quota {
+  padding: 12px 2px 4px;
+  border-top: 1px solid var(--border-light);
+}
+
+.current-drive-quota-title {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex: 0 0 118px;
-  gap: 6px;
-}
-
-.user-list-actions .arco-btn-size-small {
-  height: 24px;
-  padding: 0 4px;
-  line-height: 24px;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  color: var(--text-secondary);
   font-size: 12px;
+  line-height: 18px;
 }
 
+.current-drive-quota-title strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.current-drive-quota .arco-progress-line {
+  margin: 0;
+}
+
+.current-drive-quota-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 10px;
+  gap: 12px;
+}
+
+.current-drive-quota-stats > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.current-drive-quota-stats span,
+.current-drive-quota-stats strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current-drive-quota-stats span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.current-drive-quota-stats strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.current-drive-quota-empty {
+  padding: 12px 2px 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  border-top: 1px solid var(--border-light);
+}
+
+@keyframes current-drive-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 </style>
