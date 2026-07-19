@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 
 import { Tree as AntdTree } from 'ant-design-vue'
+import { Modal } from '@arco-design/web-vue'
 import collapseMotion from 'ant-design-vue/es/_util/collapseMotion'
+import { Trash2 } from 'lucide-vue-next'
 import usePanTreeStore, { PanTreeState } from './pantreestore'
 import MySwitchTab from '../layout/MySwitchTab.vue'
 import { KeyboardState, useAppStore, useKeyboardStore, usePanFileStore, useSettingStore } from '../store'
@@ -19,6 +21,8 @@ import { modalUpload } from '../utils/modal'
 import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
 import { loadDriveAccountOptions, toDriveAccountOption, type DriveAccountOption } from '../utils/driveAccount'
+import { getWebDavConnectionId, removeWebDavConnection } from '../utils/webdavClient'
+import { getS3ConnectionId, removeS3Connection } from '../utils/s3Client'
 
 const treeref = ref()
 const inputselectType = ref('backup')
@@ -354,6 +358,34 @@ const handleSwitchDriveAccount = async (userId: string) => {
   }
 }
 
+const handleRemoveDriveAccount = (account: DriveAccountOption) => {
+  if (!account.user_id || isSwitchingDrive.value) return
+  Modal.confirm({
+    title: '移除网盘账号',
+    content: `确定移除“${account.name}”吗？这只会删除本地登录信息，不会删除网盘中的文件。`,
+    okText: '移除',
+    cancelText: '取消',
+    okButtonProps: { status: 'danger' },
+    onOk: async () => {
+      isSwitchingDrive.value = true
+      try {
+        const token = UserDAL.GetUserToken(account.user_id)
+        if (isWebDavUser(token)) removeWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
+        if (isS3User(token)) removeS3Connection(getS3ConnectionId(token.default_drive_id || token.user_id))
+        if (account.user_id === userStore.user_id) await UserDAL.UserLogOff(account.user_id)
+        else await UserDAL.UserClearFromDB(account.user_id)
+        driveAccounts.value = await loadDriveAccountOptions().catch(() => UserDAL.GetUserList().map(toDriveAccountOption))
+        message.success('网盘账号已从本地移除')
+      } catch (error: any) {
+        message.error(error?.message || '移除网盘账号失败')
+        throw error
+      } finally {
+        isSwitchingDrive.value = false
+      }
+    }
+  })
+}
+
 const handleOpenDriveLogin = () => {
   isDriveSwitcherOpen.value = false
   userStore.userShowLogin = true
@@ -377,15 +409,20 @@ const handleOpenDriveLogin = () => {
       <template #content>
         <div class="pan-drive-menu" :style="{ '--pan-drive-menu-width': `${driveSwitcherWidth}px` }">
           <div v-if="driveAccounts.length" class="pan-drive-menu-list">
-            <button v-for="account in driveAccounts" :key="account.user_id" type="button" class="pan-drive-menu-item" :class="{ active: account.user_id === userStore.user_id }" :disabled="isSwitchingDrive" @click="handleSwitchDriveAccount(account.user_id)">
-              <span class="drive-provider-mark" aria-hidden="true">
-                <img v-if="account.icon" :src="account.icon" alt="" />
-                <span v-else>{{ account.providerLabel.slice(0, 1) }}</span>
-              </span>
-              <span>{{ account.name }}</span>
-              <small :title="account.detail">{{ account.detail }}</small>
-              <IconFont v-if="account.user_id === userStore.user_id" name="iconrsuccess" class="current" />
-            </button>
+            <div v-for="account in driveAccounts" :key="account.user_id" class="pan-drive-menu-item" :class="{ active: account.user_id === userStore.user_id }">
+              <button type="button" class="pan-drive-menu-account" :disabled="isSwitchingDrive" @click="handleSwitchDriveAccount(account.user_id)">
+                <span class="drive-provider-mark" aria-hidden="true">
+                  <img v-if="account.icon" :src="account.icon" alt="" />
+                  <span v-else>{{ account.providerLabel.slice(0, 1) }}</span>
+                </span>
+                <span>{{ account.name }}</span>
+                <small :title="account.detail">{{ account.detail }}</small>
+                <IconFont v-if="account.user_id === userStore.user_id" name="iconrsuccess" class="current" />
+              </button>
+              <button type="button" class="pan-drive-menu-remove" :disabled="isSwitchingDrive" :title="`移除 ${account.name}`" :aria-label="`移除 ${account.name}`" @click="handleRemoveDriveAccount(account)">
+                <Trash2 :size="14" />
+              </button>
+            </div>
           </div>
           <div v-else class="pan-drive-menu-empty">还没有登录网盘账号</div>
           <button type="button" class="pan-drive-menu-login" @click="handleOpenDriveLogin">

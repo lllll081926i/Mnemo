@@ -387,6 +387,7 @@ body,
   align-items: stretch !important;
   height: var(--layout-header-height) !important;
   padding: 0 !important;
+  overflow: hidden !important;
 }
 
 #xbyhead2 .arco-menu-horizontal .arco-menu-item {
@@ -451,14 +452,6 @@ body,
 #xbyhead2 .arco-btn-text[title*='关闭']:hover {
   color: #fff !important;
   background: #ef4444 !important;
-}
-
-#xbyhead2 .head-divider {
-  width: 1px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--border-light);
-  flex: 0 0 auto;
 }
 
 #xbybody {
@@ -587,13 +580,23 @@ body,
   overflow: hidden !important;
   height: 100% !important;
   transition:
-    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
 }
 
 .MySplit .arco-split-pane-first,
 .MySplit .arco-split-pane-second {
-  will-change: width, flex-basis;
+  min-width: 0;
+  will-change: flex-basis;
+}
+
+.MySplit.is-resizing .arco-split-pane {
+  transition: none !important;
+}
+
+.MySplit.is-collapsed .arco-split-pane-first {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .MySplit.is-collapsed .splitline {
@@ -602,11 +605,17 @@ body,
 }
 
 .MySplit .splitline {
+  box-sizing: border-box;
   width: 4px !important;
+  height: 100%;
   border-left: 1px solid var(--border-light) !important;
   border-right: 0 !important;
   margin: 0 !important;
   background: transparent !important;
+  user-select: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
 }
 
 .MySplit .splitline:hover,
@@ -632,6 +641,9 @@ body,
 }
 
 .pan-drive-switcher {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   flex-shrink: 0;
   padding: 8px;
   border-bottom: 1px solid var(--border-light);
@@ -647,7 +659,7 @@ body,
   min-height: 34px;
   padding: 6px 10px;
   border: 1px solid var(--border-light);
-  border-radius: 8px;
+  border-radius: var(--ui-control-radius);
   background: var(--bg-subtle);
   color: var(--text-primary);
   font-size: 13px;
@@ -670,6 +682,29 @@ body,
   min-width: 0;
 }
 
+.drive-provider-mark {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: 3px;
+}
+
+.drive-provider-mark img {
+  display: block;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
 .pan-drive-switcher-btn .label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -678,6 +713,7 @@ body,
 }
 
 .pan-drive-menu {
+  box-sizing: border-box;
   width: var(--pan-drive-menu-width, var(--layout-rail-width));
   max-width: min(360px, calc(100vw - 16px));
   padding: 4px;
@@ -688,7 +724,6 @@ body,
   overflow: auto;
 }
 
-.pan-drive-menu-item,
 .pan-drive-menu-login {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto 18px;
@@ -707,18 +742,83 @@ body,
   cursor: pointer;
 }
 
-.pan-drive-menu-item span {
+.pan-drive-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 4px;
+  color: var(--text-primary);
+  background: transparent;
+  border-radius: 3px;
+}
+
+.pan-drive-menu-account {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  gap: 8px;
+  padding: 0 4px;
+  color: inherit;
+  font: inherit;
+  font-size: var(--ui-font-size-small);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.pan-drive-menu-remove {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  padding: 0;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ui-control-radius);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.pan-drive-menu-item:hover .pan-drive-menu-remove,
+.pan-drive-menu-item:focus-within .pan-drive-menu-remove {
+  opacity: 1;
+}
+
+.pan-drive-menu-remove:hover,
+.pan-drive-menu-remove:focus-visible {
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  outline: none;
+}
+
+.pan-drive-menu-account span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pan-drive-menu-item small {
+.pan-drive-menu-account small {
+  max-width: 74px;
+  overflow: hidden;
   color: var(--text-secondary);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.pan-drive-menu-item .current {
+.pan-drive-menu-account .current {
   color: var(--color-primary);
 }
 
@@ -831,10 +931,12 @@ body,
 .treeleft {
   display: flex !important;
   flex-direction: column !important;
-  height: calc(100% - 94px) !important;
+  width: 100% !important;
+  height: auto !important;
   min-height: 0 !important;
   margin-left: 0 !important;
-  padding: 0 4px 8px !important;
+  padding: 0 8px 8px !important;
+  box-sizing: border-box !important;
   overflow: hidden !important;
 }
 
@@ -844,6 +946,28 @@ body,
 .treeleft .arco-tabs-content-list,
 .treeleft .arco-tabs-pane {
   height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.shortcut-tree-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dirtree,
+.quicktree,
+.colortree {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  background: transparent !important;
 }
 
 .dirtree,
@@ -851,11 +975,70 @@ body,
   height: 100% !important;
 }
 
-.dirtree .ant-tree-node-content-wrapper,
-.quicktree .ant-tree-node-content-wrapper,
-.colortree .ant-tree-node-content-wrapper {
+.colortree {
+  height: 180px;
+  flex: 0 0 180px;
+}
+
+.quicktree-area {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pan-left .ant-tree-list,
+.pan-left .ant-tree-list-holder,
+.pan-left .ant-tree-list-holder-inner {
+  min-width: 0 !important;
+}
+
+.pan-left .ant-tree-list-holder {
+  overflow-x: hidden !important;
+}
+
+.pan-left .ant-tree-treenode {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.pan-left .ant-tree-indent,
+.pan-left .ant-tree-switcher,
+.pan-left .ant-tree-iconEle {
+  flex: 0 0 auto;
+}
+
+.pan-left .ant-tree-node-content-wrapper {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  align-items: center;
+  min-width: 0 !important;
+  max-width: 100%;
   min-height: 30px !important;
-  border-radius: 8px !important;
+  overflow: hidden;
+  border-radius: 0 !important;
+}
+
+.pan-left .ant-tree-title {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pan-left .dirtitle,
+.pan-left .quicktitle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.pan-left .dirtitle.treedragnode {
+  width: 100%;
 }
 
 .dirtree .ant-tree-node-content-wrapper:hover,
@@ -865,6 +1048,50 @@ body,
 
 .ant-tree-node-selected .ant-tree-node-content-wrapper {
   background: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+}
+
+.quickitem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.quickitem .quicktitle {
+  flex: 1 1 auto;
+}
+
+.quickitem .quickbtn {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.quickitem:hover .quickbtn,
+.quickitem:focus-within .quickbtn {
+  opacity: 1;
+}
+
+.quicktree .quickbtn .arco-btn-size-mini {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 !important;
+  color: var(--text-tertiary) !important;
+}
+
+.quicktree .quickbtn .arco-btn-size-mini:hover,
+.quicktree .quickbtn .arco-btn-size-mini:focus-visible {
+  color: var(--color-error) !important;
+  background: color-mix(in srgb, var(--color-error) 10%, transparent) !important;
+}
+
+.mnemo-tree-collapse {
+  overflow: hidden;
+  transition:
+    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 140ms ease;
 }
 
 .dirtree .iconfont.iconfile-folder,
@@ -1285,7 +1512,9 @@ body[arco-theme='dark'] .toppanbtn .arco-btn:hover {
   max-width: 100%;
   background: var(--color-primary);
   border-radius: inherit;
-  transition: width 0.24s ease, opacity 0.24s ease;
+  transition:
+    width 0.24s ease,
+    opacity 0.24s ease;
 }
 
 .ui-workspace-content .progress-current.succeed {

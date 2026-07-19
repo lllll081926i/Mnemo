@@ -651,7 +651,7 @@ export default class UserDAL {
   }
 
   static async UserClearFromDB(user_id: string): Promise<void> {
-    DB.deleteUser(user_id)
+    await DB.deleteUser(user_id)
     UserTokenMap.delete(user_id)
   }
 
