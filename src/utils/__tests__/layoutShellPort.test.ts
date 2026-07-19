@@ -110,6 +110,17 @@ describe('deep layout shell port', () => {
     expect(page).toContain("event.key === 'Escape' && appStore.appTab === 'setting'")
   })
 
+  it('keeps Box in the shared login provider flow', () => {
+    const login = read('src/user/UserLogin.vue')
+    expect(login).toContain("'dropbox', 'onedrive', 'box', 'webdav', 's3'")
+    expect(login).toContain("loginProvider.value === 'box'")
+    expect(login).toContain("loginProvider === 'box'")
+    expect(login).toContain('createBoxPkceVerifier')
+    expect(login).toContain('buildBoxAuthUrl')
+    expect(login).toContain('exchangeBoxCodeForToken')
+    expect(login).toContain('submitBoxCode(code)')
+  })
+
   it('keeps all setting groups in one scrollable document with sidebar anchors', () => {
     const setting = read('src/setting/index.vue')
     expect(setting).toContain('scrollToSection')

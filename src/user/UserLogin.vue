@@ -21,6 +21,7 @@ import { Cloud189QrState, pollCloud189QrLogin, requestCloud189QrCode } from '../
 import { GuangyaSmsState, generateGuangyaDid, requestGuangyaSmsCode, submitGuangyaSmsCode } from '../guangya/auth'
 import { DROPBOX_APP_KEY, buildDropboxAuthUrl, createDropboxPkceVerifier, exchangeDropboxCodeForToken } from '../dropbox/auth'
 import { ONEDRIVE_CLIENT_ID, buildOneDriveAuthUrl, createOneDrivePkceVerifier, exchangeOneDriveCodeForToken } from '../onedrive/auth'
+import { BOX_CLIENT_ID, buildBoxAuthUrl, createBoxPkceVerifier, exchangeBoxCodeForToken } from '../box/auth'
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
@@ -40,10 +41,10 @@ const qrCodeUrl = ref('')
 const qrCodeStatusType = ref()
 const qrCodeStatusTips = ref()
 
-type LoginProvider = 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'webdav' | 's3'
+type LoginProvider = 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'box' | 'webdav' | 's3'
 
 const loginProvider = ref<LoginProvider>('aliyun')
-const loginProviders: LoginProvider[] = ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'webdav', 's3']
+const loginProviders: LoginProvider[] = ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'box', 'webdav', 's3']
 const getLoginProviderMeta = (provider: LoginProvider) => getDriveProviderMeta(provider)
 const activeLoginProviderMeta = computed(() => getLoginProviderMeta(loginProvider.value))
 const cloud123Code = ref('')
@@ -79,6 +80,10 @@ const onedriveClientId = ref('')
 const onedriveVerifier = ref('')
 const onedriveLoading = ref(false)
 const onedriveAuthUrl = ref('')
+const boxClientId = ref('')
+const boxVerifier = ref('')
+const boxLoading = ref(false)
+const boxAuthUrl = ref('')
 const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
 const webDavLoading = ref(false)
 const s3Form = ref({ name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true })
@@ -142,6 +147,7 @@ const handleModalOpen = () => {
     stored === 'quark' ||
     stored === 'dropbox' ||
     stored === 'onedrive' ||
+    stored === 'box' ||
     stored === 'webdav' ||
     stored === 's3'
   ) {
@@ -149,6 +155,7 @@ const handleModalOpen = () => {
   }
   dropboxAppKey.value = localStorage.getItem('dropbox_app_key') || DROPBOX_APP_KEY
   onedriveClientId.value = localStorage.getItem('onedrive_client_id') || ONEDRIVE_CLIENT_ID
+  boxClientId.value = localStorage.getItem('box_client_id') || BOX_CLIENT_ID
   if (loginProvider.value === 'cloud123') {
     handleOpenCloud123()
   } else if (loginProvider.value === 'baidu') {
@@ -169,6 +176,8 @@ const handleModalOpen = () => {
     handleOpenDropbox()
   } else if (loginProvider.value === 'onedrive') {
     handleOpenOneDrive()
+  } else if (loginProvider.value === 'box') {
+    handleOpenBox()
   } else if (loginProvider.value === 'webdav') {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
@@ -179,7 +188,7 @@ const handleModalOpen = () => {
 }
 
 const handleOauthCallback = (event: any) => {
-  if (loginProvider.value !== 'cloud123' && loginProvider.value !== 'baidu' && loginProvider.value !== 'dropbox' && loginProvider.value !== 'onedrive') return
+  if (loginProvider.value !== 'cloud123' && loginProvider.value !== 'baidu' && loginProvider.value !== 'dropbox' && loginProvider.value !== 'onedrive' && loginProvider.value !== 'box') return
   const url = event?.detail || ''
   if (!url) return
   try {
@@ -196,6 +205,8 @@ const handleOauthCallback = (event: any) => {
         submitDropboxCode(code)
       } else if (loginProvider.value === 'onedrive') {
         submitOneDriveCode(code)
+      } else if (loginProvider.value === 'box') {
+        submitBoxCode(code)
       }
     }
   } catch {
@@ -235,6 +246,8 @@ watch(loginProvider, () => {
     handleOpenDropbox()
   } else if (loginProvider.value === 'onedrive') {
     handleOpenOneDrive()
+  } else if (loginProvider.value === 'box') {
+    handleOpenBox()
   } else if (loginProvider.value === 'webdav') {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
@@ -428,6 +441,9 @@ const handleClose = () => {
   onedriveVerifier.value = ''
   onedriveLoading.value = false
   onedriveAuthUrl.value = ''
+  boxVerifier.value = ''
+  boxLoading.value = false
+  boxAuthUrl.value = ''
   webDavForm.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
   webDavLoading.value = false
   s3Form.value = { name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true }
@@ -544,6 +560,25 @@ const handleReopenOneDrive = () => {
   handleOpenOneDrive().catch((err: any) => message.error(err?.message || '打开 OneDrive 授权页失败'))
 }
 
+const handleOpenBox = async () => {
+  loginLoading.value = false
+  const clientId = (boxClientId.value || localStorage.getItem('box_client_id') || BOX_CLIENT_ID).trim()
+  if (!clientId) {
+    message.warning('请先在 src/box/auth.ts 填写 BOX_CLIENT_ID')
+    return
+  }
+  boxClientId.value = clientId
+  localStorage.setItem('box_client_id', clientId)
+  boxVerifier.value = createBoxPkceVerifier()
+  const authUrl = await buildBoxAuthUrl(clientId, boxVerifier.value)
+  boxAuthUrl.value = authUrl
+  window.Electron.shell.openExternal(authUrl)
+}
+
+const handleReopenBox = () => {
+  handleOpenBox().catch((err: any) => message.error(err?.message || '打开 Box 授权页失败'))
+}
+
 const submitCloud123Code = async () => {
   if (cloud123Loading.value) return
   if (!cloud123Code.value.trim()) {
@@ -627,6 +662,28 @@ const submitOneDriveCode = async (code: string) => {
     message.error('OneDrive 登录失败')
   } finally {
     onedriveLoading.value = false
+  }
+}
+
+const submitBoxCode = async (code: string) => {
+  if (boxLoading.value) return
+  const clientId = boxClientId.value.trim()
+  if (!clientId || !boxVerifier.value) {
+    message.error('Box 授权信息已失效，请重新打开授权页面')
+    return
+  }
+  boxLoading.value = true
+  try {
+    const token = await exchangeBoxCodeForToken(code, clientId, boxVerifier.value)
+    if (token) {
+      await UserDAL.UserLogin(token, true)
+      useUserStore().userShowLogin = false
+    }
+  } catch (error) {
+    console.error('Box 登录失败:', error)
+    message.error('Box 登录失败')
+  } finally {
+    boxLoading.value = false
   }
 }
 
@@ -1372,6 +1429,18 @@ const loginSuccess = (token: ITokenInfo) => {
                 <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 OneDrive 授权页面</p>
                 <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
                 <a-button style="margin-top: 16px" :loading="onedriveLoading" @click="handleReopenOneDrive">重新打开浏览器</a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 'box'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <div class="browser-login-hint">
+                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 Box 授权页面</p>
+                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
+                <a-button style="margin-top: 16px" :loading="boxLoading" @click="handleReopenBox">重新打开浏览器</a-button>
               </div>
             </div>
           </div>
