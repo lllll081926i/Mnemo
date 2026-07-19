@@ -306,7 +306,7 @@ export function DecodeEncName(user_id: string, item: IAliFileItem | IAliGetFileM
   }
   let name = item.name
   let description = item.description
-  let need_decode = description && description.includes('xbyEncrypt')
+  let need_decode = description && description.includes('mnemoEncrypt')
   if (need_decode && securityFileNameAutoDecrypt) {
     let encType = getEncType(item)
     let filename = item.name.replace(ext ? '.' + ext : '', '')

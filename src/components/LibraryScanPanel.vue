@@ -317,7 +317,7 @@ body:not([arco-theme='dark']) .library-scan-drive-card.selected {
   background: var(--color-fill-2);
 }
 
-#xbybody .library-scan-panel {
+#mnemobody .library-scan-panel {
   border: 1px solid rgba(255, 255, 255, .078) !important;
   background:
     radial-gradient(circle at 10% 0%, rgba(255, 255, 255, .09), transparent 32%),
@@ -325,16 +325,16 @@ body:not([arco-theme='dark']) .library-scan-drive-card.selected {
   box-shadow: 0 18px 48px rgba(0, 0, 0, .18), inset 0 1px 0 rgba(255, 255, 255, .065) !important;
   backdrop-filter: blur(22px) saturate(1.14) !important;
 }
-body:not([arco-theme='dark']) #xbybody .library-scan-panel {
+body:not([arco-theme='dark']) #mnemobody .library-scan-panel {
   border: 1px solid var(--color-border-2) !important;
   background: var(--color-bg-1) !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
 
-#xbybody .music-rail .library-scan-panel,
-#xbybody .book-sidebar .library-scan-panel,
-#xbybody .media-library-nav .library-scan-panel {
+#mnemobody .music-rail .library-scan-panel,
+#mnemobody .book-sidebar .library-scan-panel,
+#mnemobody .media-library-nav .library-scan-panel {
   border: 1px solid rgba(255, 255, 255, .078) !important;
   background:
     radial-gradient(circle at 10% 0%, rgba(255, 255, 255, .09), transparent 32%),
@@ -343,9 +343,9 @@ body:not([arco-theme='dark']) #xbybody .library-scan-panel {
   backdrop-filter: blur(22px) saturate(1.14) !important;
 }
 
-#xbybody .music-rail .library-scan-panel .arco-btn,
-#xbybody .book-sidebar .library-scan-panel .arco-btn,
-#xbybody .media-library-nav .library-scan-panel .arco-btn {
+#mnemobody .music-rail .library-scan-panel .arco-btn,
+#mnemobody .book-sidebar .library-scan-panel .arco-btn,
+#mnemobody .media-library-nav .library-scan-panel .arco-btn {
   width: 100% !important;
   height: 32px !important;
   min-height: 32px !important;
@@ -361,18 +361,18 @@ body:not([arco-theme='dark']) #xbybody .library-scan-panel {
   transform: none !important;
 }
 
-#xbybody .music-rail .library-scan-panel .arco-btn-primary,
-#xbybody .book-sidebar .library-scan-panel .arco-btn-primary,
-#xbybody .media-library-nav .library-scan-panel .arco-btn-primary {
+#mnemobody .music-rail .library-scan-panel .arco-btn-primary,
+#mnemobody .book-sidebar .library-scan-panel .arco-btn-primary,
+#mnemobody .media-library-nav .library-scan-panel .arco-btn-primary {
   border-color: transparent !important;
   background: linear-gradient(135deg, #00f5d4, #f4d28a) !important;
   color: #07110f !important;
   font-weight: 800 !important;
 }
 
-#xbybody .music-rail .library-scan-import-btn,
-#xbybody .book-sidebar .library-scan-import-btn,
-#xbybody .media-library-nav .library-scan-import-btn {
+#mnemobody .music-rail .library-scan-import-btn,
+#mnemobody .book-sidebar .library-scan-import-btn,
+#mnemobody .media-library-nav .library-scan-import-btn {
   width: 100% !important;
   height: 32px !important;
   min-height: 32px !important;
@@ -388,41 +388,41 @@ body:not([arco-theme='dark']) #xbybody .library-scan-panel {
   transform: none !important;
 }
 
-#xbybody .music-rail .library-scan-import-btn:hover,
-#xbybody .book-sidebar .library-scan-import-btn:hover,
-#xbybody .media-library-nav .library-scan-import-btn:hover {
+#mnemobody .music-rail .library-scan-import-btn:hover,
+#mnemobody .book-sidebar .library-scan-import-btn:hover,
+#mnemobody .media-library-nav .library-scan-import-btn:hover {
   border-color: rgba(0, 245, 212, .24) !important;
   background: rgba(0, 245, 212, .075) !important;
   color: #fff !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .music-rail .library-scan-panel .arco-btn,
-body:not([arco-theme='dark']) #xbybody .book-sidebar .library-scan-panel .arco-btn,
-body:not([arco-theme='dark']) #xbybody .media-library-nav .library-scan-panel .arco-btn {
+body:not([arco-theme='dark']) #mnemobody .music-rail .library-scan-panel .arco-btn,
+body:not([arco-theme='dark']) #mnemobody .book-sidebar .library-scan-panel .arco-btn,
+body:not([arco-theme='dark']) #mnemobody .media-library-nav .library-scan-panel .arco-btn {
   border-color: var(--color-border-2) !important;
   background: var(--color-bg-1) !important;
   color: var(--color-text-1) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .music-rail .library-scan-panel .arco-btn-primary,
-body:not([arco-theme='dark']) #xbybody .book-sidebar .library-scan-panel .arco-btn-primary,
-body:not([arco-theme='dark']) #xbybody .media-library-nav .library-scan-panel .arco-btn-primary {
+body:not([arco-theme='dark']) #mnemobody .music-rail .library-scan-panel .arco-btn-primary,
+body:not([arco-theme='dark']) #mnemobody .book-sidebar .library-scan-panel .arco-btn-primary,
+body:not([arco-theme='dark']) #mnemobody .media-library-nav .library-scan-panel .arco-btn-primary {
   border-color: transparent !important;
   background: rgb(var(--primary-6)) !important;
   color: #fff !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .music-rail .library-scan-import-btn,
-body:not([arco-theme='dark']) #xbybody .book-sidebar .library-scan-import-btn,
-body:not([arco-theme='dark']) #xbybody .media-library-nav .library-scan-import-btn {
+body:not([arco-theme='dark']) #mnemobody .music-rail .library-scan-import-btn,
+body:not([arco-theme='dark']) #mnemobody .book-sidebar .library-scan-import-btn,
+body:not([arco-theme='dark']) #mnemobody .media-library-nav .library-scan-import-btn {
   border-color: var(--color-border-2) !important;
   background: var(--color-bg-1) !important;
   color: var(--color-text-1) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .music-rail .library-scan-import-btn:hover,
-body:not([arco-theme='dark']) #xbybody .book-sidebar .library-scan-import-btn:hover,
-body:not([arco-theme='dark']) #xbybody .media-library-nav .library-scan-import-btn:hover {
+body:not([arco-theme='dark']) #mnemobody .music-rail .library-scan-import-btn:hover,
+body:not([arco-theme='dark']) #mnemobody .book-sidebar .library-scan-import-btn:hover,
+body:not([arco-theme='dark']) #mnemobody .media-library-nav .library-scan-import-btn:hover {
   border-color: rgb(var(--primary-6)) !important;
   background: var(--color-fill-2) !important;
   color: rgb(var(--primary-6)) !important;

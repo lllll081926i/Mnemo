@@ -4,7 +4,7 @@ import AliFile from '../aliapi/file'
 import AliFileCmd from '../aliapi/filecmd'
 import ServerHttp from '../aliapi/server'
 import { ITokenInfo, useAppStore, useFootStore, usePanFileStore, useSettingStore, useUserStore } from '../store'
-import { IPageCode, IPageDocx, IPageEpub, IPageImage, IPageMusic, IPageMusicTrack, IPageOffice, IPagePdf, IPageSheet, IPageVideo, IPageVideoPlaylistEntry } from '../store/appstore'
+import { IPageCode, IPageDocx, IPageImage, IPageMusic, IPageMusicTrack, IPageOffice, IPagePdf, IPageSheet, IPageVideo, IPageVideoPlaylistEntry } from '../store/appstore'
 import UserDAL from '../user/userdal'
 import { clickWait } from './debounce'
 import DebugLog from './debuglog'
@@ -115,7 +115,7 @@ export async function menuOpenFile(
   if (parent_file_id.includes('root')) parent_file_id = 'root'
   const drive_id = file.drive_id
   if (file.ext == 'zip' || file.ext == 'rar' || file.ext == '7z') {
-    if (file.description && file.description.includes('xbyEncrypt')) {
+    if (file.description && file.description.includes('mnemoEncrypt')) {
       message.error('不支持在线预览该格式的加密文件')
       return
     }
@@ -151,7 +151,7 @@ export async function menuOpenFile(
       await OfficePdf(file, password)
       return
     }
-    if (file.description && file.description.includes('xbyEncrypt')) {
+    if (file.description && file.description.includes('mnemoEncrypt')) {
       const codeExt = PrismExt(file.ext) || TextPreviewExt(file.ext)
       if (file.size < 512 * 1024 || (file.size < 5 * 1024 * 1024 && codeExt)) {
         await Code(file, codeExt, password)
@@ -435,33 +435,9 @@ async function Pdf(file: IAliGetFileModel, password: string = ''): Promise<void>
 }
 
 async function Epub(file: IAliGetFileModel, password: string = ''): Promise<void> {
-  const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
-    message.error('在线预览失败 账号失效，操作取消')
-    return
-  }
-  message.loading('加载中...', 2)
-  const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
-  if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '获取 EPUB 预览链接失败，操作取消')
-    return
-  }
-  const pageEpub: IPageEpub = {
-    user_id: token.user_id,
-    drive_id: file.drive_id,
-    file_id: file.file_id,
-    file_name: file.name,
-    preview_url: getProxyUrl({
-      user_id: token.user_id,
-      drive_id: file.drive_id,
-      file_id: file.file_id,
-      file_size: rawData.size || file.size,
-      proxy_url: rawData.url,
-      content_disposition: 'inline',
-      file_name: file.name
-    })
-  }
-  window.WebOpenWindow({ page: 'PageEpub', data: pageEpub, theme: 'dark' })
+  void file
+  void password
+  message.info('当前不支持 EPUB 预览，请使用本地应用打开该文件')
 }
 
 async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void> {

@@ -718,7 +718,7 @@ onMounted(async () => {
                 <div class="aml-home-copy">
                   <div class="aml-home-kicker">
                     <Sparkles :size="15" :stroke-width="1.7" />
-                    BoxPlayer
+                    Mnemo
                   </div>
                   <h1>{{ heroTrack?.title || stripExt(heroTrack?.file_name || '网盘音乐') }}</h1>
                   <p>{{ heroTrack?.artist || heroTrack?.album || homeSubtitle }}</p>
@@ -806,7 +806,7 @@ onMounted(async () => {
                     <RefreshCw :size="13" :stroke-width="1.5" />
                   </button>
                   </div>
-                  <div class="aml-home-section-note">BOXPLAYER RADIO LIST</div>
+                  <div class="aml-home-section-note">MNEMO RADIO LIST</div>
                 </div>
                 <div class="aml-home-song-list">
                   <button

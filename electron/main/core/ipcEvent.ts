@@ -1,4 +1,4 @@
-import { AppWindow, createElectronWindow, createReaderWindow, Referer, ua } from './window'
+import { AppWindow, createElectronWindow, Referer, ua } from './window'
 import path from 'path'
 import is from 'electron-is'
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, net, powerSaveBlocker, session, shell } from 'electron'
@@ -9,29 +9,8 @@ import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
 import { registerMediaImageCacheIpc } from '../mediaImageCache'
 import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort, parseElectronProxyRules, syncMotrixApplicationProxy } from '../aria/runtime'
-import { requestPanHub } from './panHubRequest'
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
 import { convert as convertOpenDataLoaderPdf, type ConvertOptions as OpenDataLoaderPdfOptions } from '@opendataloader/pdf'
-import {
-  getBookMeta,
-  isBookIndexed,
-  clearBookData,
-  storeChunks,
-  storeEmbeddings,
-  storeMeta,
-  hybridSearch,
-  writeMemory,
-  searchMemories,
-  listMemories,
-  deleteMemory,
-  listSkills,
-  getSkill,
-  setSkillEnabled,
-  recordMetric,
-  getMetrics,
-  wipeAllData,
-  destroyDb
-} from '../reedy/ReedyService'
 
 let psbId: any
 
@@ -150,7 +129,6 @@ export default class ipcEvent {
     this.handleWebSetProgressBar()
     this.handleWebShutDown()
     this.handleWebSetProxy()
-    this.handlePanHubRequest()
     this.handleOfficePreviewConvertToPdf()
     this.handleOpenDataLoaderConvertPdf()
     this.handleWebOpenWindow()
@@ -162,7 +140,6 @@ export default class ipcEvent {
     this.handlePowerSaveBlocker()
     this.handleMpvEmbedded()
     registerMediaImageCacheIpc()
-    this.handleReedy()
   }
 
   private static handleMpvEmbedded() {
@@ -196,8 +173,6 @@ export default class ipcEvent {
         } catch {}
       } else if (data.cmd && data.cmd === 'minsize') {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
-      } else if (data.cmd && data.cmd === 'open-reader-window') {
-        createReaderWindow(data.bookData)
       } else if (data.cmd && data.cmd === 'maxsize') {
         if (mainWindow && !mainWindow.isDestroyed()) {
           if (mainWindow.isMaximized()) {
@@ -687,10 +662,6 @@ export default class ipcEvent {
     })
   }
 
-  private static handlePanHubRequest() {
-    ipcMain.handle('PanHub:request', async (_event, data) => requestPanHub(data))
-  }
-
   private static handleOfficePreviewConvertToPdf() {
     ipcMain.handle('OfficePreview:convertToPdf', async (_event, data: { sourceUrl?: string; fileName?: string }) => {
       try {
@@ -823,9 +794,6 @@ export default class ipcEvent {
         win.webContents.send('setPage', data)
         win.setTitle('预览窗口')
         win.show()
-        if (data.page === 'PageBookReader') {
-          setTimeout(() => win.setFullScreen(true), 200)
-        }
       })
     })
   }
@@ -979,112 +947,4 @@ export default class ipcEvent {
     })
   }
 
-  // ---------------------------------------------------------------------------
-  // Reedy IPC handlers
-  // ---------------------------------------------------------------------------
-
-  private static handleReedy() {
-    // Request-response via ipcMain.handle
-    ipcMain.handle('reedy:get-meta', (_event, bookHash: string) => {
-      return getBookMeta(bookHash)
-    })
-
-    ipcMain.handle('reedy:is-indexed', (_event, bookHash: string) => {
-      return isBookIndexed(bookHash)
-    })
-
-    ipcMain.handle('reedy:clear-book', (_event, bookHash: string) => {
-      clearBookData(bookHash)
-      return { ok: true }
-    })
-
-    ipcMain.handle('reedy:list-skills', () => {
-      return listSkills()
-    })
-
-    ipcMain.handle('reedy:toggle-skill', (_event, skillId: string, enabled: boolean) => {
-      setSkillEnabled(skillId, enabled)
-      return { ok: true }
-    })
-
-    ipcMain.handle(
-      'reedy:write-memory',
-      (
-        _event,
-        args: {
-          scope: string
-          scope_key: string
-          key: string
-          summary: string
-          source_message_id?: string
-          embedding?: number[]
-        }
-      ) => {
-        return writeMemory(args as any)
-      }
-    )
-
-    ipcMain.handle('reedy:search-memories', (_event, scope: string, scopeKey: string, queryEmbedding: number[] | null, topK: number, recencyWeight?: number) => {
-      return searchMemories(scope as any, scopeKey, queryEmbedding, topK, recencyWeight)
-    })
-
-    ipcMain.handle('reedy:list-memories', (_event, scope: string, scopeKey: string, limit: number) => {
-      return listMemories(scope as any, scopeKey, limit)
-    })
-
-    ipcMain.handle('reedy:delete-memory', (_event, id: string) => {
-      return deleteMemory(id)
-    })
-
-    ipcMain.handle('reedy:export-metrics', (_event, since?: number) => {
-      return getMetrics(since)
-    })
-
-    ipcMain.handle('reedy:wipe-all', () => {
-      wipeAllData()
-      return { ok: true }
-    })
-
-    ipcMain.handle('reedy:record-metric', (_event, evt: any) => {
-      recordMetric(evt)
-      return { ok: true }
-    })
-
-    // Indexing: store chunks + embeddings + meta
-    ipcMain.handle('reedy:store-chunks', (_event, chunks: any[]) => {
-      storeChunks(chunks)
-      return { ok: true }
-    })
-
-    ipcMain.handle('reedy:store-embeddings', (_event, rows: any[]) => {
-      storeEmbeddings(rows)
-      return { ok: true }
-    })
-
-    ipcMain.handle('reedy:store-meta', (_event, meta: any) => {
-      storeMeta(meta)
-      return { ok: true }
-    })
-
-    // Search: hybrid search
-    ipcMain.handle('reedy:search', (_event, bookHash: string, queryEmbedding: number[], queryText: string, topK: number, spoilerBound?: number) => {
-      return hybridSearch(bookHash, queryEmbedding, queryText, topK, spoilerBound)
-    })
-
-    // Cleanup on app quit
-    ipcMain.handle('reedy:destroy', () => {
-      destroyDb()
-      return { ok: true }
-    })
-
-    ipcMain.handle('payment:start-server', async () => {
-      const { startPaymentServer } = await import('./oauthServer')
-      const win = BrowserWindow.getAllWindows()[0]
-      return startPaymentServer(win)
-    })
-    ipcMain.handle('payment:stop-server', async () => {
-      const { stopPaymentServer } = await import('./oauthServer')
-      stopPaymentServer()
-    })
-  }
 }

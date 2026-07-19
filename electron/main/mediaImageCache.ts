@@ -48,11 +48,11 @@ function decodeOriginalUrl(encoded: string): string {
   return decodeURIComponent(decoded)
 }
 
-const UA = 'BoxPlayer'
+const UA = 'Mnemo'
 
 /** 构建鉴权请求头 */
 function buildAuthHeaders(config: CachedServerConfig): Record<string, string> {
-  const APP_NAME = 'XbyBoxPlayer'
+  const APP_NAME = 'Mnemo'
   const APP_VERSION = '1.0.0'
 
   if (config.type === 'plex') {

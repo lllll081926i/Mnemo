@@ -112,29 +112,29 @@ const handleClickBottleFish = async () => {
           </a-doption>
         </a-dgroup>
         <a-dgroup v-if="capabilities.encryption" title="加密新建">
-          <a-doption value="newfile" @click="() => modalCreatNewFile('xbyEncrypt1')">
+          <a-doption value="newfile" @click="() => modalCreatNewFile('mnemoEncrypt1')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>新建文件（加密）</template>
           </a-doption>
-          <a-doption value="newfolder" @click="() => modalCreatNewDir('folder', 'xbyEncrypt1')">
+          <a-doption value="newfolder" @click="() => modalCreatNewDir('folder', 'mnemoEncrypt1')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>新建文件夹（加密）</template>
           </a-doption>
-          <a-doption value="newdatefolder" @click="() => modalCreatNewDir('datefolder', 'xbyEncrypt1')">
+          <a-doption value="newdatefolder" @click="() => modalCreatNewDir('datefolder', 'mnemoEncrypt1')">
             <template #icon><IconFont name="iconfolderadd" /></template>
             <template #default>日期+序号（加密）</template>
           </a-doption>
         </a-dgroup>
         <a-dgroup v-if="capabilities.encryption" title="私密新建">
-          <a-doption value="newfile" @click="() => modalCreatNewFile('xbyEncrypt2')">
+          <a-doption value="newfile" @click="() => modalCreatNewFile('mnemoEncrypt2')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>新建文件（私密）</template>
           </a-doption>
-          <a-doption value="newfolder" @click="() => modalCreatNewDir('folder', 'xbyEncrypt2')">
+          <a-doption value="newfolder" @click="() => modalCreatNewDir('folder', 'mnemoEncrypt2')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>新建文件夹（私密）</template>
           </a-doption>
-          <a-doption value="newdatefolder" @click="() => modalCreatNewDir('datefolder', 'xbyEncrypt2')">
+          <a-doption value="newdatefolder" @click="() => modalCreatNewDir('datefolder', 'mnemoEncrypt2')">
             <template #icon><IconFont name="iconfolderadd" /></template>
             <template #default>日期+序号（私密）</template>
           </a-doption>
@@ -163,21 +163,21 @@ const handleClickBottleFish = async () => {
           </a-doption>
         </a-dgroup>
         <a-dgroup v-if="capabilities.encryption" title="加密上传">
-          <a-doption value="uploadfile" title="Ctrl+J" @click="() => handleUpload('file', 'xbyEncrypt1')">
+          <a-doption value="uploadfile" title="Ctrl+J" @click="() => handleUpload('file', 'mnemoEncrypt1')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>上传文件（加密）</template>
           </a-doption>
-          <a-doption value="uploaddir" title="Ctrl+Shift+J" @click="() => handleUpload('folder', 'xbyEncrypt1')">
+          <a-doption value="uploaddir" title="Ctrl+Shift+J" @click="() => handleUpload('folder', 'mnemoEncrypt1')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>上传文件夹（加密）</template>
           </a-doption>
         </a-dgroup>
         <a-dgroup v-if="capabilities.encryption" title="私密上传">
-          <a-doption value="uploadfile" title="Ctrl+M" @click="() => handleUpload('file', 'xbyEncrypt2')">
+          <a-doption value="uploadfile" title="Ctrl+M" @click="() => handleUpload('file', 'mnemoEncrypt2')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>上传文件（私密）</template>
           </a-doption>
-          <a-doption value="uploaddir" title="Ctrl+Shift+M" @click="() => handleUpload('folder', 'xbyEncrypt2')">
+          <a-doption value="uploaddir" title="Ctrl+Shift+M" @click="() => handleUpload('folder', 'mnemoEncrypt2')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>上传文件夹（私密）</template>
           </a-doption>
@@ -198,13 +198,13 @@ const handleClickBottleFish = async () => {
           </a-doption>
         </a-dgroup>
         <a-dgroup title="加密上传">
-          <a-doption value="uploadfile" @click="() => handleUpload('pic_file', 'xbyEncrypt1')">
+          <a-doption value="uploadfile" @click="() => handleUpload('pic_file', 'mnemoEncrypt1')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>上传照片/视频（加密）</template>
           </a-doption>
         </a-dgroup>
         <a-dgroup title="私密上传">
-          <a-doption value="uploadfile" title="Ctrl+U" @click="() => handleUpload('pic_file', 'xbyEncrypt2')">
+          <a-doption value="uploadfile" title="Ctrl+U" @click="() => handleUpload('pic_file', 'mnemoEncrypt2')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>上传照片/视频（私密）</template>
           </a-doption>

@@ -30,11 +30,11 @@ describe('deep layout shell port', () => {
 
   it('layout css owns shared header and rail tokens without a footer reservation', () => {
     const css = read('src/assets/layout-refactor.css')
-    expect(css).toContain('#xbyhead')
+    expect(css).toContain('#mnemohead')
     expect(css).toContain('--layout-header-height: 48px')
     expect(css).toContain('height: var(--layout-header-height)')
     expect(css).toContain('--layout-footer-height: 0px')
-    expect(css).not.toContain('#xbyfoot')
+    expect(css).not.toContain('#mnemofoot')
     expect(css).toContain('--layout-rail-width: 220px')
   })
 
@@ -60,7 +60,7 @@ describe('deep layout shell port', () => {
     expect(switchTab).not.toContain('offsetLeft')
     expect(css).toContain('.MySplit.is-resizing .arco-split-pane')
     expect(css).toContain('.pan-left .ant-tree-node-content-wrapper')
-    expect(css).toContain('#xbyhead2 .arco-menu-horizontal .arco-menu-inner')
+    expect(css).toContain('#mnemohead2 .arco-menu-horizontal .arco-menu-inner')
     expect(css).toContain('overflow: hidden !important')
   })
 
@@ -255,7 +255,7 @@ describe('deep layout shell port', () => {
     const pan = read('src/pan/PanRight.vue')
     const down = read('src/down/index.vue')
     expect(page).not.toContain('<a-layout-footer')
-    expect(page).not.toContain('id="xbyfoot"')
+    expect(page).not.toContain('id="mnemofoot"')
     expect(pan).not.toContain('DirTopPath')
     expect(down).not.toContain('content-header')
     expect(down).not.toContain('activeTitle')
@@ -272,7 +272,7 @@ describe('deep layout shell port', () => {
     expect(windowSource).toContain('disableDevTools(win.webContents)')
     expect(windowSource).toContain('disableDevTools(webContent)')
     expect(windowSource).toContain('if (!allowDevTools) webPreferences.devTools = false')
-    expect(windowSource).toContain('handleWebView(AppWindow.readerWindow, DEBUGGING)')
+    expect(windowSource).not.toContain('readerWindow')
     expect(loginSource).toContain('if (import.meta.env.DEV)')
   })
 

@@ -3085,7 +3085,7 @@ onBeforeUnmount(() => {
 
 <template>
   <a-layout style='height: 100vh' draggable='false'>
-    <a-layout-header id='xbyhead' draggable='false'>
+    <a-layout-header id='mnemohead' draggable='false'>
       <div v-if="useMacEmbeddedMpv" class="mpv-video-titlebar q-electron-drag">
         <div class="mpv-window-controls">
           <button class="mpv-window-dot close" type="button" aria-label="关闭窗口" @click.stop="handleHideClick"></button>
@@ -3094,7 +3094,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="mpv-window-title">{{ pageVideo?.file_name || '视频在线预览' }}</div>
       </div>
-      <div v-else id='xbyhead2' class='q-electron-drag'>
+      <div v-else id='mnemohead2' class='q-electron-drag'>
         <a-button type='text' tabindex='-1'>
           <IconFont name="iconfile_video" />
         </a-button>

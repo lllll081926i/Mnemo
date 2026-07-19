@@ -12,9 +12,10 @@ import { EventEmitter } from 'node:events'
 import exception from './core/exception'
 import ipcEvent from './core/ipcEvent'
 import MotrixApplication from './aria/MotrixApplication'
-import { destroyDb } from './reedy/ReedyService'
 
-const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth', 'boxplayer-auth']
+// These protocols are already registered with third-party OAuth applications.
+// Keep them until every provider callback configuration has been migrated together.
+const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth']
 
 type UserToken = {
   access_token: string;
@@ -134,9 +135,9 @@ export default class launch extends EventEmitter {
     app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
     app.commandLine.appendSwitch('force_high_performance_gpu')
 
-    app.name = 'BoxPlayer'
+    app.name = 'Mnemo'
     if (is.windows()) {
-      app.setAppUserModelId('com.github.gaozhangmin')
+      app.setAppUserModelId('com.mnemo.app')
     }
     // mscache: 协议必须在 app.ready 之前注册 scheme 特权
     protocol.registerSchemesAsPrivileged([
@@ -342,7 +343,6 @@ export default class launch extends EventEmitter {
   handleAppWillQuit() {
     app.on('will-quit', async () => {
       try { await this.motrixApp?.quit() } catch {}
-      try { destroyDb() } catch {}
       try {
         if (AppWindow.appTray) {
           AppWindow.appTray.destroy()
@@ -387,32 +387,7 @@ export default class launch extends EventEmitter {
   private dispatchOAuthUrl(url: string) {
     if (!url) return
     if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() === false) {
-      if (url.startsWith('boxplayer-auth://payment-')) {
-        try {
-          const params = new URLSearchParams(url.includes('?') ? url.split('?')[1] : '')
-          const status = url.startsWith('boxplayer-auth://payment-cancelled') || url.startsWith('boxplayer-auth://payment-canceled')
-            ? 'cancelled'
-            : url.startsWith('boxplayer-auth://payment-failed') || url.startsWith('boxplayer-auth://payment-failure')
-              ? 'failed'
-              : 'success'
-          AppWindow.mainWindow.webContents.send('payment-callback', {
-            status,
-            checkout_id: params.get('checkout_id') || '',
-            reason: params.get('reason') || '',
-          })
-        } catch {}
-      } else if (url.startsWith('boxplayer-auth://')) {
-        try {
-          const hash = url.includes('#') ? url.split('#')[1] : ''
-          const params = new URLSearchParams(hash)
-          AppWindow.mainWindow.webContents.send('auth-callback', {
-            access_token: params.get('access_token') || '',
-            refresh_token: params.get('refresh_token') || '',
-          })
-        } catch {}
-      } else {
-        AppWindow.mainWindow.webContents.send('cloud123-oauth-callback', url)
-      }
+      AppWindow.mainWindow.webContents.send('cloud123-oauth-callback', url)
       AppWindow.mainWindow.show()
       AppWindow.mainWindow.focus()
     } else {

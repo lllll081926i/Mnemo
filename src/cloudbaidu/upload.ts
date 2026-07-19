@@ -140,7 +140,7 @@ export const apiBaiduLocateUpload = async (
 }
 
 const buildMultipart = (fieldName: string, filename: string, buff: Buffer) => {
-  const boundary = '----xbybaidu' + Date.now().toString(16) + Math.random().toString(16).slice(2)
+  const boundary = '----mnemobaidu' + Date.now().toString(16) + Math.random().toString(16).slice(2)
   const parts: Buffer[] = []
   parts.push(Buffer.from(`--${boundary}\r\n`))
   parts.push(Buffer.from(`Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\n`))

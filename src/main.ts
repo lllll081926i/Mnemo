@@ -139,10 +139,6 @@ window.Electron.ipcRenderer.on('setPage', (_event: any, args: any) => {
     appStore.pageOffice = args.data
   } else if (args.page == 'PagePdf') {
     appStore.pagePdf = args.data
-  } else if (args.page == 'PageEpub') {
-    appStore.pageEpub = args.data
-  } else if (args.page == 'PageBookReader') {
-    appStore.pageEpub = args.data
   } else if (args.page == 'PageDocx') {
     appStore.pageDocx = args.data
   } else if (args.page == 'PageSheet') {

@@ -38,8 +38,8 @@ describe('embedded MPV capability', () => {
   })
 
   it('requires a complete macOS native resource bundle before enabling embedded MPV', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'boxplayer-mpv-resources-'))
-    const addonPath = path.join(dir, 'boxplayer-mpv-texture.node')
+    const dir = mkdtempSync(path.join(tmpdir(), 'mnemo-mpv-resources-'))
+    const addonPath = path.join(dir, 'mnemo-mpv-texture.node')
     writeFileSync(addonPath, '')
 
     const incomplete = getEmbeddedMpvNativeResourceStatus([addonPath])
@@ -48,7 +48,7 @@ describe('embedded MPV capability', () => {
     expect(incomplete.missing).toContain(path.join(dir, 'mpv-bundle-manifest.json'))
 
     writeFileSync(path.join(dir, 'libmpv.dylib'), '')
-    writeFileSync(path.join(dir, 'mpv-bundle-manifest.json'), JSON.stringify({ files: [{ name: 'boxplayer-mpv-texture.node' }] }))
+    writeFileSync(path.join(dir, 'mpv-bundle-manifest.json'), JSON.stringify({ files: [{ name: 'mnemo-mpv-texture.node' }] }))
 
     const missingManifestEntry = getEmbeddedMpvNativeResourceStatus([addonPath])
     expect(missingManifestEntry.complete).toBe(false)
@@ -56,15 +56,15 @@ describe('embedded MPV capability', () => {
   })
 
   it('accepts a complete macOS native resource bundle manifest', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'boxplayer-mpv-resources-'))
-    const addonPath = path.join(dir, 'boxplayer-mpv-texture.node')
+    const dir = mkdtempSync(path.join(tmpdir(), 'mnemo-mpv-resources-'))
+    const addonPath = path.join(dir, 'mnemo-mpv-texture.node')
     writeFileSync(addonPath, '')
     writeFileSync(path.join(dir, 'libmpv.dylib'), '')
     writeFileSync(
       path.join(dir, 'mpv-bundle-manifest.json'),
       JSON.stringify({
         files: [
-          { name: 'boxplayer-mpv-texture.node', sha256: 'node-sha' },
+          { name: 'mnemo-mpv-texture.node', sha256: 'node-sha' },
           { name: 'libmpv.dylib', sha256: 'libmpv-sha' }
         ]
       })
@@ -100,15 +100,15 @@ describe('embedded MPV capability', () => {
   })
 
   it('reports missing native addon candidates without throwing', () => {
-    const result = loadEmbeddedMpvNativeAddon(['/missing/boxplayer-mpv-texture.node'])
+    const result = loadEmbeddedMpvNativeAddon(['/missing/mnemo-mpv-texture.node'])
 
     expect(result.addon).toBeUndefined()
     expect(result.error).toContain('未找到')
-    expect(result.searchedPaths).toEqual(['/missing/boxplayer-mpv-texture.node'])
+    expect(result.searchedPaths).toEqual(['/missing/mnemo-mpv-texture.node'])
   })
 
   it('rejects native addon modules with an incomplete interface', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'boxplayer-mpv-addon-'))
+    const dir = mkdtempSync(path.join(tmpdir(), 'mnemo-mpv-addon-'))
     const addonPath = path.join(dir, 'incomplete.cjs')
     writeFileSync(addonPath, 'module.exports = { mpvTexture: {} }')
 
@@ -120,7 +120,7 @@ describe('embedded MPV capability', () => {
   })
 
   it('rejects native addon modules without control/status methods', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'boxplayer-mpv-addon-'))
+    const dir = mkdtempSync(path.join(tmpdir(), 'mnemo-mpv-addon-'))
     const addonPath = path.join(dir, 'missing-status.cjs')
     writeFileSync(addonPath, `
       module.exports = {
@@ -153,7 +153,7 @@ describe('embedded MPV capability', () => {
   })
 
   it('loads native addon modules with the expected mpvTexture shape', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'boxplayer-mpv-addon-'))
+    const dir = mkdtempSync(path.join(tmpdir(), 'mnemo-mpv-addon-'))
     mkdirSync(dir, { recursive: true })
     const addonPath = path.join(dir, 'complete.cjs')
     writeFileSync(addonPath, `

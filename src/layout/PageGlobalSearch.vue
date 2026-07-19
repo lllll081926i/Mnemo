@@ -1,29 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Search, X, File, Folder, ArrowUpRight, Film, Tv, Monitor, Clock, ChevronRight, Sparkles } from 'lucide-vue-next'
+import { Search, X, File, Folder, ArrowUpRight, Film, Tv, Monitor, Clock, ChevronRight } from 'lucide-vue-next'
 import { useAppStore } from '../store'
 import { humanSize } from '../utils/format'
 import { searchAllDrives, searchResultGroupTitle, type GlobalSearchResult } from '../utils/globalSearch'
-import { createPanHubFetch, discoverPanHubSources, searchPanHubSources, type PanHubMergedLinks } from '../utils/panHubSearch'
-import PanHubResultGroup from './PanHubResultGroup.vue'
-import PanHubHotSearches from './PanHubHotSearches.vue'
-import PanHubDoubanHot from './PanHubDoubanHot.vue'
-import PanHubSearchBox from './PanHubSearchBox.vue'
-import PanHubSettingsDrawer, { type PanHubSettings } from './PanHubSettingsDrawer.vue'
-import AISearchAgent from './AISearchAgent.vue'
-import { checkAndIncrement, isLoggedIn, isPro } from '../utils/usageLimit'
-import { getAIConfig } from '../utils/bookAI'
-import { isBoxPlayerCloudProvider } from '../utils/boxplayerCloudAI'
-import message from '../utils/message'
-import Config from '../config'
 
 const appStore = useAppStore()
 const HISTORY_KEY = 'global_search_history'
 const MAX_HISTORY = 20
-const PANHUB_API_BASE = `${Config.BOXPLAYER_AI_API_URL.replace(/\/+$/, '')}/api`
-const panHubFetch = createPanHubFetch(window.Electron?.ipcRenderer?.invoke?.bind(window.Electron.ipcRenderer))
-
-const searchMode = ref<'local' | 'panhub' | 'ai'>('local')
 const keyword = ref('')
 const inputRef = ref<HTMLInputElement>()
 const cloudResults = ref<GlobalSearchResult[]>([])
@@ -130,113 +114,12 @@ const totalMs = computed(() => msResults.value.length)
 const showHistoryDrop = computed(() => !hasInput.value && history.value.length > 0)
 const hasBoth = computed(() => totalCloud.value > 0 && totalMs.value > 0)
 
-const isLocalMode = () => searchMode.value === 'local'
-const isPanHubMode = () => searchMode.value === 'panhub'
-const isAiMode = () => searchMode.value === 'ai'
-
-const phLoading = ref(false); const phSearched = ref(false)
-const phTotal = ref(0); const phMerged = ref<PanHubMergedLinks>({})
-const phError = ref(''); const phFilterPlatform = ref('all')
-const phSortType = ref<'default'|'date-desc'|'date-asc'|'name-asc'|'name-desc'>('default')
-const phElapsedMs = ref(0); let phController: AbortController|null = null
-const SETTINGS_KEY = 'panhub.user_settings'
-const phAllPlugins = ref<string[]>([])
-const phAllChannels = ref<string[]>([])
-const showPhSettings = ref(false)
-async function openPhSettings() {
-  showPhSettings.value = true
-  if (!phAllPlugins.value.length) {
-    try {
-      const sources = await discoverPanHubSources(PANHUB_API_BASE, panHubFetch)
-      phAllPlugins.value = sources.plugins
-      phAllChannels.value = sources.channels
-      if (!phSources.value.plugins.length) phSources.value = { plugins: sources.plugins, channels: sources.channels }
-    } catch {}
-  }
-}
-function loadPhSettings(): PanHubSettings {
-  try { const raw = localStorage.getItem(SETTINGS_KEY); if (raw) return JSON.parse(raw) } catch {}
-  return { enabledPlugins: [], enabledChannels: [], concurrency: 4, pluginTimeoutMs: 5000 }
-}
-function savePhSettings(s: PanHubSettings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)) }
-const phSettings = ref<PanHubSettings>(loadPhSettings())
-const phSources = ref<{ plugins: string[]; channels: string[] }>({ plugins: [], channels: [] })
-
-const PH_PLATFORM_INFO: Record<string,{name:string;color:string}> = {
-  aliyun:{name:'阿里云盘',color:'#7c3aed'},quark:{name:'夸克网盘',color:'#6366f1'},
-  baidu:{name:'百度网盘',color:'#2563eb'},'115':{name:'115网盘',color:'#f59e0b'},
-  xunlei:{name:'迅雷云盘',color:'#fbbf24'},uc:{name:'UC网盘',color:'#ef4444'},
-  tianyi:{name:'天翼云盘',color:'#ec4899'},'123':{name:'123网盘',color:'#10b981'},
-  mobile:{name:'移动云盘',color:'#0ea5e9'},pikpak:{name:'PikPak',color:'#f97316'},
-  lanzou:{name:'蓝奏云',color:'#06b6d4'},magnet:{name:'磁力链接',color:'#64748b'},
-  ed2k:{name:'电驴链接',color:'#475569'},others:{name:'其他网盘',color:'#6b7280'},
-}
-const phHasResults = computed(() => Object.keys(phMerged.value).length > 0)
-const phPlatforms=computed(()=>{const p:{key:string;name:string;count:number}[]=[];for(const[k,v]of Object.entries(phMerged.value))p.push({key:k,name:PH_PLATFORM_INFO[k]?.name||k,count:v.length});return p})
-const aiAgentCanSend = computed(() => {
-  if (isPro()) return true
-  const cfg = getAIConfig()
-  return isLoggedIn() && !!cfg && !isBoxPlayerCloudProvider(cfg.providerName)
-})
-
-async function phDoSearch(){
-  const kw=keyword.value.trim()
-  if(kw.length<2){phMerged.value={};phSearched.value=false;return}
-  const usage = checkAndIncrement('panHubSearch')
-  if(!usage.allowed){message.warning(usage.message || '今日全网资源搜索次数已用完');return}
-  addToHistory(kw)
-  if(phController)phController.abort()
-  const controller=new AbortController()
-  phController=controller
-  phLoading.value=true;phSearched.value=true
-  phError.value='';phTotal.value=0;phMerged.value={};phFilterPlatform.value='all';phSortType.value='default'
-  const start=Date.now()
-  try{
-    panHubFetch(`${PANHUB_API_BASE}/hot-searches`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({term:kw})}).catch(()=>{})
-    const sources=await discoverPanHubSources(PANHUB_API_BASE,panHubFetch,controller.signal)
-        if(!phAllPlugins.value.length){phAllPlugins.value=sources.plugins;phAllChannels.value=sources.channels;phSources.value={plugins:sources.plugins,channels:sources.channels}}
-    const result=await searchPanHubSources({
-      apiBase:PANHUB_API_BASE,
-      keyword:kw,
-      plugins:sources.plugins,
-      channels:sources.channels,
-      concurrency:4,
-      pluginTimeoutMs:5000,
-      signal:controller.signal,
-      fetchImpl:panHubFetch,
-      onProgress:(merged,total)=>{
-        if(phController!==controller)return
-        phMerged.value=merged;phTotal.value=total
-      }
-    })
-    if(phController!==controller)return
-    phMerged.value=result.merged;phTotal.value=result.total
-    if(result.successfulSources===0&&result.failedSources>0)phError.value='搜索源暂时不可用，请稍后重试'
-  }catch(e:any){if(e?.name==='AbortError')return;phError.value=e?.message||'网络请求失败'}
-  finally{if(phController===controller){phLoading.value=false;phElapsedMs.value=Date.now()-start;phController=null}}
-}
-function phReset(){if(phController)phController.abort();phController=null;phLoading.value=false;phSearched.value=false;phError.value='';phTotal.value=0;phMerged.value={};keyword.value=''}
-function phHotSelect(term:string){keyword.value=term;nextTick(()=>{if(searchTimer.value)clearTimeout(searchTimer.value);phDoSearch()})}
-function phCopy(url:string){navigator.clipboard.writeText(url).catch(()=>{})}
-function phFmt(ms:number):string{return ms<1000?`${ms}ms`:`${(ms/1000).toFixed(1)}s`}
-
-function handleSearchSubmit(){if(searchTimer.value){clearTimeout(searchTimer.value)};doSearch()}
-
 function onSearchBoxSubmit() {
   if (searchTimer.value) clearTimeout(searchTimer.value)
-  if (searchMode.value === 'ai') { aiTrigger.value++; aiKeyword.value = keyword.value; return }
   doSearch()
 }
 
-const aiTrigger = ref(0)
-const aiKeyword = ref('')
-
-function activateAiMode() {
-  searchMode.value = 'ai'
-}
-
 function doSearch() {
-  if (searchMode.value === 'panhub') { phDoSearch(); return }
   const q = keyword.value.trim()
   if (q.length < 2) {
     cloudResults.value = []
@@ -265,20 +148,16 @@ function doSearch() {
 
 watch(keyword, () => {
   if (searchTimer.value) clearTimeout(searchTimer.value)
-  selectedSection.value = null; selectedIndex.value = 0
-  if (keyword.value.trim().length < 2) { cloudResults.value = []; msResults.value = []; phMerged.value = {}; searching.value = false; return }
-  if (searchMode.value === 'panhub') { searchTimer.value = setTimeout(doSearch, 300); return }
-  searching.value = true; searchTimer.value = setTimeout(doSearch, 300)
-})
-
-watch(searchMode, () => {
-  if (searchTimer.value) clearTimeout(searchTimer.value)
-  if (searchMode.value === 'local') {
-    phController?.abort(); phController = null; phLoading.value = false
-  } else {
-    searchId.value++; searching.value = false
+  selectedSection.value = null
+  selectedIndex.value = 0
+  if (keyword.value.trim().length < 2) {
+    cloudResults.value = []
+    msResults.value = []
+    searching.value = false
+    return
   }
-  if (keyword.value.trim().length >= 2) searchTimer.value = setTimeout(doSearch, 0)
+  searching.value = true
+  searchTimer.value = setTimeout(doSearch, 300)
 })
 
 async function handleClick(result: GlobalSearchResult) {
@@ -409,31 +288,21 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (searchTimer.value) clearTimeout(searchTimer.value)
-  phController?.abort()
 })
 </script>
 
 <template>
   <div class="gs-page" @keydown="handleKeyDown">
     <div class="gs-page-header">
-      <div class="gs-page-tabs">
-        <button :class="['gs-page-tab', searchMode === 'local' ? 'active' : '']" @click="searchMode = 'local'">搜索我的</button>
-        <button :class="['gs-page-tab', searchMode === 'panhub' ? 'active' : '']" @click="searchMode = 'panhub'">搜索全网 <span class="gs-pro-badge">Pro</span></button>
-        <button :class="['gs-page-tab', searchMode === 'ai' ? 'active' : '']" @click="activateAiMode">AI Agent <span class="gs-pro-badge">Pro</span></button>
-      </div>
+      <form class="gs-page-search" @submit.prevent="onSearchBoxSubmit">
+        <Search :size="21" :stroke-width="1.7" class="gs-page-search-icon" />
+        <input ref="inputRef" v-model="keyword" class="gs-page-input" type="search" placeholder="搜索所有网盘和媒体服务器..." autocomplete="off" />
+        <button v-if="keyword" class="gs-page-clear" type="button" title="清除" @click="keyword = ''">
+          <X :size="16" :stroke-width="1.8" />
+        </button>
+      </form>
 
-      <PanHubSearchBox
-        v-if="searchMode !== 'ai'"
-        v-model="keyword"
-        :loading="searchMode === 'local' ? searching : phLoading"
-        :searched="searchMode === 'local' ? (searching === false && hasInput) : phSearched"
-        :placeholder="searchMode === 'panhub' ? '搜索全网公开网盘资源...' : '搜索所有网盘和媒体服务器...'"
-        @search="onSearchBoxSubmit()"
-        @pause="phController?.abort(); phLoading = false"
-        @reset="searchMode === 'local' ? (keyword = '') : phReset()"
-      />
-
-      <div v-if="showHistoryDrop && searchMode === 'local'" class="gs-history-drop">
+      <div v-if="showHistoryDrop" class="gs-history-drop">
         <div class="gs-history-drop-header" @click="historyCollapsed = !historyCollapsed">
           <ChevronRight :size="12" :stroke-width="2.5" class="gs-chevron" :class="{ open: !historyCollapsed }" />
           <Clock :size="14" :stroke-width="1.5" />
@@ -464,7 +333,6 @@ onUnmounted(() => {
     </div>
 
     <div class="gs-page-body">
-      <template v-if="isLocalMode()">
       <div v-if="searching && hasInput" class="gs-page-status">
         <span class="gs-spinner" /> 搜索中...
       </div>
@@ -607,33 +475,7 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-          </template>
       </div>
-      </template>
-      <template v-else-if="isPanHubMode()">
-        <div class="ph-settings-bar">
-      <button class="ph-settings-btn" type="button" title="搜索设置" @click="openPhSettings()">⚙ 并发:{{ phSettings.concurrency }} · 超时:{{ phSettings.pluginTimeoutMs }}ms</button>
-    </div>
-    <div v-if="!phSearched" class="ph-hero-row">
-          <header class="ph-hero"><div class="ph-hero-badge">PanHub 搜索聚合引擎</div><h1 class="ph-hero-title"><span class="ph-hero-title-line">一键检索</span><span class="ph-hero-title-line ph-hero-title-accent">全网网盘资源</span></h1><p class="ph-hero-desc">聚合阿里云盘、夸克、百度网盘、115、迅雷等平台 · 快速、直达、少打扰</p><ul class="ph-hero-features"><li class="ph-hero-feature">实时聚合</li><li class="ph-hero-feature">多平台覆盖</li><li class="ph-hero-feature">结果去重</li></ul></header>
-<aside class="ph-hero-aside"><PanHubHotSearches :api-base="PANHUB_API_BASE" @select="phHotSelect" /></aside>
-        </div>
-        <div v-if="phError" class="ph-error"><span class="ph-error-icon">⚠️</span>{{ phError }}</div>
-        <div v-if="phSearched && !phLoading" class="ph-stats-bar">
-          <div class="ph-stats-main"><span class="ph-stat-item"><span class="ph-stat-label">结果</span><span class="ph-stat-value">{{ phTotal }}</span></span><span class="ph-stat-item"><span class="ph-stat-label">用时</span><span class="ph-stat-value">{{ phFmt(phElapsedMs) }}</span></span></div>
-          <div v-if="phTotal>0" class="ph-stats-filters"><button :class="['ph-filter-pill',{active:phFilterPlatform==='all'}]" type="button" @click="phFilterPlatform='all'">全部 ({{phTotal}})</button><button v-for="p in phPlatforms" :key="p.key" :class="['ph-filter-pill',{active:phFilterPlatform===p.key}]" type="button" @click="phFilterPlatform=phFilterPlatform===p.key?'all':p.key">{{p.name}}({{p.count}})</button></div>
-          <div v-if="phTotal>0" class="ph-stats-sort"><select v-model="phSortType" class="ph-sort-select"><option value="default">默认排序</option><option value="date-desc">最新发布</option><option value="date-asc">最早发布</option><option value="name-asc">名称A→Z</option><option value="name-desc">名称Z→A</option></select></div>
-
-        </div>
-        <div v-if="phLoading" class="ph-status-msg"><span class="gs-spinner" /> 正在搜索全网资源...</div>
-        <section v-if="phHasResults" class="ph-results-section"><div class="ph-results-grid"><PanHubResultGroup :merged="phMerged" :platform-info="PH_PLATFORM_INFO" :filter-platform="phFilterPlatform" :sort-type="phSortType" @copy="phCopy" /></div></section>
-        <section v-else-if="phSearched&&!phLoading&&!phHasResults" class="ph-empty-section"><div class="ph-empty-card"><div class="ph-empty-icon">🔍</div><h3>未找到相关资源</h3><p>试试其他关键词，或检查搜索源是否可用</p></div></section>
-        <PanHubSettingsDrawer v-model="phSettings" :open="showPhSettings" :all-plugins="phAllPlugins" :all-channels="phAllChannels" @update:open="showPhSettings = $event" @save="savePhSettings(phSettings)" />
-      <section v-if="!phSearched" class="ph-douban-section"><PanHubDoubanHot :api-base="PANHUB_API_BASE" @select="phHotSelect" /></section>
-      </template>
-      <template v-else>
-        <AISearchAgent :ai-enabled="aiAgentCanSend" :keyword="aiKeyword" :trigger="aiTrigger" :ph-search="phDoSearch" @search-resource="(t: string) => { searchMode = 'panhub'; keyword = t; phDoSearch() }" />
-      </template>
     </div>
   </div>
 </template>
@@ -1222,49 +1064,6 @@ onUnmounted(() => {
   background: var(--color-fill-2);
 }
 
-/* PanHub */
-.ph-hero-row{display:flex;align-items:stretch;gap:0;position:relative;background:linear-gradient(145deg,rgba(var(--primary-6),.12) 0%,rgba(var(--primary-6),.04) 35%,rgba(var(--warning-6),.06) 70%,rgba(var(--primary-6),.08) 100%);border-radius:20px;box-shadow:0 4px 20px -4px rgba(var(--primary-6),.15);overflow:hidden;margin:0 48px}
-.ph-hero{flex:1;min-width:0;padding:24px 28px;text-align:left;position:relative;z-index:1}
-.ph-hero-badge{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:rgb(var(--primary-6));margin-bottom:10px;padding:6px 12px;background:rgba(var(--primary-6),.12);border:1px solid rgba(var(--primary-6),.25);border-radius:8px}
-.ph-hero-title{font-size:36px;font-weight:800;margin:0 0 10px;color:var(--color-text-1);letter-spacing:-.04em;line-height:1.1;max-width:560px}
-.ph-hero-title-line{display:block}
-.ph-hero-title-accent{color:rgb(var(--primary-6))}
-.ph-hero-desc{font-size:14px;color:var(--color-text-3);margin:0 0 16px;line-height:1.65;max-width:520px}
-.ph-hero-features{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:12px 20px}
-.ph-hero-feature{font-size:12px;font-weight:700;color:rgb(var(--primary-6));padding:6px 12px;background:var(--color-fill-1);border:1px solid rgba(var(--primary-6),.2);border-radius:10px;transition:transform .2s,box-shadow .2s}
-.ph-hero-feature:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(var(--primary-6),.15)}
-
-.ph-hero-aside{flex-shrink:0;width:340px}
-.ph-hero-aside :deep(.ph-hot){background:transparent;border:none;box-shadow:none}
-.ph-settings-bar{position:relative;display:flex;justify-content:flex-end;margin:0 48px 8px}
-.ph-settings-bar .ph-settings-btn{padding:6px 12px;font-size:12px;font-weight:500;color:var(--color-text-3);background:var(--color-fill-1);border:1px solid var(--color-border-2);border-radius:8px;cursor:pointer}
-.ph-settings-bar .ph-settings-btn:hover{color:var(--color-text-1);background:var(--color-fill-2)}
-.ph-settings-bar .ph-settings-drop{position:absolute;right:0;top:36px;z-index:100;padding:12px 14px;background:var(--color-bg-2);border:1px solid var(--color-border-2);border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);min-width:180px;display:flex;flex-direction:column;gap:10px}
-.ph-stats-bar{margin:0 48px;background:var(--color-bg-2);border:1px solid var(--color-border-2);border-radius:12px;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
-.ph-stats-main{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.ph-stat-item{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--color-fill-1);border-radius:8px;border:1px solid var(--color-border-2)}
-.ph-stat-label{font-size:13px;color:var(--color-text-4);font-weight:500}
-.ph-stat-value{font-size:18px;font-weight:700;color:rgb(var(--primary-6))}
-.ph-stats-filters{display:flex;gap:8px;flex-wrap:wrap}
-.ph-stats-sort{display:flex;align-items:center}
-.ph-filter-pill{padding:6px 14px;border:1px solid var(--color-border-2);background:var(--color-fill-1);border-radius:999px;font-size:13px;font-weight:500;color:var(--color-text-3);cursor:pointer;transition:all .15s;white-space:nowrap}
-.ph-filter-pill:hover{background:var(--color-bg-2);border-color:var(--color-border-2)}
-.ph-filter-pill.active{background:rgb(var(--primary-6));color:#fff;border-color:transparent}
-.ph-sort-select{padding:8px 14px;border:1px solid var(--color-border-2);background:var(--color-fill-1);border-radius:8px;font-size:13px;font-weight:500;color:var(--color-text-2);cursor:pointer;outline:none;min-width:140px}
-.ph-sort-select:focus{border-color:rgb(var(--primary-6));box-shadow:0 0 0 3px rgba(var(--primary-6),.12)}
-/* settings now use PanHubSettingsDrawer */
-.ph-status-msg{display:flex;align-items:center;justify-content:center;gap:10px;padding:60px 48px;font-size:14px;color:var(--color-text-3)}
-.ph-error{display:flex;align-items:center;gap:8px;margin:12px 48px 0;padding:12px 16px;background:rgba(var(--danger-6),.1);border:1px solid rgba(var(--danger-6),.3);border-radius:8px;color:rgb(var(--danger-6));font-weight:500;font-size:13px}
-.ph-error-icon{font-size:16px}
-.ph-results-section{padding:0 48px 32px}
-.ph-results-grid{display:grid;grid-template-columns:1fr;gap:16px}
-.ph-empty-section{display:flex;justify-content:center;padding:48px 24px}
-.ph-empty-card{background:var(--color-bg-2);border:1px solid var(--color-border-2);border-radius:16px;padding:32px;text-align:center;max-width:400px}
-.ph-empty-icon{font-size:48px;margin-bottom:16px;opacity:.6}
-.ph-empty-card h3{margin:0 0 8px;font-size:20px;color:var(--color-text-1)}
-.ph-empty-card p{margin:0;font-size:14px;color:var(--color-text-3);line-height:1.6}
-.ph-douban-section{padding:0 48px 32px}
-
 @media (max-width: 720px) {
   .gs-page-header {
     padding: 20px 16px 12px;
@@ -1278,13 +1077,6 @@ onUnmounted(() => {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 10px;
   }
-  .ph-hero-row { flex-direction: column; margin: 0 16px; }
-  .ph-hero-aside { width: 100%; }
-  .ph-stats-bar { margin: 0 16px; padding: 12px 14px; }
-  .ph-results-section { padding: 0 16px 24px; }
-  .ph-douban-section { padding: 0 16px 24px; }
-  .ph-status-msg { padding: 40px 16px; }
-  .ph-error { margin: 12px 16px 0; }
 }
 </style>
 

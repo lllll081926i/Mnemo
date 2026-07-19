@@ -109,7 +109,6 @@
         :media-item="currentMediaItem"
         :active-playlist-name="selectedPlaylist"
         :playlist-items="selectedPlaylist ? filteredItems : []"
-        @ai-rescrape="handleManualAIScrape"
         @back="handleDetailBack"
         @tag-click="handleDetailTagClick"
       />
@@ -641,7 +640,7 @@
                 @error="handleImageError"
               />
               <div class="poster-placeholder">
-                <img class="poster-placeholder-app-icon" src="/icon.svg" alt="BoxPlayer" />
+                <img class="poster-placeholder-app-icon" src="/icon.svg" alt="Mnemo" />
               </div>
 
               <div v-if="isContinueWatchingView && item.watchProgress !== undefined" class="watch-progress">
@@ -705,7 +704,7 @@
                 @error="handleImageError"
               />
               <div class="poster-placeholder">
-                <img class="poster-placeholder-app-icon" src="/icon.svg" alt="BoxPlayer" />
+                <img class="poster-placeholder-app-icon" src="/icon.svg" alt="Mnemo" />
               </div>
               <div class="type-badge">
                 {{ getItemTypeLabel(item) }}
@@ -815,10 +814,6 @@
               <span class="library-card-context-icon">≡</span>
               <span>{{ contextMenuInPlaylist ? '移除播放列表' : '添加到播放列表' }}</span>
             </button>
-            <button type="button" class="library-card-context-item" @click="aiRescrapeFromMenu">
-              <span class="library-card-context-icon">AI</span>
-              <span>AI 重刮削 <span class="ai-pro-badge">Pro</span></span>
-            </button>
             <div class="library-card-context-divider" />
             <button type="button" class="library-card-context-item danger" @click="deleteMediaFromMenu">
               <span class="library-card-context-icon">✕</span>
@@ -859,7 +854,6 @@ import { apiBaiduFileList, mapBaiduFileToAliModel } from '../cloudbaidu/dirfilel
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
 import { menuOpenFile } from '../utils/openfile'
 import message from '../utils/message'
-import { manualAIScrapeItems } from '../utils/mediaAIScrape'
 import useLocalMediaHomePreferencesStore from '../store/localMediaHomePreferences'
 import type { LocalMediaHomePosterType, LocalMediaHomeSectionKey } from '../store/localMediaHomePreferences'
 
@@ -1879,31 +1873,6 @@ const removeFromContinueWatchingFromMenu = () => {
     mediaStore.removeFromContinueWatching(contextMenuItem.value.id)
   }
   handleContextMenuClose()
-}
-
-const handleManualAIScrape = async (item: MediaLibraryItem) => {
-  const scrapedItems = await manualAIScrapeItems(item)
-  if (!scrapedItems.length) return
-  if (!scrapedItems.some(scraped => scraped.id === item.id)) {
-    mediaStore.removeMediaItem(item.id)
-  }
-  for (const scraped of scrapedItems) {
-    if (scraped.type === 'tv') {
-      mediaStore.addOrMergeTvSeries(scraped)
-    } else {
-      mediaStore.addMediaItem(scraped)
-    }
-    mediaStore.addToRecentlyAdded(scraped)
-  }
-  currentMediaItem.value = scrapedItems[0]
-  message.success('AI 重刮削完成')
-}
-
-const aiRescrapeFromMenu = async () => {
-  const target = contextMenuItem.value
-  handleContextMenuClose()
-  if (!target) return
-  await handleManualAIScrape(target)
 }
 
 const getBaseMediaId = (item: MediaLibraryItem) => {
@@ -4952,49 +4921,49 @@ body[arco-theme='dark'] .detail-media-modal .arco-modal-title {
   color: var(--app-mineradio-ink, #e8ecef) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library {
+body:not([arco-theme='dark']) #mnemobody .media-library {
   --app-mineradio-ink: rgba(17, 24, 39, 0.94);
   --app-glass-panel: rgba(255, 255, 255, 0.72);
   --app-glass-line: rgba(15, 23, 42, 0.08);
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library .toolbar-btn,
-body:not([arco-theme='dark']) #xbybody .media-library .library-arrow-back,
-body:not([arco-theme='dark']) #xbybody .media-library .view-toggle-pill {
+body:not([arco-theme='dark']) #mnemobody .media-library .toolbar-btn,
+body:not([arco-theme='dark']) #mnemobody .media-library .library-arrow-back,
+body:not([arco-theme='dark']) #mnemobody .media-library .view-toggle-pill {
   color: rgba(17, 24, 39, 0.88) !important;
   border-color: rgba(15, 23, 42, 0.08) !important;
   background: rgba(255, 255, 255, 0.66) !important;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library .toolbar-btn:hover,
-body:not([arco-theme='dark']) #xbybody .media-library .library-arrow-back:hover {
+body:not([arco-theme='dark']) #mnemobody .media-library .toolbar-btn:hover,
+body:not([arco-theme='dark']) #mnemobody .media-library .library-arrow-back:hover {
   color: rgba(17, 24, 39, 0.96) !important;
   border-color: rgba(15, 23, 42, 0.12) !important;
   background: rgba(255, 255, 255, 0.84) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library .view-toggle-seg {
+body:not([arco-theme='dark']) #mnemobody .media-library .view-toggle-seg {
   color: rgba(17, 24, 39, 0.54) !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library .view-toggle-seg:hover,
-body:not([arco-theme='dark']) #xbybody .media-library .view-toggle-seg.active {
+body:not([arco-theme='dark']) #mnemobody .media-library .view-toggle-seg:hover,
+body:not([arco-theme='dark']) #mnemobody .media-library .view-toggle-seg.active {
   color: rgba(17, 24, 39, 0.94) !important;
   background: rgba(15, 23, 42, 0.08) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library .toolbar-btn .iconfont,
-body:not([arco-theme='dark']) #xbybody .media-library .library-arrow-back .iconfont,
-body:not([arco-theme='dark']) #xbybody .media-library .view-toggle-seg .iconfont {
+body:not([arco-theme='dark']) #mnemobody .media-library .toolbar-btn .iconfont,
+body:not([arco-theme='dark']) #mnemobody .media-library .library-arrow-back .iconfont,
+body:not([arco-theme='dark']) #mnemobody .media-library .view-toggle-seg .iconfont {
   color: currentColor !important;
   opacity: 0.82 !important;
   text-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-library .view-toggle-divider {
+body:not([arco-theme='dark']) #mnemobody .media-library .view-toggle-divider {
   background: rgba(15, 23, 42, 0.1) !important;
 }
 

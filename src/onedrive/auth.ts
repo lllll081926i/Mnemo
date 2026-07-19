@@ -42,7 +42,7 @@ export const createOneDrivePkceVerifier = (): string => {
   return base64UrlEncode(bytes)
 }
 
-export const buildOneDriveAuthUrl = async (clientId: string, verifier: string, state = `boxplayer_${Date.now()}`): Promise<string> => {
+export const buildOneDriveAuthUrl = async (clientId: string, verifier: string, state = `mnemo_${Date.now()}`): Promise<string> => {
   const challenge = base64UrlEncode(await sha256(verifier))
   const params = new URLSearchParams({
     client_id: clientId.trim(),

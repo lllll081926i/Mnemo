@@ -30,7 +30,7 @@ export function PageMain() {
           window.MainProxyServer = await createProxyServer(window.MainProxyPort)
         })
       }
-      // DebugLog.mSaveSuccess('小白羊启动')
+      // DebugLog.mSaveSuccess('Mnemo启动')
       await ShareDAL.aLoadFromDB().catch((err: any) => {
         DebugLog.mSaveDanger('ShareDALLDB', err)
       })

@@ -61,7 +61,7 @@ const hashString = (value: string): string => {
   return Math.abs(hash).toString(36)
 }
 
-export const buildCloud123AuthUrl = (clientId = '', state = `boxplayer_${Date.now()}`) => {
+export const buildCloud123AuthUrl = (clientId = '', state = `mnemo_${Date.now()}`) => {
   const credentials = resolveCloud123OAuthCredentials(clientId)
   if (!credentials.clientId) throw new Error('请填写 123 网盘 App ID')
   const params = new URLSearchParams({

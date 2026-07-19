@@ -473,7 +473,7 @@ export class ShelfManager {
     ctx.font = '800 40px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'alphabetic'
-    const title = mesh.card.title || 'BoxPlayer'
+    const title = mesh.card.title || 'Mnemo'
     const words = title.length > 13 ? title.slice(0, 13) + '...' : title
     ctx.fillText(words, 386, 142)
     ctx.fillStyle = 'rgba(244,210,138,.76)'
@@ -1133,7 +1133,7 @@ export class ShelfManager {
       ctx.fillText(truncateCanvasText(ctx, name, 930), 160, 74)
       ctx.fillStyle = 'rgba(255,255,255,.45)'
       ctx.font = '700 26px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
-      ctx.fillText(truncateCanvasText(ctx, track?.artist || track?.description || 'BoxPlayer Radio', 900), 160, 120)
+      ctx.fillText(truncateCanvasText(ctx, track?.artist || track?.description || 'Mnemo Radio', 900), 160, 120)
       ctx.fillStyle = 'rgba(255,255,255,.56)'
       ctx.font = '800 22px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
       ctx.textAlign = 'right'
@@ -1196,7 +1196,7 @@ export class ShelfManager {
       ctx.fillText(truncateCanvasText(ctx, title, 820), 76, 186)
       ctx.fillStyle = 'rgba(255,255,255,.52)'
       ctx.font = '760 28px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
-      const subtitle = card.subtitle || 'BoxPlayer Radio'
+      const subtitle = card.subtitle || 'Mnemo Radio'
       ctx.fillText(truncateCanvasText(ctx, subtitle, 880), 78, 236)
       const line = ctx.createLinearGradient(74, 286, canvas.width - 74, 286)
       line.addColorStop(0, accent)

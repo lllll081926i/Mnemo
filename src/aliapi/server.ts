@@ -56,7 +56,7 @@ export default class ServerHttp {
   }
 
   static async Post(postData: any, isfirst = true): Promise<IServerRespData> {
-    const url = ServerHttp.baseApi + 'xby2'
+    const url = ServerHttp.baseApi + 'mnemo2'
     return axios
       .post(url, postData, {
         responseType: 'arraybuffer',

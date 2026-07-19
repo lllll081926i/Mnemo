@@ -6,7 +6,6 @@ import { usePanTreeStore, useAppStore } from '../../store'
 import TreeStore from '../../store/treestore'
 import { MediaScanner } from '../../utils/mediaScanner'
 import MusicScanner from '../../utils/musicScanner'
-import BookScanner from '../../utils/bookScanner'
 import message from '../../utils/message'
 import { computed, ref } from 'vue'
 import { isAliyunUser as isAliyunAccountUser, isBoxUser, isCloud123User, isDropboxUser, isGuangyaUser, isOneDriveUser } from '../../aliapi/utils'
@@ -16,7 +15,6 @@ const pantreeStore = usePanTreeStore()
 const appStore = useAppStore()
 const mediaScanner = MediaScanner.getInstance()
 const musicScanner = MusicScanner.getInstance()
-const bookScanner = BookScanner.getInstance()
 const isCloudUser = computed(() => isCloud123User(pantreeStore.user_id || '') || pantreeStore.drive_id === 'cloud123')
 const isAliyunAccount = computed(() => isAliyunAccountUser(pantreeStore.user_id || ''))
 const isDropbox = computed(() => isDropboxUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'dropbox')
@@ -90,14 +88,13 @@ const buildSelectedFolder = () => {
 // 扫描类型勾选
 const scanVideo = ref(true)
 const scanAudio = ref(false)
-const scanBook = ref(false)
-const isScanning = computed(() => mediaScanner.isCurrentlyScanning || musicScanner.isScanning || bookScanner.isScanning)
+const isScanning = computed(() => mediaScanner.isCurrentlyScanning || musicScanner.isScanning)
 
 const handleStartScan = async () => {
   const folder = buildSelectedFolder()
   if (!folder) return
   if (isScanning.value) { message.warning('正在扫描中，请稍后...'); return }
-  if (!scanVideo.value && !scanAudio.value && !scanBook.value) { message.warning('请至少勾选一种扫描类型'); return }
+  if (!scanVideo.value && !scanAudio.value) { message.warning('请至少勾选一种扫描类型'); return }
 
   const userId = pantreeStore.user_id || ''
   const tasks: Promise<any>[] = []
@@ -112,27 +109,7 @@ const handleStartScan = async () => {
     appStore.toggleTab('music')
     tasks.push(musicScanner.scanFolder(folder, userId).then(r => message.success(`音频扫描完成：收录 ${r.found} 首`)).catch(e => console.error('音频扫描失败:', e)))
   }
-  if (scanBook.value && !bookScanner.isScanning) {
-    if (!userId) { message.error('未识别到当前账号，无法扫描'); return }
-    appStore.toggleTab('book')
-    tasks.push(bookScanner.scanFolder(folder, userId).then(r => message.success(`书籍扫描完成：收录 ${r.found} 本`)).catch(e => console.error('书籍扫描失败:', e)))
-  }
-
   await Promise.allSettled(tasks)
-}
-
-// AI 批量刮削
-const handleAIBatchScrape = async () => {
-  const folder = buildSelectedFolder()
-  if (!folder) return
-  if (mediaScanner.isCurrentlyScanning) { message.warning('正在扫描中，请稍后...'); return }
-  try {
-    appStore.toggleTab('media')
-    await mediaScanner.batchAIScrapeFolder(folder, pantreeStore.drive_id)
-  } catch (error) {
-    console.error('AI 批量刮削失败:', error)
-    message.error('AI 批量刮削失败，请稍后重试')
-  }
 }
 
 // 检查是否选中了有效的文件夹
@@ -203,19 +180,9 @@ const isSelectedFolder = computed(() => {
             </template>
             <template #default>音频</template>
           </a-doption>
-          <a-doption @click.stop="scanBook = !scanBook">
-            <template #icon>
-              <IconFont :name="scanBook ? 'iconcheckbox-full' : 'iconfangkuang'" :style="scanBook ? 'color: rgb(var(--primary-6))' : ''" />
-            </template>
-            <template #default>书籍</template>
-          </a-doption>
           <a-doption @click="handleStartScan">
             <template #icon><IconFont name="iconstart" /></template>
             <template #default>开始扫描</template>
-          </a-doption>
-          <a-doption @click="handleAIBatchScrape">
-            <template #icon><IconFont name="iconscan" /></template>
-            <template #default>AI 重刮削 <span class="ai-pro-badge">Pro</span></template>
           </a-doption>
         </template>
       </a-dsubmenu>

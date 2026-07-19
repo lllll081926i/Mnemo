@@ -1,14 +1,5 @@
 <template>
-  <a-modal
-    :visible="visible"
-    title="连接到 WebDAV"
-    ok-text="连接"
-    width="920px"
-    modal-class="webdav-connect-modal"
-    :ok-loading="loading"
-    @ok="handleSubmit"
-    @cancel="emit('update:visible', false)"
-  >
+  <a-modal :visible="visible" title="连接到 WebDAV" ok-text="连接" width="920px" modal-class="webdav-connect-modal" :ok-loading="loading" @ok="handleSubmit" @cancel="emit('update:visible', false)">
     <div class="webdav-modal">
       <div class="webdav-grid">
         <div class="panel-card form-section">
@@ -72,13 +63,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'update:visible', value: boolean): void
-  (event: 'update:modelValue', value: {
-    name: string
-    url: string
-    username: string
-    password: string
-    rootPath: string
-  }): void
+  (
+    event: 'update:modelValue',
+    value: {
+      name: string
+      url: string
+      username: string
+      password: string
+      rootPath: string
+    }
+  ): void
   (event: 'submit'): void
 }>()
 
@@ -90,22 +84,30 @@ const form = reactive({
   rootPath: '/'
 })
 
-watch(() => props.visible, (visible) => {
-  if (!visible) return
-  form.name = props.modelValue.name
-  form.url = props.modelValue.url
-  form.username = props.modelValue.username
-  form.password = props.modelValue.password
-  form.rootPath = props.modelValue.rootPath
-}, { immediate: true })
+watch(
+  () => props.visible,
+  (visible) => {
+    if (!visible) return
+    form.name = props.modelValue.name
+    form.url = props.modelValue.url
+    form.username = props.modelValue.username
+    form.password = props.modelValue.password
+    form.rootPath = props.modelValue.rootPath
+  },
+  { immediate: true }
+)
 
-watch(form, () => {
-  emit('update:modelValue', { ...form })
-}, { deep: true })
+watch(
+  form,
+  () => {
+    emit('update:modelValue', { ...form })
+  },
+  { deep: true }
+)
 
 const handleSubmit = () => {
-  if (!form.url.trim() || !form.username.trim() || !form.password.trim()) {
-    message.error('请至少填写 WebDAV 地址、用户名和密码')
+  if (!form.name.trim() || !form.url.trim() || !form.username.trim() || !form.password.trim()) {
+    message.error('请填写 WebDAV 名称、地址、用户名和密码')
     return
   }
   emit('submit')

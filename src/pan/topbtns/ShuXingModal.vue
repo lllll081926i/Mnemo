@@ -602,7 +602,7 @@ const parseBaiduDesc = (desc: string) => {
     <div class='modalfoot'>
       <a-button type='outline' size='small' @click='handleCopyJson'>复制JSON</a-button>
       <div style='flex-grow: 1'></div>
-      <template v-if="fileInfo?.description && !fileInfo?.description.includes('xbyEncrypt')">
+      <template v-if="fileInfo?.description && !fileInfo?.description.includes('mnemoEncrypt')">
         <a-button v-if="fileInfo?.category == 'video'" type='outline' size='small' @click='handleCopyThumbnail'>
           复制M3U8链接
         </a-button>

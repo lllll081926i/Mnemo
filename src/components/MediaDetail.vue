@@ -22,7 +22,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   back: []
   tagClick: [tagType: string, tagValue: string]
-  aiRescrape: [item: MediaLibraryItem]
 }>()
 
 const settingStore = useSettingStore()

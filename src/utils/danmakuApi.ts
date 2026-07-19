@@ -64,7 +64,7 @@ export function normalizeDanmakuApiUrl(url: string) {
 
 function createHeaders(contentType = false) {
   const headers: Record<string, string> = {
-    'User-Agent': 'BoxPlayer'
+    'User-Agent': 'Mnemo'
   }
   if (contentType) headers['Content-Type'] = 'application/json'
   return headers

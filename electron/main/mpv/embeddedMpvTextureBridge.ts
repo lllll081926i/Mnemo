@@ -90,7 +90,7 @@ export class EmbeddedMpvTextureBridge {
       }
     }
 
-    // sbtlTV owns one fixed main window. BoxPlayer creates a new preview
+    // sbtlTV owns one fixed main window. Mnemo creates a new preview
     // window for each video, so the singleton bridge must follow the current
     // sender instead of keeping the first window's mainFrame forever.
     if (this.window !== window) {

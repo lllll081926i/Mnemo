@@ -31,7 +31,7 @@ describe('danmakuApi', () => {
       method: 'POST',
       headers: expect.objectContaining({
         'Content-Type': 'application/json',
-        'User-Agent': 'BoxPlayer'
+        'User-Agent': 'Mnemo'
       }),
       body: JSON.stringify({
         matchMode: 'fileNameOnly',

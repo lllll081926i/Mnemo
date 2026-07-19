@@ -56,7 +56,7 @@ export const createBoxPkceVerifier = (): string => {
 export const buildBoxAuthUrl = async (
   clientId: string,
   verifier: string,
-  state = `boxplayer_${Date.now()}`
+  state = `mnemo_${Date.now()}`
 ): Promise<string> => {
   const challenge = base64UrlEncode(await sha256(verifier))
   const params = new URLSearchParams({

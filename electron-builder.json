@@ -1,9 +1,9 @@
 {
-  "appId": "com.xbyboxplayer.app",
-  "productName": "BoxPlayer",
+  "appId": "com.mnemo.app",
+  "productName": "Mnemo",
   "protocols": [
     {
-      "name": "xbyboxplayer OAuth",
+      "name": "mnemo OAuth",
       "schemes": ["xbyboxplayer-oauth", "boxplayer-onedriveoauth"]
     }
   ],
@@ -21,7 +21,7 @@
   "mac": {
     "icon": "./static/images/icon.icns",
     "type": "distribution",
-    "artifactName": "boxplayer-${version}-mac-${arch}.${ext}",
+    "artifactName": "mnemo-${version}-mac-${arch}.${ext}",
     "darkModeSupport": true,
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
@@ -40,10 +40,10 @@
     "notarize": true
   },
   "linux": {
-    "executableName": "boxplayer",
+    "executableName": "mnemo",
     "icon": "./static/images/icon_256x256.png",
     "category": "Network",
-    "artifactName": "boxplayer-${version}-linux-${arch}.${ext}",
+    "artifactName": "mnemo-${version}-linux-${arch}.${ext}",
     "extraResources": [
       { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png" },
       { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
@@ -61,7 +61,7 @@
   },
   "win": {
     "icon": "./static/images/icon_256x256.ico",
-    "artifactName": "boxplayer-${version}-win-${arch}.${ext}",
+    "artifactName": "mnemo-${version}-win-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker",
     "extraResources": [
       { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
@@ -71,7 +71,7 @@
     "target": [{ "target": "nsis", "arch": ["x64"] }]
   },
   "dmg": {
-    "title": "BoxPlayer",
+    "title": "Mnemo",
     "window": { "width": 560, "height": 320 },
     "iconSize": 96,
     "contents": [
@@ -89,7 +89,7 @@
   "publish": [
     {
       "owner": "gaozhangmin",
-      "repo": "boxplayer",
+      "repo": "mnemo",
       "provider": "github",
       "releaseType": "prerelease"
     }

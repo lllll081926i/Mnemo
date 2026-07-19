@@ -188,7 +188,7 @@ async function fetchLrclib(artist: string, title: string, durationSec?: number, 
     let resp = await axios.get('https://lrclib.net/api/get', {
       params,
       timeout: 8000,
-      headers: { 'User-Agent': 'BoxPlayer/1.0 (https://github.com/gaozhangmin/boxplayer)' }
+      headers: { 'User-Agent': 'Mnemo/1.0 (https://github.com/gaozhangmin/mnemo)' }
     }).catch(() => null)
     let body: any = resp?.data
     if (!body || (!body.syncedLyrics && !body.plainLyrics)) {
@@ -196,7 +196,7 @@ async function fetchLrclib(artist: string, title: string, durationSec?: number, 
       const sResp = await axios.get('https://lrclib.net/api/search', {
         params: { track_name: title, ...(artist ? { artist_name: artist } : {}) },
         timeout: 8000,
-        headers: { 'User-Agent': 'BoxPlayer/1.0' }
+        headers: { 'User-Agent': 'Mnemo/1.0' }
       }).catch(() => null)
       const list: any[] = Array.isArray(sResp?.data) ? sResp!.data : []
       const best = list.find((item: any) => item?.syncedLyrics) || list[0]

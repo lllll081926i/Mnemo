@@ -21,7 +21,7 @@ export const fetchMediaServerLoginProfile = async (config: Pick<MediaServerConfi
     const headers: Record<string, string> = {
       Accept: 'application/json',
       'X-Plex-Token': config.accessToken || '',
-      'X-Plex-Product': 'XbyBoxPlayer'
+      'X-Plex-Product': 'Mnemo'
     }
     for (const path of ['/identity', '/']) {
       try {

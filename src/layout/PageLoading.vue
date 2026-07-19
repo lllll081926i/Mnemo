@@ -1,19 +1,19 @@
 <script setup lang="ts"></script>
 
 <template>
-  <div class="desktop-loading boxplayer-splash-loading">
-    <div class="boxplayer-splash-noise"></div>
-    <div class="boxplayer-splash-wordmark" aria-label="BoxPlayer">
-      <span class="boxplayer-splash-word-main">Box</span>
-      <span class="boxplayer-splash-word-accent">Player</span>
+  <div class="desktop-loading mnemo-splash-loading">
+    <div class="mnemo-splash-noise"></div>
+    <div class="mnemo-splash-wordmark" aria-label="Mnemo">
+      <span class="mnemo-splash-word-main">Box</span>
+      <span class="mnemo-splash-word-accent">Player</span>
     </div>
-    <div class="boxplayer-splash-line"></div>
-    <div class="boxplayer-splash-state">LOADING</div>
+    <div class="mnemo-splash-line"></div>
+    <div class="mnemo-splash-state">LOADING</div>
   </div>
 </template>
 
 <style>
-.desktop-loading.boxplayer-splash-loading {
+.desktop-loading.mnemo-splash-loading {
   position: absolute;
   inset: 0;
   display: grid;
@@ -28,7 +28,7 @@
     linear-gradient(180deg, #020606 0%, #050607 42%, #000 100%);
 }
 
-.boxplayer-splash-loading::after {
+.mnemo-splash-loading::after {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -38,7 +38,7 @@
     linear-gradient(180deg, rgba(0, 0, 0, 0.68), transparent 32%, transparent 64%, rgba(0, 0, 0, 0.74));
 }
 
-.boxplayer-splash-noise {
+.mnemo-splash-noise {
   position: absolute;
   inset: 0;
   opacity: 0.04;
@@ -47,7 +47,7 @@
   mix-blend-mode: screen;
 }
 
-.boxplayer-splash-wordmark {
+.mnemo-splash-wordmark {
   position: relative;
   z-index: 2;
   display: inline-flex;
@@ -63,22 +63,22 @@
   text-shadow:
     0 0 28px rgba(0, 245, 212, 0.22),
     0 22px 78px rgba(0, 0, 0, 0.56);
-  animation: boxplayerSplashWord 1.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: mnemoSplashWord 1.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.boxplayer-splash-word-main,
-.boxplayer-splash-word-accent {
+.mnemo-splash-word-main,
+.mnemo-splash-word-accent {
   position: relative;
   display: inline-block;
   white-space: nowrap;
 }
 
-.boxplayer-splash-word-main {
+.mnemo-splash-word-main {
   color: #f8f8f2;
-  animation: boxplayerSplashMain 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: mnemoSplashMain 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.boxplayer-splash-word-accent {
+.mnemo-splash-word-accent {
   margin-left: 0.04em;
   color: transparent;
   background: linear-gradient(94deg, #fff 4%, rgba(244, 210, 138, 0.98) 36%, rgba(122, 215, 194, 0.94) 70%, rgba(255, 255, 255, 0.88));
@@ -86,11 +86,11 @@
   background-size: 300% 100%;
   -webkit-text-fill-color: transparent;
   -webkit-background-clip: text;
-  animation: boxplayerSplashAccent 1.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: mnemoSplashAccent 1.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.boxplayer-splash-wordmark::before,
-.boxplayer-splash-wordmark::after {
+.mnemo-splash-wordmark::before,
+.mnemo-splash-wordmark::after {
   position: absolute;
   left: 50%;
   z-index: -1;
@@ -102,19 +102,19 @@
   transform: translateX(-50%);
 }
 
-.boxplayer-splash-wordmark::before {
+.mnemo-splash-wordmark::before {
   top: 18%;
   background: linear-gradient(90deg, transparent, rgba(0, 245, 212, 0.13), transparent);
   filter: blur(14px);
 }
 
-.boxplayer-splash-wordmark::after {
+.mnemo-splash-wordmark::after {
   bottom: 18%;
   background: linear-gradient(90deg, transparent, rgba(244, 210, 138, 0.14), transparent);
   filter: blur(18px);
 }
 
-.boxplayer-splash-line {
+.mnemo-splash-line {
   position: absolute;
   top: calc(50% + 78px);
   left: 50%;
@@ -127,10 +127,10 @@
     0 0 34px rgba(122, 215, 194, 0.1);
   transform: translateX(-50%) scaleX(0.2);
   transform-origin: center;
-  animation: boxplayerSplashLine 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: mnemoSplashLine 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.boxplayer-splash-state {
+.mnemo-splash-state {
   position: absolute;
   top: calc(50% + 106px);
   left: 50%;
@@ -143,10 +143,10 @@
     0 0 18px rgba(244, 210, 138, 0.24),
     0 0 34px rgba(122, 215, 194, 0.12);
   transform: translateX(-50%);
-  animation: boxplayerSplashState 1.8s ease-in-out infinite alternate;
+  animation: mnemoSplashState 1.8s ease-in-out infinite alternate;
 }
 
-@keyframes boxplayerSplashWord {
+@keyframes mnemoSplashWord {
   0% {
     opacity: 0.48;
     filter: blur(10px);
@@ -162,7 +162,7 @@
   }
 }
 
-@keyframes boxplayerSplashMain {
+@keyframes mnemoSplashMain {
   0% {
     opacity: 0.62;
     clip-path: inset(16% 0 18% 0);
@@ -179,7 +179,7 @@
   }
 }
 
-@keyframes boxplayerSplashAccent {
+@keyframes mnemoSplashAccent {
   0%,
   28% {
     opacity: 0.42;
@@ -200,7 +200,7 @@
   }
 }
 
-@keyframes boxplayerSplashLine {
+@keyframes mnemoSplashLine {
   0% {
     opacity: 0;
     transform: translateX(-50%) scaleX(0.05);
@@ -211,7 +211,7 @@
   }
 }
 
-@keyframes boxplayerSplashState {
+@keyframes mnemoSplashState {
   0% {
     opacity: 0.42;
   }

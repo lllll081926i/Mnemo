@@ -1,4 +1,4 @@
-const DB_NAME = 'boxplayer-mineradio'
+const DB_NAME = 'mnemo-mineradio'
 const DB_VERSION = 1
 const STORE = 'kv'
 

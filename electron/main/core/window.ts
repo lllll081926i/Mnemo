@@ -11,7 +11,6 @@ export const AppWindow: {
   mainWindow: BrowserWindow | undefined
   uploadWindow: BrowserWindow | undefined
   downloadWindow: BrowserWindow | undefined
-  readerWindow: BrowserWindow | undefined
   appTray: Tray | undefined
   winWidth: number
   winHeight: number
@@ -20,7 +19,6 @@ export const AppWindow: {
   mainWindow: undefined,
   uploadWindow: undefined,
   downloadWindow: undefined,
-  readerWindow: undefined,
   appTray: undefined,
   winWidth: 0,
   winHeight: 0,
@@ -133,7 +131,7 @@ export function createMainWindow() {
 
   AppWindow.mainWindow.on('ready-to-show', function () {
     showMainPage()
-    AppWindow.mainWindow!.setTitle('BoxPlayer')
+    AppWindow.mainWindow!.setTitle('Mnemo')
     if (is.windows() && process.argv && process.argv.join(' ').indexOf('--openAsHidden') < 0) {
       AppWindow.mainWindow!.show()
     } else if (is.macOS() && !app.getLoginItemSettings().wasOpenedAsHidden) {
@@ -148,7 +146,7 @@ export function createMainWindow() {
 
   AppWindow.mainWindow.webContents.on('render-process-gone', function (event, details) {
     if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed') {
-      ShowErrorAndRelaunch('(⊙o⊙)？小白羊遇到错误崩溃了', details.reason)
+      ShowErrorAndRelaunch('(⊙o⊙)？Mnemo遇到错误崩溃了', details.reason)
     }
   })
 
@@ -185,7 +183,7 @@ export function createTray() {
   const icon = getStaticPath('icon_256x256.ico')
   AppWindow.appTray = new Tray(icon)
   const contextMenu = Menu.buildFromTemplate(trayMenuTemplate)
-  AppWindow.appTray.setToolTip('BoxPlayer')
+  AppWindow.appTray.setToolTip('Mnemo')
   AppWindow.appTray.setContextMenu(contextMenu)
   AppWindow.appTray.on('click', () => {
     if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
@@ -420,7 +418,7 @@ function createUpload() {
   AppWindow.uploadWindow.on('ready-to-show', function () {
     creatUploadPort()
     AppWindow.uploadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'upload' } })
-    AppWindow.uploadWindow!.setTitle('boxplayer上传进程')
+    AppWindow.uploadWindow!.setTitle('mnemo上传进程')
   })
 
   AppWindow.uploadWindow.webContents.on('render-process-gone', function (event, details) {
@@ -443,7 +441,7 @@ function createDownload() {
   AppWindow.downloadWindow.on('ready-to-show', function () {
     creatDownloadPort()
     AppWindow.downloadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'download' } })
-    AppWindow.downloadWindow!.setTitle('boxplayer下载进程')
+    AppWindow.downloadWindow!.setTitle('mnemo下载进程')
   })
 
   AppWindow.downloadWindow.webContents.on('render-process-gone', function (event, details) {
@@ -458,74 +456,4 @@ function createDownload() {
 
   AppWindow.downloadWindow.webContents.closeDevTools()
   AppWindow.downloadWindow.hide()
-}
-
-export function createReaderWindow(bookData: any) {
-  if (AppWindow.readerWindow && !AppWindow.readerWindow.isDestroyed()) {
-    AppWindow.readerWindow.focus()
-    AppWindow.readerWindow.webContents.send('setPage', { page: 'PageBookReader', data: bookData })
-    return
-  }
-
-  const display = screen.getPrimaryDisplay()
-  const { width: screenWidth, height: screenHeight } = display.workAreaSize
-  const winWidth = Math.min(Math.round(screenWidth * 0.75), 1200)
-  const winHeight = Math.min(Math.round(screenHeight * 0.85), 900)
-
-  AppWindow.readerWindow = new BrowserWindow({
-    show: false,
-    width: winWidth,
-    height: winHeight,
-    minWidth: 680,
-    minHeight: 500,
-    center: true,
-    icon: getStaticPath('icon_256x256.ico'),
-    useContentSize: true,
-    frame: false,
-    transparent: false,
-    title: 'BoxPlayer 阅读器',
-    backgroundColor: '#1a1a1a',
-    webPreferences: {
-      spellcheck: false,
-      devTools: DEBUGGING,
-      webviewTag: true,
-      nodeIntegration: true,
-      nodeIntegrationInWorker: true,
-      sandbox: false,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
-      contextIsolation: false,
-      backgroundThrottling: false,
-      enableWebSQL: true,
-      disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure',
-      preload: getAsarPath('dist/electron/preload/index.js')
-    }
-  })
-
-  AppWindow.readerWindow.removeMenu()
-
-  if (DEBUGGING) {
-    AppWindow.readerWindow.loadURL(process.env.VITE_DEV_SERVER_URL!, { userAgent: ua, httpReferrer: Referer })
-  } else {
-    AppWindow.readerWindow.loadURL('file://' + getAsarPath('dist/main.html'), { userAgent: ua, httpReferrer: Referer })
-  }
-
-  AppWindow.readerWindow.on('ready-to-show', () => {
-    AppWindow.readerWindow!.webContents.send('setPage', { page: 'PageBookReader', data: bookData })
-    AppWindow.readerWindow!.show()
-  })
-
-  AppWindow.readerWindow.on('closed', () => {
-    AppWindow.readerWindow = undefined
-  })
-
-  handleWebView(AppWindow.readerWindow, DEBUGGING)
-  handleWinCmd(AppWindow.readerWindow)
-
-  AppWindow.readerWindow.webContents.on('will-navigate', (e, url) => {
-    e.preventDefault()
-    if (!url.includes(process.env.VITE_DEV_SERVER_URL || '')) {
-      shell.openExternal(url)
-    }
-  })
 }

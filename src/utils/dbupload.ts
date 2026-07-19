@@ -109,14 +109,14 @@ export interface IUploadingUI {
   Info: IStateUploadInfo
 }
 
-class XBYDB3Upload extends Dexie {
+class MNEMODB3Upload extends Dexie {
   iuploadtask: Dexie.Table<IStateUploadTask>
   iuploadinfo: Dexie.Table<IStateUploadInfo>
   iuploaded: Dexie.Table<IStateUploadTask>
   iobject: Dexie.Table<object, string>
 
   constructor() {
-    super('XBYDB3Upload')
+    super('MNEMODB3Upload')
 
     this.version(3)
       .stores({
@@ -317,5 +317,5 @@ class XBYDB3Upload extends Dexie {
   }
 }
 
-const DBUpload = new XBYDB3Upload()
+const DBUpload = new MNEMODB3Upload()
 export default DBUpload

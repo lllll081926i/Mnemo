@@ -116,17 +116,17 @@ export default class AppCache {
 
 
     if (delby == 'all') {
-      message.success('删除全部数据成功，自动重启小白羊')
+      message.success('删除全部数据成功，自动重启Mnemo')
       Sleep(3000).then(() => {
         window.WebRelaunch()
       })
     } else if (delby == 'db') {
-      message.success('删除数据库成功，自动重启小白羊')
+      message.success('删除数据库成功，自动重启Mnemo')
       Sleep(3000).then(() => {
         window.WebRelaunch()
       })
     } else {
-      message.success('清理缓存成功，自动重启小白羊')
+      message.success('清理缓存成功，自动重启Mnemo')
       Sleep(3000).then(() => {
         // window.WebReload()
         window.WebRelaunch()
@@ -137,7 +137,7 @@ export default class AppCache {
   static async aClearCache(): Promise<void> {
     const dir = getUserData()
     await AppCache.DeleteDir(path.join(dir, 'Cache')).catch(() => {})
-    message.success('删除全部缓存数据成功，自动重启小白羊')
+    message.success('删除全部缓存数据成功，自动重启Mnemo')
     Sleep(1500).then(() => {
       window.WebRelaunch()
     })

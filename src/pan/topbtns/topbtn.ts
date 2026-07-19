@@ -115,7 +115,7 @@ export function handleUpload(uploadType: string, encType: string = '') {
     message.error(`${getDriveProviderLabel(provider)} 暂不支持加密上传`)
     return
   }
-  if (encType == 'xbyEncrypt1') {
+  if (encType == 'mnemoEncrypt1') {
     if (!useSettingStore().securityPassword) {
       modalPassword('new', (success) => {
         success && handleUpload(uploadType, encType)
@@ -127,7 +127,7 @@ export function handleUpload(uploadType: string, encType: string = '') {
     window.WebShowOpenDialogSync(
       {
         title: '选择多个文件上传到网盘',
-        buttonLabel: `${encType == 'xbyEncrypt1' ? '加密' : encType == 'xbyEncrypt2' ? '私密' : ''}上传选中的文件`,
+        buttonLabel: `${encType == 'mnemoEncrypt1' ? '加密' : encType == 'mnemoEncrypt2' ? '私密' : ''}上传选中的文件`,
         properties: ['openFile', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
       },
       (files: string[] | undefined) => {
@@ -138,7 +138,7 @@ export function handleUpload(uploadType: string, encType: string = '') {
     window.WebShowOpenDialogSync(
       {
         title: '选择多个文件夹上传到网盘',
-        buttonLabel: `${encType == 'xbyEncrypt1' ? '加密' : encType == 'xbyEncrypt2' ? '私密' : ''}上传文件夹`,
+        buttonLabel: `${encType == 'mnemoEncrypt1' ? '加密' : encType == 'mnemoEncrypt2' ? '私密' : ''}上传文件夹`,
         properties: ['openDirectory', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
       },
       (files: string[] | undefined) => {
@@ -538,7 +538,7 @@ export async function menuFileEncTypeChange(istree: boolean) {
   }
   if (topbtnLock.has('menuFileEncTypeChange')) return
   topbtnLock.add('menuFileEncTypeChange')
-  let encType = 'xbyEncrypt1'
+  let encType = 'mnemoEncrypt1'
   Modal.open({
     title: '标记加密',
     okText: '标记',
@@ -548,10 +548,10 @@ export async function menuFileEncTypeChange(istree: boolean) {
         Select,
         {
           tabindex: '-1',
-          defaultValue: 'xbyEncrypt1',
+          defaultValue: 'mnemoEncrypt1',
           onChange: (value: any) => (encType = value)
         },
-        () => [h(Option, { tabindex: '-1', value: 'notEncrypt', label: '未加密' }), h(Option, { tabindex: '-1', value: 'xbyEncrypt1', label: '加密文件' }), h(Option, { tabindex: '-1', value: 'xbyEncrypt2', label: '私密文件' })]
+        () => [h(Option, { tabindex: '-1', value: 'notEncrypt', label: '未加密' }), h(Option, { tabindex: '-1', value: 'mnemoEncrypt1', label: '加密文件' }), h(Option, { tabindex: '-1', value: 'mnemoEncrypt2', label: '私密文件' })]
       ),
     onOk: async () => {
       try {
@@ -653,7 +653,7 @@ export function menuCreatShare(istree: boolean, shareby: string, driveType: stri
     message.error('没有可以分享的文件！')
     return
   }
-  let encFiles = list.filter((l) => getEncType(l) == 'xbyEncrypt2')
+  let encFiles = list.filter((l) => getEncType(l) == 'mnemoEncrypt2')
   if (encFiles.length > 0) {
     Modal.open({
       title: '存在私密的文件，是否继续分享？',
@@ -884,7 +884,7 @@ export function menuVideoXBT() {
     message.error('没有选中任何文件')
     return
   }
-  if (first.description && first.description.includes('xbyEncrypt')) {
+  if (first.description && first.description.includes('mnemoEncrypt')) {
     message.error('加密视频无法获取雪碧图')
     return
   }

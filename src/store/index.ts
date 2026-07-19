@@ -15,7 +15,6 @@ import usePanTreeStore from '../pan/pantreestore'
 import usePanFileStore from '../pan/panfilestore'
 import useMediaServerRegistryStore from './mediaServerRegistry'
 import useMediaServerNavigationStore from './mediaServerNavigation'
-import useBookLibraryStore from './booklibrary'
 import useMusicLibraryStore from './musiclibrary'
 import useMusicPlayerStore from './musicplayerstore'
 
@@ -54,7 +53,6 @@ export {
   usePanFileStore,
   useMediaServerRegistryStore,
   useMediaServerNavigationStore,
-  useBookLibraryStore,
   useMusicLibraryStore,
   useMusicPlayerStore,
   useServerStore,

@@ -537,10 +537,10 @@ export default class AliFileCmd {
     if (isDropboxUser(user_id) || drive_id === 'dropbox') return
     // 防止加密标记清空
     let parts = description.split(',') || []
-    let encryptPart = parts.find((part: any) => part.includes('xbyEncrypt')) || ''
+    let encryptPart = parts.find((part: any) => part.includes('mnemoEncrypt')) || ''
     let colorPart = parts.find((part: any) => /c.{6}$/.test(part)) || ''
     if (color) {
-      if (color.includes('xbyEncrypt')) {
+      if (color.includes('mnemoEncrypt')) {
         encryptPart = color
       } else if (color === 'notEncrypt') {
         encryptPart = ''
@@ -557,7 +557,7 @@ export default class AliFileCmd {
       title = '清除标记'
     } else if (color.includes('ce74c3c')) {
       title = ''
-    } else if (color.includes('xbyEncrypt')) {
+    } else if (color.includes('mnemoEncrypt')) {
       title = '标记加密'
     }
     let successList = await ApiBatchSuccess(title, batchList, user_id, '')

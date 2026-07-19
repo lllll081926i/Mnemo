@@ -29,7 +29,7 @@ describe('zip design port to Vue chrome', () => {
 
   it('keeps layout selectors out of the token file', () => {
     const css = read('src/assets/design-tokens.css')
-    for (const selector of ['#xbyhead', '#xbyhead2', '#xbyfoot', '#footer2', '.xbyleft', '.xbyright', '.xbyleftmenu', '.toppanbtn', '.pan-drive-switcher', '.mantine-root']) {
+    for (const selector of ['#mnemohead', '#mnemohead2', '#mnemofoot', '#footer2', '.mnemoleft', '.mnemoright', '.mnemoleftmenu', '.toppanbtn', '.pan-drive-switcher', '.mantine-root']) {
       expect(css).not.toContain(selector)
     }
   })

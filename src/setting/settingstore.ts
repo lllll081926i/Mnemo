@@ -105,13 +105,11 @@ export interface SettingState {
   uiFolderPreviewAutoHide: number
   uiLibraryAutoScanMusic: boolean
   uiLibraryAutoScanVideo: boolean
-  uiLibraryAutoScanBook: boolean
   uiLibraryIncrementalScan: boolean
   uiLibraryScanIntervalHours: number
   uiLibraryAutoScanPromptedUsers: string[]
   uiLibraryAutoScanMusicDisabledUsers: string[]
   uiLibraryAutoScanVideoDisabledUsers: string[]
-  uiLibraryAutoScanBookDisabledUsers: string[]
   uiLibraryFollowManualScans: boolean
   uiMusicAutoScanFolders: { user_id: string; drive_id: string; file_id: string; name: string; path?: string }[]
   uiFileOrderDuli: string
@@ -201,18 +199,6 @@ export interface SettingState {
 
   ariaResumeAllWhenLaunched: boolean
 
-  // API 密钥 (BYOK)
-  apiAIModelKey: string
-  apiAIModelProvider: string
-  apiAIModelId: string
-  apiAIBaseUrl: string
-  apiAIEmbeddingModelId: string
-  apiAIRagEnabled: boolean
-  apiAISpoilerProtection: boolean
-  apiAIMaxContextChunks: number
-  apiAIIndexingMode: 'on-demand' | 'background'
-  apiAIReedyEnabled: boolean
-  apiAIReedyRuntime: 'mvp' | 'agent'
 }
 
 const setting: SettingState = {
@@ -294,13 +280,11 @@ const setting: SettingState = {
   uiFolderPreviewAutoHide: 6,
   uiLibraryAutoScanMusic: false,
   uiLibraryAutoScanVideo: false,
-  uiLibraryAutoScanBook: false,
   uiLibraryIncrementalScan: true,
   uiLibraryScanIntervalHours: 24,
   uiLibraryAutoScanPromptedUsers: [],
   uiLibraryAutoScanMusicDisabledUsers: [],
   uiLibraryAutoScanVideoDisabledUsers: [],
-  uiLibraryAutoScanBookDisabledUsers: [],
   uiLibraryFollowManualScans: true,
   uiMusicAutoScanFolders: [],
   uiFileOrderDuli: 'null',
@@ -393,19 +377,7 @@ const setting: SettingState = {
   ariaState: 'local',
   ariaLoading: false,
 
-  ariaResumeAllWhenLaunched: false,
-
-  apiAIModelKey: '',
-  apiAIModelProvider: '',
-  apiAIModelId: '',
-  apiAIBaseUrl: '',
-  apiAIEmbeddingModelId: '',
-  apiAIRagEnabled: false,
-  apiAISpoilerProtection: true,
-  apiAIMaxContextChunks: 6,
-  apiAIIndexingMode: 'on-demand',
-  apiAIReedyEnabled: false,
-  apiAIReedyRuntime: 'mvp'
+  ariaResumeAllWhenLaunched: false
 }
 
 function _loadSetting(val: any) {
@@ -496,7 +468,6 @@ function _loadSetting(val: any) {
   setting.uiFolderPreviewAutoHide = defaultNumber(val.uiFolderPreviewAutoHide, 6)
   setting.uiLibraryAutoScanMusic = defaultBool(val.uiLibraryAutoScanMusic, false)
   setting.uiLibraryAutoScanVideo = defaultBool(val.uiLibraryAutoScanVideo, false)
-  setting.uiLibraryAutoScanBook = defaultBool(val.uiLibraryAutoScanBook, false)
   setting.uiLibraryIncrementalScan = defaultBool(val.uiLibraryIncrementalScan, true)
   setting.uiLibraryScanIntervalHours = defaultNumberSub(val.uiLibraryScanIntervalHours, 24, 1, 24 * 30)
   setting.uiLibraryAutoScanPromptedUsers = Array.isArray(val.uiLibraryAutoScanPromptedUsers)
@@ -507,9 +478,6 @@ function _loadSetting(val: any) {
     : []
   setting.uiLibraryAutoScanVideoDisabledUsers = Array.isArray(val.uiLibraryAutoScanVideoDisabledUsers)
     ? val.uiLibraryAutoScanVideoDisabledUsers.filter((s: unknown) => typeof s === 'string')
-    : []
-  setting.uiLibraryAutoScanBookDisabledUsers = Array.isArray(val.uiLibraryAutoScanBookDisabledUsers)
-    ? val.uiLibraryAutoScanBookDisabledUsers.filter((s: unknown) => typeof s === 'string')
     : []
   setting.uiLibraryFollowManualScans = defaultBool(val.uiLibraryFollowManualScans, true)
   setting.uiMusicAutoScanFolders = Array.isArray(val.uiMusicAutoScanFolders)
@@ -611,18 +579,6 @@ function _loadSetting(val: any) {
 
   setting.ariaResumeAllWhenLaunched = defaultBool(val.ariaResumeAllWhenLaunched, false)
 
-  // API 密钥
-  setting.apiAIModelKey = defaultString(val.apiAIModelKey, '')
-  setting.apiAIModelProvider = defaultString(val.apiAIModelProvider, '')
-  setting.apiAIModelId = defaultString(val.apiAIModelId, '')
-  setting.apiAIBaseUrl = defaultString(val.apiAIBaseUrl, '')
-  setting.apiAIEmbeddingModelId = defaultString(val.apiAIEmbeddingModelId, '')
-  setting.apiAIRagEnabled = defaultBool(val.apiAIRagEnabled, false)
-  setting.apiAISpoilerProtection = defaultBool(val.apiAISpoilerProtection, true)
-  setting.apiAIMaxContextChunks = defaultNumberSub(val.apiAIMaxContextChunks, 6, 1, 12)
-  setting.apiAIIndexingMode = defaultValue(val.apiAIIndexingMode, ['on-demand', 'background'])
-  setting.apiAIReedyEnabled = defaultBool(val.apiAIReedyEnabled, false)
-  setting.apiAIReedyRuntime = defaultValue(val.apiAIReedyRuntime, ['mvp', 'agent']) as 'mvp' | 'agent'
 }
 
 let settingstr = ''

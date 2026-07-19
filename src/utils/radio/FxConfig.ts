@@ -148,7 +148,7 @@ export const DEFAULT_MUSIC_FX: MusicFxConfig = {
 export const MUSIC_FX_PRESETS: Array<{ id: string; name: string; config: MusicFxConfig }> = [
   {
     id: 'mineradio',
-    name: 'BoxPlayer Radio',
+    name: 'Mnemo Radio',
     config: { ...DEFAULT_MUSIC_FX }
   },
   {

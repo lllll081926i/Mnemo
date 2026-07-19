@@ -1,6 +1,6 @@
 import type { MediaServerConfig } from '../types/mediaServer'
 
-const APP_NAME = 'XbyBoxPlayer'
+const APP_NAME = 'Mnemo'
 const APP_VERSION = '1.0.0'
 
 const createMediaBrowserAuthorization = (config: MediaServerConfig) => {

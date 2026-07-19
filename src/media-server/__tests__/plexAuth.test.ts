@@ -27,13 +27,13 @@ describe('plexAuth', () => {
   })
 
   it('reuses the stored Plex client identifier', () => {
-    stubLocalStorage({ boxplayer_plex_client_id: 'boxplayer-existing-client' })
+    stubLocalStorage({ mnemo_plex_client_id: 'mnemo-existing-client' })
 
-    expect(getPlexClientId()).toBe('boxplayer-existing-client')
+    expect(getPlexClientId()).toBe('mnemo-existing-client')
   })
 
   it('creates Plex server configs with a stable non-empty device id', () => {
-    stubLocalStorage({ boxplayer_plex_client_id: 'boxplayer-stable-client' })
+    stubLocalStorage({ mnemo_plex_client_id: 'mnemo-stable-client' })
     const resources: PlexResource[] = [{
       name: 'Living Room Plex',
       accessToken: 'plex-token',
@@ -53,13 +53,13 @@ describe('plexAuth', () => {
     const [config] = createPlexServerConfigs(resources)
 
     expect(config.type).toBe('plex')
-    expect(config.deviceId).toBe('boxplayer-stable-client')
+    expect(config.deviceId).toBe('mnemo-stable-client')
     expect(config.baseUrl).toBe('https://plex.example.com:32400')
     expect(config.backupAddresses?.Remote).toBe('https://plex.example.com:32400')
   })
 
   it('prefers a local Plex connection while preserving remote fallback lines', () => {
-    stubLocalStorage({ boxplayer_plex_client_id: 'boxplayer-stable-client' })
+    stubLocalStorage({ mnemo_plex_client_id: 'mnemo-stable-client' })
     const resources: PlexResource[] = [{
       name: 'Studio Plex',
       accessToken: 'plex-token',
@@ -92,7 +92,7 @@ describe('plexAuth', () => {
   })
 
   it('verifies Plex server identity before saving', async () => {
-    stubLocalStorage({ boxplayer_plex_client_id: 'boxplayer-stable-client' })
+    stubLocalStorage({ mnemo_plex_client_id: 'mnemo-stable-client' })
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({ MediaContainer: { friendlyName: 'Verified Plex' } })
@@ -102,7 +102,7 @@ describe('plexAuth', () => {
   })
 
   it('rejects unreachable Plex server connections', async () => {
-    stubLocalStorage({ boxplayer_plex_client_id: 'boxplayer-stable-client' })
+    stubLocalStorage({ mnemo_plex_client_id: 'mnemo-stable-client' })
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false,
       json: async () => ({})

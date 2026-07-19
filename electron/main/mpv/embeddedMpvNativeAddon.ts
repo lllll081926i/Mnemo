@@ -94,7 +94,7 @@ const requireNative = createRequire(import.meta.url)
 export function getEmbeddedMpvNativeAddonCandidates(platform = process.platform, arch = process.arch): string[] {
   if (platform !== 'darwin') return []
   const sbtlRelativePath = path.join('engine', 'darwin', arch, 'mpv-texture', 'mpv_texture.node')
-  const legacyRelativePath = path.join('engine', 'darwin', arch, 'mpv-texture', 'boxplayer-mpv-texture.node')
+  const legacyRelativePath = path.join('engine', 'darwin', arch, 'mpv-texture', 'mnemo-mpv-texture.node')
   return [
     getResourcesPath(sbtlRelativePath),
     getStaticPath(sbtlRelativePath),
@@ -127,7 +127,7 @@ export function getEmbeddedMpvNativeResourceStatus(candidates = getEmbeddedMpvNa
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
       const files = Array.isArray(manifest?.files) ? manifest.files : []
-      const hasNode = files.some((file: any) => file?.name === 'mpv_texture.node' || file?.name === 'boxplayer-mpv-texture.node')
+      const hasNode = files.some((file: any) => file?.name === 'mpv_texture.node' || file?.name === 'mnemo-mpv-texture.node')
       const hasLibmpv = files.some((file: any) => file?.name === 'libmpv.dylib')
       if (!hasNode || !hasLibmpv) {
         return {

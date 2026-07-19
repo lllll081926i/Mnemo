@@ -21,7 +21,7 @@ const actionLabel = ref('')
 const secondaryLabel = ref('')
 const state = ref<'empty' | 'scanning' | 'scan-complete' | 'first-play' | ''>('')
 
-const DISMISS_PREFIX = 'boxplayer-mineradio-banner-dismissed.'
+const DISMISS_PREFIX = 'mnemo-mineradio-banner-dismissed.'
 
 function dismissKey(nextState: string) {
   return `${DISMISS_PREFIX}${nextState}`

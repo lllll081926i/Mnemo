@@ -40,8 +40,8 @@ watch(
 
 <template>
   <a-layout class="ui-workspace-shell">
-    <a-layout-sider hide-trigger :width="192" class="xbyleft ui-workspace-rail transfer-rail">
-      <a-menu class="xbyleftmenu rail-menu" :selected-keys="[appStore.GetAppTabMenu]" @update:selected-keys="appStore.toggleTabMenu('down', $event[0])">
+    <a-layout-sider hide-trigger :width="192" class="mnemoleft ui-workspace-rail transfer-rail">
+      <a-menu class="mnemoleftmenu rail-menu" :selected-keys="[appStore.GetAppTabMenu]" @update:selected-keys="appStore.toggleTabMenu('down', $event[0])">
         <a-menu-item key="DowningRight">
           <template #icon><IconFont name="icondownload" /></template>
           正在下载
@@ -76,7 +76,7 @@ watch(
         </button>
       </div>
     </a-layout-sider>
-    <a-layout-content class="xbyright ui-workspace-content">
+    <a-layout-content class="mnemoright ui-workspace-content">
       <div class="content-body">
         <a-tabs type="text" direction="horizontal" class="hidetabs" :justify="true" :active-key="appStore.GetAppTabMenu">
           <a-tab-pane key="DowningRight" title="1"><DownDowning /></a-tab-pane>

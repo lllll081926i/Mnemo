@@ -88,7 +88,7 @@ const loadSheet = async () => {
     const firstSheet = workbook.SheetNames[0] || ''
     activeSheet.value = firstSheet
     renderSheet(workbook, firstSheet)
-    ;(window as any).__boxplayerSheetWorkbook = workbook
+    ;(window as any).__mnemoSheetWorkbook = workbook
   } catch (err: any) {
     errorText.value = err?.message || '表格预览失败'
     message.error(errorText.value)
@@ -98,7 +98,7 @@ const loadSheet = async () => {
 }
 
 const handleSheetClick = (name: string) => {
-  changeSheet(name, (window as any).__boxplayerSheetWorkbook)
+  changeSheet(name, (window as any).__mnemoSheetWorkbook)
 }
 
 onMounted(() => {
@@ -112,14 +112,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown, true)
-  delete (window as any).__boxplayerSheetWorkbook
+  delete (window as any).__mnemoSheetWorkbook
 })
 </script>
 
 <template>
   <a-layout style="height: 100vh; background: #f2f4f7" draggable="false">
-    <a-layout-header id="xbyhead" draggable="false">
-      <div id="xbyhead2" class="q-electron-drag">
+    <a-layout-header id="mnemohead" draggable="false">
+      <div id="mnemohead2" class="q-electron-drag">
         <a-button type="text" tabindex="-1">
           <IconFont name="iconfile-xsl" />
         </a-button>

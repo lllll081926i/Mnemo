@@ -360,7 +360,7 @@ const handleOpen = () => {
     if (loginProvider.value !== 'aliyun' || !useUser.userShowLogin) return
     const webview = getAliyunLoginWebview()
     if (!webview) {
-      message.error('严重错误：无法打开登录弹窗，请退出小白羊后重新运行')
+      message.error('严重错误：无法打开登录弹窗，请退出Mnemo后重新运行')
       return
     }
     if (import.meta.env.DEV) {

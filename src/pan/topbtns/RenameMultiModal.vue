@@ -986,7 +986,7 @@ const handleSelectRow = (visible: boolean, treeNodeKey: string) => {
             </a-tabs>
           </div>
         </a-layout-sider>
-        <a-layout-content class='xbyright'>
+        <a-layout-content class='mnemoright'>
           <div style='height: 20px'></div>
           <div class='toppanbtns' style='height: 26px' tabindex='-1'>
             <div class='toppanbtn'>

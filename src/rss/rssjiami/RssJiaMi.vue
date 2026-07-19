@@ -13,7 +13,7 @@ const outPath = ref('')
 const breakSmall = ref(true)
 const encName = ref(false)
 const encType = ref('aesctr')
-const encDecType = ref('xbyEncrypt1')
+const encDecType = ref('mnemoEncrypt1')
 const password = ref('')
 const mode = ref<'enc' | 'dec' | 'decName'>('enc')
 const matchExtList = ref<string[]>([])
@@ -57,7 +57,7 @@ const handleSelectDir = (inout: boolean) => {
 }
 
 const handleDecType = () => {
-  password.value = encDecType.value === 'xbyEncrypt1' ? '' : usePanTreeStore().user_id
+  password.value = encDecType.value === 'mnemoEncrypt1' ? '' : usePanTreeStore().user_id
 }
 
 const handleClickJiaMi = async () => {
@@ -111,8 +111,8 @@ const handleClickJiaMi = async () => {
       <div class="settinghead">1:选择加密类型</div>
       <div class="settingrow">
         <a-radio-group v-model="encDecType" type="radio" tabindex="-1" @change="handleDecType">
-          <a-radio tabindex="-1" value="xbyEncrypt1">加密</a-radio>
-          <a-radio tabindex="-1" value="xbyEncrypt2">私密</a-radio>
+          <a-radio tabindex="-1" value="mnemoEncrypt1">加密</a-radio>
+          <a-radio tabindex="-1" value="mnemoEncrypt2">私密</a-radio>
         </a-radio-group>
       </div>
       <template v-if="mode != 'decName'">
@@ -134,7 +134,7 @@ const handleClickJiaMi = async () => {
         <div class="settinghead">2:输入加密的内容</div>
         <a-textarea v-model='encContent' placeholder='加密的名称' show-word-limit
                     @keydown='(e:any) => e.stopPropagation()' />
-        <template v-if="encDecType === 'xbyEncrypt1'">
+        <template v-if="encDecType === 'mnemoEncrypt1'">
           <div class="settingspace"></div>
           <div class="settinghead">3:填写解密的密码</div>
           <div class="settingrow">
@@ -156,7 +156,7 @@ const handleClickJiaMi = async () => {
           <div class="helptxt">默认不填，对文件夹内的全部文件，执行一次加密</div>
           <div class="helptxt">例如填写 .mp4 就是只加密.mp4结尾的文件</div>
         </div>
-        <template v-if="encDecType === 'xbyEncrypt1'">
+        <template v-if="encDecType === 'mnemoEncrypt1'">
           <div class="settingspace"></div>
           <div class="settinghead">5:填写加密的密码</div>
           <div class="settingrow">
@@ -182,7 +182,7 @@ const handleClickJiaMi = async () => {
           <div class="helptxt">默认不填，对文件夹内的全部文件，执行一次加密</div>
           <div class="helptxt">例如填写 .mp4 就是只加密.mp4结尾的文件</div>
         </div>
-        <template v-if="encDecType === 'xbyEncrypt1'">
+        <template v-if="encDecType === 'mnemoEncrypt1'">
           <div class="settingspace"></div>
           <div class="settinghead">5:填写解密的密码</div>
           <div class="settingrow">
@@ -222,10 +222,10 @@ const handleClickJiaMi = async () => {
       <div class="settinghead">:我直接打压缩包不就好了吗？</div>
       <div class="settingrow">
         1.
-        <a-typography-text type="success">加密的文件，使用小白羊下载时会自动解密</a-typography-text>
+        <a-typography-text type="success">加密的文件，使用Mnemo下载时会自动解密</a-typography-text>
         <br />
         2.
-        <a-typography-text type="success">加密的视频文件，小白羊支持直接在线播放</a-typography-text>
+        <a-typography-text type="success">加密的视频文件，Mnemo支持直接在线播放</a-typography-text>
         <br />
         3.
         <a-typography-text type="success">加密的文件，无法通过其他软件解密查看原始数据</a-typography-text>

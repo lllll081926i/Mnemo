@@ -75,7 +75,7 @@ function trackFromAliModel(item: IAliGetFileModel, user_id: string, drive_id: st
     category: (item.category as any) || 'audio',
     thumbnail: item.thumbnail || '',
     description: item.description || '',
-    encType: item.description && item.description.includes('xbyEncrypt') ? 'xbyEncrypt' : '',
+    encType: item.description && item.description.includes('mnemoEncrypt') ? 'mnemoEncrypt' : '',
     scanned_at: nowMs(),
     updated_at: typeof item.time === 'number' && item.time > 0 ? item.time : undefined
   }

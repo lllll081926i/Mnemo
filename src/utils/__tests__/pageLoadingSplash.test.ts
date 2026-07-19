@@ -6,15 +6,15 @@ const root = resolve(__dirname, '../../..')
 const readSource = (file: string) => readFileSync(resolve(root, file), 'utf8')
 
 describe('app startup loading splash', () => {
-  it('uses the BoxPlayer wordmark splash instead of the legacy spinner', () => {
+  it('uses the Mnemo wordmark splash instead of the legacy spinner', () => {
     const source = readSource('src/layout/PageLoading.vue')
 
-    expect(source).toContain('BoxPlayer')
-    expect(source).toContain('boxplayer-splash-loading')
-    expect(source).toContain('boxplayer-splash-wordmark')
-    expect(source).toContain('boxplayer-splash-word-main')
-    expect(source).toContain('boxplayer-splash-word-accent')
-    expect(source).toContain('boxplayer-splash-line')
+    expect(source).toContain('Mnemo')
+    expect(source).toContain('mnemo-splash-loading')
+    expect(source).toContain('mnemo-splash-wordmark')
+    expect(source).toContain('mnemo-splash-word-main')
+    expect(source).toContain('mnemo-splash-word-accent')
+    expect(source).toContain('mnemo-splash-line')
     expect(source).toContain('LOADING')
     expect(source).not.toContain('Radio')
     expect(source).not.toContain('desktop-loading-img')

@@ -87,8 +87,8 @@ const loadCode = () => {
 
 <template>
   <a-layout style="height: 100vh" draggable="false">
-    <a-layout-header id="xbyhead" draggable="false">
-      <div id="xbyhead2" class="q-electron-drag">
+    <a-layout-header id="mnemohead" draggable="false">
+      <div id="mnemohead2" class="q-electron-drag">
         <a-button type="text" tabindex="-1">
           <IconFont name="icondebug" v-if="format" />
           <IconFont name="iconfile-txt" v-else />

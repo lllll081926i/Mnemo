@@ -42,7 +42,7 @@ export type Drive115UploadTokenResp = {
 }
 
 const buildFormData = (fields: Record<string, string>) => {
-  const boundary = '----xby115' + Date.now().toString(16) + Math.random().toString(16).slice(2)
+  const boundary = '----mnemo115' + Date.now().toString(16) + Math.random().toString(16).slice(2)
   const chunks: Buffer[] = []
   const pushField = (name: string, value: string) => {
     chunks.push(Buffer.from(`--${boundary}\r\n`))

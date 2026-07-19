@@ -82,7 +82,7 @@ const normalizeToken = (data: any, clientId: string): ITokenInfo | null => {
   }
 }
 
-export const buildBaiduAuthUrl = (clientId = '', state = `boxplayer_${Date.now()}`) => {
+export const buildBaiduAuthUrl = (clientId = '', state = `mnemo_${Date.now()}`) => {
   const credentials = resolveBaiduOAuthCredentials(clientId)
   if (!credentials.clientId) throw new Error('请填写百度网盘 App ID')
   const params = new URLSearchParams({

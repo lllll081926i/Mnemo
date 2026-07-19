@@ -19,14 +19,6 @@ export interface IPagePdf {
   preview_url: string
 }
 
-export interface IPageEpub {
-  user_id: string
-  drive_id: string
-  file_id: string
-  file_name: string
-  preview_url: string
-}
-
 export interface IPageDocx {
   user_id: string
   drive_id: string
@@ -164,7 +156,6 @@ export interface AppState {
 
   pageOffice?: IPageOffice
   pagePdf?: IPagePdf
-  pageEpub?: IPageEpub
   pageDocx?: IPageDocx
   pageSheet?: IPageSheet
   pageCode?: IPageCode

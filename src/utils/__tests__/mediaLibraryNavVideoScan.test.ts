@@ -47,7 +47,7 @@ describe('video library scan controls', () => {
   it('keeps local import and WebDAV actions visually aligned with the scan panel buttons', () => {
     const panel = readSource('src/components/LibraryScanPanel.vue')
 
-    expect(panel).toContain('#xbybody .media-library-nav .library-scan-import-btn')
+    expect(panel).toContain('#mnemobody .media-library-nav .library-scan-import-btn')
     expect(panel).toContain('border-radius: 999px !important')
     expect(panel).toContain('background: rgba(255, 255, 255, .055) !important')
     expect(panel).toContain('color: rgba(255, 255, 255, .72) !important')

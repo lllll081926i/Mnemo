@@ -7916,19 +7916,19 @@ body[arco-theme='dark'] .media-server-workspace .person-about-card {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22) !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-toolbar,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tabs,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-content,
-body[arco-theme='dark'] #xbybody .media-server-workspace .placeholder-card,
-body[arco-theme='dark'] #xbybody .media-server-workspace .home-intro,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-lower-content,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-section,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-section-header,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-section-episodes,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-media-card-rail,
-body[arco-theme='dark'] #xbybody .media-server-workspace .home-page,
-body[arco-theme='dark'] #xbybody .media-server-workspace .library-shell,
-body[arco-theme='dark'] #xbybody .media-server-workspace .collection-shell {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-toolbar,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tabs,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-content,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .placeholder-card,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .home-intro,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-lower-content,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-section,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-section-header,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-section-episodes,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-media-card-rail,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .home-page,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .library-shell,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .collection-shell {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -7957,9 +7957,9 @@ body[arco-theme='dark'] .media-server-workspace .home-library-manager-list {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab:hover,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab.active {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab:hover,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab.active {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8052,18 +8052,18 @@ body[arco-theme='dark'] .media-server-workspace .listing-toggle-group button.act
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-toolbar,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tabs,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-content,
-body[arco-theme='dark'] #xbybody .media-server-workspace .home-intro,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-lower-content,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-section,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-section-header,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-section-episodes,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-media-card-rail,
-body[arco-theme='dark'] #xbybody .media-server-workspace .home-page,
-body[arco-theme='dark'] #xbybody .media-server-workspace .library-shell,
-body[arco-theme='dark'] #xbybody .media-server-workspace .collection-shell {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-toolbar,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tabs,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-content,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .home-intro,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-lower-content,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-section,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-section-header,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-section-episodes,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-media-card-rail,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .home-page,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .library-shell,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .collection-shell {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8072,34 +8072,34 @@ body[arco-theme='dark'] #xbybody .media-server-workspace .collection-shell {
   -webkit-backdrop-filter: none !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab:hover,
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab.active {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab:hover,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab.active {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-#xbybody .media-server-workspace .workspace-toolbar,
-#xbybody .media-server-workspace .workspace-tabs,
-#xbybody .media-server-workspace .workspace-content,
-#xbybody .media-server-workspace .home-page,
-#xbybody .media-server-workspace .home-intro,
-#xbybody .media-server-workspace .home-section,
-#xbybody .media-server-workspace .home-section-header,
-#xbybody .media-server-workspace .home-card-grid,
-#xbybody .media-server-workspace .resume-strip,
-#xbybody .media-server-workspace .poster-row,
-#xbybody .media-server-workspace .detail-page,
-#xbybody .media-server-workspace .detail-lower-content,
-#xbybody .media-server-workspace .detail-section,
-#xbybody .media-server-workspace .detail-section-header,
-#xbybody .media-server-workspace .detail-section-episodes,
-#xbybody .media-server-workspace .detail-episodes-rail,
-#xbybody .media-server-workspace .detail-media-card-rail,
-#xbybody .media-server-workspace .library-shell,
-#xbybody .media-server-workspace .collection-shell {
+#mnemobody .media-server-workspace .workspace-toolbar,
+#mnemobody .media-server-workspace .workspace-tabs,
+#mnemobody .media-server-workspace .workspace-content,
+#mnemobody .media-server-workspace .home-page,
+#mnemobody .media-server-workspace .home-intro,
+#mnemobody .media-server-workspace .home-section,
+#mnemobody .media-server-workspace .home-section-header,
+#mnemobody .media-server-workspace .home-card-grid,
+#mnemobody .media-server-workspace .resume-strip,
+#mnemobody .media-server-workspace .poster-row,
+#mnemobody .media-server-workspace .detail-page,
+#mnemobody .media-server-workspace .detail-lower-content,
+#mnemobody .media-server-workspace .detail-section,
+#mnemobody .media-server-workspace .detail-section-header,
+#mnemobody .media-server-workspace .detail-section-episodes,
+#mnemobody .media-server-workspace .detail-episodes-rail,
+#mnemobody .media-server-workspace .detail-media-card-rail,
+#mnemobody .media-server-workspace .library-shell,
+#mnemobody .media-server-workspace .collection-shell {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8108,94 +8108,94 @@ body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab.active {
   -webkit-backdrop-filter: none !important;
 }
 
-#xbybody .media-server-workspace .workspace-toolbar::before,
-#xbybody .media-server-workspace .workspace-toolbar::after,
-#xbybody .media-server-workspace .workspace-tabs::before,
-#xbybody .media-server-workspace .workspace-tabs::after,
-#xbybody .media-server-workspace .home-section::before,
-#xbybody .media-server-workspace .home-section::after,
-#xbybody .media-server-workspace .home-section-header::before,
-#xbybody .media-server-workspace .home-section-header::after,
-#xbybody .media-server-workspace .detail-lower-content::before,
-#xbybody .media-server-workspace .detail-lower-content::after,
-#xbybody .media-server-workspace .detail-section::before,
-#xbybody .media-server-workspace .detail-section::after,
-#xbybody .media-server-workspace .detail-section-header::before,
-#xbybody .media-server-workspace .detail-section-header::after {
+#mnemobody .media-server-workspace .workspace-toolbar::before,
+#mnemobody .media-server-workspace .workspace-toolbar::after,
+#mnemobody .media-server-workspace .workspace-tabs::before,
+#mnemobody .media-server-workspace .workspace-tabs::after,
+#mnemobody .media-server-workspace .home-section::before,
+#mnemobody .media-server-workspace .home-section::after,
+#mnemobody .media-server-workspace .home-section-header::before,
+#mnemobody .media-server-workspace .home-section-header::after,
+#mnemobody .media-server-workspace .detail-lower-content::before,
+#mnemobody .media-server-workspace .detail-lower-content::after,
+#mnemobody .media-server-workspace .detail-section::before,
+#mnemobody .media-server-workspace .detail-section::after,
+#mnemobody .media-server-workspace .detail-section-header::before,
+#mnemobody .media-server-workspace .detail-section-header::after {
   display: none !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-#xbybody .media-server-workspace .workspace-tab,
-#xbybody .media-server-workspace .workspace-tab:hover,
-#xbybody .media-server-workspace .workspace-tab.active {
+#mnemobody .media-server-workspace .workspace-tab,
+#mnemobody .media-server-workspace .workspace-tab:hover,
+#mnemobody .media-server-workspace .workspace-tab.active {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace {
   --app-mineradio-ink: rgba(17, 24, 39, 0.94);
   --app-glass-panel: rgba(255, 255, 255, 0.72);
   --app-glass-line: rgba(15, 23, 42, 0.08);
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .toolbar-btn,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-back-button,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .server-switch-dropdown .arco-btn {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .toolbar-btn,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-back-button,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .server-switch-dropdown .arco-btn {
   color: rgba(17, 24, 39, 0.88) !important;
   border-color: rgba(15, 23, 42, 0.08) !important;
   background: rgba(255, 255, 255, 0.66) !important;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .server-switch-dropdown .arco-btn-content,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .server-switch-trigger,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .server-switch-trigger-text {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .server-switch-dropdown .arco-btn-content,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .server-switch-trigger,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .server-switch-trigger-text {
   color: rgba(17, 24, 39, 0.92) !important;
   opacity: 1 !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .toolbar-btn:hover,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-back-button:hover,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .server-switch-dropdown .arco-btn:hover {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .toolbar-btn:hover,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-back-button:hover,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .server-switch-dropdown .arco-btn:hover {
   color: rgba(17, 24, 39, 0.96) !important;
   border-color: rgba(15, 23, 42, 0.12) !important;
   background: rgba(255, 255, 255, 0.84) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .toolbar-btn .iconfont,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-back-button .iconfont,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .view-toggle-seg .iconfont {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .toolbar-btn .iconfont,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-back-button .iconfont,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .view-toggle-seg .iconfont {
   color: currentColor !important;
   opacity: 0.82 !important;
   text-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .view-toggle-pill {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .view-toggle-pill {
   border-color: rgba(15, 23, 42, 0.08) !important;
   background: rgba(255, 255, 255, 0.66) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .view-toggle-seg {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .view-toggle-seg {
   color: rgba(17, 24, 39, 0.5) !important;
   background: transparent !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .view-toggle-seg:hover,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .view-toggle-seg.active {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .view-toggle-seg:hover,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .view-toggle-seg.active {
   color: rgba(17, 24, 39, 0.92) !important;
   background: rgba(15, 23, 42, 0.08) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .view-toggle-divider {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .view-toggle-divider {
   background: rgba(15, 23, 42, 0.1) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .listing-back-button {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .listing-back-button {
   width: auto !important;
   max-width: min(520px, 100%) !important;
   flex: 0 0 auto !important;
@@ -8318,7 +8318,7 @@ body[arco-theme='dark'] .home-library-manager-modal-shell.detail-media-modal-she
   color: var(--app-mineradio-ink, #e8ecef) !important;
 }
 
-#xbybody .media-server-workspace .workspace-tabs {
+#mnemobody .media-server-workspace .workspace-tabs {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -8334,7 +8334,7 @@ body[arco-theme='dark'] .home-library-manager-modal-shell.detail-media-modal-she
   -webkit-backdrop-filter: blur(14px) !important;
 }
 
-#xbybody .media-server-workspace .workspace-tab {
+#mnemobody .media-server-workspace .workspace-tab {
   height: 34px !important;
   min-width: 72px !important;
   padding: 0 18px !important;
@@ -8346,35 +8346,35 @@ body[arco-theme='dark'] .home-library-manager-modal-shell.detail-media-modal-she
   box-shadow: none !important;
 }
 
-#xbybody .media-server-workspace .workspace-tab:hover {
+#mnemobody .media-server-workspace .workspace-tab:hover {
   opacity: 0.82 !important;
   background: rgba(255, 255, 255, 0.05) !important;
 }
 
-#xbybody .media-server-workspace .workspace-tab.active {
+#mnemobody .media-server-workspace .workspace-tab.active {
   color: var(--app-mineradio-ink, #e8ecef) !important;
   opacity: 1 !important;
   background: rgba(255, 255, 255, 0.12) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .workspace-tabs {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .workspace-tabs {
   border-color: rgba(15, 23, 42, 0.08) !important;
   background: rgba(255, 255, 255, 0.66) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .workspace-tab {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .workspace-tab {
   color: rgba(17, 24, 39, 0.58) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .workspace-tab:hover,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .workspace-tab.active {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .workspace-tab:hover,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .workspace-tab.active {
   color: rgba(17, 24, 39, 0.94) !important;
   background: rgba(15, 23, 42, 0.08) !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tabs {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tabs {
   border-color: rgba(255, 255, 255, 0.08) !important;
   background: rgba(255, 255, 255, 0.06) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
@@ -8382,29 +8382,29 @@ body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tabs {
   -webkit-backdrop-filter: blur(14px) !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab {
   color: var(--app-mineradio-ink, #e8ecef) !important;
   opacity: 0.62 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab:hover {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab:hover {
   opacity: 0.82 !important;
   background: rgba(255, 255, 255, 0.05) !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab.active {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-tab.active {
   color: var(--app-mineradio-ink, #e8ecef) !important;
   opacity: 1 !important;
   background: rgba(255, 255, 255, 0.12) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 
-#xbybody .media-server-workspace .workspace-content-search,
-#xbybody .media-server-workspace .search-shell-media-server,
-#xbybody .media-server-workspace .search-result-stack,
-#xbybody .media-server-workspace .search-feedback-card {
+#mnemobody .media-server-workspace .workspace-content-search,
+#mnemobody .media-server-workspace .search-shell-media-server,
+#mnemobody .media-server-workspace .search-result-stack,
+#mnemobody .media-server-workspace .search-feedback-card {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8413,14 +8413,14 @@ body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-tab.active {
   -webkit-backdrop-filter: none !important;
 }
 
-body[arco-theme='dark'] #xbybody .media-server-workspace .workspace-content-search,
-body[arco-theme='dark'] #xbybody .media-server-workspace .search-shell-media-server,
-body[arco-theme='dark'] #xbybody .media-server-workspace .search-result-stack,
-body[arco-theme='dark'] #xbybody .media-server-workspace .search-feedback-card,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .workspace-content-search,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .search-shell-media-server,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .search-result-stack,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .search-feedback-card {
+body[arco-theme='dark'] #mnemobody .media-server-workspace .workspace-content-search,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .search-shell-media-server,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .search-result-stack,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .search-feedback-card,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .workspace-content-search,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .search-shell-media-server,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .search-result-stack,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .search-feedback-card {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8429,14 +8429,14 @@ body:not([arco-theme='dark']) #xbybody .media-server-workspace .search-feedback-
   -webkit-backdrop-filter: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-lower-content,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section-header,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section-episodes,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-chip-row,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-people-rail,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-recommendation-rail,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-media-card-rail {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-lower-content,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section-header,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section-episodes,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-chip-row,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-people-rail,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-recommendation-rail,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-media-card-rail {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8445,85 +8445,85 @@ body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-media-car
   -webkit-backdrop-filter: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section::before,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section::after,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section-header::before,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section-header::after {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section::before,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section::after,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section-header::before,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section-header::after {
   display: none !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-section-header h4 {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-section-header h4 {
   color: rgba(17, 24, 39, 0.94) !important;
   text-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-chip-button,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-chip-link {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-chip-button,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-chip-link {
   color: rgba(31, 41, 55, 0.78) !important;
   border-color: rgba(15, 23, 42, 0.08) !important;
   background: rgba(255, 255, 255, 0.42) !important;
   box-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .person-card,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-media-card,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-file-bar {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .person-card,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-media-card,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-file-bar {
   color: rgba(17, 24, 39, 0.92) !important;
   border-color: rgba(15, 23, 42, 0.08) !important;
   background: rgba(255, 255, 255, 0.48) !important;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08) !important;
 }
 
-#xbybody .media-server-workspace .detail-hero-title,
-#xbybody .media-server-workspace .detail-rating-line,
-#xbybody .media-server-workspace .detail-tech-line,
-#xbybody .media-server-workspace .detail-overview,
-#xbybody .media-server-workspace .detail-section-header h4,
-#xbybody .media-server-workspace .detail-media-card-title,
-#xbybody .media-server-workspace .detail-media-row span,
-#xbybody .media-server-workspace .detail-media-row strong {
+#mnemobody .media-server-workspace .detail-hero-title,
+#mnemobody .media-server-workspace .detail-rating-line,
+#mnemobody .media-server-workspace .detail-tech-line,
+#mnemobody .media-server-workspace .detail-overview,
+#mnemobody .media-server-workspace .detail-section-header h4,
+#mnemobody .media-server-workspace .detail-media-card-title,
+#mnemobody .media-server-workspace .detail-media-row span,
+#mnemobody .media-server-workspace .detail-media-row strong {
   text-shadow: none !important;
   filter: none !important;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-#xbybody .media-server-workspace .detail-hero-logo {
+#mnemobody .media-server-workspace .detail-hero-logo {
   filter: none !important;
 }
 
-#xbybody .media-server-workspace .detail-hero-poster,
-#xbybody .media-server-workspace .detail-square-action,
-#xbybody .media-server-workspace .detail-primary-play,
-#xbybody .media-server-workspace .detail-secondary-download,
-#xbybody .media-server-workspace .detail-chip-button,
-#xbybody .media-server-workspace .detail-chip-link,
-#xbybody .media-server-workspace .detail-media-card {
+#mnemobody .media-server-workspace .detail-hero-poster,
+#mnemobody .media-server-workspace .detail-square-action,
+#mnemobody .media-server-workspace .detail-primary-play,
+#mnemobody .media-server-workspace .detail-secondary-download,
+#mnemobody .media-server-workspace .detail-chip-button,
+#mnemobody .media-server-workspace .detail-chip-link,
+#mnemobody .media-server-workspace .detail-media-card {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-#xbybody .media-server-workspace .detail-section-header h4 {
+#mnemobody .media-server-workspace .detail-section-header h4 {
   font-size: 20px !important;
   line-height: 1.25 !important;
   font-weight: 760 !important;
   letter-spacing: 0 !important;
 }
 
-#xbybody .media-server-workspace .detail-media-card-title {
+#mnemobody .media-server-workspace .detail-media-card-title {
   margin-bottom: 14px !important;
   font-size: 16px !important;
   line-height: 1.35 !important;
   font-weight: 720 !important;
 }
 
-#xbybody .media-server-workspace .detail-media-card-heading {
+#mnemobody .media-server-workspace .detail-media-card-heading {
   gap: 10px !important;
 }
 
-#xbybody .media-server-workspace .detail-media-kind-badge {
+#mnemobody .media-server-workspace .detail-media-kind-badge {
   width: 30px !important;
   height: 30px !important;
   border-radius: 10px !important;
@@ -8531,77 +8531,77 @@ body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-file-bar 
   font-weight: 760 !important;
 }
 
-#xbybody .media-server-workspace .detail-media-card {
+#mnemobody .media-server-workspace .detail-media-card {
   min-height: 238px !important;
   padding: 18px 20px !important;
   border-radius: 20px !important;
 }
 
-#xbybody .media-server-workspace .detail-media-row {
+#mnemobody .media-server-workspace .detail-media-row {
   grid-template-columns: 96px minmax(0, 1fr) !important;
   gap: 14px !important;
 }
 
-#xbybody .media-server-workspace .detail-media-row span,
-#xbybody .media-server-workspace .detail-media-row strong {
+#mnemobody .media-server-workspace .detail-media-row span,
+#mnemobody .media-server-workspace .detail-media-row strong {
   font-size: 13px !important;
   line-height: 1.45 !important;
 }
 
-#xbybody .media-server-workspace .detail-hero-title {
+#mnemobody .media-server-workspace .detail-hero-title {
   font-size: clamp(30px, 3.4vw, 52px) !important;
   letter-spacing: 0 !important;
 }
 
-#xbybody .media-server-workspace .detail-rating-line,
-#xbybody .media-server-workspace .detail-tech-line {
+#mnemobody .media-server-workspace .detail-rating-line,
+#mnemobody .media-server-workspace .detail-tech-line {
   font-size: 14px !important;
   line-height: 1.45 !important;
 }
 
-#xbybody .media-server-workspace .detail-overview {
+#mnemobody .media-server-workspace .detail-overview {
   font-size: 14px !important;
   line-height: 1.65 !important;
 }
 
-#xbybody .media-server-workspace .detail-backdrop-mask {
+#mnemobody .media-server-workspace .detail-backdrop-mask {
   background:
     linear-gradient(90deg, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.42) 34%, rgba(0, 0, 0, 0.16) 72%, rgba(0, 0, 0, 0.08) 100%),
     linear-gradient(180deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.08) 48%, rgba(0, 0, 0, 0.42) 100%) !important;
 }
 
-#xbybody .media-server-workspace .detail-hero-title,
-#xbybody .media-server-workspace .detail-episode-heading,
-#xbybody .media-server-workspace .detail-rating-line,
-#xbybody .media-server-workspace .detail-rating-line span,
-#xbybody .media-server-workspace .detail-tech-line,
-#xbybody .media-server-workspace .detail-overview {
+#mnemobody .media-server-workspace .detail-hero-title,
+#mnemobody .media-server-workspace .detail-episode-heading,
+#mnemobody .media-server-workspace .detail-rating-line,
+#mnemobody .media-server-workspace .detail-rating-line span,
+#mnemobody .media-server-workspace .detail-tech-line,
+#mnemobody .media-server-workspace .detail-overview {
   color: rgba(255, 255, 255, 0.96) !important;
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.38) !important;
 }
 
-#xbybody .media-server-workspace .detail-meta-badge {
+#mnemobody .media-server-workspace .detail-meta-badge {
   color: rgba(255, 255, 255, 0.92) !important;
   border-color: rgba(255, 255, 255, 0.24) !important;
   background: rgba(0, 0, 0, 0.28) !important;
 }
 
-#xbybody .media-server-workspace .detail-square-action,
-#xbybody .media-server-workspace .detail-secondary-download {
+#mnemobody .media-server-workspace .detail-square-action,
+#mnemobody .media-server-workspace .detail-secondary-download {
   color: rgba(255, 255, 255, 0.94) !important;
   border-color: rgba(255, 255, 255, 0.28) !important;
   background: rgba(7, 12, 20, 0.54) !important;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24) !important;
 }
 
-#xbybody .media-server-workspace .detail-square-action:hover,
-#xbybody .media-server-workspace .detail-secondary-download:hover {
+#mnemobody .media-server-workspace .detail-square-action:hover,
+#mnemobody .media-server-workspace .detail-secondary-download:hover {
   background: rgba(7, 12, 20, 0.68) !important;
 }
 
-#xbybody .media-server-workspace .detail-episode-card,
-body[arco-theme='dark'] #xbybody .media-server-workspace .detail-episode-card,
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-episode-card {
+#mnemobody .media-server-workspace .detail-episode-card,
+body[arco-theme='dark'] #mnemobody .media-server-workspace .detail-episode-card,
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-episode-card {
   background: transparent !important;
   background-color: transparent !important;
   border-color: transparent !important;
@@ -8610,77 +8610,77 @@ body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-episode-c
   -webkit-backdrop-filter: none !important;
 }
 
-#xbybody .media-server-workspace .detail-episode-card::before,
-#xbybody .media-server-workspace .detail-episode-card::after {
+#mnemobody .media-server-workspace .detail-episode-card::before,
+#mnemobody .media-server-workspace .detail-episode-card::after {
   display: none !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-#xbybody .media-server-workspace .detail-episode-cover {
+#mnemobody .media-server-workspace .detail-episode-cover {
   background: rgba(255, 255, 255, 0.08) !important;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18) !important;
 }
 
-#xbybody .media-server-workspace .detail-episode-kicker,
-#xbybody .media-server-workspace .detail-episode-title {
+#mnemobody .media-server-workspace .detail-episode-kicker,
+#mnemobody .media-server-workspace .detail-episode-title {
   background: transparent !important;
   box-shadow: none !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-episode-kicker {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-episode-kicker {
   color: rgba(31, 41, 55, 0.72) !important;
 }
 
-body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-episode-title {
+body:not([arco-theme='dark']) #mnemobody .media-server-workspace .detail-episode-title {
   color: rgba(17, 24, 39, 0.94) !important;
 }
 
 /* Keep the media-server home renderer stable in Electron.
    Backdrop blur plus hover transforms can trigger layer invalidation and make the home nav/content flicker. */
-#xbybody .media-server-workspace .workspace-page,
-#xbybody .media-server-workspace .workspace-toolbar,
-#xbybody .media-server-workspace .workspace-tabs,
-#xbybody .media-server-workspace .workspace-content,
-#xbybody .media-server-workspace .home-page,
-#xbybody .media-server-workspace .home-section,
-#xbybody .media-server-workspace .resume-strip,
-#xbybody .media-server-workspace .poster-row {
+#mnemobody .media-server-workspace .workspace-page,
+#mnemobody .media-server-workspace .workspace-toolbar,
+#mnemobody .media-server-workspace .workspace-tabs,
+#mnemobody .media-server-workspace .workspace-content,
+#mnemobody .media-server-workspace .home-page,
+#mnemobody .media-server-workspace .home-section,
+#mnemobody .media-server-workspace .resume-strip,
+#mnemobody .media-server-workspace .poster-row {
   backface-visibility: hidden !important;
   -webkit-backface-visibility: hidden !important;
   transform: translateZ(0) !important;
 }
 
-#xbybody .media-server-workspace .workspace-toolbar,
-#xbybody .media-server-workspace .workspace-tabs,
-#xbybody .media-server-workspace .view-toggle-pill,
-#xbybody .media-server-workspace .toolbar-btn,
-#xbybody .media-server-workspace .see-all-button,
-#xbybody .media-server-workspace .poster-overlay-badge,
-#xbybody .media-server-workspace .section-error-card .arco-btn,
-#xbybody .media-server-workspace .workspace-toolbar .arco-btn,
-#xbybody .media-server-workspace .home-page .arco-btn {
+#mnemobody .media-server-workspace .workspace-toolbar,
+#mnemobody .media-server-workspace .workspace-tabs,
+#mnemobody .media-server-workspace .view-toggle-pill,
+#mnemobody .media-server-workspace .toolbar-btn,
+#mnemobody .media-server-workspace .see-all-button,
+#mnemobody .media-server-workspace .poster-overlay-badge,
+#mnemobody .media-server-workspace .section-error-card .arco-btn,
+#mnemobody .media-server-workspace .workspace-toolbar .arco-btn,
+#mnemobody .media-server-workspace .home-page .arco-btn {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-#xbybody .media-server-workspace .toolbar-btn:active,
-#xbybody .media-server-workspace .view-toggle-seg:active,
-#xbybody .media-server-workspace .see-all-button:active,
-#xbybody .media-server-workspace .interactive-card:hover,
-#xbybody .media-server-workspace .poster-tile:hover,
-#xbybody .media-server-workspace .poster-tile:hover .poster-image img,
-#xbybody .media-server-workspace .poster-tile:hover .poster-meta,
-#xbybody .media-server-workspace .resume-card:hover,
-#xbybody .media-server-workspace .resume-card:hover .resume-card-poster img,
-#xbybody .media-server-workspace .resume-card:hover .resume-card-body {
+#mnemobody .media-server-workspace .toolbar-btn:active,
+#mnemobody .media-server-workspace .view-toggle-seg:active,
+#mnemobody .media-server-workspace .see-all-button:active,
+#mnemobody .media-server-workspace .interactive-card:hover,
+#mnemobody .media-server-workspace .poster-tile:hover,
+#mnemobody .media-server-workspace .poster-tile:hover .poster-image img,
+#mnemobody .media-server-workspace .poster-tile:hover .poster-meta,
+#mnemobody .media-server-workspace .resume-card:hover,
+#mnemobody .media-server-workspace .resume-card:hover .resume-card-poster img,
+#mnemobody .media-server-workspace .resume-card:hover .resume-card-body {
   transform: none !important;
 }
 
 /* ── popup/dropdown glass background ── */
-#xbybody .arco-select-popup-container .arco-select-popup-inner,
-#xbybody .arco-trigger-popup-wrapper .arco-dropdown-list,
-#xbybody .arco-trigger-popup {
+#mnemobody .arco-select-popup-container .arco-select-popup-inner,
+#mnemobody .arco-trigger-popup-wrapper .arco-dropdown-list,
+#mnemobody .arco-trigger-popup {
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 14px;
@@ -8689,9 +8689,9 @@ body:not([arco-theme='dark']) #xbybody .media-server-workspace .detail-episode-t
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
 }
 
-body[arco-theme='dark'] #xbybody .arco-select-popup-container .arco-select-popup-inner,
-body[arco-theme='dark'] #xbybody .arco-trigger-popup-wrapper .arco-dropdown-list,
-body[arco-theme='dark'] #xbybody .arco-trigger-popup {
+body[arco-theme='dark'] #mnemobody .arco-select-popup-container .arco-select-popup-inner,
+body[arco-theme='dark'] #mnemobody .arco-trigger-popup-wrapper .arco-dropdown-list,
+body[arco-theme='dark'] #mnemobody .arco-trigger-popup {
   background: linear-gradient(180deg, rgba(24, 29, 40, 0.92), rgba(17, 21, 30, 0.88));
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);

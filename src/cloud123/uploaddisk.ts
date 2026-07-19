@@ -81,7 +81,7 @@ const md5File = async (filePath: string): Promise<{ etag: string; error: string 
 }
 
 const buildMultipart = (preuploadID: string, sliceNo: number, sliceMD5: string, sliceBuff: Buffer) => {
-  const boundary = '----xby123pan' + Date.now().toString(16) + Math.random().toString(16).slice(2)
+  const boundary = '----mnemo123pan' + Date.now().toString(16) + Math.random().toString(16).slice(2)
   const parts: Buffer[] = []
   const pushField = (name: string, value: string) => {
     parts.push(Buffer.from(`--${boundary}\r\n`))

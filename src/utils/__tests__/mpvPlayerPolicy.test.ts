@@ -10,8 +10,8 @@ describe('mpvPlayerPolicy', () => {
 
   it('builds unquoted direct-spawn invocation for Linux mpv control mode', () => {
     expect(buildDirectPlayerInvocation('linux', '/usr/bin/mpv')).toEqual({ binary: '/usr/bin/mpv', args: [] })
-    expect(buildDirectPlayerInvocation('linux', 'mpv --profile=boxplayer')).toEqual({ binary: 'mpv', args: ['--profile=boxplayer'] })
-    expect(buildDirectPlayerInvocation('linux', "'/opt/mpv player/mpv' --profile=boxplayer")).toEqual({ binary: '/opt/mpv player/mpv', args: ['--profile=boxplayer'] })
+    expect(buildDirectPlayerInvocation('linux', 'mpv --profile=mnemo')).toEqual({ binary: 'mpv', args: ['--profile=mnemo'] })
+    expect(buildDirectPlayerInvocation('linux', "'/opt/mpv player/mpv' --profile=mnemo")).toEqual({ binary: '/opt/mpv player/mpv', args: ['--profile=mnemo'] })
   })
 
   it('splits simple quoted Linux command strings', () => {

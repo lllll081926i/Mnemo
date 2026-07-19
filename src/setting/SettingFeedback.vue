@@ -2,7 +2,7 @@
 import { openExternal } from '../utils/electronhelper'
 
 function openSupport() {
-  openExternal('https://xbyvideohub.com/support/')
+  openExternal('https://mnemovideohub.com/support/')
 }
 </script>
 

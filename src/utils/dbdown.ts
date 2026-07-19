@@ -2,12 +2,12 @@ import Dexie from 'dexie'
 import { IStateDownFile } from '../down/DownDAL'
 import useUserStore from '../user/userstore'
 
-class XBYDB3Down extends Dexie {
+class MNEMODB3Down extends Dexie {
   idowning: Dexie.Table<IStateDownFile, string>
   idowned: Dexie.Table<IStateDownFile, string>
 
   constructor() {
-    super('XBYDB3Down')
+    super('MNEMODB3Down')
 
     this.version(10)
       .stores({
@@ -120,5 +120,5 @@ class XBYDB3Down extends Dexie {
   }
 }
 
-const DBDown = new XBYDB3Down()
+const DBDown = new MNEMODB3Down()
 export default DBDown

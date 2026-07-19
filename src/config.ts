@@ -1,8 +1,8 @@
-import { BOXPLAYER_AI_API_URL } from './secrets.generated'
+import { MNEMO_AI_API_URL } from './secrets.generated'
 
 export default class Config {
-  // BoxPlayer Cloud AI API
-  static BOXPLAYER_AI_API_URL = BOXPLAYER_AI_API_URL
+  // Mnemo Cloud AI API
+  static MNEMO_AI_API_URL = MNEMO_AI_API_URL
 
   // 网络请求配置
   static referer = 'https://www.aliyundrive.com/drive'

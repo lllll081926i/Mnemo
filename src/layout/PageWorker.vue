@@ -5,8 +5,8 @@ const handleHideClick = (_e: any) => {
 </script>
 <template>
   <a-layout style="height: 100vh" draggable="false">
-    <a-layout-header id="xbyhead" draggable="false">
-      <div id="xbyhead2" class="q-electron-drag">
+    <a-layout-header id="mnemohead" draggable="false">
+      <div id="mnemohead2" class="q-electron-drag">
         <div class="title">阿里云盘</div>
 
         <div class="flexauto"></div>
@@ -16,10 +16,10 @@ const handleHideClick = (_e: any) => {
         </a-button>
       </div>
     </a-layout-header>
-    <a-layout-content id="xbybody">
-      <h3 id="xbyworker">工作进程</h3>
+    <a-layout-content id="mnemobody">
+      <h3 id="mnemoworker">工作进程</h3>
     </a-layout-content>
-    <a-layout-footer id="xbyfoot" draggable="false"> </a-layout-footer>
+    <a-layout-footer id="mnemofoot" draggable="false"> </a-layout-footer>
   </a-layout>
 </template>
 <style></style>

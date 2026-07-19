@@ -13,7 +13,7 @@ export interface LocalPlaylist {
   updatedAt: number
 }
 
-const STORE_KEY = 'boxplayer-local-playlists'
+const STORE_KEY = 'mnemo-local-playlists'
 
 function genId(): string {
   return 'pl_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)

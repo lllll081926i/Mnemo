@@ -44,7 +44,7 @@ html.dark body {
 }
 
 /* Typography and functional controls share one semantic baseline across pages. */
-#xbybody,
+#mnemobody,
 .arco-modal,
 .arco-dropdown,
 .arco-select-dropdown,
@@ -54,12 +54,12 @@ html.dark body {
   line-height: var(--ui-line-height);
 }
 
-#xbybody :where(.arco-typography, .arco-menu-item, .arco-form-label, .arco-checkbox-label, .arco-radio-label, .arco-switch-text, .arco-tag, .arco-badge-status-text),
+#mnemobody :where(.arco-typography, .arco-menu-item, .arco-form-label, .arco-checkbox-label, .arco-radio-label, .arco-switch-text, .arco-tag, .arco-badge-status-text),
 body :where(.arco-dropdown-option, .arco-select-option, .arco-popover-title, .arco-modal-header-title) {
   color: var(--text-primary) !important;
 }
 
-#xbybody :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker),
+#mnemobody :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker),
 body :where(.arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-tag, .arco-input-number, .arco-picker) {
   color: var(--text-primary) !important;
   background: var(--control-bg) !important;
@@ -89,7 +89,7 @@ body .arco-picker-focused {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 16%, transparent) !important;
 }
 
-#xbybody :where(.arco-btn),
+#mnemobody :where(.arco-btn),
 body :where(.arco-modal .arco-btn, .arco-popover-popup-content .arco-btn) {
   min-height: var(--ui-control-height);
   color: var(--text-primary) !important;
@@ -101,40 +101,40 @@ body :where(.arco-modal .arco-btn, .arco-popover-popup-content .arco-btn) {
   box-shadow: none !important;
 }
 
-#xbybody :where(.arco-btn):hover,
+#mnemobody :where(.arco-btn):hover,
 body :where(.arco-modal .arco-btn, .arco-popover-popup-content .arco-btn):hover {
   color: var(--color-primary) !important;
   border-color: var(--color-primary) !important;
   background: var(--bg-hover) !important;
 }
 
-#xbybody .arco-btn.arco-btn-primary,
+#mnemobody .arco-btn.arco-btn-primary,
 body :where(.arco-modal .arco-btn.arco-btn-primary, .arco-popover-popup-content .arco-btn.arco-btn-primary) {
   color: var(--text-inverse) !important;
   border-color: var(--color-primary) !important;
   background: var(--color-primary) !important;
 }
 
-#xbybody .arco-btn.arco-btn-primary:hover,
+#mnemobody .arco-btn.arco-btn-primary:hover,
 body :where(.arco-modal .arco-btn.arco-btn-primary, .arco-popover-popup-content .arco-btn.arco-btn-primary):hover {
   color: var(--text-inverse) !important;
   border-color: var(--color-primary-hover) !important;
   background: var(--color-primary-hover) !important;
 }
 
-#xbybody .arco-btn.arco-btn-text {
+#mnemobody .arco-btn.arco-btn-text {
   color: var(--text-link) !important;
   border-color: transparent !important;
   background: transparent !important;
 }
 
-#xbybody .arco-btn.arco-btn-text:hover {
+#mnemobody .arco-btn.arco-btn-text:hover {
   color: var(--color-primary) !important;
   background: var(--bg-hover) !important;
 }
 
-#xbybody :where(.arco-btn, .arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-number, .arco-picker).arco-disabled,
-#xbybody :where(.arco-btn)[disabled] {
+#mnemobody :where(.arco-btn, .arco-input-wrapper, .arco-select-view, .arco-textarea-wrapper, .arco-input-number, .arco-picker).arco-disabled,
+#mnemobody :where(.arco-btn)[disabled] {
   color: var(--text-disabled) !important;
   border-color: var(--border-light) !important;
   background: var(--bg-subtle) !important;
@@ -333,7 +333,7 @@ body,
   background: var(--bg-base) !important;
 }
 
-#xbyhead {
+#mnemohead {
   flex-shrink: 0 !important;
   height: var(--layout-header-height) !important;
   min-height: var(--layout-header-height) !important;
@@ -345,7 +345,7 @@ body,
   backdrop-filter: none !important;
 }
 
-#xbyhead2 {
+#mnemohead2 {
   display: flex !important;
   align-items: center !important;
   gap: 8px !important;
@@ -354,7 +354,7 @@ body,
   min-height: var(--layout-header-height) !important;
 }
 
-#xbyhead2 .title {
+#mnemohead2 .title {
   margin: 0 8px 0 4px !important;
   font-size: 15px !important;
   font-weight: 700 !important;
@@ -363,7 +363,7 @@ body,
   white-space: nowrap !important;
 }
 
-#xbyhead2 .arco-menu-horizontal {
+#mnemohead2 .arco-menu-horizontal {
   flex: 0 1 auto !important;
   min-width: 0 !important;
   height: var(--layout-header-height) !important;
@@ -373,16 +373,16 @@ body,
   border: 0 !important;
 }
 
-#xbyhead2 > .flexauto {
+#mnemohead2 > .flexauto {
   flex: 1 1 auto !important;
   min-width: 0 !important;
 }
 
-#xbyhead2 > :not(.arco-menu-horizontal):not(.flexauto) {
+#mnemohead2 > :not(.arco-menu-horizontal):not(.flexauto) {
   flex-shrink: 0 !important;
 }
 
-#xbyhead2 .arco-menu-horizontal .arco-menu-inner {
+#mnemohead2 .arco-menu-horizontal .arco-menu-inner {
   display: flex !important;
   align-items: stretch !important;
   height: var(--layout-header-height) !important;
@@ -390,7 +390,7 @@ body,
   overflow: hidden !important;
 }
 
-#xbyhead2 .arco-menu-horizontal .arco-menu-item {
+#mnemohead2 .arco-menu-horizontal .arco-menu-item {
   position: relative !important;
   display: inline-flex !important;
   align-items: center !important;
@@ -405,20 +405,20 @@ body,
   box-shadow: none !important;
 }
 
-#xbyhead2 .arco-menu-horizontal .arco-menu-item:hover {
+#mnemohead2 .arco-menu-horizontal .arco-menu-item:hover {
   color: var(--text-primary) !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-#xbyhead2 .arco-menu-horizontal .arco-menu-item.arco-menu-selected {
+#mnemohead2 .arco-menu-horizontal .arco-menu-item.arco-menu-selected {
   color: var(--color-primary) !important;
   font-weight: 600 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-#xbyhead2 .arco-menu-selected-label {
+#mnemohead2 .arco-menu-selected-label {
   left: 16px !important;
   right: 16px !important;
   bottom: 0 !important;
@@ -426,7 +426,7 @@ body,
   background: var(--color-primary) !important;
 }
 
-#xbyhead2 .arco-btn-text {
+#mnemohead2 .arco-btn-text {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -442,43 +442,43 @@ body,
   box-shadow: none !important;
 }
 
-#xbyhead2 .arco-btn-text:hover,
-#xbyhead2 .arco-btn-text.active {
+#mnemohead2 .arco-btn-text:hover,
+#mnemohead2 .arco-btn-text.active {
   color: var(--text-primary) !important;
   background: var(--bg-subtle) !important;
   box-shadow: none !important;
 }
 
-#xbyhead2 .arco-btn-text[title*='关闭']:hover {
+#mnemohead2 .arco-btn-text[title*='关闭']:hover {
   color: #fff !important;
   background: #ef4444 !important;
 }
 
-#xbybody {
+#mnemobody {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   overflow: hidden !important;
   background: var(--bg-base) !important;
 }
 
-#xbybody > .arco-tabs,
-#xbybody > .hidetabs,
-#xbybody .hidetabs.arco-tabs {
+#mnemobody > .arco-tabs,
+#mnemobody > .hidetabs,
+#mnemobody .hidetabs.arco-tabs {
   height: 100% !important;
 }
 
-#xbybody .arco-tabs-content,
-#xbybody .arco-tabs-content-list,
-#xbybody .arco-tabs-pane,
-#xbybody .arco-tabs-content-item {
+#mnemobody .arco-tabs-content,
+#mnemobody .arco-tabs-content-list,
+#mnemobody .arco-tabs-pane,
+#mnemobody .arco-tabs-content-item {
   height: 100% !important;
 }
 
-#xbybody .arco-tabs-pane {
+#mnemobody .arco-tabs-pane {
   overflow: hidden !important;
 }
 
-#xbybody .arco-tabs-pane.arco-tabs-pane-active {
+#mnemobody .arco-tabs-pane.arco-tabs-pane-active {
   animation: ui-page-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -506,7 +506,7 @@ body,
 }
 
 /* Shared page rails */
-.xbyleft,
+.mnemoleft,
 .settings-sider {
   width: var(--layout-rail-width) !important;
   min-width: var(--layout-rail-width) !important;
@@ -515,7 +515,7 @@ body,
   box-shadow: none !important;
 }
 
-.xbyright {
+.mnemoright {
   min-width: 0 !important;
   background: var(--bg-surface) !important;
 }
@@ -530,11 +530,11 @@ body,
   border-bottom: 1px solid var(--border-light);
 }
 
-.xbyleftmenu.arco-menu .arco-menu-inner {
+.mnemoleftmenu.arco-menu .arco-menu-inner {
   padding: 8px 0 !important;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item {
+.mnemoleftmenu.arco-menu .arco-menu-item {
   display: flex !important;
   align-items: center !important;
   height: 36px !important;
@@ -547,23 +547,23 @@ body,
   border-radius: 0 !important;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item:hover {
+.mnemoleftmenu.arco-menu .arco-menu-item:hover {
   color: var(--text-primary) !important;
   background: transparent !important;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item.arco-menu-selected {
+.mnemoleftmenu.arco-menu .arco-menu-item.arco-menu-selected {
   color: var(--color-primary) !important;
   font-weight: 600 !important;
   background: transparent !important;
   border-left-color: var(--color-primary) !important;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item.arco-menu-selected::after {
+.mnemoleftmenu.arco-menu .arco-menu-item.arco-menu-selected::after {
   display: none !important;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item .arco-menu-icon {
+.mnemoleftmenu.arco-menu .arco-menu-item .arco-menu-icon {
   width: 22px !important;
   margin-right: 8px !important;
   color: inherit !important;
@@ -1101,7 +1101,7 @@ body,
 }
 
 /* Pan right */
-.xbyright {
+.mnemoright {
   display: flex !important;
   flex-direction: column !important;
   height: 100% !important;
@@ -1292,7 +1292,7 @@ body,
 }
 
 /* A shared compact action style for pan, transfer and share toolbars. */
-#xbybody .toppanbtn .arco-btn {
+#mnemobody .toppanbtn .arco-btn {
   min-height: 30px !important;
   padding: 0 9px !important;
   color: var(--text-link) !important;
@@ -1301,21 +1301,21 @@ body,
   border-radius: var(--ui-control-radius) !important;
 }
 
-#xbybody .toppanbtn .arco-btn:hover,
-#xbybody .toppanbtn .arco-btn:focus-visible {
+#mnemobody .toppanbtn .arco-btn:hover,
+#mnemobody .toppanbtn .arco-btn:focus-visible {
   color: var(--color-primary) !important;
   background: var(--bg-hover) !important;
   border-color: var(--color-primary) !important;
 }
 
-#xbybody .toppanbtn .arco-btn.danger,
-#xbybody .toppanbtn .arco-btn.arco-btn-status-danger {
+#mnemobody .toppanbtn .arco-btn.danger,
+#mnemobody .toppanbtn .arco-btn.arco-btn-status-danger {
   color: var(--color-error) !important;
   border-color: color-mix(in srgb, var(--color-error) 42%, var(--control-border)) !important;
 }
 
-#xbybody .toppanbtn .arco-btn.danger:hover,
-#xbybody .toppanbtn .arco-btn.arco-btn-status-danger:hover {
+#mnemobody .toppanbtn .arco-btn.danger:hover,
+#mnemobody .toppanbtn .arco-btn.arco-btn-status-danger:hover {
   color: var(--text-inverse) !important;
   background: var(--color-error) !important;
   border-color: var(--color-error) !important;

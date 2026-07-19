@@ -22,7 +22,7 @@ const METEO_URL = 'https://api.open-meteo.com/v1/forecast'
 const GEO_URL = 'https://geocoding-api.open-meteo.com/v1/search'
 const IP_URL = 'http://ip-api.com/json/'
 
-const CACHE_KEY = 'boxplayer-weather-cache'
+const CACHE_KEY = 'mnemo-weather-cache'
 const CACHE_TTL = 30 * 60 * 1000 // 30min
 
 function conditionIcon(code: number): string {

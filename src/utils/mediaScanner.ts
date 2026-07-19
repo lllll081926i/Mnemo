@@ -53,7 +53,7 @@ export class MediaScanner {
   async scanFolder(
     folder: IAliGetFileModel,
     driveServerId: string,
-    options: { incremental?: boolean; silent?: boolean; aiScrape?: boolean } = {}
+    options: { incremental?: boolean; silent?: boolean } = {}
   ): Promise<void> {
     if (this.isScanning) {
       if (!options.silent) message.warning('正在扫描中，请稍后...')
@@ -94,22 +94,12 @@ export class MediaScanner {
 
     try {
       console.log('开始扫描网盘文件夹:', folder.name)
-      const shouldRunAIScrape = Boolean(options.aiScrape && await this.canRunInternalAIScrape())
-
-      // Phase 1: 边遍历边 TMDB 匹配（跳过 AI 兜底）
-      const { unmatched: unmatchedFiles, totalFound } = await this.scrapeFolderRecursive(folder, scanContext, folderKey, existingIds, options.incremental, shouldRunAIScrape,
+      const { totalFound } = await this.scrapeFolderRecursive(folder, scanContext, folderKey, existingIds, options.incremental,
         ({ processed }) => {
           totalProcessed += processed
           this.mediaStore.setScanProgress(totalProcessed, Math.max(1, totalFound || totalProcessed))
         }
       )
-
-      // Phase 2: 仅 AI 刮削模式才把 TMDB 未匹配文件交给 AI 判断。
-      if (shouldRunAIScrape && unmatchedFiles.length > 0 && !this.shouldStop) {
-        const aiSaved = await this.applyBatchAIScrapeResults(unmatchedFiles, folder.name, folderKey)
-        totalProcessed += aiSaved
-        if (aiSaved > 0) console.log(`🤖 AI 兜底成功: ${aiSaved}/${unmatchedFiles.length}`)
-      }
 
       if (!this.shouldStop) {
         const mediaFolder: MediaLibraryFolder = {
@@ -142,14 +132,13 @@ export class MediaScanner {
     }
   }
 
-  // 边遍历边刮削：列出文件夹 → TMDB 匹配（跳过 AI）→ 递归子文件夹 → 返回 { unmatched, totalFound }
+  // 边遍历边刮削：列出文件夹 → TMDB 匹配 → 递归子文件夹。
   private async scrapeFolderRecursive(
     folder: IAliGetFileModel,
     scanContext: ScanContext,
     folderKey: string,
     existingIds: Set<string>,
     incremental: boolean | undefined,
-    deferUnmatchedForAI: boolean,
     onProgress: (stats: { processed: number }) => void,
     depth = 0
   ): Promise<{ unmatched: DriveFileItem[]; totalFound: number }> {
@@ -205,10 +194,7 @@ export class MediaScanner {
             batch.map(f => this.processVideoFileWithoutAI(f, folder.name, folderKey))
           )
           for (const r of results) {
-            if (r.status === 'fulfilled' && r.value) {
-              if (deferUnmatchedForAI) unmatchedFiles.push(r.value)
-              else this.addUnmatchedMediaItem(r.value, folder.name, folderKey)
-            }
+            if (r.status === 'fulfilled' && r.value) this.addUnmatchedMediaItem(r.value, folder.name, folderKey)
           }
           onProgress({ processed: batch.length })
         }
@@ -218,7 +204,7 @@ export class MediaScanner {
       for (const sub of subFolders) {
         if (this.shouldStop) break
         const subResult = await this.scrapeFolderRecursive(
-          sub, scanContext, folderKey, existingIds, incremental, deferUnmatchedForAI, onProgress, depth + 1
+          sub, scanContext, folderKey, existingIds, incremental, onProgress, depth + 1
         )
         unmatchedFiles.push(...subResult.unmatched)
         totalFound += subResult.totalFound
@@ -1119,54 +1105,6 @@ export class MediaScanner {
   // 检查是否正在扫描
   get isCurrentlyScanning(): boolean {
     return this.isScanning
-  }
-
-  // AI 批量刮削：收集文件夹内所有视频文件，一次性发给 AI 识别
-  async batchAIScrapeFolder(folder: IAliGetFileModel, driveServerId: string): Promise<number> {
-    if (this.isScanning) {
-      message.warning('正在扫描中，请稍后...')
-      return 0
-    }
-
-    await this.scanFolder(folder, driveServerId, { aiScrape: await this.canRunInternalAIScrape() })
-    return 0
-  }
-
-  private async canRunInternalAIScrape(): Promise<boolean> {
-    const [{ resolveAIProviderConfig }, { isPro }] = await Promise.all([import('./bookAI'), import('./usageLimit')])
-    return isPro() && resolveAIProviderConfig()?.providerName === 'boxplayer-cloud'
-  }
-
-  private async applyBatchAIScrapeResults(unmatchedFiles: DriveFileItem[], folderName: string, folderId: string): Promise<number> {
-    const { batchScrapeMediaWithAI } = await import('./mediaAIScrape')
-
-    if (!unmatchedFiles.length) {
-      message.warning(`"${folderName}" 中没有需要 AI 判断的未匹配视频`)
-      return 0
-    }
-
-    message.info(`"${folderName}" 中有 ${unmatchedFiles.length} 个未匹配视频，正在 AI 识别…`)
-    const fileInfos = unmatchedFiles.map(f => ({ name: f.name, path: f.path, fileSize: f.fileSize, driveFile: f }))
-    const results = await batchScrapeMediaWithAI(fileInfos, folderName)
-
-    let saved = 0
-    for (const r of results) {
-      if (r.mediaItem) {
-        if (r.mediaItem.type === 'tv') {
-          this.mediaStore.addOrMergeTvSeries(r.mediaItem)
-        } else {
-          this.mediaStore.addMediaItem(r.mediaItem)
-        }
-        saved++
-      } else if (r.file.driveFile) this.addUnmatchedMediaItem(r.file.driveFile, folderName, folderId)
-    }
-
-    if (saved > 0) {
-      message.success(`AI 识别完成：${saved}/${results.length} 个文件匹配成功`)
-    } else {
-      message.warning('AI 未能识别出任何影视作品')
-    }
-    return saved
   }
 
   // 断点续刮：保存/读取/清除扫描断点

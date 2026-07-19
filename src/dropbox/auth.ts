@@ -54,7 +54,7 @@ export const createDropboxPkceVerifier = (): string => {
   return base64UrlEncode(bytes)
 }
 
-export const buildDropboxAuthUrl = async (appKey: string, verifier: string, state = `boxplayer_${Date.now()}`): Promise<string> => {
+export const buildDropboxAuthUrl = async (appKey: string, verifier: string, state = `mnemo_${Date.now()}`): Promise<string> => {
   const challenge = base64UrlEncode(await sha256(verifier))
   const params = new URLSearchParams({
     client_id: appKey.trim(),

@@ -2,15 +2,15 @@ import type { MediaServerConfig } from '../types/mediaServer'
 import type { PlexPin, PlexResource } from '../types/mediaServerPlex'
 import { openExternal } from '../utils/electronhelper'
 
-const PLEX_CLIENT_ID_STORAGE_KEY = 'boxplayer_plex_client_id'
-const PLEX_PRODUCT = 'BoxPlayer'
+const PLEX_CLIENT_ID_STORAGE_KEY = 'mnemo_plex_client_id'
+const PLEX_PRODUCT = 'Mnemo'
 const PLEX_VERSION = '1.7.20'
-const PLEX_PLATFORM = 'BoxPlayer_Electron'
-const PLEX_DEVICE = 'XbyBoxPlayer'
+const PLEX_PLATFORM = 'Mnemo_Electron'
+const PLEX_DEVICE = 'Mnemo'
 const POLL_INTERVAL_MS = 1000
 const POLL_TIMEOUT_MS = 120_000
 
-const createFallbackPlexClientId = () => `boxplayer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+const createFallbackPlexClientId = () => `mnemo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 
 export const getPlexClientId = () => {
   try {
@@ -19,7 +19,7 @@ export const getPlexClientId = () => {
     if (existing) return existing
 
     const generated = typeof globalThis.crypto?.randomUUID === 'function'
-      ? `boxplayer-${globalThis.crypto.randomUUID()}`
+      ? `mnemo-${globalThis.crypto.randomUUID()}`
       : createFallbackPlexClientId()
     storage?.setItem(PLEX_CLIENT_ID_STORAGE_KEY, generated)
     return generated

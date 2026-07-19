@@ -311,11 +311,11 @@ body[arco-theme='dark'] .toppanbtn .arco-btn.danger:active {
   margin-top: 15%;
 }
 
-#xbybody .toppanlist .arco-list,
-#xbybody .toppanlist .arco-list-content,
-#xbybody .toppanlist .arco-list-empty,
-#xbybody .toppanlist .arco-virtual-list,
-#xbybody .toppanlist .arco-virtual-list-container {
+#mnemobody .toppanlist .arco-list,
+#mnemobody .toppanlist .arco-list-content,
+#mnemobody .toppanlist .arco-list-empty,
+#mnemobody .toppanlist .arco-virtual-list,
+#mnemobody .toppanlist .arco-virtual-list-container {
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -730,11 +730,11 @@ body[arco-theme='dark'] .toppanarea {
   margin-right: 4px !important;
 }
 
-.xbyleft {
+.mnemoleft {
   box-shadow: 2px 0 8px 0 var(--leftshadow) !important;
 }
 
-.xbyright {
+.mnemoright {
   padding-left: 16px;
 }
 
@@ -751,18 +751,18 @@ body[arco-theme='dark'] .toppanarea {
   overflow: hidden;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-inner {
+.mnemoleftmenu.arco-menu .arco-menu-inner {
   padding: 0 2px 0 0 !important;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item {
+.mnemoleftmenu.arco-menu .arco-menu-item {
   padding: 0 8px;
   margin-bottom: 2px;
   line-height: 40px;
   height: 40px;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item::after {
+.mnemoleftmenu.arco-menu .arco-menu-item::after {
   position: absolute;
   top: 0;
   left: 0;
@@ -775,7 +775,7 @@ body[arco-theme='dark'] .toppanarea {
   content: '';
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item.arco-menu-selected::after {
+.mnemoleftmenu.arco-menu .arco-menu-item.arco-menu-selected::after {
   transform: scaleY(1);
   opacity: 1;
   transition:
@@ -784,7 +784,7 @@ body[arco-theme='dark'] .toppanarea {
   border-right: 2px solid #637dff;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item .arco-menu-icon {
+.mnemoleftmenu.arco-menu .arco-menu-item .arco-menu-icon {
   width: 30px;
   text-align: left;
   margin-right: 0;
@@ -794,7 +794,7 @@ body[arco-theme='dark'] .toppanarea {
   flex-grow: 0;
 }
 
-.xbyleftmenu.arco-menu .arco-menu-item .arco-menu-icon .iconfont {
+.mnemoleftmenu.arco-menu .arco-menu-item .arco-menu-icon .iconfont {
   font-size: 20px;
 }
 

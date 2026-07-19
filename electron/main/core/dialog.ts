@@ -5,7 +5,7 @@ export function ShowErrorAndRelaunch(title: string, errmsg: string) {
     .showMessageBox({
       type: 'error',
       buttons: ['ok'],
-      title: title + '，小白羊将自动退出',
+      title: title + '，Mnemo将自动退出',
       message: '错误信息:' + errmsg
     })
     .then((_) => {
@@ -24,7 +24,7 @@ export function ShowErrorAndExit(title: string, errmsg: string) {
     .showMessageBox({
       type: 'error',
       buttons: ['ok'],
-      title: title + '，小白羊将自动退出',
+      title: title + '，Mnemo将自动退出',
       message: '错误信息:' + errmsg
     })
     .then((_) => {

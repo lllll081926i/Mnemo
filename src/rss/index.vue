@@ -36,9 +36,9 @@ watch(
 
 <template>
   <a-layout style="height: 100%">
-    <a-layout-sider hide-trigger :width="218" class="xbyleft rss-sider">
+    <a-layout-sider hide-trigger :width="218" class="mnemoleft rss-sider">
       <div class="headdesc">好玩的插件</div>
-      <a-menu :style="{ width: '100%' }" class="xbyleftmenu rss-leftmenu"
+      <a-menu :style="{ width: '100%' }" class="mnemoleftmenu rss-leftmenu"
               :selected-keys="[appStore.GetAppTabMenu]"
               @update:selected-keys="appStore.toggleTabMenu('rss', $event[0])">
         <a-menu-item key="RssXiMa">

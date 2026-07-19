@@ -374,7 +374,7 @@ const handleOpenFile = (event: Event, file: IAliGetFileModel | undefined) => {
     panfileStore.mMouseSelect(file.file_id, false, false)
   }
   let isShare = file.from_share_id != undefined
-  let isEncrypt = file.description && file.description.includes('xbyEncrypt')
+  let isEncrypt = file.description && file.description.includes('mnemoEncrypt')
   if (isEncrypt) {
     if (isShare) {
       modalPassword('input', (success, inputpassword) => {
@@ -932,7 +932,7 @@ const onPanDragEnd = (ev: any) => {
             </div>
             <div class="filebtn">
               <template v-if="!item.album_id && item.description">
-                <a-button v-if="!item.description.includes(',') && !item.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                <a-button v-if="!item.description.includes(',') && !item.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
                   <IconFont name="iconwbiaoqian" :class="item.description" />
                 </a-button>
                 <a-button v-else-if="item.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
@@ -941,12 +941,12 @@ const onPanDragEnd = (ev: any) => {
                     :class="
                       item.description
                         .split(',')
-                        .filter((v: string) => !v.includes('xbyEncrypt'))
+                        .filter((v: string) => !v.includes('mnemoEncrypt'))
                         .join('')
                     " />
                 </a-button>
               </template>
-              <a-popover v-if="item.thumbnail && !item.description.includes('xbyEncrypt')" content-class="popimg" position="lt">
+              <a-popover v-if="item.thumbnail && !item.description.includes('mnemoEncrypt')" content-class="popimg" position="lt">
                 <a-button type="text" tabindex="-1" class="gengduo" title="缩略图">
                   <IconFont name="icongengduo" />
                 </a-button>
@@ -956,10 +956,10 @@ const onPanDragEnd = (ev: any) => {
                   </div>
                 </template>
               </a-popover>
-              <a-button v-if="item.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
+              <a-button v-if="item.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                 <IconFont name="iconsafebox" style="color: grey" />
               </a-button>
-              <a-button v-else-if="item.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
+              <a-button v-else-if="item.description.includes('mnemoEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                 <IconFont name="iconsafebox" style="color: pink" />
               </a-button>
               <a-button v-else type="text" tabindex="-1" class="gengduo" disabled></a-button>
@@ -993,7 +993,7 @@ const onPanDragEnd = (ev: any) => {
             </div>
             <div class="filebtn">
               <template v-if="!item.album_id && item.description">
-                <a-button v-if="!item.description.includes(',') && !item.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                <a-button v-if="!item.description.includes(',') && !item.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
                   <IconFont name="iconwbiaoqian" :class="item.description" />
                 </a-button>
                 <a-button v-else-if="item.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
@@ -1002,12 +1002,12 @@ const onPanDragEnd = (ev: any) => {
                     :class="
                       item.description
                         .split(',')
-                        .filter((v: string) => !v.includes('xbyEncrypt'))
+                        .filter((v: string) => !v.includes('mnemoEncrypt'))
                         .join('')
                     " />
                 </a-button>
               </template>
-              <a-popover v-if="item.thumbnail && !item.description.includes('xbyEncrypt')" content-class="popimg" position="lt">
+              <a-popover v-if="item.thumbnail && !item.description.includes('mnemoEncrypt')" content-class="popimg" position="lt">
                 <a-button type="text" tabindex="-1" class="gengduo">
                   <IconFont name="icontupianyulan" />
                 </a-button>
@@ -1017,10 +1017,10 @@ const onPanDragEnd = (ev: any) => {
                   </div>
                 </template>
               </a-popover>
-              <a-button v-if="item.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
+              <a-button v-if="item.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                 <IconFont name="iconsafebox" style="color: grey" />
               </a-button>
-              <a-button v-else-if="item.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
+              <a-button v-else-if="item.description.includes('mnemoEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                 <IconFont name="iconsafebox" style="color: pink" />
               </a-button>
               <a-button v-if="false" type="text" tabindex="-1" class="gengduo" disabled></a-button>
@@ -1109,7 +1109,7 @@ const onPanDragEnd = (ev: any) => {
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
                   <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
                       <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
                     <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
@@ -1118,15 +1118,15 @@ const onPanDragEnd = (ev: any) => {
                         :class="
                           grid.description
                             .split(',')
-                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .filter((v: string) => !v.includes('mnemoEncrypt'))
                             .join('')
                         " />
                     </a-button>
                   </template>
-                  <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
+                  <a-button v-if="grid.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
-                  <a-button v-else-if="grid.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
+                  <a-button v-else-if="grid.description.includes('mnemoEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                     <IconFont name="iconsafebox" style="color: pink" />
                   </a-button>
                 </div>
@@ -1172,7 +1172,7 @@ const onPanDragEnd = (ev: any) => {
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
                   <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
                       <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
                     <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
@@ -1181,15 +1181,15 @@ const onPanDragEnd = (ev: any) => {
                         :class="
                           grid.description
                             .split(',')
-                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .filter((v: string) => !v.includes('mnemoEncrypt'))
                             .join('')
                         " />
                     </a-button>
                   </template>
-                  <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
+                  <a-button v-if="grid.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
-                  <a-button v-else-if="grid.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
+                  <a-button v-else-if="grid.description.includes('mnemoEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                     <IconFont name="iconsafebox" style="color: pink" />
                   </a-button>
                 </div>
@@ -1270,7 +1270,7 @@ const onPanDragEnd = (ev: any) => {
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
                   <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
                       <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
                     <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
@@ -1279,15 +1279,15 @@ const onPanDragEnd = (ev: any) => {
                         :class="
                           grid.description
                             .split(',')
-                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .filter((v: string) => !v.includes('mnemoEncrypt'))
                             .join('')
                         " />
                     </a-button>
                   </template>
-                  <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
+                  <a-button v-if="grid.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
-                  <a-button v-else-if="grid.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
+                  <a-button v-else-if="grid.description.includes('mnemoEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                     <IconFont name="iconsafebox" style="color: pink" />
                   </a-button>
                 </div>
@@ -1336,7 +1336,7 @@ const onPanDragEnd = (ev: any) => {
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
                   <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
                       <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
                     <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
@@ -1345,12 +1345,12 @@ const onPanDragEnd = (ev: any) => {
                         :class="
                           grid.description
                             .split(',')
-                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .filter((v: string) => !v.includes('mnemoEncrypt'))
                             .join('')
                         " />
                     </a-button>
                   </template>
-                  <a-button v-if="grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="加密文件">
+                  <a-button v-if="grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
                 </div>

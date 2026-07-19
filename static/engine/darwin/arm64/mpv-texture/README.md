@@ -5,10 +5,10 @@ This directory is the expected development and packaged resource location for th
 Expected final files:
 
 ```text
-boxplayer-mpv-texture.node
+mnemo-mpv-texture.node
 libmpv.dylib
 *.dylib
 mpv-bundle-manifest.json
 ```
 
-During development, `native/boxplayer-mpv-texture/scripts/install-dev-stub.sh` can copy the default stub `.node` here after a local node-gyp build. That stub only validates the Electron/native loader path and does not render video.
+During development, `native/mnemo-mpv-texture/scripts/install-dev-stub.sh` can copy the default stub `.node` here after a local node-gyp build. That stub only validates the Electron/native loader path and does not render video.

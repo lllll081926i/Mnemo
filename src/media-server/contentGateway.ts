@@ -859,8 +859,8 @@ const createJellyfinAuthorization = (config: MediaServerConfig) => {
   const fields = [
     `Token="${config.accessToken || ''}"`,
     `UserId="${config.userId || ''}"`,
-    'Client="XbyBoxPlayer"',
-    'Device="XbyBoxPlayer"',
+    'Client="Mnemo"',
+    'Device="Mnemo"',
     `DeviceId="${config.deviceId || ''}"`,
     'Version="1.0.0"'
   ]

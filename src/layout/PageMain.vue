@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { KeyboardState, useAppStore, useFootStore, useKeyboardStore, useMouseStore, useSettingStore, useUserStore, useWinStore } from '../store'
-import { BookOpen, Music, Pause, Play, SkipBack, SkipForward, Video } from 'lucide-vue-next'
+import { Music, Pause, Play, SkipBack, SkipForward, Video } from 'lucide-vue-next'
 import { onHideRightMenu, TestAlt, TestCtrl, TestKey, TestShift } from '../utils/keyboardhelper'
 
 import Setting from '../setting/index.vue'
@@ -192,8 +192,8 @@ onUnmounted(() => {
 </script>
 <template>
   <a-layout style="height: 100vh" draggable="false">
-    <a-layout-header id="xbyhead" draggable="false">
-      <div id="xbyhead2" class="q-electron-drag">
+    <a-layout-header id="mnemohead" draggable="false">
+      <div id="mnemohead2" class="q-electron-drag">
         <a-button v-show="appStore.appTab === 'pan'" type="text" size="small" @click="handlePanVisible">
           <IconFont name="iconmenuon" />
         </a-button>
@@ -233,7 +233,7 @@ onUnmounted(() => {
         </a-button>
       </div>
     </a-layout-header>
-    <a-layout-content id="xbybody">
+    <a-layout-content id="mnemobody">
       <a-tabs type="text" :direction="'horizontal'" class="hidetabs" :justify="true" :active-key="appStore.appTab">
         <a-tab-pane key="pan" title="1">
           <Pan :visible="panVisible" />
@@ -354,9 +354,9 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #xbybody *,
-  #xbybody *::before,
-  #xbybody *::after {
+  #mnemobody *,
+  #mnemobody *::before,
+  #mnemobody *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

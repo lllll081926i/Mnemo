@@ -159,10 +159,10 @@ export function getIPAddress() {
 export function getEncType(file: IAliGetFileModel | IAliFileItem | { description: string }): string {
   let description = file.description
   if (description) {
-    if (description.includes('xbyEncrypt1')) {
-      return 'xbyEncrypt1'
-    } else if (description.includes('xbyEncrypt2')) {
-      return 'xbyEncrypt2'
+    if (description.includes('mnemoEncrypt1')) {
+      return 'mnemoEncrypt1'
+    } else if (description.includes('mnemoEncrypt2')) {
+      return 'mnemoEncrypt2'
     }
   }
   return ''
@@ -174,7 +174,7 @@ export function getEncPassword(user_id: string, encType: string, inputpassword: 
       return inputpassword
     }
     let settingStore = useSettingStore()
-    if (encType == 'xbyEncrypt1') {
+    if (encType == 'mnemoEncrypt1') {
       let ecnPassword = decodeName(localPwd, settingStore.securityEncType, settingStore.securityPassword)
       if (!ecnPassword) {
         ecnPassword = decodeName(user_id, settingStore.securityEncType, settingStore.securityPassword)

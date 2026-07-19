@@ -328,8 +328,8 @@ function getImageUrl(item: OneImageModel) {
 
 <template>
   <a-layout style="height: 100vh" draggable="false">
-    <a-layout-header v-show="!isPlaying" id="xbyhead" draggable="false">
-      <div id="xbyhead2" class="q-electron-drag">
+    <a-layout-header v-show="!isPlaying" id="mnemohead" draggable="false">
+      <div id="mnemohead2" class="q-electron-drag">
         <a-button type="text" tabindex="-1">
           <IconFont name="iconfile-img" />
         </a-button>

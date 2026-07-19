@@ -89,8 +89,8 @@ watch(
 
 <template>
   <a-layout class="ui-workspace-shell">
-    <a-layout-sider hide-trigger :width="220" class="xbyleft ui-workspace-rail share-rail">
-      <a-menu :selected-keys="[activeMenuKey]" class="xbyleftmenu rail-menu share-account-menu" @update:selected-keys="handleMenuSelect">
+    <a-layout-sider hide-trigger :width="220" class="mnemoleft ui-workspace-rail share-rail">
+      <a-menu :selected-keys="[activeMenuKey]" class="mnemoleftmenu rail-menu share-account-menu" @update:selected-keys="handleMenuSelect">
         <template v-if="createdShareAccounts.length > 0 || hasImportedShares">
           <div class="share-rail-group">总览</div>
           <a-menu-item v-if="createdShareAccounts.length > 0" key="overview">
@@ -123,7 +123,7 @@ watch(
       </a-menu>
     </a-layout-sider>
 
-    <a-layout-content class="xbyright ui-workspace-content">
+    <a-layout-content class="mnemoright ui-workspace-content">
       <a-tabs type="text" direction="horizontal" class="hidetabs" :justify="true" :active-key="appStore.GetAppTabMenu">
         <a-tab-pane v-if="createdShareAccounts.length > 0" key="MyShareRight" title="shares">
           <MyShareRight />

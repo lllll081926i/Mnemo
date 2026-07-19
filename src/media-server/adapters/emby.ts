@@ -14,7 +14,7 @@ interface EmbyAuthResponse {
   }
 }
 
-const APP_NAME = 'XbyBoxPlayer'
+const APP_NAME = 'Mnemo'
 const APP_VERSION = '1.0.0'
 
 const createEmbyAuthHeader = (deviceId: string) => {

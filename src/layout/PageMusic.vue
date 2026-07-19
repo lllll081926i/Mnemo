@@ -340,7 +340,7 @@ function exportVisualFx() {
   const blob = new Blob([JSON.stringify(visualFx.value, null, 2)], { type: 'application/json' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = 'boxplayer-radio-fx.json'
+  a.download = 'mnemo-radio-fx.json'
   a.click()
   URL.revokeObjectURL(a.href)
 }
@@ -617,7 +617,7 @@ function collectCurrentToNewPlaylist() {
 function toggleGestureControl() {
   visualFx.value.gestureControlEnabled = !visualFx.value.gestureControlEnabled
   gestureHudVisible.value = visualFx.value.gestureControlEnabled
-  gestureHudText.value = visualFx.value.gestureControlEnabled ? '手势控制已开启：当前以鼠标/滚轮模拟 BoxPlayer Radio 手势反馈。' : '手势控制已关闭'
+  gestureHudText.value = visualFx.value.gestureControlEnabled ? '手势控制已开启：当前以鼠标/滚轮模拟 Mnemo Radio 手势反馈。' : '手势控制已关闭'
   if (!visualFx.value.gestureControlEnabled) window.setTimeout(() => gestureHudVisible.value = false, 1100)
 }
 
@@ -1378,7 +1378,7 @@ defineExpose({ togglePlay, playPrev, playNext, seekRel })
     <div v-if="showSplash" class="mineradio-splash">
       <div class="mineradio-splash-noise"></div>
       <div class="mineradio-splash-wordmark">
-        <span class="splash-word-mine">BoxPlayer</span>
+        <span class="splash-word-mine">Mnemo</span>
         <span class="splash-word-radio">Radio</span>
       </div>
       <div class="mineradio-splash-line"></div>
@@ -1397,7 +1397,7 @@ defineExpose({ togglePlay, playPrev, playNext, seekRel })
       <div class="music-fx-head">
         <div>
           <div class="music-fx-title">视觉控制台</div>
-          <div class="music-fx-sub">BOXPLAYER RADIO VISUALS</div>
+          <div class="music-fx-sub">MNEMO RADIO VISUALS</div>
         </div>
         <button class="music-fx-reset" title="恢复默认" @click="resetVisualFx">
           <RotateCcw :size="16" :stroke-width="1.9" />

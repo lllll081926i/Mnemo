@@ -8,12 +8,12 @@ export interface IStateFileHash {
   sha1: string
   name: string
 }
-class XBYDB3Cache extends Dexie {
+class MNEMODB3Cache extends Dexie {
   ifilehash: Dexie.Table<IStateFileHash>
   iobject: Dexie.Table<object, string>
 
   constructor() {
-    super('XBYDB3Cache')
+    super('MNEMODB3Cache')
 
     this.version(10)
       .stores({
@@ -50,5 +50,5 @@ class XBYDB3Cache extends Dexie {
   }
 }
 
-const DBCache = new XBYDB3Cache()
+const DBCache = new MNEMODB3Cache()
 export default DBCache
