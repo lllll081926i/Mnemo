@@ -4,8 +4,11 @@ import { h } from 'vue'
 import IconFont from '../components/IconFont.vue'
 import PanDAL from './pandal'
 import TreeStore, { TreeNodeData } from '../store/treestore'
-import { GetDriveID, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
+import { GetDriveID } from '../aliapi/utils'
 import message from '../utils/message'
+import UserDAL from '../user/userdal'
+import { isDriveProviderSidebarEntryAvailable, isDriveSidebarKey, resolveDriveProvider } from '../utils/driveProvider'
+import { useSettingStore } from '../store'
 
 export interface PanTreeState {
   user_id: string
@@ -59,64 +62,7 @@ const usePanTreeStore = defineStore('pantree', {
       description: ''
     },
     selectDirPath: [],
-    treeData: [
-      {
-        __v_skip: true,
-        title: '收藏夹',
-        namesearch: '',
-        key: 'favorite',
-        icon: () => fileiconfn('iconcrown'),
-        isLeaf: true,
-        children: []
-      },
-      {
-        __v_skip: true,
-        title: '放映室',
-        namesearch: '',
-        key: 'video',
-        icon: () => fileiconfn('iconrss_video'),
-        isLeaf: true,
-        children: []
-      },
-      {
-        __v_skip: true,
-        title: '回收站',
-        namesearch: '',
-        key: 'trash',
-        icon: () => fileiconfn('icondelete'),
-        isLeaf: true,
-        children: []
-      },
-      {
-        __v_skip: true,
-        title: '文件恢复',
-        namesearch: '',
-        key: 'recover',
-        icon: () => fileiconfn('iconrecover'),
-        isLeaf: true,
-        children: []
-      },
-      {
-        __v_skip: true,
-        title: '全盘搜索',
-        namesearch: '',
-        key: 'search',
-        icon: () => fileiconfn('iconsearch'),
-        isLeaf: true,
-        children: []
-      },
-      {
-        __v_skip: true,
-        title: '相册管理',
-        namesearch: '',
-        key: 'pic_root',
-        icon: () => fileiconfn('iconjietu'),
-        isLeaf: true,
-        children: []
-      },
-      { __v_skip: true, title: '备份盘', namesearch: '', key: 'backup_root', children: [] },
-      { __v_skip: true, title: '资源盘', namesearch: '', key: 'resource_root', children: [] }
-    ],
+    treeData: [],
     treeExpandedKeys: [],
     treeSelectedKeys: [],
     quickData: [],
@@ -130,65 +76,31 @@ const usePanTreeStore = defineStore('pantree', {
   actions: {
     mTreeSelected(e: any, kuaijie: boolean = false) {
       let { key, drive_id = undefined } = e.node
-      let is_refresh_drive_id = !['favorite', 'trash', 'recover'].includes(key) || !/color.*/g.test(key)
-      const isCloudUser = isCloud123User(this.user_id || '')
-      const isDrive115 = isDrive115User(this.user_id || '')
-      const isBaidu = isBaiduUser(this.user_id || '')
-      const isPikPak = isPikPakUser(this.user_id || '')
-      const isDropbox = isDropboxUser(this.user_id || '')
-      const isOneDrive = isOneDriveUser(this.user_id || '')
-      const isBox = isBoxUser(this.user_id || '')
-      const isQuark = isQuarkUser(this.user_id || '')
-      const isCloud139 = isCloud139User(this.user_id || '')
-      const isCloud189 = isCloud189User(this.user_id || '')
-      const isGuangya = isGuangyaUser(this.user_id || '')
-      if (isCloudUser) {
-        const unsupported = ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite']
-        if (unsupported.includes(key)) {
-          message.info('123云盘不支持此功能')
+      const is_refresh_drive_id = !['favorite', 'trash', 'recover'].includes(key) && !String(key).startsWith('color')
+      if (!kuaijie && isDriveSidebarKey(String(key))) {
+        const token = UserDAL.GetUserToken(this.user_id || '')
+        const provider = resolveDriveProvider({ tokenfrom: token?.tokenfrom, userId: this.user_id, driveId: this.drive_id })
+        const settingStore = useSettingStore()
+        if (!isDriveProviderSidebarEntryAvailable(provider, String(key), token, {
+          hideResourceDrive: settingStore.securityHideResourceDrive,
+          hideBackupDrive: settingStore.securityHideBackupDrive,
+          hideAlbum: settingStore.securityHidePicDrive
+        })) {
+          message.info('当前网盘不支持此入口')
           return
         }
-      }
-      if ((isDrive115 || isBaidu) && key === 'resource_root') {
-        message.info((isDrive115 ? '115网盘' : '百度网盘') + '不支持此功能')
-        return
-      }
-      if (isPikPak && ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite'].includes(key)) {
-        message.info('PikPak 不支持此功能')
-        return
-      }
-      if (isQuark && ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite'].includes(key)) {
-        message.info('夸克网盘不支持此功能')
-        return
-      }
-      if ((isCloud139 || isCloud189 || isGuangya) && ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite', 'trash'].includes(key)) {
-        message.info((isCloud139 ? '139云盘' : isCloud189 ? '天翼云盘' : '光鸭云盘') + '不支持此功能')
-        return
-      }
-      if (isDropbox && ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite', 'trash'].includes(key)) {
-        message.info('Dropbox 不支持此功能')
-        return
-      }
-      if (isOneDrive && ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite'].includes(key)) {
-        message.info('OneDrive 不支持此功能')
-        return
-      }
-      if (isBox && ['video', 'recover', 'pic_root', 'backup_root', 'resource_root', 'favorite'].includes(key)) {
-        message.info('Box 不支持此功能')
-        return
       }
       if (!kuaijie) {
         const getParentNode = (node: any): any => {
           return node.parent ? getParentNode(node.parent) : node
         }
         const parentNode = getParentNode(e.node)
-        drive_id = GetDriveID(this.user_id, parentNode.key || key)
+        drive_id = parentNode.drive_id || GetDriveID(this.user_id, parentNode.key || key)
       }
       console.log('mTreeSelected', e, drive_id)
       if (is_refresh_drive_id && drive_id) {
         this.drive_id = drive_id
       }
-      if (key === 'video') this.drive_id = GetDriveID(this.user_id, 'backup')
       if (key === 'pic_root') key = this.selectDir.album_type || 'pic_root'
       else this.selectDir.album_id = ''
       PanDAL.aReLoadOneDirToShow('', key, true)

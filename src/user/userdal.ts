@@ -14,10 +14,11 @@ import { applyOneDriveQuota, refreshOneDriveAccessToken } from '../onedrive/auth
 import { applyBoxQuota, refreshBoxAccessToken } from '../box/auth'
 import { refreshCloud189Token } from '../cloud189/auth'
 import { fetchGuangyaUserInfo, refreshGuangyaAccessToken } from '../guangya/auth'
-import { isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isNonAliyunProvider, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import { GetDriveType, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isNonAliyunProvider, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import { promptAutoScanForUser } from '../utils/libraryAutoScanPrompt'
 import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
+import { getDriveProviderSidebarEntries } from '../utils/driveProvider'
 
 export const UserTokenMap = new Map<string, ITokenInfo>()
 
@@ -622,21 +623,31 @@ export default class UserDAL {
       await PanDAL.aReLoadOneDirToShow(token.default_drive_id || token.user_id, '/', true)
       return
     }
-    // 刷新网盘数据
-    if (!useSettingStore().securityHideResourceDrive) {
+    const settingStore = useSettingStore()
+    const panTreeStore = usePanTreeStore()
+    panTreeStore.mSaveUser(token.user_id, token.default_drive_id, token.resource_drive_id, token.backup_drive_id, token.pic_drive_id)
+
+    const spaces = getDriveProviderSidebarEntries('aliyun', token, {
+      hideResourceDrive: settingStore.securityHideResourceDrive,
+      hideBackupDrive: settingStore.securityHideBackupDrive,
+      hideAlbum: settingStore.securityHidePicDrive
+    }).filter((entry) => entry.kind === 'space')
+    const resourceSpace = spaces.find((entry) => entry.key === 'resource_root')
+    const backupSpace = spaces.find((entry) => entry.key === 'backup_root')
+    const preferredSpace = settingStore.uiShowPanRootFirst === 'backup' ? backupSpace || resourceSpace : resourceSpace || backupSpace
+    const initialSpace = preferredSpace || spaces[0]
+    const fallbackDriveId = initialSpace?.driveId || token.default_drive_id || token.resource_drive_id || token.backup_drive_id || token.default_sbox_drive_id || token.sbox_drive_id
+    panTreeStore.drive_id = fallbackDriveId
+
+    if (resourceSpace) {
       await PanDAL.aReLoadResourceDrive(token)
     }
-    if (!useSettingStore().securityHideBackupDrive) {
+    if (backupSpace && backupSpace.driveId !== resourceSpace?.driveId) {
       await PanDAL.aReLoadBackupDrive(token)
     }
-    if (useSettingStore().uiShowPanRootFirst === 'resource') {
-      await PanDAL.aReLoadOneDirToShow(token.resource_drive_id, 'resource_root', true)
-    } else if (useSettingStore().uiShowPanRootFirst === 'backup') {
-      await PanDAL.aReLoadOneDirToShow(token.backup_drive_id, 'backup_root', true)
-    } else {
-      await PanDAL.aReLoadOneDirToShow(token.resource_drive_id, 'resource_root', true)
-      await PanDAL.aReLoadOneDirToShow(token.backup_drive_id, 'backup_root', true)
-    }
+    if (!fallbackDriveId) return
+    const rootKey = initialSpace?.key || GetDriveType(token.user_id, fallbackDriveId).key
+    await PanDAL.aReLoadOneDirToShow(fallbackDriveId, rootKey, true)
   }
 
   static async UserLogOff(user_id: string): Promise<boolean> {

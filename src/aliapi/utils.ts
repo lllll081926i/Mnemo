@@ -109,19 +109,19 @@ export function GetDriveType(user_id: string, drive_id: string): any {
       return { title: '网盘文件', name: 'box', key: 'box_root' }
     }
     switch (drive_id) {
-      case token.backup_drive_id:
-        return { title: '备份盘', name: 'backup', key: 'backup_root' }
       case token.resource_drive_id:
-        return { title: '资源盘', name: 'resource', key: 'resource_root' }
+        return { title: '网盘文件', name: 'resource', key: 'resource_root' }
+      case token.backup_drive_id:
+        return { title: token.resource_drive_id ? '备份空间' : '网盘文件', name: 'backup', key: 'backup_root' }
       case token.pic_drive_id:
-        return { title: '全部相册', name: 'pic', key: 'pic_root' }
+        return { title: '相册', name: 'pic', key: 'pic_root' }
       case token.default_sbox_drive_id:
         return { title: '安全盘', name: 'safe', key: 'safe_root' }
       default:
-        return { title: '备份盘', name: 'backup', key: 'backup_root' }
+        return { title: '网盘文件', name: 'backup', key: 'backup_root' }
     }
   }
-  return { title: '备份盘', name: 'backup', key: 'backup_root' }
+  return { title: '网盘文件', name: 'backup', key: 'backup_root' }
 }
 
 function resolveUserTokenInfo(user: string | { user_id?: string; tokenfrom?: string }) {

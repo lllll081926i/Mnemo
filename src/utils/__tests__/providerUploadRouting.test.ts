@@ -22,4 +22,15 @@ describe('provider upload routing', () => {
     expect(actions).toContain("directoryId.startsWith('color') || directoryId.startsWith('search')")
     expect(actions).toContain("!['favorite', 'recover', 'trash'].includes(directoryId)")
   })
+
+  it('uses one provider registry for sidebar visibility and activation', () => {
+    const sidebar = read('src/pan/PanLeft.vue')
+    const treeStore = read('src/pan/pantreestore.ts')
+    expect(sidebar).toContain('getDriveProviderSidebarEntries')
+    expect(treeStore).toContain('isDriveProviderSidebarEntryAvailable')
+    expect(treeStore).toContain('hideResourceDrive: settingStore.securityHideResourceDrive')
+    expect(treeStore).not.toContain("title: '放映室'")
+    expect(treeStore).not.toContain('PikPak 不支持此功能')
+    expect(treeStore).not.toContain('夸克网盘不支持此功能')
+  })
 })

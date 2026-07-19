@@ -17,11 +17,12 @@ import FolderPreviewPopover from './menus/FolderPreviewPopover.vue'
 import { TreeNodeData } from '../store/treestore'
 import { dropMoveSelectedFile, uploadLocalPaths } from './topbtns/topbtn'
 import message from '../utils/message'
-import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import { GetDriveType, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
 import { loadDriveAccountOptions, toDriveAccountOption, type DriveAccountOption } from '../utils/driveAccount'
 import { getWebDavConnectionId, removeWebDavConnection } from '../utils/webdavClient'
 import { getS3ConnectionId, removeS3Connection } from '../utils/s3Client'
+import { getDriveProviderSidebarEntries, getDriveSidebarIcon, isDriveSidebarKey } from '../utils/driveProvider'
 
 const treeref = ref()
 const inputselectType = ref('backup')
@@ -29,8 +30,7 @@ const appStore = useAppStore()
 const pantreeStore = usePanTreeStore()
 const settingStore = useSettingStore()
 const userStore = useUserStore()
-const isAliyunAccount = computed(() => isAliyunUser(pantreeStore.user_id || UserDAL.GetUserToken(pantreeStore.user_id || '')))
-const { capabilities: providerCapabilities } = useCurrentDriveProvider()
+const { provider, capabilities: providerCapabilities } = useCurrentDriveProvider()
 const treeViewportRef = ref<HTMLElement | null>(null)
 const treeViewportHeight = ref(360)
 const treeHeight = computed(() => Math.max(160, treeViewportHeight.value))
@@ -179,57 +179,40 @@ const handleQuickSelect = (index: number) => {
   }
 }
 const filterTreeData = computed(() => {
-  const isCloudUser = isCloud123User(pantreeStore.user_id || '') || isPikPakUser(pantreeStore.user_id || '') || isDropboxUser(pantreeStore.user_id || '') || isOneDriveUser(pantreeStore.user_id || '') || isBoxUser(pantreeStore.user_id || '')
-  const baseList = isCloudUser
-    ? pantreeStore.treeData.filter((item) => {
-        if (item.key === 'backup_root') return false
-        if (item.key === 'resource_root') return false
-        if (item.key === 'pic_root') return false
-        if (
-          (isPikPakUser(pantreeStore.user_id || '') || isDropboxUser(pantreeStore.user_id || '') || isOneDriveUser(pantreeStore.user_id || '') || isBoxUser(pantreeStore.user_id || '')) &&
-          (item.key === 'video' || item.key === 'recover' || item.key === 'favorite')
-        )
-          return false
-        return true
-      })
-    : pantreeStore.treeData.filter((item) => {
-        if (!isAliyunAccount.value && (item.key === 'backup_root' || item.key === 'resource_root')) {
-          return false
-        }
-        if (isBaiduUser(pantreeStore.user_id || '') && item.key === 'trash') {
-          return false
-        }
-        if (!isAliyunAccount.value && (item.key === 'pic_root' || item.key === 'video' || item.key === 'favorite' || item.key === 'recover')) {
-          return false
-        }
-        if (useSettingStore().securityHideBackupDrive && item.key === 'backup_root') {
-          return false
-        }
-        if ((useSettingStore().securityHideBackupDrive || useSettingStore().securityHideResourceDrive) && item.key === 'resource_root') {
-          return false
-        }
-        if (useSettingStore().securityHidePicDrive && item.key === 'pic_root') {
-          return false
-        }
-        if (!usePanTreeStore().resource_drive_id && item.key === 'resource_root') {
-          return false
-        }
-        return true
-      })
-
-  return baseList.filter((item) => item.key !== 'trash' || providerCapabilities.value.trashView)
+  const token = UserDAL.GetUserToken(pantreeStore.user_id || '')
+  const entries = getDriveProviderSidebarEntries(provider.value, token, {
+    hideResourceDrive: settingStore.securityHideResourceDrive,
+    hideBackupDrive: settingStore.securityHideBackupDrive,
+    hideAlbum: settingStore.securityHidePicDrive
+  })
+  const nodeMap = new Map(pantreeStore.treeData.map((item) => [String(item.key), item]))
+  const roots = pantreeStore.treeData.filter((item) => !isDriveSidebarKey(String(item.key)))
+  const sidebarNodes = entries.map((entry) => {
+    const source = nodeMap.get(entry.key)
+    return {
+      ...(source || {}),
+      __v_skip: true,
+      key: entry.key,
+      drive_id: entry.driveId || source?.drive_id,
+      parent_file_id: '',
+      title: entry.title,
+      namesearch: '',
+      icon: entry.icon,
+      children: source?.children || [],
+      isLeaf: entry.kind === 'feature' || entry.key === 'pic_root'
+    } as TreeNodeData
+  })
+  return [...roots, ...sidebarNodes]
 })
 
 const folderPreviewRef = ref<{ open: (target: HTMLElement, params: any) => void; leave: () => void; cancel: () => void } | null>(null)
-
-const SPECIAL_KEYS = new Set(['trash', 'recover', 'favorite', 'video', 'pic_root', 'backup_root', 'resource_root'])
 
 const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
   if (!settingStore.uiFolderPreviewEnabled) return false
   if (!data) return false
   const key = String(data.key || '')
   if (!key) return false
-  if (SPECIAL_KEYS.has(key)) return false
+  if (isDriveSidebarKey(key)) return false
   if (key.startsWith('search') || key.startsWith('color')) return false
   if (data.isLeaf === true) {
     // leaf placeholder, but still might be a real folder; only block if no drive_id
@@ -470,8 +453,8 @@ const handleOpenDriveLogin = () => {
             <template #switcherIcon>
               <i class="ant-tree-switcher-icon iconfont Arrow" />
             </template>
-            <template #icon>
-              <IconFont name="iconfile-folder" />
+            <template #icon="{ dataRef }">
+              <IconFont :name="typeof dataRef.icon === 'string' ? dataRef.icon : getDriveSidebarIcon(String(dataRef.key || ''))" />
             </template>
             <template #title="{ dataRef }">
               <span
@@ -559,90 +542,42 @@ const handleOpenDriveLogin = () => {
 </template>
 
 <style lang="less">
-.ant-tree.ant-tree-show-line .ant-tree-child-tree li:not(:last-child)::before {
+.pan-left .ant-tree.ant-tree-show-line .ant-tree-child-tree li:not(:last-child)::before {
   border-left: none !important;
 }
 
-.ant-tree.ant-tree-show-line li:not(:last-child)::before {
+.pan-left .ant-tree.ant-tree-show-line li:not(:last-child)::before {
   border-left: 1px dashed #d9d9d9;
   top: 10px;
   left: 11px;
 }
 
-.dirtree .iconfont,
-.sharetree .iconfont,
-.quicktree .iconfont,
-.videotree .iconfont {
+.pan-left .dirtree .iconfont,
+.pan-left .quicktree .iconfont {
+  font-size: 17px;
+  color: var(--text-secondary);
+}
+
+.pan-left .colortree .iconfont {
   font-size: 20px;
 }
 
-.dirtree .iconfont.iconfile-folder,
-.sharetree .iconfont.iconfile-folder,
-.quicktree .iconfont.iconfile-folder,
-.videotree .iconfont.iconfile-folder {
-  color: #ffb74d;
-  font-size: 20px;
+.pan-left .ant-tree-node-selected .ant-tree-iconEle .iconfont {
+  color: rgb(var(--primary-6));
 }
 
-.colortree .iconfont {
-  font-size: 20px;
-}
-
-.dirtree .iconfont.iconrecover {
-  color: #13c2c2;
-}
-
-.dirtree .iconfont.icondelete {
-  color: #ff4d4fd9;
-}
-
-.dirtree .iconfont.iconsearch {
-  color: #1890ff;
-}
-
-.dirtree .iconfont.iconcrown {
-  color: #ffb74d;
-}
-
-.dirtree .iconfont.iconrss_video {
-  color: #a760ef;
-}
-
-.dirtree .iconfont.iconjietu {
-  color: #a77566;
-}
-
-.colortree .iconfont.iconrss_video {
-  color: #a760ef;
-}
-
-.ant-tree .iconfile-folder {
-  color: #ffb74d;
-  font-size: 20px;
-}
-
-.ant-tree-node-selected .ant-tree-title,
-.ant-tree-node-selected .ant-tree-title > span {
+.pan-left .ant-tree-node-selected .ant-tree-title,
+.pan-left .ant-tree-node-selected .ant-tree-title > span {
   color: rgb(var(--primary-6)) !important;
   font-weight: 500;
 }
 
-body[arco-theme='dark'] .ant-tree-node-selected .ant-tree-title,
-body[arco-theme='dark'] .ant-tree-node-selected .ant-tree-title > span {
+body[arco-theme='dark'] .pan-left .ant-tree-node-selected .ant-tree-title,
+body[arco-theme='dark'] .pan-left .ant-tree-node-selected .ant-tree-title > span {
   color: rgb(255, 255, 255) !important;
 }
 
-.rootsearch {
-  width: calc(100% - 151px) !important;
-  float: right;
-}
-
-.rootsearch.arco-input-wrapper {
-  background-color: transparent;
-  border: 1px solid rgb(var(--primary-6)) !important;
-}
-
-.quicktree .ant-tree-icon__customize .iconfont {
+.pan-left .quicktree .ant-tree-icon__customize .iconfont {
   font-size: 18px;
   margin-right: 2px;
 }

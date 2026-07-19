@@ -18,6 +18,7 @@ export interface DriveProviderCapabilities {
   provider: DriveProvider
   mountedStorage: boolean
   download: boolean
+  search: boolean
   upload: boolean
   uploadMode: 'queue' | 'direct' | 'none'
   createFolder: boolean
@@ -129,6 +130,7 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
 const noCapabilities: Omit<DriveProviderCapabilities, 'provider'> = {
   mountedStorage: false,
   download: false,
+  search: false,
   upload: false,
   uploadMode: 'none',
   createFolder: false,
@@ -175,6 +177,7 @@ const createCapabilities = (provider: DriveProvider, overrides: Partial<DrivePro
 
 const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities> = {
   aliyun: createCapabilities('aliyun', {
+    search: true,
     createTextFile: true,
     permanentDelete: true,
     trashView: true,
@@ -196,17 +199,17 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
     copyTree: true,
     photoAlbum: true
   }),
-  cloud123: createCapabilities('cloud123', { createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, trashView: true, trashRestore: true }),
-  '115': createCapabilities('115', { trashView: true, trashRestore: true, trashPurge: true }),
+  cloud123: createCapabilities('cloud123', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, trashView: true, trashRestore: true }),
+  '115': createCapabilities('115', { search: true, trashView: true, trashRestore: true, trashPurge: true }),
   '139': createCapabilities('139'),
   '189': createCapabilities('189'),
-  guangya: createCapabilities('guangya', { createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
-  baidu: createCapabilities('baidu'),
+  guangya: createCapabilities('guangya', { search: true, createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
+  baidu: createCapabilities('baidu', { search: true }),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
-  quark: createCapabilities('quark', { createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
-  dropbox: createCapabilities('dropbox', { createTextFile: true, createShare: true, manageCreatedShares: true }),
-  onedrive: createCapabilities('onedrive', { createTextFile: true, createShare: true }),
-  box: createCapabilities('box', { createTextFile: true, createShare: true }),
+  quark: createCapabilities('quark', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
+  dropbox: createCapabilities('dropbox', { search: true, createTextFile: true, createShare: true, manageCreatedShares: true }),
+  onedrive: createCapabilities('onedrive', { search: true, createTextFile: true, createShare: true }),
+  box: createCapabilities('box', { search: true, createTextFile: true, createShare: true }),
   webdav: createCapabilities('webdav', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   s3: createCapabilities('s3', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   unknown: { ...noCapabilities, provider: 'unknown' }
@@ -275,6 +278,78 @@ export const getDriveProviderAccountId = (userId: string, provider?: DriveProvid
 }
 
 export const getDriveProviderCapabilities = (context: DriveProviderContext | string = {}): DriveProviderCapabilities => driveProviderCapabilities[resolveDriveProvider(context)]
+
+export type DriveSidebarEntryKind = 'space' | 'feature'
+
+export interface DriveSidebarEntry {
+  key: string
+  title: string
+  icon: string
+  kind: DriveSidebarEntryKind
+  driveId?: string
+}
+
+export interface DriveSidebarOptions {
+  hideResourceDrive?: boolean
+  hideBackupDrive?: boolean
+  hideAlbum?: boolean
+}
+
+const driveSidebarKeys = new Set(['favorite', 'search', 'trash', 'recover', 'video', 'pic_root', 'backup_root', 'resource_root', 'safe_root'])
+
+export const isDriveSidebarKey = (key: string) => driveSidebarKeys.has(key)
+
+export const getDriveSidebarIcon = (key: string) => {
+  if (key === 'favorite') return 'iconcrown'
+  if (key === 'search') return 'iconsearch'
+  if (key === 'trash') return 'icondelete'
+  if (key === 'recover') return 'iconrecover'
+  if (key === 'pic_root') return 'iconjietu'
+  if (key === 'safe_root') return 'iconsafebox'
+  return 'iconfile-folder'
+}
+
+export const getDriveProviderSidebarEntries = (context: DriveProviderContext | string, token?: Partial<ITokenInfo>, options: DriveSidebarOptions = {}): DriveSidebarEntry[] => {
+  const provider = resolveDriveProvider(context)
+  const capabilities = getDriveProviderCapabilities(provider)
+  const entries: DriveSidebarEntry[] = []
+
+  if (provider === 'aliyun' && token) {
+    const spaces: DriveSidebarEntry[] = []
+    const usedDriveIds = new Set<string>()
+    const addSpace = (key: string, title: string, driveId: string | undefined) => {
+      if (!driveId || usedDriveIds.has(driveId)) return
+      usedDriveIds.add(driveId)
+      spaces.push({ key, title, icon: getDriveSidebarIcon(key), kind: 'space', driveId })
+    }
+
+    const mergedDrive = token.resource_drive_id && token.resource_drive_id === token.backup_drive_id
+    if (mergedDrive) {
+      if (!options.hideResourceDrive || !options.hideBackupDrive) addSpace('resource_root', '网盘文件', token.resource_drive_id)
+    } else {
+      if (!options.hideResourceDrive) addSpace('resource_root', '网盘文件', token.resource_drive_id)
+      if (!options.hideBackupDrive) addSpace('backup_root', spaces.length ? '备份空间' : '网盘文件', token.backup_drive_id)
+    }
+    if (!token.resource_drive_id && !token.backup_drive_id) addSpace('backup_root', '网盘文件', token.default_drive_id)
+    addSpace('safe_root', '安全盘', token.default_sbox_drive_id || token.sbox_drive_id)
+    entries.push(...spaces)
+
+    if (capabilities.photoAlbum && token.pic_drive_id && !options.hideAlbum) {
+      entries.push({ key: 'pic_root', title: '相册', icon: getDriveSidebarIcon('pic_root'), kind: 'space', driveId: token.pic_drive_id })
+    }
+  }
+
+  if (capabilities.favorite) entries.push({ key: 'favorite', title: '收藏夹', icon: getDriveSidebarIcon('favorite'), kind: 'feature' })
+  if (capabilities.search) entries.push({ key: 'search', title: '全盘搜索', icon: getDriveSidebarIcon('search'), kind: 'feature' })
+  if (capabilities.trashView) entries.push({ key: 'trash', title: '回收站', icon: getDriveSidebarIcon('trash'), kind: 'feature' })
+  if (provider === 'aliyun') entries.push({ key: 'recover', title: '文件恢复', icon: getDriveSidebarIcon('recover'), kind: 'feature' })
+  return entries
+}
+
+export const isDriveProviderSidebarEntryAvailable = (context: DriveProviderContext | string, key: string, token?: Partial<ITokenInfo>, options: DriveSidebarOptions = {}) => {
+  if (!isDriveSidebarKey(key)) return true
+  return getDriveProviderSidebarEntries(context, token, options).some((entry) => entry.key === key)
+}
 
 export const getDriveProviderMeta = (tokenfrom?: string): DriveProviderMeta => {
   return driveProviderMap[(tokenfrom || 'unknown') as DriveProvider] || driveProviderMap.unknown

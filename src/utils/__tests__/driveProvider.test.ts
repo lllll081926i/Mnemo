@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, resolveDriveProvider } from '../driveProvider'
+import { buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
 describe('drive provider capabilities', () => {
   it('resolves providers from tokens, account ids and drive ids', () => {
@@ -41,6 +41,43 @@ describe('drive provider capabilities', () => {
     expect(cloud123.favorite).toBe(false)
     expect(cloud123.colorTag).toBe(false)
     expect(cloud123.copyTree).toBe(false)
+  })
+
+  it('exposes search only where a concrete provider search path exists', () => {
+    for (const provider of ['aliyun', 'cloud123', '115', 'guangya', 'baidu', 'quark', 'dropbox', 'onedrive', 'box']) {
+      expect(getDriveProviderCapabilities(provider).search, provider).toBe(true)
+    }
+    for (const provider of ['139', '189', 'pikpak', 'webdav', 's3', 'unknown']) {
+      expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
+    }
+  })
+
+  it('builds flat Aliyun spaces and deduplicates merged resource drives', () => {
+    const merged = getDriveProviderSidebarEntries('aliyun', {
+      resource_drive_id: 'merged-drive',
+      backup_drive_id: 'merged-drive',
+      default_sbox_drive_id: 'safe-drive',
+      pic_drive_id: 'album-drive'
+    })
+    expect(merged.filter((entry) => entry.driveId === 'merged-drive')).toHaveLength(1)
+    expect(merged.map((entry) => entry.key)).toEqual(['resource_root', 'safe_root', 'pic_root', 'favorite', 'search', 'trash', 'recover'])
+    expect(getDriveProviderSidebarEntries('aliyun', { resource_drive_id: 'merged-drive', backup_drive_id: 'merged-drive' }, { hideResourceDrive: true })[0].key).toBe('resource_root')
+    expect(getDriveProviderSidebarEntries('aliyun', { default_drive_id: 'merged-drive', resource_drive_id: 'merged-drive', backup_drive_id: 'merged-drive' }, { hideResourceDrive: true, hideBackupDrive: true }).some((entry) => entry.kind === 'space')).toBe(false)
+
+    const split = getDriveProviderSidebarEntries('aliyun', { resource_drive_id: 'resource', backup_drive_id: 'backup' })
+    expect(split.slice(0, 2).map((entry) => [entry.key, entry.title])).toEqual([
+      ['resource_root', '网盘文件'],
+      ['backup_root', '备份空间']
+    ])
+  })
+
+  it('keeps provider sidebar features aligned with capabilities', () => {
+    expect(getDriveProviderSidebarEntries('cloud123').map((entry) => entry.key)).toEqual(['search', 'trash'])
+    expect(getDriveProviderSidebarEntries('pikpak').map((entry) => entry.key)).toEqual(['trash'])
+    expect(getDriveProviderSidebarEntries('quark').map((entry) => entry.key)).toEqual(['search'])
+    expect(getDriveProviderSidebarEntries('139')).toEqual([])
+    expect(isDriveProviderSidebarEntryAvailable('pikpak', 'search')).toBe(false)
+    expect(isDriveProviderSidebarEntryAvailable('pikpak', 'trash')).toBe(true)
   })
 
   it('exposes sharing only for providers with implemented share creation', () => {
