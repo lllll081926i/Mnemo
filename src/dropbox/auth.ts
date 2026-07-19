@@ -48,6 +48,7 @@ export const buildDropboxAuthUrl = async (appKey: string, verifier: string, stat
     response_type: 'code',
     redirect_uri: DROPBOX_REDIRECT_URL,
     token_access_type: 'offline',
+    force_reapprove: 'true',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     scope: DROPBOX_SCOPE,
@@ -111,14 +112,18 @@ const dropboxJson = async <T>(url: string, init: RequestInit, fallback: string):
 }
 
 const applyDropboxAccount = async (token: ITokenInfo) => {
-  const account = await dropboxJson<any>(DROPBOX_ACCOUNT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token.access_token}`,
-      'Content-Type': 'application/json'
+  const account = await dropboxJson<any>(
+    DROPBOX_ACCOUNT_URL,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: 'null'
     },
-    body: 'null'
-  }, '获取 Dropbox 账号信息失败')
+    '获取 Dropbox 账号信息失败'
+  )
   if (account) {
     const accountId = account.account_id || hashString(token.refresh_token || token.access_token)
     token.user_id = `dropbox_${accountId}`
@@ -128,14 +133,18 @@ const applyDropboxAccount = async (token: ITokenInfo) => {
     token.avatar = account.profile_photo_url || token.avatar
   }
 
-  const space = await dropboxJson<any>(DROPBOX_SPACE_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token.access_token}`,
-      'Content-Type': 'application/json'
+  const space = await dropboxJson<any>(
+    DROPBOX_SPACE_URL,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: 'null'
     },
-    body: 'null'
-  }, '获取 Dropbox 空间信息失败')
+    '获取 Dropbox 空间信息失败'
+  )
   if (space) {
     const used = Number(space.used || 0)
     const allocated = Number(space.allocation?.allocated || 0)
@@ -168,11 +177,15 @@ export const exchangeDropboxCodeForToken = async (code: string, appKey: string, 
     code_verifier: verifier
   })
   if (DROPBOX_APP_SECRET.trim()) body.set('client_secret', DROPBOX_APP_SECRET.trim())
-  const data = await dropboxJson<any>(DROPBOX_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  }, '获取 Dropbox access_token 失败')
+  const data = await dropboxJson<any>(
+    DROPBOX_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    },
+    '获取 Dropbox access_token 失败'
+  )
   const token = normalizeDropboxToken(data, appKey)
   if (token) {
     await applyDropboxAccount(token)
@@ -191,11 +204,15 @@ export const refreshDropboxAccessToken = async (token: ITokenInfo): Promise<ITok
     client_id: appKey
   })
   if (DROPBOX_APP_SECRET.trim()) body.set('client_secret', DROPBOX_APP_SECRET.trim())
-  const data = await dropboxJson<any>(DROPBOX_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  }, '刷新 Dropbox Token 失败')
+  const data = await dropboxJson<any>(
+    DROPBOX_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    },
+    '刷新 Dropbox Token 失败'
+  )
   if (!data?.access_token) return null
   token.access_token = data.access_token
   token.expires_in = Number(data.expires_in || token.expires_in || 14400)

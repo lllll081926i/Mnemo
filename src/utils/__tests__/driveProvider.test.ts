@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getDriveProviderCapabilities, resolveDriveProvider } from '../driveProvider'
+import { buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, resolveDriveProvider } from '../driveProvider'
 
 describe('drive provider capabilities', () => {
   it('resolves providers from tokens, account ids and drive ids', () => {
@@ -8,6 +8,19 @@ describe('drive provider capabilities', () => {
     expect(resolveDriveProvider({ userId: 'cloud123_user-id' })).toBe('cloud123')
     expect(resolveDriveProvider({ driveId: 'drive115' })).toBe('115')
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
+  })
+
+  it('builds stable provider-scoped ids for multiple accounts', () => {
+    expect(buildDriveProviderUserId('baidu', '10001')).toBe('baidu_10001')
+    expect(buildDriveProviderUserId('baidu', '10002')).toBe('baidu_10002')
+    expect(buildDriveProviderUserId('baidu', 'baidu_10001')).toBe('baidu_10001')
+    expect(buildDriveProviderUserId('115', '20001')).toBe('115_20001')
+    expect(buildDriveProviderUserId('webdav', 'connection-a')).toBe('webdav:connection-a')
+    expect(buildDriveProviderUserId('s3', 'connection-b')).toBe('s3:connection-b')
+    expect(buildDriveProviderUserId('aliyun', 'aliyun-remote-id')).toBe('aliyun-remote-id')
+
+    expect(getDriveProviderAccountId('baidu_10001', 'baidu')).toBe('10001')
+    expect(getDriveProviderAccountId('webdav:connection-a', 'webdav')).toBe('connection-a')
   })
 
   it('keeps Aliyun-only operations isolated', () => {

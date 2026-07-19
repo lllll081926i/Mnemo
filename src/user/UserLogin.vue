@@ -465,7 +465,7 @@ const submitWebDavLogin = async () => {
     await UserDAL.UserLogin(createWebDavUserToken(connection), true)
     useUser.userShowLogin = false
   } catch (error: any) {
-    message.error(`连接 WebDAV 服务器失败: ${error?.message || '未知错误'}`)
+    message.error(`添加 WebDAV 失败: ${error?.message || '未知错误'}`)
   } finally {
     webDavLoading.value = false
   }
@@ -486,7 +486,7 @@ const submitS3Login = async () => {
     await UserDAL.UserLogin(createS3UserToken(connection), true)
     useUser.userShowLogin = false
   } catch (error: any) {
-    message.error(`连接 S3 失败: ${error?.message || '未知错误'}`)
+    message.error(`添加 S3 失败: ${error?.message || '未知错误'}`)
   } finally {
     s3Loading.value = false
   }

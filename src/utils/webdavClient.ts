@@ -129,11 +129,16 @@ const saveWebDavConnections = (connections: WebDavConnectionConfig[]) => {
 
 export const saveWebDavConnection = (config: WebDavConnectionConfig) => {
   const list = getWebDavConnections()
+  const name = config.name.trim()
+  if (!name) throw new Error('请填写 WebDAV 连接名称')
+  const duplicate = list.find((item) => item.id !== config.id && item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())
+  if (duplicate) throw new Error(`WebDAV 连接名称“${name}”已存在`)
+  const normalizedConfig = { ...config, name }
   const index = list.findIndex((item) => item.id === config.id)
   if (index >= 0) {
-    list[index] = config
+    list[index] = normalizedConfig
   } else {
-    list.unshift(config)
+    list.unshift(normalizedConfig)
   }
   saveWebDavConnections(list)
 }
@@ -153,7 +158,7 @@ export const createWebDavConnection = (input: { name: string; url: string; usern
   const normalizedRoot = normalizeWebDavPath(input.rootPath || '/')
   const timestamp = Date.now().toString()
   const idSeed = `${normalizedUrl}|${input.username}|${normalizedRoot}|${timestamp}`
-  const id = btoa(idSeed)
+  const id = btoa(unescape(encodeURIComponent(idSeed)))
     .replace(/[^a-zA-Z0-9]/g, '')
     .slice(0, 24)
   return {

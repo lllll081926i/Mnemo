@@ -2,6 +2,7 @@ import { ITokenInfo } from '../user/userstore'
 import UserDAL from '../user/userdal'
 import message from './message'
 import { CLOUD123_APP_ID, CLOUD123_APP_SECRET } from '../secrets.generated'
+import { buildDriveProviderUserId } from './driveProvider'
 
 const CLOUD123_AUTH_URL = 'https://yun.123pan.com/auth'
 const CLOUD123_ACCESS_TOKEN_URL = 'https://open-api.123pan.com/api/v1/oauth2/access_token'
@@ -60,7 +61,7 @@ export const buildCloud123AuthUrl = () => {
 const normalizeToken = (data: any): ITokenInfo | null => {
   if (!data?.access_token) return null
   const payload = parseJwtPayload(data.access_token) || {}
-  const userId = payload.user_id || payload.id || payload.uid || `cloud123_${hashString(data.refresh_token || data.access_token)}`
+  const userId = payload.user_id || payload.id || payload.uid || hashString(data.refresh_token || data.access_token)
   const expireTime = new Date(Date.now() + (data.expires_in || 0) * 1000).toISOString()
 
   return {
@@ -76,7 +77,7 @@ const normalizeToken = (data: any): ITokenInfo | null => {
     device_id: '',
     expires_in: data.expires_in || 0,
     token_type: data.token_type || 'Bearer',
-    user_id: `cloud123_${userId}`,
+    user_id: buildDriveProviderUserId('cloud123', userId),
     user_name: '123网盘',
     avatar: '',
     nick_name: '123网盘',
@@ -146,7 +147,7 @@ export const exchangeCloud123CodeForToken = async (code: string): Promise<IToken
       const userInfo = await fetchCloud123UserInfo(token.access_token)
       if (userInfo) {
         const uid = userInfo.uid ?? userInfo.userId
-        if (uid) token.user_id = `cloud123_${uid}`
+        if (uid) token.user_id = buildDriveProviderUserId('cloud123', uid)
         token.user_name = userInfo.nickname || token.user_name
         token.nick_name = userInfo.nickname || token.nick_name
         token.avatar = userInfo.headImage || token.avatar
@@ -155,7 +156,7 @@ export const exchangeCloud123CodeForToken = async (code: string): Promise<IToken
         if (typeof totalSize === 'number') token.total_size = totalSize
         if (typeof usedSize === 'number') token.used_size = usedSize
         if (typeof totalSize === 'number' && typeof usedSize === 'number') {
-          token.spaceinfo = `${(usedSize / (1024 ** 3)).toFixed(2)} GB / ${(totalSize / (1024 ** 3)).toFixed(2)} GB`
+          token.spaceinfo = `${(usedSize / 1024 ** 3).toFixed(2)} GB / ${(totalSize / 1024 ** 3).toFixed(2)} GB`
         }
         const vipInfo = Array.isArray(userInfo.vipInfo) ? userInfo.vipInfo : []
         const vipCurrent = vipInfo[0]
@@ -188,29 +189,29 @@ export const refreshCloud123AccessToken = async (refreshToken: string): Promise<
   const token = normalizeToken(data)
   if (token) {
     try {
-    const userInfo = await fetchCloud123UserInfo(token.access_token)
-    if (userInfo) {
-      const uid = userInfo.uid ?? userInfo.userId
-      if (uid) token.user_id = `cloud123_${uid}`
-      token.user_name = userInfo.nickname || token.user_name
-      token.nick_name = userInfo.nickname || token.nick_name
-      token.avatar = userInfo.headImage || token.avatar
-      const totalSize = userInfo.spacePermanent
-      const usedSize = userInfo.spaceUsed
-      if (typeof totalSize === 'number') token.total_size = totalSize
-      if (typeof usedSize === 'number') token.used_size = usedSize
-      if (typeof totalSize === 'number' && typeof usedSize === 'number') {
-        token.spaceinfo = `${(usedSize / (1024 ** 3)).toFixed(2)} GB / ${(totalSize / (1024 ** 3)).toFixed(2)} GB`
+      const userInfo = await fetchCloud123UserInfo(token.access_token)
+      if (userInfo) {
+        const uid = userInfo.uid ?? userInfo.userId
+        if (uid) token.user_id = buildDriveProviderUserId('cloud123', uid)
+        token.user_name = userInfo.nickname || token.user_name
+        token.nick_name = userInfo.nickname || token.nick_name
+        token.avatar = userInfo.headImage || token.avatar
+        const totalSize = userInfo.spacePermanent
+        const usedSize = userInfo.spaceUsed
+        if (typeof totalSize === 'number') token.total_size = totalSize
+        if (typeof usedSize === 'number') token.used_size = usedSize
+        if (typeof totalSize === 'number' && typeof usedSize === 'number') {
+          token.spaceinfo = `${(usedSize / 1024 ** 3).toFixed(2)} GB / ${(totalSize / 1024 ** 3).toFixed(2)} GB`
+        }
+        const vipInfo = Array.isArray(userInfo.vipInfo) ? userInfo.vipInfo : []
+        const vipCurrent = vipInfo[0]
+        if (vipCurrent?.vipLabel) token.vipname = vipCurrent.vipLabel
+        if (vipCurrent?.endTime) token.vipexpire = vipCurrent.endTime
+        if (userInfo.vip) token.vipIcon = token.vipIcon || ''
       }
-      const vipInfo = Array.isArray(userInfo.vipInfo) ? userInfo.vipInfo : []
-      const vipCurrent = vipInfo[0]
-      if (vipCurrent?.vipLabel) token.vipname = vipCurrent.vipLabel
-      if (vipCurrent?.endTime) token.vipexpire = vipCurrent.endTime
-      if (userInfo.vip) token.vipIcon = token.vipIcon || ''
+    } catch {
+      // ignore user info failure
     }
-  } catch {
-    // ignore user info failure
-  }
   }
   return token
 }

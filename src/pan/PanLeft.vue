@@ -2,12 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 
 import { Tree as AntdTree } from 'ant-design-vue'
+import collapseMotion from 'ant-design-vue/es/_util/collapseMotion'
 import usePanTreeStore, { PanTreeState } from './pantreestore'
 import MySwitchTab from '../layout/MySwitchTab.vue'
-import { KeyboardState, useAppStore, useKeyboardStore, usePanFileStore, useSettingStore, useWinStore } from '../store'
+import { KeyboardState, useAppStore, useKeyboardStore, usePanFileStore, useSettingStore } from '../store'
 import PanDAL from './pandal'
 import UserDAL from '../user/userdal'
-import type { ITokenInfo } from '../user/userstore'
 import useUserStore from '../user/userstore'
 import { onHideRightMenuScroll, onShowRightMenu, TestCtrl } from '../utils/keyboardhelper'
 import DirLeftMenu from './menus/DirLeftMenu.vue'
@@ -18,19 +18,21 @@ import message from '../utils/message'
 import { modalUpload } from '../utils/modal'
 import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
+import { loadDriveAccountOptions, toDriveAccountOption, type DriveAccountOption } from '../utils/driveAccount'
 
 const treeref = ref()
 const inputselectType = ref('backup')
-const winStore = useWinStore()
-// header 48 + drive switcher ~50 + segmented ~44 + paddings
-const treeHeight = computed(() => Math.max(220, winStore.height - 48 - 50 - 44 - 24))
 const appStore = useAppStore()
 const pantreeStore = usePanTreeStore()
 const settingStore = useSettingStore()
 const userStore = useUserStore()
 const isAliyunAccount = computed(() => isAliyunUser(pantreeStore.user_id || UserDAL.GetUserToken(pantreeStore.user_id || '')))
 const { capabilities: providerCapabilities } = useCurrentDriveProvider()
-const quickHeight = computed(() => Math.max(160, winStore.height - 48 - 50 - 44 - 24 - (providerCapabilities.value.colorTag ? 210 : 0)))
+const treeViewportRef = ref<HTMLElement | null>(null)
+const treeViewportHeight = ref(360)
+const treeHeight = computed(() => Math.max(160, treeViewportHeight.value))
+const quickHeight = computed(() => Math.max(120, treeViewportHeight.value - (providerCapabilities.value.colorTag ? 180 : 0)))
+const treeMotion = collapseMotion('mnemo-tree-collapse', false)
 
 const keyboardStore = useKeyboardStore()
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -275,65 +277,98 @@ const onTreeScroll = () => {
 
 const driveSwitcherLabel = computed(() => {
   const userId = pantreeStore.user_id || ''
-  const driveId = pantreeStore.drive_id || ''
   if (!userId) return '选择网盘账号'
   try {
     const token = UserDAL.GetUserToken(userId)
-    const nick = token?.nick_name || token?.user_name || userId
-    const driveTitle = GetDriveType(userId, driveId)?.title || '网盘'
-    return `${driveTitle} · ${nick}`
+    const account = toDriveAccountOption(token)
+    return `${account.providerLabel} · ${account.name}`
   } catch {
     return '网盘账号'
   }
 })
 
-const driveAccounts = ref<ITokenInfo[]>([])
+const currentDriveAccount = computed(() => {
+  const userId = pantreeStore.user_id || ''
+  if (!userId) return undefined
+  try {
+    return toDriveAccountOption(UserDAL.GetUserToken(userId))
+  } catch {
+    return undefined
+  }
+})
+const driveAccounts = ref<DriveAccountOption[]>([])
 const isSwitchingDrive = ref(false)
 const isDriveSwitcherOpen = ref(false)
 const driveSwitcherRef = ref<HTMLElement | null>(null)
 const driveSwitcherWidth = ref(220)
 let driveSwitcherObserver: ResizeObserver | undefined
+let treeViewportObserver: ResizeObserver | undefined
 
 onMounted(() => {
-  if (!driveSwitcherRef.value) return
-  const syncWidth = () => {
-    driveSwitcherWidth.value = Math.round(driveSwitcherRef.value?.getBoundingClientRect().width || 220)
+  if (driveSwitcherRef.value) {
+    const syncWidth = () => {
+      driveSwitcherWidth.value = Math.round(driveSwitcherRef.value?.getBoundingClientRect().width || 220)
+    }
+    syncWidth()
+    driveSwitcherObserver = new ResizeObserver(syncWidth)
+    driveSwitcherObserver.observe(driveSwitcherRef.value)
   }
-  syncWidth()
-  driveSwitcherObserver = new ResizeObserver(syncWidth)
-  driveSwitcherObserver.observe(driveSwitcherRef.value)
+  if (treeViewportRef.value) {
+    const syncHeight = () => {
+      const viewport = treeViewportRef.value
+      if (!viewport) return
+      const style = window.getComputedStyle(viewport)
+      const verticalPadding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
+      treeViewportHeight.value = Math.max(160, Math.floor(viewport.clientHeight - verticalPadding))
+    }
+    syncHeight()
+    treeViewportObserver = new ResizeObserver(syncHeight)
+    treeViewportObserver.observe(treeViewportRef.value)
+  }
 })
 
-onBeforeUnmount(() => driveSwitcherObserver?.disconnect())
+onBeforeUnmount(() => {
+  driveSwitcherObserver?.disconnect()
+  treeViewportObserver?.disconnect()
+})
 
 const refreshDriveAccounts = async (visible: boolean) => {
   isDriveSwitcherOpen.value = visible
   if (!visible) return
-  driveAccounts.value = await UserDAL.GetUserListFromDB().catch(() => UserDAL.GetUserList())
+  driveAccounts.value = await loadDriveAccountOptions().catch(() => UserDAL.GetUserList().map(toDriveAccountOption))
 }
 
 const handleSwitchDriveAccount = async (userId: string) => {
-  if (!userId || userId === userStore.user_id || isSwitchingDrive.value) return
+  if (!userId || isSwitchingDrive.value) return
+  if (userId === userStore.user_id) {
+    isDriveSwitcherOpen.value = false
+    return
+  }
   isSwitchingDrive.value = true
   try {
     const changed = await UserDAL.UserChange(userId)
-    if (!changed) message.error('切换网盘账号失败，请重新登录')
+    if (changed) isDriveSwitcherOpen.value = false
+    else message.error('切换网盘账号失败，请重新登录')
   } finally {
     isSwitchingDrive.value = false
   }
 }
 
 const handleOpenDriveLogin = () => {
+  isDriveSwitcherOpen.value = false
   userStore.userShowLogin = true
 }
 </script>
 <template>
   <aside class="pan-left" tabindex="-1" @keydown.tab.prevent="() => true">
-    <a-dropdown trigger="click" position="br" @popup-visible-change="refreshDriveAccounts">
+    <a-dropdown trigger="click" position="br" :popup-visible="isDriveSwitcherOpen" @popup-visible-change="refreshDriveAccounts">
       <div ref="driveSwitcherRef" class="pan-drive-switcher">
         <button type="button" class="pan-drive-switcher-btn" :aria-expanded="isDriveSwitcherOpen">
           <span class="meta">
-            <IconFont name="iconyunpan" class="drive-icon" />
+            <span class="drive-provider-mark" aria-hidden="true">
+              <img v-if="currentDriveAccount?.icon" :src="currentDriveAccount.icon" alt="" />
+              <IconFont v-else name="iconyunpan" />
+            </span>
             <span class="label">{{ driveSwitcherLabel }}</span>
           </span>
           <IconFont name="icondown" />
@@ -343,14 +378,20 @@ const handleOpenDriveLogin = () => {
         <div class="pan-drive-menu" :style="{ '--pan-drive-menu-width': `${driveSwitcherWidth}px` }">
           <div v-if="driveAccounts.length" class="pan-drive-menu-list">
             <button v-for="account in driveAccounts" :key="account.user_id" type="button" class="pan-drive-menu-item" :class="{ active: account.user_id === userStore.user_id }" :disabled="isSwitchingDrive" @click="handleSwitchDriveAccount(account.user_id)">
-              <IconFont name="iconyunpan" />
-              <span>{{ account.nick_name || account.user_name || account.user_id }}</span>
-              <small>{{ account.tokenfrom || '网盘' }}</small>
+              <span class="drive-provider-mark" aria-hidden="true">
+                <img v-if="account.icon" :src="account.icon" alt="" />
+                <span v-else>{{ account.providerLabel.slice(0, 1) }}</span>
+              </span>
+              <span>{{ account.name }}</span>
+              <small :title="account.detail">{{ account.detail }}</small>
               <IconFont v-if="account.user_id === userStore.user_id" name="iconrsuccess" class="current" />
             </button>
           </div>
           <div v-else class="pan-drive-menu-empty">还没有登录网盘账号</div>
-          <button type="button" class="pan-drive-menu-login" @click="handleOpenDriveLogin">登录网盘账号</button>
+          <button type="button" class="pan-drive-menu-login" @click="handleOpenDriveLogin">
+            <IconFont name="iconadd" />
+            <span>添加网盘</span>
+          </button>
         </div>
       </template>
     </a-dropdown>
@@ -360,7 +401,7 @@ const handleOpenDriveLogin = () => {
         <MySwitchTab :name="'panleft'" :tabs="switchValues" :value="appStore.GetAppTabMenu" @update:value="(val: string) => appStore.toggleTabMenu('pan', val)" />
       </div>
     </div>
-    <div class="treeleft">
+    <div ref="treeViewportRef" class="treeleft">
       <a-tabs type="text" :direction="'horizontal'" class="hidetabs" :justify="true" :active-key="appStore.GetAppTabMenu">
         <a-tab-pane key="wangpan" title="1">
           <div v-if="!pantreeStore.user_id" class="pan-tree-empty">
@@ -382,7 +423,7 @@ const handleOpenDriveLogin = () => {
             :style="{ height: treeHeight + 'px' }"
             :item-height="30"
             :show-line="{ showLeafIcon: false }"
-            :open-animation="{}"
+            :motion="treeMotion"
             :expanded-keys="pantreeStore.treeExpandedKeys"
             :selected-keys="pantreeStore.treeSelectedKeys"
             :tree-data="filterTreeData"
@@ -415,60 +456,63 @@ const handleOpenDriveLogin = () => {
           </AntdTree>
         </a-tab-pane>
         <a-tab-pane key="kuaijie" title="2">
-          <AntdTree
-            v-if="providerCapabilities.colorTag"
-            :tabindex="-1"
-            :focusable="false"
-            class="colortree"
-            block-node
-            selectable
-            :auto-expand-parent="false"
-            show-icon
-            :style="{ marginLeft: '-18px' }"
-            :item-height="30"
-            :show-line="false"
-            :open-animation="{}"
-            :selected-keys="pantreeStore.treeSelectedKeys"
-            :tree-data="colorTreeData"
-            @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, true)">
-            <template #icon="{ dataRef }">
-              <IconFont name="iconwbiaoqian" :class="dataRef.namesearch" />
-            </template>
-            <template #title="{ dataRef }">
-              <span :class="'dirtitle ' + dataRef.namesearch">标记 · {{ dataRef.title }}</span>
-            </template>
-          </AntdTree>
-          <div class="quicktree-area" @drop="onQuickDrop($event)" @dragover="onRowItemDragOver" @dragenter="onRowItemDragEnter" @dragleave="onRowItemDragLeave">
+          <div class="shortcut-tree-layout">
             <AntdTree
+              v-if="providerCapabilities.colorTag"
               :tabindex="-1"
               :focusable="false"
-              class="quicktree"
+              class="colortree"
               block-node
               selectable
               :auto-expand-parent="false"
               show-icon
-              :height="quickHeight"
-              :style="{ height: quickHeight + 'px', marginLeft: '-18px' }"
               :item-height="30"
               :show-line="false"
-              :open-animation="{}"
+              :motion="treeMotion"
               :selected-keys="pantreeStore.treeSelectedKeys"
-              :tree-data="pantreeStore.quickData"
+              :tree-data="colorTreeData"
               @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, true)">
-              <template #icon>
-                <IconFont name="iconfile-folder" />
+              <template #icon="{ dataRef }">
+                <IconFont name="iconwbiaoqian" :class="dataRef.namesearch" />
               </template>
               <template #title="{ dataRef }">
-                <div class="quickitem" @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)" @mouseleave="onTreeNodeLeave">
-                  <span class="quicktitle" :title="dataRef.namesearch">
-                    {{ dataRef.title }}
-                  </span>
-                  <span class="quickbtn">
-                    <a-button type="text" size="mini" @click.stop="handleQuickDelete(dataRef.key)">删除</a-button>
-                  </span>
-                </div>
+                <span :class="'dirtitle ' + dataRef.namesearch">标记 · {{ dataRef.title }}</span>
               </template>
             </AntdTree>
+            <div class="quicktree-area" @drop="onQuickDrop($event)" @dragover="onRowItemDragOver" @dragenter="onRowItemDragEnter" @dragleave="onRowItemDragLeave">
+              <AntdTree
+                :tabindex="-1"
+                :focusable="false"
+                class="quicktree"
+                block-node
+                selectable
+                :auto-expand-parent="false"
+                show-icon
+                :height="quickHeight"
+                :style="{ height: quickHeight + 'px' }"
+                :item-height="30"
+                :show-line="false"
+                :motion="treeMotion"
+                :selected-keys="pantreeStore.treeSelectedKeys"
+                :tree-data="pantreeStore.quickData"
+                @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, true)">
+                <template #icon>
+                  <IconFont name="iconfile-folder" />
+                </template>
+                <template #title="{ dataRef }">
+                  <div class="quickitem" @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)" @mouseleave="onTreeNodeLeave">
+                    <span class="quicktitle" :title="dataRef.namesearch">
+                      {{ dataRef.title }}
+                    </span>
+                    <span class="quickbtn">
+                      <a-button type="text" size="mini" title="删除快捷方式" aria-label="删除快捷方式" @click.stop="handleQuickDelete(dataRef.key)">
+                        <IconFont name="icondelete" />
+                      </a-button>
+                    </span>
+                  </div>
+                </template>
+              </AntdTree>
+            </div>
           </div>
         </a-tab-pane>
       </a-tabs>
@@ -479,14 +523,6 @@ const handleOpenDriveLogin = () => {
 </template>
 
 <style lang="less">
-.treeleft {
-  margin-left: -6px;
-}
-
-.dirtree {
-  height: 100%;
-}
-
 .ant-tree.ant-tree-show-line .ant-tree-child-tree li:not(:last-child)::before {
   border-left: none !important;
 }
@@ -549,30 +585,6 @@ const handleOpenDriveLogin = () => {
   font-size: 20px;
 }
 
-.dirtitle {
-  white-space: nowrap;
-  word-break: keep-all;
-}
-
-.dirtitle.treedragnode {
-  width: 100%;
-  display: inline-block;
-}
-
-.dirtree .ant-tree-list-holder-inner .ant-tree-node-content-wrapper {
-  flex-wrap: nowrap !important;
-  flex-shrink: 0 !important;
-  display: flex;
-}
-
-.dirtree .ant-tree-list-holder {
-  overflow-x: hidden;
-}
-
-.dirtree .ant-tree-title {
-  flex-grow: 1;
-}
-
 .ant-tree-node-selected .ant-tree-title,
 .ant-tree-node-selected .ant-tree-title > span {
   color: rgb(var(--primary-6)) !important;
@@ -582,35 +594,6 @@ const handleOpenDriveLogin = () => {
 body[arco-theme='dark'] .ant-tree-node-selected .ant-tree-title,
 body[arco-theme='dark'] .ant-tree-node-selected .ant-tree-title > span {
   color: rgb(255, 255, 255) !important;
-}
-
-.headswitch {
-  width: 100%;
-  height: 56px;
-  overflow: hidden;
-  text-align: center;
-  justify-content: center;
-  position: relative;
-  padding-top: 16px;
-  padding-bottom: 6px;
-  margin-left: -18px;
-  flex-shrink: 0;
-  flex-grow: 0;
-}
-
-.headswitch .bghr {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 32px;
-  border-bottom: 1px solid var(--color-neutral-3);
-  z-index: -1;
-}
-
-.headswitch .sw {
-  margin: 0 auto;
-  background: var(--color-bg-1);
-  width: fit-content;
 }
 
 .rootsearch {
@@ -623,60 +606,8 @@ body[arco-theme='dark'] .ant-tree-node-selected .ant-tree-title > span {
   border: 1px solid rgb(var(--primary-6)) !important;
 }
 
-.colortree {
-  height: 180px;
-  flex-shrink: 0;
-  flex-grow: 0;
-}
-
 .quicktree .ant-tree-icon__customize .iconfont {
   font-size: 18px;
   margin-right: 2px;
-}
-
-.quicktree .ant-tree-node-content-wrapper {
-  flex: auto;
-  display: flex !important;
-  flex-direction: row;
-}
-
-.quicktree .ant-tree-title {
-  flex: auto;
-  display: flex !important;
-  flex-direction: row;
-}
-
-.quickitem {
-  display: flex;
-}
-
-.quickitem .quicktitle {
-  flex-shrink: 1;
-  flex-grow: 1;
-  display: -webkit-box;
-  max-height: 24px;
-  word-break: break-all;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-line-clamp: 1;
-}
-
-.quickitem .quickbtn {
-  flex-shrink: 0;
-  flex-grow: 0;
-  padding-left: 2px;
-  padding-right: 2px;
-  font-size: 12px;
-  color: var(--color-text-3);
-}
-
-.quicktree .quickbtn .arco-btn-size-mini {
-  padding: 0 4px;
-}
-
-.quicktree .quickbtn .arco-btn-size-mini:hover,
-.quicktree .quickbtn .arco-btn-size-mini:active {
-  color: #fff !important;
-  background: rgba(255, 77, 79, 0.85) !important;
 }
 </style>

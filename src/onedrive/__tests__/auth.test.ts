@@ -11,6 +11,7 @@ describe('OneDrive auth helpers', () => {
     expect(parsed.searchParams.get('response_type')).toBe('code')
     expect(parsed.searchParams.get('redirect_uri')).toBe('boxplayer-onedriveoauth://callback')
     expect(parsed.searchParams.get('response_mode')).toBe('query')
+    expect(parsed.searchParams.get('prompt')).toBe('select_account')
     expect(parsed.searchParams.get('code_challenge_method')).toBe('S256')
     expect(parsed.searchParams.get('code_challenge')).toBeTruthy()
     expect(parsed.searchParams.get('state')).toBe('state-1')

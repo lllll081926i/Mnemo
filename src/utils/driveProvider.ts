@@ -226,6 +226,24 @@ const providerAliases: Array<[DriveProvider, string[], string[]]> = [
   ['aliyun', ['aliyun_'], []]
 ]
 
+const driveProviderUserIdPrefixes: Record<DriveProvider, string> = {
+  aliyun: '',
+  cloud123: 'cloud123_',
+  '115': '115_',
+  '139': 'cloud139_',
+  '189': 'cloud189_',
+  guangya: 'guangya_',
+  baidu: 'baidu_',
+  pikpak: 'pikpak_',
+  quark: 'quark_',
+  dropbox: 'dropbox_',
+  onedrive: 'onedrive_',
+  box: 'box_',
+  webdav: 'webdav:',
+  s3: 's3:',
+  unknown: ''
+}
+
 export const resolveDriveProvider = (context: DriveProviderContext | string = {}): DriveProvider => {
   const resolvedContext = typeof context === 'string' ? { tokenfrom: context } : context
   const tokenfrom = resolvedContext.tokenfrom as DriveProvider | undefined
@@ -236,6 +254,22 @@ export const resolveDriveProvider = (context: DriveProviderContext | string = {}
     if (userPrefixes.some((prefix) => userId.startsWith(prefix)) || driveIds.includes(driveId)) return provider
   }
   return 'unknown'
+}
+
+export const buildDriveProviderUserId = (provider: DriveProvider, accountId: string | number): string => {
+  const value = String(accountId ?? '').trim()
+  if (!value) return ''
+  const prefix = driveProviderUserIdPrefixes[provider]
+  if (!prefix || value.startsWith(prefix)) return value
+  return `${prefix}${value}`
+}
+
+export const getDriveProviderAccountId = (userId: string, provider?: DriveProvider): string => {
+  const value = String(userId || '')
+  if (!value) return ''
+  const resolvedProvider = provider || resolveDriveProvider({ userId: value })
+  const prefix = driveProviderUserIdPrefixes[resolvedProvider]
+  return prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value
 }
 
 export const getDriveProviderCapabilities = (context: DriveProviderContext | string = {}): DriveProviderCapabilities => driveProviderCapabilities[resolveDriveProvider(context)]

@@ -49,6 +49,7 @@ export const buildOneDriveAuthUrl = async (clientId: string, verifier: string, s
     response_type: 'code',
     redirect_uri: ONEDRIVE_REDIRECT_URL,
     response_mode: 'query',
+    prompt: 'select_account',
     scope: ONEDRIVE_SCOPE,
     state,
     code_challenge: challenge,
@@ -158,11 +159,15 @@ export const exchangeOneDriveCodeForToken = async (code: string, clientId: strin
     grant_type: 'authorization_code',
     code_verifier: verifier
   })
-  const data = await graphJson<any>(ONEDRIVE_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  }, '获取 OneDrive access_token 失败')
+  const data = await graphJson<any>(
+    ONEDRIVE_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    },
+    '获取 OneDrive access_token 失败'
+  )
   const token = normalizeOneDriveToken(data, clientId)
   if (token) {
     await applyOneDriveAccount(token)
@@ -181,11 +186,15 @@ export const refreshOneDriveAccessToken = async (token: ITokenInfo): Promise<ITo
     refresh_token: token.refresh_token,
     grant_type: 'refresh_token'
   })
-  const data = await graphJson<any>(ONEDRIVE_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  }, '刷新 OneDrive Token 失败')
+  const data = await graphJson<any>(
+    ONEDRIVE_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    },
+    '刷新 OneDrive Token 失败'
+  )
   if (!data?.access_token) return null
   token.access_token = data.access_token
   if (data.refresh_token) token.refresh_token = data.refresh_token

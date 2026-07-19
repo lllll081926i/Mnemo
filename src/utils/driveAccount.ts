@@ -1,26 +1,44 @@
 import UserDAL from '../user/userdal'
 import type { ITokenInfo } from '../user/userstore'
-import { getDriveProviderIcon, getDriveProviderLabel, type DriveProvider } from './driveProvider'
+import { getDriveProviderAccountId, getDriveProviderIcon, getDriveProviderLabel, type DriveProvider } from './driveProvider'
 
 export interface DriveAccountOption {
   user_id: string
   name: string
   provider: DriveProvider
   providerLabel: string
+  detail: string
   icon: string
 }
 
-export const toDriveAccountOption = (token: ITokenInfo): DriveAccountOption => ({
-  user_id: token.user_id,
-  name: token.nick_name || token.user_name || token.name || token.user_id,
-  provider: token.tokenfrom,
-  providerLabel: getDriveProviderLabel(token.tokenfrom),
-  icon: getDriveProviderIcon(token.tokenfrom)
-})
+const getAccountIdentifier = (token: ITokenInfo, name: string, providerLabel: string) => {
+  const accountName = (token.user_name || '').trim()
+  if (accountName && accountName !== name && accountName !== providerLabel) return accountName
+  const accountId = getDriveProviderAccountId(token.user_id, token.tokenfrom)
+  if (!accountId || accountId === name) return ''
+  return accountId.length > 12 ? `••••${accountId.slice(-6)}` : accountId
+}
+
+export const toDriveAccountOption = (token: ITokenInfo): DriveAccountOption => {
+  const name = token.nick_name || token.user_name || token.name || token.user_id
+  const providerLabel = getDriveProviderLabel(token.tokenfrom)
+  const identifier = getAccountIdentifier(token, name, providerLabel)
+  return {
+    user_id: token.user_id,
+    name,
+    provider: token.tokenfrom,
+    providerLabel,
+    detail: identifier ? `${providerLabel} · ${identifier}` : providerLabel,
+    icon: getDriveProviderIcon(token.tokenfrom)
+  }
+}
 
 export const loadDriveAccountOptions = async (): Promise<DriveAccountOption[]> => {
   const tokens = await UserDAL.GetUserListFromDB()
-  return tokens.filter((token) => !!token.user_id).map(toDriveAccountOption)
+  return tokens
+    .filter((token) => !!token.user_id)
+    .map(toDriveAccountOption)
+    .sort((a, b) => a.providerLabel.localeCompare(b.providerLabel) || a.name.localeCompare(b.name) || a.user_id.localeCompare(b.user_id))
 }
 
 export const getDriveAccountLabel = (userId: string): string => {

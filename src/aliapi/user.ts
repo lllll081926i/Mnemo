@@ -10,6 +10,7 @@ import getUuid from 'uuid-by-string'
 import { useSettingStore } from '../store'
 import { refreshCloud123AccessToken } from '../utils/cloud123'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
+import { buildDriveProviderUserId } from '../utils/driveProvider'
 
 export const TokenReTimeMap = new Map<string, number>()
 export const TokenLockMap = new Map<string, number>()
@@ -18,7 +19,6 @@ export const OpenApiTokenLockMap = new Map<string, number>()
 export const SessionLockMap = new Map<string, number>()
 export const SessionReTimeMap = new Map<string, number>()
 export default class AliUser {
-
   static async ApiSessionRefreshAccount(token: ITokenInfo, showMessage: boolean, forceRefresh: boolean = false): Promise<boolean> {
     if (!token.user_id) return false
     if (!forceRefresh && new Date(token.session_expires_in).getTime() >= Date.now()) return true
@@ -40,9 +40,9 @@ export default class AliUser {
     const apiUrl = 'https://api.aliyundrive.com/users/v1/users/device/create_session'
     let { signature, publicKey } = GetSignature(0, token.user_id, token.device_id)
     const postData = {
-      'deviceName': 'Edge浏览器',
-      'modelName': 'Windows网页版',
-      'pubKey': publicKey
+      deviceName: 'Edge浏览器',
+      modelName: 'Windows网页版',
+      pubKey: publicKey
     }
     const resp = await AliHttp.Post(apiUrl, postData, token.user_id, '')
     SessionLockMap.delete(token.user_id)
@@ -62,7 +62,9 @@ export default class AliUser {
   }
 
   static async ApiTokenRefreshAccount(token: ITokenInfo, showMessage: boolean, forceRefresh: boolean = false): Promise<boolean> {
-    if (token.user_id?.startsWith('cloud123_')) { return true }
+    if (token.user_id?.startsWith('cloud123_')) {
+      return true
+    }
     if (!token.refresh_token) return false
     if (!forceRefresh && new Date(token.expire_time).getTime() >= Date.now()) return true
     if (forceRefresh) {
@@ -124,7 +126,6 @@ export default class AliUser {
     }
     return false
   }
-
 
   static async OpenApiTokenRefreshAccount(token: ITokenInfo, showMessage: boolean, forceRefresh: boolean = false): Promise<boolean> {
     if (isCloud123User(token)) {
@@ -352,6 +353,9 @@ export default class AliUser {
       const data = await resp.json()
       if (data?.code !== 0 || !data?.data) return false
       const info = data.data
+      const previousUserId = token.user_id
+      const accountId = info.uid ?? info.userId
+      if (accountId !== undefined && accountId !== null && String(accountId)) token.user_id = buildDriveProviderUserId('cloud123', accountId)
       token.user_name = info.nickname || token.user_name
       token.nick_name = info.nickname || token.nick_name
       token.avatar = info.headImage || token.avatar
@@ -365,7 +369,7 @@ export default class AliUser {
       if (vipCurrent?.vipLabel) token.vipname = vipCurrent.vipLabel
       if (vipCurrent?.endTime) token.vipexpire = vipCurrent.endTime
       if (info.vip) token.vipIcon = token.vipIcon || ''
-      UserDAL.SaveUserToken(token)
+      UserDAL.SaveUserToken(token, previousUserId)
       return true
     } catch (err: any) {
       DebugLog.mSaveWarning('Drive123UserInfo err=' + (err?.message || ''), err)
@@ -386,6 +390,9 @@ export default class AliUser {
       const data = await resp.json()
       if (data?.code !== 0 || !data?.data) return false
       const info = data.data
+      const previousUserId = token.user_id
+      const accountId = info.user_id ?? info.userId ?? info.uid
+      if (accountId !== undefined && accountId !== null && String(accountId)) token.user_id = buildDriveProviderUserId('115', accountId)
       token.user_name = info.user_name || token.user_name
       token.nick_name = info.user_name || token.nick_name
       token.avatar = info.user_face_m || info.user_face_l || info.user_face_s || token.avatar
@@ -401,7 +408,7 @@ export default class AliUser {
       }
       if (info?.vip_info?.level_name) token.vipname = info.vip_info.level_name
       if (info?.vip_info?.expire) token.vipexpire = String(info.vip_info.expire)
-      UserDAL.SaveUserToken(token)
+      UserDAL.SaveUserToken(token, previousUserId)
       return true
     } catch (err: any) {
       DebugLog.mSaveWarning('Drive115UserInfo err=' + (err?.message || ''), err)
@@ -426,12 +433,13 @@ export default class AliUser {
       if (!resp.ok) return false
       const data = await resp.json()
       if (data?.errno !== 0) return false
+      const previousUserId = token.user_id
       token.user_name = data.netdisk_name || data.baidu_name || token.user_name
       token.nick_name = data.netdisk_name || data.baidu_name || token.nick_name
       token.avatar = data.avatar_url || token.avatar
       if (data.vip_type === 2) token.vipname = 'SVIP'
       if (data.vip_type === 1) token.vipname = 'VIP'
-      if (!token.user_id && data.uk) token.user_id = `baidu_${data.uk}`
+      if (data.uk !== undefined && data.uk !== null && String(data.uk)) token.user_id = buildDriveProviderUserId('baidu', data.uk)
       const quotaParams = new URLSearchParams({
         access_token: token.access_token,
         checkfree: '1',
@@ -455,7 +463,7 @@ export default class AliUser {
           }
         }
       }
-      UserDAL.SaveUserToken(token)
+      UserDAL.SaveUserToken(token, previousUserId)
       return true
     } catch (err: any) {
       DebugLog.mSaveWarning('DriveBaiduUserInfo err=' + (err?.message || ''), err)
@@ -532,7 +540,6 @@ export default class AliUser {
     return -1
   }
 
-
   static async ApiUserRewardSpace(user_id: string, gift_code: string) {
     if (!user_id) return false
     const url = 'https://member.aliyundrive.com/v1/users/rewards'
@@ -556,7 +563,6 @@ export default class AliUser {
     if (!token.user_id) return false
     const url = 'business/v1.0/users/vip/info'
 
-
     const postData = {}
     const resp = await AliHttp.Post(url, postData, token.user_id, '')
     if (AliHttp.IsSuccess(resp.code)) {
@@ -578,11 +584,9 @@ export default class AliUser {
     return false
   }
 
-
   static async ApiUserPic(token: ITokenInfo): Promise<boolean> {
     if (!token.user_id) return false
     const url = 'adrive/v1/user/albums_info'
-
 
     const postData = {}
     const resp = await AliHttp.Post(url, postData, token.user_id, '')
@@ -594,7 +598,6 @@ export default class AliUser {
     }
     return false
   }
-
 
   static async ApiUserDriveDetails(user_id: string): Promise<IAliUserDriveDetails> {
     const detail: IAliUserDriveDetails = {
@@ -655,7 +658,6 @@ export default class AliUser {
     }
     return 0
   }
-
 
   static async ApiUserCapacityDetails(user_id: string): Promise<IAliUserDriveCapacity[]> {
     let result: IAliUserDriveCapacity[] = []

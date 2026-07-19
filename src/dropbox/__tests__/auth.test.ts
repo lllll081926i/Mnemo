@@ -11,6 +11,7 @@ describe('Dropbox auth helpers', () => {
     expect(parsed.searchParams.get('client_id')).toBe('app-key')
     expect(parsed.searchParams.get('response_type')).toBe('code')
     expect(parsed.searchParams.get('token_access_type')).toBe('offline')
+    expect(parsed.searchParams.get('force_reapprove')).toBe('true')
     expect(parsed.searchParams.get('code_challenge_method')).toBe('S256')
     expect(parsed.searchParams.get('code_challenge')).toBeTruthy()
     expect(parsed.searchParams.get('state')).toBe('state-1')

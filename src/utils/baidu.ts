@@ -2,6 +2,7 @@ import { ITokenInfo } from '../user/userstore'
 import UserDAL from '../user/userdal'
 import message from './message'
 import { BAIDU_APP_ID, BAIDU_APP_SECRET } from '../secrets.generated'
+import { buildDriveProviderUserId } from './driveProvider'
 
 const BAIDU_AUTH_URL = 'https://openapi.baidu.com/oauth/2.0/authorize'
 const BAIDU_TOKEN_URL = 'https://openapi.baidu.com/oauth/2.0/token'
@@ -37,7 +38,7 @@ const normalizeToken = (data: any): ITokenInfo | null => {
     device_id: '',
     expires_in: expiresIn,
     token_type: data.token_type || 'Bearer',
-    user_id: `baidu_${hashString(data.refresh_token || data.access_token)}`,
+    user_id: buildDriveProviderUserId('baidu', hashString(data.refresh_token || data.access_token)),
     user_name: '百度网盘',
     avatar: '',
     nick_name: '百度网盘',
@@ -143,7 +144,7 @@ export const exchangeBaiduCodeForToken = async (code: string): Promise<ITokenInf
       const info = await fetchBaiduUserInfo(token.access_token)
       if (info) {
         const uk = info.uk ?? info.user_id
-        if (!token.user_id && uk) token.user_id = `baidu_${uk}`
+        if (uk !== undefined && uk !== null && String(uk)) token.user_id = buildDriveProviderUserId('baidu', uk)
         token.user_name = info.netdisk_name || info.baidu_name || token.user_name
         token.nick_name = info.netdisk_name || info.baidu_name || token.nick_name
         token.avatar = info.avatar_url || token.avatar
@@ -157,7 +158,7 @@ export const exchangeBaiduCodeForToken = async (code: string): Promise<ITokenInf
         if (typeof quota.free === 'number') token.free_size = quota.free
         if (typeof quota.expire === 'boolean') token.space_expire = quota.expire
         if (typeof quota.total === 'number' && typeof quota.used === 'number') {
-          token.spaceinfo = `${(quota.used / (1024 ** 3)).toFixed(2)} GB / ${(quota.total / (1024 ** 3)).toFixed(2)} GB`
+          token.spaceinfo = `${(quota.used / 1024 ** 3).toFixed(2)} GB / ${(quota.total / 1024 ** 3).toFixed(2)} GB`
         }
       }
     } catch {
@@ -190,7 +191,7 @@ export const refreshBaiduAccessToken = async (refreshToken: string): Promise<ITo
       const info = await fetchBaiduUserInfo(token.access_token)
       if (info) {
         const uk = info.uk ?? info.user_id
-        if (!token.user_id && uk) token.user_id = `baidu_${uk}`
+        if (uk !== undefined && uk !== null && String(uk)) token.user_id = buildDriveProviderUserId('baidu', uk)
         token.user_name = info.netdisk_name || info.baidu_name || token.user_name
         token.nick_name = info.netdisk_name || info.baidu_name || token.nick_name
         token.avatar = info.avatar_url || token.avatar
@@ -204,7 +205,7 @@ export const refreshBaiduAccessToken = async (refreshToken: string): Promise<ITo
         if (typeof quota.free === 'number') token.free_size = quota.free
         if (typeof quota.expire === 'boolean') token.space_expire = quota.expire
         if (typeof quota.total === 'number' && typeof quota.used === 'number') {
-          token.spaceinfo = `${(quota.used / (1024 ** 3)).toFixed(2)} GB / ${(quota.total / (1024 ** 3)).toFixed(2)} GB`
+          token.spaceinfo = `${(quota.used / 1024 ** 3).toFixed(2)} GB / ${(quota.total / 1024 ** 3).toFixed(2)} GB`
         }
       }
     } catch {
