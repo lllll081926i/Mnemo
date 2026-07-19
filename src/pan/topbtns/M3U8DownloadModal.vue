@@ -57,15 +57,10 @@ const handleOpen = async () => {
   }
 }
 
-const handleDownload = (item: any) => {
-  message.error('当前版本M3U8视频下载功能尚不可用，可以自行使用其他m3u8下载软件下载', 5)
-  handleCopyUrl(item)
-}
-
 const handleCopyUrl = (item: any) => {
   if (item.url) {
     copyToClipboard(item.url)
-    message.success(item.label + ' M3U8下载链接已复制到剪切板')
+    message.success(item.label + ' 转码链接已复制到剪切板')
   }
 }
 
@@ -87,7 +82,7 @@ const handleHide = () => {
   <a-modal :visible="visible" modal-class="modalclass" :footer="false" :unmount-on-close="true" :mask-closable="false"
            @cancel="handleHide" @before-open="handleOpen" @close="handleClose">
     <template #title>
-      <span class="modaltitle">下载转码后的视频</span>
+      <span class="modaltitle">转码视频链接</span>
     </template>
     <div class="modalbody" style="width: 540px">
       <div style="width: 100%">
@@ -112,21 +107,10 @@ const handleHide = () => {
             </span>
           </div>
           <span class="arco-upload-list-item-operation">
-            <a-button-group>
-              <a-button type="outline" size="small" @click="() => handleCopyUrl(item)">复制</a-button>
-              <a-button type="outline" size="small" @click="() => handleDownload(item)">下载</a-button>
-            </a-button-group>
+            <a-button type="outline" size="small" @click="() => handleCopyUrl(item)">复制</a-button>
           </span>
         </div>
       </div>
-
-      <a-typography style="background: var(--color-fill-2); padding: 8px; margin-top: 24px">
-        <a-typography-paragraph>说明:</a-typography-paragraph>
-        <ul>
-          <li>转码视频下载功能当前版本不可用</li>
-          <li>m3u8是一堆ts文件，下载后会自动合并成一个完整的文件</li>
-        </ul>
-      </a-typography>
     </div>
   </a-modal>
 </template>

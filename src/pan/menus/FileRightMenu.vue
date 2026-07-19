@@ -189,7 +189,7 @@ const canCreateShare = computed(() => capabilities.value.createShare && (provide
           </a-doption>
           <a-doption v-if="isvideo" @click="() => menuM3U8Download()">
             <template #icon><IconFont name="iconluxiang" /></template>
-            <template #default>M3U8下载</template>
+            <template #default>转码链接</template>
           </a-doption>
           <a-doption v-if="isselected" @click="() => menuCopyFileName()">
             <template #icon><IconFont name="iconlist" /></template>
