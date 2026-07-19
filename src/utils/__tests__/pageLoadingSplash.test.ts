@@ -18,6 +18,7 @@ describe('app startup rendering', () => {
     expect(app).toContain("return h('div', { class: 'desktop-loading-empty' })")
     expect(windowSource).not.toContain('splash')
     expect(windowSource).not.toContain('?splash=')
+    expect(windowSource).toContain('export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true)')
     expect(ipcSource).not.toContain("data.page === 'PageMusic' ? 'music' : undefined")
   })
 })
