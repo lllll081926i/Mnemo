@@ -10,6 +10,7 @@ export interface ShareHistoryState {
   ListLoading: boolean
   ListDataRaw: Item[]
   ListDataShow: Item[]
+  LoadedAccountId: string
 
   ListSelected: Set<string>
   ListOrderKey: string
@@ -26,6 +27,7 @@ const useShareHistoryStore = defineStore('sharehistory', {
     ListLoading: false,
     ListDataRaw: [],
     ListDataShow: [],
+    LoadedAccountId: '',
     ListSelected: new Set<string>(),
     ListOrderKey: 'mtime',
     ListFocusKey: '',
@@ -69,13 +71,14 @@ const useShareHistoryStore = defineStore('sharehistory', {
 
   actions: {
 
-    aLoadListData(list: Item[]) {
+    aLoadListData(list: Item[], accountId: string = '') {
       let item: Item
       for (let i = 0, maxi = list.length; i < maxi; i++) {
         item = list[i]
         item.display_name = HanToPin(item.share_name)
       }
       this.ListDataRaw = this.mGetOrder(this.ListOrderKey, list)
+      this.LoadedAccountId = accountId
       const oldSelected = this.ListSelected
       const newSelected = new Set<string>()
       let key = ''

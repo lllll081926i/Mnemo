@@ -1,23 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import {
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useKeyboardStore,
-  useMouseStore,
-  useUserStore,
-  useWinStore
-} from '../../store'
+import { KeyboardState, MouseState, useAppStore, useKeyboardStore, useMouseStore, useWinStore } from '../../store'
 import ShareDAL from './ShareDAL'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  TestCtrl,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../../utils/keyboardhelper'
+import { onHideRightMenuScroll, onShowRightMenu, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../../utils/keyboardhelper'
 import { copyToClipboard, openExternal } from '../../utils/electronhelper'
 import message from '../../utils/message'
 
@@ -28,6 +13,8 @@ import useShareHistoryStore from './ShareHistoryStore'
 import AliShare from '../../aliapi/share'
 import { TestButton } from '../../utils/mosehelper'
 import { xorWith } from 'lodash'
+
+const props = defineProps<{ accountId: string }>()
 
 const viewlist = ref()
 const inputsearch = ref()
@@ -55,14 +42,17 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'share') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
 })
 
 const rangIsSelecting = ref(false)
@@ -93,7 +83,10 @@ const onSelectReverse = () => {
   shareHistoryStore.ListSelected.clear()
   shareHistoryStore.ListFocusKey = ''
   if (reverseSelect.length > 0) {
-    shareHistoryStore.mRangSelect(reverseSelect[0].share_id, reverseSelect.map(r => r.share_id))
+    shareHistoryStore.mRangSelect(
+      reverseSelect[0].share_id,
+      reverseSelect.map((r) => r.share_id)
+    )
   }
   shareHistoryStore.mRefreshListDataShow(false)
 }
@@ -129,7 +122,7 @@ const onSelectRang = (share_id: string) => {
   }
 }
 
-const handleRefresh = () => ShareDAL.aReloadShareHistory(useUserStore().user_id, true)
+const handleRefresh = () => ShareDAL.aReloadShareHistory(props.accountId, true)
 const handleSelectAll = () => shareHistoryStore.mSelectAll()
 const handleOrder = (order: string) => shareHistoryStore.mOrderListData(order)
 const handleSelect = (share_id: string, event: any, isCtrl: boolean = false) => {
@@ -239,64 +232,61 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 </script>
 
 <template>
-  <div style="height: 7px"></div>
-  <div class='toppanbtns' style='height: 26px'>
-    <div style="min-height: 26px; max-width: 100%; flex-shrink: 0; flex-grow: 0">
-      <div class="toppannav">
-        <div class="toppannavitem" title="历史导入">
-          <span> 历史导入 </span>
-        </div>
-      </div>
-    </div>
-    <div class='flex flexauto'></div>
-  </div>
-  <div style="height: 14px"></div>
-  <div class="toppanbtns" style="height: 26px">
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" :loading="shareHistoryStore.ListLoading" title="F5"
-                @click="handleRefresh">
+  <div class="toppanbtns">
+    <div v-if="!shareHistoryStore.IsListSelected" class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" :loading="shareHistoryStore.ListLoading" title="F5" @click="handleRefresh">
         <template #icon>
           <IconFont name="iconreload-1-icon" />
         </template>
         刷新
       </a-button>
     </div>
-    <div v-show="shareHistoryStore.IsListSelected" class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink"><IconFont name="iconchakan" />查看
+    <div v-else class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink">
+        <IconFont name="iconchakan" />
+        查看
       </a-button>
       <a-button type="text" size="small" tabindex="-1" title="保存到我的导入" @click="handleSaveMyImport">
-        <IconFont name="iconxuanzhuan" />保存导入
+        <IconFont name="iconxuanzhuan" />
+        保存导入
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink"><IconFont name="iconcopy" />复制链接
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink">
+        <IconFont name="iconcopy" />
+        复制链接
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+B" @click="handleBrowserLink"><IconFont name="iconchrome" />浏览器
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+B" @click="handleBrowserLink">
+        <IconFont name="iconchrome" />
+        浏览器
       </a-button>
     </div>
-    <div style="flex-grow: 1"></div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="toppanbtn">
-      <a-input-search ref="inputsearch" tabindex="-1" size="small" title="Ctrl+F / F3 / Space" placeholder="快速筛选"
-                      v-model="shareHistoryStore.ListSearchKey" allow-clear
-                      @clear='(e:any)=>handleSearchInput("")'
-                      @input="(val:any)=>handleSearchInput(val as string)"
-                      @press-enter="handleSearchEnter"
-                      @keydown.esc=";($event.target as any).blur()" />
+      <a-input-search
+        ref="inputsearch"
+        tabindex="-1"
+        size="small"
+        title="Ctrl+F / F3 / Space"
+        placeholder="快速筛选"
+        v-model="shareHistoryStore.ListSearchKey"
+        allow-clear
+        @clear="(e: any) => handleSearchInput('')"
+        @input="(val: any) => handleSearchInput(val as string)"
+        @press-enter="handleSearchEnter"
+        @keydown.esc=";($event.target as any).blur()"
+      />
     </div>
-    <div></div>
   </div>
-  <div style="height: 9px"></div>
   <div class="toppanarea">
-    <div style="margin: 0 3px">
+    <div class="list-selection-primary">
       <AntdTooltip title="点击全选" placement="left">
         <a-button shape="circle" type="text" tabindex="-1" class="select all" title="Ctrl+A" @click="handleSelectAll">
           <IconFont :name="shareHistoryStore.IsListSelectedAll ? 'iconrsuccess' : 'iconpic2'" />
         </a-button>
       </AntdTooltip>
-      <div class='selectInfo'>{{ shareHistoryStore.ListDataSelectCountInfo }}</div>
-      <div style='margin: 0 2px'>
-        <AntdTooltip placement='rightTop' v-if="shareHistoryStore.ListDataShow.length > 0">
-          <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                    :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+      <div class="selectInfo">{{ shareHistoryStore.ListDataSelectCountInfo }}</div>
+      <div class="list-selection-actions">
+        <AntdTooltip placement="rightTop" v-if="shareHistoryStore.ListDataShow.length > 0">
+          <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
             {{ rangIsSelecting ? '取消选择' : '区间选择' }}
           </a-button>
           <template #title>
@@ -309,50 +299,42 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
             </div>
           </template>
         </AntdTooltip>
-        <a-button shape='square'
-                  v-if='!rangIsSelecting && shareHistoryStore.ListSelected.size > 0 && shareHistoryStore.ListSelected.size < shareHistoryStore.ListDataShow.length'
-                  type='text'
-                  tabindex='-1'
-                  class='qujian'
-                  status='normal' @click='onSelectReverse'>
+        <a-button
+          shape="square"
+          v-if="!rangIsSelecting && shareHistoryStore.ListSelected.size > 0 && shareHistoryStore.ListSelected.size < shareHistoryStore.ListDataShow.length"
+          type="text"
+          tabindex="-1"
+          class="qujian"
+          status="normal"
+          @click="onSelectReverse"
+        >
           反向选择
         </a-button>
-        <a-button shape='square' v-if='!rangIsSelecting && shareHistoryStore.ListSelected.size > 0' type='text'
-                  tabindex='-1' class='qujian'
-                  status='normal' @click='onSelectCancel'>
-          取消已选
-        </a-button>
+        <a-button shape="square" v-if="!rangIsSelecting && shareHistoryStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
       </div>
     </div>
-    <div style="flex-grow: 1"></div>
-    <div :class="'cell count order ' + (shareHistoryStore.ListOrderKey == 'save' ? 'active' : '')"
-         @click="handleOrder('save')">
+    <div class="toolbar-spacer"></div>
+    <div :class="'cell count order ' + (shareHistoryStore.ListOrderKey == 'save' ? 'active' : '')" @click="handleOrder('save')">
       保存数
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell count order ' + (shareHistoryStore.ListOrderKey == 'preview' ? 'active' : '')"
-         @click="handleOrder('preview')">
+    <div :class="'cell count order ' + (shareHistoryStore.ListOrderKey == 'preview' ? 'active' : '')" @click="handleOrder('preview')">
       预览数
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell count order ' + (shareHistoryStore.ListOrderKey == 'browse' ? 'active' : '')"
-         @click="handleOrder('browse')">
+    <div :class="'cell count order ' + (shareHistoryStore.ListOrderKey == 'browse' ? 'active' : '')" @click="handleOrder('browse')">
       浏览数
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell sharetime order ' + (shareHistoryStore.ListOrderKey == 'ctime' ? 'active' : '')"
-         @click="handleOrder('ctime')">
+    <div :class="'cell sharetime order ' + (shareHistoryStore.ListOrderKey == 'ctime' ? 'active' : '')" @click="handleOrder('ctime')">
       创建时间
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell sharetime order ' + (shareHistoryStore.ListOrderKey == 'mtime' ? 'active' : '')"
-         @click="handleOrder('mtime')">
+    <div :class="'cell sharetime order ' + (shareHistoryStore.ListOrderKey == 'mtime' ? 'active' : '')" @click="handleOrder('mtime')">
       修改时间
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell count'">
-      创建者
-    </div>
+    <div :class="'cell count'">创建者</div>
     <div class="cell pr"></div>
   </div>
   <div class="toppanlist" @keydown.space.prevent="() => true">
@@ -368,24 +350,23 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         threshold: 1,
         itemKey: 'share_id'
       }"
-      style="width: 100%"
       :data="shareHistoryStore.ListDataShow"
       tabindex="-1"
-      @scroll="onHideRightMenuScroll">
+      @scroll="onHideRightMenuScroll"
+    >
       <template #empty>
-        <a-empty description="没导入过任何分享链接" />
+        <a-empty description="暂无历史记录" />
       </template>
       <template #item="{ item, index }">
         <div :key="item.share_id" class="listitemdiv">
           <div
             :class="'fileitem' + (shareHistoryStore.ListSelected.has(item.share_id) ? ' selected' : '') + (shareHistoryStore.ListFocusKey == item.share_id ? ' focus' : '')"
             @click="handleSelect(item.share_id, $event)"
-            @mouseover='onSelectRang(item.share_id)'
-            @contextmenu="(event:MouseEvent)=>handleRightClick({event,node:{key:item.share_id}} )">
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.share_id] ? (rangSelectStart == item.share_id ? 'rangstart' : rangSelectEnd == item.share_id ? 'rangend' : 'rang') : '')">
-              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index"
-                        @click.prevent.stop="handleSelect(item.share_id, $event, true)">
+            @mouseover="onSelectRang(item.share_id)"
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.share_id } })"
+          >
+            <div :class="'rangselect ' + (rangSelectFiles[item.share_id] ? (rangSelectStart == item.share_id ? 'rangstart' : rangSelectEnd == item.share_id ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.share_id, $event, true)">
                 <IconFont :name="shareHistoryStore.ListSelected.has(item.share_id) ? 'iconrsuccess' : 'iconpic2'" />
               </a-button>
             </div>
@@ -408,8 +389,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
       </template>
     </a-list>
 
-    <a-dropdown id="rightsharehistorymenu" class="rightmenu" :popup-visible="true"
-                style="z-index: -1; left: -200px; opacity: 0">
+    <a-dropdown id="rightsharehistorymenu" class="rightmenu" :popup-visible="true" style="z-index: -1; left: -200px; opacity: 0">
       <template #content>
         <a-doption @click="handleOpenLink">
           <template #icon><IconFont name="iconchakan" /></template>
@@ -431,5 +411,3 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
     </a-dropdown>
   </div>
 </template>
-
-<style></style>

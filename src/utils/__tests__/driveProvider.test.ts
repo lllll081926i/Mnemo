@@ -34,6 +34,38 @@ describe('drive provider capabilities', () => {
     }
   })
 
+  it('separates share creation from in-app share management', () => {
+    for (const provider of ['aliyun', 'cloud123', 'guangya', 'quark', 'dropbox']) {
+      expect(getDriveProviderCapabilities(provider).manageCreatedShares, provider).toBe(true)
+    }
+    for (const provider of ['pikpak', 'onedrive', 'box']) {
+      const capabilities = getDriveProviderCapabilities(provider)
+      expect(capabilities.createShare, provider).toBe(true)
+      expect(capabilities.manageCreatedShares, provider).toBe(false)
+    }
+
+    expect(getDriveProviderCapabilities('dropbox').editCreatedShares).toBe(false)
+    expect(getDriveProviderCapabilities('dropbox').cancelCreatedShares).toBe(false)
+    expect(getDriveProviderCapabilities('cloud123').editCreatedShares).toBe(true)
+    expect(getDriveProviderCapabilities('cloud123').cancelCreatedShares).toBe(false)
+    for (const provider of ['aliyun', 'guangya', 'quark']) {
+      const capabilities = getDriveProviderCapabilities(provider)
+      expect(capabilities.editCreatedShares, provider).toBe(true)
+      expect(capabilities.cancelCreatedShares, provider).toBe(true)
+    }
+  })
+
+  it('keeps imported-share records and share history provider-specific', () => {
+    for (const provider of ['aliyun', 'quark']) {
+      expect(getDriveProviderCapabilities(provider).manageImportedShares, provider).toBe(true)
+    }
+    for (const provider of ['cloud123', 'guangya', 'dropbox', 'pikpak', 'onedrive', 'box']) {
+      expect(getDriveProviderCapabilities(provider).manageImportedShares, provider).toBe(false)
+    }
+    expect(getDriveProviderCapabilities('aliyun').shareHistory).toBe(true)
+    expect(getDriveProviderCapabilities('quark').shareHistory).toBe(false)
+  })
+
   it('keeps mounted storage destructive operations explicit', () => {
     for (const provider of ['webdav', 's3']) {
       const capabilities = getDriveProviderCapabilities(provider)

@@ -1,26 +1,9 @@
 <script setup lang="ts">
-import { h, ref } from 'vue'
-import { IAliShareItem } from '../../aliapi/alimodels'
-import {
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useKeyboardStore,
-  useMouseStore,
-  useMyShareStore,
-  useUserStore,
-  useWinStore
-} from '../../store'
+import { computed, h, ref } from 'vue'
+import { KeyboardState, MouseState, useAppStore, useKeyboardStore, useMouseStore, useMyShareStore, useWinStore } from '../../store'
 import { humanCount } from '../../utils/format'
 import ShareDAL from './ShareDAL'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  TestCtrl,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../../utils/keyboardhelper'
+import { onHideRightMenuScroll, onShowRightMenu, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../../utils/keyboardhelper'
 import { copyToClipboard, openExternal } from '../../utils/electronhelper'
 import message from '../../utils/message'
 import AliShare from '../../aliapi/share'
@@ -32,6 +15,8 @@ import { GetShareUrlFormate } from '../../utils/shareurl'
 import { TestButton } from '../../utils/mosehelper'
 import { xorWith } from 'lodash'
 import { Modal } from '@arco-design/web-vue'
+import { getDriveProviderCapabilities } from '../../utils/driveProvider'
+import type { IManagedShareItem } from './MyShareStore'
 
 const viewlist = ref()
 const inputsearch = ref()
@@ -39,6 +24,11 @@ const inputsearch = ref()
 const appStore = useAppStore()
 const winStore = useWinStore()
 const myshareStore = useMyShareStore()
+const selectedShares = computed(() => myshareStore.GetSelected())
+const selectedAccountIds = computed(() => new Set(selectedShares.value.map((item) => item.account_id)))
+const canEditSelected = computed(() => selectedShares.value.length > 0 && selectedAccountIds.value.size == 1 && selectedShares.value.every((item) => getDriveProviderCapabilities(item.account_provider).editCreatedShares))
+const canCancelSelected = computed(() => selectedShares.value.length > 0 && selectedShares.value.every((item) => getDriveProviderCapabilities(item.account_provider).cancelCreatedShares))
+const canCancelVisibleShares = computed(() => myshareStore.ListDataShow.some((item) => getDriveProviderCapabilities(item.account_provider).cancelCreatedShares))
 
 const keyboardStore = useKeyboardStore()
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -47,9 +37,9 @@ keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestCtrl('a', state.KeyDownEvent, () => myshareStore.mSelectAll())) return
   if (TestCtrl('b', state.KeyDownEvent, handleBrowserLink)) return
   if (TestCtrl('c', state.KeyDownEvent, handleCopySelectedLink)) return
-  if (TestCtrl('Delete', state.KeyDownEvent, () => handleDeleteSelectedLink('selected'))) return
-  if (TestCtrl('e', state.KeyDownEvent, handleEdit)) return
-  if (TestKey('f2', state.KeyDownEvent, handleEdit)) return
+  if (canCancelSelected.value && TestCtrl('Delete', state.KeyDownEvent, () => handleDeleteSelectedLink('selected'))) return
+  if (canEditSelected.value && TestCtrl('e', state.KeyDownEvent, handleEdit)) return
+  if (canEditSelected.value && TestKey('f2', state.KeyDownEvent, handleEdit)) return
   if (TestCtrl('f', state.KeyDownEvent, () => inputsearch.value.focus())) return
   if (TestKey('f3', state.KeyDownEvent, () => inputsearch.value.focus())) return
   if (TestKey(' ', state.KeyDownEvent, () => inputsearch.value.focus())) return
@@ -64,14 +54,17 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'share') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
 })
 
 const rangIsSelecting = ref(false)
@@ -98,15 +91,18 @@ const onSelectReverse = () => {
   onHideRightMenuScroll()
   const listData = myshareStore.ListDataShow
   const listSelected = myshareStore.GetSelected()
-  const reverseSelect = xorWith(listData, listSelected, (a, b) => a.share_id === b.share_id)
+  const reverseSelect = xorWith(listData, listSelected, (a, b) => a.share_key === b.share_key)
   myshareStore.ListSelected.clear()
   myshareStore.ListFocusKey = ''
   if (reverseSelect.length > 0) {
-    myshareStore.mRangSelect(reverseSelect[0].share_id, reverseSelect.map(r => r.share_id))
+    myshareStore.mRangSelect(
+      reverseSelect[0].share_key,
+      reverseSelect.map((r) => r.share_key)
+    )
   }
   myshareStore.mRefreshListDataShow(false)
 }
-const onSelectRang = (share_id: string) => {
+const onSelectRang = (shareKey: string) => {
   if (rangIsSelecting.value && rangSelectID.value != '') {
     let startid = rangSelectID.value
     let endid = ''
@@ -115,20 +111,20 @@ const onSelectRang = (share_id: string) => {
     let a = -1
     let b = -1
     for (let i = 0, maxi = children.length; i < maxi; i++) {
-      if (children[i].share_id == share_id) a = i
-      if (children[i].share_id == startid) b = i
+      if (children[i].share_key == shareKey) a = i
+      if (children[i].share_key == startid) b = i
       if (a > 0 && b > 0) break
     }
     if (a >= 0 && b >= 0) {
       if (a > b) {
         ;[a, b] = [b, a]
-        endid = share_id
+        endid = shareKey
       } else {
         endid = startid
-        startid = share_id
+        startid = shareKey
       }
       for (let n = a; n <= b; n++) {
-        s[children[n].share_id] = true
+        s[children[n].share_key] = true
       }
     }
     rangSelectStart.value = startid
@@ -138,37 +134,37 @@ const onSelectRang = (share_id: string) => {
   }
 }
 
-const handleRefresh = () => ShareDAL.aReloadMyShare(useUserStore().user_id, true)
+const handleRefresh = () => ShareDAL.aReloadAllMyShare(true)
 const handleSelectAll = () => myshareStore.mSelectAll()
 const handleOrder = (order: string) => myshareStore.mOrderListData(order)
-const handleSelect = (share_id: string, event: any, isCtrl: boolean = false) => {
+const handleSelect = (shareKey: string, event: any, isCtrl: boolean = false) => {
   onHideRightMenuScroll()
   if (rangIsSelecting.value) {
     if (!rangSelectID.value) {
-      if (!myshareStore.ListSelected.has(share_id)) {
-        myshareStore.mMouseSelect(share_id, true, false)
+      if (!myshareStore.ListSelected.has(shareKey)) {
+        myshareStore.mMouseSelect(shareKey, true, false)
       }
-      rangSelectID.value = share_id
-      rangSelectStart.value = share_id
-      rangSelectFiles.value = { [share_id]: true }
+      rangSelectID.value = shareKey
+      rangSelectStart.value = shareKey
+      rangSelectFiles.value = { [shareKey]: true }
     } else {
       const start = rangSelectID.value
       const children = myshareStore.ListDataShow
       let a = -1
       let b = -1
       for (let i = 0, maxi = children.length; i < maxi; i++) {
-        if (children[i].share_id == share_id) a = i
-        if (children[i].share_id == start) b = i
+        if (children[i].share_key == shareKey) a = i
+        if (children[i].share_key == start) b = i
         if (a > 0 && b > 0) break
       }
       const fileList: string[] = []
       if (a >= 0 && b >= 0) {
         if (a > b) [a, b] = [b, a]
         for (let n = a; n <= b; n++) {
-          fileList.push(children[n].share_id)
+          fileList.push(children[n].share_key)
         }
       }
-      myshareStore.mRangSelect(share_id, fileList)
+      myshareStore.mRangSelect(shareKey, fileList)
       rangIsSelecting.value = false
       rangSelectID.value = ''
       rangSelectStart.value = ''
@@ -177,31 +173,33 @@ const handleSelect = (share_id: string, event: any, isCtrl: boolean = false) => 
     }
     myshareStore.mRefreshListDataShow(false)
   } else {
-    myshareStore.mMouseSelect(share_id, event.ctrlKey || isCtrl, event.shiftKey)
-    if (!myshareStore.ListSelected.has(share_id)) {
+    myshareStore.mMouseSelect(shareKey, event.ctrlKey || isCtrl, event.shiftKey)
+    if (!myshareStore.ListSelected.has(shareKey)) {
       myshareStore.ListFocusKey = ''
     }
   }
 }
 
-
-const handleClickName = (share: IAliShareItem) => {
-  handleEdit(share)
+const handleClickName = (share: IManagedShareItem) => {
+  if (getDriveProviderCapabilities(share.account_provider).editCreatedShares) handleEdit(share)
+  else handleOpenLink(share)
 }
 const handleEdit = (share: any) => {
-  let list: IAliShareItem[]
-  if (share && share.share_id) {
+  let list: IManagedShareItem[]
+  if (share && share.share_key) {
     list = [share]
   } else {
     list = myshareStore.GetSelected()
   }
-  if (list && list.length > 0) modalEditShareLink(list)
+  const accountIds = new Set(list.map((item) => item.account_id))
+  const canEdit = list.length > 0 && accountIds.size == 1 && list.every((item) => getDriveProviderCapabilities(item.account_provider).editCreatedShares)
+  if (canEdit) modalEditShareLink(list)
   else {
-    message.error('没有选中任何分享链接！')
+    message.error(list.length > 0 ? '只能修改同一账号下支持编辑的分享链接' : '没有选中任何分享链接！')
   }
 }
-const handleOpenLink = () => {
-  const share = myshareStore.GetSelectedFirst()
+const handleOpenLink = (input?: IManagedShareItem) => {
+  const share = input?.share_key ? input : myshareStore.GetSelectedFirst()
   if (!share) {
     message.error('没有选中分享链接！')
   } else {
@@ -233,15 +231,16 @@ const handleBrowserLink = () => {
 }
 const handleDeleteSelectedLink = (delby: any) => {
   const name = delby == 'selected' ? '取消选中的分享' : delby == 'expired' ? '清理全部过期已失效' : '清理全部文件已删除'
-  let list: IAliShareItem[]
+  let list: IManagedShareItem[]
   if (delby == 'selected') {
     list = myshareStore.GetSelected()
   } else {
     list = []
-    const allList = myshareStore.ListDataRaw
-    let item: IAliShareItem
+    const allList = myshareStore.AccountFilter ? myshareStore.ListDataRaw.filter((item) => item.account_id == myshareStore.AccountFilter) : myshareStore.ListDataRaw
+    let item: IManagedShareItem
     for (let i = 0, maxi = allList.length; i < maxi; i++) {
       item = allList[i]
+      if (!getDriveProviderCapabilities(item.account_provider).cancelCreatedShares) continue
       if (delby == 'expired') {
         if (item.expired && item.first_file) list.push(item)
       } else {
@@ -253,29 +252,36 @@ const handleDeleteSelectedLink = (delby: any) => {
     message.error('没有需要清理的分享链接！')
     return
   }
+  const cancelShares = async () => {
+    const accountGroups = new Map<string, IManagedShareItem[]>()
+    for (const item of list) {
+      const group = accountGroups.get(item.account_id) || []
+      group.push(item)
+      accountGroups.set(item.account_id, group)
+    }
+    const deletedKeys: string[] = []
+    for (const [accountId, items] of accountGroups) {
+      const success = await AliShare.ApiCancelShareBatch(accountId, ArrayKeyList<string>('share_id', items))
+      const successIds = new Set(success)
+      deletedKeys.push(...items.filter((item) => successIds.has(item.share_id)).map((item) => item.share_key))
+    }
+    myshareStore.mDeleteFiles(deletedKeys)
+    if (deletedKeys.length > 0) message.success(`${name}成功 ${deletedKeys.length} 条`)
+  }
   if (delby == 'selected') {
     Modal.open({
       title: name,
       okText: '继续',
       bodyStyle: { minWidth: '340px' },
-      content: () => h('div', {
-        style: 'color: red',
-        innerText: '该操作不可逆，是否继续？'
-      }),
-      onOk: async () => {
-        const selectKeys = ArrayKeyList<string>('share_id', list)
-        AliShare.ApiCancelShareBatch(useUserStore().user_id, selectKeys).then((success: string[]) => {
-          useMyShareStore().mDeleteFiles(success)
-          message.success(name + '成功！')
-        })
-      }
+      content: () =>
+        h('div', {
+          style: 'color: red',
+          innerText: '该操作不可逆，是否继续？'
+        }),
+      onOk: cancelShares
     })
   } else {
-    const selectKeys = ArrayKeyList<string>('share_id', list)
-    AliShare.ApiCancelShareBatch(useUserStore().user_id, selectKeys).then((success: string[]) => {
-      useMyShareStore().mDeleteFiles(success)
-      message.success(name + '成功！')
-    })
+    cancelShares()
   }
 }
 
@@ -296,101 +302,76 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 </script>
 
 <template>
-  <div style="height: 7px"></div>
-  <div class='toppanbtns' style='height: 26px'>
-    <div style="min-height: 26px; max-width: 100%; flex-shrink: 0; flex-grow: 0">
-      <div class="toppannav">
-        <div class="toppannavitem" title="我的分享">
-          <span> 我的分享 </span>
-        </div>
-      </div>
-    </div>
-    <div class='flex flexauto'></div>
-    <div class="toppanbtns" style="height: 26px;min-width: fit-content">
-      <div class="flex flexauto"></div>
-      <div class="flex flexnoauto cellcount" title="2天内过期">
-        <a-badge color="#637dff" :text="'临期 ' + myshareStore.ListStats.expir2day" />
-      </div>
-      <div class="flex flexnoauto cellcount" title="总过期">
-        <a-badge color="#637dff" :text="'过期 ' + myshareStore.ListStats.expired" />
-      </div>
-      <div class="flex flexnoauto cellcount" title="总违规">
-        <a-badge color="#637dff" :text="'违规 ' + myshareStore.ListStats.forbidden" />
-      </div>
-      <div class="flex flexnoauto cellcount" title="总浏览">
-        <a-badge color="#637dff" :text="'浏览 ' + myshareStore.ListStats.preview" />
-      </div>
-      <div class="flex flexnoauto cellcount" title="总下载">
-        <a-badge color="#637dff" :text="'下载 ' + myshareStore.ListStats.download" />
-      </div>
-      <div class="flex flexnoauto cellcount" title="总转存">
-        <a-badge color="#637dff" :text="'转存 ' + myshareStore.ListStats.save" />
-      </div>
-      <div class="flex flexnoauto cellcount" title="最大浏览数">
-        <a-badge color="#637dff" :text="'浏览 ' + myshareStore.ListStats.previewMax" />
-      </div>
-    </div>
-  </div>
-  <div style="height: 14px"></div>
-  <div class="toppanbtns" style="height: 26px">
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" :loading="myshareStore.ListLoading" title="F5"
-                @click="handleRefresh">
-        <template #icon><IconFont name="iconreload-1-icon" />
-        </template>
+  <div class="toppanbtns">
+    <div v-if="!myshareStore.IsListSelected" class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" :loading="myshareStore.ListLoading" title="F5" @click="handleRefresh">
+        <template #icon><IconFont name="iconreload-1-icon" /></template>
         刷新
       </a-button>
     </div>
-    <div v-show="myshareStore.IsListSelected" class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" title="F2 / Ctrl+E" @click="handleEdit"><IconFont name="iconedit-square" />修改
+    <div v-if="myshareStore.IsListSelected" class="toppanbtn">
+      <a-button v-if="canEditSelected" type="text" size="small" tabindex="-1" title="F2 / Ctrl+E" @click="handleEdit">
+        <IconFont name="iconedit-square" />
+        修改
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink"><IconFont name="iconchakan" />查看
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink">
+        <IconFont name="iconchakan" />
+        查看
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink"><IconFont name="iconcopy" />复制链接
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink">
+        <IconFont name="iconcopy" />
+        复制链接
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+B" @click="handleBrowserLink"><IconFont name="iconchrome" />浏览器
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+B" @click="handleBrowserLink">
+        <IconFont name="iconchrome" />
+        浏览器
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" class="danger" title="Ctrl+Delete"
-                @click="handleDeleteSelectedLink('selected')"><IconFont name="icondelete" />取消分享
+      <a-button v-if="canCancelSelected" type="text" size="small" tabindex="-1" class="danger" title="Ctrl+Delete" @click="handleDeleteSelectedLink('selected')">
+        <IconFont name="icondelete" />
+        取消分享
       </a-button>
     </div>
-    <div v-show="!myshareStore.IsListSelected" class="toppanbtn">
+    <div v-else-if="canCancelVisibleShares" class="toppanbtn">
       <a-dropdown trigger="hover" position="bl" @select="handleDeleteSelectedLink">
         <a-button type="text" size="small" tabindex="-1">
-          <IconFont name="iconrest" />清理全部
-          <IconFont name="icondown" /></a-button>
+          <IconFont name="iconrest" />
+          清理全部
+          <IconFont name="icondown" />
+        </a-button>
         <template #content>
           <a-doption :value="'expired'" class="danger">删除全部 过期已失效</a-doption>
           <a-doption :value="'deleted'" class="danger">删除全部 文件已删除</a-doption>
         </template>
       </a-dropdown>
     </div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="toppanbtn">
-      <a-input-search ref="inputsearch" tabindex="-1"
-                      size="small" title="Ctrl+F / F3 / Space"
-                      placeholder="快速筛选"
-                      allow-clear @clear='(e:any)=>handleSearchInput("")'
-                      v-model="myshareStore.ListSearchKey"
-                      @input="(val:any)=>handleSearchInput(val as string)"
-                      @press-enter="handleSearchEnter"
-                      @keydown.esc=";($event.target as any).blur()" />
+      <a-input-search
+        ref="inputsearch"
+        tabindex="-1"
+        size="small"
+        title="Ctrl+F / F3 / Space"
+        placeholder="快速筛选"
+        allow-clear
+        @clear="(e: any) => handleSearchInput('')"
+        v-model="myshareStore.ListSearchKey"
+        @input="(val: any) => handleSearchInput(val as string)"
+        @press-enter="handleSearchEnter"
+        @keydown.esc=";($event.target as any).blur()"
+      />
     </div>
-    <div></div>
   </div>
-  <div style="height: 9px"></div>
   <div class="toppanarea">
-    <div style="margin: 0 3px">
+    <div class="list-selection-primary">
       <AntdTooltip title="点击全选" placement="left">
         <a-button shape="circle" type="text" tabindex="-1" class="select all" title="Ctrl+A" @click="handleSelectAll">
           <IconFont :name="myshareStore.IsListSelectedAll ? 'iconrsuccess' : 'iconpic2'" />
         </a-button>
       </AntdTooltip>
-      <div class='selectInfo'>{{ myshareStore.ListDataSelectCountInfo }}</div>
-      <div style='margin: 0 2px'>
-        <AntdTooltip placement='rightTop' v-if="myshareStore.ListDataShow.length > 0">
-          <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                    :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+      <div class="selectInfo">{{ myshareStore.ListDataSelectCountInfo }}</div>
+      <div class="list-selection-actions">
+        <AntdTooltip placement="rightTop" v-if="myshareStore.ListDataShow.length > 0">
+          <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
             {{ rangIsSelecting ? '取消选择' : '区间选择' }}
           </a-button>
           <template #title>
@@ -403,45 +384,32 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
             </div>
           </template>
         </AntdTooltip>
-        <a-button shape='square'
-                  v-if='!rangIsSelecting && myshareStore.ListSelected.size > 0 && myshareStore.ListSelected.size < myshareStore.ListDataShow.length'
-                  type='text'
-                  tabindex='-1'
-                  class='qujian'
-                  status='normal' @click='onSelectReverse'>
+        <a-button shape="square" v-if="!rangIsSelecting && myshareStore.ListSelected.size > 0 && myshareStore.ListSelected.size < myshareStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">
           反向选择
         </a-button>
-        <a-button shape='square' v-if='!rangIsSelecting && myshareStore.ListSelected.size > 0' type='text'
-                  tabindex='-1' class='qujian'
-                  status='normal' @click='onSelectCancel'>
-          取消已选
-        </a-button>
+        <a-button shape="square" v-if="!rangIsSelecting && myshareStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
       </div>
     </div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
+    <div v-if="!myshareStore.AccountFilter" class="cell account">账号</div>
     <div class="cell tiquma">提取码</div>
-    <div :class="'cell sharetime order ' + (myshareStore.ListOrderKey == 'state' ? 'active' : '')"
-         @click="handleOrder('state')">
+    <div :class="'cell sharetime order ' + (myshareStore.ListOrderKey == 'state' ? 'active' : '')" @click="handleOrder('state')">
       有效期
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell count order ' + (myshareStore.ListOrderKey == 'preview' ? 'active' : '')"
-         @click="handleOrder('preview')">
+    <div :class="'cell count order ' + (myshareStore.ListOrderKey == 'preview' ? 'active' : '')" @click="handleOrder('preview')">
       浏览数
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell count order ' + (myshareStore.ListOrderKey == 'download' ? 'active' : '')"
-         @click="handleOrder('download')">
+    <div :class="'cell count order responsive-column-tertiary ' + (myshareStore.ListOrderKey == 'download' ? 'active' : '')" @click="handleOrder('download')">
       下载数
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell count order ' + (myshareStore.ListOrderKey == 'save' ? 'active' : '')"
-         @click="handleOrder('save')">
+    <div :class="'cell count order responsive-column-secondary ' + (myshareStore.ListOrderKey == 'save' ? 'active' : '')" @click="handleOrder('save')">
       转存数
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell sharetime order ' + (myshareStore.ListOrderKey == 'time' ? 'active' : '')"
-         @click="handleOrder('time')">
+    <div :class="'cell sharetime order ' + (myshareStore.ListOrderKey == 'time' ? 'active' : '')" @click="handleOrder('time')">
       创建时间
       <IconFont name="iconxia" />
     </div>
@@ -458,57 +426,56 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         fixedSize: true,
         estimatedSize: 50,
         threshold: 1,
-        itemKey: 'share_id'
+        itemKey: 'share_key'
       }"
-      style="width: 100%"
       :data="myshareStore.ListDataShow"
       :loading="myshareStore.ListLoading"
       tabindex="-1"
-      @scroll="onHideRightMenuScroll">
+      @scroll="onHideRightMenuScroll"
+    >
       <template #empty>
-        <a-empty description="没创建过任何分享链接" />
+        <a-empty description="暂无分享链接" />
       </template>
 
       <template #item="{ item, index }">
-        <div :key="item.share_id" class="listitemdiv">
+        <div :key="item.share_key" class="listitemdiv">
           <div
-            :class="'fileitem' + (myshareStore.ListSelected.has(item.share_id) ? ' selected' : '') + (myshareStore.ListFocusKey == item.share_id ? ' focus' : '')"
-            @click="handleSelect(item.share_id, $event)"
-            @mouseover='onSelectRang(item.share_id)'
-            @contextmenu="(event:MouseEvent)=>handleRightClick({event,node:{key:item.share_id}} )">
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.share_id] ? (rangSelectStart == item.share_id ? 'rangstart' : rangSelectEnd == item.share_id ? 'rangend' : 'rang') : '')">
-              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index"
-                        @click.prevent.stop="handleSelect(item.share_id, $event, true)">
-                <IconFont :name="myshareStore.ListSelected.has(item.share_id) ? 'iconrsuccess' : 'iconpic2'" />
+            :class="'fileitem' + (myshareStore.ListSelected.has(item.share_key) ? ' selected' : '') + (myshareStore.ListFocusKey == item.share_key ? ' focus' : '')"
+            @click="handleSelect(item.share_key, $event)"
+            @mouseover="onSelectRang(item.share_key)"
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.share_key } })"
+          >
+            <div :class="'rangselect ' + (rangSelectFiles[item.share_key] ? (rangSelectStart == item.share_key ? 'rangstart' : rangSelectEnd == item.share_key ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.share_key, $event, true)">
+                <IconFont :name="myshareStore.ListSelected.has(item.share_key) ? 'iconrsuccess' : 'iconpic2'" />
               </a-button>
             </div>
             <div class="fileicon">
               <IconFont :name="item.icon" aria-hidden="true" />
             </div>
-            <div class="filename">
-              <div :title="item.share_url || ('https://www.aliyundrive.com/s/' + item.share_id)" @click="handleClickName(item)">
+            <div class="filename workspace-primary-name">
+              <div :title="item.share_url || 'https://www.aliyundrive.com/s/' + item.share_id" @click="handleClickName(item)">
                 {{ item.share_name }}
               </div>
             </div>
-            <div class="cell tiquma">{{ item.share_pwd }}</div>
+            <div v-if="!myshareStore.AccountFilter" class="cell account" :title="item.account_name">{{ item.account_name }}</div>
+            <div class="cell tiquma">{{ item.share_pwd || '无' }}</div>
             <div v-if="item.status == 'forbidden'" class="cell sharestate forbidden">分享违规</div>
             <div v-else-if="item.expired" class="cell sharestate expired">过期失效</div>
             <div v-else-if="!item.first_file" class="cell sharestate deleted">文件已删</div>
             <div v-else class="cell sharestate active">{{ item.share_msg }}</div>
             <div class="cell count">{{ humanCount(item.preview_count) }}</div>
-            <div class="cell count">{{ humanCount(item.download_count) }}</div>
-            <div class="cell count">{{ humanCount(item.save_count) }}</div>
+            <div class="cell count responsive-column-tertiary">{{ humanCount(item.download_count) }}</div>
+            <div class="cell count responsive-column-secondary">{{ humanCount(item.save_count) }}</div>
 
             <div class="cell sharetime">{{ item.created_at.replace(' ', '\n') }}</div>
           </div>
         </div>
       </template>
     </a-list>
-    <a-dropdown id="rightmysharemenu" class="rightmenu" :popup-visible="true"
-                style="z-index: -1; left: -200px; opacity: 0">
+    <a-dropdown id="rightmysharemenu" class="rightmenu" :popup-visible="true" style="z-index: -1; left: -200px; opacity: 0">
       <template #content>
-        <a-doption @click="handleEdit">
+        <a-doption v-if="canEditSelected" @click="handleEdit">
           <template #icon><IconFont name="iconedit-square" /></template>
           <template #default>修改</template>
         </a-doption>
@@ -526,7 +493,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           <template #default>浏览器</template>
         </a-doption>
 
-        <a-doption class="danger" @click="handleDeleteSelectedLink('selected')">
+        <a-doption v-if="canCancelSelected" class="danger" @click="handleDeleteSelectedLink('selected')">
           <template #icon><IconFont name="icondelete" /></template>
           <template #default>取消分享</template>
         </a-doption>
@@ -534,7 +501,3 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
     </a-dropdown>
   </div>
 </template>
-
-<style>
-
-</style>

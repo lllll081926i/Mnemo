@@ -1,9 +1,10 @@
-import { IAliGetFileModel, IAliShareItem } from '../aliapi/alimodels'
+import { IAliGetFileModel } from '../aliapi/alimodels'
 import { useModalStore } from '../store'
 import { IServerVerData } from '../aliapi/server'
 import { IRawUrl } from './proxyhelper'
 import message from './message'
 import { checkAndIncrement } from './usageLimit'
+import type { IManagedShareItem } from '../share/share/MyShareStore'
 
 export function modalCloseAll() {
   useModalStore().showModal('', {})
@@ -51,7 +52,7 @@ export function modalRename(istree: boolean, ismulti: boolean, ispic: boolean) {
   useModalStore().showModal(ismulti ? 'renamemulti' : 'rename', { istree, ispic })
 }
 
-export function modalEditShareLink(sharelist: IAliShareItem[]) {
+export function modalEditShareLink(sharelist: IManagedShareItem[]) {
   useModalStore().showModal('editshare', { sharelist })
 }
 

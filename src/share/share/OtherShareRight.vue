@@ -1,24 +1,8 @@
 <script setup lang="ts">
 import { h, ref } from 'vue'
-import {
-  IOtherShareLinkModel,
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useKeyboardStore,
-  useMouseStore,
-  useOtherShareStore,
-  useWinStore
-} from '../../store'
+import { IOtherShareLinkModel, KeyboardState, MouseState, useAppStore, useKeyboardStore, useMouseStore, useOtherShareStore, useWinStore } from '../../store'
 import ShareDAL from './ShareDAL'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  TestCtrl,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../../utils/keyboardhelper'
+import { onHideRightMenuScroll, onShowRightMenu, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../../utils/keyboardhelper'
 import { copyToClipboard, getFromClipboard, openExternal } from '../../utils/electronhelper'
 import message from '../../utils/message'
 
@@ -42,11 +26,12 @@ const inputsearch = ref()
 const appStore = useAppStore()
 const winStore = useWinStore()
 const othershareStore = useOtherShareStore()
-const shareUrl = (share: IOtherShareLinkModel) => share.share_id.startsWith('quark:')
-  ? `https://pan.quark.cn/s/${share.share_id.replace('quark:', '')}`
-  : share.share_id.startsWith('guangya:')
-    ? `https://www.guangyapan.com/s/${share.share_id.replace('guangya:', '')}`
-  : `https://www.aliyundrive.com/s/${share.share_id}`
+const shareUrl = (share: IOtherShareLinkModel) =>
+  share.share_id.startsWith('quark:')
+    ? `https://pan.quark.cn/s/${share.share_id.replace('quark:', '')}`
+    : share.share_id.startsWith('guangya:')
+      ? `https://www.guangyapan.com/s/${share.share_id.replace('guangya:', '')}`
+      : `https://www.aliyundrive.com/s/${share.share_id}`
 
 const keyboardStore = useKeyboardStore()
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -96,7 +81,10 @@ const onSelectReverse = () => {
   othershareStore.ListSelected.clear()
   othershareStore.ListFocusKey = ''
   if (reverseSelect.length > 0) {
-    othershareStore.mRangSelect(reverseSelect[0].share_id, reverseSelect.map(r => r.share_id))
+    othershareStore.mRangSelect(
+      reverseSelect[0].share_id,
+      reverseSelect.map((r) => r.share_id)
+    )
   }
   othershareStore.mRefreshListDataShow(false)
 }
@@ -137,14 +125,17 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'share') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
 })
 
 const handleRefresh = () => ShareDAL.aReloadOtherShare()
@@ -254,10 +245,11 @@ const handleDeleteSelectedLink = (delby: any) => {
       title: name,
       okText: '继续',
       bodyStyle: { minWidth: '340px' },
-      content: () => h('div', {
-        style: 'color: red',
-        innerText: '该操作不可逆，是否继续？'
-      }),
+      content: () =>
+        h('div', {
+          style: 'color: red',
+          innerText: '该操作不可逆，是否继续？'
+        }),
       onOk: async () => {
         const selectKeys = ArrayKeyList<string>('share_id', list)
         ShareDAL.DeleteOtherShare(selectKeys).then(() => {
@@ -308,7 +300,7 @@ const handleBatchSaveSelected = () => {
     message.error('没有选中分享链接！')
     return
   }
-  modalSelectPanDir('share', '', async function(user_id: string, drive_id: string, selectFile: any) {
+  modalSelectPanDir('share', '', async function (user_id: string, drive_id: string, selectFile: any) {
     if (!drive_id || !selectFile.drive_id || !selectFile.file_id) return
     let success = 0
     const errors: string[] = []
@@ -323,7 +315,7 @@ const handleBatchSaveSelected = () => {
         errors.push(`${share.share_name}: ${files.next_marker}`)
         continue
       }
-      const ids = files.items.map(item => item.file_id)
+      const ids = files.items.map((item) => item.file_id)
       const save = await AliShare.ApiSaveShareFilesBatch(share.share_id, shareToken, user_id, selectFile.drive_id, selectFile.file_id, ids)
       if (save === 'success' || save === 'async') success += 1
       else errors.push(`${share.share_name}: ${save}`)
@@ -352,87 +344,81 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 </script>
 
 <template>
-  <div style="height: 7px"></div>
-  <div class='toppanbtns' style='height: 26px'>
-    <div style="min-height: 26px; max-width: 100%; flex-shrink: 0; flex-grow: 0">
-      <div class="toppannav">
-        <div class="toppannavitem" title="我的导入">
-          <span> 我的导入 </span>
-        </div>
+  <div class="toppanbtns">
+    <template v-if="!othershareStore.IsListSelected">
+      <div class="toppanbtn">
+        <a-button type="text" size="small" tabindex="-1" :loading="othershareStore.ListLoading" title="F5" @click="handleRefresh">
+          <template #icon>
+            <IconFont name="iconreload-1-icon" />
+          </template>
+          刷新
+        </a-button>
       </div>
-    </div>
-    <div class='flex flexauto'></div>
-  </div>
-  <div style="height: 14px"></div>
-  <div class="toppanbtns" style="height: 26px">
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" :loading="othershareStore.ListLoading" title="F5"
-                @click="handleRefresh">
-        <template #icon>
-          <IconFont name="iconreload-1-icon" />
-        </template>
-        刷新
-      </a-button>
-    </div>
-    <div class="toppanbtn">
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+N" @click="handleDaoRuLink">
-        <IconFont name="iconlink2" />导入
-      </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+U" @click="handleRefreshStats">
-        <IconFont name="iconyibu" />更新
-      </a-button>
-      <a-button v-if="!othershareStore.IsListSelected"
-                class="danger" type="text" size="small" tabindex="-1"
-                @click="handleDeleteSelectedLink">
-        <IconFont name="iconrest" />删除过期
-      </a-button>
-    </div>
-    <div v-show="othershareStore.IsListSelected" class="toppanbtn">
+      <div class="toppanbtn">
+        <a-button type="text" size="small" tabindex="-1" title="Ctrl+N" @click="handleDaoRuLink">
+          <IconFont name="iconlink2" />
+          导入
+        </a-button>
+        <a-button type="text" size="small" tabindex="-1" title="Ctrl+U" @click="handleRefreshStats">
+          <IconFont name="iconyibu" />
+          更新
+        </a-button>
+        <a-button class="danger" type="text" size="small" tabindex="-1" @click="handleDeleteSelectedLink">
+          <IconFont name="iconrest" />
+          删除过期
+        </a-button>
+      </div>
+    </template>
+    <div v-else class="toppanbtn">
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink">
-        <IconFont name="iconchakan" />查看
+        <IconFont name="iconchakan" />
+        查看
       </a-button>
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink">
-        <IconFont name="iconcopy" />复制链接
+        <IconFont name="iconcopy" />
+        复制链接
       </a-button>
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+B" @click="handleBrowserLink">
-        <IconFont name="iconchrome" />浏览器
+        <IconFont name="iconchrome" />
+        浏览器
       </a-button>
       <a-button type="text" size="small" tabindex="-1" @click="handleBatchSaveSelected">
-        <IconFont name="iconxuanzhuan" />批量转存
+        <IconFont name="iconxuanzhuan" />
+        批量转存
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" class="danger" title="Ctrl+Delete"
-                @click="handleDeleteSelectedLink('selected')">
-        <IconFont name="icondelete" />删除
+      <a-button type="text" size="small" tabindex="-1" class="danger" title="Ctrl+Delete" @click="handleDeleteSelectedLink('selected')">
+        <IconFont name="icondelete" />
+        删除
       </a-button>
     </div>
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="toppanbtn">
-      <a-input-search ref="inputsearch" tabindex="-1" size="small"
-                      title="Ctrl+F / F3 / Space"
-                      placeholder="快速筛选"
-                      allow-clear
-                      v-model="othershareStore.ListSearchKey"
-                      @clear='(e:any)=>handleSearchInput("")'
-                      @input="(val:any)=>handleSearchInput(val as string)"
-                      @press-enter="handleSearchEnter"
-                      @keydown.esc=";($event.target as any).blur()" />
+      <a-input-search
+        ref="inputsearch"
+        tabindex="-1"
+        size="small"
+        title="Ctrl+F / F3 / Space"
+        placeholder="快速筛选"
+        allow-clear
+        v-model="othershareStore.ListSearchKey"
+        @clear="(e: any) => handleSearchInput('')"
+        @input="(val: any) => handleSearchInput(val as string)"
+        @press-enter="handleSearchEnter"
+        @keydown.esc=";($event.target as any).blur()" />
     </div>
-    <div></div>
   </div>
-  <div style="height: 9px"></div>
   <div class="toppanarea">
-    <div style="margin: 0 3px">
+    <div class="list-selection-primary">
       <AntdTooltip title="点击全选" placement="left">
         <a-button shape="circle" type="text" tabindex="-1" class="select all" title="Ctrl+A" @click="handleSelectAll">
           <IconFont :name="othershareStore.IsListSelectedAll ? 'iconrsuccess' : 'iconpic2'" />
         </a-button>
       </AntdTooltip>
     </div>
-    <div class='selectInfo'>{{ othershareStore.ListDataSelectCountInfo }}</div>
-    <div style='margin: 0 2px'>
-      <AntdTooltip placement='rightTop' v-if="othershareStore.ListDataShow.length > 0">
-        <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                  :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+    <div class="selectInfo">{{ othershareStore.ListDataSelectCountInfo }}</div>
+    <div class="list-selection-actions">
+      <AntdTooltip placement="rightTop" v-if="othershareStore.ListDataShow.length > 0">
+        <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
           {{ rangIsSelecting ? '取消选择' : '区间选择' }}
         </a-button>
         <template #title>
@@ -445,30 +431,19 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           </div>
         </template>
       </AntdTooltip>
-      <a-button shape='square'
-                v-if='!rangIsSelecting && othershareStore.ListSelected.size > 0 && othershareStore.ListSelected.size < othershareStore.ListDataShow.length'
-                type='text'
-                tabindex='-1'
-                class='qujian'
-                status='normal' @click='onSelectReverse'>
+      <a-button shape="square" v-if="!rangIsSelecting && othershareStore.ListSelected.size > 0 && othershareStore.ListSelected.size < othershareStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">
         反向选择
       </a-button>
-      <a-button shape='square' v-if='!rangIsSelecting && othershareStore.ListSelected.size > 0' type='text'
-                tabindex='-1' class='qujian'
-                status='normal' @click='onSelectCancel'>
-        取消已选
-      </a-button>
+      <a-button shape="square" v-if="!rangIsSelecting && othershareStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
     </div>
 
-    <div style="flex-grow: 1"></div>
+    <div class="toolbar-spacer"></div>
     <div class="cell tiquma">提取码</div>
-    <div :class="'cell sharestate order ' + (othershareStore.ListOrderKey == 'state' ? 'active' : '')"
-         @click="handleOrder('state')">
+    <div :class="'cell sharestate order ' + (othershareStore.ListOrderKey == 'state' ? 'active' : '')" @click="handleOrder('state')">
       状态
       <IconFont name="iconxia" />
     </div>
-    <div :class="'cell sharetime order ' + (othershareStore.ListOrderKey == 'time' ? 'active' : '')"
-         @click="handleOrder('time')">
+    <div :class="'cell sharetime order ' + (othershareStore.ListOrderKey == 'time' ? 'active' : '')" @click="handleOrder('time')">
       导入时间
       <IconFont name="iconxia" />
     </div>
@@ -487,24 +462,21 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         threshold: 1,
         itemKey: 'share_id'
       }"
-      style="width: 100%"
       :data="othershareStore.ListDataShow"
       tabindex="-1"
       @scroll="onHideRightMenuScroll">
       <template #empty>
-        <a-empty description="没导入过任何分享链接" />
+        <a-empty description="暂无导入链接" />
       </template>
       <template #item="{ item, index }">
         <div :key="item.share_id" class="listitemdiv">
           <div
             :class="'fileitem' + (othershareStore.ListSelected.has(item.share_id) ? ' selected' : '') + (othershareStore.ListFocusKey == item.share_id ? ' focus' : '')"
             @click="handleSelect(item.share_id, $event)"
-            @mouseover='onSelectRang(item.share_id)'
-            @contextmenu="(event:MouseEvent)=>handleRightClick({event,node:{key:item.share_id}} )">
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.share_id] ? (rangSelectStart == item.share_id ? 'rangstart' : rangSelectEnd == item.share_id ? 'rangend' : 'rang') : '')">
-              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index"
-                        @click.prevent.stop="handleSelect(item.share_id, $event, true)">
+            @mouseover="onSelectRang(item.share_id)"
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.share_id } })">
+            <div :class="'rangselect ' + (rangSelectFiles[item.share_id] ? (rangSelectStart == item.share_id ? 'rangstart' : rangSelectEnd == item.share_id ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.share_id, $event, true)">
                 <IconFont :name="othershareStore.ListSelected.has(item.share_id) ? 'iconrsuccess' : 'iconpic2'" />
               </a-button>
             </div>
@@ -527,8 +499,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
       </template>
     </a-list>
 
-    <a-dropdown id="rightothersharemenu" class="rightmenu" :popup-visible="true"
-                style="z-index: -1; left: -200px; opacity: 0">
+    <a-dropdown id="rightothersharemenu" class="rightmenu" :popup-visible="true" style="z-index: -1; left: -200px; opacity: 0">
       <template #content>
         <a-doption @click="handleOpenLink">
           <template #icon><IconFont name="iconchakan" /></template>
@@ -556,25 +527,15 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
     </a-dropdown>
   </div>
 
-  <a-modal v-model:visible="daoruModel" :footer="false" :unmount-on-close="true" :mask-closable="false">
-    <template #title> 批量导入分享链接记录</template>
-    <div style="width: 500px">
-      <div style="margin-bottom: 32px">
-        <div class="arco-textarea-wrapper arco-textarea-scroll">
-          <textarea v-model="daoruModelText" class="arco-textarea daoruinput"
-                    placeholder="请粘贴，每行一条分享链接，例如：https://www.aliyundrive.com/s/9inQ0eeZ8w8 提取码: CNp7 或 https://pan.quark.cn/s/abcd?pwd=123456"></textarea>
-        </div>
-        <div>
-          <span class="oporg">注：仅导入记录，不会导入分享的文件</span>
-        </div>
+  <a-modal v-model:visible="daoruModel" modal-class="compact-action-modal" :footer="false" :unmount-on-close="true" :mask-closable="false">
+    <template #title>导入分享链接</template>
+    <div class="compact-modal-form">
+      <div class="arco-textarea-wrapper arco-textarea-scroll compact-modal-textarea">
+          <textarea v-model="daoruModelText" class="arco-textarea daoruinput" placeholder="请粘贴，每行一条分享链接，例如：https://www.aliyundrive.com/s/9inQ0eeZ8w8 提取码: CNp7 或 https://pan.quark.cn/s/abcd?pwd=123456"></textarea>
       </div>
-      <div class="flex" style="justify-content: center; align-items: center; margin-bottom: 0px">
-        <a-button id="OSRDaoRuLink" type="primary" size="small" tabindex="-1" :loading="daoruModelLoading"
-                  @click="handleSaveDaoRuLink">批量导入
-        </a-button>
+      <div class="compact-modal-actions">
+        <a-button id="OSRDaoRuLink" type="primary" size="small" tabindex="-1" :loading="daoruModelLoading" @click="handleSaveDaoRuLink">批量导入</a-button>
       </div>
     </div>
   </a-modal>
 </template>
-
-<style></style>

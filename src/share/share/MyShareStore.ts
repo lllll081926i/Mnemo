@@ -6,7 +6,14 @@ import { HanToPin } from '../../utils/utils'
 import { UpdateShareModel } from '../../aliapi/share'
 import { humanExpiration } from '../../utils/format'
 
-type Item = IAliShareItem
+export interface IManagedShareItem extends IAliShareItem {
+  account_id: string
+  account_name: string
+  account_provider: string
+  share_key: string
+}
+
+type Item = IManagedShareItem
 
 export interface MyShareState {
 
@@ -16,6 +23,9 @@ export interface MyShareState {
 
   ListDataShow: Item[]
 
+  LoadedAccountIds: string[]
+
+  AccountFilter: string
 
   ListSelected: Set<string>
 
@@ -29,13 +39,15 @@ export interface MyShareState {
 }
 
 type State = MyShareState
-const KEY = 'share_id'
+const KEY = 'share_key'
 
 const useMyShareStore = defineStore('myshare', {
   state: (): State => ({
     ListLoading: false,
     ListDataRaw: [],
     ListDataShow: [],
+    LoadedAccountIds: [],
+    AccountFilter: '',
     ListSelected: new Set<string>(),
     ListOrderKey: 'time',
     ListFocusKey: '',
@@ -82,14 +94,15 @@ const useMyShareStore = defineStore('myshare', {
 
   actions: {
 
-    aLoadListData(list: Item[]) {
+    aLoadListData(list: Item[], accountIds: string[] = []) {
 
       let item: Item
       for (let i = 0, maxi = list.length; i < maxi; i++) {
         item = list[i]
-        item.description = HanToPin(item.share_name)
+        item.description = HanToPin(`${item.share_name} ${item.account_name}`)
       }
       this.ListDataRaw = this.mGetOrder(this.ListOrderKey, list)
+      this.LoadedAccountIds = accountIds.concat().sort()
 
       const oldSelected = this.ListSelected
       const newSelected = new Set<string>()
@@ -119,6 +132,12 @@ const useMyShareStore = defineStore('myshare', {
     mSearchListData(value: string) {
 
       this.$patch({ ListSelected: new Set<string>(), ListFocusKey: '', ListSelectKey: '', ListSearchKey: value })
+      this.mRefreshListDataShow(true)
+    },
+
+    mSetAccountFilter(accountId: string) {
+      if (this.AccountFilter == accountId) return
+      this.$patch({ AccountFilter: accountId, ListSelected: new Set<string>(), ListFocusKey: '', ListSelectKey: '' })
       this.mRefreshListDataShow(true)
     },
 
@@ -154,22 +173,23 @@ const useMyShareStore = defineStore('myshare', {
         this.ListDataShow = ListDataShow
         return
       }
+      const filterSource = this.AccountFilter ? this.ListDataRaw.filter((item) => item.account_id == this.AccountFilter) : this.ListDataRaw
       if (this.ListSearchKey) {
 
         const searchList: Item[] = []
-        const results = fuzzysort.go(this.ListSearchKey, this.ListDataRaw, {
+        const results = fuzzysort.go(this.ListSearchKey, filterSource, {
           threshold: -200000,
-          keys: ['share_name', 'description'],
-          scoreFn: (a) => Math.max(a[0] ? a[0].score : -200000, a[1] ? a[1].score : -200000)
+          keys: ['share_name', 'description', 'account_name'],
+          scoreFn: (a) => Math.max(a[0] ? a[0].score : -200000, a[1] ? a[1].score : -200000, a[2] ? a[2].score : -200000)
         })
         for (let i = 0, maxi = results.length; i < maxi; i++) {
-          if (results[i].score > -200000) searchList.push(results[i].obj as IAliShareItem)
+          if (results[i].score > -200000) searchList.push(results[i].obj as Item)
         }
         Object.freeze(searchList)
         this.ListDataShow = searchList
       } else {
 
-        const listDataShow = this.ListDataRaw.concat()
+        const listDataShow = filterSource.concat()
         Object.freeze(listDataShow)
         this.ListDataShow = listDataShow
       }
@@ -240,13 +260,13 @@ const useMyShareStore = defineStore('myshare', {
     mGetFocusNext(position: string) {
       return GetFocusNext(this.ListDataShow, KEY, this.ListFocusKey, position, '')
     },
-    mDeleteFiles(share_idList: string[]) {
-      const fileMap = new Set(share_idList)
+    mDeleteFiles(shareKeyList: string[]) {
+      const fileMap = new Set(shareKeyList)
       const listDataRaw = this.ListDataRaw
       const newDataList: Item[] = []
       for (let i = 0, maxi = listDataRaw.length; i < maxi; i++) {
         const item = listDataRaw[i]
-        if (!fileMap.has(item.share_id)) {
+        if (!fileMap.has(item.share_key)) {
           newDataList.push(item)
         }
       }
@@ -255,14 +275,14 @@ const useMyShareStore = defineStore('myshare', {
         this.mRefreshListDataShow(true)
       }
     },
-    mUpdateShare(success: UpdateShareModel[]) {
+    mUpdateShare(success: UpdateShareModel[], accountId: string = '') {
       const listDataRaw = this.ListDataRaw
       const timeNow = new Date().getTime()
       for (let j = 0, jmax = success.length; j < jmax; j++) {
         const info = success[j]
         for (let i = 0, maxi = listDataRaw.length; i < maxi; i++) {
           const item = listDataRaw[i]
-          if (item.share_id == info.share_id) {
+          if (item.share_id == info.share_id && (!accountId || item.account_id == accountId)) {
             item.share_pwd = info.share_pwd
             item.share_name = info.share_name
             item.description = HanToPin(info.share_name)

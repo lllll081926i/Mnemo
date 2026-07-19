@@ -1,13 +1,13 @@
 <script lang="ts">
 import { defineComponent, PropType, ref } from 'vue'
 import dayjs from 'dayjs'
-import { useMyShareStore, useUserStore } from '../../store'
+import { useMyShareStore } from '../../store'
 import message from '../../utils/message'
 import { copyToClipboard, openExternal } from '../../utils/electronhelper'
-import { IAliShareItem } from '../../aliapi/alimodels'
 import AliShare, { UpdateShareModel } from '../../aliapi/share'
 import { modalCloseAll } from '../../utils/modal'
 import { GetShareUrlFormate } from '../../utils/shareurl'
+import type { IManagedShareItem } from './MyShareStore'
 
 export default defineComponent({
   props: {
@@ -16,7 +16,7 @@ export default defineComponent({
       required: true
     },
     sharelist: {
-      type: Array as PropType<IAliShareItem[]>,
+      type: Array as PropType<IManagedShareItem[]>,
       required: true
     }
   },
@@ -84,9 +84,9 @@ export default defineComponent({
       }
 
       if (files.length > 1) nameList = undefined 
-      const user_id = useUserStore().user_id
+      const user_id = files[0].account_id
       AliShare.ApiUpdateShareBatch(user_id, idList, expLsit, pwdList, nameList).then((success: UpdateShareModel[]) => {
-        useMyShareStore().mUpdateShare(success)
+        useMyShareStore().mUpdateShare(success, user_id)
         modalCloseAll()
       })
     },

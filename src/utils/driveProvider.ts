@@ -33,6 +33,11 @@ export interface DriveProviderCapabilities {
   trashClear: boolean
   createShare: boolean
   importShare: boolean
+  manageCreatedShares: boolean
+  editCreatedShares: boolean
+  cancelCreatedShares: boolean
+  manageImportedShares: boolean
+  shareHistory: boolean
   quickTransfer: boolean
   favorite: boolean
   colorTag: boolean
@@ -138,6 +143,11 @@ const noCapabilities: Omit<DriveProviderCapabilities, 'provider'> = {
   trashClear: false,
   createShare: false,
   importShare: false,
+  manageCreatedShares: false,
+  editCreatedShares: false,
+  cancelCreatedShares: false,
+  manageImportedShares: false,
+  shareHistory: false,
   quickTransfer: false,
   favorite: false,
   colorTag: false,
@@ -170,6 +180,11 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
     trashClear: true,
     createShare: true,
     importShare: true,
+    manageCreatedShares: true,
+    editCreatedShares: true,
+    cancelCreatedShares: true,
+    manageImportedShares: true,
+    shareHistory: true,
     quickTransfer: true,
     favorite: true,
     colorTag: true,
@@ -178,15 +193,15 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
     copyTree: true,
     photoAlbum: true
   }),
-  cloud123: createCapabilities('cloud123', { createShare: true, importShare: true, trashView: true, trashRestore: true }),
+  cloud123: createCapabilities('cloud123', { createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, trashView: true, trashRestore: true }),
   '115': createCapabilities('115', { trashView: true, trashRestore: true, trashPurge: true }),
   '139': createCapabilities('139'),
   '189': createCapabilities('189'),
-  guangya: createCapabilities('guangya', { createTextFile: true, createShare: true, importShare: true }),
+  guangya: createCapabilities('guangya', { createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
   baidu: createCapabilities('baidu'),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
-  quark: createCapabilities('quark', { createShare: true, importShare: true, copy: false }),
-  dropbox: createCapabilities('dropbox', { createTextFile: true, createShare: true }),
+  quark: createCapabilities('quark', { createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
+  dropbox: createCapabilities('dropbox', { createTextFile: true, createShare: true, manageCreatedShares: true }),
   onedrive: createCapabilities('onedrive', { createTextFile: true, createShare: true }),
   box: createCapabilities('box', { createTextFile: true, createShare: true }),
   webdav: createCapabilities('webdav', { mountedStorage: true, recycleBin: false, permanentDelete: true }),

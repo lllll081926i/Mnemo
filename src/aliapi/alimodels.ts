@@ -146,6 +146,10 @@ export interface IAliShareBottleFish {
 }
 
 export interface IAliShareItem {
+  account_id?: string
+  account_name?: string
+  account_provider?: string
+  share_key?: string
   created_at: string
   creator: string
   description: string

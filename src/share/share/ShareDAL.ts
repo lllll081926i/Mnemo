@@ -14,8 +14,81 @@ import useMyTransferShareStore from './MyShareTransferStore'
 import AliTransferShareList from '../../aliapi/transfersharelist'
 import useShareHistoryStore from './ShareHistoryStore'
 import useShareBottleFishStore from './ShareBottleFishStore'
+import UserDAL from '../../user/userdal'
+import type { ITokenInfo } from '../../user/userstore'
+import { getDriveProviderCapabilities, getDriveProviderIcon, getDriveProviderLabel, type DriveProvider, type DriveProviderCapabilities } from '../../utils/driveProvider'
+import type { IManagedShareItem } from './MyShareStore'
+import DebugLog from '../../utils/debuglog'
+
+export interface IShareAccountSummary {
+  user_id: string
+  name: string
+  provider: DriveProvider
+  providerLabel: string
+  icon: string
+  capabilities: DriveProviderCapabilities
+}
 
 export default class ShareDAL {
+
+  static toShareAccount(token: ITokenInfo): IShareAccountSummary | undefined {
+    const capabilities = getDriveProviderCapabilities({ tokenfrom: token.tokenfrom, userId: token.user_id, driveId: token.default_drive_id })
+    if (!capabilities.manageCreatedShares && !capabilities.manageImportedShares && !capabilities.shareHistory) return undefined
+    return {
+      user_id: token.user_id,
+      name: token.nick_name || token.user_name || token.name || token.user_id,
+      provider: capabilities.provider,
+      providerLabel: getDriveProviderLabel(capabilities.provider),
+      icon: getDriveProviderIcon(capabilities.provider),
+      capabilities
+    }
+  }
+
+  static async getShareAccounts(): Promise<IShareAccountSummary[]> {
+    const tokens = await UserDAL.GetUserListFromDB()
+    return tokens.map((token) => ShareDAL.toShareAccount(token)).filter((account): account is IShareAccountSummary => !!account)
+  }
+
+  static async aReloadAllMyShare(force: boolean): Promise<IShareAccountSummary[]> {
+    const accounts = await ShareDAL.getShareAccounts()
+    const myshareStore = useMyShareStore()
+    const accountIds = accounts.filter((account) => account.capabilities.manageCreatedShares).map((account) => account.user_id).sort()
+    if (!force && accountIds.length == myshareStore.LoadedAccountIds.length && accountIds.every((id, index) => id == myshareStore.LoadedAccountIds[index])) return accounts
+    if (myshareStore.ListLoading) return accounts
+    myshareStore.ListLoading = true
+    try {
+      const successfulAccountIds: string[] = []
+      const failedAccounts: string[] = []
+      const lists = await Promise.all(
+        accounts
+          .filter((account) => account.capabilities.manageCreatedShares)
+          .map(async (account) => {
+            try {
+              const resp = await AliShareList.ApiShareListAll(account.user_id)
+              successfulAccountIds.push(account.user_id)
+              return resp.items.map(
+                (item): IManagedShareItem => ({
+                  ...item,
+                  account_id: account.user_id,
+                  account_name: account.name,
+                  account_provider: account.provider,
+                  share_key: `${account.user_id}:${item.share_id}`
+                })
+              )
+            } catch (error: any) {
+              failedAccounts.push(account.name)
+              DebugLog.mSaveWarning(`aReloadAllMyShare ${account.user_id}`, error)
+              return []
+            }
+          })
+      )
+      myshareStore.aLoadListData(lists.flat(), successfulAccountIds)
+      if (failedAccounts.length > 0) message.warning(`部分账号分享加载失败：${failedAccounts.join('、')}`)
+    } finally {
+      myshareStore.ListLoading = false
+    }
+    return accounts
+  }
 
   static async aLoadFromDB(): Promise<void> {
     const shareSiteList = await DB.getValueObject('shareSiteList')
@@ -28,23 +101,17 @@ export default class ShareDAL {
 
   static async aReloadMyShare(user_id: string, force: boolean): Promise<void> {
     if (!user_id) return
-    const myshareStore = useMyShareStore()
-    if (!force && myshareStore.ListDataRaw.length > 0) return
-    if (myshareStore.ListLoading == true) return
-    myshareStore.ListLoading = true
-    const resp = await AliShareList.ApiShareListAll(user_id)
-    myshareStore.aLoadListData(resp.items)
-    myshareStore.ListLoading = false
+    await ShareDAL.aReloadAllMyShare(force)
   }
 
   static async aReloadShareHistory(user_id: string, force: boolean): Promise<void> {
     if (!user_id) return
     const shareHistoryStore = useShareHistoryStore()
-    if (!force && shareHistoryStore.ListDataRaw.length > 0) return
+    if (!force && shareHistoryStore.LoadedAccountId == user_id) return
     if (shareHistoryStore.ListLoading == true) return
     shareHistoryStore.ListLoading = true
     const resp = await AliShareList.ApiShareRecentListAll(user_id)
-    shareHistoryStore.aLoadListData(resp.items)
+    shareHistoryStore.aLoadListData(resp.items, user_id)
     shareHistoryStore.ListLoading = false
   }
 
