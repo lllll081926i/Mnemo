@@ -16,111 +16,12 @@ import {
   menuVideoXBT
 } from '../topbtns/topbtn'
 import { modalRename, modalShuXing } from '../../utils/modal'
-import { useSettingStore, usePanFileStore, useAppStore, usePanTreeStore } from '../../store'
-import { computed, ref } from 'vue'
-import { MediaScanner } from '../../utils/mediaScanner'
-import MusicScanner from '../../utils/musicScanner'
-import BookScanner from '../../utils/bookScanner'
-import message from '../../utils/message'
-import { isAliyunUser as isAliyunAccountUser, isBoxUser, isCloud123User, isDropboxUser, isGuangyaUser, isOneDriveUser } from '../../aliapi/utils'
-import { isWebDavDrive } from '../../utils/webdavClient'
-import { isS3Drive } from '../../utils/s3Client'
+import { useSettingStore } from '../../store'
+import { computed } from 'vue'
+import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 let istree = false
 const settingStore = useSettingStore()
-const panFileStore = usePanFileStore()
-const appStore = useAppStore()
-const panTreeStore = usePanTreeStore()
-const mediaScanner = MediaScanner.getInstance()
-const musicScanner = MusicScanner.getInstance()
-const bookScanner = BookScanner.getInstance()
-
-const pickFolderForScan = () => {
-  const selectedFiles = panFileStore.GetSelected()
-  if (selectedFiles.length === 0) {
-    message.warning('请先选择要扫描的文件夹')
-    return null
-  }
-  const folder = selectedFiles.find((file) => file.isDir)
-  if (!folder) {
-    message.warning('请选择文件夹进行扫描')
-    return null
-  }
-  return folder
-}
-
-// 扫描类型勾选
-const scanVideo = ref(true)
-const scanAudio = ref(false)
-const scanBook = ref(false)
-const isScanning = computed(() => mediaScanner.isCurrentlyScanning || musicScanner.isScanning || bookScanner.isScanning)
-
-const handleStartScan = async () => {
-  const folder = pickFolderForScan()
-  if (!folder) return
-  if (isScanning.value) {
-    message.warning('正在扫描中，请稍后...')
-    return
-  }
-  if (!scanVideo.value && !scanAudio.value && !scanBook.value) {
-    message.warning('请至少勾选一种扫描类型')
-    return
-  }
-
-  const userId = (folder as any).user_id || panTreeStore.user_id || ''
-  const tasks: Promise<any>[] = []
-
-  if (scanVideo.value && !mediaScanner.isCurrentlyScanning) {
-    message.info(`开始扫描 "${folder.name}" 视频`)
-    appStore.toggleTab('media')
-    tasks.push(mediaScanner.scanFolder(folder, folder.drive_id).catch((e) => console.error('视频扫描失败:', e)))
-  }
-  if (scanAudio.value && !musicScanner.isScanning) {
-    if (!userId) {
-      message.error('无法识别当前账号')
-      return
-    }
-    appStore.toggleTab('music')
-    tasks.push(
-      musicScanner
-        .scanFolder(folder, userId)
-        .then((r) => message.success(`音频扫描完成: ${r.found} 首`))
-        .catch((e) => console.error('音频扫描失败:', e))
-    )
-  }
-  if (scanBook.value && !bookScanner.isScanning) {
-    if (!userId) {
-      message.error('无法识别当前账号')
-      return
-    }
-    appStore.toggleTab('book')
-    tasks.push(
-      bookScanner
-        .scanFolder(folder, userId)
-        .then((r) => message.success(`书籍扫描完成: ${r.found} 本`))
-        .catch((e) => console.error('书籍扫描失败:', e))
-    )
-  }
-
-  await Promise.allSettled(tasks)
-}
-
-// AI 批量刮削
-const handleAIBatchScrape = async () => {
-  const folder = pickFolderForScan()
-  if (!folder) return
-  if (mediaScanner.isCurrentlyScanning) {
-    message.warning('正在扫描中，请稍后...')
-    return
-  }
-  try {
-    appStore.toggleTab('media')
-    await mediaScanner.batchAIScrapeFolder(folder, (folder as any).drive_id)
-  } catch (error) {
-    console.error('AI 批量刮削失败:', error)
-    message.error('AI 批量刮削失败，请稍后重试')
-  }
-}
 
 const props = defineProps({
   dirtype: {
@@ -159,85 +60,27 @@ const isShowBtn = computed(() => {
 const isPic = computed(() => {
   return props.dirtype === 'pic' && props.inputpicType == 'mypic'
 })
-const isCloudUser = computed(() => isCloud123User(panTreeStore.user_id || '') || panTreeStore.drive_id === 'cloud123')
-const isAliyunAccount = computed(() => isAliyunAccountUser(panTreeStore.user_id || ''))
-const isDropbox = computed(() => isDropboxUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'dropbox')
-const isOneDrive = computed(() => isOneDriveUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'onedrive')
-const isBox = computed(() => isBoxUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'box')
-const isGuangya = computed(() => isGuangyaUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'guangya')
-const isThirdPartyDrive = computed(() => isDropbox.value || isOneDrive.value || isBox.value || isGuangya.value)
-const isShareSupported = computed(() => props.inputselectType.includes('resource') || isDropbox.value || isOneDrive.value || isBox.value || isGuangya.value)
-const isWebDav = computed(() => isWebDavDrive(panTreeStore.drive_id || panTreeStore.selectDir.drive_id))
-const isS3 = computed(() => isS3Drive(panTreeStore.drive_id || panTreeStore.selectDir.drive_id))
-const isMountedStorage = computed(() => isWebDav.value || isS3.value)
-
-// 检查是否选中了文件夹
-const isSelectedFolder = computed(() => {
-  const selectedFiles = panFileStore.GetSelected()
-  return selectedFiles.some((file) => file.isDir)
-})
+const { provider, capabilities } = useCurrentDriveProvider()
+const canCreateShare = computed(() => capabilities.value.createShare && (provider.value !== 'aliyun' || props.inputselectType.includes('resource')))
 </script>
 
 <template>
   <a-dropdown id="rightpanmenu" class="rightmenu" :popup-visible="true" style="z-index: -1; left: -200px; opacity: 0">
     <template #content>
-      <a-doption @click="() => menuDownload(istree)">
+      <a-doption v-if="capabilities.download" @click="() => menuDownload(istree)">
         <template #icon><IconFont name="icondownload" /></template>
         <template #default>下载</template>
       </a-doption>
-      <a-doption v-if="isShareSupported" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
+      <a-doption v-if="canCreateShare" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>
       </a-doption>
-      <a-doption v-if="isAliyunAccount" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
+      <a-doption v-if="capabilities.quickTransfer" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
         <template #icon><IconFont name="iconrss" /></template>
         <template #default>快传</template>
       </a-doption>
 
-      <!-- 扫描数据 -->
-      <a-dsubmenu v-if="isSelectedFolder && isShowBtn" class="rightmenu" trigger="hover">
-        <template #default>
-          <div @click.stop="() => {}">
-            <span class="arco-dropdown-option-icon">
-              <IconFont name="iconscan" style="opacity: 0.8" />
-            </span>
-            扫描数据
-          </div>
-        </template>
-        <template #content>
-          <a-doption @click.stop="scanVideo = !scanVideo">
-            <template #icon>
-              <IconFont :name="scanVideo ? 'iconcheckbox-full' : 'iconfangkuang'" :style="scanVideo ? 'color: rgb(var(--primary-6))' : ''" />
-            </template>
-            <template #default>视频</template>
-          </a-doption>
-          <a-doption @click.stop="scanAudio = !scanAudio">
-            <template #icon>
-              <IconFont :name="scanAudio ? 'iconcheckbox-full' : 'iconfangkuang'" :style="scanAudio ? 'color: rgb(var(--primary-6))' : ''" />
-            </template>
-            <template #default>音频</template>
-          </a-doption>
-          <a-doption @click.stop="scanBook = !scanBook">
-            <template #icon>
-              <IconFont :name="scanBook ? 'iconcheckbox-full' : 'iconfangkuang'" :style="scanBook ? 'color: rgb(var(--primary-6))' : ''" />
-            </template>
-            <template #default>书籍</template>
-          </a-doption>
-          <a-doption @click="handleStartScan">
-            <template #icon><IconFont name="iconstart" /></template>
-            <template #default>开始扫描</template>
-          </a-doption>
-          <a-doption @click="handleAIBatchScrape">
-            <template #icon><IconFont name="iconscan" /></template>
-            <template #default>
-              AI 重刮削
-              <span class="ai-pro-badge">Pro</span>
-            </template>
-          </a-doption>
-        </template>
-      </a-dsubmenu>
-
-      <a-dsubmenu v-if="dirtype !== 'pic' && !isMountedStorage && !isThirdPartyDrive" id="rightpansubbiaoji" class="rightmenu" trigger="hover">
+      <a-dsubmenu v-if="dirtype !== 'pic' && capabilities.colorTag" id="rightpansubbiaoji" class="rightmenu" trigger="hover">
         <template #default>
           <div @click.stop="() => {}">
             <span class="arco-dropdown-option-icon">
@@ -280,23 +123,23 @@ const isSelectedFolder = computed(() => {
             <template #icon><IconFont name="iconqingkong" /></template>
             <template #default>移出相册</template>
           </a-doption>
-          <a-doption v-if="isShowBtn" @click="() => menuCopySelectedFile(istree, 'cut')">
+          <a-doption v-if="isShowBtn && capabilities.move" @click="() => menuCopySelectedFile(istree, 'cut')">
             <template #icon><IconFont name="iconscissor" /></template>
             <template #default>移动到...</template>
           </a-doption>
-          <a-doption v-if="isShowBtn" @click="() => menuCopySelectedFile(istree, 'copy')">
+          <a-doption v-if="isShowBtn && capabilities.copy" @click="() => menuCopySelectedFile(istree, 'copy')">
             <template #icon><IconFont name="iconcopy" /></template>
             <template #default>复制到...</template>
           </a-doption>
-          <a-doption v-if="isShowBtn && isAliyunAccount && !isMountedStorage && !isThirdPartyDrive" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
+          <a-doption v-if="isShowBtn && capabilities.encryption" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
             <template #icon><IconFont name="iconsafebox" /></template>
             <template #default>标记加密</template>
           </a-doption>
-          <a-doption v-if="!isMountedStorage && ((isShowBtn && dirtype !== 'mypic') || dirtype === 'search')" class="danger" @click="() => menuTrashSelectFile(istree, false, isPic)">
+          <a-doption v-if="capabilities.recycleBin && ((isShowBtn && dirtype !== 'mypic') || dirtype === 'search')" class="danger" @click="() => menuTrashSelectFile(istree, false, isPic)">
             <template #icon><IconFont name="icondelete" /></template>
             <template #default>放回收站</template>
           </a-doption>
-          <a-dsubmenu v-if="dirtype !== 'mypic' && (isAliyunAccount || isMountedStorage)" class="rightmenu" trigger="hover">
+          <a-dsubmenu v-if="dirtype !== 'mypic' && capabilities.permanentDelete" class="rightmenu" trigger="hover">
             <template #default>
               <span class="arco-dropdown-option-icon"><IconFont name="iconrest" /></span>
               彻底删除
@@ -310,7 +153,7 @@ const isSelectedFolder = computed(() => {
         </template>
       </a-dsubmenu>
 
-      <a-doption v-if="dirtype != 'video'" @click="() => modalRename(istree, isselectedmulti, dirtype.includes('pic'))">
+      <a-doption v-if="dirtype != 'video' && capabilities.rename" @click="() => modalRename(istree, isselectedmulti, dirtype.includes('pic'))">
         <template #icon><IconFont name="iconedit-square" /></template>
         <template #default>重命名</template>
       </a-doption>
@@ -337,11 +180,11 @@ const isSelectedFolder = computed(() => {
             <template #icon><IconFont name="iconjietu" /></template>
             <template #default>雪碧图</template>
           </a-doption>
-          <a-doption v-if="isShowBtn && isAliyunAccount && !isMountedStorage && !isThirdPartyDrive" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
+          <a-doption v-if="isShowBtn && capabilities.encryption" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
             <template #icon><IconFont name="iconsafebox" /></template>
             <template #default>标记加密</template>
           </a-doption>
-          <a-doption v-if="isShowBtn && isAliyunAccount && !isMountedStorage" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
+          <a-doption v-if="isShowBtn && capabilities.playbackHistory" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
             <template #icon><IconFont name="iconshipin" /></template>
             <template #default>清除历史</template>
           </a-doption>
@@ -357,7 +200,7 @@ const isSelectedFolder = computed(() => {
             <template #icon><IconFont name="iconlist" /></template>
             <template #default>复制文件名</template>
           </a-doption>
-          <a-doption v-if="isselected && !isselectedmulti && !isCloudUser && !isThirdPartyDrive && !isMountedStorage" @click="() => menuCopyFileTree()">
+          <a-doption v-if="isselected && !isselectedmulti && capabilities.copyTree" @click="() => menuCopyFileTree()">
             <template #icon><IconFont name="iconnode-tree1" /></template>
             <template #default>复制目录树</template>
           </a-doption>
@@ -366,20 +209,3 @@ const isSelectedFolder = computed(() => {
     </template>
   </a-dropdown>
 </template>
-<style>
-.ai-pro-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-  color: #fff;
-  font-weight: 700;
-  line-height: 1;
-  height: 14px;
-  padding: 0 5px;
-  font-size: 9px;
-  vertical-align: middle;
-  margin-left: 4px;
-}
-</style>

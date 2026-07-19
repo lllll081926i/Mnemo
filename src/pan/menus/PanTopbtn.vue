@@ -3,12 +3,10 @@ import { computed, ref } from 'vue'
 import { handleUpload, topFavorDeleteAll } from '../topbtns/topbtn'
 import { modalCreatNewAlbum, modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalShowShareLink } from '../../utils/modal'
 import AliShare from '../../aliapi/share'
-import { usePanTreeStore, usePanFileStore } from '../../store'
+import { usePanTreeStore } from '../../store'
 import message from '../../utils/message'
 import PanDAL from '../pandal'
-import { isAliyunUser, isBoxUser, isCloud123User, isDropboxUser, isGuangyaUser, isOneDriveUser, isQuarkUser } from '../../aliapi/utils'
-import { isWebDavDrive } from '../../utils/webdavClient'
-import { isS3Drive } from '../../utils/s3Client'
+import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 const props = defineProps({
   dirtype: {
@@ -31,18 +29,7 @@ const props = defineProps({
 
 const videoSelectType = ref('recent')
 const panTreeStore = usePanTreeStore()
-const panFileStore = usePanFileStore()
-
-const isWebDav = computed(() => isWebDavDrive(panTreeStore.drive_id || panTreeStore.selectDir.drive_id))
-const isS3 = computed(() => isS3Drive(panTreeStore.drive_id || panTreeStore.selectDir.drive_id))
-const isMountedStorage = computed(() => isWebDav.value || isS3.value)
-const isDropbox = computed(() => isDropboxUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'dropbox')
-const isOneDrive = computed(() => isOneDriveUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'onedrive')
-const isBox = computed(() => isBoxUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'box')
-const isGuangya = computed(() => isGuangyaUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'guangya')
-const isQuark = computed(() => isQuarkUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'quark')
-const isThirdPartyDrive = computed(() => isDropbox.value || isOneDrive.value || isBox.value || isGuangya.value)
-const isShareImportSupported = computed(() => isAliyunUser(panTreeStore.user_id || '') || isQuark.value || isCloud123User(panTreeStore.user_id || '') || isGuangya.value)
+const { provider, capabilities } = useCurrentDriveProvider()
 
 const isShowBtn = computed(() => {
   return (props.dirtype === 'pic' && props.inputpicType != 'mypic') || props.dirtype === 'mypic' || props.dirtype === 'pan'
@@ -99,11 +86,11 @@ const handleClickBottleFish = async () => {
     </a-space>
   </div>
   <div v-if="!isselected && ['pan', 'pic', 'mypic'].includes(dirtype)" class="toppanbtn">
-    <a-button v-if="inputselectType.includes('resource') && isAliyunUser(panTreeStore.user_id || '')" type="text" size="small" tabindex="-1" @click="handleClickBottleFish">
+    <a-button v-if="inputselectType.includes('resource') && provider === 'aliyun'" type="text" size="small" tabindex="-1" @click="handleClickBottleFish">
       <IconFont name="iconnotification" />
       好运瓶
     </a-button>
-    <a-dropdown v-if="dirtype !== 'pic'" trigger="hover" class="rightmenu" position="bl">
+    <a-dropdown v-if="dirtype !== 'pic' && (capabilities.createTextFile || capabilities.createFolder)" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconplus" />
         新建
@@ -111,20 +98,20 @@ const handleClickBottleFish = async () => {
       </a-button>
       <template #content>
         <a-dgroup title="普通新建">
-          <a-doption v-if="!isMountedStorage" value="newfile" title="Ctrl+N" @click="() => modalCreatNewFile()">
+          <a-doption v-if="capabilities.createTextFile" value="newfile" title="Ctrl+N" @click="() => modalCreatNewFile()">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>新建文件</template>
           </a-doption>
-          <a-doption value="newfolder" title="Ctrl+Shift+N" @click="() => modalCreatNewDir('folder')">
+          <a-doption v-if="capabilities.createFolder" value="newfolder" title="Ctrl+Shift+N" @click="() => modalCreatNewDir('folder')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>新建文件夹</template>
           </a-doption>
-          <a-doption v-if="!isMountedStorage" value="newdatefolder" @click="() => modalCreatNewDir('datefolder')">
+          <a-doption v-if="capabilities.createDateFolder" value="newdatefolder" @click="() => modalCreatNewDir('datefolder')">
             <template #icon><IconFont name="iconfolderadd" /></template>
             <template #default>日期+序号</template>
           </a-doption>
         </a-dgroup>
-        <a-dgroup v-if="!isMountedStorage && !isThirdPartyDrive" title="加密新建">
+        <a-dgroup v-if="capabilities.encryption" title="加密新建">
           <a-doption value="newfile" @click="() => modalCreatNewFile('xbyEncrypt1')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>新建文件（加密）</template>
@@ -138,7 +125,7 @@ const handleClickBottleFish = async () => {
             <template #default>日期+序号（加密）</template>
           </a-doption>
         </a-dgroup>
-        <a-dgroup v-if="!isMountedStorage && !isThirdPartyDrive" title="私密新建">
+        <a-dgroup v-if="capabilities.encryption" title="私密新建">
           <a-doption value="newfile" @click="() => modalCreatNewFile('xbyEncrypt2')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>新建文件（私密）</template>
@@ -158,7 +145,7 @@ const handleClickBottleFish = async () => {
       <IconFont name="iconplus" />
       创建相册
     </a-button>
-    <a-dropdown v-if="!dirtype.includes('pic')" trigger="hover" class="rightmenu" position="bl">
+    <a-dropdown v-if="!dirtype.includes('pic') && capabilities.upload" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconupload" />
         上传
@@ -175,7 +162,7 @@ const handleClickBottleFish = async () => {
             <template #default>上传文件夹</template>
           </a-doption>
         </a-dgroup>
-        <a-dgroup v-if="!isMountedStorage && !isThirdPartyDrive" title="加密上传">
+        <a-dgroup v-if="capabilities.encryption" title="加密上传">
           <a-doption value="uploadfile" title="Ctrl+J" @click="() => handleUpload('file', 'xbyEncrypt1')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>上传文件（加密）</template>
@@ -185,7 +172,7 @@ const handleClickBottleFish = async () => {
             <template #default>上传文件夹（加密）</template>
           </a-doption>
         </a-dgroup>
-        <a-dgroup v-if="!isMountedStorage && !isThirdPartyDrive" title="私密上传">
+        <a-dgroup v-if="capabilities.encryption" title="私密上传">
           <a-doption value="uploadfile" title="Ctrl+M" @click="() => handleUpload('file', 'xbyEncrypt2')">
             <template #icon><IconFont name="iconwenjian" /></template>
             <template #default>上传文件（私密）</template>
@@ -197,7 +184,7 @@ const handleClickBottleFish = async () => {
         </a-dgroup>
       </template>
     </a-dropdown>
-    <a-dropdown v-if="isShowBtn && dirtype.includes('pic') && isAliyunUser(panTreeStore.user_id || '')" trigger="hover" class="rightmenu" position="bl">
+    <a-dropdown v-if="isShowBtn && dirtype.includes('pic') && capabilities.photoAlbum" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconupload" />
         上传照片/视频
@@ -224,7 +211,7 @@ const handleClickBottleFish = async () => {
         </a-dgroup>
       </template>
     </a-dropdown>
-    <a-button v-if="!dirtype.includes('pic') && isShareImportSupported" type="text" size="small" tabindex="-1" title="Ctrl+L" @click="modalDaoRuShareLink()">
+    <a-button v-if="!dirtype.includes('pic') && capabilities.importShare" type="text" size="small" tabindex="-1" title="Ctrl+L" @click="modalDaoRuShareLink()">
       <IconFont name="iconlink2" />
       导入分享
     </a-button>
@@ -235,4 +222,3 @@ const handleClickBottleFish = async () => {
     </a-button> -->
   </div>
 </template>
-<style></style>

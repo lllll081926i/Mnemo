@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { usePanFileStore, usePanTreeStore } from '../../store'
-import { isAliyunUser as isAliyunAccountUser, isBoxUser, isDropboxUser, isGuangyaUser, isOneDriveUser } from '../../aliapi/utils'
-import { isWebDavDrive } from '../../utils/webdavClient'
-import { isS3Drive } from '../../utils/s3Client'
+import { usePanFileStore } from '../../store'
+import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 import {
   menuAddAlbumSelectFile,
@@ -60,18 +58,8 @@ const props = defineProps({
 })
 
 const istree = false
-const panTreeStore = usePanTreeStore()
 const panFileStore = usePanFileStore()
-const isAliyunAccount = computed(() => isAliyunAccountUser(panTreeStore.user_id || ''))
-const isDropbox = computed(() => isDropboxUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'dropbox')
-const isOneDrive = computed(() => isOneDriveUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'onedrive')
-const isBox = computed(() => isBoxUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'box')
-const isGuangya = computed(() => isGuangyaUser(panTreeStore.user_id || '') || panTreeStore.drive_id === 'guangya')
-const isThirdPartyDrive = computed(() => isDropbox.value || isOneDrive.value || isBox.value || isGuangya.value)
-const isShareSupported = computed(() => props.inputselectType.includes('resource') || isDropbox.value || isOneDrive.value || isBox.value || isGuangya.value)
-const isWebDav = computed(() => isWebDavDrive(panTreeStore.drive_id || panTreeStore.selectDir.drive_id))
-const isS3 = computed(() => isS3Drive(panTreeStore.drive_id || panTreeStore.selectDir.drive_id))
-const isMountedStorage = computed(() => isWebDav.value || isS3.value)
+const { provider, capabilities } = useCurrentDriveProvider()
 const isShowBtn = computed(() => {
   return (props.dirtype === 'pic' && props.inputpicType != 'mypic') || props.dirtype === 'mypic' || ['search', 'color', 'pan'].includes(props.dirtype)
 })
@@ -83,18 +71,21 @@ const hasSelection = computed(() => props.isselected && selectedItems.value.leng
 const selectedOne = computed(() => (selectedItems.value.length === 1 ? selectedItems.value[0] : undefined))
 const selectedOneDirectory = computed(() => !!selectedOne.value?.isDir)
 const hasSelectedFile = computed(() => selectedItems.value.some((item: any) => !item.isDir))
-const canMutateSelection = computed(() => isShowBtn.value)
-const canSendToTrash = computed(() => !isMountedStorage.value && (canMutateSelection.value || props.dirtype === 'search'))
-const canPermanentlyDelete = computed(() => isAliyunAccount.value || isMountedStorage.value)
+const canRenameSelection = computed(() => isShowBtn.value && capabilities.value.rename)
+const canMoveSelection = computed(() => isShowBtn.value && capabilities.value.move)
+const canCopySelection = computed(() => isShowBtn.value && capabilities.value.copy)
+const canMutateSelection = computed(() => canRenameSelection.value || canMoveSelection.value || canCopySelection.value)
+const canSendToTrash = computed(() => capabilities.value.recycleBin && (canMutateSelection.value || props.dirtype === 'search'))
+const canPermanentlyDelete = computed(() => capabilities.value.permanentDelete)
 const canShowDelete = computed(() => canSendToTrash.value || canPermanentlyDelete.value)
 const canShowMore = computed(() => hasSelection.value && (canMutateSelection.value || !isPic.value || props.isvideo || props.dirtype === 'mypic'))
-const canCreateShare = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && isShareSupported.value)
-const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && isAliyunAccount.value)
+const canCreateShare = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && capabilities.value.createShare && (provider.value !== 'aliyun' || props.inputselectType.includes('resource')))
+const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && capabilities.value.quickTransfer)
 </script>
 
 <template>
   <div v-if="hasSelection && dirtype !== 'trash' && dirtype !== 'recover'" class="toppanbtn">
-    <a-button v-if="!isPic && dirtype != 'video'" type="text" size="small" tabindex="-1" title="Ctrl+D" @click="() => menuDownload(istree)">
+    <a-button v-if="!isPic && dirtype != 'video' && capabilities.download" type="text" size="small" tabindex="-1" title="Ctrl+D" @click="() => menuDownload(istree)">
       <IconFont name="icondownload" />
       下载
     </a-button>
@@ -106,15 +97,15 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
       <IconFont name="iconrss" />
       快传
     </a-button>
-    <a-button v-if="!isPic && !isallfavored && isAliyunAccount" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, true)">
+    <a-button v-if="!isPic && !isallfavored && capabilities.favorite" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, true)">
       <IconFont name="iconcrown" />
       收藏
     </a-button>
-    <a-button v-if="!isPic && isallfavored && isAliyunAccount" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, false)">
+    <a-button v-if="!isPic && isallfavored && capabilities.favorite" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, false)">
       <IconFont name="iconcrown2" />
       取消收藏
     </a-button>
-    <a-button v-if="isShowBtn" title="F2 / Ctrl+E" type="text" size="small" tabindex="-1" @click="() => modalRename(istree, isselectedmulti, isPic)">
+    <a-button v-if="canRenameSelection" title="F2 / Ctrl+E" type="text" size="small" tabindex="-1" @click="() => modalRename(istree, isselectedmulti, isPic)">
       <IconFont name="iconedit-square" />
       重命名
     </a-button>
@@ -133,7 +124,7 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
           <template #icon><IconFont name="icondelete" /></template>
           <template #default>放回收站</template>
         </a-doption>
-        <a-dsubmenu v-if="isAliyunAccount || isMountedStorage" class="rightmenu" trigger="hover">
+        <a-dsubmenu v-if="canPermanentlyDelete" class="rightmenu" trigger="hover">
           <template #default>
             <span class="arco-dropdown-option-icon"><IconFont name="iconrest" /></span>
             彻底删除
@@ -161,11 +152,11 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
           <template #icon><IconFont name="iconscissor" /></template>
           <template #default>移出相册</template>
         </a-doption>
-        <a-doption v-if="canMutateSelection" title="Ctrl+X" @click="() => menuCopySelectedFile(istree, 'cut')">
+        <a-doption v-if="canMoveSelection" title="Ctrl+X" @click="() => menuCopySelectedFile(istree, 'cut')">
           <template #icon><IconFont name="iconscissor" /></template>
           <template #default>移动到...</template>
         </a-doption>
-        <a-doption v-if="canMutateSelection" title="Ctrl+C" @click="() => menuCopySelectedFile(istree, 'copy')">
+        <a-doption v-if="canCopySelection" title="Ctrl+C" @click="() => menuCopySelectedFile(istree, 'copy')">
           <template #icon><IconFont name="iconcopy" /></template>
           <template #default>复制到...</template>
         </a-doption>
@@ -177,15 +168,15 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
           <template #icon><IconFont name="iconjietu" /></template>
           <template #default>雪碧图</template>
         </a-doption>
-        <a-doption v-if="canMutateSelection && isAliyunAccount" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
+        <a-doption v-if="canMutateSelection && capabilities.encryption" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
           <template #icon><IconFont name="iconsafebox" /></template>
           <template #default>标记加密</template>
         </a-doption>
-        <a-doption v-if="canMutateSelection && isallcolored && isAliyunAccount" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
+        <a-doption v-if="canMutateSelection && isallcolored && capabilities.playbackHistory" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
           <template #icon><IconFont name="iconshipin" /></template>
           <template #default>清除历史</template>
         </a-doption>
-        <a-doption v-if="canMutateSelection && isallcolored && !isMountedStorage && !isThirdPartyDrive" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileColorChange(istree, '')">
+        <a-doption v-if="canMutateSelection && isallcolored && capabilities.colorTag" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileColorChange(istree, '')">
           <template #icon><IconFont name="iconfangkuang" /></template>
           <template #default>清除标记</template>
         </a-doption>
@@ -201,7 +192,7 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
           <template #icon><IconFont name="iconlist" /></template>
           <template #default>复制文件名</template>
         </a-doption>
-        <a-doption v-if="!dirtype.includes('pic') && selectedOneDirectory && !isselectedmulti && isAliyunAccount" @click="() => menuCopyFileTree()">
+        <a-doption v-if="!dirtype.includes('pic') && selectedOneDirectory && !isselectedmulti && capabilities.copyTree" @click="() => menuCopyFileTree()">
           <template #icon><IconFont name="iconnode-tree1" /></template>
           <template #default>复制目录树</template>
         </a-doption>
@@ -209,4 +200,3 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
     </a-dropdown>
   </div>
 </template>
-<style></style>

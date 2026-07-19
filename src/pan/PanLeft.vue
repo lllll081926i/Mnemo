@@ -17,19 +17,20 @@ import { dropMoveSelectedFile } from './topbtns/topbtn'
 import message from '../utils/message'
 import { modalUpload } from '../utils/modal'
 import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import useCurrentDriveProvider from './useCurrentDriveProvider'
 
 const treeref = ref()
 const inputselectType = ref('backup')
 const winStore = useWinStore()
 // header 48 + drive switcher ~50 + segmented ~44 + paddings
 const treeHeight = computed(() => Math.max(220, winStore.height - 48 - 50 - 44 - 24))
-const quickHeight = computed(() => Math.max(160, winStore.height - 48 - 50 - 44 - 24 - 210))
 const appStore = useAppStore()
 const pantreeStore = usePanTreeStore()
 const settingStore = useSettingStore()
 const userStore = useUserStore()
-const isCloudUser = computed(() => isCloud123User(pantreeStore.user_id || ''))
 const isAliyunAccount = computed(() => isAliyunUser(pantreeStore.user_id || UserDAL.GetUserToken(pantreeStore.user_id || '')))
+const { capabilities: providerCapabilities } = useCurrentDriveProvider()
+const quickHeight = computed(() => Math.max(160, winStore.height - 48 - 50 - 44 - 24 - (providerCapabilities.value.colorTag ? 210 : 0)))
 
 const keyboardStore = useKeyboardStore()
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -211,7 +212,7 @@ const filterTreeData = computed(() => {
         return true
       })
 
-  return baseList
+  return baseList.filter((item) => item.key !== 'trash' || providerCapabilities.value.trashView)
 })
 
 const folderPreviewRef = ref<{ open: (target: HTMLElement, params: any) => void; leave: () => void; cancel: () => void } | null>(null)
@@ -364,8 +365,7 @@ const handleOpenDriveLogin = () => {
         <a-tab-pane key="wangpan" title="1">
           <div v-if="!pantreeStore.user_id" class="pan-tree-empty">
             <IconFont name="iconyunpan" />
-            <strong>登录后查看网盘文件</strong>
-            <span>回收站、全盘搜索和文件目录会在登录后显示</span>
+            <strong>登录后查看文件</strong>
             <a-button type="primary" size="small" @click="handleOpenDriveLogin">登录网盘账号</a-button>
           </div>
           <AntdTree
@@ -416,6 +416,7 @@ const handleOpenDriveLogin = () => {
         </a-tab-pane>
         <a-tab-pane key="kuaijie" title="2">
           <AntdTree
+            v-if="providerCapabilities.colorTag"
             :tabindex="-1"
             :focusable="false"
             class="colortree"
