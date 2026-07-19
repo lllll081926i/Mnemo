@@ -59,7 +59,7 @@ const handleImportAsar = () => {
   )
 }
 
-const openProject = () => openExternal('https://github.com/gaozhangmin/mnemo')
+const openProject = () => openExternal('https://github.com/lllll081926i/Mnemo')
 </script>
 
 <template>

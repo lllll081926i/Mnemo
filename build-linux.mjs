@@ -6,8 +6,8 @@ const root = process.cwd()
 const releaseDir = resolve(root, 'release')
 
 function run(args) {
-  console.info(`\n> pnpm exec electron-builder ${args.join(' ')}`)
-  const result = spawnSync('pnpm', ['exec', 'electron-builder', ...args], {
+  console.info(`\n> npm exec -- electron-builder ${args.join(' ')}`)
+  const result = spawnSync('npm', ['exec', '--', 'electron-builder', ...args], {
     cwd: root,
     stdio: 'inherit',
     shell: false

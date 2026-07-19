@@ -68,9 +68,9 @@ function ensurePythonShim() {
 ensurePythonShim()
 
 run('node', ['version.mjs'])
-run('pnpm', ['exec', 'vue-tsc', '--noEmit'])
-run('pnpm', ['exec', 'vite', 'build'])
+run('npm', ['exec', '--', 'vue-tsc', '--noEmit'])
+run('npm', ['exec', '--', 'vite', 'build'])
 
 run('node', ['build-linux.mjs'])
-run('pnpm', ['exec', 'electron-builder', '--win'])
-run('pnpm', ['exec', 'electron-builder', '--mac'])
+run('npm', ['exec', '--', 'electron-builder', '--win'])
+run('npm', ['exec', '--', 'electron-builder', '--mac'])

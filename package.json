@@ -1,14 +1,14 @@
 {
   "name": "mnemo",
   "description": "Mnemo",
-  "version": "5.0.7",
+  "version": "0.1.0",
   "main": "dist/electron/main/index.js",
   "packageManager": "npm@11.18.0",
   "author": {
     "name": "gaozhangmin",
     "email": "gaozhangmin@gmail.com"
   },
-  "homepage": "https://github.com/gaozhangmin/mnemo",
+  "homepage": "https://github.com/lllll081926i/Mnemo",
   "license": "GPL-3.0",
   "scripts": {
     "secrets:generate": "node scripts/generate-secrets.mjs --mode=local",
@@ -162,10 +162,5 @@
     "vite",
     "vue3",
     "vue"
-  ],
-  "pnpm": {
-    "overrides": {
-      "@electron/get": "3.1.0"
-    }
-  }
+  ]
 }

@@ -7,7 +7,7 @@
       "schemes": ["xbyboxplayer-oauth", "boxplayer-onedriveoauth"]
     }
   ],
-  "copyright": "copyright ©2026 GaoZhangMin",
+  "copyright": "copyright ©2026 Mnemo",
   "asar": true,
   "compression": "maximum",
   "npmRebuild": false,
@@ -88,8 +88,8 @@
   },
   "publish": [
     {
-      "owner": "gaozhangmin",
-      "repo": "mnemo",
+      "owner": "lllll081926i",
+      "repo": "Mnemo",
       "provider": "github",
       "releaseType": "prerelease"
     }

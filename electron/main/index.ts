@@ -4,10 +4,10 @@ import launch from './launch'
 
 app.setAboutPanelOptions({
   applicationName: 'Mnemo',
-  copyright: 'copyright ©2026 GaoZhangMin',
-  website: 'https://github.com/gaozhangmin/mnemo',
+  copyright: 'copyright ©2026 Mnemo',
+  website: 'https://github.com/lllll081926i/Mnemo',
   iconPath: getStaticPath('icon_64x64.png'),
-  applicationVersion: '30'
+  applicationVersion: app.getVersion()
 })
 
 const appLaunch = new launch()

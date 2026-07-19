@@ -188,7 +188,7 @@ async function fetchLrclib(artist: string, title: string, durationSec?: number, 
     let resp = await axios.get('https://lrclib.net/api/get', {
       params,
       timeout: 8000,
-      headers: { 'User-Agent': 'Mnemo/1.0 (https://github.com/gaozhangmin/mnemo)' }
+      headers: { 'User-Agent': 'Mnemo/0.1.0 (https://github.com/lllll081926i/Mnemo)' }
     }).catch(() => null)
     let body: any = resp?.data
     if (!body || (!body.syncedLyrics && !body.plainLyrics)) {
