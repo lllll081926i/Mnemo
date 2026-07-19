@@ -36,8 +36,14 @@ describe('provider OAuth runtime configuration', () => {
 
   it('routes shared protocol callbacks by OAuth state and only marks opened URLs after shell success', () => {
     const login = read('src/user/UserLogin.vue')
+    const preload = read('electron/preload/index.ts')
+    const mainIpc = read('electron/main/core/ipcEvent.ts')
     expect(login).toContain('const callbackProvider = oauthLoginProviders.find((provider) => oauthStates.get(provider) === state)')
     expect(login).toContain("oauthStates.delete(callbackProvider)")
-    expect(login).toContain('await window.Electron.shell.openExternal(authUrl)')
+    expect(login).toContain('await window.WebOpenExternal(authUrl)')
+    expect(login).not.toContain('window.Electron.shell.openExternal')
+    expect(preload).toContain("ipcRenderer.invoke('WebOpenExternal', url)")
+    expect(mainIpc).toContain("ipcMain.handle('WebOpenExternal'")
+    expect(mainIpc).toContain("url.protocol !== 'https:' && url.protocol !== 'http:'")
   })
 })

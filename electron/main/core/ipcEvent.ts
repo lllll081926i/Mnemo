@@ -127,6 +127,7 @@ export default class ipcEvent {
     this.handleWebSetProgressBar()
     this.handleWebShutDown()
     this.handleWebSetProxy()
+    this.handleWebOpenExternal()
     this.handleAutoUpdate()
     this.handleSafeStorage()
     this.handleOfficePreviewConvertToPdf()
@@ -138,6 +139,19 @@ export default class ipcEvent {
 
   private static handleAutoUpdate() {
     ipcMain.handle('AutoUpdate:check', () => checkForUpdatesNow())
+  }
+
+  private static handleWebOpenExternal() {
+    ipcMain.handle('WebOpenExternal', async (_event, value: unknown) => {
+      try {
+        const url = new URL(String(value || '').trim())
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return { ok: false, error: '仅允许打开 HTTP 或 HTTPS 链接' }
+        await shell.openExternal(url.toString())
+        return { ok: true }
+      } catch (error: any) {
+        return { ok: false, error: error?.message || '无法打开系统浏览器' }
+      }
+    })
   }
 
   private static handleSafeStorage() {

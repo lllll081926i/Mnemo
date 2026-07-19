@@ -145,6 +145,13 @@ window.WebOpenWindow = function(data: any) {
   } catch {
   }
 }
+window.WebOpenExternal = async function(url: string) {
+  try {
+    return await ipcRenderer.invoke('WebOpenExternal', url)
+  } catch (error: any) {
+    return { ok: false, error: error?.message || '无法打开系统浏览器' }
+  }
+}
 window.WebShutDown = function(data: any) {
   try {
     ipcRenderer.send('WebShutDown', data)

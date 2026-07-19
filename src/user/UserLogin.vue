@@ -125,6 +125,11 @@ const createOAuthState = (provider: OAuthLoginProvider) => {
   return state
 }
 
+const openExternalAuthUrl = async (authUrl: string) => {
+  const result = await window.WebOpenExternal(authUrl)
+  if (!result?.ok) throw new Error(result?.error || '无法打开系统浏览器')
+}
+
 const getAliyunLoginWebview = () => document.getElementById('loginiframe') as any
 
 const stopAliyunLoginWebview = () => {
@@ -565,7 +570,7 @@ const handleOpenCloud123 = () => {
     if (loginProvider.value !== 'cloud123' || !useUser.userShowLogin) return
     try {
       const authUrl = buildCloud123AuthUrl(clientId, createOAuthState('cloud123'))
-      await window.Electron.shell.openExternal(authUrl)
+      await openExternalAuthUrl(authUrl)
       cloud123AuthUrl.value = authUrl
     } catch (err: any) {
       oauthStates.delete('cloud123')
@@ -597,7 +602,7 @@ const handleOpenBaidu = async () => {
   const authUrl = buildBaiduAuthUrl(clientId, createOAuthState('baidu'))
   baiduAuthUrl.value = ''
   try {
-    await window.Electron.shell.openExternal(authUrl)
+    await openExternalAuthUrl(authUrl)
     baiduAuthUrl.value = authUrl
   } catch (err) {
     oauthStates.delete('baidu')
@@ -628,7 +633,7 @@ const handleOpenDropbox = async (showMissing = false) => {
   const authUrl = await buildDropboxAuthUrl(appKey, dropboxVerifier.value, createOAuthState('dropbox'))
   dropboxAuthUrl.value = ''
   try {
-    await window.Electron.shell.openExternal(authUrl)
+    await openExternalAuthUrl(authUrl)
     dropboxAuthUrl.value = authUrl
   } catch (err) {
     oauthStates.delete('dropbox')
@@ -654,7 +659,7 @@ const handleOpenOneDrive = async (showMissing = false) => {
   const authUrl = await buildOneDriveAuthUrl(clientId, onedriveVerifier.value, createOAuthState('onedrive'))
   onedriveAuthUrl.value = ''
   try {
-    await window.Electron.shell.openExternal(authUrl)
+    await openExternalAuthUrl(authUrl)
     onedriveAuthUrl.value = authUrl
   } catch (err) {
     oauthStates.delete('onedrive')
@@ -681,7 +686,7 @@ const handleOpenBox = async (showMissing = false) => {
   const authUrl = await buildBoxAuthUrl(clientId, boxVerifier.value, createOAuthState('box'))
   boxAuthUrl.value = ''
   try {
-    await window.Electron.shell.openExternal(authUrl)
+    await openExternalAuthUrl(authUrl)
     boxAuthUrl.value = authUrl
   } catch (err) {
     oauthStates.delete('box')
