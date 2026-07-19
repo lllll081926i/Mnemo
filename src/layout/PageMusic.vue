@@ -4,7 +4,7 @@ import { KeyboardState, useAppStore, useKeyboardStore } from '../store'
 import useMusicPlayerStore, { type MusicPlayerState } from '../store/musicplayerstore'
 import message from '../utils/message'
 import { TestAlt, TestKey, TestShift } from '../utils/keyboardhelper'
-import { getRawUrl } from '../utils/proxyhelper'
+import { getProxyUrl, getRawUrl, isLocalProxyUrl } from '../utils/proxyhelper'
 import type { IPageMusicTrack } from '../store/appstore'
 import { fetchMusicMetadata, findActiveLineIndex, parseLrc, type LyricLine, type MusicMetadata } from '../utils/musicMetadata'
 import { bindAudio, ensureInit as initAudioEngine } from '../module/audioplayer/index'
@@ -823,7 +823,20 @@ async function resolveUrl(idx: number) {
   if (t.local_url) return t.local_url
   const d = await getRawUrl(t.user_id, t.drive_id, t.file_id, t.encType || '', t.password || '', false, 'audio')
   if (typeof d === 'string') throw new Error(d || '获取地址失败')
-  return d.url || ''
+  if (!d.url) return ''
+  if (isLocalProxyUrl(d.url)) return d.url
+  return getProxyUrl({
+    user_id: t.user_id,
+    drive_id: t.drive_id,
+    file_id: t.file_id,
+    file_size: d.size,
+    encType: t.encType || '',
+    password: t.password || '',
+    quality: 'Origin',
+    proxy_kind: 'audio',
+    proxy_url: d.url,
+    proxy_headers: d.headers ? JSON.stringify(d.headers) : undefined
+  })
 }
 
 async function loadIdx(idx: number, auto = true) {

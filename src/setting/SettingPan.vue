@@ -70,36 +70,31 @@ const cb = (val: any) => settingStore.updateStore(val)
 <style scoped>
 .settings-tags {
   display: grid !important;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
-  gap: 4px 12px !important;
+  grid-template-columns: repeat(3, 176px);
+  justify-content: start;
+  gap: 6px 16px !important;
   width: 100%;
   min-width: 0;
-  min-height: 88px;
+  min-height: 0;
   overflow: visible !important;
   white-space: normal !important;
-  align-content: center;
+  align-content: start;
 }
 .settings-tag {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  min-height: 26px;
+  min-height: 28px;
 }
 .settings-tag > span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
   flex: 0 0 auto;
 }
 .settings-tag :deep(.arco-input-wrapper) {
-  width: 100% !important;
+  width: 148px !important;
   min-width: 0;
-}
-
-@media (max-width: 900px) {
-  .settings-tags {
-    grid-template-columns: repeat(2, minmax(140px, 1fr));
-  }
 }
 </style>

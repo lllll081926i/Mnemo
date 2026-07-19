@@ -248,7 +248,7 @@ body .arco-select-option.selected {
 
 .ui-plain-row {
   display: grid;
-  grid-template-columns: minmax(160px, var(--layout-row-label-width)) minmax(0, 1fr);
+  grid-template-columns: minmax(132px, var(--layout-row-label-width)) minmax(0, 1fr);
   gap: var(--layout-row-gap);
   align-items: center;
   min-height: var(--layout-row-min-height);

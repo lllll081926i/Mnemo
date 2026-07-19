@@ -76,7 +76,18 @@ describe('deep layout shell port', () => {
   it('uses spacing for individual settings and dividers only between setting groups', () => {
     const css = read('src/assets/layout-refactor.css')
     const setting = read('src/setting/index.vue')
+    const transfer = read('src/setting/SettingDown.vue')
+    const debug = read('src/setting/SettingDebug.vue')
     expect(css).toContain('.ui-plain-list {\n  display: grid;\n  gap: 2px;')
+    expect(css).not.toContain('.ui-compact-grid')
+    expect(css).not.toContain('.ui-compact-field')
+    expect(transfer).not.toContain('ui-compact-grid')
+    expect(setting).toContain('min-width: var(--layout-content-width)')
+    expect(setting).toContain('grid-template-columns: var(--layout-rail-width) minmax(0, 1fr)')
+    expect(setting).not.toContain('@media (max-width: 760px)')
+    expect(debug).not.toContain('服务地址')
+    expect(debug).not.toContain('服务端口')
+    expect(debug).not.toContain('createProxyServer')
     expect(css).toContain('--layout-row-min-height: 36px')
     expect(css).not.toContain(
       '.ui-plain-row {\n  display: grid;\n  grid-template-columns: minmax(160px, var(--layout-row-label-width)) minmax(0, 1fr);\n  gap: var(--layout-row-gap);\n  align-items: center;\n  min-height: var(--layout-row-min-height);\n  padding: 6px 0;\n  border-bottom'
@@ -118,6 +129,20 @@ describe('deep layout shell port', () => {
     expect(stores).not.toContain('useLogStore')
     expect(db).not.toContain('IStateDebugLog')
     expect(db).not.toContain('saveLog(')
+  })
+
+  it('routes built-in media and subtitle requests through provider-aware proxy paths', () => {
+    const video = read('src/layout/PageVideo.vue')
+    const music = read('src/layout/PageMusic.vue')
+    const fileApi = read('src/aliapi/file.ts')
+    const player = read('src/utils/playerhelper.ts')
+
+    expect(video).toContain('needsProviderProxy')
+    expect(video).toContain('isLocalProxyUrl(url)')
+    expect(music).toContain('proxy_headers: d.headers ? JSON.stringify(d.headers) : undefined')
+    expect(fileApi).toContain("proxy_kind: 'subtitle'")
+    expect(player).toContain('findBestSubtitleMatch')
+    expect(player).toContain("proxy_kind: 'subtitle'")
   })
 
   it('keeps active workspace toolbars free of fixed spacer nodes', () => {

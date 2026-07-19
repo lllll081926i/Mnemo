@@ -90,7 +90,7 @@ async function getQuarkProxyToken(userId: string) {
 
   for (const [storedUserId, token] of UserTokenMap) {
     if (!isUsableQuarkToken(token)) continue
-    if (!userId || storedUserId === userId || storedUserId === quarkUserId || storedUserId.endsWith(userId)) {
+    if (storedUserId === userId || storedUserId === quarkUserId) {
       return token
     }
   }
@@ -99,15 +99,10 @@ async function getQuarkProxyToken(userId: string) {
   for (const token of dbTokens) {
     if (!isUsableQuarkToken(token)) continue
     const storedUserId = token.user_id || ''
-    if (!userId || storedUserId === userId || storedUserId === quarkUserId || storedUserId.endsWith(userId)) {
+    if (storedUserId === userId || storedUserId === quarkUserId) {
       UserTokenMap.set(storedUserId, token)
       return token
     }
-  }
-  const fallback = dbTokens.find(isUsableQuarkToken)
-  if (fallback?.user_id) {
-    UserTokenMap.set(fallback.user_id, fallback)
-    return fallback
   }
   return undefined
 }
@@ -205,6 +200,11 @@ export function getProxyUrl(info: FileInfo) {
   let params = Object.keys(info).filter(v => info[v])
     .map((key: string) => `${encodeURIComponent(key)}=${encodeURIComponent(info[key]!!)}`)
   return `${proxyUrl}?${params.join('&')}`
+}
+
+export function isLocalProxyUrl(url: string) {
+  const { debugProxyHost, debugProxyPort } = useSettingStore()
+  return String(url || '').startsWith(`http://${debugProxyHost}:${debugProxyPort}/proxy?`)
 }
 
 export function getRedirectUrl(info: FileInfo) {

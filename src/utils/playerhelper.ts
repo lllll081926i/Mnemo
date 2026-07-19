@@ -5,7 +5,6 @@ import { spawn, SpawnOptions } from 'child_process'
 import mpvAPI from '../module/node-mpv'
 import AliFile from '../aliapi/file'
 import AliFileCmd from '../aliapi/filecmd'
-import levenshtein from 'fast-levenshtein'
 import AliDirFileList from '../aliapi/dirfilelist'
 import { ITokenInfo, usePanFileStore, useSettingStore } from '../store'
 import { createTmpFile, delTmpFile, GetExpiresTime } from './utils'
@@ -32,28 +31,14 @@ import { apiBoxFileList, mapBoxItemToAliModel } from '../box/dirfilelist'
 import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../guangya/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from './webdavClient'
 import { buildDirectPlayerInvocation, buildPlayerCommand, formatPlayerArg, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
+import { findBestSubtitleMatch } from './subtitleMatching'
 
 const canUseAliyunFileList = (userId: string) => isAliyunUser(userId)
 const currentPlayerPlatform = () => (is.windows() ? 'win32' : is.macOS() ? 'darwin' : is.linux() ? 'linux' : process.platform)
 
 const PlayerUtils = {
   filterSubtitleFile(name: string, subTitlesList: IAliGetFileModel[]) {
-    // 自动加载同名字幕
-    const findName = path.parse(name).name
-    const similarity: any = subTitlesList.reduce(
-      (min: any, item, index) => {
-        // 莱文斯坦距离算法(计算相似度)
-        const matchName = path.parse(item.name).name
-        const distance = levenshtein.get(findName, matchName, { useCollator: true })
-        if (distance < min.distance) {
-          min.distance = distance
-          min.index = index
-        }
-        return min
-      },
-      { distance: Infinity, index: -1 }
-    )
-    return similarity.index !== -1 ? subTitlesList[similarity.index] : undefined
+    return findBestSubtitleMatch(name, subTitlesList)
   },
 
   async getVideoDanmuList(pageVideo: IPageVideo, option: any, pos: number) {
@@ -393,7 +378,15 @@ const PlayerUtils = {
                 if (subTitleFile) {
                   const data = await AliFile.ApiFileDownloadUrl(token.user_id, subTitleFile.drive_id, subTitleFile.file_id, 14400)
                   if (typeof data !== 'string' && data.url && data.url != '') {
-                    await mpv.addSubtitles(data.url, 'select', subTitleFile.name || currentFileInfo.name)
+                    const subtitleUrl = getProxyUrl({
+                      user_id: token.user_id,
+                      drive_id: subTitleFile.drive_id,
+                      file_id: subTitleFile.file_id,
+                      proxy_kind: 'subtitle',
+                      proxy_url: data.url,
+                      proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined
+                    })
+                    await mpv.addSubtitles(subtitleUrl, 'select', subTitleFile.name || currentFileInfo.name)
                   }
                 }
               }
@@ -504,7 +497,17 @@ const PlayerUtils = {
       // 加载转码的内嵌字幕
       if (rawData.subtitles && quality != 'Origin') {
         let subTitleData = rawData.subtitles.find((sub: any) => sub.language === 'chi') || rawData.subtitles[0]
-        subTitleUrl = (subTitleData && subTitleData.url) || ''
+        if (subTitleData?.url) {
+          const subtitleHeaders = subTitleData.headers || rawData.headers
+          subTitleUrl = getProxyUrl({
+            user_id: token.user_id,
+            drive_id: file.drive_id,
+            file_id: file.file_id,
+            proxy_kind: 'subtitle',
+            proxy_url: subTitleData.url,
+            proxy_headers: subtitleHeaders ? JSON.stringify(subtitleHeaders) : undefined
+          })
+        }
       }
       if (rawData.qualities) {
         const selectedQuality = rawData.qualities.find((q: any) => q.quality === quality) || rawData.qualities[0]
@@ -516,7 +519,14 @@ const PlayerUtils = {
     if (subTitleFile && !subTitleFile.isDir) {
       const data = await AliFile.ApiFileDownloadUrl(token.user_id, subTitleFile.drive_id, subTitleFile.file_id, 14400)
       if (typeof data !== 'string' && data.url && data.url != '') {
-        subTitleUrl = data.url
+        subTitleUrl = getProxyUrl({
+          user_id: token.user_id,
+          drive_id: subTitleFile.drive_id,
+          file_id: subTitleFile.file_id,
+          proxy_kind: 'subtitle',
+          proxy_url: data.url,
+          proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined
+        })
       }
     }
     // 获取播放进度

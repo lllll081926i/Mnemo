@@ -9,12 +9,11 @@ import HlsJs from 'hls.js'
 import * as dashjs from 'dashjs'
 import AliFile from '../aliapi/file'
 import AliDirFileList from '../aliapi/dirfilelist'
-import levenshtein from 'fast-levenshtein'
 import type { SettingOption } from 'artplayer/types/setting'
 import type { Option } from 'artplayer/types/option'
 import AliFileCmd from '../aliapi/filecmd'
 import PlayerUtils from '../utils/playerhelper'
-import { getEncType, getProxyUrl, getRawUrl, IRawUrl } from '../utils/proxyhelper'
+import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl, IRawUrl } from '../utils/proxyhelper'
 import { TestAlt, TestKey } from '../utils/keyboardhelper'
 import { GetExpiresTime } from '../utils/utils'
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
@@ -61,6 +60,7 @@ import { apiBoxFileList, mapBoxItemToAliModel } from '../box/dirfilelist'
 import { apiCloud139FileList, mapCloud139FileToAliModel } from '../cloud139/dirfilelist'
 import { apiCloud189FileList, mapCloud189FileToAliModel } from '../cloud189/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
+import { resolveDriveProvider } from '../utils/driveProvider'
 import useMediaServerRegistryStore from '../store/mediaServerRegistry'
 import MpvEmbeddedSurface from '../components/MpvEmbeddedSurface.vue'
 import {
@@ -389,7 +389,11 @@ const resolveHeaderAwareVideoUrl = (
   quality: string,
   proxyKind = ''
 ) => {
-  if (!pageVideo.encType && !hasPlaybackHeaders(headers)) return url
+  if (isLocalProxyUrl(url)) return url
+  const token = UserDAL.GetUserToken(pageVideo.user_id)
+  const provider = resolveDriveProvider({ tokenfrom: token?.tokenfrom, userId: pageVideo.user_id, driveId: pageVideo.drive_id })
+  const needsProviderProxy = pageVideo.drive_id !== 'media_server' && provider !== 'aliyun'
+  if (!pageVideo.encType && !hasPlaybackHeaders(headers) && !needsProviderProxy) return url
   return getProxyUrl({
     user_id: pageVideo.user_id,
     drive_id: pageVideo.drive_id,
@@ -2655,23 +2659,7 @@ const hasSubtitleSource = (item?: selectorItem) => {
 
 const readSubtitleItemText = async (item: selectorItem) => {
   if (!item.file_id) return ''
-  if (isQuarkUser(pageVideo.user_id) || pageVideo.drive_id === 'quark') {
-    const raw = await getRawUrl(pageVideo.user_id, pageVideo.drive_id, item.file_id, item.encType, item.password, false, 'other')
-    if (typeof raw === 'string' || !raw.url) return ''
-    const url = getProxyUrl({
-      user_id: pageVideo.user_id,
-      drive_id: pageVideo.drive_id,
-      file_id: item.file_id,
-      encType: item.encType,
-      password: item.password,
-      file_size: raw.size,
-      quality: 'Origin',
-      proxy_url: raw.url
-    })
-    const response = await fetch(url)
-    return response.ok ? response.text() : ''
-  }
-  return AliFile.ApiFileDownText(pageVideo.user_id, pageVideo.drive_id, item.file_id, -1, -1, item.encType)
+  return AliFile.ApiFileDownText(item.user_id || pageVideo.user_id, item.drive_id || pageVideo.drive_id, item.file_id, -1, -1, item.encType, item.password || pageVideo.password)
 }
 
 const buildMultipleSubtitleTrack = async (art: Artplayer, item: selectorItem, index: number): Promise<MultipleSubtitleTrack | undefined> => {
@@ -2738,7 +2726,7 @@ const applyMultipleSubtitles = async (art: Artplayer, items: selectorItem[], rev
 
 const loadOnlineSub = async (art: Artplayer, item: any) => {
   clearMultipleSubtitleState(art)
-  const data = await AliFile.ApiFileDownText(pageVideo.user_id, pageVideo.drive_id, item.file_id, -1, -1, item.encType)
+  const data = await AliFile.ApiFileDownText(item.user_id || pageVideo.user_id, item.drive_id || pageVideo.drive_id, item.file_id, -1, -1, item.encType, item.password || pageVideo.password)
   if (data) {
     await loadSubtitleTextToPlayer(art, item.name, item.ext, data)
     return item.html
@@ -2778,22 +2766,12 @@ const getSubTitleList = async (art: Artplayer) => {
     let subtitleSize = art.storage.get('subtitleSize') + 'px'
     const hasDownloadedDefault = downloadedSubSelector.some((item) => item.default)
     if (onlineSubSelector.length > 0 && !hasDownloadedDefault) {
-      const fileName = pageVideo.file_name
-      // 自动加载同名字幕
-      const similarity = subSelector.reduce((min, item, index) => {
-        // 莱文斯坦距离算法(计算相似度)
-        const distance = levenshtein.get(fileName, item.html, { useCollator: true })
-        if (distance < min.distance) {
-          min.distance = distance
-          min.index = index
-        }
-        return min
-      }, { distance: Infinity, index: -1 })
-      if (similarity.index !== -1) {
+      const matchedSubtitle = PlayerUtils.filterSubtitleFile(pageVideo.file_name, onlineSubSelector as any) as selectorItem | undefined
+      if (matchedSubtitle) {
         subSelector.forEach(v => v.default = false)
-        subSelector[similarity.index].default = true
+        matchedSubtitle.default = true
         art.subtitle.style('fontSize', subtitleSize)
-        await loadOnlineSub(art, subSelector[similarity.index])
+        await loadOnlineSub(art, matchedSubtitle)
       }
     } else if (embedSubSelector.length > 0 && !hasDownloadedDefault) {
       art.subtitle.url = embedSubSelector[0].url

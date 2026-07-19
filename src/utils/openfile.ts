@@ -11,7 +11,7 @@ import DebugLog from './debuglog'
 import message from './message'
 import { modalArchive, modalArchivePassword, modalSelectPanDir, modalSelectVideoQuality } from './modal'
 import PlayerUtils from './playerhelper'
-import { getEncType, getProxyUrl, getRawUrl } from './proxyhelper'
+import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from './proxyhelper'
 import { isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser } from '../aliapi/utils'
 
 async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo | undefined> {
@@ -673,7 +673,21 @@ async function Audio(file: IAliGetFileModel, password: string = ''): Promise<voi
     // 兜底：旧版底部播放器
     const data = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, weifa, 'audio')
     if (typeof data != 'string') {
-      useFootStore().mSaveAudioUrl(data.url)
+      const audioUrl = isLocalProxyUrl(data.url)
+        ? data.url
+        : getProxyUrl({
+            user_id: token.user_id,
+            drive_id: file.drive_id,
+            file_id: file.file_id,
+            file_size: data.size,
+            encType: getEncType(file),
+            password,
+            quality: 'Origin',
+            proxy_kind: 'audio',
+            proxy_url: data.url,
+            proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined
+          })
+      useFootStore().mSaveAudioUrl(audioUrl)
     } else {
       message.error(data)
     }

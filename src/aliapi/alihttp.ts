@@ -277,7 +277,8 @@ export default class AliHttp {
         }
         headers['Authorization'] = token_type + ' ' + access_token
       }
-      headers.Range = 'bytes=0-' + (Math.min(fileSize, maxSize) - 1).toString()
+      const rangeSize = Math.min(fileSize, maxSize)
+      if (rangeSize > 0) headers.Range = `bytes=0-${rangeSize - 1}`
 
       return axios
         .get(url, {

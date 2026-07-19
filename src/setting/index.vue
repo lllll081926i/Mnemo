@@ -173,7 +173,9 @@ const closeSettings = () => appStore.closeSettings()
 
 <style>
 .settings-page {
+  --layout-row-label-width: 150px;
   width: 100%;
+  grid-template-columns: var(--layout-rail-width) minmax(0, 1fr);
   color: var(--text-primary);
   background: var(--bg-surface);
 }
@@ -290,9 +292,17 @@ body:not([arco-theme='dark']) .settings-sidebar {
 }
 
 .settings-content {
+  width: var(--layout-content-width);
+  min-width: var(--layout-content-width);
+  max-width: var(--layout-content-width);
   padding-top: 10px;
   padding-right: max(52px, var(--layout-page-gutter));
   padding-bottom: 18px;
+}
+
+.settings-page .ui-plain-row {
+  grid-template-columns: var(--layout-row-label-width) minmax(0, 1fr);
+  gap: var(--layout-row-gap);
 }
 
 .settings-section {
@@ -342,24 +352,4 @@ body:not([arco-theme='dark']) .settings-sidebar {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
-@media (max-width: 760px) {
-  .settings-page {
-    grid-template-columns: 176px minmax(0, 1fr);
-  }
-
-  .settings-nav-item {
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: 7px;
-    padding-inline: 8px;
-  }
-
-  .settings-content {
-    padding-right: 18px;
-    padding-left: 18px;
-  }
-
-  .settings-close {
-    right: 8px;
-  }
-}
 </style>

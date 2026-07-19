@@ -7,7 +7,7 @@ import { IAliFileItem, IAliGetDirModel, IAliGetFileModel, IAliGetForderSizeModel
 import AliDirFileList from './dirfilelist'
 import { ICompilationList, IDownloadUrl, IOfficePreViewUrl, IVideoPreviewUrl, IVideoXBTUrl } from './models'
 import { DecodeEncName, GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from './utils'
-import { getRawUrl } from '../utils/proxyhelper'
+import { getProxyUrl, getRawUrl } from '../utils/proxyhelper'
 import { apiCloud123DownloadInfo, apiCloud123FileDetail } from '../cloud123/filecmd'
 import { mapCloud123InfoToAliModel } from '../cloud123/dirfilelist'
 import { apiCloud123TranscodeList } from '../cloud123/video'
@@ -1114,7 +1114,19 @@ export default class AliFile {
     // 原始文件大小
     if (filesize === -1) filesize = downUrl.size
     if (maxsize === -1) maxsize = downUrl.size
-    const resp = await AliHttp.GetString(downUrl.url, '', filesize, maxsize)
+    const proxyUrl = getProxyUrl({
+      user_id,
+      drive_id,
+      file_id,
+      file_size: downUrl.size,
+      encType,
+      password,
+      quality: 'Origin',
+      proxy_kind: 'subtitle',
+      proxy_url: downUrl.url,
+      proxy_headers: downUrl.headers ? JSON.stringify(downUrl.headers) : undefined
+    })
+    const resp = await AliHttp.GetString(proxyUrl, '', filesize, maxsize)
     if (AliHttp.IsSuccess(resp.code)) {
       if (typeof resp.body == 'string') return resp.body
       return JSON.stringify(resp.body, undefined, 2)
