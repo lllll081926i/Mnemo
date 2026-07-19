@@ -17,8 +17,15 @@ describe('createAutoUpdateController', () => {
   it('uses the Mnemo GitHub repository as the release feed', () => {
     const builder = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'electron-builder.json'), 'utf8'))
     expect(builder.publish).toEqual(expect.arrayContaining([
-      expect.objectContaining({ provider: 'github', owner: 'lllll081926i', repo: 'Mnemo' })
+      expect.objectContaining({ provider: 'github', owner: 'lllll081926i', repo: 'Mnemo', releaseType: 'release' })
     ]))
+  })
+
+  it('publishes a latest stable release with every required provider credential', () => {
+    const workflow = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8')
+    expect(workflow).toContain('BAIDU_PCS_APP_ID')
+    expect(workflow).toContain('--prerelease=false')
+    expect(workflow).toContain('--latest')
   })
 
   it('asks before downloading an available update', async () => {
