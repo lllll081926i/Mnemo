@@ -1,4 +1,4 @@
-import { ITokenInfo } from '../user/userstore'
+import type { ITokenInfo } from '../user/userstore'
 import { DRIVE115_APP_ID, DRIVE115_APP_SECRET } from '../secrets.generated'
 
 export { DRIVE115_APP_ID, DRIVE115_APP_SECRET }
@@ -7,6 +7,19 @@ const DRIVE115_AUTH_DEVICE_URL = 'https://passportapi.115.com/open/authDeviceCod
 const DRIVE115_QR_STATUS_URL = 'https://qrcodeapi.115.com/get/status/'
 const DRIVE115_TOKEN_URL = 'https://passportapi.115.com/open/deviceCodeToToken'
 const DRIVE115_REFRESH_URL = 'https://passportapi.115.com/open/refreshToken'
+
+const readStoredCredential = (key: string) => {
+  try {
+    return typeof localStorage === 'undefined' ? '' : localStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+export const resolve115Credentials = (clientId = '', clientSecret = '') => ({
+  clientId: clientId.trim() || readStoredCredential('drive115_client_id').trim() || DRIVE115_APP_ID.trim(),
+  clientSecret: clientSecret.trim() || readStoredCredential('drive115_client_secret').trim() || DRIVE115_APP_SECRET.trim()
+})
 
 export const isDrive115ApiSuccess = (data: any): boolean => {
   if (!data || data.status === false || data.state === false || data.error) return false
@@ -52,13 +65,8 @@ export const generatePkce = async () => {
   return { codeVerifier, codeChallenge }
 }
 
-export const buildQrImageUrl = (content: string) => {
-  const params = new URLSearchParams({ size: '250x250', data: content })
-  return `https://api.qrserver.com/v1/create-qr-code/?${params.toString()}`
-}
-
 export const requestDeviceCode = async (clientId: string, codeChallenge: string, method = 'sha256') => {
-  const effectiveClientId = (clientId || '').trim() || DRIVE115_APP_ID
+  const effectiveClientId = resolve115Credentials(clientId).clientId
   const body = new URLSearchParams({
     client_id: effectiveClientId,
     code_challenge: codeChallenge,
@@ -113,10 +121,11 @@ export const exchangeDeviceCode = async (uid: string, codeVerifier: string) => {
   return { data: data?.data || data, error: '' }
 }
 
-export const refresh115AccessToken = async (refreshToken: string) => {
+export const refresh115AccessToken = async (refreshToken: string, clientId = '', clientSecret = '') => {
+  const credentials = resolve115Credentials(clientId, clientSecret)
   const body = new URLSearchParams({ refresh_token: refreshToken })
-  if (DRIVE115_APP_ID) body.set('client_id', DRIVE115_APP_ID)
-  if (DRIVE115_APP_SECRET) body.set('client_secret', DRIVE115_APP_SECRET)
+  if (credentials.clientId) body.set('client_id', credentials.clientId)
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const resp = await fetch(DRIVE115_REFRESH_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -153,7 +162,7 @@ export const build115UserId = (refreshToken?: string, accessToken?: string) => {
   return `115_${hashString(base)}`
 }
 
-export const normalize115Token = (data: any): ITokenInfo | null => {
+export const normalize115Token = (data: any, clientId = ''): ITokenInfo | null => {
   if (!data?.access_token) return null
   const expireTime = new Date(Date.now() + (data.expires_in || 0) * 1000).toISOString()
   const userId = build115UserId(data.refresh_token, data.access_token)
@@ -167,7 +176,7 @@ export const normalize115Token = (data: any): ITokenInfo | null => {
     open_api_refresh_token: '',
     open_api_expires_in: 0,
     signature: '',
-    device_id: '',
+    device_id: resolve115Credentials(clientId).clientId,
     expires_in: data.expires_in || 0,
     token_type: data.token_type || 'Bearer',
     user_id: userId,

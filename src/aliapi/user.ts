@@ -132,7 +132,7 @@ export default class AliUser {
     if (isCloud123User(token)) {
       if (!token.refresh_token) return false
       if (!forceRefresh && new Date(token.expire_time).getTime() >= Date.now()) return true
-      const refreshed = await refreshCloud123AccessToken(token.refresh_token)
+      const refreshed = await refreshCloud123AccessToken(token.refresh_token, token.device_id)
       if (refreshed) {
         const previousUserId = token.user_id
         refreshed.user_id = refreshed.user_id || previousUserId

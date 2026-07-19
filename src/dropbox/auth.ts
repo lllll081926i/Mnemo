@@ -12,6 +12,19 @@ const DROPBOX_SPACE_URL = 'https://api.dropboxapi.com/2/users/get_space_usage'
 const DROPBOX_REDIRECT_URL = 'xbyboxplayer-oauth://callback'
 const DROPBOX_SCOPE = 'account_info.read files.metadata.read files.content.read files.content.write sharing.read sharing.write'
 
+const readStoredCredential = (key: string) => {
+  try {
+    return typeof localStorage === 'undefined' ? '' : localStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+export const resolveDropboxCredentials = (appKey = '', appSecret = '') => ({
+  appKey: appKey.trim() || readStoredCredential('dropbox_app_key').trim() || DROPBOX_APP_KEY.trim(),
+  appSecret: appSecret.trim() || readStoredCredential('dropbox_app_secret').trim() || DROPBOX_APP_SECRET.trim()
+})
+
 const hashString = (value: string): string => {
   let hash = 0
   for (let i = 0; i < value.length; i++) {
@@ -168,15 +181,16 @@ const normalizeDropboxToken = (data: any, appKey: string): ITokenInfo | null => 
   return token
 }
 
-export const exchangeDropboxCodeForToken = async (code: string, appKey: string, verifier: string): Promise<ITokenInfo | null> => {
+export const exchangeDropboxCodeForToken = async (code: string, appKey: string, verifier: string, appSecret = ''): Promise<ITokenInfo | null> => {
+  const credentials = resolveDropboxCredentials(appKey, appSecret)
   const body = new URLSearchParams({
     code,
     grant_type: 'authorization_code',
-    client_id: appKey.trim(),
+    client_id: credentials.appKey,
     redirect_uri: DROPBOX_REDIRECT_URL,
     code_verifier: verifier
   })
-  if (DROPBOX_APP_SECRET.trim()) body.set('client_secret', DROPBOX_APP_SECRET.trim())
+  if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
   const data = await dropboxJson<any>(
     DROPBOX_TOKEN_URL,
     {
@@ -186,7 +200,7 @@ export const exchangeDropboxCodeForToken = async (code: string, appKey: string, 
     },
     '获取 Dropbox access_token 失败'
   )
-  const token = normalizeDropboxToken(data, appKey)
+  const token = normalizeDropboxToken(data, credentials.appKey)
   if (token) {
     await applyDropboxAccount(token)
     const { default: UserDAL } = await import('../user/userdal')
@@ -196,14 +210,15 @@ export const exchangeDropboxCodeForToken = async (code: string, appKey: string, 
 }
 
 export const refreshDropboxAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
-  const appKey = token.device_id || ''
+  const credentials = resolveDropboxCredentials(token.device_id)
+  const appKey = credentials.appKey
   if (!appKey || !token.refresh_token) return null
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: token.refresh_token,
     client_id: appKey
   })
-  if (DROPBOX_APP_SECRET.trim()) body.set('client_secret', DROPBOX_APP_SECRET.trim())
+  if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
   const data = await dropboxJson<any>(
     DROPBOX_TOKEN_URL,
     {

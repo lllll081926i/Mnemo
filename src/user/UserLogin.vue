@@ -11,17 +11,17 @@ import AliUser from '../aliapi/user'
 import AliHttp from '../aliapi/alihttp'
 import { Input, Modal, Space } from '@arco-design/web-vue'
 import { QRCode as AntQRCode } from 'ant-design-vue'
-import { buildCloud123AuthUrl, exchangeCloud123CodeForToken } from '../utils/cloud123'
-import { buildBaiduAuthUrl, exchangeBaiduCodeForToken } from '../utils/baidu'
-import { buildQrImageUrl, DRIVE115_APP_ID, exchangeDeviceCode, generatePkce, normalize115Token, pollDeviceStatus, requestDeviceCode } from '../utils/drive115'
-import { loginPikPak } from '../pikpak/auth'
+import { buildCloud123AuthUrl, exchangeCloud123CodeForToken, resolveCloud123OAuthCredentials } from '../utils/cloud123'
+import { buildBaiduAuthUrl, exchangeBaiduCodeForToken, resolveBaiduOAuthCredentials } from '../utils/baidu'
+import { DRIVE115_APP_ID, exchangeDeviceCode, generatePkce, normalize115Token, pollDeviceStatus, requestDeviceCode, resolve115Credentials } from '../utils/drive115'
+import { loginPikPak, resolvePikPakCredentials } from '../pikpak/auth'
 import { completeQuarkQrLogin, pollQuarkQrStatus, requestQuarkQrCode } from '../quark/auth'
 import { normalizeCloud139Token } from '../cloud139/auth'
 import { Cloud189QrState, pollCloud189QrLogin, requestCloud189QrCode } from '../cloud189/auth'
-import { GuangyaSmsState, generateGuangyaDid, requestGuangyaSmsCode, submitGuangyaSmsCode } from '../guangya/auth'
-import { DROPBOX_APP_KEY, buildDropboxAuthUrl, createDropboxPkceVerifier, exchangeDropboxCodeForToken } from '../dropbox/auth'
+import { GuangyaSmsState, generateGuangyaDid, requestGuangyaSmsCode, resolveGuangyaClientId, submitGuangyaSmsCode } from '../guangya/auth'
+import { buildDropboxAuthUrl, createDropboxPkceVerifier, exchangeDropboxCodeForToken, resolveDropboxCredentials } from '../dropbox/auth'
 import { ONEDRIVE_CLIENT_ID, buildOneDriveAuthUrl, createOneDrivePkceVerifier, exchangeOneDriveCodeForToken } from '../onedrive/auth'
-import { BOX_CLIENT_ID, buildBoxAuthUrl, createBoxPkceVerifier, exchangeBoxCodeForToken } from '../box/auth'
+import { buildBoxAuthUrl, createBoxPkceVerifier, exchangeBoxCodeForToken, resolveBoxCredentials } from '../box/auth'
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
@@ -42,23 +42,32 @@ const qrCodeStatusType = ref()
 const qrCodeStatusTips = ref()
 
 type LoginProvider = 'aliyun' | 'cloud123' | '115' | '139' | '189' | 'guangya' | 'baidu' | 'pikpak' | 'quark' | 'dropbox' | 'onedrive' | 'box' | 'webdav' | 's3'
+type OAuthLoginProvider = Extract<LoginProvider, 'cloud123' | 'baidu' | 'dropbox' | 'onedrive' | 'box'>
 
 const loginProvider = ref<LoginProvider>('aliyun')
 const loginProviders: LoginProvider[] = ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'box', 'webdav', 's3']
+const oauthLoginProviders: OAuthLoginProvider[] = ['cloud123', 'baidu', 'dropbox', 'onedrive', 'box']
 const getLoginProviderMeta = (provider: LoginProvider) => getDriveProviderMeta(provider)
 const activeLoginProviderMeta = computed(() => getLoginProviderMeta(loginProvider.value))
 const cloud123Code = ref('')
 const cloud123Loading = ref(false)
+const cloud123AppId = ref('')
+const cloud123AppSecret = ref('')
+const cloud123AuthUrl = ref('')
 const baiduCode = ref('')
 const baiduLoading = ref(false)
 const baiduAuthUrl = ref('')
+const baiduAppId = ref('')
+const baiduAppSecret = ref('')
 const pikpakUsername = ref('')
 const pikpakPassword = ref('')
+const pikpakClientId = ref('')
+const pikpakClientSecret = ref('')
 const pikpakLoading = ref(false)
 const quarkLoading = ref(false)
 const quarkTips = ref('请使用夸克 App 扫码')
 const quarkQrToken = ref('')
-const quarkQrImageUrl = ref('')
+const quarkQrUrl = ref('')
 const quarkQrStatusType = ref<'info' | 'success' | 'warning' | 'error'>('info')
 const cloud139Authorization = ref('')
 const cloud139Loading = ref(false)
@@ -69,10 +78,12 @@ const cloud189QrStatusType = ref<'info' | 'success' | 'warning' | 'error'>('info
 const cloud189QrUrl = ref('')
 const guangyaPhone = ref('')
 const guangyaCode = ref('')
+const guangyaClientId = ref('')
 const guangyaDeviceId = ref(generateGuangyaDid())
 const guangyaSmsState = ref<GuangyaSmsState | null>(null)
 const guangyaLoading = ref(false)
 const dropboxAppKey = ref('')
+const dropboxAppSecret = ref('')
 const dropboxVerifier = ref('')
 const dropboxLoading = ref(false)
 const dropboxAuthUrl = ref('')
@@ -81,6 +92,7 @@ const onedriveVerifier = ref('')
 const onedriveLoading = ref(false)
 const onedriveAuthUrl = ref('')
 const boxClientId = ref('')
+const boxClientSecret = ref('')
 const boxVerifier = ref('')
 const boxLoading = ref(false)
 const boxAuthUrl = ref('')
@@ -89,6 +101,7 @@ const webDavLoading = ref(false)
 const s3Form = ref({ name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true })
 const s3Loading = ref(false)
 const drive115ClientId = ref(DRIVE115_APP_ID || '')
+const drive115ClientSecret = ref('')
 const drive115Verifier = ref('')
 const drive115Uid = ref('')
 const drive115Time = ref('')
@@ -103,8 +116,15 @@ let cloud189Timer: any = null
 let cloud189Polling = false
 let loginOpenTimer: any = null
 let cloud123OpenTimer: any = null
-let baiduOpenTimer: any = null
 let aliyunLoginHandled = false
+const oauthStates = new Map<OAuthLoginProvider, string>()
+
+const createOAuthState = (provider: OAuthLoginProvider) => {
+  const nonce = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  const state = `${provider}_${nonce}`
+  oauthStates.set(provider, state)
+  return state
+}
 
 const getAliyunLoginWebview = () => document.getElementById('loginiframe') as any
 
@@ -127,9 +147,13 @@ const clearOpenTimers = () => {
     clearTimeout(cloud123OpenTimer)
     cloud123OpenTimer = null
   }
-  if (baiduOpenTimer) {
-    clearTimeout(baiduOpenTimer)
-    baiduOpenTimer = null
+}
+
+const stopDrive115Polling = () => {
+  drive115Polling.value = false
+  if (drive115Timer) {
+    clearTimeout(drive115Timer)
+    drive115Timer = null
   }
 }
 
@@ -153,13 +177,30 @@ const handleModalOpen = () => {
   ) {
     loginProvider.value = stored
   }
-  dropboxAppKey.value = localStorage.getItem('dropbox_app_key') || DROPBOX_APP_KEY
+  const dropboxCredentials = resolveDropboxCredentials()
+  dropboxAppKey.value = dropboxCredentials.appKey
+  dropboxAppSecret.value = dropboxCredentials.appSecret
   onedriveClientId.value = localStorage.getItem('onedrive_client_id') || ONEDRIVE_CLIENT_ID
-  boxClientId.value = localStorage.getItem('box_client_id') || BOX_CLIENT_ID
+  const boxCredentials = resolveBoxCredentials()
+  boxClientId.value = boxCredentials.clientId
+  boxClientSecret.value = boxCredentials.clientSecret
+  const drive115Credentials = resolve115Credentials()
+  drive115ClientId.value = drive115Credentials.clientId
+  drive115ClientSecret.value = drive115Credentials.clientSecret
+  const baiduCredentials = resolveBaiduOAuthCredentials()
+  baiduAppId.value = baiduCredentials.clientId
+  baiduAppSecret.value = baiduCredentials.clientSecret
+  const cloud123Credentials = resolveCloud123OAuthCredentials()
+  cloud123AppId.value = cloud123Credentials.clientId
+  cloud123AppSecret.value = cloud123Credentials.clientSecret
+  const pikpakCredentials = resolvePikPakCredentials()
+  pikpakClientId.value = pikpakCredentials.clientId
+  pikpakClientSecret.value = pikpakCredentials.clientSecret
+  guangyaClientId.value = resolveGuangyaClientId()
   if (loginProvider.value === 'cloud123') {
     handleOpenCloud123()
   } else if (loginProvider.value === 'baidu') {
-    handleOpenBaidu()
+    void handleOpenBaidu().catch((err: any) => message.error(err?.message || '打开百度网盘授权页失败'))
   } else if (loginProvider.value === '115') {
     handleOpen115()
   } else if (loginProvider.value === 'pikpak') {
@@ -173,11 +214,11 @@ const handleModalOpen = () => {
   } else if (loginProvider.value === 'guangya') {
     loginLoading.value = false
   } else if (loginProvider.value === 'dropbox') {
-    handleOpenDropbox()
+    void handleOpenDropbox().catch((err: any) => message.error(err?.message || '打开 Dropbox 授权页失败'))
   } else if (loginProvider.value === 'onedrive') {
-    handleOpenOneDrive()
+    void handleOpenOneDrive().catch((err: any) => message.error(err?.message || '打开 OneDrive 授权页失败'))
   } else if (loginProvider.value === 'box') {
-    handleOpenBox()
+    void handleOpenBox().catch((err: any) => message.error(err?.message || '打开 Box 授权页失败'))
   } else if (loginProvider.value === 'webdav') {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
@@ -188,29 +229,44 @@ const handleModalOpen = () => {
 }
 
 const handleOauthCallback = (event: any) => {
-  if (loginProvider.value !== 'cloud123' && loginProvider.value !== 'baidu' && loginProvider.value !== 'dropbox' && loginProvider.value !== 'onedrive' && loginProvider.value !== 'box') return
   const url = event?.detail || ''
   if (!url) return
   try {
     const parsed = new URL(url)
+    const state = parsed.searchParams.get('state') || ''
+    const callbackProvider = oauthLoginProviders.find((provider) => oauthStates.get(provider) === state)
+    if (!callbackProvider) {
+      message.error('登录回调校验失败，请重新打开授权页面')
+      return
+    }
+    const error = parsed.searchParams.get('error') || ''
+    if (error) {
+      oauthStates.delete(callbackProvider)
+      message.error(parsed.searchParams.get('error_description') || error)
+      return
+    }
     const code = parsed.searchParams.get('code') || ''
     if (code) {
-      if (loginProvider.value === 'cloud123') {
+      oauthStates.delete(callbackProvider)
+      if (callbackProvider === 'cloud123') {
         cloud123Code.value = code
         submitCloud123Code()
-      } else if (loginProvider.value === 'baidu') {
+      } else if (callbackProvider === 'baidu') {
         baiduCode.value = code
         submitBaiduCode()
-      } else if (loginProvider.value === 'dropbox') {
+      } else if (callbackProvider === 'dropbox') {
         submitDropboxCode(code)
-      } else if (loginProvider.value === 'onedrive') {
+      } else if (callbackProvider === 'onedrive') {
         submitOneDriveCode(code)
-      } else if (loginProvider.value === 'box') {
+      } else if (callbackProvider === 'box') {
         submitBoxCode(code)
       }
+    } else {
+      oauthStates.delete(callbackProvider)
+      message.error('登录回调缺少授权 code，请重新打开授权页面')
     }
   } catch {
-    // ignore parse errors
+    message.error('无法解析登录回调，请重新打开授权页面')
   }
 }
 
@@ -225,11 +281,14 @@ onBeforeUnmount(() => {
 watch(loginProvider, () => {
   if (!useUser.userShowLogin) return
   clearOpenTimers()
+  if (loginProvider.value !== '115') stopDrive115Polling()
+  if (loginProvider.value !== 'quark') clearQuarkTimer()
+  if (loginProvider.value !== '189') clearCloud189Timer()
   if (loginProvider.value !== 'aliyun') stopAliyunLoginWebview()
   if (loginProvider.value === 'cloud123') {
     handleOpenCloud123()
   } else if (loginProvider.value === 'baidu') {
-    handleOpenBaidu()
+    void handleOpenBaidu().catch((err: any) => message.error(err?.message || '打开百度网盘授权页失败'))
   } else if (loginProvider.value === '115') {
     handleOpen115()
   } else if (loginProvider.value === 'pikpak') {
@@ -243,11 +302,11 @@ watch(loginProvider, () => {
   } else if (loginProvider.value === 'guangya') {
     loginLoading.value = false
   } else if (loginProvider.value === 'dropbox') {
-    handleOpenDropbox()
+    void handleOpenDropbox().catch((err: any) => message.error(err?.message || '打开 Dropbox 授权页失败'))
   } else if (loginProvider.value === 'onedrive') {
-    handleOpenOneDrive()
+    void handleOpenOneDrive().catch((err: any) => message.error(err?.message || '打开 OneDrive 授权页失败'))
   } else if (loginProvider.value === 'box') {
-    handleOpenBox()
+    void handleOpenBox().catch((err: any) => message.error(err?.message || '打开 Box 授权页失败'))
   } else if (loginProvider.value === 'webdav') {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
@@ -396,18 +455,17 @@ const handleClose = () => {
   client_id.value = ALIYUN_APP_ID
   client_secret.value = ALIYUN_APP_SECRET
   clearInterval(intervalId.value)
+  oauthStates.clear()
   clearOpenTimers()
   stopAliyunLoginWebview()
-  if (drive115Timer) {
-    clearTimeout(drive115Timer)
-    drive115Timer = null
-  }
+  stopDrive115Polling()
   clearQuarkTimer()
   clearCloud189Timer()
   refreshStepTips('process', 1)
   refreshQrCodeStatus()
   cloud123Code.value = ''
   cloud123Loading.value = false
+  cloud123AuthUrl.value = ''
   baiduCode.value = ''
   baiduLoading.value = false
   baiduAuthUrl.value = ''
@@ -423,7 +481,7 @@ const handleClose = () => {
   quarkLoading.value = false
   quarkTips.value = '请使用夸克 App 扫码'
   quarkQrToken.value = ''
-  quarkQrImageUrl.value = ''
+  quarkQrUrl.value = ''
   quarkQrStatusType.value = 'info'
   cloud139Authorization.value = ''
   cloud139Loading.value = false
@@ -495,88 +553,145 @@ const submitS3Login = async () => {
 const handleOpenCloud123 = () => {
   loginLoading.value = false
   clearOpenTimers()
-  cloud123OpenTimer = setTimeout(() => {
+  const clientId = cloud123AppId.value.trim()
+  const clientSecret = cloud123AppSecret.value.trim()
+  if (!clientId || !clientSecret) {
+    cloud123AuthUrl.value = ''
+    return
+  }
+  localStorage.setItem('cloud123_app_id', clientId)
+  localStorage.setItem('cloud123_app_secret', clientSecret)
+  cloud123AuthUrl.value = ''
+  cloud123OpenTimer = setTimeout(async () => {
     if (loginProvider.value !== 'cloud123' || !useUser.userShowLogin) return
-    const authUrl = buildCloud123AuthUrl()
-    window.Electron.shell.openExternal(authUrl)
+    try {
+      const authUrl = buildCloud123AuthUrl(clientId, createOAuthState('cloud123'))
+      await window.Electron.shell.openExternal(authUrl)
+      cloud123AuthUrl.value = authUrl
+    } catch (err: any) {
+      oauthStates.delete('cloud123')
+      message.error(err?.message || '打开 123 网盘授权页失败')
+    }
   }, 50)
 }
 
 const handleReopenCloud123 = () => {
-  const authUrl = buildCloud123AuthUrl()
-  window.Electron.shell.openExternal(authUrl)
+  if (!cloud123AppId.value.trim() || !cloud123AppSecret.value.trim()) {
+    message.error('请填写 123 网盘 App ID 和 App Secret')
+    return
+  }
+  handleOpenCloud123()
 }
 
-const handleOpenBaidu = () => {
+const handleOpenBaidu = async () => {
   loginLoading.value = false
   clearOpenTimers()
   if (loginProvider.value !== 'baidu' || !useUser.userShowLogin) return
-  const authUrl = buildBaiduAuthUrl()
-  baiduAuthUrl.value = authUrl
-  window.Electron.shell.openExternal(authUrl)
+  const clientId = baiduAppId.value.trim()
+  const clientSecret = baiduAppSecret.value.trim()
+  if (!clientId || !clientSecret) {
+    baiduAuthUrl.value = ''
+    return
+  }
+  localStorage.setItem('baidu_app_id', clientId)
+  localStorage.setItem('baidu_app_secret', clientSecret)
+  const authUrl = buildBaiduAuthUrl(clientId, createOAuthState('baidu'))
+  baiduAuthUrl.value = ''
+  try {
+    await window.Electron.shell.openExternal(authUrl)
+    baiduAuthUrl.value = authUrl
+  } catch (err) {
+    oauthStates.delete('baidu')
+    throw err
+  }
 }
 
 const handleReopenBaidu = () => {
-  const authUrl = baiduAuthUrl.value || buildBaiduAuthUrl()
-  baiduAuthUrl.value = authUrl
-  window.Electron.shell.openExternal(authUrl)
+  if (!baiduAppId.value.trim() || !baiduAppSecret.value.trim()) {
+    message.error('请填写百度网盘 App ID 和 App Secret')
+    return
+  }
+  void handleOpenBaidu().catch((err: any) => message.error(err?.message || '打开百度网盘授权页失败'))
 }
 
-const handleOpenDropbox = async () => {
+const handleOpenDropbox = async (showMissing = false) => {
   loginLoading.value = false
-  const appKey = (dropboxAppKey.value || localStorage.getItem('dropbox_app_key') || DROPBOX_APP_KEY).trim()
+  const appKey = resolveDropboxCredentials(dropboxAppKey.value, dropboxAppSecret.value).appKey
   if (!appKey) {
-    message.warning('请先在 src/dropbox/auth.ts 填写 DROPBOX_APP_KEY')
+    dropboxAuthUrl.value = ''
+    if (showMissing) message.error('请填写 Dropbox App Key')
     return
   }
   dropboxAppKey.value = appKey
   localStorage.setItem('dropbox_app_key', appKey)
+  localStorage.setItem('dropbox_app_secret', dropboxAppSecret.value.trim())
   dropboxVerifier.value = createDropboxPkceVerifier()
-  const authUrl = await buildDropboxAuthUrl(appKey, dropboxVerifier.value)
-  dropboxAuthUrl.value = authUrl
-  window.Electron.shell.openExternal(authUrl)
+  const authUrl = await buildDropboxAuthUrl(appKey, dropboxVerifier.value, createOAuthState('dropbox'))
+  dropboxAuthUrl.value = ''
+  try {
+    await window.Electron.shell.openExternal(authUrl)
+    dropboxAuthUrl.value = authUrl
+  } catch (err) {
+    oauthStates.delete('dropbox')
+    throw err
+  }
 }
 
 const handleReopenDropbox = () => {
-  handleOpenDropbox().catch((err: any) => message.error(err?.message || '打开 Dropbox 授权页失败'))
+  handleOpenDropbox(true).catch((err: any) => message.error(err?.message || '打开 Dropbox 授权页失败'))
 }
 
-const handleOpenOneDrive = async () => {
+const handleOpenOneDrive = async (showMissing = false) => {
   loginLoading.value = false
   const clientId = (onedriveClientId.value || localStorage.getItem('onedrive_client_id') || ONEDRIVE_CLIENT_ID).trim()
   if (!clientId) {
-    message.warning('请先在 src/onedrive/auth.ts 填写 ONEDRIVE_CLIENT_ID')
+    onedriveAuthUrl.value = ''
+    if (showMissing) message.error('请填写 OneDrive Client ID')
     return
   }
   onedriveClientId.value = clientId
   localStorage.setItem('onedrive_client_id', clientId)
   onedriveVerifier.value = createOneDrivePkceVerifier()
-  const authUrl = await buildOneDriveAuthUrl(clientId, onedriveVerifier.value)
-  onedriveAuthUrl.value = authUrl
-  window.Electron.shell.openExternal(authUrl)
+  const authUrl = await buildOneDriveAuthUrl(clientId, onedriveVerifier.value, createOAuthState('onedrive'))
+  onedriveAuthUrl.value = ''
+  try {
+    await window.Electron.shell.openExternal(authUrl)
+    onedriveAuthUrl.value = authUrl
+  } catch (err) {
+    oauthStates.delete('onedrive')
+    throw err
+  }
 }
 
 const handleReopenOneDrive = () => {
-  handleOpenOneDrive().catch((err: any) => message.error(err?.message || '打开 OneDrive 授权页失败'))
+  handleOpenOneDrive(true).catch((err: any) => message.error(err?.message || '打开 OneDrive 授权页失败'))
 }
 
-const handleOpenBox = async () => {
+const handleOpenBox = async (showMissing = false) => {
   loginLoading.value = false
-  const clientId = (boxClientId.value || localStorage.getItem('box_client_id') || BOX_CLIENT_ID).trim()
+  const clientId = resolveBoxCredentials(boxClientId.value, boxClientSecret.value).clientId
   if (!clientId) {
-    message.warning('请先在 src/box/auth.ts 填写 BOX_CLIENT_ID')
+    boxAuthUrl.value = ''
+    if (showMissing) message.error('请填写 Box Client ID')
     return
   }
   boxClientId.value = clientId
   localStorage.setItem('box_client_id', clientId)
+  localStorage.setItem('box_client_secret', boxClientSecret.value.trim())
   boxVerifier.value = createBoxPkceVerifier()
-  const authUrl = await buildBoxAuthUrl(clientId, boxVerifier.value)
-  boxAuthUrl.value = authUrl
-  window.Electron.shell.openExternal(authUrl)
+  const authUrl = await buildBoxAuthUrl(clientId, boxVerifier.value, createOAuthState('box'))
+  boxAuthUrl.value = ''
+  try {
+    await window.Electron.shell.openExternal(authUrl)
+    boxAuthUrl.value = authUrl
+  } catch (err) {
+    oauthStates.delete('box')
+    throw err
+  }
 }
 
 const handleReopenBox = () => {
-  handleOpenBox().catch((err: any) => message.error(err?.message || '打开 Box 授权页失败'))
+  handleOpenBox(true).catch((err: any) => message.error(err?.message || '打开 Box 授权页失败'))
 }
 
 const submitCloud123Code = async () => {
@@ -587,7 +702,7 @@ const submitCloud123Code = async () => {
   }
   cloud123Loading.value = true
   try {
-    const token = await exchangeCloud123CodeForToken(cloud123Code.value.trim())
+    const token = await exchangeCloud123CodeForToken(cloud123Code.value.trim(), cloud123AppId.value, cloud123AppSecret.value)
     if (token) {
       await UserDAL.UserLogin(token, true)
       useUserStore().userShowLogin = false
@@ -608,7 +723,7 @@ const submitBaiduCode = async () => {
   }
   baiduLoading.value = true
   try {
-    const token = await exchangeBaiduCodeForToken(baiduCode.value.trim())
+    const token = await exchangeBaiduCodeForToken(baiduCode.value.trim(), baiduAppId.value, baiduAppSecret.value)
     if (token) {
       await UserDAL.UserLogin(token, true)
       useUserStore().userShowLogin = false
@@ -630,7 +745,7 @@ const submitDropboxCode = async (code: string) => {
   }
   dropboxLoading.value = true
   try {
-    const token = await exchangeDropboxCodeForToken(code, appKey, dropboxVerifier.value)
+    const token = await exchangeDropboxCodeForToken(code, appKey, dropboxVerifier.value, dropboxAppSecret.value)
     if (token) {
       await UserDAL.UserLogin(token, true)
       useUserStore().userShowLogin = false
@@ -674,7 +789,7 @@ const submitBoxCode = async (code: string) => {
   }
   boxLoading.value = true
   try {
-    const token = await exchangeBoxCodeForToken(code, clientId, boxVerifier.value)
+    const token = await exchangeBoxCodeForToken(code, clientId, boxVerifier.value, boxClientSecret.value)
     if (token) {
       await UserDAL.UserLogin(token, true)
       useUserStore().userShowLogin = false
@@ -694,9 +809,17 @@ const submitPikPakLogin = async () => {
     message.error('请输入 PikPak 账号和密码')
     return
   }
+  const clientId = pikpakClientId.value.trim()
+  const clientSecret = pikpakClientSecret.value.trim()
+  if (!clientId || !clientSecret) {
+    message.error('请填写 PikPak Client ID 和 Client Secret')
+    return
+  }
   pikpakLoading.value = true
   try {
-    const token = await loginPikPak(username, pikpakPassword.value)
+    localStorage.setItem('pikpak_client_id', clientId)
+    localStorage.setItem('pikpak_client_secret', clientSecret)
+    const token = await loginPikPak(username, pikpakPassword.value, clientId, clientSecret)
     await UserDAL.UserLogin(token, true)
     useUserStore().userShowLogin = false
   } catch (err: any) {
@@ -731,10 +854,16 @@ const sendGuangyaSmsCode = async () => {
     message.error('请输入光鸭云盘手机号，例如 +86 13800138000')
     return
   }
+  const clientId = guangyaClientId.value.trim()
+  if (!clientId) {
+    message.error('请填写光鸭云盘 Client ID')
+    return
+  }
   guangyaLoading.value = true
   try {
+    localStorage.setItem('guangya_client_id', clientId)
     guangyaDeviceId.value = guangyaDeviceId.value || generateGuangyaDid()
-    guangyaSmsState.value = await requestGuangyaSmsCode(phone, guangyaDeviceId.value)
+    guangyaSmsState.value = await requestGuangyaSmsCode(phone, guangyaDeviceId.value, clientId)
     message.success('验证码已发送')
   } catch (err: any) {
     message.error(err?.message || '发送光鸭云盘验证码失败')
@@ -756,7 +885,7 @@ const submitGuangyaLogin = async () => {
   }
   guangyaLoading.value = true
   try {
-    const token = await submitGuangyaSmsCode(guangyaSmsState.value, code, guangyaDeviceId.value)
+    const token = await submitGuangyaSmsCode(guangyaSmsState.value, code, guangyaDeviceId.value, guangyaClientId.value)
     await UserDAL.UserLogin(token, true)
     useUserStore().userShowLogin = false
   } catch (err: any) {
@@ -847,14 +976,14 @@ const handleOpenQuark = async () => {
   if (quarkLoading.value) return
   loginLoading.value = true
   quarkLoading.value = true
-  quarkQrImageUrl.value = ''
+  quarkQrUrl.value = ''
   quarkQrToken.value = ''
   quarkQrStatusType.value = 'info'
   quarkTips.value = '正在获取夸克登录二维码...'
   try {
     const qr = await requestQuarkQrCode()
     quarkQrToken.value = qr.token
-    quarkQrImageUrl.value = qr.qrImageUrl
+    quarkQrUrl.value = qr.qrUrl
     quarkTips.value = '请使用夸克 App 扫码'
     loginLoading.value = false
     quarkLoading.value = false
@@ -922,8 +1051,12 @@ const pollQuarkStatus = async () => {
 }
 
 const handleOpen115 = async () => {
-  if (!drive115ClientId.value.trim() && !DRIVE115_APP_ID) {
+  stopDrive115Polling()
+  const clientId = drive115ClientId.value.trim() || DRIVE115_APP_ID
+  if (!clientId) {
     loginLoading.value = false
+    qrCodeUrl.value = ''
+    qrCodeStatusType.value = 'warning'
     drive115Tips.value = '请先填写 App ID'
     return
   }
@@ -932,8 +1065,13 @@ const handleOpen115 = async () => {
   try {
     const { codeVerifier, codeChallenge } = await generatePkce()
     drive115Verifier.value = codeVerifier
-    const resp = await requestDeviceCode(drive115ClientId.value.trim(), codeChallenge, 'sha256')
+    localStorage.setItem('drive115_client_id', clientId)
+    localStorage.setItem('drive115_client_secret', drive115ClientSecret.value.trim())
+    drive115ClientId.value = clientId
+    const resp = await requestDeviceCode(clientId, codeChallenge, 'sha256')
     if (resp.error) {
+      qrCodeUrl.value = ''
+      qrCodeStatusType.value = 'error'
       drive115Tips.value = resp.error
       loginLoading.value = false
       drive115Loading.value = false
@@ -942,7 +1080,7 @@ const handleOpen115 = async () => {
     drive115Uid.value = resp.uid || ''
     drive115Time.value = resp.time || ''
     drive115Sign.value = resp.sign || ''
-    qrCodeUrl.value = buildQrImageUrl(resp.qrcode || '')
+    qrCodeUrl.value = resp.qrcode || ''
     qrCodeStatusType.value = 'info'
     drive115Tips.value = '请使用 115 App 扫码'
     loginLoading.value = false
@@ -950,6 +1088,8 @@ const handleOpen115 = async () => {
     drive115Polling.value = true
     poll115Status()
   } catch (err: any) {
+    qrCodeUrl.value = ''
+    qrCodeStatusType.value = 'error'
     drive115Tips.value = err?.message || '获取二维码失败'
     loginLoading.value = false
     drive115Loading.value = false
@@ -957,7 +1097,7 @@ const handleOpen115 = async () => {
 }
 
 const poll115Status = async () => {
-  if (!drive115Polling.value) return
+  if (!drive115Polling.value || loginProvider.value !== '115' || !useUser.userShowLogin) return
   if (!drive115Uid.value || !drive115Time.value || !drive115Sign.value) return
   try {
     const status = await pollDeviceStatus(drive115Uid.value, drive115Time.value, drive115Sign.value)
@@ -965,19 +1105,19 @@ const poll115Status = async () => {
       drive115Tips.value = status.error
     } else if (status.state === 0) {
       drive115Tips.value = '二维码已失效，请刷新'
-      drive115Polling.value = false
+      stopDrive115Polling()
       return
     } else if (status.status === 1) {
       drive115Tips.value = status.msg || '扫码成功，等待确认'
     } else if (status.status === 2) {
       drive115Tips.value = status.msg || '授权成功，正在登录'
-      drive115Polling.value = false
+      stopDrive115Polling()
       const tokenResp = await exchangeDeviceCode(drive115Uid.value, drive115Verifier.value)
       if (tokenResp.error) {
         drive115Tips.value = tokenResp.error
         return
       }
-      const token = normalize115Token(tokenResp.data)
+      const token = normalize115Token(tokenResp.data, drive115ClientId.value)
       if (!token) {
         drive115Tips.value = '登录失败'
         return
@@ -1115,6 +1255,12 @@ const loginStepSecond = async (token: ITokenInfo) => {
   if (!token) {
     refreshStepTips('process', 1)
     message.error('请重新登录')
+    return
+  }
+  if (!client_id.value.trim() || !client_secret.value.trim()) {
+    await settingStore.updateStore({ uiEnableOpenApiType: 'custom' })
+    refreshStepTips('error', 2)
+    handlerChangeType()
     return
   }
   loginLoading.value = false
@@ -1292,11 +1438,12 @@ const loginSuccess = (token: ITokenInfo) => {
         <div v-else-if="loginProvider === 'cloud123'">
           <div id="logindiv">
             <div class="logincontent">
-              <div class="browser-login-hint">
-                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 123 网盘授权页面</p>
-                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-                <a-button style="margin-top: 16px" @click="handleReopenCloud123">重新打开浏览器</a-button>
-              </div>
+              <form class="oauth-login-form" @submit.prevent="handleReopenCloud123">
+                <a-input v-model="cloud123AppId" placeholder="App ID" allow-clear />
+                <a-input-password v-model="cloud123AppSecret" placeholder="App Secret" allow-clear />
+                <p v-if="cloud123AuthUrl" class="oauth-login-status">授权页面已打开</p>
+                <a-button html-type="submit" type="primary" :loading="cloud123Loading">打开授权页面</a-button>
+              </form>
             </div>
           </div>
         </div>
@@ -1306,16 +1453,20 @@ const loginSuccess = (token: ITokenInfo) => {
             <div class="logincontent">
               <div id="loginframediv" class="loginframe">
                 <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
-                <div class="qrcodeframe" v-if="!loginLoading">
-                  <a-image width="250" height="250" :hide-footer="true" :preview="false" :show-loader="true" @click="handleRefresh115Qr" style="display: inline-block" :src="qrCodeUrl"></a-image>
+                <div class="qrcodeframe drive115-qrcode" v-if="!loginLoading">
+                  <div class="local-qrcode" @click="handleRefresh115Qr">
+                    <AntQRCode v-if="qrCodeUrl" :value="qrCodeUrl" :size="220" color="#000" bg-color="#fff" />
+                    <div v-else class="qrcode-placeholder">填写 App ID 后刷新</div>
+                  </div>
                   <a-alert banner center :show-icon="false" :type="qrCodeStatusType || 'info'">
                     {{ drive115Tips }}
                   </a-alert>
                 </div>
               </div>
-              <div class="cloud123-code">
+              <div class="oauth-login-form drive115-login-form">
                 <a-input v-model="drive115ClientId" placeholder="App ID（client_id）" allow-clear @change="handleStorageChange" />
-                <a-button type="primary" :loading="drive115Loading" @click="handleRefresh115Qr">刷新二维码</a-button>
+                <a-input-password v-model="drive115ClientSecret" placeholder="App Secret（可选）" allow-clear />
+                <a-button type="primary" long :loading="drive115Loading" @click="handleRefresh115Qr">刷新二维码</a-button>
               </div>
             </div>
           </div>
@@ -1339,7 +1490,8 @@ const loginSuccess = (token: ITokenInfo) => {
                 <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
                 <div class="qrcodeframe" v-if="!loginLoading">
                   <div class="cloud189-qrcode-wrap">
-                    <AntQRCode :value="cloud189QrUrl || 'cloud189'" :size="250" color="#000" bg-color="#fff" />
+                    <AntQRCode v-if="cloud189QrUrl" :value="cloud189QrUrl" :size="250" color="#000" bg-color="#fff" />
+                    <div v-else class="qrcode-placeholder">二维码不可用</div>
                   </div>
                   <a-alert banner center :show-icon="false" :type="cloud189QrStatusType">
                     {{ cloud189Tips }}
@@ -1357,6 +1509,7 @@ const loginSuccess = (token: ITokenInfo) => {
           <div id="logindiv">
             <div class="logincontent">
               <div class="pikpak-login-form">
+                <a-input v-model="guangyaClientId" placeholder="Client ID" allow-clear />
                 <a-input v-model="guangyaPhone" placeholder="手机号，例如 +86 13800138000" allow-clear />
                 <a-input v-model="guangyaCode" placeholder="短信验证码" allow-clear @press-enter="submitGuangyaLogin" />
                 <a-space direction="vertical" fill>
@@ -1371,11 +1524,12 @@ const loginSuccess = (token: ITokenInfo) => {
         <div v-else-if="loginProvider === 'baidu'">
           <div id="logindiv">
             <div class="logincontent">
-              <div class="browser-login-hint">
-                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开百度网盘授权页面</p>
-                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-                <a-button style="margin-top: 16px" @click="handleReopenBaidu">重新打开浏览器</a-button>
-              </div>
+              <form class="oauth-login-form" @submit.prevent="handleReopenBaidu">
+                <a-input v-model="baiduAppId" placeholder="App ID" allow-clear />
+                <a-input-password v-model="baiduAppSecret" placeholder="App Secret" allow-clear />
+                <p v-if="baiduAuthUrl" class="oauth-login-status">授权页面已打开</p>
+                <a-button html-type="submit" type="primary" :loading="baiduLoading">打开授权页面</a-button>
+              </form>
             </div>
           </div>
         </div>
@@ -1384,6 +1538,8 @@ const loginSuccess = (token: ITokenInfo) => {
           <div id="logindiv">
             <div class="logincontent">
               <div class="pikpak-login-form">
+                <a-input v-model="pikpakClientId" placeholder="Client ID" allow-clear />
+                <a-input-password v-model="pikpakClientSecret" placeholder="Client Secret" allow-clear />
                 <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
                 <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear @press-enter="submitPikPakLogin" />
                 <a-button type="primary" long :loading="pikpakLoading" @click="submitPikPakLogin">登录 PikPak</a-button>
@@ -1397,7 +1553,10 @@ const loginSuccess = (token: ITokenInfo) => {
             <div class="logincontent quark-logincontent">
               <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
               <div class="qrcodeframe" v-if="!loginLoading">
-                <a-image width="250" height="250" :hide-footer="true" :preview="false" :show-loader="true" @click="handleOpenQuark" style="display: inline-block" :src="quarkQrImageUrl"></a-image>
+                <div class="local-qrcode" @click="handleOpenQuark">
+                  <AntQRCode v-if="quarkQrUrl" :value="quarkQrUrl" :size="250" color="#000" bg-color="#fff" />
+                  <div v-else class="qrcode-placeholder">二维码不可用</div>
+                </div>
                 <a-alert banner center :show-icon="false" :type="quarkQrStatusType">
                   {{ quarkTips }}
                 </a-alert>
@@ -1412,11 +1571,12 @@ const loginSuccess = (token: ITokenInfo) => {
         <div v-else-if="loginProvider === 'dropbox'">
           <div id="logindiv">
             <div class="logincontent">
-              <div class="browser-login-hint">
-                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 Dropbox 授权页面</p>
-                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-                <a-button style="margin-top: 16px" :loading="dropboxLoading" @click="handleReopenDropbox">重新打开浏览器</a-button>
-              </div>
+              <form class="oauth-login-form" @submit.prevent="handleReopenDropbox">
+                <a-input v-model="dropboxAppKey" placeholder="App Key" allow-clear />
+                <a-input-password v-model="dropboxAppSecret" placeholder="App Secret（可选）" allow-clear />
+                <p v-if="dropboxAuthUrl" class="oauth-login-status">授权页面已打开</p>
+                <a-button html-type="submit" type="primary" :loading="dropboxLoading">打开授权页面</a-button>
+              </form>
             </div>
           </div>
         </div>
@@ -1424,11 +1584,11 @@ const loginSuccess = (token: ITokenInfo) => {
         <div v-else-if="loginProvider === 'onedrive'">
           <div id="logindiv">
             <div class="logincontent">
-              <div class="browser-login-hint">
-                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 OneDrive 授权页面</p>
-                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-                <a-button style="margin-top: 16px" :loading="onedriveLoading" @click="handleReopenOneDrive">重新打开浏览器</a-button>
-              </div>
+              <form class="oauth-login-form" @submit.prevent="handleReopenOneDrive">
+                <a-input v-model="onedriveClientId" placeholder="Client ID" allow-clear />
+                <p v-if="onedriveAuthUrl" class="oauth-login-status">授权页面已打开</p>
+                <a-button html-type="submit" type="primary" :loading="onedriveLoading">打开授权页面</a-button>
+              </form>
             </div>
           </div>
         </div>
@@ -1436,11 +1596,12 @@ const loginSuccess = (token: ITokenInfo) => {
         <div v-else-if="loginProvider === 'box'">
           <div id="logindiv">
             <div class="logincontent">
-              <div class="browser-login-hint">
-                <p style="margin: 32px 0 8px; font-size: 15px">已在系统浏览器中打开 Box 授权页面</p>
-                <p style="color: var(--color-text-3); font-size: 13px">请在浏览器中完成登录，授权后将自动跳转回应用</p>
-                <a-button style="margin-top: 16px" :loading="boxLoading" @click="handleReopenBox">重新打开浏览器</a-button>
-              </div>
+              <form class="oauth-login-form" @submit.prevent="handleReopenBox">
+                <a-input v-model="boxClientId" placeholder="Client ID" allow-clear />
+                <a-input-password v-model="boxClientSecret" placeholder="Client Secret（可选）" allow-clear />
+                <p v-if="boxAuthUrl" class="oauth-login-status">授权页面已打开</p>
+                <a-button html-type="submit" type="primary" :loading="boxLoading">打开授权页面</a-button>
+              </form>
             </div>
           </div>
         </div>
@@ -1507,15 +1668,18 @@ const loginSuccess = (token: ITokenInfo) => {
     }
 
     .qrcodeframe {
-      border-radius: 10px;
-      padding: 5px;
-      box-shadow: grey 0 0 10px;
-      margin: 40px 15px 15px 15px;
+      padding: 0;
+      margin: 36px 0 14px;
     }
 
-    .cloud189-qrcode-wrap {
+    .cloud189-qrcode-wrap,
+    .local-qrcode {
       display: flex;
       justify-content: center;
+    }
+
+    .local-qrcode {
+      cursor: pointer;
     }
 
     .loading {
@@ -1657,21 +1821,45 @@ const loginSuccess = (token: ITokenInfo) => {
   font-weight: 600;
 }
 
-.cloud123-code {
+.oauth-login-form {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
+  width: 300px;
+  margin: 64px auto 0;
+}
+
+.drive115-login-form {
+  margin-top: 8px;
+}
+
+.oauth-login-status {
+  min-height: 20px;
+  margin: 0;
+  color: var(--color-text-2);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.qrcode-placeholder {
+  display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
+  width: 250px;
+  height: 250px;
+  color: var(--color-text-3);
+  background: var(--color-bg-1);
+  border: 1px solid var(--color-border-2);
+  font-size: 13px;
 }
 
-.cloud123-code .arco-input-wrapper {
-  width: 260px;
+.drive115-qrcode {
+  margin: 8px 0 !important;
 }
 
-.browser-login-hint {
-  text-align: center;
-  padding: 16px 8px 0;
+.drive115-qrcode .qrcode-placeholder {
+  width: 220px;
+  height: 220px;
 }
 
 .pikpak-login-form {

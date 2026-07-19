@@ -211,6 +211,21 @@ describe('deep layout shell port', () => {
     expect(login).toContain('submitBoxCode(code)')
   })
 
+  it('keeps provider login configuration and QR rendering inside the app', () => {
+    const login = read('src/user/UserLogin.vue')
+    expect(login).toContain('v-model="cloud123AppId"')
+    expect(login).toContain('v-model="baiduAppSecret"')
+    expect(login).toContain('v-model="dropboxAppKey"')
+    expect(login).toContain('v-model="onedriveClientId"')
+    expect(login).toContain('v-model="boxClientId"')
+    expect(login).toContain('v-model="pikpakClientId"')
+    expect(login).toContain('v-model="guangyaClientId"')
+    expect(login).toContain('AntQRCode v-if="qrCodeUrl"')
+    expect(login).toContain('AntQRCode v-if="quarkQrUrl"')
+    expect(login).not.toContain('api.qrserver.com')
+    expect(login).not.toContain('请先在 src/')
+  })
+
   it('keeps all setting groups in one scrollable document with sidebar anchors', () => {
     const setting = read('src/setting/index.vue')
     expect(setting).toContain('scrollToSection')

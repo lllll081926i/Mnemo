@@ -36,7 +36,7 @@ export default class UserDAL {
       if (isCloud123User(token)) {
         const expireTime = new Date(token.expire_time || 0).getTime()
         if (!token.access_token || (expireTime && expireTime <= Date.now())) {
-          const refreshed = await refreshCloud123AccessToken(token.refresh_token)
+          const refreshed = await refreshCloud123AccessToken(token.refresh_token, token.device_id)
           if (!refreshed) return null
           const previousUserId = token.user_id
           refreshed.user_id = refreshed.user_id || previousUserId
@@ -52,7 +52,7 @@ export default class UserDAL {
       if (isBaiduUser(token)) {
         const expireTime = new Date(token.expire_time || 0).getTime()
         if (!token.access_token || (expireTime && expireTime <= Date.now())) {
-          const refreshed = await refreshBaiduAccessToken(token.refresh_token)
+          const refreshed = await refreshBaiduAccessToken(token.refresh_token, token.device_id)
           if (!refreshed) return null
           const previousUserId = token.user_id
           refreshed.user_id = refreshed.user_id || previousUserId
@@ -112,7 +112,7 @@ export default class UserDAL {
         }
         const expireTime = new Date(token.expire_time || 0).getTime()
         if (!token.access_token || (expireTime && expireTime <= Date.now())) {
-          const refreshed = await refresh115AccessToken(token.refresh_token)
+          const refreshed = await refresh115AccessToken(token.refresh_token, token.device_id)
           if (!refreshed?.access_token) return null
           token.access_token = refreshed.access_token
           if (refreshed.refresh_token) token.refresh_token = refreshed.refresh_token
@@ -233,7 +233,7 @@ export default class UserDAL {
         if (isCloud123User(token)) {
           const expireTime = new Date(token.expire_time || 0).getTime()
           if (expireTime && expireTime - dateNow <= 1000 * 60 * 5) {
-            const refreshed = await refreshCloud123AccessToken(token.refresh_token)
+            const refreshed = await refreshCloud123AccessToken(token.refresh_token, token.device_id)
             if (refreshed) {
               const previousUserId = token.user_id
               refreshed.user_id = refreshed.user_id || previousUserId
@@ -245,7 +245,7 @@ export default class UserDAL {
         if (isBaiduUser(token)) {
           const expireTime = new Date(token.expire_time || 0).getTime()
           if (expireTime && expireTime - dateNow <= 1000 * 60 * 5) {
-            const refreshed = await refreshBaiduAccessToken(token.refresh_token)
+            const refreshed = await refreshBaiduAccessToken(token.refresh_token, token.device_id)
             if (refreshed) {
               const previousUserId = token.user_id
               refreshed.user_id = refreshed.user_id || previousUserId
@@ -750,14 +750,14 @@ export default class UserDAL {
       // 刷新token和session
       if (token.user_id) {
         if (isCloud123User(token)) {
-          const refreshed = await refreshCloud123AccessToken(token.refresh_token)
+          const refreshed = await refreshCloud123AccessToken(token.refresh_token, token.device_id)
           if (!refreshed?.access_token) return false
           const currentUserId = token.user_id
           Object.assign(token, refreshed)
           token.user_id = currentUserId || refreshed.user_id
           UserDAL.SaveUserToken(token)
         } else if (isBaiduUser(token)) {
-          const refreshed = await refreshBaiduAccessToken(token.refresh_token)
+          const refreshed = await refreshBaiduAccessToken(token.refresh_token, token.device_id)
           if (!refreshed?.access_token) return false
           token.access_token = refreshed.access_token
           if (refreshed.refresh_token) token.refresh_token = refreshed.refresh_token
@@ -766,7 +766,7 @@ export default class UserDAL {
           token.expire_time = new Date(Date.now() + (token.expires_in || 0) * 1000).toISOString()
           UserDAL.SaveUserToken(token)
         } else if (isDrive115User(token)) {
-          const refreshed = await refresh115AccessToken(token.refresh_token)
+          const refreshed = await refresh115AccessToken(token.refresh_token, token.device_id)
           if (refreshed?.error || !refreshed?.access_token) return false
           token.access_token = refreshed.access_token
           if (refreshed.refresh_token) token.refresh_token = refreshed.refresh_token

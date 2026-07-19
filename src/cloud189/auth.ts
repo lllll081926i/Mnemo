@@ -11,14 +11,17 @@ export const CLOUD189_CLIENT_TYPE = '10020'
 export const CLOUD189_VERSION = '6.2'
 export const CLOUD189_PC = 'TELEPC'
 export const CLOUD189_CHANNEL_ID = 'web_cloud.189.cn'
-export const CLOUD189_RETURN_URL = 'https://m.cloud.189.cn/zhuanti/2020/loginErrorPc/index.html'
+export const CLOUD189_LOGIN_REDIRECT_URL = 'https://cloud.189.cn/main.action'
 export const CLOUD189_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 
 export interface Cloud189QrState {
+  appId: string
+  clientType: string
+  returnUrl: string
+  loginUrl: string
   lt: string
   reqId: string
   paramId: string
-  captchaToken: string
   qrUrl: string
   encryuuid: string
   createdAt: number
@@ -62,83 +65,109 @@ export const cloud189SignatureHeaders = (sessionKey: string, sessionSecret: stri
   }
 }
 
-const extract = (html: string, pattern: RegExp, name: string) => {
-  const match = pattern.exec(html)
-  if (!match?.[1]) throw new Error(`解析天翼登录参数失败：缺少 ${name}`)
-  const value = match[1]
-  if (/[^\x00-\xff]/.test(value)) throw new Error(`解析天翼登录参数失败：${name} 含非法字符`)
-  return value
+export const buildCloud189LoginStartUrl = () => {
+  const params = new URLSearchParams({ redirectURL: CLOUD189_LOGIN_REDIRECT_URL })
+  return `${CLOUD189_WEB_URL}/api/portal/loginUrl.action?${params.toString()}`
 }
 
-export const requestCloud189QrCode = async (): Promise<Cloud189QrState> => {
-  const baseParams = new URLSearchParams({
-    appId: CLOUD189_APP_ID,
-    clientType: CLOUD189_CLIENT_TYPE,
-    returnURL: CLOUD189_RETURN_URL,
-    timeStamp: String(Date.now())
-  })
-  const htmlResp = await fetch(`${CLOUD189_WEB_URL}/api/portal/unifyLoginForPC.action?${baseParams.toString()}`, {
-    headers: { 'User-Agent': CLOUD189_USER_AGENT, Referer: CLOUD189_WEB_URL }
-  })
-  const html = await htmlResp.text()
-  if (!htmlResp.ok) throw new Error(`初始化天翼登录参数失败 HTTP ${htmlResp.status}`)
-  const captchaToken = extract(html, /'captchaToken'\s+value='(.+?)'/, 'captchaToken')
-  const lt = extract(html, /\blt\s*=\s*"(.+?)"/, 'lt')
-  const paramId = extract(html, /\bparamId\s*=\s*"(.+?)"/, 'paramId')
-  const reqId = extract(html, /\breqId\s*=\s*"(.+?)"/, 'reqId')
-  const uuidResp = await fetch(`${CLOUD189_AUTH_URL}/api/logbox/oauth2/getUUID.do`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json;charset=UTF-8',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': CLOUD189_USER_AGENT
-    },
-    body: new URLSearchParams({ appId: CLOUD189_APP_ID })
-  })
-  const data = await uuidResp.json().catch(() => undefined)
-  if (!uuidResp.ok || !data?.uuid || !data?.encryuuid) throw new Error('获取天翼云盘二维码失败')
-  return { lt, reqId, paramId, captchaToken, qrUrl: data.uuid, encryuuid: data.encryuuid, createdAt: Date.now() }
+export const parseCloud189LoginContext = (url: string) => {
+  const parsed = new URL(url)
+  const appId = parsed.searchParams.get('appId') || ''
+  const lt = parsed.searchParams.get('lt') || ''
+  const reqId = parsed.searchParams.get('reqId') || ''
+  if (!appId || !lt || !reqId) throw new Error('解析天翼登录参数失败')
+  return { appId, lt, reqId, loginUrl: parsed.toString() }
 }
 
-export const pollCloud189QrLogin = async (state: Cloud189QrState): Promise<{ status: 'waiting' | 'expired' | 'failed' | 'success'; message: string; token?: ITokenInfo }> => {
-  if (Date.now() - state.createdAt > 300000) return { status: 'expired', message: '二维码已过期，请重新获取' }
-  const now = new Date()
+const cloud189LoginHeaders = (context: { lt: string; reqId: string; loginUrl: string }) => ({
+  Accept: 'application/json;charset=UTF-8',
+  'Content-Type': 'application/x-www-form-urlencoded',
+  'User-Agent': CLOUD189_USER_AGENT,
+  Referer: context.loginUrl,
+  Origin: CLOUD189_AUTH_URL,
+  Reqid: context.reqId,
+  lt: context.lt
+})
+
+const cloud189Json = async (resp: Response, fallback: string) => {
+  const data = await resp.json().catch(() => undefined)
+  if (!resp.ok) throw new Error(`${fallback} HTTP ${resp.status}`)
+  if (data?.result !== undefined && String(data.result) !== '0') throw new Error(data?.msg || data?.message || fallback)
+  return data
+}
+
+export const buildCloud189QrPollForm = (state: Cloud189QrState, now = new Date()) => {
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`
-  const form = new URLSearchParams({
-    appId: CLOUD189_APP_ID,
-    clientType: CLOUD189_CLIENT_TYPE,
-    returnUrl: CLOUD189_RETURN_URL,
+  return new URLSearchParams({
+    appId: state.appId,
+    clientType: state.clientType,
+    returnUrl: state.returnUrl,
     paramId: state.paramId,
     uuid: state.qrUrl,
     encryuuid: state.encryuuid,
     date,
-    timeStamp: String(Date.now()),
+    timeStamp: String(now.getTime()),
     cb_SaveName: '0',
     isOauth2: 'true',
     state: ''
   })
+}
+
+export const requestCloud189QrCode = async (): Promise<Cloud189QrState> => {
+  const loginResp = await fetch(buildCloud189LoginStartUrl(), {
+    credentials: 'include',
+    headers: { 'User-Agent': CLOUD189_USER_AGENT, Referer: CLOUD189_WEB_URL }
+  })
+  if (!loginResp.ok) throw new Error(`初始化天翼登录参数失败 HTTP ${loginResp.status}`)
+  const context = parseCloud189LoginContext(loginResp.url)
+  const headers = cloud189LoginHeaders(context)
+  const appConfResp = await fetch(`${CLOUD189_AUTH_URL}/api/logbox/oauth2/appConf.do`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: new URLSearchParams({ version: '2.0', appKey: context.appId })
+  })
+  const appConf = await cloud189Json(appConfResp, '获取天翼登录配置失败')
+  const config = appConf?.data
+  if (!config?.paramId || !config?.returnUrl) throw new Error('天翼登录配置不完整')
+  const uuidResp = await fetch(`${CLOUD189_AUTH_URL}/api/logbox/oauth2/getUUID.do`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: new URLSearchParams({ appId: context.appId })
+  })
+  const data = await cloud189Json(uuidResp, '获取天翼云盘二维码失败')
+  if (!data?.uuid || !data?.encryuuid) throw new Error('天翼云盘二维码数据不完整')
+  return {
+    ...context,
+    clientType: String(config.clientType || '1'),
+    returnUrl: String(config.returnUrl),
+    paramId: String(config.paramId),
+    qrUrl: String(data.uuid),
+    encryuuid: String(data.encryuuid),
+    createdAt: Date.now()
+  }
+}
+
+export const pollCloud189QrLogin = async (state: Cloud189QrState): Promise<{ status: 'waiting' | 'expired' | 'failed' | 'success'; message: string; token?: ITokenInfo }> => {
+  if (Date.now() - state.createdAt > 300000) return { status: 'expired', message: '二维码已过期，请重新获取' }
   const resp = await fetch(`${CLOUD189_AUTH_URL}/api/logbox/oauth2/qrcodeLoginState.do`, {
     method: 'POST',
-    headers: {
-      Referer: CLOUD189_AUTH_URL,
-      Reqid: state.reqId,
-      lt: state.lt,
-      Accept: 'application/json;charset=UTF-8',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': CLOUD189_USER_AGENT
-    },
-    body: form
+    credentials: 'include',
+    headers: cloud189LoginHeaders(state),
+    body: buildCloud189QrPollForm(state)
   })
   const data = await resp.json().catch(() => undefined)
+  if (!resp.ok) return { status: 'failed', message: `获取扫码状态失败 HTTP ${resp.status}` }
   const status = Number(data?.status)
   if (status === -106 || status === -11002) return { status: 'waiting', message: '请扫码并在手机上确认登录' }
   if (status === -11001) return { status: 'expired', message: '二维码已过期，请重新获取' }
   if (status !== 0 || !data?.redirectUrl) return { status: 'failed', message: data?.msg || data?.message || `扫码登录失败，状态码 ${data?.status}` }
-  const token = await finalizeCloud189Login(data.redirectUrl)
+  const token = await finalizeCloud189Login(data.redirectUrl, state.appId)
   return token ? { status: 'success', message: '登录成功', token } : { status: 'failed', message: '换取天翼云盘登录态失败' }
 }
 
-export const finalizeCloud189Login = async (redirectUrl: string): Promise<ITokenInfo | null> => {
+export const finalizeCloud189Login = async (redirectUrl: string, appId = CLOUD189_APP_ID): Promise<ITokenInfo | null> => {
   const params = new URLSearchParams({ ...cloud189ClientSuffix(), redirectURL: redirectUrl })
   const resp = await fetch(`${CLOUD189_API_URL}/getSessionForPC.action?${params.toString()}`, {
     method: 'POST',
@@ -146,10 +175,10 @@ export const finalizeCloud189Login = async (redirectUrl: string): Promise<IToken
   })
   const data = await resp.json().catch(() => undefined)
   if (!resp.ok || Number(data?.res_code || 0) !== 0 || !data?.refreshToken) return null
-  return normalizeCloud189Token(data)
+  return normalizeCloud189Token(data, appId)
 }
 
-export const normalizeCloud189Token = (data: any): ITokenInfo => {
+export const normalizeCloud189Token = (data: any, appId = CLOUD189_APP_ID): ITokenInfo => {
   const id = data.userId || data.loginName || hashString(data.refreshToken || data.accessToken || data.sessionKey || '')
   return {
     tokenfrom: '189',
@@ -161,7 +190,7 @@ export const normalizeCloud189Token = (data: any): ITokenInfo => {
     open_api_refresh_token: data.sessionSecret || '',
     open_api_expires_in: 0,
     signature: data.sessionSecret || '',
-    device_id: '',
+    device_id: appId,
     expires_in: Number(data.expiresIn || data.expires_in || 0),
     token_type: 'Bearer',
     user_id: `cloud189_${id}`,
@@ -198,8 +227,10 @@ export const normalizeCloud189Token = (data: any): ITokenInfo => {
 
 export const refreshCloud189Token = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
   if (!token.refresh_token) return null
+  const appId = token.device_id || CLOUD189_APP_ID
+  if (!appId) return null
   const form = new URLSearchParams({
-    clientId: CLOUD189_APP_ID,
+    clientId: appId,
     refreshToken: token.refresh_token,
     grantType: 'refresh_token',
     format: 'json'
@@ -211,11 +242,11 @@ export const refreshCloud189Token = async (token: ITokenInfo): Promise<ITokenInf
   })
   const data = await resp.json().catch(() => undefined)
   if (!resp.ok || !data?.accessToken) return null
-  const params = new URLSearchParams({ ...cloud189ClientSuffix(), appId: CLOUD189_APP_ID, accessToken: data.accessToken })
+  const params = new URLSearchParams({ ...cloud189ClientSuffix(), appId, accessToken: data.accessToken })
   const sessionResp = await fetch(`${CLOUD189_API_URL}/getSessionForPC.action?${params.toString()}`, {
     headers: { Accept: 'application/json;charset=UTF-8', 'User-Agent': CLOUD189_USER_AGENT }
   })
   const session = await sessionResp.json().catch(() => undefined)
   if (!sessionResp.ok || Number(session?.res_code || 0) !== 0) return null
-  return normalizeCloud189Token({ ...data, ...session, refreshToken: data.refreshToken || token.refresh_token })
+  return normalizeCloud189Token({ ...data, ...session, refreshToken: data.refreshToken || token.refresh_token }, appId)
 }

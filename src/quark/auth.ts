@@ -49,7 +49,6 @@ export const QUARK_DOWNLOAD_AGENT =
 export type QuarkQrCode = {
   token: string
   qrUrl: string
-  qrImageUrl: string
 }
 
 export type QuarkQrStatus = {
@@ -110,11 +109,6 @@ export const buildQuarkQrLoginUrl = (token: string): string => {
   return `https://su.quark.cn/4_eMHBJ?${params.toString()}`
 }
 
-export const buildQuarkQrImageUrl = (content: string): string => {
-  const params = new URLSearchParams({ size: '250x250', data: content })
-  return `https://api.qrserver.com/v1/create-qr-code/?${params.toString()}`
-}
-
 export const requestQuarkQrCode = async (): Promise<QuarkQrCode> => {
   const params = new URLSearchParams({
     client_id: '532',
@@ -131,11 +125,7 @@ export const requestQuarkQrCode = async (): Promise<QuarkQrCode> => {
     throw new Error(data?.message || '获取夸克登录二维码失败')
   }
   const qrUrl = buildQuarkQrLoginUrl(token)
-  return {
-    token,
-    qrUrl,
-    qrImageUrl: buildQuarkQrImageUrl(qrUrl)
-  }
+  return { token, qrUrl }
 }
 
 export const pollQuarkQrStatus = async (token: string): Promise<QuarkQrStatus> => {

@@ -14,6 +14,16 @@ export interface GuangyaSmsState {
   verificationId: string
 }
 
+const readStoredClientId = () => {
+  try {
+    return typeof localStorage === 'undefined' ? '' : localStorage.getItem('guangya_client_id') || ''
+  } catch {
+    return ''
+  }
+}
+
+export const resolveGuangyaClientId = (clientId = '') => clientId.trim() || readStoredClientId().trim() || GUANGYA_CLIENT_ID.trim()
+
 export const normalizeGuangyaPhoneNumber = (value: string): string => {
   const text = value.trim().replace(/\s+/g, ' ')
   const compact = text.replace(/[\s-]/g, '')
@@ -51,13 +61,13 @@ const tokenHex = (length: number): string => {
   return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export const guangyaAccountHeaders = (deviceId: string) => ({
+export const guangyaAccountHeaders = (deviceId: string, clientId = '') => ({
   accept: '*/*',
   'content-type': 'application/json',
   origin: GUANGYA_WEB_URL,
   referer: `${GUANGYA_WEB_URL}/`,
   'user-agent': GUANGYA_USER_AGENT,
-  'x-client-id': GUANGYA_CLIENT_ID,
+  'x-client-id': resolveGuangyaClientId(clientId),
   'x-client-version': '0.0.1',
   'x-device-id': deviceId,
   'x-device-model': 'chrome%2F147.0.0.0',
@@ -92,13 +102,15 @@ const readJson = async (resp: Response): Promise<any> => {
   return data
 }
 
-export const requestGuangyaSmsCode = async (phoneNumber: string, deviceId = generateGuangyaDid()): Promise<GuangyaSmsState> => {
+export const requestGuangyaSmsCode = async (phoneNumber: string, deviceId = generateGuangyaDid(), clientId = ''): Promise<GuangyaSmsState> => {
+  const effectiveClientId = resolveGuangyaClientId(clientId)
+  if (!effectiveClientId) throw new Error('请填写光鸭云盘 Client ID')
   const normalizedPhoneNumber = normalizeGuangyaPhoneNumber(phoneNumber)
   const initResp = await fetch(`${GUANGYA_ACCOUNT_URL}/v1/shield/captcha/init`, {
     method: 'POST',
-    headers: guangyaAccountHeaders(deviceId),
+    headers: guangyaAccountHeaders(deviceId, effectiveClientId),
     body: JSON.stringify({
-      client_id: GUANGYA_CLIENT_ID,
+      client_id: effectiveClientId,
       action: 'POST:/v1/auth/verification',
       device_id: deviceId,
       meta: { phone_number: normalizedPhoneNumber }
@@ -114,13 +126,13 @@ export const requestGuangyaSmsCode = async (phoneNumber: string, deviceId = gene
   const sendResp = await fetch(`${GUANGYA_ACCOUNT_URL}/v1/auth/verification`, {
     method: 'POST',
     headers: {
-      ...guangyaAccountHeaders(deviceId),
+      ...guangyaAccountHeaders(deviceId, effectiveClientId),
       'x-captcha-token': captchaToken
     },
     body: JSON.stringify({
       phone_number: normalizedPhoneNumber,
       target: 'ANY',
-      client_id: GUANGYA_CLIENT_ID
+      client_id: effectiveClientId
     })
   })
   const send = await readJson(sendResp)
@@ -129,14 +141,16 @@ export const requestGuangyaSmsCode = async (phoneNumber: string, deviceId = gene
   return { phoneNumber: normalizedPhoneNumber, captchaToken, verificationId }
 }
 
-export const submitGuangyaSmsCode = async (state: GuangyaSmsState, verificationCode: string, deviceId: string): Promise<ITokenInfo> => {
+export const submitGuangyaSmsCode = async (state: GuangyaSmsState, verificationCode: string, deviceId: string, clientId = ''): Promise<ITokenInfo> => {
+  const effectiveClientId = resolveGuangyaClientId(clientId)
+  if (!effectiveClientId) throw new Error('请填写光鸭云盘 Client ID')
   const verifyResp = await fetch(`${GUANGYA_ACCOUNT_URL}/v1/auth/verification/verify`, {
     method: 'POST',
-    headers: guangyaAccountHeaders(deviceId),
+    headers: guangyaAccountHeaders(deviceId, effectiveClientId),
     body: JSON.stringify({
       verification_id: state.verificationId,
       verification_code: verificationCode,
-      client_id: GUANGYA_CLIENT_ID
+      client_id: effectiveClientId
     })
   })
   const verify = await readJson(verifyResp)
@@ -146,25 +160,25 @@ export const submitGuangyaSmsCode = async (state: GuangyaSmsState, verificationC
   const signinResp = await fetch(`${GUANGYA_ACCOUNT_URL}/v1/auth/signin`, {
     method: 'POST',
     headers: {
-      ...guangyaAccountHeaders(deviceId),
+      ...guangyaAccountHeaders(deviceId, effectiveClientId),
       'x-captcha-token': state.captchaToken
     },
     body: JSON.stringify({
       verification_code: verificationCode,
       verification_token: verificationToken,
       username: state.phoneNumber,
-      client_id: GUANGYA_CLIENT_ID
+      client_id: effectiveClientId
     })
   })
   const signin = await readJson(signinResp)
-  return normalizeGuangyaToken(signin, deviceId, state.phoneNumber)
+  return normalizeGuangyaToken(signin, deviceId, state.phoneNumber, effectiveClientId)
 }
 
 export const fetchGuangyaUserInfo = async (token: ITokenInfo): Promise<any> => {
   const resp = await fetch(`${GUANGYA_ACCOUNT_URL}/v1/user/me`, {
     method: 'POST',
     headers: {
-      ...guangyaAccountHeaders(token.device_id || generateGuangyaDid()),
+      ...guangyaAccountHeaders(token.device_id || generateGuangyaDid(), token.open_api_access_token),
       authorization: `Bearer ${token.access_token}`
     }
   })
@@ -174,27 +188,29 @@ export const fetchGuangyaUserInfo = async (token: ITokenInfo): Promise<any> => {
 export const refreshGuangyaAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
   if (!token.refresh_token) return null
   const deviceId = token.device_id || generateGuangyaDid()
+  const clientId = resolveGuangyaClientId(token.open_api_access_token)
+  if (!clientId) return null
   const resp = await fetch(`${GUANGYA_ACCOUNT_URL}/v1/auth/token`, {
     method: 'POST',
     headers: {
-      ...guangyaAccountHeaders(deviceId),
+      ...guangyaAccountHeaders(deviceId, clientId),
       'x-action': '401'
     },
     body: JSON.stringify({
-      client_id: GUANGYA_CLIENT_ID,
+      client_id: clientId,
       grant_type: 'refresh_token',
       refresh_token: token.refresh_token
     })
   })
   const data = await readJson(resp)
-  const refreshed = normalizeGuangyaToken(data, deviceId, token.user_name || token.nick_name || token.user_id)
+  const refreshed = normalizeGuangyaToken(data, deviceId, token.user_name || token.nick_name || token.user_id, clientId)
   refreshed.user_id = token.user_id || refreshed.user_id
   refreshed.user_name = token.user_name || refreshed.user_name
   refreshed.nick_name = token.nick_name || refreshed.nick_name
   return refreshed
 }
 
-export const normalizeGuangyaToken = (data: any, deviceId: string, fallbackName = '光鸭云盘'): ITokenInfo => {
+export const normalizeGuangyaToken = (data: any, deviceId: string, fallbackName = '光鸭云盘', clientId = ''): ITokenInfo => {
   const raw = data?.data || data || {}
   const accessToken = raw?.access_token || raw?.accessToken || ''
   const refreshToken = raw?.refresh_token || raw?.refreshToken || ''
@@ -207,7 +223,7 @@ export const normalizeGuangyaToken = (data: any, deviceId: string, fallbackName 
     refresh_token: refreshToken,
     session_expires_in: 0,
     open_api_token_type: '',
-    open_api_access_token: '',
+    open_api_access_token: resolveGuangyaClientId(clientId),
     open_api_refresh_token: '',
     open_api_expires_in: 0,
     signature: '',

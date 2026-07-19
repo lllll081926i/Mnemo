@@ -1,5 +1,4 @@
-import { ITokenInfo } from '../user/userstore'
-import UserDAL from '../user/userdal'
+import type { ITokenInfo } from '../user/userstore'
 import message from './message'
 import { BAIDU_APP_ID, BAIDU_APP_SECRET } from '../secrets.generated'
 import { buildDriveProviderUserId } from './driveProvider'
@@ -12,6 +11,19 @@ const BAIDU_QUOTA_URL = 'https://pan.baidu.com/api/quota'
 const BAIDU_REDIRECT_URL = 'xbyboxplayer-oauth://callback'
 const BAIDU_SCOPE = 'basic,netdisk'
 
+const readStoredCredential = (key: string) => {
+  try {
+    return typeof localStorage === 'undefined' ? '' : localStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+export const resolveBaiduOAuthCredentials = (clientId = '', clientSecret = '') => ({
+  clientId: clientId.trim() || readStoredCredential('baidu_app_id').trim() || BAIDU_APP_ID.trim(),
+  clientSecret: clientSecret.trim() || readStoredCredential('baidu_app_secret').trim() || BAIDU_APP_SECRET.trim()
+})
+
 const hashString = (value: string): string => {
   let hash = 0
   for (let i = 0; i < value.length; i++) {
@@ -21,7 +33,7 @@ const hashString = (value: string): string => {
   return Math.abs(hash).toString(36)
 }
 
-const normalizeToken = (data: any): ITokenInfo | null => {
+const normalizeToken = (data: any, clientId: string): ITokenInfo | null => {
   if (!data?.access_token) return null
   const expiresIn = Number(data.expires_in || 0)
   const expireTime = new Date(Date.now() + expiresIn * 1000).toISOString()
@@ -35,7 +47,7 @@ const normalizeToken = (data: any): ITokenInfo | null => {
     open_api_refresh_token: '',
     open_api_expires_in: 0,
     signature: '',
-    device_id: '',
+    device_id: clientId,
     expires_in: expiresIn,
     token_type: data.token_type || 'Bearer',
     user_id: buildDriveProviderUserId('baidu', hashString(data.refresh_token || data.access_token)),
@@ -70,13 +82,15 @@ const normalizeToken = (data: any): ITokenInfo | null => {
   }
 }
 
-export const buildBaiduAuthUrl = () => {
+export const buildBaiduAuthUrl = (clientId = '', state = `boxplayer_${Date.now()}`) => {
+  const credentials = resolveBaiduOAuthCredentials(clientId)
+  if (!credentials.clientId) throw new Error('请填写百度网盘 App ID')
   const params = new URLSearchParams({
     response_type: 'code',
-    client_id: BAIDU_APP_ID,
+    client_id: credentials.clientId,
     redirect_uri: BAIDU_REDIRECT_URL,
     scope: BAIDU_SCOPE,
-    state: `boxplayer_${Date.now()}`,
+    state,
     qrcode: '1',
     force_login: '1'
   })
@@ -119,98 +133,78 @@ const fetchBaiduQuota = async (accessToken: string) => {
   return data
 }
 
-export const exchangeBaiduCodeForToken = async (code: string): Promise<ITokenInfo | null> => {
+const applyBaiduAccount = async (token: ITokenInfo) => {
+  try {
+    const info = await fetchBaiduUserInfo(token.access_token)
+    if (info) {
+      const uk = info.uk ?? info.user_id
+      if (uk !== undefined && uk !== null && String(uk)) token.user_id = buildDriveProviderUserId('baidu', uk)
+      token.user_name = info.netdisk_name || info.baidu_name || token.user_name
+      token.nick_name = info.netdisk_name || info.baidu_name || token.nick_name
+      token.avatar = info.avatar_url || token.avatar
+      if (info.vip_type === 2) token.vipname = 'SVIP'
+      if (info.vip_type === 1) token.vipname = 'VIP'
+    }
+    const quota = await fetchBaiduQuota(token.access_token)
+    if (quota) {
+      if (typeof quota.total === 'number') token.total_size = quota.total
+      if (typeof quota.used === 'number') token.used_size = quota.used
+      if (typeof quota.free === 'number') token.free_size = quota.free
+      if (typeof quota.expire === 'boolean') token.space_expire = quota.expire
+      if (typeof quota.total === 'number' && typeof quota.used === 'number') token.spaceinfo = `${(quota.used / 1024 ** 3).toFixed(2)} GB / ${(quota.total / 1024 ** 3).toFixed(2)} GB`
+    }
+  } catch {
+    // Account metadata is optional after a successful OAuth token exchange.
+  }
+}
+
+const requestBaiduToken = async (params: URLSearchParams, fallback: string) => {
+  const resp = await fetch(`${BAIDU_TOKEN_URL}?${params.toString()}`, {
+    headers: { 'User-Agent': 'pan.baidu.com' }
+  })
+  const data = await resp.json().catch(() => undefined)
+  if (!resp.ok || data?.error) {
+    message.error(data?.error_description || data?.error_msg || data?.error || fallback)
+    return null
+  }
+  return data
+}
+
+export const exchangeBaiduCodeForToken = async (code: string, clientId = '', clientSecret = ''): Promise<ITokenInfo | null> => {
+  const credentials = resolveBaiduOAuthCredentials(clientId, clientSecret)
+  if (!credentials.clientId || !credentials.clientSecret) {
+    message.error('请填写百度网盘 App ID 和 App Secret')
+    return null
+  }
   const params = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    client_id: BAIDU_APP_ID,
-    client_secret: BAIDU_APP_SECRET,
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret,
     redirect_uri: BAIDU_REDIRECT_URL
   })
-  const url = `${BAIDU_TOKEN_URL}?${params.toString()}`
-  const resp = await fetch(url, {
-    headers: {
-      'User-Agent': 'pan.baidu.com'
-    }
-  })
-  if (!resp.ok) {
-    message.error('获取 access_token 失败')
-    return null
-  }
-  const data = await resp.json()
-  const token = normalizeToken(data)
+  const data = await requestBaiduToken(params, '获取百度网盘 access_token 失败')
+  const token = normalizeToken(data, credentials.clientId)
   if (token) {
-    try {
-      const info = await fetchBaiduUserInfo(token.access_token)
-      if (info) {
-        const uk = info.uk ?? info.user_id
-        if (uk !== undefined && uk !== null && String(uk)) token.user_id = buildDriveProviderUserId('baidu', uk)
-        token.user_name = info.netdisk_name || info.baidu_name || token.user_name
-        token.nick_name = info.netdisk_name || info.baidu_name || token.nick_name
-        token.avatar = info.avatar_url || token.avatar
-        if (info.vip_type === 2) token.vipname = 'SVIP'
-        if (info.vip_type === 1) token.vipname = 'VIP'
-      }
-      const quota = await fetchBaiduQuota(token.access_token)
-      if (quota) {
-        if (typeof quota.total === 'number') token.total_size = quota.total
-        if (typeof quota.used === 'number') token.used_size = quota.used
-        if (typeof quota.free === 'number') token.free_size = quota.free
-        if (typeof quota.expire === 'boolean') token.space_expire = quota.expire
-        if (typeof quota.total === 'number' && typeof quota.used === 'number') {
-          token.spaceinfo = `${(quota.used / 1024 ** 3).toFixed(2)} GB / ${(quota.total / 1024 ** 3).toFixed(2)} GB`
-        }
-      }
-    } catch {
-      // ignore user info failure
-    }
+    await applyBaiduAccount(token)
+    const { default: UserDAL } = await import('../user/userdal')
     UserDAL.SaveUserToken(token)
   }
   return token
 }
 
-export const refreshBaiduAccessToken = async (refreshToken: string): Promise<ITokenInfo | null> => {
+export const refreshBaiduAccessToken = async (refreshToken: string, clientId = '', clientSecret = ''): Promise<ITokenInfo | null> => {
   if (!refreshToken) return null
+  const credentials = resolveBaiduOAuthCredentials(clientId, clientSecret)
+  if (!credentials.clientId || !credentials.clientSecret) return null
   const params = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
-    client_id: BAIDU_APP_ID,
-    client_secret: BAIDU_APP_SECRET
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret
   })
-  const url = `${BAIDU_TOKEN_URL}?${params.toString()}`
-  const resp = await fetch(url, {
-    headers: {
-      'User-Agent': 'pan.baidu.com'
-    }
-  })
-  if (!resp.ok) return null
-  const data = await resp.json()
-  const token = normalizeToken(data)
-  if (token) {
-    try {
-      const info = await fetchBaiduUserInfo(token.access_token)
-      if (info) {
-        const uk = info.uk ?? info.user_id
-        if (uk !== undefined && uk !== null && String(uk)) token.user_id = buildDriveProviderUserId('baidu', uk)
-        token.user_name = info.netdisk_name || info.baidu_name || token.user_name
-        token.nick_name = info.netdisk_name || info.baidu_name || token.nick_name
-        token.avatar = info.avatar_url || token.avatar
-        if (info.vip_type === 2) token.vipname = 'SVIP'
-        if (info.vip_type === 1) token.vipname = 'VIP'
-      }
-      const quota = await fetchBaiduQuota(token.access_token)
-      if (quota) {
-        if (typeof quota.total === 'number') token.total_size = quota.total
-        if (typeof quota.used === 'number') token.used_size = quota.used
-        if (typeof quota.free === 'number') token.free_size = quota.free
-        if (typeof quota.expire === 'boolean') token.space_expire = quota.expire
-        if (typeof quota.total === 'number' && typeof quota.used === 'number') {
-          token.spaceinfo = `${(quota.used / 1024 ** 3).toFixed(2)} GB / ${(quota.total / 1024 ** 3).toFixed(2)} GB`
-        }
-      }
-    } catch {
-      // ignore user info failure
-    }
-  }
+  const data = await requestBaiduToken(params, '刷新百度网盘 Token 失败')
+  const token = normalizeToken(data, credentials.clientId)
+  if (token) await applyBaiduAccount(token)
   return token
 }

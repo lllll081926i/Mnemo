@@ -2,7 +2,7 @@ import path from 'path'
 import mime from 'mime-types'
 import type { IUploadingUI } from '../utils/dbupload'
 import UserDAL from '../user/userdal'
-import { captchaSign, pikpakAuthHeaders, PIKPAK_CLIENT_ID } from './auth'
+import { captchaSign, getPikPakClientId, pikpakAuthHeaders } from './auth'
 import { computeProviderGcid, fetchProviderUploadWithRetry, openProviderUploadFile, parseProviderUploadResponse } from '../utils/providerUpload'
 import { uploadOssFile } from '../utils/ossUpload'
 import { buildPikPakUploadBody, toPikPakOssCredentials, type PikPakUploadCreateResponse } from './uploadProtocol'
@@ -22,7 +22,7 @@ const createPikPakUpload = async (fileui: IUploadingUI, gcid: string): Promise<{
       method: 'POST',
       headers: pikpakAuthHeaders(token),
       body: JSON.stringify({
-        client_id: PIKPAK_CLIENT_ID,
+        client_id: getPikPakClientId(),
         action: 'POST:/drive/v1/files',
         device_id: token.device_id || '',
         meta: {

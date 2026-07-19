@@ -40,7 +40,7 @@ describe('createQuarkTokenFromCookies', () => {
 })
 
 describe('requestQuarkQrCode', () => {
-  it('gets a QR token and image URL from Quark login API', async () => {
+  it('gets QR content from Quark login API without an external image service', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -53,7 +53,7 @@ describe('requestQuarkQrCode', () => {
 
     expect(result.token).toBe('qr-token')
     expect(result.qrUrl).toContain('https://su.quark.cn/4_eMHBJ')
-    expect(result.qrImageUrl).toContain('api.qrserver.com')
+    expect(result).not.toHaveProperty('qrImageUrl')
   })
 })
 

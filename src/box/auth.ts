@@ -11,6 +11,19 @@ const BOX_ME_URL = 'https://api.box.com/2.0/users/me'
 export const BOX_DEFAULT_REDIRECT_URL = 'xbyboxplayer-oauth://callback'
 export const BOX_SCOPE = 'root_readwrite'
 
+const readStoredCredential = (key: string) => {
+  try {
+    return typeof localStorage === 'undefined' ? '' : localStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+export const resolveBoxCredentials = (clientId = '', clientSecret = '') => ({
+  clientId: clientId.trim() || readStoredCredential('box_client_id').trim() || BOX_CLIENT_ID.trim(),
+  clientSecret: clientSecret.trim() || readStoredCredential('box_client_secret').trim() || BOX_CLIENT_SECRET.trim()
+})
+
 const hashString = (value: string): string => {
   let hash = 0
   for (let i = 0; i < value.length; i++) {
@@ -149,22 +162,24 @@ const normalizeBoxToken = (data: any, clientId: string): ITokenInfo | null => {
 export const exchangeBoxCodeForToken = async (
   code: string,
   clientId: string,
-  verifier: string
+  verifier: string,
+  clientSecret = ''
 ): Promise<ITokenInfo | null> => {
+  const credentials = resolveBoxCredentials(clientId, clientSecret)
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    client_id: clientId.trim(),
+    client_id: credentials.clientId,
     redirect_uri: BOX_DEFAULT_REDIRECT_URL,
     code_verifier: verifier
   })
-  if (BOX_CLIENT_SECRET.trim()) body.set('client_secret', BOX_CLIENT_SECRET.trim())
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const data = await boxJson<any>(BOX_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body
   }, '获取 Box access_token 失败')
-  const token = normalizeBoxToken(data, clientId)
+  const token = normalizeBoxToken(data, credentials.clientId)
   if (token) {
     await applyBoxAccount(token)
     const { default: UserDAL } = await import('../user/userdal')
@@ -174,14 +189,15 @@ export const exchangeBoxCodeForToken = async (
 }
 
 export const refreshBoxAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
-  const clientId = token.device_id || BOX_CLIENT_ID
+  const credentials = resolveBoxCredentials(token.device_id)
+  const clientId = credentials.clientId
   if (!clientId || !token.refresh_token) return null
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: token.refresh_token,
     client_id: clientId
   })
-  if (BOX_CLIENT_SECRET.trim()) body.set('client_secret', BOX_CLIENT_SECRET.trim())
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const data = await boxJson<any>(BOX_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
