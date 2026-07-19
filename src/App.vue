@@ -1,13 +1,13 @@
 <script lang="ts">
 import { defineAsyncComponent, h } from 'vue'
 import { useAppStore } from './store'
-import PageMain from './layout/PageMain.vue'
 import './assets/global.css'
 import './assets/design-tokens.css'
 import './assets/fileitem.css'
 import './assets/antd.css'
 import './assets/layout-refactor.css'
 
+const PageMain = defineAsyncComponent(() => import('./layout/PageMain.vue'))
 const PageVideoXBTVue = defineAsyncComponent(() => import('./layout/PageVideoXBT.vue'))
 const PageCode = defineAsyncComponent(() => import('./layout/PageCode.vue'))
 const PageOffice = defineAsyncComponent(() => import('./layout/PageOffice.vue'))

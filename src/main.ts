@@ -5,8 +5,6 @@ import store, { useAppStore, useSettingStore } from './store'
 import '@arco-themes/vue-gi-demo/css/arco.css'
 import message from './utils/message'
 import DebugLog from './utils/debuglog'
-import { PageMain } from './layout/PageMain'
-import { WorkerPage } from './workerpage/workercmd'
 
 window.onerror = function (errorMessage, scriptURI, lineNo, columnNo, error) {
   try {
@@ -121,17 +119,29 @@ window.Electron.ipcRenderer.on('setDownloadPort', (_event: any, args: any) => {
   }
 })
 
-window.Electron.ipcRenderer.on('setPage', (_event: any, args: any) => {
+window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {
   console.log('setPage', args.page, args)
   const appStore = useAppStore()
   const settingStore = useSettingStore()
   if (args.theme && settingStore) appStore.toggleTheme(args.theme)
 
   if (args.page == 'PageMain') {
-    PageMain()
+    try {
+      const { PageMain } = await import('./layout/PageMain')
+      PageMain()
+    } catch (error) {
+      DebugLog.mSaveDanger('PageMainLoad', error)
+      return
+    }
     window.IsMainPage = true
   } else if (args.page == 'PageWorker') {
-    WorkerPage(args.data.type)
+    try {
+      const { WorkerPage } = await import('./workerpage/workercmd')
+      WorkerPage(args.data?.type)
+    } catch (error) {
+      DebugLog.mSaveDanger('WorkerPageLoad', error)
+      return
+    }
   } else if (args.page == 'PageCode') {
     appStore.pageCode = args.data
   } else if (args.page == 'PageOffice') {
