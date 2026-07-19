@@ -10,6 +10,7 @@ const sharedAlias = {
   '@shared': path.resolve(__dirname, 'shared'),
   '@main':   path.resolve(__dirname, 'electron/main')
 }
+const sourceExtensions = ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']
 const electronMainExternal = [...Object.keys('dependencies' in pkg ? pkg.dependencies : {}), 'aria2-lib']
 
 // https://vitejs.dev/config/
@@ -24,7 +25,7 @@ export default defineConfig(({ command }) => {
   return {
     resolve: {
       alias: sharedAlias,
-      extensions: ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']
+      extensions: sourceExtensions
     },
     build: {
       rollupOptions: {
@@ -55,7 +56,7 @@ export default defineConfig(({ command }) => {
             }
           },
           vite: {
-            resolve: { alias: sharedAlias },
+            resolve: { alias: sharedAlias, extensions: sourceExtensions },
             build: {
               minify: isBuild,
               outDir: 'dist/electron/main',
@@ -79,7 +80,7 @@ export default defineConfig(({ command }) => {
             reload()
           },
           vite: {
-            resolve: { alias: sharedAlias },
+            resolve: { alias: sharedAlias, extensions: sourceExtensions },
             build: {
               minify: isBuild,
               outDir: 'dist/electron/preload',

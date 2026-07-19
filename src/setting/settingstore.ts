@@ -17,7 +17,7 @@ import {
   type MediaServerPlaybackQuality
 } from '../media-server/playbackQuality'
 
-declare type ProxyType = 'none' | 'http' | 'https' | 'socks4' | 'socks4a' | 'socks5' | 'socks5h'
+type ProxyType = 'system' | 'none' | 'http' | 'https' | 'socks5' | 'socks5h'
 declare type VideoQuality = 'Origin' | 'QHD' | 'FHD' | 'HD' | 'SD' | 'LD'
 export type DanmakuMode = 0 | 1 | 2
 export interface DanmakuApiSetting {
@@ -185,7 +185,6 @@ export interface SettingState {
   yinsiZipPassword: boolean
 
   // 网络代理
-  proxyUseProxy: boolean
   proxyType: ProxyType
   proxyHost: string
   proxyPort: number
@@ -380,8 +379,7 @@ const setting: SettingState = {
   yinsiZipPassword: false,
 
   // 网络代理
-  proxyUseProxy: false,
-  proxyType: 'none',
+  proxyType: 'system',
   proxyHost: '',
   proxyPort: 0,
   proxyUserName: '',
@@ -590,8 +588,12 @@ function _loadSetting(val: any) {
   setting.yinsiZipPassword = defaultBool(val.yinsiZipPassword, false)
 
   // 网络代理
-  setting.proxyUseProxy = defaultBool(val.proxyUseProxy, false)
-  setting.proxyType = defaultValue(val.proxyType, ['none', 'http', 'https', 'socks5', 'socks5h'])
+  const storedProxyType = defaultValue(val.proxyType, ['system', 'none', 'http', 'https', 'socks5', 'socks5h']) as ProxyType
+  if (Object.hasOwn(val, 'proxyUseProxy')) {
+    setting.proxyType = val.proxyUseProxy === false && storedProxyType !== 'none' ? 'none' : storedProxyType === 'none' ? 'system' : storedProxyType
+  } else {
+    setting.proxyType = storedProxyType
+  }
   setting.proxyHost = defaultString(val.proxyHost, '')
   setting.proxyPort = defaultNumber(val.proxyPort, 0)
   setting.proxyUserName = defaultString(val.proxyUserName, '')
@@ -716,8 +718,8 @@ const useSettingStore = defineStore('setting', {
         || Object.hasOwn(partial, 'uiFileOrderDuli')) {
         await PanDAL.aReLoadOneDirToShow('', 'refresh', false)
       }
-      if (Object.hasOwn(partial, 'proxyUseProxy')) {
-        this.WebSetProxy()
+      if (Object.hasOwn(partial, 'proxyType')) {
+        await this.WebSetProxy()
       }
       SaveSetting()
       useAppStore().toggleTheme(setting.uiTheme)
@@ -735,31 +737,15 @@ const useSettingStore = defineStore('setting', {
       this.$patch({ uiFileColorArray: arr })
       SaveSetting()
     },
-    getProxy() {
-      if (!this.proxyType || this.proxyType == 'none') return undefined
-      if (!this.proxyHost) return undefined
-
-      if (this.proxyType.startsWith('http')) {
-        const auth = this.proxyUserName && this.proxyPassword ? this.proxyUserName + ':' + this.proxyPassword : ''
-        return this.proxyType + '://' + (auth ? auth + '@' : '') + this.proxyHost + ':' + this.proxyPort
-      }
-      return {
-        hostname: this.proxyHost,
-        port: this.proxyPort,
-        protocol: this.proxyType,
-        username: this.proxyUserName,
-        password: this.proxyPassword
-      }
-    },
-    WebSetProxy() {
-      let proxy = ''
-      if (this.proxyUseProxy) {
-        if (this.proxyType && this.proxyType !== 'none' && this.proxyHost && this.proxyPort) {
-          const auth = this.proxyUserName && this.proxyPassword ? this.proxyUserName + ':' + this.proxyPassword : ''
-          proxy = this.proxyType + '://' + (auth ? auth + '@' : '') + this.proxyHost + ':' + this.proxyPort
-        }
-      }
-      window.WebSetProxy({ proxyUrl: proxy })
+    async WebSetProxy(): Promise<boolean> {
+      if (this.proxyType === 'system') return await window.WebSetProxy({ mode: 'system' })
+      if (this.proxyType === 'none') return await window.WebSetProxy({ mode: 'direct' })
+      const host = this.proxyHost.trim()
+      if (!host || !this.proxyPort) return false
+      const username = this.proxyUserName.trim()
+      const auth = username ? `${encodeURIComponent(username)}${this.proxyPassword ? `:${encodeURIComponent(this.proxyPassword)}` : ''}@` : ''
+      const proxyUrl = `${this.proxyType}://${auth}${host}:${this.proxyPort}`
+      return await window.WebSetProxy({ mode: 'fixed_servers', proxyUrl })
     }
   }
 })

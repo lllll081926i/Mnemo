@@ -8,7 +8,7 @@ import { ShowError } from './dialog'
 import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
 import { registerMediaImageCacheIpc } from '../mediaImageCache'
 import { createHash } from 'crypto'
-import { getMotrixApplicationRpcPort } from '../aria/runtime'
+import { getMotrixApplicationRpcPort, parseElectronProxyRules, syncMotrixApplicationProxy } from '../aria/runtime'
 import { requestPanHub } from './panHubRequest'
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
 import { convert as convertOpenDataLoaderPdf, type ConvertOptions as OpenDataLoaderPdfOptions } from '@opendataloader/pdf'
@@ -669,15 +669,21 @@ export default class ipcEvent {
   }
 
   private static handleWebSetProxy() {
-    ipcMain.on('WebSetProxy', (event, data) => {
-      // if (data.proxyUrl) app.commandLine.appendSwitch('proxy-server', data.proxyUrl)
-      // else app.commandLine.removeSwitch('proxy-server')
-      console.log(JSON.stringify(data))
-      if (data.proxyUrl) {
-        session.defaultSession.setProxy({ proxyRules: data.proxyUrl })
+    ipcMain.handle('WebSetProxy', async (_event, data: { mode?: 'system' | 'direct' | 'fixed_servers'; proxyUrl?: string }) => {
+      const mode = data?.mode
+      let ariaProxy = ''
+      if (mode === 'fixed_servers' && data.proxyUrl) {
+        await session.defaultSession.setProxy({ mode: 'fixed_servers', proxyRules: data.proxyUrl })
+        ariaProxy = data.proxyUrl
+      } else if (mode === 'direct') {
+        await session.defaultSession.setProxy({ mode: 'direct' })
       } else {
-        session.defaultSession.setProxy({})
+        await session.defaultSession.setProxy({ mode: 'system' })
+        ariaProxy = parseElectronProxyRules(await session.defaultSession.resolveProxy('https://api.aliyundrive.com'))
       }
+      await session.defaultSession.closeAllConnections()
+      await syncMotrixApplicationProxy(ariaProxy)
+      return true
     })
   }
 

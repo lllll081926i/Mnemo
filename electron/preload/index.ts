@@ -205,10 +205,11 @@ window.WebShutDown = function(data: any) {
   } catch {
   }
 }
-window.WebSetProxy = function(data: { proxyUrl: string }) {
+window.WebSetProxy = async function(data: { mode: 'system' | 'direct' | 'fixed_servers'; proxyUrl?: string }) {
   try {
-    ipcRenderer.send('WebSetProxy', data)
+    return await ipcRenderer.invoke('WebSetProxy', data)
   } catch {
+    return false
   }
 }
 

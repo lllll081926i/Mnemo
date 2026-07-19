@@ -17,9 +17,9 @@ import WebDavServer from '../module/webdav'
 export function PageMain() {
   if (window.WinMsg) return
   window.WinMsg = WinMsg
-  //useSettingStore().WebSetProxy()
   Promise.resolve()
     .then(async () => {
+      if (!(await useSettingStore().WebSetProxy())) DebugLog.mSaveWarning('Proxy settings were not applied because the manual proxy is incomplete')
       // 创建代理server
       if (!window.MainProxyServer) {
         window.MainProxyHost = useSettingStore().debugProxyHost
