@@ -1,6 +1,5 @@
 import { IAliGetFileModel } from '../aliapi/alimodels'
 import { useModalStore } from '../store'
-import { IServerVerData } from '../aliapi/server'
 import { IRawUrl } from './proxyhelper'
 import type { IManagedShareItem } from '../share/share/MyShareStore'
 
@@ -113,14 +112,6 @@ export function modalDownload(istree: boolean) {
 
 export function modalCloud123OfflineDownload(offlineForm?: { dirId?: string; dirName?: string }) {
   useModalStore().showModal('cloud123offline', offlineForm ? { offlineForm } : {})
-}
-
-export function modalUpdateLog() {
-  useModalStore().showModal('showupdatelog', {})
-}
-
-export function modalUpdate(verData: IServerVerData) {
-  useModalStore().showModal('showupdate', { verData })
 }
 
 export function modalShowPost(msg: string, msgid: string) {

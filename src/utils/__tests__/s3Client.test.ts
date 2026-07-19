@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { copyS3Path, createS3Connection, createS3Directory, createS3UserToken, getS3Connections, isS3Drive, listS3Directory, moveS3Path, normalizeS3Prefix, normalizeS3RelativePath, renameS3Path, saveS3Connection, type S3ConnectionInput } from '../s3Client'
+import { createWebDavConnection, getWebDavConnections, saveWebDavConnection } from '../webdavClient'
 
 const storage = new Map<string, string>()
 
@@ -16,6 +17,10 @@ const localStorageMock = {
 }
 
 Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, configurable: true })
+Object.assign(globalThis, {
+  WebSafeStorageEncryptSync: (value: string) => Buffer.from(value, 'utf8').toString('base64'),
+  WebSafeStorageDecryptSync: (value: string) => Buffer.from(value, 'base64').toString('utf8')
+})
 
 const createInput = (name: string): S3ConnectionInput => ({
   name,
@@ -59,6 +64,22 @@ describe('S3 connection model', () => {
     expect(getS3Connections()[0].name).toBe('归档存储')
     expect(() => saveS3Connection({ ...connection, id: 'blank-name', name: '   ' })).toThrow('请填写 S3 连接名称')
     expect(() => saveS3Connection({ ...connection, id: 'duplicate-name', name: '归档存储' })).toThrow('已存在')
+  })
+
+  it('encrypts mounted-storage credentials at rest', () => {
+    const s3 = createS3Connection(createInput('安全存储'))
+    saveS3Connection(s3)
+    const s3Raw = storage.get('Mnemo_S3Connections') || ''
+    expect(s3Raw).not.toContain('access-key')
+    expect(s3Raw).not.toContain('secret-key')
+    expect(getS3Connections()[0]).toMatchObject({ accessKeyId: 'access-key', secretAccessKey: 'secret-key' })
+
+    const webdav = createWebDavConnection({ name: 'WebDAV', url: 'https://dav.example.com', username: 'dav-user', password: 'dav-password' })
+    saveWebDavConnection(webdav)
+    const webdavRaw = storage.get('mnemo.webdav.connections') || ''
+    expect(webdavRaw).not.toContain('dav-user')
+    expect(webdavRaw).not.toContain('dav-password')
+    expect(getWebDavConnections()[0]).toMatchObject({ username: 'dav-user', password: 'dav-password' })
   })
 
   it('creates isolated account and drive ids for every connection', () => {

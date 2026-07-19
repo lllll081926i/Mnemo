@@ -12,8 +12,6 @@ declare interface Window {
   platform: any
   WebToElectron: any
   WebToElectronCB: any
-  WebSpawnSync: any
-  WebExecSync: any
   WebShowOpenDialogSync: any
   WebShowSaveDialogSync: any
   WebShowItemInFolder: any

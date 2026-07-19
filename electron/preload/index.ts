@@ -145,12 +145,6 @@ window.WebOpenWindow = function(data: any) {
   } catch {
   }
 }
-window.WebOpenUrl = function(data: any) {
-  try {
-    ipcRenderer.send('WebOpenUrl', data)
-  } catch {
-  }
-}
 window.WebShutDown = function(data: any) {
   try {
     ipcRenderer.send('WebShutDown', data)
@@ -163,6 +157,25 @@ window.WebSetProxy = async function(data: { mode: 'system' | 'direct' | 'fixed_s
   } catch {
     return false
   }
+}
+window.WebCheckUpdate = async function() {
+  return ipcRenderer.invoke('AutoUpdate:check')
+}
+window.WebSafeStorageEncrypt = async function(value: string) {
+  return ipcRenderer.invoke('SafeStorage:encrypt', value)
+}
+window.WebSafeStorageDecrypt = async function(value: string) {
+  return ipcRenderer.invoke('SafeStorage:decrypt', value)
+}
+window.WebSafeStorageEncryptSync = function(value: string) {
+  const result = ipcRenderer.sendSync('SafeStorage:encryptSync', value)
+  if (!result?.ok) throw new Error(result?.error || '加密失败')
+  return result.value
+}
+window.WebSafeStorageDecryptSync = function(value: string) {
+  const result = ipcRenderer.sendSync('SafeStorage:decryptSync', value)
+  if (!result?.ok) throw new Error(result?.error || '解密失败')
+  return result.value
 }
 
 window.WebMpvEmbeddedCapability = async function() {

@@ -89,3 +89,13 @@ export function registerAutoUpdate() {
     isMas: is.mas()
   })
 }
+
+export async function checkForUpdatesNow() {
+  if (!app.isPackaged || is.mas()) return { ok: false, error: '当前环境不支持自动更新检查' }
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    return { ok: true, version: result?.updateInfo?.version || app.getVersion() }
+  } catch (error: any) {
+    return { ok: false, error: error?.message || '检查更新失败' }
+  }
+}

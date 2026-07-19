@@ -253,18 +253,34 @@ export function createElectronWindow(width: number, height: number, center: bool
     handleWinCmd(win)
   }
   handleWebView(win, allowDevTools)
-  win.webContents.on('will-navigate', (e, url) => {
-    e.preventDefault()
-    if (!url.includes(process.env.VITE_DEV_SERVER_URL)) {
-      shell.openExternal(url)
-    }
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+    return { action: 'deny' }
   })
-  win.webContents.on('did-create-window', (childWindow) => {
-    if (is.windows()) {
-      childWindow.setMenu(null)
-    }
+  win.webContents.on('will-navigate', (e, url) => {
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL
+    if (devServerUrl && isSameOrigin(url, devServerUrl)) return
+    e.preventDefault()
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
   })
   return win
+}
+
+const isSafeExternalUrl = (value: string) => {
+  try {
+    const protocol = new URL(value).protocol
+    return protocol === 'https:' || protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+const isSameOrigin = (value: string, expected: string) => {
+  try {
+    return new URL(value).origin === new URL(expected).origin
+  } catch {
+    return false
+  }
 }
 
 function registerDevToolsShortcut(webContent: Electron.WebContents) {

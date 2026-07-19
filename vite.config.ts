@@ -11,7 +11,7 @@ const sharedAlias = {
   '@main':   path.resolve(__dirname, 'electron/main')
 }
 const sourceExtensions = ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']
-const electronMainExternal = [...Object.keys('dependencies' in pkg ? pkg.dependencies : {}), 'aria2-lib']
+const electronMainExternal = Object.keys('dependencies' in pkg ? pkg.dependencies : {})
 
 // https://vitejs.dev/config/
 // @ts-ignore

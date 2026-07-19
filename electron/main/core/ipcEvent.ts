@@ -1,7 +1,7 @@
-import { AppWindow, createElectronWindow, Referer, ua } from './window'
+import { AppWindow, createElectronWindow } from './window'
 import path from 'path'
 import is from 'electron-is'
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, safeStorage, session, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { exec, execFile } from 'child_process'
 import { ShowError } from './dialog'
@@ -10,6 +10,7 @@ import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort, parseElectronProxyRules, syncMotrixApplicationProxy } from '../aria/runtime'
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
 import { convert as convertOpenDataLoaderPdf, type ConvertOptions as OpenDataLoaderPdfOptions } from '@opendataloader/pdf'
+import { checkForUpdatesNow } from './autoUpdate'
 
 let psbId: any
 
@@ -126,12 +127,44 @@ export default class ipcEvent {
     this.handleWebSetProgressBar()
     this.handleWebShutDown()
     this.handleWebSetProxy()
+    this.handleAutoUpdate()
+    this.handleSafeStorage()
     this.handleOfficePreviewConvertToPdf()
     this.handleOpenDataLoaderConvertPdf()
     this.handleWebOpenWindow()
-    this.handleWebOpenUrl()
     this.handlePowerSaveBlocker()
     this.handleMpvEmbedded()
+  }
+
+  private static handleAutoUpdate() {
+    ipcMain.handle('AutoUpdate:check', () => checkForUpdatesNow())
+  }
+
+  private static handleSafeStorage() {
+    ipcMain.handle('SafeStorage:encrypt', (_event, value: unknown) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用')
+      return safeStorage.encryptString(String(value ?? '')).toString('base64')
+    })
+    ipcMain.handle('SafeStorage:decrypt', (_event, value: unknown) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用')
+      return safeStorage.decryptString(Buffer.from(String(value || ''), 'base64'))
+    })
+    ipcMain.on('SafeStorage:encryptSync', (event, value: unknown) => {
+      try {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用')
+        event.returnValue = { ok: true, value: safeStorage.encryptString(String(value ?? '')).toString('base64') }
+      } catch (error: any) {
+        event.returnValue = { ok: false, error: error?.message || '加密失败' }
+      }
+    })
+    ipcMain.on('SafeStorage:decryptSync', (event, value: unknown) => {
+      try {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用')
+        event.returnValue = { ok: true, value: safeStorage.decryptString(Buffer.from(String(value || ''), 'base64')) }
+      } catch (error: any) {
+        event.returnValue = { ok: false, error: error?.message || '解密失败' }
+      }
+    })
   }
 
   private static handleMpvEmbedded() {
@@ -733,45 +766,6 @@ export default class ipcEvent {
         win.webContents.send('setPage', data)
         win.setTitle('预览窗口')
         win.show()
-      })
-    })
-  }
-
-  private static handleWebOpenUrl() {
-    ipcMain.on('WebOpenUrl', (event, data) => {
-      const win = new BrowserWindow({
-        show: false,
-        width: AppWindow.winWidth,
-        height: AppWindow.winHeight,
-        center: true,
-        minWidth: 680,
-        minHeight: 500,
-        icon: getStaticPath('icon_256x256.ico'),
-        useContentSize: true,
-        frame: true,
-        hasShadow: true,
-        autoHideMenuBar: true,
-        backgroundColor: data.theme && data.theme == 'dark' ? '#23232e' : '#ffffff',
-        webPreferences: {
-          spellcheck: false,
-          devTools: is.dev(),
-          sandbox: false,
-          webSecurity: false,
-          allowRunningInsecureContent: true,
-          backgroundThrottling: false,
-          enableWebSQL: false,
-          disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure'
-        }
-      })
-
-      win.on('ready-to-show', function () {
-        win.setTitle('预览窗口')
-        win.show()
-      })
-
-      win.loadURL(data.PageUrl, {
-        userAgent: ua,
-        httpReferrer: Referer
       })
     })
   }

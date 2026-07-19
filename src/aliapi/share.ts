@@ -2,9 +2,8 @@ import DebugLog from '../utils/debuglog'
 import { humanDateTime, humanDateTimeDateStr, humanExpiration, humanSize } from '../utils/format'
 import message from '../utils/message'
 import AliHttp, { IUrlRespData } from './alihttp'
-import ServerHttp from './server'
 import { ApiBatch, ApiBatchMaker, ApiBatchSuccess, isBoxUser, isCloud123User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from './utils'
-import { useSettingStore, useMyShareStore } from '../store'
+import { useMyShareStore } from '../store'
 import { IAliFileItem, IAliShareAnonymous, IAliShareBottleFish, IAliShareFileItem, IAliShareItem } from './alimodels'
 import getFileIcon from './fileicon'
 import { IAliBatchResult } from './models'
@@ -142,18 +141,6 @@ export default class AliShare {
     const postData = { share_id: share_id, share_pwd: pwd }
 
     let resp = await AliHttp.Post(url, postData, '', '')
-    let isgetpwd = false
-
-    if (resp.body?.code == 'InvalidResource.SharePwd') {
-      if (useSettingStore().yinsiLinkPassword) {
-        const serdata = await ServerHttp.PostToServer({ cmd: 'GetAliSharePwd', shareid: share_id })
-        if (serdata.password) {
-          isgetpwd = true
-          postData.share_pwd = serdata.password
-          resp = await AliHttp.Post(url, postData, '', '')
-        }
-      }
-    }
     if (resp.body?.code == 'InvalidResource.SharePwd') return '，提取码错误'
     if (resp.body?.code == 'ShareLink.Cancelled') return '，分享链接被取消分享了'
     if (resp.body?.code == 'ShareLink.Expired') return '，分享链接过期失效了'
@@ -161,11 +148,6 @@ export default class AliShare {
     if (resp.body?.code) return '，' + resp.body.code
 
     if (AliHttp.IsSuccess(resp.code)) {
-      if (useSettingStore().yinsiLinkPassword && !isgetpwd) ServerHttp.PostToServer({
-        cmd: 'PostAliShare',
-        shareid: share_id,
-        password: postData.share_pwd
-      })
       return (resp.body.share_token as string | undefined) || '，share_token错误'
     } else if (!AliHttp.HttpCodeBreak(resp.code)) {
       DebugLog.mSaveWarning('ApiGetShareToken err=' + share_id + ' ' + (resp.code || ''), resp.body)

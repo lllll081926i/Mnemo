@@ -18,6 +18,11 @@ export interface WebDavConnectionConfig {
   createdAt: string
 }
 
+type PersistedWebDavConnection = Omit<WebDavConnectionConfig, 'username' | 'password'> & Partial<Pick<WebDavConnectionConfig, 'username' | 'password'>> & {
+  __mnemo_secret?: string
+  __mnemo_secret_version?: number
+}
+
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.rmvb', '.asf', '.divx', '.xvid', '.ts', '.m2ts', '.mts', '.vob', '.ogv', '.dv'])
 
 const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, '')
@@ -112,25 +117,42 @@ export const getWebDavConnectionId = (driveId?: string) => {
   return driveId.slice('webdav:'.length)
 }
 
+const protectWebDavConnection = (connection: WebDavConnectionConfig): PersistedWebDavConnection => {
+  const { username, password, ...stored } = connection
+  return {
+    ...stored,
+    __mnemo_secret: (globalThis as unknown as Window).WebSafeStorageEncryptSync(JSON.stringify({ username, password })),
+    __mnemo_secret_version: 1
+  }
+}
+
+const revealWebDavConnection = (stored: PersistedWebDavConnection): WebDavConnectionConfig => {
+  if (!stored.__mnemo_secret) return stored as WebDavConnectionConfig
+  const { __mnemo_secret, __mnemo_secret_version, ...connection } = stored
+  const credentials = JSON.parse((globalThis as unknown as Window).WebSafeStorageDecryptSync(__mnemo_secret)) as Pick<WebDavConnectionConfig, 'username' | 'password'>
+  return { ...connection, ...credentials }
+}
+
+const saveWebDavConnections = (connections: WebDavConnectionConfig[]) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(connections.map(protectWebDavConnection)))
+}
+
 export const getWebDavConnections = (): WebDavConnectionConfig[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    if (!localStorage.getItem(STORAGE_KEY)) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
+    const connections = (parsed as PersistedWebDavConnection[]).map(revealWebDavConnection)
+    if (!localStorage.getItem(STORAGE_KEY) || parsed.some((item) => !item?.__mnemo_secret)) {
+      saveWebDavConnections(connections)
       localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
-    return parsed
+    return connections
   } catch (error) {
     console.error('读取 WebDAV 连接配置失败:', error)
     return []
   }
-}
-
-const saveWebDavConnections = (connections: WebDavConnectionConfig[]) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(connections))
 }
 
 export const saveWebDavConnection = (config: WebDavConnectionConfig) => {

@@ -49,7 +49,9 @@ describe('multi-account provider boundaries', () => {
     const db = read('src/utils/db.ts')
     const userDal = read('src/user/userdal.ts')
 
-    expect(db).toContain('return this.itoken.put(token)')
+    expect(db).toContain('return this.itoken.put(await protectToken(token))')
+    expect(db).toContain("'access_token'")
+    expect(db).toContain('WebSafeStorageEncrypt')
     expect(db).not.toContain('this.itoken.put(token, token.user_id)')
     expect(userDal).toContain('static async SaveUserToken')
     expect(userDal).toContain('await UserDAL.SaveUserToken(token)')

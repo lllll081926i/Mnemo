@@ -568,11 +568,10 @@ const onRowItemDragStart = (ev: any, file_id: string) => {
 
   const dragImage = document.createElement('div')
   dragImage.className = 'dragrowitem'
-  if (files.length == 1) {
-    dragImage.innerHTML = '<a>移动</a>' + files[0].name
-  } else {
-    dragImage.innerHTML = '<a>批量移动</a>' + files[0].name + ' 等(' + files.length.toString() + '个文件)'
-  }
+  const action = document.createElement('a')
+  action.textContent = files.length == 1 ? '移动' : '批量移动'
+  dragImage.append(action)
+  dragImage.append(files.length == 1 ? files[0].name : `${files[0].name} 等(${files.length}个文件)`)
 
   if (ev.dataTransfer) {
     document.body.appendChild(dragImage)

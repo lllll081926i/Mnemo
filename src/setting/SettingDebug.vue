@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import useSettingStore from './settingstore'
 import AppCache from '../utils/appcache'
-import { getUserData, openExternal } from '../utils/electronhelper'
+import { getUserData } from '../utils/electronhelper'
 
 const settingStore = useSettingStore()
 const cb = (val: any) => settingStore.updateStore(val)
 const userData = getUserData()
-const handleJumpPath = () => openExternal(userData)
+const handleJumpPath = () => window.WebShowItemInFolder(userData)
 </script>
 
 <template>

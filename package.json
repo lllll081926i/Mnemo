@@ -5,17 +5,26 @@
   "main": "dist/electron/main/index.js",
   "packageManager": "npm@11.18.0",
   "author": {
-    "name": "gaozhangmin",
-    "email": "gaozhangmin@gmail.com"
+    "name": "lllll081926i"
   },
   "homepage": "https://github.com/lllll081926i/Mnemo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lllll081926i/Mnemo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lllll081926i/Mnemo/issues"
+  },
   "license": "GPL-3.0",
   "scripts": {
     "secrets:generate": "node scripts/generate-secrets.mjs --mode=local",
     "predev": "node scripts/generate-secrets.mjs --mode=local",
     "dev": "vite",
     "prebuild": "node scripts/generate-secrets.mjs --mode=local",
-    "build": "node version.mjs && vue-tsc --noEmit && vite build",
+    "typecheck:renderer": "vue-tsc --noEmit --pretty false",
+    "typecheck:electron": "tsc -p tsconfig.node.json --noEmit --pretty false",
+    "typecheck": "npm run typecheck:renderer && npm run typecheck:electron",
+    "build": "npm run typecheck && vite build",
     "build:version": "node version.mjs",
     "build:electron": "npm run build && electron-builder",
     "build:test": "npm run build && electron-builder --dir",
@@ -25,7 +34,7 @@
     "build:windows": "npm run build && electron-builder --win",
     "build:all": "node build-all.mjs",
     "pretest": "node scripts/generate-secrets.mjs --mode=local",
-    "test": "vitest run electron/main/aria/__tests__ src/down/motrix-integration src/utils/__tests__/aria2EnginePolicy.test.ts src/utils/__tests__/aria2Rpc.test.ts"
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=22.12.0"

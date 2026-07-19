@@ -23,7 +23,11 @@ declare interface Window {
   WebQuarkDownloadUrl: any
   WebSetCookies: any
   WebOpenWindow: any
-  WebOpenUrl: any
+  WebCheckUpdate: () => Promise<{ ok: boolean; version?: string; error?: string }>
+  WebSafeStorageEncrypt: (value: string) => Promise<string>
+  WebSafeStorageDecrypt: (value: string) => Promise<string>
+  WebSafeStorageEncryptSync: (value: string) => string
+  WebSafeStorageDecryptSync: (value: string) => string
   WebShutDown: any
   WebSetProxy: any
   WebMpvEmbeddedCapability: () => Promise<any>

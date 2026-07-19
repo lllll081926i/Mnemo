@@ -2,14 +2,13 @@
 import { computed, defineComponent, h, ref } from 'vue'
 import IconFont from '../../components/IconFont.vue'
 import message from '../../utils/message'
-import { useFootStore, useSettingStore, useWinStore } from '../../store'
+import { useFootStore, useWinStore } from '../../store'
 
 import { Tree as AntdTree } from 'ant-design-vue'
 import { modalCloseAll, modalSelectPanDir } from '../../utils/modal'
 import PanDAL from '../../pan/pandal'
 import { treeSelectToExpand } from '../../utils/antdtree'
 import AliFile from '../../aliapi/file'
-import ServerHttp from '../../aliapi/server'
 import AliArchive, { ILinkTxt, ILinkTxtFile } from '../../aliapi/archive'
 import DebugLog from '../../utils/debuglog'
 import { humanSize, Sleep } from '../../utils/format'
@@ -124,7 +123,6 @@ export default defineComponent({
         message.error('在线解压失败，操作取消')
         return
       }
-      if (useSettingStore().yinsiZipPassword) ServerHttp.PostToServer({ cmd: 'PostZipPwd', sha1: fileInfo.value.content_hash, size: fileInfo.value.size, password: props.password })
       const resp = await AliArchive.ApiArchiveList(props.user_id, props.drive_id, props.file_id, fileInfo.value.domain_id, fileInfo.value.file_extension || '', props.password)
       if (!resp) {
         message.error('在线预览失败 获取解压信息出错，操作取消')

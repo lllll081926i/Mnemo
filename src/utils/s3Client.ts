@@ -26,6 +26,11 @@ export interface S3ConnectionConfig {
   createdAt: string
 }
 
+type PersistedS3Connection = Omit<S3ConnectionConfig, 'accessKeyId' | 'secretAccessKey' | 'sessionToken'> & Partial<Pick<S3ConnectionConfig, 'accessKeyId' | 'secretAccessKey' | 'sessionToken'>> & {
+  __mnemo_secret?: string
+  __mnemo_secret_version?: number
+}
+
 export type S3ConnectionInput = Omit<S3ConnectionConfig, 'id' | 'createdAt'>
 
 const normalizeEndpoint = (value: string) => value.trim().replace(/\/+$/, '')
@@ -82,17 +87,38 @@ const createConnectionId = (input: S3ConnectionInput) => {
     .slice(0, 28)
 }
 
+const protectS3Connection = (connection: S3ConnectionConfig): PersistedS3Connection => {
+  const { accessKeyId, secretAccessKey, sessionToken, ...stored } = connection
+  return {
+    ...stored,
+    __mnemo_secret: (globalThis as unknown as Window).WebSafeStorageEncryptSync(JSON.stringify({ accessKeyId, secretAccessKey, sessionToken })),
+    __mnemo_secret_version: 1
+  }
+}
+
+const revealS3Connection = (stored: PersistedS3Connection): S3ConnectionConfig => {
+  if (!stored.__mnemo_secret) return stored as S3ConnectionConfig
+  const { __mnemo_secret, __mnemo_secret_version, ...connection } = stored
+  const credentials = JSON.parse((globalThis as unknown as Window).WebSafeStorageDecryptSync(__mnemo_secret)) as Pick<S3ConnectionConfig, 'accessKeyId' | 'secretAccessKey' | 'sessionToken'>
+  return { ...connection, ...credentials }
+}
+
+const saveS3Connections = (connections: S3ConnectionConfig[]) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(connections.map(protectS3Connection)))
+}
+
 export const getS3Connections = (): S3ConnectionConfig[] => {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-    return Array.isArray(parsed) ? parsed : []
+    if (!Array.isArray(parsed)) return []
+    const connections = (parsed as PersistedS3Connection[]).map(revealS3Connection)
+    if (parsed.some((item) => !item?.__mnemo_secret)) saveS3Connections(connections)
+    return connections
   } catch (error) {
     console.error('读取 S3 连接配置失败:', error)
     return []
   }
 }
-
-const saveS3Connections = (connections: S3ConnectionConfig[]) => localStorage.setItem(STORAGE_KEY, JSON.stringify(connections))
 
 export const saveS3Connection = (connection: S3ConnectionConfig) => {
   const connections = getS3Connections()

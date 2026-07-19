@@ -50,9 +50,7 @@ const musicsdkMock = vi.hoisted(() => {
   }
 })
 
-vi.mock('../module/musicsdk/index', musicsdkMock.module)
 vi.mock('../../module/musicsdk/index', musicsdkMock.module)
-vi.mock('/Users/gaozhangmin/aliyunpan/src/module/musicsdk/index.ts', musicsdkMock.module)
 
 describe('musicMetadata', () => {
   beforeEach(async () => {

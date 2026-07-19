@@ -9,7 +9,10 @@ export function copyToClipboard(text: string): void {
   window.Electron.clipboard.writeText(text, 'clipboard')
 }
 export function openExternal(url: string): void {
-  window.Electron.shell.openExternal(url)
+  try {
+    const target = new URL(url)
+    if (target.protocol === 'https:' || target.protocol === 'http:') window.Electron.shell.openExternal(target.toString())
+  } catch {}
 }
 
 const ElectronPath = {

@@ -21,7 +21,10 @@ export function WorkerPage(type: string) {
     }
     workerTimer = setTimeout(func, 6000) 
     const element = document.createElement('div')
-    element.innerHTML = '<h3 class="workertitle">上传进程</h3>'
+    const title = document.createElement('h3')
+    title.className = 'workertitle'
+    title.textContent = '上传进程'
+    element.append(title)
     document.body.append(element)
   }
   if (type == 'download') {
@@ -34,7 +37,10 @@ export function WorkerPage(type: string) {
     }
     workerTimer = setTimeout(func, 6000) 
     const element = document.createElement('div')
-    element.innerHTML = '<h3 class="workertitle">下载进程</h3>'
+    const title = document.createElement('h3')
+    title.className = 'workertitle'
+    title.textContent = '下载进程'
+    element.append(title)
     document.body.append(element)
   }
 }

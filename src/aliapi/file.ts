@@ -30,7 +30,7 @@ import UserDAL from '../user/userdal'
 import { ITokenInfo } from '../user/userstore'
 import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, isWebDavDrive } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive } from '../utils/s3Client'
-import { getAlipanVideoPromotionReason } from '../utils/alipanPromotion'
+import { getAlipanVideoPromotionReason } from '../utils/alipanPromotionRules'
 import { canUseAliyunPreviewApi, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
 
 const parseBaiduPath = (file_path: string) => {

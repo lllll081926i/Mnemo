@@ -52,7 +52,7 @@ const loadDocx = async () => {
     const response = await fetch(url)
     if (!response.ok) throw new Error(`Word 文件下载失败：${response.status}`)
     const blob = await response.blob()
-    viewerRef.value.innerHTML = ''
+    viewerRef.value.replaceChildren()
     await renderAsync(blob, viewerRef.value, undefined, {
       inWrapper: true,
       ignoreWidth: false,

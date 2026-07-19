@@ -2,6 +2,10 @@ import { Message } from '@arco-design/web-vue'
 import { h } from 'vue'
 
 const MessageMap = new Map<string, number>()
+const renderContent = (msg: string, count: number) => count > 1
+  ? () => h('div', [msg, h('span', { class: 'messagebadge' }, [h('span', String(count))])])
+  : msg
+
 function getCount(msg: string) {
   let count = MessageMap.get(msg) || 0
   count++
@@ -13,7 +17,7 @@ export default class message {
     const count = getCount(key || msg)
     return Message.info({
       id: key || msg,
-      content: count > 1 ? () => h('div', { innerHTML: msg + '<span class="messagebadge"><span>' + count + '</span></span>' }) : msg,
+      content: renderContent(msg, count),
       position: 'bottom',
       duration: duration * 1000,
       onClose: (id) => MessageMap.delete(key || msg)
@@ -24,7 +28,7 @@ export default class message {
     const count = getCount(key || msg)
     return Message.error({
       id: key || msg,
-      content: count > 1 ? () => h('div', { innerHTML: msg + '<span class="messagebadge"><span>' + count + '</span></span>' }) : msg,
+      content: renderContent(msg, count),
       position: 'bottom',
       duration: duration * 1000,
       onClose: (id) => MessageMap.delete(key || msg)
@@ -35,7 +39,7 @@ export default class message {
     const count = getCount(key || msg)
     return Message.success({
       id: key || msg,
-      content: count > 1 ? () => h('div', { innerHTML: msg + '<span class="messagebadge"><span>' + count + '</span></span>' }) : msg,
+      content: renderContent(msg, count),
       position: 'bottom',
       duration: duration == 0 ? 1 : duration * 1000,
       onClose: (id) => MessageMap.delete(key || msg)
@@ -46,7 +50,7 @@ export default class message {
     const count = getCount(key || msg)
     return Message.warning({
       id: key || msg,
-      content: count > 1 ? () => h('div', { innerHTML: msg + '<span class="messagebadge"><span>' + count + '</span></span>' }) : msg,
+      content: renderContent(msg, count),
       position: 'bottom',
       duration: duration * 1000,
       onClose: (id) => MessageMap.delete(key || msg)
@@ -54,10 +58,10 @@ export default class message {
   }
 
   static loading(msg: string, duration: number = 3, key: string = '') {
-    const count = 0 
+    const count = 0
     return Message.loading({
       id: key || msg,
-      content: count > 1 ? () => h('div', { innerHTML: msg + '<span class="messagebadge"><span>' + count + '</span></span>' }) : msg,
+      content: renderContent(msg, count),
       position: 'bottom',
       duration: duration * 1000
     })

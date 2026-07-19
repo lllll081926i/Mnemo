@@ -14,12 +14,9 @@ export interface SettingState {
   uiDefaultTab: string
   uiImageMode: string
   uiExitOnClose: boolean
-  uiLaunchAutoCheckUpdate: boolean
   uiLaunchAutoSign: boolean
   uiLaunchStart: boolean
   uiLaunchStartShow: boolean
-  uiUpdateProxyEnable: boolean
-  uiUpdateProxyUrl: string
 
   // 账户设置
   uiEnableOpenApiType: string
@@ -121,10 +118,6 @@ export interface SettingState {
   debugLogEnabled: boolean
   debugLogLevel: 'debug' | 'info' | 'warn' | 'error'
   debugLogMaxSizeMB: number
-  // 自动填写 分享链接提取码
-  yinsiLinkPassword: boolean
-  yinsiZipPassword: boolean
-
   // 网络代理
   proxyType: ProxyType
   proxyHost: string
@@ -150,12 +143,9 @@ const setting: SettingState = {
   uiDefaultTab: 'pan',
   uiImageMode: 'fill',
   uiExitOnClose: false,
-  uiLaunchAutoCheckUpdate: false,
   uiLaunchAutoSign: false,
   uiLaunchStart: false,
   uiLaunchStartShow: false,
-  uiUpdateProxyEnable: false,
-  uiUpdateProxyUrl: 'https://mirror.ghproxy.com',
 
   // 账户设置
   uiEnableOpenApiType: 'inline',
@@ -262,10 +252,6 @@ const setting: SettingState = {
   debugLogEnabled: true,
   debugLogLevel: 'info',
   debugLogMaxSizeMB: 5,
-  // 自动填写 分享链接提取码
-  yinsiLinkPassword: false,
-  yinsiZipPassword: false,
-
   // 网络代理
   proxyType: 'system',
   proxyHost: '',
@@ -291,12 +277,9 @@ function _loadSetting(val: any) {
   setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'down', 'share', 'setting'])
   setting.uiImageMode = defaultValue(val.uiImageMode, ['fill', 'width', 'web'])
   setting.uiExitOnClose = defaultBool(val.uiExitOnClose, false)
-  setting.uiLaunchAutoCheckUpdate = defaultBool(val.uiLaunchAutoCheckUpdate, false)
   setting.uiLaunchAutoSign = defaultBool(val.uiLaunchAutoSign, false)
   setting.uiLaunchStart = defaultBool(val.uiLaunchStart, false)
   setting.uiLaunchStartShow = defaultBool(val.uiLaunchStartShow, false)
-  setting.uiUpdateProxyEnable = defaultBool(val.uiUpdateProxyEnable, false)
-  setting.uiUpdateProxyUrl = defaultString(val.uiUpdateProxyUrl, 'https://mirror.ghproxy.com')
 
   // 账户设置
   setting.uiEnableOpenApiType = defaultValue(val.uiEnableOpenApiType, ['inline', 'custom'])
@@ -390,10 +373,6 @@ function _loadSetting(val: any) {
   setting.debugLogEnabled = defaultBool(val.debugLogEnabled, true)
   setting.debugLogLevel = defaultValue(val.debugLogLevel, ['info', 'debug', 'warn', 'error'])
   setting.debugLogMaxSizeMB = defaultNumberSub(val.debugLogMaxSizeMB, 5, 1, 100)
-  // 自动填写 分享链接提取码
-  setting.yinsiLinkPassword = defaultBool(val.yinsiLinkPassword, false)
-  setting.yinsiZipPassword = defaultBool(val.yinsiZipPassword, false)
-
   // 网络代理
   const storedProxyType = defaultValue(val.proxyType, ['system', 'none', 'http', 'https', 'socks5', 'socks5h']) as ProxyType
   if (Object.hasOwn(val, 'proxyUseProxy')) {

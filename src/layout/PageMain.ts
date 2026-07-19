@@ -1,4 +1,3 @@
-import ServerHttp from '../aliapi/server'
 import { useAppStore, useFootStore, usePanTreeStore, useSettingStore } from '../store'
 import AppCache from '../utils/appcache'
 import DownDAL from '../down/DownDAL'
@@ -40,12 +39,6 @@ export function PageMain() {
     })
     .then(async () => {
       await Sleep(500)
-      // 启动时检查更新
-      if (useSettingStore().uiLaunchAutoCheckUpdate) {
-        ServerHttp.CheckUpgrade(false).catch((err: any) => {
-          DebugLog.mSaveDanger('CheckUpgrade', err)
-        })
-      }
       // 重新启动未完成的下载和上传任务
       await DownDAL.aReloadDowning().catch((err: any) => {
         DebugLog.mSaveDanger('aReloadDowning', err)
@@ -97,8 +90,6 @@ export const WinMsg = async (arg: any) => {
 }
 
 let runTime = Math.floor(Date.now() / 1000)
-let chkUpgradeTime1 = Math.floor(Date.now() / 1000)
-let chkUpgradeTime2 = Math.floor(Date.now() / 1000)
 let chkBackupDirSizeTime = 0
 let chkResourceDirSizeTime = 0
 let lockBackupDirSizeTime = false
@@ -122,21 +113,6 @@ function timeEvent() {
     runTime = nowTime
     chkBackupDirSizeTime = 0
     chkResourceDirSizeTime = 0
-  }
-
-  // 启动时检查一次
-  if (chkUpgradeTime1 > 0 && nowTime - chkUpgradeTime1 > 360) {
-    chkUpgradeTime1 = -1
-    ServerHttp.CheckConfigUpgrade().catch((err: any) => {
-      DebugLog.mSaveDanger('CheckConfigUpgrade', err)
-    })
-  }
-  // 14300s检查一次
-  if (nowTime - chkUpgradeTime2 > 14300) {
-    chkUpgradeTime2 = nowTime
-    ServerHttp.CheckConfigUpgrade().catch((err: any) => {
-      DebugLog.mSaveDanger('CheckConfigUpgrade', err)
-    })
   }
 
   // 自动刷新文件夹大小，10s检查一次

@@ -3,9 +3,7 @@ import DB from '../../utils/db'
 import { humanDateTime, humanExpiration, Sleep } from '../../utils/format'
 import message from '../../utils/message'
 import useMyShareStore from './MyShareStore'
-import { IShareSiteGroupModel, IShareSiteModel, useServerStore } from '../../store'
 import useOtherShareStore, { IOtherShareLinkModel } from './OtherShareStore'
-import ServerHttp from '../../aliapi/server'
 import { IID, ParseShareIDList } from '../../utils/shareurl'
 import { RunBatch } from '../../aliapi/batch'
 import AliShare from '../../aliapi/share'
@@ -91,10 +89,6 @@ export default class ShareDAL {
   }
 
   static async aLoadFromDB(): Promise<void> {
-    const shareSiteList = await DB.getValueObject('shareSiteList')
-    const shareSiteGroupList = await DB.getValueObject('shareSiteGroupList')
-    useServerStore().mSaveShareSiteList(shareSiteList as IShareSiteModel[])
-    useServerStore().mSaveShareSiteGroupList(shareSiteGroupList as IShareSiteGroupModel[])
     await ShareDAL.aReloadOtherShare()
   }
 
@@ -264,18 +258,4 @@ export default class ShareDAL {
   }
 
 
-  static aLoadShareSite() {
-    if (useServerStore().shareSiteList.length == 0) ServerHttp.CheckConfigUpgrade()
-  }
-
-
-  static SaveShareSite(list: IShareSiteModel[]) {
-    DB.saveValueObject('shareSiteList', list).catch()
-    useServerStore().mSaveShareSiteList(list)
-  }
-
-  static SaveShareSiteGroup(list: IShareSiteGroupModel[]) {
-    DB.saveValueObject('shareSiteGroupList', list).catch()
-    useServerStore().mSaveShareSiteGroupList(list)
-  }
 }

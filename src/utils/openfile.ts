@@ -2,7 +2,6 @@ import { IAliGetFileModel } from '../aliapi/alimodels'
 import AliArchive from '../aliapi/archive'
 import AliFile from '../aliapi/file'
 import AliFileCmd from '../aliapi/filecmd'
-import ServerHttp from '../aliapi/server'
 import { ITokenInfo, useAppStore, useFootStore, usePanFileStore, useSettingStore, useUserStore } from '../store'
 import { IPageCode, IPageDocx, IPageImage, IPageMusic, IPageMusicTrack, IPageOffice, IPagePdf, IPageSheet, IPageVideo, IPageVideoPlaylistEntry } from '../store/appstore'
 import UserDAL from '../user/userdal'
@@ -239,18 +238,6 @@ async function Archive(drive_id: string, file_id: string, file_name: string, par
   if (!resp) {
     message.error('在线预览失败 获取解压信息出错，操作取消')
     return
-  }
-
-  if (resp.state == '密码错误' && useSettingStore().yinsiZipPassword) {
-    password = await ServerHttp.PostToServer({
-      cmd: 'GetZipPwd',
-      sha1: info.content_hash,
-      size: info.size
-    }).then((serdata) => {
-      if (serdata.password) return serdata.password
-      return ''
-    })
-    if (password) resp = await AliArchive.ApiArchiveList(user_id, drive_id, file_id, info.domain_id, info.file_extension || '', password)
   }
 
   if (!resp) {

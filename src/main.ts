@@ -7,7 +7,6 @@ import message from './utils/message'
 import DebugLog from './utils/debuglog'
 import { PageMain } from './layout/PageMain'
 import { WorkerPage } from './workerpage/workercmd'
-import ServerHttp from './aliapi/server'
 
 window.onerror = function (errorMessage, scriptURI, lineNo, columnNo, error) {
   try {
@@ -160,9 +159,6 @@ window.Electron.ipcRenderer.on('setTheme', (_event: any, args: any) => {
   appStore.toggleDark(args.dark)
 })
 
-window.Electron.ipcRenderer.on('showUpdateModal', () => {
-  ServerHttp.CheckUpgrade(false).catch(() => {})
-})
 
 window.Electron.ipcRenderer.on('cloud123-oauth-callback', (_event: any, url: string) => {
   if (!url) return

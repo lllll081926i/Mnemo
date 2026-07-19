@@ -23,12 +23,9 @@ import ArchivePasswordModal from '../pan/topbtns/ArchivePasswordModal.vue'
 import UploadModal from '../pan/topbtns/UploadModal.vue'
 import DownloadModal from '../pan/topbtns/DownloadModal.vue'
 import MoveToAlbumModal from '../pan/topbtns/MoveToAlbumModal.vue'
-import ShowUpdateLog from '../pan/topbtns/ShowUpdateLog.vue'
 import PostModal from '../pan/topbtns/PostModal.vue'
 import UserRewardSpace from '../user/UserRewardSpace.vue'
 import PasswordModal from '../pan/topbtns/PasswordModal.vue'
-import UpdateModal from '../pan/topbtns/ShowUpdateModal.vue'
-import ShowUpdateModal from '../pan/topbtns/ShowUpdateModal.vue'
 import SelectVideoQualityModal from '../pan/topbtns/SelectVideoQualityModal.vue'
 import Cloud123OfflineDownloadModal from '../down/Cloud123OfflineDownloadModal.vue'
 
@@ -36,8 +33,6 @@ export default defineComponent({
   components: {
     SelectVideoQualityModal,
     Cloud123OfflineDownloadModal,
-    ShowUpdateModal,
-    UpdateModal,
     PasswordModal,
     UserRewardSpace,
     UserSpaceModal,
@@ -62,7 +57,6 @@ export default defineComponent({
     ArchivePasswordModal,
     UploadModal,
     DownloadModal,
-    ShowUpdateLog,
     PostModal
   },
   setup() {
@@ -152,9 +146,6 @@ export default defineComponent({
                      :extFilter='modalStore.modalData.extFilter'
                      :callback='modalStore.modalData.callback' />
 
-  <ShowUpdateLog :visible="modalStore.modalName == 'showupdatelog'" />
-  <ShowUpdateModal :visible="modalStore.modalName == 'showupdate'"
-                   :verData='modalStore.modalData.verData || {}' />
   <SelectVideoQualityModal :visible="modalStore.modalName == 'selectvideoquality'"
                            :file-info="modalStore.modalData.fileInfo || {}"
                            :quality-data="modalStore.modalData.qualityData || {}"

@@ -6,7 +6,13 @@ import Db from '../utils/db'
 import fs from 'node:fs'
 import path from 'path'
 import { decodeName, encodeName } from '../module/flow-enc/utils'
-import { localPwd } from '../utils/aria2c'
+import { modalPassword } from '../utils/modal'
+
+interface AccountBackup {
+  format: 'mnemo-account-backup'
+  version: 1
+  accounts: ITokenInfo[]
+}
 
 const handlerAccountImport = () => {
   window.WebShowOpenDialogSync(
@@ -17,14 +23,16 @@ const handlerAccountImport = () => {
       properties: ['openFile', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
     },
     async (files: string[] | undefined) => {
-      if (files && files.length > 0) {
+      if (files && files.length > 0) modalPassword('input', async (success, password) => {
+        if (!success || !password) return
         try {
-          // 获取内容
           let userList: ITokenInfo[] = []
           let uniqueUserIds = new Set()
           for (let filePath of files) {
             let readData = fs.readFileSync(filePath, 'utf-8')
-            let parsedData: any = JSON.parse(<string>decodeName(localPwd, 'aesctr', readData))
+            const backup = JSON.parse(<string>decodeName(password, 'aesctr', readData)) as AccountBackup
+            if (backup?.format !== 'mnemo-account-backup' || backup.version !== 1) throw new Error('备份格式或密码错误')
+            const parsedData = backup.accounts
             if (Array.isArray(parsedData) && parsedData.every((item) => item.hasOwnProperty('access_token'))) {
               let filteredData: ITokenInfo[] = parsedData.filter((item: ITokenInfo) => {
                 if (!uniqueUserIds.has(item.user_id)) {
@@ -56,15 +64,16 @@ const handlerAccountImport = () => {
             message.error('数据错误，导入用户账户数据失败')
           }
         } catch (err) {
-          message.error('数据错误，导入用户账户数据失败')
+          message.error('密码错误或账户备份已损坏')
         }
-      }
+      })
     }
   )
 }
 
 const handlerAccountExport = () => {
-  if (window.WebShowOpenDialogSync) {
+  if (window.WebShowOpenDialogSync) modalPassword('input', (success, password) => {
+    if (!success || !password) return
     window.WebShowOpenDialogSync(
       {
         title: '选择一个文件夹，保存导出的数据',
@@ -74,14 +83,14 @@ const handlerAccountExport = () => {
       (result: string[] | undefined) => {
         if (result && result[0]) {
           let exportFile = path.join(result[0], 'user.db')
-          let userList = JSON.stringify(UserDAL.GetUserList())
-          let data = encodeName(localPwd, 'aesctr', userList)
+          const backup: AccountBackup = { format: 'mnemo-account-backup', version: 1, accounts: UserDAL.GetUserList() }
+          let data = encodeName(password, 'aesctr', JSON.stringify(backup))
           fs.writeFileSync(exportFile, data)
           message.success('导出所有用户账户数据成功')
         }
       }
     )
-  }
+  })
 }
 </script>
 

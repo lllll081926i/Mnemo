@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createAutoUpdateController } from '../autoUpdate'
 
@@ -12,6 +14,13 @@ class FakeUpdater extends EventEmitter {
 }
 
 describe('createAutoUpdateController', () => {
+  it('uses the Mnemo GitHub repository as the release feed', () => {
+    const builder = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'electron-builder.json'), 'utf8'))
+    expect(builder.publish).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'github', owner: 'lllll081926i', repo: 'Mnemo' })
+    ]))
+  })
+
   it('downloads an available update silently in the background', async () => {
     const updater = new FakeUpdater()
     const dialog = {

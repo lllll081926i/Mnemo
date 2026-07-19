@@ -2,6 +2,42 @@ import Dexie from 'dexie'
 import { ITokenInfo } from '../user/userstore'
 import { IOtherShareLinkModel } from '../share/share/OtherShareStore'
 
+const TOKEN_SECRET_FIELDS: Array<keyof ITokenInfo> = [
+  'access_token',
+  'refresh_token',
+  'open_api_access_token',
+  'open_api_refresh_token',
+  'signature'
+]
+
+type PersistedToken = ITokenInfo & {
+  __mnemo_secret?: string
+  __mnemo_secret_version?: number
+}
+
+async function protectToken(token: ITokenInfo): Promise<PersistedToken> {
+  if (!window.WebSafeStorageEncrypt) throw new Error('系统安全存储接口不可用')
+  const secrets: Partial<ITokenInfo> = {}
+  const stored = { ...token } as PersistedToken
+  for (const field of TOKEN_SECRET_FIELDS) {
+    ;(secrets as any)[field] = token[field]
+    ;(stored as any)[field] = ''
+  }
+  stored.__mnemo_secret = await window.WebSafeStorageEncrypt(JSON.stringify(secrets))
+  stored.__mnemo_secret_version = 1
+  return stored
+}
+
+async function revealToken(stored: PersistedToken): Promise<ITokenInfo> {
+  if (!stored.__mnemo_secret) return stored
+  if (!window.WebSafeStorageDecrypt) throw new Error('系统安全存储接口不可用')
+  const secrets = JSON.parse(await window.WebSafeStorageDecrypt(stored.__mnemo_secret)) as Partial<ITokenInfo>
+  const token = { ...stored, ...secrets } as PersistedToken
+  delete token.__mnemo_secret
+  delete token.__mnemo_secret_version
+  return token
+}
+
 class MNEMODB3 extends Dexie {
   iobject: Dexie.Table<object, string>
   istring: Dexie.Table<string, string>
@@ -9,7 +45,7 @@ class MNEMODB3 extends Dexie {
   ibool: Dexie.Table<boolean, string>
   icache: Dexie.Table<Blob, string>
 
-  itoken: Dexie.Table<ITokenInfo, string>
+  itoken: Dexie.Table<PersistedToken, string>
   iothershare: Dexie.Table<IOtherShareLinkModel, string>
 
   constructor() {
@@ -231,16 +267,23 @@ class MNEMODB3 extends Dexie {
 
   async getUser(user_id: string): Promise<ITokenInfo | undefined> {
     if (!this.isOpen()) await this.open().catch(() => {})
-    return this.transaction('r', this.itoken, () => {
+    const stored = await this.transaction('r', this.itoken, () => {
       return this.itoken.get(user_id)
     })
+    if (!stored) return undefined
+    const token = await revealToken(stored)
+    if (!stored.__mnemo_secret) void this.saveUser(token).catch(() => undefined)
+    return token
   }
 
   async getUserAll(): Promise<ITokenInfo[]> {
     if (!this.isOpen()) await this.open().catch(() => {})
-    const list = await this.transaction('r', this.itoken, () => {
+    const storedList = await this.transaction('r', this.itoken, () => {
       return this.itoken.toArray()
     })
+    const list = await Promise.all(storedList.map(revealToken))
+    const legacyTokens = storedList.filter((token) => !token.__mnemo_secret)
+    if (legacyTokens.length) void this.saveUserBatch(legacyTokens).catch(() => undefined)
     return list.sort((a: ITokenInfo, b: ITokenInfo) => Number(b.used_size || 0) - Number(a.used_size || 0))
   }
 
@@ -251,13 +294,14 @@ class MNEMODB3 extends Dexie {
 
   async saveUser(token: ITokenInfo): Promise<string> {
     if (!this.isOpen()) await this.open().catch(() => {})
-    return this.itoken.put(token)
+    return this.itoken.put(await protectToken(token))
   }
 
   async saveUserBatch(tokens: ITokenInfo[]): Promise<boolean | string> {
     if (tokens.length == 0) return false
     if (!this.isOpen()) await this.open().catch()
-    return this.itoken.bulkPut(tokens).catch()
+    const protectedTokens = await Promise.all(tokens.map(protectToken))
+    return this.itoken.bulkPut(protectedTokens).catch()
   }
 
   async getCache(key: string): Promise<Blob | undefined> {
