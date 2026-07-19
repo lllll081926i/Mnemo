@@ -45,7 +45,6 @@ type BoxCollectionResp = {
 type BoxTokenReader = {
   getUserToken: (user_id: string) => any
   getUserTokenFromDB: (user_id: string) => Promise<any>
-  getUserListFromDB: () => Promise<any[]>
 }
 
 const isUsableBoxToken = (token: any) => {
@@ -58,18 +57,14 @@ export const resolveBoxTokenForRequest = async (user_id: string, reader: BoxToke
     const dbToken = await reader.getUserTokenFromDB(user_id)
     if (isUsableBoxToken(dbToken)) token = dbToken
   }
-  if (isUsableBoxToken(token)) return token
-
-  const list = await reader.getUserListFromDB()
-  return list.find(isUsableBoxToken)
+  return isUsableBoxToken(token) ? token : undefined
 }
 
 export const getBoxToken = async (user_id: string) => {
   const { default: UserDAL } = await import('../user/userdal')
   return resolveBoxTokenForRequest(user_id, {
     getUserToken: UserDAL.GetUserToken.bind(UserDAL),
-    getUserTokenFromDB: UserDAL.GetUserTokenFromDB.bind(UserDAL),
-    getUserListFromDB: UserDAL.GetUserListFromDB.bind(UserDAL)
+    getUserTokenFromDB: UserDAL.GetUserTokenFromDB.bind(UserDAL)
   })
 }
 
@@ -82,7 +77,7 @@ export const boxApiRequest = async <T>(user_id: string, pathOrUrl: string, init:
   const url = pathOrUrl.startsWith('https://') ? pathOrUrl : `${BOX_API_HOST}${pathOrUrl}`
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token.access_token}`,
-    ...(init.headers as Record<string, string> || {})
+    ...((init.headers as Record<string, string>) || {})
   }
   const resp = await fetch(url, { ...init, headers })
   const text = await resp.text().catch(() => '')
@@ -122,10 +117,15 @@ export const apiBoxFileList = async (user_id: string, parentId: string, limit = 
   let offset = 0
   const items: BoxItem[] = []
   while (true) {
-    const data = await boxApiRequest<BoxCollectionResp>(user_id, buildBoxChildrenPath(parentId, limit, offset), {
-      method: 'GET',
-      headers: { 'x-rep-hints': '[jpg?dimensions=320x320]' }
-    }, '获取 Box 文件列表失败')
+    const data = await boxApiRequest<BoxCollectionResp>(
+      user_id,
+      buildBoxChildrenPath(parentId, limit, offset),
+      {
+        method: 'GET',
+        headers: { 'x-rep-hints': '[jpg?dimensions=320x320]' }
+      },
+      '获取 Box 文件列表失败'
+    )
     const entries = Array.isArray(data?.entries) ? data.entries : []
     items.push(...entries)
     const total = Number(data?.total_count || 0)
@@ -136,16 +136,29 @@ export const apiBoxFileList = async (user_id: string, parentId: string, limit = 
 }
 
 export const apiBoxFileDetail = async (user_id: string, fileId: string, isFolder = false): Promise<BoxItem | null> => {
-  return await boxApiRequest<BoxItem>(user_id, buildBoxDetailPath(fileId, isFolder || fileId === 'box_root'), {
-    method: 'GET',
-    headers: { 'x-rep-hints': '[jpg?dimensions=320x320]' }
-  }, '获取 Box 文件详情失败')
+  return await boxApiRequest<BoxItem>(
+    user_id,
+    buildBoxDetailPath(fileId, isFolder || fileId === 'box_root'),
+    {
+      method: 'GET',
+      headers: { 'x-rep-hints': '[jpg?dimensions=320x320]' }
+    },
+    '获取 Box 文件详情失败'
+  )
 }
 
 const encodeDescription = (item: BoxItem) => {
   const parts: string[] = []
   if (item.parent?.id) parts.push(`box_parent:${item.parent.id}`)
-  if (item.path_collection?.entries?.length) parts.push(`box_path:${encodeURIComponent(item.path_collection.entries.map((entry) => entry.name || '').filter(Boolean).join('/'))}`)
+  if (item.path_collection?.entries?.length)
+    parts.push(
+      `box_path:${encodeURIComponent(
+        item.path_collection.entries
+          .map((entry) => entry.name || '')
+          .filter(Boolean)
+          .join('/')
+      )}`
+    )
   if (item.shared_link?.download_url) parts.push(`box_download:${encodeURIComponent(item.shared_link.download_url)}`)
   if (item.shared_link?.url) parts.push(`box_shared:${encodeURIComponent(item.shared_link.url)}`)
   return parts.join(';')
@@ -159,7 +172,7 @@ const pickThumbnail = (item: BoxItem) => {
 export const mapBoxItemToAliModel = (item: BoxItem, drive_id: string, parentId: string): IAliGetFileModel => {
   const isDir = item.type === 'folder'
   const name = item.name || ''
-  const ext = isDir ? '' : (item.extension || name.split('.').pop() || '')
+  const ext = isDir ? '' : item.extension || name.split('.').pop() || ''
   const time = new Date(item.modified_at || item.content_modified_at || item.created_at || '').getTime() || 0
   const timeStr = time ? humanDateTimeDateStr(new Date(time).toISOString()) : ''
   const size = Number(item.size || 0)

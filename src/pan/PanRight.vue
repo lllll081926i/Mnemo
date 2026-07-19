@@ -9,8 +9,8 @@ import PanDAL from './pandal'
 
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
 
-import { dropMoveSelectedFile, handleUpload, menuCopySelectedFile, menuCreatShare, menuFavSelectFile, menuTrashSelectFile, topSearchAll } from './topbtns/topbtn'
-import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalPassword, modalRename, modalSelectPanDir, modalUpload, modalCloud123OfflineDownload } from '../utils/modal'
+import { dropMoveSelectedFile, handleUpload, menuCopySelectedFile, menuCreatShare, menuFavSelectFile, menuTrashSelectFile, topSearchAll, uploadLocalPaths } from './topbtns/topbtn'
+import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalPassword, modalRename, modalSelectPanDir, modalCloud123OfflineDownload } from '../utils/modal'
 import { PanFileState } from './panfilestore'
 import PanTopbtn from './menus/PanTopbtn.vue'
 import FileTopbtn from './menus/FileTopbtn.vue'
@@ -628,21 +628,22 @@ const onPanDrop = (e: any) => {
 
   if (panfileStore.DirID.startsWith('color')) {
     message.error('不能把文件上传到颜色标记里！请先选择一个网盘里的文件夹')
+    return
   }
   if (panfileStore.DirID.startsWith('search')) {
     message.error('不能把文件上传到搜索结果里！请先选择一个网盘里的文件夹')
+    return
   }
   if (panfileStore.DirID == 'favorite') {
     message.error('不能把文件上传到收藏里！请先选择一个网盘里的文件夹')
+    return
   }
   if (panfileStore.DirID == 'recover') {
     message.error('不能把文件上传到文件恢复里！请先选择一个网盘里的文件夹')
+    return
   }
   if (panfileStore.DirID == 'trash') {
     message.error('不能把文件上传到回收站里！请先选择一个网盘里的文件夹')
-  }
-  if (panfileStore.DirID.length != 40 && !panfileStore.DirID.includes('root')) {
-    message.error('错误的上传位置！请先选择一个网盘里的文件夹')
     return
   }
 
@@ -655,7 +656,7 @@ const onPanDrop = (e: any) => {
       files.push(path)
     }
 
-    modalUpload(panfileStore.DirID, files)
+    void uploadLocalPaths(files, panfileStore.DirID)
   }
 }
 const onPanDragEnter = (ev: any) => {
@@ -758,8 +759,7 @@ const onPanDragEnd = (ev: any) => {
         :input-attrs="{ id: 'searchpanInput' }"
         @search="(val: string) => topSearchAll(val, inputsearchType)"
         @press-enter="($event: any) => topSearchAll($event.srcElement.value as string, inputsearchType)"
-        @keydown.esc=";($event.target as any).blur()"
-      />
+        @keydown.esc=";($event.target as any).blur()" />
       <a-button v-if="isAliyunUser(panTreeStore.user_id || '')" type="text" size="small" tabindex="-1" style="border: none" @click="() => topSearchAll('topSearchAll高级搜索', inputsearchType)">高级</a-button>
     </div>
 
@@ -772,8 +772,7 @@ const onPanDragEnd = (ev: any) => {
       :inputpicType="inputpicType"
       :isselectedmulti="panfileStore.IsListSelectedMulti"
       :isallfavored="panfileStore.IsListSelectedFavAll"
-      :isallcolored="panfileStore.IsListSelectedColorAll"
-    />
+      :isallcolored="panfileStore.IsListSelectedColorAll" />
     <TrashTopbtn :dirtype="panfileStore.SelectDirType" :isselected="panfileStore.IsListSelected" />
 
     <div style="flex-grow: 1"></div>
@@ -791,8 +790,7 @@ const onPanDragEnd = (ev: any) => {
         @clear="(e: any) => handleSearchInput('')"
         @input="(val: any) => handleSearchInput(val as string)"
         @press-enter="handleSearchEnter"
-        @keydown.esc=";($event.target as any).blur()"
-      />
+        @keydown.esc=";($event.target as any).blur()" />
     </div>
   </div>
   <div class="toppanarea" tabindex="-1">
@@ -880,8 +878,7 @@ const onPanDragEnd = (ev: any) => {
     :style="{ height: winStore.GetListHeight }"
     @keydown.space.prevent="() => true"
     @drop="onPanDrop"
-    @dragenter="onPanDragEnter"
-  >
+    @dragenter="onPanDragEnter">
     <a-skeleton v-if="panfileStore.ListLoading && panfileStore.ListDataCount == 0" :loading="true" :animation="true">
       <a-skeleton-line :rows="10" :line-height="50" :line-spacing="50" />
     </a-skeleton>
@@ -901,8 +898,7 @@ const onPanDragEnd = (ev: any) => {
       style="width: 100%"
       :data="panfileStore.ListDataShow"
       tabindex="-1"
-      @scroll="handleListScroll"
-    >
+      @scroll="handleListScroll">
       <template #empty>
         <a-empty description="空文件夹" />
       </template>
@@ -920,8 +916,7 @@ const onPanDragEnd = (ev: any) => {
             @drop="onRowItemDrop($event, item)"
             @dragover="onRowItemDragOver"
             @dragenter="onRowItemDragEnter"
-            @dragleave="onRowItemDragLeave"
-          >
+            @dragleave="onRowItemDragLeave">
             <div :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
               <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.file_id, $event, true)">
                 <IconFont :name="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconcrown3' : 'iconrsuccess') : item.starred ? 'iconcrown' : 'iconpic2'" />
@@ -948,8 +943,7 @@ const onPanDragEnd = (ev: any) => {
                         .split(',')
                         .filter((v: string) => !v.includes('xbyEncrypt'))
                         .join('')
-                    "
-                  />
+                    " />
                 </a-button>
               </template>
               <a-popover v-if="item.thumbnail && !item.description.includes('xbyEncrypt')" content-class="popimg" position="lt">
@@ -983,8 +977,7 @@ const onPanDragEnd = (ev: any) => {
             @mouseover="onSelectRang(item.file_id)"
             @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.file_id } })"
             @dragstart="(ev) => onRowItemDragStart(ev, item.file_id)"
-            @dragend="onRowItemDragEnd"
-          >
+            @dragend="onRowItemDragEnd">
             <div :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
               <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.file_id, $event, true)">
                 <IconFont :name="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconcrown3' : 'iconrsuccess') : item.starred ? 'iconcrown' : 'iconpic2'" />
@@ -1011,8 +1004,7 @@ const onPanDragEnd = (ev: any) => {
                         .split(',')
                         .filter((v: string) => !v.includes('xbyEncrypt'))
                         .join('')
-                    "
-                  />
+                    " />
                 </a-button>
               </template>
               <a-popover v-if="item.thumbnail && !item.description.includes('xbyEncrypt')" content-class="popimg" position="lt">
@@ -1064,8 +1056,7 @@ const onPanDragEnd = (ev: any) => {
       style="width: 100%"
       :data="panfileStore.ListDataGrid"
       tabindex="-1"
-      @scroll="handleListScroll"
-    >
+      @scroll="handleListScroll">
       <template #empty>
         <a-empty description="空文件夹" />
       </template>
@@ -1085,8 +1076,7 @@ const onPanDragEnd = (ev: any) => {
                 @drop="onRowItemDrop($event, grid.file_id)"
                 @dragover="onRowItemDragOver"
                 @dragenter="onRowItemDragEnter"
-                @dragleave="onRowItemDragLeave"
-              >
+                @dragleave="onRowItemDragLeave">
                 <div class="gridicon">
                   <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
@@ -1098,8 +1088,7 @@ const onPanDragEnd = (ev: any) => {
                       (e) => {
                         ;(e.currentTarget! as any).style.display = 'none'
                       }
-                    "
-                  />
+                    " />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1131,8 +1120,7 @@ const onPanDragEnd = (ev: any) => {
                             .split(',')
                             .filter((v: string) => !v.includes('xbyEncrypt'))
                             .join('')
-                        "
-                      />
+                        " />
                     </a-button>
                   </template>
                   <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
@@ -1151,8 +1139,7 @@ const onPanDragEnd = (ev: any) => {
                 @mouseover="() => onSelectRang(grid.file_id)"
                 @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: grid.file_id } })"
                 @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
-                @dragend="onRowItemDragEnd"
-              >
+                @dragend="onRowItemDragEnd">
                 <div class="gridicon">
                   <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
@@ -1164,8 +1151,7 @@ const onPanDragEnd = (ev: any) => {
                       (e) => {
                         ;(e.currentTarget! as any).style.display = 'none'
                       }
-                    "
-                  />
+                    " />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1197,8 +1183,7 @@ const onPanDragEnd = (ev: any) => {
                             .split(',')
                             .filter((v: string) => !v.includes('xbyEncrypt'))
                             .join('')
-                        "
-                      />
+                        " />
                     </a-button>
                   </template>
                   <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
@@ -1232,8 +1217,7 @@ const onPanDragEnd = (ev: any) => {
       style="width: 100%"
       :data="panfileStore.ListDataGrid"
       tabindex="-1"
-      @scroll="handleListScroll"
-    >
+      @scroll="handleListScroll">
       <template #empty>
         <a-empty description="空文件夹" />
       </template>
@@ -1253,8 +1237,7 @@ const onPanDragEnd = (ev: any) => {
                 @drop="onRowItemDrop($event, grid.file_id)"
                 @dragover="onRowItemDragOver"
                 @dragenter="onRowItemDragEnter"
-                @dragleave="onRowItemDragLeave"
-              >
+                @dragleave="onRowItemDragLeave">
                 <div class="gridicon">
                   <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
@@ -1266,8 +1249,7 @@ const onPanDragEnd = (ev: any) => {
                       (e) => {
                         ;(e.currentTarget! as any).style.display = 'none'
                       }
-                    "
-                  />
+                    " />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1299,8 +1281,7 @@ const onPanDragEnd = (ev: any) => {
                             .split(',')
                             .filter((v: string) => !v.includes('xbyEncrypt'))
                             .join('')
-                        "
-                      />
+                        " />
                     </a-button>
                   </template>
                   <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
@@ -1319,8 +1300,7 @@ const onPanDragEnd = (ev: any) => {
                 @mouseover="() => onSelectRang(grid.file_id)"
                 @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: grid.file_id } })"
                 @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
-                @dragend="onRowItemDragEnd"
-              >
+                @dragend="onRowItemDragEnd">
                 <div class="gridicon">
                   <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
@@ -1332,8 +1312,7 @@ const onPanDragEnd = (ev: any) => {
                       (e) => {
                         ;(e.currentTarget! as any).style.display = 'none'
                       }
-                    "
-                  />
+                    " />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1368,8 +1347,7 @@ const onPanDragEnd = (ev: any) => {
                             .split(',')
                             .filter((v: string) => !v.includes('xbyEncrypt'))
                             .join('')
-                        "
-                      />
+                        " />
                     </a-button>
                   </template>
                   <a-button v-if="grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="加密文件">
@@ -1390,8 +1368,7 @@ const onPanDragEnd = (ev: any) => {
       :isselectedmulti="panfileStore.IsListSelectedMulti"
       :inputselectType="inputselectType"
       :inputpicType="inputpicType"
-      :isallfavored="panfileStore.IsListSelectedFavAll"
-    />
+      :isallfavored="panfileStore.IsListSelectedFavAll" />
     <TrashRightMenu :dirtype="panfileStore.SelectDirType" />
   </div>
 

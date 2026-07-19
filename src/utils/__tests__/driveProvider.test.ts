@@ -10,6 +10,11 @@ describe('drive provider capabilities', () => {
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
   })
 
+  it('prefers the account provider when a stale drive id points elsewhere', () => {
+    expect(resolveDriveProvider({ userId: 'box_account-id', driveId: 'quark' })).toBe('box')
+    expect(resolveDriveProvider({ userId: 'quark_account-id', driveId: 'box' })).toBe('quark')
+  })
+
   it('builds stable provider-scoped ids for multiple accounts', () => {
     expect(buildDriveProviderUserId('baidu', '10001')).toBe('baidu_10001')
     expect(buildDriveProviderUserId('baidu', '10002')).toBe('baidu_10002')
@@ -44,6 +49,26 @@ describe('drive provider capabilities', () => {
     }
     for (const provider of ['115', '139', '189', 'baidu', 'webdav', 's3']) {
       expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
+    }
+  })
+
+  it('exposes only upload paths that have a provider implementation', () => {
+    for (const provider of ['aliyun', 'cloud123', '115', 'guangya', 'baidu', 'dropbox', 'onedrive', 'box']) {
+      const capabilities = getDriveProviderCapabilities(provider)
+      expect(capabilities.upload, provider).toBe(true)
+      expect(capabilities.uploadMode, provider).toBe('queue')
+    }
+
+    for (const provider of ['webdav', 's3']) {
+      const capabilities = getDriveProviderCapabilities(provider)
+      expect(capabilities.upload, provider).toBe(true)
+      expect(capabilities.uploadMode, provider).toBe('direct')
+    }
+
+    for (const provider of ['pikpak', 'quark', '139', '189', 'unknown']) {
+      const capabilities = getDriveProviderCapabilities(provider)
+      expect(capabilities.upload, provider).toBe(false)
+      expect(capabilities.uploadMode, provider).toBe('none')
     }
   })
 

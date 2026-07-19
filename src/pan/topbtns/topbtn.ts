@@ -23,31 +23,39 @@ import AliAlbum from '../../aliapi/album'
 import { getEncType } from '../../utils/proxyhelper'
 import { Modal, Option, Select } from '@arco-design/web-vue'
 import { h } from 'vue'
-import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, uploadWebDavLocalPaths } from '../../utils/webdavClient'
-import { getS3Connection, getS3ConnectionId, isS3Drive, uploadS3LocalPaths } from '../../utils/s3Client'
+import { getWebDavConnection, getWebDavConnectionId, uploadWebDavLocalPaths } from '../../utils/webdavClient'
+import { getS3Connection, getS3ConnectionId, uploadS3LocalPaths } from '../../utils/s3Client'
+import UserDAL from '../../user/userdal'
+import { getDriveProviderCapabilities, getDriveProviderLabel, resolveDriveProvider } from '../../utils/driveProvider'
 
 const topbtnLock = new Set()
 
-export function handleUpload(uploadType: string, encType: string = '') {
+const getCurrentUploadContext = (parentFileId = '') => {
   const pantreeStore = usePanTreeStore()
   const panfileStore = usePanFileStore()
-  const currentDirId = panfileStore.DirID || pantreeStore.selectDir.file_id
+  const currentDirId = parentFileId || panfileStore.DirID || pantreeStore.selectDir.file_id
+  const token = UserDAL.GetUserToken(pantreeStore.user_id)
+  const provider = resolveDriveProvider({ tokenfrom: token?.tokenfrom, userId: pantreeStore.user_id, driveId: pantreeStore.drive_id })
+  return { pantreeStore, currentDirId, provider, capabilities: getDriveProviderCapabilities(provider) }
+}
+
+export async function uploadLocalPaths(files: string[] | undefined, parentFileId = '', encType = ''): Promise<void> {
+  if (!files?.length) return
+  const { pantreeStore, currentDirId, provider, capabilities } = getCurrentUploadContext(parentFileId)
   if (!pantreeStore.user_id || !pantreeStore.drive_id || !currentDirId) {
     message.error('上传操作失败 父文件夹错误')
     return
   }
-  if (encType == 'xbyEncrypt1') {
-    if (!useSettingStore().securityPassword) {
-      modalPassword('new', (success) => {
-        success && handleUpload(uploadType, encType)
-      })
-      return
-    }
+  if (!capabilities.upload) {
+    message.error(`${getDriveProviderLabel(provider)} 暂不支持本地上传`)
+    return
   }
-  const handleWebDavUpload = async (files: string[] | undefined) => {
-    if (!files || files.length === 0) return
-    const connectionId = getWebDavConnectionId(pantreeStore.drive_id)
-    const connection = getWebDavConnection(connectionId)
+  if (encType && !capabilities.encryption) {
+    message.error(`${getDriveProviderLabel(provider)} 暂不支持加密上传`)
+    return
+  }
+  if (provider === 'webdav') {
+    const connection = getWebDavConnection(getWebDavConnectionId(pantreeStore.drive_id))
     if (!connection) {
       message.error('WebDAV 连接不存在')
       return
@@ -59,9 +67,9 @@ export function handleUpload(uploadType: string, encType: string = '') {
     } catch (error: any) {
       message.error(error?.message || '上传失败')
     }
+    return
   }
-  const handleS3Upload = async (files: string[] | undefined) => {
-    if (!files || files.length === 0) return
+  if (provider === 's3') {
     const connection = getS3Connection(getS3ConnectionId(pantreeStore.drive_id))
     if (!connection) {
       message.error('S3 连接不存在')
@@ -74,6 +82,32 @@ export function handleUpload(uploadType: string, encType: string = '') {
     } catch (error: any) {
       message.error(error?.message || '上传失败')
     }
+    return
+  }
+  modalUpload(currentDirId, files, false, encType)
+}
+
+export function handleUpload(uploadType: string, encType: string = '') {
+  const { pantreeStore, currentDirId, provider, capabilities } = getCurrentUploadContext()
+  if (!pantreeStore.user_id || !pantreeStore.drive_id || !currentDirId) {
+    message.error('上传操作失败 父文件夹错误')
+    return
+  }
+  if (!capabilities.upload) {
+    message.error(`${getDriveProviderLabel(provider)} 暂不支持本地上传`)
+    return
+  }
+  if (encType && !capabilities.encryption) {
+    message.error(`${getDriveProviderLabel(provider)} 暂不支持加密上传`)
+    return
+  }
+  if (encType == 'xbyEncrypt1') {
+    if (!useSettingStore().securityPassword) {
+      modalPassword('new', (success) => {
+        success && handleUpload(uploadType, encType)
+      })
+      return
+    }
   }
   if (uploadType == 'file') {
     window.WebShowOpenDialogSync(
@@ -83,11 +117,7 @@ export function handleUpload(uploadType: string, encType: string = '') {
         properties: ['openFile', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
       },
       (files: string[] | undefined) => {
-        if (files && files.length > 0) {
-          if (isWebDavDrive(pantreeStore.drive_id)) void handleWebDavUpload(files)
-          else if (isS3Drive(pantreeStore.drive_id)) void handleS3Upload(files)
-          else modalUpload(currentDirId, files, false, encType)
-        }
+        void uploadLocalPaths(files, currentDirId, encType)
       }
     )
   } else if (uploadType == 'folder') {
@@ -98,14 +128,14 @@ export function handleUpload(uploadType: string, encType: string = '') {
         properties: ['openDirectory', 'multiSelections', 'showHiddenFiles', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
       },
       (files: string[] | undefined) => {
-        if (files && files.length > 0) {
-          if (isWebDavDrive(pantreeStore.drive_id)) void handleWebDavUpload(files)
-          else if (isS3Drive(pantreeStore.drive_id)) void handleS3Upload(files)
-          else modalUpload(currentDirId, files, false, encType)
-        }
+        void uploadLocalPaths(files, currentDirId, encType)
       }
     )
   } else if (uploadType == 'pic_file') {
+    if (!capabilities.photoAlbum) {
+      message.error(`${getDriveProviderLabel(provider)} 不支持相册上传`)
+      return
+    }
     window.WebShowOpenDialogSync(
       {
         title: '选择多个照片/视频上传到网盘',

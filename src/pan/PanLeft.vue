@@ -15,9 +15,8 @@ import { onHideRightMenuScroll, onShowRightMenu, TestCtrl } from '../utils/keybo
 import DirLeftMenu from './menus/DirLeftMenu.vue'
 import FolderPreviewPopover from './menus/FolderPreviewPopover.vue'
 import { TreeNodeData } from '../store/treestore'
-import { dropMoveSelectedFile } from './topbtns/topbtn'
+import { dropMoveSelectedFile, uploadLocalPaths } from './topbtns/topbtn'
 import message from '../utils/message'
-import { modalUpload } from '../utils/modal'
 import { GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
 import { loadDriveAccountOptions, toDriveAccountOption, type DriveAccountOption } from '../utils/driveAccount'
@@ -138,7 +137,7 @@ const onRowItemDrop = (ev: any, data: any) => {
       const path = filesList[i].path
       files.push(path)
     }
-    modalUpload(data.key, files)
+    void uploadLocalPaths(files, data.key)
   } else {
     dropMoveSelectedFile(data.drive_id, data.key, true)
   }

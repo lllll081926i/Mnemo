@@ -1,22 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { BOX_FIELDS, buildBoxChildrenPath, buildBoxDetailPath, mapBoxItemToAliModel, resolveBoxTokenForRequest } from '../dirfilelist'
 
-(globalThis as any).pinyinlite = (input: string) => input.split('').map((char) => [char])
+;(globalThis as any).pinyinlite = (input: string) => input.split('').map((char) => [char])
 
 describe('Box dirfilelist helpers', () => {
-  it('refuses non-Box bearer tokens and falls back to a saved Box account', async () => {
-    const boxToken = {
-      tokenfrom: 'box',
-      user_id: 'box_user',
-      access_token: 'box-access'
-    }
+  it('refuses non-Box bearer tokens without crossing into another Box account', async () => {
     const token = await resolveBoxTokenForRequest('aliyun_user', {
-      getUserToken: (userId: string) => userId === 'aliyun_user'
-        ? { tokenfrom: 'aliyun', user_id: 'aliyun_user', access_token: 'aliyun-access' }
-        : {},
-      getUserTokenFromDB: async () => undefined,
-      getUserListFromDB: async () => [boxToken]
-    } as any)
+      getUserToken: (userId: string) => (userId === 'aliyun_user' ? { tokenfrom: 'aliyun', user_id: 'aliyun_user', access_token: 'aliyun-access' } : {}),
+      getUserTokenFromDB: async () => undefined
+    })
+
+    expect(token).toBeUndefined()
+  })
+
+  it('loads the exact Box account from storage', async () => {
+    const token = await resolveBoxTokenForRequest('box_user', {
+      getUserToken: () => undefined,
+      getUserTokenFromDB: async (userId: string) => (userId === 'box_user' ? { tokenfrom: 'box', user_id: 'box_user', access_token: 'box-access' } : undefined)
+    })
 
     expect(token?.access_token).toBe('box-access')
   })
@@ -36,15 +37,19 @@ describe('Box dirfilelist helpers', () => {
   })
 
   it('maps folders into the shared cloud file model', () => {
-    const model = mapBoxItemToAliModel({
-      id: 'folder-id',
-      type: 'folder',
-      name: 'Movies',
-      parent: { id: '0', type: 'folder', name: 'All Files' },
-      item_collection: { total_count: 3 },
-      created_at: '2026-05-10T01:00:00Z',
-      modified_at: '2026-05-10T02:00:00Z'
-    }, 'box', 'box_root')
+    const model = mapBoxItemToAliModel(
+      {
+        id: 'folder-id',
+        type: 'folder',
+        name: 'Movies',
+        parent: { id: '0', type: 'folder', name: 'All Files' },
+        item_collection: { total_count: 3 },
+        created_at: '2026-05-10T01:00:00Z',
+        modified_at: '2026-05-10T02:00:00Z'
+      },
+      'box',
+      'box_root'
+    )
 
     expect(model.drive_id).toBe('box')
     expect(model.file_id).toBe('folder-id')
@@ -56,18 +61,22 @@ describe('Box dirfilelist helpers', () => {
   })
 
   it('maps files with sha1, shared link and representations', () => {
-    const model = mapBoxItemToAliModel({
-      id: 'file-id',
-      type: 'file',
-      name: 'clip.mp4',
-      size: 1048576,
-      sha1: 'sha1',
-      parent: { id: 'folder-id', type: 'folder', name: 'Movies' },
-      shared_link: { download_url: 'https://download', url: 'https://share' },
-      representations: { entries: [{ content: { url_template: 'https://thumb/{+asset_path}' } }] },
-      created_at: '2026-05-10T01:00:00Z',
-      modified_at: '2026-05-10T02:00:00Z'
-    }, 'box', 'folder-id')
+    const model = mapBoxItemToAliModel(
+      {
+        id: 'file-id',
+        type: 'file',
+        name: 'clip.mp4',
+        size: 1048576,
+        sha1: 'sha1',
+        parent: { id: 'folder-id', type: 'folder', name: 'Movies' },
+        shared_link: { download_url: 'https://download', url: 'https://share' },
+        representations: { entries: [{ content: { url_template: 'https://thumb/{+asset_path}' } }] },
+        created_at: '2026-05-10T01:00:00Z',
+        modified_at: '2026-05-10T02:00:00Z'
+      },
+      'box',
+      'folder-id'
+    )
 
     expect(model.file_id).toBe('file-id')
     expect(model.parent_file_id).toBe('folder-id')

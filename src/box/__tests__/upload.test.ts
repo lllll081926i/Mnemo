@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBoxSmallUploadAttributes, buildBoxUploadSessionBody, buildBoxUploadSessionPath, toBoxConflictBehavior } from '../upload'
+import { buildBoxCommitBody, buildBoxPartHeaders, buildBoxSmallUploadAttributes, buildBoxUploadSessionBody, buildBoxUploadSessionPath, toBoxConflictBehavior } from '../upload'
 
 describe('Box upload helpers', () => {
   it('builds small upload attributes for root and child folders', () => {
@@ -20,5 +20,16 @@ describe('Box upload helpers', () => {
     expect(toBoxConflictBehavior('auto_rename')).toBe('rename')
     expect(toBoxConflictBehavior('overwrite')).toBe('overwrite')
     expect(toBoxConflictBehavior('refuse')).toBe('refuse')
+  })
+
+  it('builds chunk headers and commit parts', () => {
+    expect(buildBoxPartHeaders(0, 4, 10, 'chunk-digest')).toEqual({
+      Digest: 'sha=chunk-digest',
+      'Content-Range': 'bytes 0-3/10',
+      'Content-Type': 'application/octet-stream'
+    })
+    expect(buildBoxCommitBody([{ part_id: 'part-1', offset: 0, size: 4, sha1: 'sha1' }])).toEqual({
+      parts: [{ part_id: 'part-1', offset: 0, size: 4, sha1: 'sha1' }]
+    })
   })
 })

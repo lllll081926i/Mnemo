@@ -19,21 +19,42 @@ import Drive115UploadDisk from '../cloud115/uploaddisk'
 import DropboxUploadDisk from '../dropbox/upload'
 import OneDriveUploadDisk from '../onedrive/upload'
 import GuangyaUploadDisk from '../guangya/uploaddisk'
-import { isBaiduUser, isCloud123User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser } from '../aliapi/utils'
-import { apiCloud123Mkdir } from '../cloud123/filecmd'
+import BoxUploadDisk from '../box/upload'
+import { getDriveProviderCapabilities, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
+
+type UploadDiskHandler = (fileui: IUploadingUI) => Promise<string>
+
+const failUpload = (fileui: IUploadingUI, message: string, code = 505) => {
+  fileui.Info.uploadState = 'error'
+  fileui.Info.failedCode = code
+  fileui.Info.failedMessage = message
+}
+
+const runUploadDisk = async (fileui: IUploadingUI, handler: UploadDiskHandler): Promise<void> => {
+  await checkFileSize(fileui)
+  if (fileui.Info.uploadState === 'error') return
+  const uploadResult = await handler(fileui)
+  if (uploadResult === 'success') {
+    fileui.Info.uploadState = 'success'
+  } else if (!fileui.IsRunning || uploadResult === '已暂停') {
+    fileui.Info.uploadState = '已暂停'
+  } else if (fileui.Info.uploadState === 'running' || fileui.Info.uploadState === 'hashing') {
+    failUpload(fileui, uploadResult)
+  }
+}
 
 export async function StartUpload(fileui: IUploadingUI): Promise<void> {
   const token = await UserDAL.GetUserTokenFromDB(fileui.user_id)
   if (!token || token.user_id !== fileui.user_id) {
-    fileui.Info.uploadState = 'error'
-    fileui.Info.failedCode = 402
-    fileui.Info.failedMessage = '找不到账号,无法继续'
+    failUpload(fileui, '找不到账号,无法继续', 402)
     return
   }
-  if (isPikPakUser(fileui.user_id || '')) {
-    fileui.Info.uploadState = 'error'
-    fileui.Info.failedCode = 505
-    fileui.Info.failedMessage = 'PikPak 本地上传暂不支持，请使用离线下载导入 http/https 或 magnet 链接'
+  const provider = resolveDriveProvider({ tokenfrom: token.tokenfrom, userId: fileui.user_id, driveId: fileui.drive_id })
+  const capabilities = getDriveProviderCapabilities(provider)
+  if (capabilities.uploadMode !== 'queue') {
+    const providerLabel = getDriveProviderLabel(provider)
+    const message = capabilities.uploadMode === 'direct' ? `${providerLabel} 请从网盘页面直接上传` : `${providerLabel} 暂不支持本地上传`
+    failUpload(fileui, message)
     return
   }
   // 创建文件夹
@@ -41,91 +62,19 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
     return creatDirAndReadChildren(fileui)
   }
 
-  if (isCloud123User(fileui.user_id || '')) {
-    await checkFileSize(fileui)
-    const uploadResult = await Cloud123UploadDisk.UploadOneFile(fileui)
-    if (uploadResult == 'success') {
-      fileui.Info.uploadState = 'success'
-    } else if (!fileui.IsRunning) {
-      fileui.Info.uploadState = '已暂停'
-    } else if (fileui.Info.uploadState == 'running' || fileui.Info.uploadState == 'hashing') {
-      fileui.Info.uploadState = 'error'
-      fileui.Info.failedCode = 505
-      fileui.Info.failedMessage = uploadResult
-    }
-    return
-  }
-  if (isGuangyaUser(fileui.user_id || '')) {
-    await checkFileSize(fileui)
-    const uploadResult = await GuangyaUploadDisk.UploadOneFile(fileui)
-    if (uploadResult == 'success') {
-      fileui.Info.uploadState = 'success'
-    } else if (!fileui.IsRunning) {
-      fileui.Info.uploadState = '已暂停'
-    } else if (fileui.Info.uploadState == 'running' || fileui.Info.uploadState == 'hashing') {
-      fileui.Info.uploadState = 'error'
-      fileui.Info.failedCode = 505
-      fileui.Info.failedMessage = uploadResult
-    }
-    return
-  }
-  if (isBaiduUser(fileui.user_id || '')) {
-    await checkFileSize(fileui)
-    const uploadResult = await BaiduUploadDisk.UploadOneFile(fileui)
-    if (uploadResult == 'success') {
-      fileui.Info.uploadState = 'success'
-    } else if (!fileui.IsRunning) {
-      fileui.Info.uploadState = '已暂停'
-    } else if (fileui.Info.uploadState == 'running' || fileui.Info.uploadState == 'hashing') {
-      fileui.Info.uploadState = 'error'
-      fileui.Info.failedCode = 505
-      fileui.Info.failedMessage = uploadResult
-    }
-    return
-  }
-  if (isDrive115User(fileui.user_id || '')) {
-    await checkFileSize(fileui)
-    const uploadResult = await Drive115UploadDisk.UploadOneFile(fileui)
-    if (uploadResult == 'success') {
-      fileui.Info.uploadState = 'success'
-    } else if (!fileui.IsRunning) {
-      fileui.Info.uploadState = '已暂停'
-    } else if (fileui.Info.uploadState == 'running' || fileui.Info.uploadState == 'hashing') {
-      fileui.Info.uploadState = 'error'
-      fileui.Info.failedCode = 505
-      fileui.Info.failedMessage = uploadResult
-    }
-    return
-  }
-  if (isDropboxUser(fileui.user_id || '')) {
-    await checkFileSize(fileui)
-    const uploadResult = await DropboxUploadDisk.UploadOneFile(fileui)
-    if (uploadResult == 'success') {
-      fileui.Info.uploadState = 'success'
-    } else if (!fileui.IsRunning) {
-      fileui.Info.uploadState = '已暂停'
-    } else if (fileui.Info.uploadState == 'running' || fileui.Info.uploadState == 'hashing') {
-      fileui.Info.uploadState = 'error'
-      fileui.Info.failedCode = 505
-      fileui.Info.failedMessage = uploadResult
-    }
-    return
-  }
-  if (isOneDriveUser(fileui.user_id || '')) {
-    await checkFileSize(fileui)
-    const uploadResult = await OneDriveUploadDisk.UploadOneFile(fileui)
-    if (uploadResult == 'success') {
-      fileui.Info.uploadState = 'success'
-    } else if (!fileui.IsRunning) {
-      fileui.Info.uploadState = '已暂停'
-    } else if (fileui.Info.uploadState == 'running' || fileui.Info.uploadState == 'hashing') {
-      fileui.Info.uploadState = 'error'
-      fileui.Info.failedCode = 505
-      fileui.Info.failedMessage = uploadResult
-    }
+  if (provider === 'cloud123') return runUploadDisk(fileui, Cloud123UploadDisk.UploadOneFile)
+  if (provider === 'guangya') return runUploadDisk(fileui, GuangyaUploadDisk.UploadOneFile)
+  if (provider === 'baidu') return runUploadDisk(fileui, BaiduUploadDisk.UploadOneFile)
+  if (provider === '115') return runUploadDisk(fileui, Drive115UploadDisk.UploadOneFile)
+  if (provider === 'dropbox') return runUploadDisk(fileui, DropboxUploadDisk.UploadOneFile)
+  if (provider === 'onedrive') return runUploadDisk(fileui, OneDriveUploadDisk.UploadOneFile)
+  if (provider === 'box') return runUploadDisk(fileui, BoxUploadDisk.UploadOneFile)
+  if (provider !== 'aliyun') {
+    failUpload(fileui, `${getDriveProviderLabel(provider)} 暂不支持队列上传`)
     return
   }
   await checkFileSize(fileui)
+  if (fileui.Info.uploadState === 'error') return
   const uploadInfo: IUploadInfo = {
     token_type: token.token_type,
     access_token: token.access_token,
@@ -136,7 +85,6 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
   }
 
   if (fileui.Info.up_upload_id != '' && fileui.Info.up_file_id != '') {
-
     let isok = await reloadUploadUrl(uploadInfo, fileui)
     if (isok == 'neterror') {
       Sleep(8000)
@@ -176,17 +124,12 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
     fileui.Info.failedMessage = '跳过不能秒传的文件'
     return
   }
-
-
-  if (fileui.Info.uploadState == 'error') return
-
   if (uploadInfo.part_info_list.length == 0) {
     fileui.Info.uploadState = 'error'
     fileui.Info.failedCode = 505
     fileui.Info.failedMessage = '获取上传地址失败1'
     return
   }
-
 
   const uploadResult = await AliUploadDisk.UploadOneFile(uploadInfo, fileui)
   if (uploadResult == 'success') {
@@ -201,7 +144,6 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
     fileui.Info.failedMessage = uploadResult
   } else {
     console.log(fileui.Info.uploadState, fileui.Info)
-
   }
 }
 
@@ -221,25 +163,14 @@ async function creatDirAndReadChildren(fileui: IUploadingUI): Promise<void> {
 
   let uploaded_file_id = ''
   if (fileui.File.IsRoot) {
-    if (isCloud123User(fileui.user_id || '')) {
-      const data = await apiCloud123Mkdir(fileui.user_id, fileui.parent_file_id || '0', fileui.File.name)
-      if (data.error) {
-        fileui.Info.uploadState = 'error'
-        fileui.Info.failedCode = 503
-        fileui.Info.failedMessage = data.error
-        return
-      }
-      uploaded_file_id = data.file_id
-    } else {
-      const data = await AliFileCmd.ApiCreatNewForder(fileui.user_id, fileui.drive_id, fileui.parent_file_id, fileui.File.name, fileui.encType)
-      if (data.error) {
-        fileui.Info.uploadState = 'error'
-        fileui.Info.failedCode = 503
-        fileui.Info.failedMessage = data.error
-        return
-      }
-      uploaded_file_id = data.file_id
+    const data = await AliFileCmd.ApiCreatNewForder(fileui.user_id, fileui.drive_id, fileui.parent_file_id, fileui.File.name, fileui.encType)
+    if (data.error) {
+      fileui.Info.uploadState = 'error'
+      fileui.Info.failedCode = 503
+      fileui.Info.failedMessage = data.error
+      return
     }
+    uploaded_file_id = data.file_id
   }
 
   let childList: IStateUploadTaskFile[] = []
@@ -281,21 +212,20 @@ async function creatDirAndReadChildren(fileui: IUploadingUI): Promise<void> {
 async function readChildren(parentDirPartPath: string, parentDirName: string, readConfig: ReadConfig, Info: IStateUploadInfo) {
   const localDirPath = path.join(readConfig.localFilePath, parentDirPartPath, path.sep)
   const files = await readDir(localDirPath, readConfig.ingoredList)
-  if (files.error) return {
-    error: files.error,
-    fileList: [] as IStateUploadTaskFile[],
-    dirList: [] as IStateUploadTaskFile[]
-  }
+  if (files.error)
+    return {
+      error: files.error,
+      fileList: [] as IStateUploadTaskFile[],
+      dirList: [] as IStateUploadTaskFile[]
+    }
 
   const addFileList: IStateUploadTaskFile[] = []
   const addDirList: IStateUploadTaskFile[] = []
-
 
   await AddFiles(addFileList, files.fileList, parentDirPartPath, parentDirName, readConfig)
   Info.failedMessage = '读取中 ' + addFileList.length + '个'
 
   await AddDirs(addFileList, addDirList, files.dirList, parentDirPartPath, parentDirName, readConfig, Info)
-
 
   return { error: '', fileList: addFileList, dirList: addDirList }
 }
@@ -372,17 +302,23 @@ async function AddDirs(addFileList: IStateUploadTaskFile[], addDirList: IStateUp
       plist.splice(0, plist.length)
     }
   }
-  if (plist.length > 0) await Promise.all(plist).catch(() => {
-  })
+  if (plist.length > 0) await Promise.all(plist).catch(() => {})
 }
 
 const MAXFILE = 20
 const MAXDIR = 20
 
-async function readChildrenDiGui(addFileList: IStateUploadTaskFile[], addDirList: IStateUploadTaskFile[], diritem: IStateUploadTaskFile, readConfig: ReadConfig, Info: IStateUploadInfo, plist: Promise<{
-  file_id: string;
-  error: string
-}>[]): Promise<void> {
+async function readChildrenDiGui(
+  addFileList: IStateUploadTaskFile[],
+  addDirList: IStateUploadTaskFile[],
+  diritem: IStateUploadTaskFile,
+  readConfig: ReadConfig,
+  Info: IStateUploadInfo,
+  plist: Promise<{
+    file_id: string
+    error: string
+  }>[]
+): Promise<void> {
   const localDirPath = path.join(readConfig.localFilePath, diritem.partPath, path.sep)
   const dirFiles = await readDir(localDirPath, readConfig.ingoredList)
   if (dirFiles.error) {
@@ -441,9 +377,12 @@ async function readChildrenDiGui(addFileList: IStateUploadTaskFile[], addDirList
   }
 }
 
-async function readDir(fullDirPath: string, ingoredList: string[]): Promise<{
-  error: string;
-  fileList: string[];
+async function readDir(
+  fullDirPath: string,
+  ingoredList: string[]
+): Promise<{
+  error: string
+  fileList: string[]
   dirList: string[]
 }> {
   let errorMessage = ''
@@ -496,30 +435,24 @@ async function checkFileSize(fileui: IUploadingUI): Promise<void> {
   }
 
   if (fileui.File.size != stat.size) {
-
     fileui.File.size = stat.size
     fileui.Info.up_upload_id = ''
     fileui.Info.up_file_id = ''
   }
   if (fileui.File.mtime != stat.mtime.getTime()) {
-
     fileui.File.mtime = stat.mtime.getTime()
     fileui.Info.up_upload_id = ''
     fileui.Info.up_file_id = ''
   }
 }
 
-
 async function reloadUploadUrl(uploadInfo: IUploadInfo, fileui: IUploadingUI): Promise<'success' | 'error' | 'neterror' | 'codeerror'> {
-
   uploadInfo.part_info_list = []
 
-  let isOk = await AliUpload.UploadFilePartUrl(fileui.user_id, fileui.drive_id, fileui.Info.up_file_id, fileui.Info.up_upload_id, fileui.File.size, uploadInfo).catch(() => {
-  })
+  let isOk = await AliUpload.UploadFilePartUrl(fileui.user_id, fileui.drive_id, fileui.Info.up_file_id, fileui.Info.up_upload_id, fileui.File.size, uploadInfo).catch(() => {})
   if (isOk != 'success') return isOk || 'codeerror'
   if (uploadInfo.part_info_list.length > 0) {
-    isOk = await AliUpload.UploadFileListUploadedParts(fileui.user_id, fileui.drive_id, fileui.Info.up_file_id, fileui.Info.up_upload_id, 0, uploadInfo).catch(() => {
-    })
+    isOk = await AliUpload.UploadFileListUploadedParts(fileui.user_id, fileui.drive_id, fileui.Info.up_file_id, fileui.Info.up_upload_id, 0, uploadInfo).catch(() => {})
     if (isOk == 'success') {
       const part_info_list = uploadInfo.part_info_list
       let isUpload = true
@@ -531,7 +464,6 @@ async function reloadUploadUrl(uploadInfo: IUploadInfo, fileui: IUploadingUI): P
       }
       return 'success'
     } else if (isOk == 'error') {
-
       fileui.Info.up_file_id = ''
       fileui.Info.up_upload_id = ''
       uploadInfo.part_info_list = []
@@ -541,7 +473,6 @@ async function reloadUploadUrl(uploadInfo: IUploadInfo, fileui: IUploadingUI): P
     return 'error'
   }
 }
-
 
 async function checkPreHashAndGetPartlist(uploadInfo: IUploadInfo, fileui: IUploadingUI): Promise<boolean> {
   // 加密文件不秒传，不计算hash
@@ -596,18 +527,14 @@ async function checkPreHashAndGetPartlist(uploadInfo: IUploadInfo, fileui: IUplo
       return false
     }
   }
-  const miaoChuan = await AliUpload.UploadCreatFileWithFolders(
-    fileui.user_id, fileui.drive_id,
-    fileui.parent_file_id, fileui.File.name,
-    fileui.File.size, proof.sha1, proof.proof_code,
-    fileui.check_name_mode, fileui.encType
-  )
+  const miaoChuan = await AliUpload.UploadCreatFileWithFolders(fileui.user_id, fileui.drive_id, fileui.parent_file_id, fileui.File.name, fileui.File.size, proof.sha1, proof.proof_code, fileui.check_name_mode, fileui.encType)
   if (miaoChuan.errormsg != '') {
     fileui.Info.uploadState = 'error'
     fileui.Info.failedCode = 504
     fileui.Info.failedMessage = miaoChuan.errormsg
     return false
-  } else if (miaoChuan.israpid || miaoChuan.isexist) { // 秒传逻辑
+  } else if (miaoChuan.israpid || miaoChuan.isexist) {
+    // 秒传逻辑
     fileui.Info.uploadState = 'success'
     fileui.File.uploaded_file_id = miaoChuan.file_id
     fileui.File.uploaded_is_rapid = true

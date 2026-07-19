@@ -19,6 +19,7 @@ export interface DriveProviderCapabilities {
   mountedStorage: boolean
   download: boolean
   upload: boolean
+  uploadMode: 'queue' | 'direct' | 'none'
   createFolder: boolean
   createDateFolder: boolean
   createTextFile: boolean
@@ -129,6 +130,7 @@ const noCapabilities: Omit<DriveProviderCapabilities, 'provider'> = {
   mountedStorage: false,
   download: false,
   upload: false,
+  uploadMode: 'none',
   createFolder: false,
   createDateFolder: false,
   createTextFile: false,
@@ -160,6 +162,7 @@ const noCapabilities: Omit<DriveProviderCapabilities, 'provider'> = {
 const standardFileCapabilities: Partial<DriveProviderCapabilities> = {
   download: true,
   upload: true,
+  uploadMode: 'queue',
   createFolder: true,
   createDateFolder: true,
   rename: true,
@@ -195,17 +198,17 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
   }),
   cloud123: createCapabilities('cloud123', { createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, trashView: true, trashRestore: true }),
   '115': createCapabilities('115', { trashView: true, trashRestore: true, trashPurge: true }),
-  '139': createCapabilities('139'),
-  '189': createCapabilities('189'),
+  '139': createCapabilities('139', { upload: false, uploadMode: 'none' }),
+  '189': createCapabilities('189', { upload: false, uploadMode: 'none' }),
   guangya: createCapabilities('guangya', { createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
   baidu: createCapabilities('baidu'),
-  pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
-  quark: createCapabilities('quark', { createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
+  pikpak: createCapabilities('pikpak', { upload: false, uploadMode: 'none', createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
+  quark: createCapabilities('quark', { upload: false, uploadMode: 'none', createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
   dropbox: createCapabilities('dropbox', { createTextFile: true, createShare: true, manageCreatedShares: true }),
   onedrive: createCapabilities('onedrive', { createTextFile: true, createShare: true }),
   box: createCapabilities('box', { createTextFile: true, createShare: true }),
-  webdav: createCapabilities('webdav', { mountedStorage: true, recycleBin: false, permanentDelete: true }),
-  s3: createCapabilities('s3', { mountedStorage: true, recycleBin: false, permanentDelete: true }),
+  webdav: createCapabilities('webdav', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
+  s3: createCapabilities('s3', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   unknown: { ...noCapabilities, provider: 'unknown' }
 }
 
@@ -250,9 +253,8 @@ export const resolveDriveProvider = (context: DriveProviderContext | string = {}
   if (tokenfrom && tokenfrom !== 'unknown' && Object.prototype.hasOwnProperty.call(driveProviderMap, tokenfrom)) return tokenfrom
   const userId = resolvedContext.userId || ''
   const driveId = resolvedContext.driveId || ''
-  for (const [provider, userPrefixes, driveIds] of providerAliases) {
-    if (userPrefixes.some((prefix) => userId.startsWith(prefix)) || driveIds.includes(driveId)) return provider
-  }
+  for (const [provider, userPrefixes] of providerAliases) if (userPrefixes.some((prefix) => userId.startsWith(prefix))) return provider
+  for (const [provider, , driveIds] of providerAliases) if (driveIds.includes(driveId)) return provider
   return 'unknown'
 }
 
