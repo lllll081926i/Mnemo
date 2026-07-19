@@ -5,7 +5,6 @@ import {
   menuCopyFileTree,
   menuCopySelectedFile,
   menuCreatShare,
-  menuDLNA,
   menuDownload,
   menuFileClearHistory,
   menuFileColorChange,
@@ -187,10 +186,6 @@ const canCreateShare = computed(() => capabilities.value.createShare && (provide
           <a-doption v-if="isShowBtn && capabilities.playbackHistory" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
             <template #icon><IconFont name="iconshipin" /></template>
             <template #default>清除历史</template>
-          </a-doption>
-          <a-doption v-if="isvideo" @click="() => menuDLNA()">
-            <template #icon><IconFont name="icontouping2" /></template>
-            <template #default>DLNA投屏</template>
           </a-doption>
           <a-doption v-if="isvideo" @click="() => menuM3U8Download()">
             <template #icon><IconFont name="iconluxiang" /></template>

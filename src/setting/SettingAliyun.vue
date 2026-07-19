@@ -28,7 +28,7 @@ const copyCookies = async () => {
     <div class="ui-plain-row">
       <span class="ui-plain-label">优先显示</span>
       <div class="ui-plain-control">
-        <a-select class="ui-control-sm" size="small" :model-value="settingStore.uiShowPanRootFirst" @update:model-value="(value: string) => settingStore.updateStore({ uiShowPanRootFirst: value })">
+        <a-select class="ui-control-sm" size="small" :model-value="settingStore.uiShowPanRootFirst" @update:model-value="(value) => settingStore.updateStore({ uiShowPanRootFirst: String(value) })">
           <a-option value="all">全部</a-option>
           <a-option value="backup">备份盘</a-option>
           <a-option value="resource">资源盘</a-option>
@@ -56,7 +56,7 @@ const copyCookies = async () => {
     <div class="ui-plain-row">
       <span class="ui-plain-label">默认分享有效期</span>
       <div class="ui-plain-control">
-        <a-radio-group type="button" size="small" :model-value="settingStore.uiShareDays" @update:model-value="(value: string) => settingStore.updateStore({ uiShareDays: value })">
+        <a-radio-group type="button" size="small" :model-value="settingStore.uiShareDays" @update:model-value="(value) => settingStore.updateStore({ uiShareDays: String(value) })">
           <a-radio value="always">永久</a-radio>
           <a-radio value="week">一周</a-radio>
           <a-radio value="month">一月</a-radio>
@@ -66,7 +66,7 @@ const copyCookies = async () => {
     <div class="ui-plain-row">
       <span class="ui-plain-label">默认提取码</span>
       <div class="ui-plain-control">
-        <a-radio-group type="button" size="small" :model-value="settingStore.uiSharePassword" @update:model-value="(value: string) => settingStore.updateStore({ uiSharePassword: value })">
+        <a-radio-group type="button" size="small" :model-value="settingStore.uiSharePassword" @update:model-value="(value) => settingStore.updateStore({ uiSharePassword: String(value) })">
           <a-radio value="random">随机</a-radio>
           <a-radio value="last">上次</a-radio>
           <a-radio value="nopassword">无</a-radio>

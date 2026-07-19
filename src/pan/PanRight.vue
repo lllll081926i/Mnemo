@@ -34,7 +34,7 @@ const inputpicType = ref('pic_root')
 const inputselectType = ref('backup')
 const inputsearchType = ref<string[]>([])
 
-const handleListScroll = (event: any) => {
+const handleListScroll = (event?: Event) => {
   onHideRightMenuScroll()
   cancelFolderPreview()
   if (panfileStore.SelectDirType !== 'trash') return

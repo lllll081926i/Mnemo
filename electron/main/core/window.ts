@@ -91,7 +91,7 @@ export function createMainWindow() {
       AppWindow.winHeight = 680
     }
   }
-  AppWindow.mainWindow = createElectronWindow(AppWindow.winWidth, AppWindow.winHeight, true, 'main', AppWindow.winTheme, true, 'app')
+  AppWindow.mainWindow = createElectronWindow(AppWindow.winWidth, AppWindow.winHeight, true, 'main', AppWindow.winTheme, true)
 
   const showMainPage = () => {
     if (!AppWindow.mainWindow || AppWindow.mainWindow.isDestroyed()) return
@@ -192,7 +192,7 @@ export function createTray() {
   })
 }
 
-export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true, splash?: 'app' | 'music') {
+export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true) {
   const win = new BrowserWindow({
     show: false,
     width: width,
@@ -225,17 +225,9 @@ export function createElectronWindow(width: number, height: number, center: bool
   win.removeMenu()
   if (DEBUGGING) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || ''
-    let loadUrl = devUrl
-    if (splash && devUrl) {
-      try {
-        const url = new URL(devUrl)
-        url.searchParams.set('splash', splash)
-        loadUrl = url.toString()
-      } catch {}
-    }
-    win.loadURL(loadUrl, { userAgent: ua, httpReferrer: Referer })
+    win.loadURL(devUrl, { userAgent: ua, httpReferrer: Referer })
   } else {
-    win.loadURL('file://' + getAsarPath('dist/' + page + '.html') + (splash ? `?splash=${splash}` : ''), {
+    win.loadURL('file://' + getAsarPath('dist/' + page + '.html'), {
       userAgent: ua,
       httpReferrer: Referer
     })

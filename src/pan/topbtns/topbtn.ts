@@ -6,7 +6,7 @@ import AliTrash from '../../aliapi/trash'
 import { IPageVideoXBT } from '../../store/appstore'
 import DebugLog from '../../utils/debuglog'
 import message from '../../utils/message'
-import { modalCopyFileTree, modalCreatNewShareLink, modalDLNAPlayer, modalDownload, modalM3U8Download, modalMoveToAlbum, modalPassword, modalSearchPan, modalSelectPanDir, modalUpload } from '../../utils/modal'
+import { modalCopyFileTree, modalCreatNewShareLink, modalDownload, modalM3U8Download, modalMoveToAlbum, modalPassword, modalSearchPan, modalSelectPanDir, modalUpload } from '../../utils/modal'
 import { ArrayKeyList } from '../../utils/utils'
 import PanDAL from '../pandal'
 import usePanTreeStore from '../pantreestore'
@@ -893,15 +893,6 @@ export function menuVideoXBT() {
     file_name: first.name
   }
   window.WebOpenWindow({ page: 'PageVideoXBT', data: pageVideoXBT, theme: 'dark' })
-}
-
-export function menuDLNA() {
-  const first = usePanFileStore().GetSelectedFirst()
-  if (!first) {
-    message.error('没有选中任何文件')
-    return
-  }
-  modalDLNAPlayer()
 }
 
 export function menuM3U8Download() {

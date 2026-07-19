@@ -14,6 +14,8 @@ describe('deep layout shell port', () => {
     expect(page).not.toContain("key: 'rss'")
     expect(page).toMatch(/class=["']title["']>Mnemo</)
     expect(page).not.toMatch(/class=["']head-divider["']/)
+    expect(page).toContain('workspace-page-enter 160ms ease-out')
+    expect(page).toContain('@media (prefers-reduced-motion: reduce)')
     const userInfo = read('src/user/UserInfo.vue')
     expect(userInfo).toContain('current-drive-trigger')
     expect(userInfo).toContain('current-drive-avatar')

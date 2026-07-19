@@ -15,7 +15,6 @@ import SelectPanDirModal from '../pan/topbtns/SelectPanDirModal.vue'
 import CreatNewShareLinkModal from '../share/share/CreatNewShareLinkModal.vue'
 import ShuXingModal from '../pan/topbtns/ShuXingModal.vue'
 import SearchPanModal from '../pan/topbtns/SearchPanModal.vue'
-import DLNAPlayerModal from '../pan/topbtns/DLNAPlayerModal.vue'
 import M3U8DownloadModal from '../pan/topbtns/M3U8DownloadModal.vue'
 import CopyFileTreeModal from '../pan/topbtns/CopyFileTreeModal.vue'
 import ArchiveModal from '../pan/topbtns/ArchiveModal.vue'
@@ -50,7 +49,6 @@ export default defineComponent({
     SelectPanDirModal,
     ShuXingModal,
     SearchPanModal,
-    DLNAPlayerModal,
     M3U8DownloadModal,
     CopyFileTreeModal,
     ArchiveModal,
@@ -98,7 +96,6 @@ export default defineComponent({
   <SearchPanModal :visible="modalStore.modalName == 'searchpan'"
                   :inputsearchType="modalStore.modalData.inputsearchType || []" />
 
-  <DLNAPlayerModal :visible="modalStore.modalName == 'dlna'" />
   <M3U8DownloadModal :visible="modalStore.modalName == 'm3u8download'" />
   <CopyFileTreeModal :visible="modalStore.modalName == 'copyfiletree'"
                      :filelist='modalStore.modalData.filelist || []' />

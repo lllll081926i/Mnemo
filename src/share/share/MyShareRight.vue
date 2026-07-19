@@ -314,7 +314,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         <IconFont name="iconedit-square" />
         修改
       </a-button>
-      <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink">
+      <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="() => handleOpenLink()">
         <IconFont name="iconchakan" />
         查看
       </a-button>
@@ -479,7 +479,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           <template #icon><IconFont name="iconedit-square" /></template>
           <template #default>修改</template>
         </a-doption>
-        <a-doption @click="handleOpenLink">
+        <a-doption @click="() => handleOpenLink()">
           <template #icon><IconFont name="iconchakan" /></template>
           <template #default>查看</template>
         </a-doption>

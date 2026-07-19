@@ -760,7 +760,7 @@ export default class ipcEvent {
     let winWidth = AppWindow.winWidth
     if (winWidth < 1080) winWidth = 1080
     ipcMain.on('WebOpenWindow', (event, data) => {
-      const win = createElectronWindow(winWidth, AppWindow.winHeight, true, 'main2', data.theme, true, data.page === 'PageMusic' ? 'music' : undefined)
+      const win = createElectronWindow(winWidth, AppWindow.winHeight, true, 'main2', data.theme, true)
       win.on('ready-to-show', function () {
         win.webContents.send('setPage', data)
         win.setTitle('预览窗口')

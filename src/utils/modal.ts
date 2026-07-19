@@ -74,10 +74,6 @@ export function modalSearchPan(inputsearchType: string[]) {
   useModalStore().showModal('searchpan', { inputsearchType })
 }
 
-export function modalDLNAPlayer() {
-  useModalStore().showModal('dlna', {})
-}
-
 export function modalM3U8Download() {
   useModalStore().showModal('m3u8download', {})
 }

@@ -343,6 +343,21 @@ onUnmounted(() => {
   background: transparent !important;
 }
 
+.hidetabs > .arco-tabs-content > .arco-tabs-content-list > .arco-tabs-pane-active {
+  animation: workspace-page-enter 160ms ease-out;
+}
+
+@keyframes workspace-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .hidetabs > .arco-tabs-nav {
   width: 0 !important;
   height: 0 !important;

@@ -5,33 +5,19 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(__dirname, '../../..')
 const readSource = (file: string) => readFileSync(resolve(root, file), 'utf8')
 
-describe('app startup loading splash', () => {
-  it('uses the Mnemo wordmark splash instead of the legacy spinner', () => {
-    const source = readSource('src/layout/PageLoading.vue')
-
-    expect(source).toContain('Mnemo')
-    expect(source).toContain('mnemo-splash-loading')
-    expect(source).toContain('mnemo-splash-wordmark')
-    expect(source).toContain('mnemo-splash-word-main')
-    expect(source).toContain('mnemo-splash-word-accent')
-    expect(source).toContain('mnemo-splash-line')
-    expect(source).toContain('LOADING')
-    expect(source).not.toContain('Radio')
-    expect(source).not.toContain('desktop-loading-img')
-    expect(source).not.toContain('rotate360')
-    expect(source).not.toContain('alt="loading-img"')
-  })
-
-  it('only renders the splash for app startup and PageMusic windows', () => {
+describe('app startup rendering', () => {
+  it('does not delay application or music windows with a splash screen', () => {
     const app = readSource('src/App.vue')
+    const appStore = readSource('src/store/appstore.ts')
     const windowSource = readSource('electron/main/core/window.ts')
     const ipcSource = readSource('electron/main/core/ipcEvent.ts')
 
-    expect(app).toContain("splash === 'app' || splash === 'music'")
-    expect(app).toContain('PAGE_LOADING_SPLASH_MIN_MS = 1200')
-    expect(app).toContain('if (!splashReady.value) return h(PageLoading)')
+    expect(app).not.toContain('PageLoading')
+    expect(app).not.toContain('PAGE_LOADING_SPLASH_MIN_MS')
+    expect(appStore).not.toContain('PageLoading')
     expect(app).toContain("return h('div', { class: 'desktop-loading-empty' })")
-    expect(windowSource).toContain("'main', AppWindow.winTheme, true, 'app'")
-    expect(ipcSource).toContain("data.page === 'PageMusic' ? 'music' : undefined")
+    expect(windowSource).not.toContain('splash')
+    expect(windowSource).not.toContain('?splash=')
+    expect(ipcSource).not.toContain("data.page === 'PageMusic' ? 'music' : undefined")
   })
 })

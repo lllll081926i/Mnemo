@@ -40,7 +40,6 @@
     "node": ">=22.12.0"
   },
   "devDependencies": {
-    "@achingbrain/ssdp": "^4.2.4",
     "@arco-design/web-vue": "2.55.1",
     "@arco-themes/vue-gi-demo": "^0.0.48",
     "@aws-sdk/client-s3": "^3.1090.0",
@@ -54,7 +53,6 @@
     "@types/markdown-it": "^14.0.0",
     "@types/mime-types": "^2.1.4",
     "@types/node": "^20.12.5",
-    "@types/thunky": "^1.1.2",
     "@vitejs/plugin-vue": "^6.0.8",
     "ant-design-vue": "4.1.2",
     "aria2-lib": "^1.0.1",
@@ -87,16 +85,14 @@
     "pdfjs-dist": "^4.10.38",
     "pinia": "^2.1.7",
     "semver": "^7.6.0",
-    "thunky": "^1.1.0",
     "typescript": "^5.4.4",
-    "upnp-client-ts": "^1.1.1",
     "uuid": "^11.1.1",
     "viewerjs": "^1.11.6",
     "vite": "^7.3.6",
     "vite-plugin-electron": "^0.29.1",
     "vite-plugin-electron-renderer": "^0.14.7",
     "vitest": "^3.2.7",
-    "vue": "^3.4.21",
+    "vue": "^3.5.40",
     "vue-tsc": "^2.2.12",
     "webdav": "5.9.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

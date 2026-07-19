@@ -1,7 +1,6 @@
 <script lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { h } from 'vue'
 import { useAppStore } from './store'
-import PageLoading from './layout/PageLoading.vue'
 import PageMain from './layout/PageMain.vue'
 import './assets/global.css'
 import './assets/design-tokens.css'
@@ -19,29 +18,11 @@ import PageVideo from './layout/PageVideo.vue'
 import PageMusic from './layout/PageMusic.vue'
 import PageWorker from './layout/PageWorker.vue'
 
-function shouldShowPageLoadingSplash() {
-  if (typeof window === 'undefined') return false
-  const splash = new URLSearchParams(window.location.search).get('splash')
-  return splash === 'app' || splash === 'music'
-}
-
-const PAGE_LOADING_SPLASH_MIN_MS = 1200
-
 export default {
   setup() {
     const appStore = useAppStore()
-    const showStartupSplash = shouldShowPageLoadingSplash()
-    const splashReady = ref(!showStartupSplash)
-
-    onMounted(() => {
-      if (!showStartupSplash) return
-      window.setTimeout(() => {
-        splashReady.value = true
-      }, PAGE_LOADING_SPLASH_MIN_MS)
-    })
 
     return () => {
-      if (!splashReady.value) return h(PageLoading)
       if (appStore.appPage == 'PageMain') return h(PageMain)
       if (appStore.appPage == 'PageOffice') return h(PageOffice)
       if (appStore.appPage == 'PagePdf') return h(PagePdf)
@@ -53,7 +34,6 @@ export default {
       if (appStore.appPage == 'PageVideo') return h(PageVideo)
       if (appStore.appPage == 'PageMusic') return h(PageMusic)
       if (appStore.appPage == 'PageWorker') return h(PageWorker)
-      if (shouldShowPageLoadingSplash()) return h(PageLoading)
       return h('div', { class: 'desktop-loading-empty' })
     }
   }

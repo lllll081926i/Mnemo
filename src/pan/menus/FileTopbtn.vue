@@ -9,7 +9,6 @@ import {
   menuCopyFileTree,
   menuCopySelectedFile,
   menuCreatShare,
-  menuDLNA,
   menuDownload,
   menuFavSelectFile,
   menuFileClearHistory,
@@ -179,10 +178,6 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
         <a-doption v-if="canMutateSelection && isallcolored && capabilities.colorTag" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileColorChange(istree, '')">
           <template #icon><IconFont name="iconfangkuang" /></template>
           <template #default>清除标记</template>
-        </a-doption>
-        <a-doption v-if="isvideo" @click="() => menuDLNA()">
-          <template #icon><IconFont name="icontouping2" /></template>
-          <template #default>DLNA投屏</template>
         </a-doption>
         <a-doption v-if="isvideo" @click="() => menuM3U8Download()">
           <template #icon><IconFont name="iconluxiang" /></template>

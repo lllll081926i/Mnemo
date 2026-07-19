@@ -151,7 +151,7 @@ export interface AppState {
 const useAppStore = defineStore('app', {
   state: (): AppState => ({
     appTheme: 'light',
-    appPage: 'PageLoading',
+    appPage: '',
     appTab: 'pan',
     lastMainTab: 'pan',
     appTabMenuMap: new Map<string, string>([
