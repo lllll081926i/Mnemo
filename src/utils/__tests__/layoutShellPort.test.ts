@@ -16,6 +16,18 @@ describe('deep layout shell port', () => {
     expect(office).toContain('office-preview-state')
   })
 
+  it('loads Prism only for formatted code previews', () => {
+    const html = read('index.html')
+    const code = read('src/layout/PageCode.vue')
+
+    expect(html).not.toContain("src='/prism.js'")
+    expect(html).not.toContain("href='/prism-vsc-dark-plus.css'")
+    expect(code).toContain("const PRISM_SCRIPT_URL = './prism.js'")
+    expect(code).toContain('loadPrism')
+    expect(code).toContain('format.value = !noformat')
+    expect(code).toContain('await nextTick()')
+  })
+
   it('main shell only exposes pan/down/share/setting tabs', () => {
     const page = read('src/layout/PageMain.vue')
     const panes = [...page.matchAll(/a-tab-pane key=["']([^"']+)["']/g)].map((m) => m[1])

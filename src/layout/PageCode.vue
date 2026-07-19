@@ -2,8 +2,57 @@
 import AliFile from '../aliapi/file'
 import { KeyboardState, useAppStore, useKeyboardStore } from '../store'
 import message from '../utils/message'
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { TestAlt, TestKey } from '../utils/keyboardhelper'
+
+interface PrismApi {
+  highlightAllUnder(element: Element): void
+}
+
+const PRISM_SCRIPT_URL = './prism.js'
+const PRISM_STYLE_URL = './prism-vsc-dark-plus.css'
+const codeWindow = window as Window & { Prism?: PrismApi }
+let prismPromise: Promise<PrismApi> | undefined
+
+const ensurePrismStyles = () => {
+  if (document.querySelector('link[data-mnemo-prism-style]')) return
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = PRISM_STYLE_URL
+  link.dataset.mnemoPrismStyle = 'true'
+  document.head.append(link)
+}
+
+const loadPrism = (): Promise<PrismApi> => {
+  ensurePrismStyles()
+  if (codeWindow.Prism?.highlightAllUnder) return Promise.resolve(codeWindow.Prism)
+  if (prismPromise) return prismPromise
+
+  prismPromise = new Promise<PrismApi>((resolve, reject) => {
+    const script = document.createElement('script')
+    const timeout = window.setTimeout(() => finish(() => reject(new Error('代码高亮组件加载超时'))), 10000)
+    const finish = (callback: () => void) => {
+      window.clearTimeout(timeout)
+      script.removeEventListener('load', handleLoad)
+      script.removeEventListener('error', handleError)
+      callback()
+    }
+    const handleLoad = () => finish(() => codeWindow.Prism?.highlightAllUnder ? resolve(codeWindow.Prism) : reject(new Error('代码高亮组件初始化失败')))
+    const handleError = () => finish(() => reject(new Error('代码高亮组件加载失败')))
+
+    script.src = PRISM_SCRIPT_URL
+    script.async = true
+    script.dataset.mnemoPrism = 'true'
+    script.addEventListener('load', handleLoad, { once: true })
+    script.addEventListener('error', handleError, { once: true })
+    document.head.append(script)
+  }).catch((error) => {
+    prismPromise = undefined
+    throw error
+  })
+
+  return prismPromise
+}
 
 const keyboardStore = useKeyboardStore()
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -26,21 +75,30 @@ const onKeyDown = (event: KeyboardEvent) => {
 
 const appStore = useAppStore()
 const codeBlock = ref()
-const lang = ref('language-' + appStore.pageCode?.code_ext || '')
+const lang = ref(appStore.pageCode?.code_ext ? 'language-' + appStore.pageCode.code_ext : 'language-plain')
 const codeString = ref('')
 const format = ref(false)
+let titleTimer: number | undefined
+let titleRetryTimer: number | undefined
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown, true)
   const name = appStore.pageCode?.file_name || '文档在线预览'
-  setTimeout(() => {
+  document.title = name
+  titleTimer = window.setTimeout(() => {
     document.title = name
   }, 1000)
-  setTimeout(() => {
+  titleRetryTimer = window.setTimeout(() => {
     document.title = name
   }, 10000)
 
-  loadCode()
+  void loadCode()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown, true)
+  if (titleTimer !== undefined) window.clearTimeout(titleTimer)
+  if (titleRetryTimer !== undefined) window.clearTimeout(titleRetryTimer)
 })
 
 const handleHideClick = (_e: any) => {
@@ -53,9 +111,16 @@ const handleMaxClick = (_e: any) => {
   if (window.WebToWindow) window.WebToWindow({ cmd: 'maxsize' })
 }
 
-const loadCode = () => {
-  const pageCode = appStore.pageCode!
-  AliFile.ApiFileDownText(pageCode.user_id, pageCode.drive_id, pageCode.file_id, pageCode.file_size, 512 * 1024, pageCode.encType, pageCode.password).then((data: any) => {
+const loadCode = async () => {
+  const pageCode = appStore.pageCode
+  if (!pageCode) {
+    message.error('缺少文件预览信息')
+    return
+  }
+
+  try {
+    const data = await AliFile.ApiFileDownText(pageCode.user_id, pageCode.drive_id, pageCode.file_id, pageCode.file_size, 512 * 1024, pageCode.encType, pageCode.password)
+    if (typeof data !== 'string') throw new Error('文件内容格式无效')
     if (pageCode.file_size > 512 * 1024) {
       message.info('文件较大，只显示了前 512KB 的内容')
     }
@@ -70,18 +135,21 @@ const loadCode = () => {
       lang.value = 'language-json'
     }
 
-    const nofromate = pageCode.file_size > 512 * 1024 || fext == 'plain'
+    const noformat = pageCode.file_size > 512 * 1024 || fext == 'plain'
     codeString.value = data
-    format.value = nofromate
+    format.value = !noformat
 
-    if (nofromate) return
-    setTimeout(() => {
-      try {
-        if (codeBlock.value) window.Prism.highlightAllUnder(codeBlock.value)
-      } catch {
-      }
-    }, 500)
-  })
+    if (noformat) return
+    await nextTick()
+    try {
+      const prism = await loadPrism()
+      if (codeBlock.value) prism.highlightAllUnder(codeBlock.value)
+    } catch (error: any) {
+      message.warning(error?.message || '代码高亮加载失败，已显示原始内容')
+    }
+  } catch (error: any) {
+    message.error(error?.message || '文件内容加载失败')
+  }
 }
 </script>
 
