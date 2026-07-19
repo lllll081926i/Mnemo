@@ -78,7 +78,7 @@ const handleExpandAll = (isExpand: boolean) => {
         <template #icon> <IconFont name="icondownload" /> </template>
         <template #default>下载</template>
       </a-doption>
-      <a-doption v-show="isShareSupported"
+      <a-doption v-if="isShareSupported"
                  @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>

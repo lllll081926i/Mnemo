@@ -344,7 +344,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
           <template #default>暂停上传</template>
         </a-doption>
 
-        <a-doption v-show="menuShowDir" @click="() => UploadingDAL.mUploadingShowTask()">
+        <a-doption v-if="menuShowDir" @click="() => UploadingDAL.mUploadingShowTask()">
           <template #icon><IconFont name="icongengduo1" /></template>
           <template #default>查看详情</template>
         </a-doption>

@@ -180,18 +180,6 @@ const closeSettings = () => appStore.closeSettings()
   background: var(--bg-surface);
 }
 
-body:not([arco-theme='dark']) .settings-page,
-body:not([arco-theme='dark']) .settings-main,
-body:not([arco-theme='dark']) .settings-content {
-  color: #111827;
-  background: #fff;
-}
-
-body:not([arco-theme='dark']) .settings-sidebar {
-  background: #fff;
-  border-right-color: #e5e7eb;
-}
-
 .settings-sidebar {
   display: flex;
   flex-direction: column;
@@ -278,7 +266,7 @@ body:not([arco-theme='dark']) .settings-sidebar {
   color: var(--text-secondary);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ui-control-radius);
 }
 
 .settings-close:hover {
@@ -292,8 +280,8 @@ body:not([arco-theme='dark']) .settings-sidebar {
 }
 
 .settings-content {
-  width: var(--layout-content-width);
-  min-width: var(--layout-content-width);
+  width: min(100%, var(--layout-content-width));
+  min-width: 0;
   max-width: var(--layout-content-width);
   padding-top: 10px;
   padding-right: max(52px, var(--layout-page-gutter));
@@ -342,8 +330,8 @@ body:not([arco-theme='dark']) .settings-sidebar {
 
 .settings-page .arco-input-wrapper,
 .settings-page .arco-select-view {
-  background: transparent;
-  border-color: var(--border-light);
+  background: var(--control-bg);
+  border-color: var(--control-border);
 }
 
 .settings-page .arco-input-wrapper:focus-within,

@@ -168,7 +168,7 @@ const handleSearchEnter = (event: any) => {
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+N" @click="handleDaoRuLink"><IconFont name="iconlink2" />导入订阅
       </a-button>
     </div>
-    <div v-show="myfollowingStore.IsListSelected" class="toppanbtn">
+    <div v-if="myfollowingStore.IsListSelected" class="toppanbtn">
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink"><IconFont name="iconcopy" />复制链接
       </a-button>
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+B" @click="handleBrowserLink"><IconFont name="iconchrome" />浏览器

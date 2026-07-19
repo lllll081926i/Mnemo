@@ -119,7 +119,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         刷新
       </a-button>
     </div>
-    <div v-show="shareBottleFishStore.IsListSelected" class="toppanbtn">
+    <div v-if="shareBottleFishStore.IsListSelected" class="toppanbtn">
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleOpenLink">
         <IconFont name="iconchakan" />查看
       </a-button>

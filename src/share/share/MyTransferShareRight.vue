@@ -316,7 +316,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
         <IconFont name="iconrest" />删除过期
       </a-button>
     </div>
-    <div v-show="myTransferShare.IsListSelected" class="toppanbtn">
+    <div v-if="myTransferShare.IsListSelected" class="toppanbtn">
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+O" @click="handleClickName"><IconFont name="iconchakan" />查看
       </a-button>
       <a-button type="text" size="small" tabindex="-1" title="Ctrl+C" @click="handleCopySelectedLink"><IconFont name="iconcopy" />复制链接
