@@ -13,8 +13,6 @@ import type { ITokenInfo } from '../user/userstore'
 import useUserStore from '../user/userstore'
 import usePanTreeStore from '../pan/pantreestore'
 import usePanFileStore from '../pan/panfilestore'
-import useMediaServerRegistryStore from './mediaServerRegistry'
-import useMediaServerNavigationStore from './mediaServerNavigation'
 import useMusicPlayerStore from './musicplayerstore'
 
 import type { IShareSiteGroupModel, IShareSiteModel } from './serverstore'
@@ -50,8 +48,6 @@ export {
   ITokenInfo,
   usePanTreeStore,
   usePanFileStore,
-  useMediaServerRegistryStore,
-  useMediaServerNavigationStore,
   useMusicPlayerStore,
   useServerStore,
   IOtherShareLinkModel,

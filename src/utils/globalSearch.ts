@@ -1,7 +1,5 @@
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import type { ITokenInfo } from '../user/userstore'
-import type { MediaServerConfig } from '../types/mediaServer'
-import type { MediaServerLibraryNode } from '../types/mediaServerContent'
 
 export interface GlobalSearchResult {
   id: string
@@ -13,14 +11,11 @@ export interface GlobalSearchResult {
   parent_file_id: string
   drive_id: string
   user_id: string
-  source: 'cloud' | 'media_server'
+  source: 'cloud'
   provider: string
   providerName: string
   userName: string
   icon: string
-  mediaServerId?: string
-  itemType?: string
-  poster?: string
   path?: string
 }
 
@@ -47,31 +42,6 @@ function cloudResult(
     userName,
     icon: item.icon,
     path: item.path || ''
-  }
-}
-
-function mediaServerResult(
-  node: MediaServerLibraryNode,
-  server: MediaServerConfig
-): GlobalSearchResult {
-  return {
-    id: `ms:${server.id}:${node.id}`,
-    name: node.title,
-    ext: '',
-    size: 0,
-    isDir: node.kind === 'folder',
-    file_id: node.id,
-    parent_file_id: '',
-    drive_id: 'media_server',
-    user_id: server.id,
-    source: 'media_server',
-    provider: server.type,
-    providerName: server.name || server.type,
-    userName: '',
-    icon: 'media',
-    mediaServerId: server.id,
-    itemType: node.kind,
-    poster: node.poster || node.images?.primary || node.images?.thumb
   }
 }
 
@@ -234,29 +204,6 @@ async function searchGuangya(token: ITokenInfo, keyword: string): Promise<Global
   }
 }
 
-async function searchMediaServers(keyword: string): Promise<GlobalSearchResult[]> {
-  try {
-    const { default: useMediaServerRegistryStore } = await import('../store/mediaServerRegistry')
-    const { getMediaServerSearch } = await import('../media-server/contentGateway')
-    const registry = useMediaServerRegistryStore()
-    if (!registry.servers?.length) return []
-
-    const results: GlobalSearchResult[] = []
-    for (const server of registry.servers) {
-      if (!server.accessToken && !server.password) continue
-      try {
-        const data = await getMediaServerSearch(server, keyword)
-        for (const node of data.items) {
-          results.push(mediaServerResult(node, server))
-        }
-      } catch {}
-    }
-    return results
-  } catch {
-    return []
-  }
-}
-
 function isSkipProvider(token: ITokenInfo): boolean {
   return token.tokenfrom === '139' || token.tokenfrom === '189' || token.tokenfrom === 'pikpak'
 }
@@ -274,7 +221,7 @@ function dispatchSearch(token: ITokenInfo, keyword: string): Promise<GlobalSearc
   return searchAliyun(token, keyword)
 }
 
-export async function searchAllDrives(keyword: string, opts?: { platforms?: string[]; includeMediaServers?: boolean }): Promise<GlobalSearchResult[]> {
+export async function searchAllDrives(keyword: string, opts?: { platforms?: string[] }): Promise<GlobalSearchResult[]> {
   if (!keyword || keyword.trim().length < 2) return []
 
   const k = keyword.trim()
@@ -295,10 +242,6 @@ export async function searchAllDrives(keyword: string, opts?: { platforms?: stri
     promises.push(dispatchSearch(token, k))
   }
 
-  if (opts?.includeMediaServers !== false) {
-    promises.push(searchMediaServers(k))
-  }
-
   const settled = await Promise.allSettled(promises)
   const all: GlobalSearchResult[] = []
   for (const r of settled) {
@@ -308,6 +251,5 @@ export async function searchAllDrives(keyword: string, opts?: { platforms?: stri
 }
 
 export function searchResultGroupTitle(result: GlobalSearchResult): string {
-  if (result.source === 'media_server') return result.providerName
   return `${result.providerName} · ${result.userName}`
 }

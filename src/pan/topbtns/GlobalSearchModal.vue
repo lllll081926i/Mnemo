@@ -79,12 +79,6 @@ function handleClose() {
 }
 
 function handleClick(result: GlobalSearchResult) {
-  if (result.source === 'media_server') {
-    handleClose()
-    nextTick(() => appStore.toggleTab('media-server'))
-    return
-  }
-
   handleClose()
   nextTick(async () => {
     appStore.toggleTab('pan')
@@ -183,7 +177,7 @@ function getExtBadge(ext: string) {
           v-model="keyword"
           type="text"
           class="gs-input"
-          placeholder="搜索所有网盘和媒体服务器..."
+          placeholder="搜索所有网盘..."
           autocomplete="off"
           spellcheck="false"
         />
@@ -218,16 +212,15 @@ function getExtBadge(ext: string) {
             @mouseenter="selectedIndex = allItems.findIndex(i => i.groupIndex === gi && i.itemIndex === ii)"
           >
             <div class="gs-result-icon">
-              <Folder v-if="item.isDir && item.source === 'cloud'" :size="18" :stroke-width="1.5" />
-              <File v-else-if="item.source === 'cloud'" :size="18" :stroke-width="1.5" />
-              <span v-else class="gs-ms-icon">🎬</span>
+              <Folder v-if="item.isDir" :size="18" :stroke-width="1.5" />
+              <File v-else :size="18" :stroke-width="1.5" />
             </div>
             <div class="gs-result-body">
               <div class="gs-result-name">{{ item.name }}</div>
               <div class="gs-result-meta">
                 <span v-if="item.ext" class="gs-ext-badge">{{ getExtBadge(item.ext) }}</span>
                 <span v-if="item.size > 0">{{ humanSize(item.size) }}</span>
-                <span class="gs-source-tag">{{ item.source === 'media_server' ? item.providerName : item.providerName }}</span>
+                <span class="gs-source-tag">{{ item.providerName }}</span>
               </div>
             </div>
           </div>

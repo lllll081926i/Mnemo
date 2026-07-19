@@ -15,7 +15,7 @@ import message from './message'
 import UserDAL, { UserTokenMap } from '../user/userdal'
 import Config from '../config'
 import { buildUpstreamProxyHeaders } from './proxyHeaders'
-import { MEDIA_SERVER_DRIVE_ID, shouldRefreshProxyUrl } from './proxyCache'
+import { shouldRefreshProxyUrl } from './proxyCache'
 import { isAliyunUser, isQuarkUser } from '../aliapi/utils'
 import { isWebDavDrive } from './webdavClient'
 import { QUARK_DOWNLOAD_AGENT, readQuarkCookieStringFromElectron } from '../quark/auth'
@@ -234,7 +234,6 @@ export async function getRawUrl(
     qualities: [],
     subtitles: []
   }
-  if (drive_id === MEDIA_SERVER_DRIVE_ID) return data
   let { uiVideoQuality, uiVideoPlayer, securityPreviewAutoDecrypt } = useSettingStore()
   // 违规视频也使用转码播放
   if (!encType && preview_type) {
@@ -325,8 +324,7 @@ export async function createProxyServer(port: number) {
     if (pathname === '/proxy') {
       const driveId = String(drive_id || '')
       const fileId = String(file_id || '')
-      const isMediaServerProxy = driveId === MEDIA_SERVER_DRIVE_ID
-      let proxyInfo: any = isMediaServerProxy ? undefined : await Db.getValueObject('ProxyInfo')
+      let proxyInfo: any = await Db.getValueObject('ProxyInfo')
       let proxyUrl = proxy_url || (proxyInfo && proxyInfo.proxy_url || '') || ''
       let { uiVideoQuality, securityEncType, securityFileNameAutoDecrypt } = useSettingStore()
       let selectQuality = quality || uiVideoQuality
@@ -355,7 +353,7 @@ export async function createProxyServer(port: number) {
         clientRes.end()
         await Db.deleteValueObject('ProxyInfo')
         return
-      } else if (!proxyInfo && !isMediaServerProxy && proxy_kind !== 'subtitle') {
+      } else if (!proxyInfo && proxy_kind !== 'subtitle') {
         let info: FileInfo = {
           user_id, drive_id, file_id, file_size, encType,
           videoQuality: selectQuality,

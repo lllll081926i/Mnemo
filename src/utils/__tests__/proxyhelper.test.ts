@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { buildUpstreamProxyHeaders } from '../proxyHeaders'
-import { shouldRefreshProxyUrl } from '../proxyCache'
 
 describe('buildUpstreamProxyHeaders', () => {
   it('keeps range and media auth headers while dropping conditional and hop-by-hop headers', () => {
@@ -27,21 +26,5 @@ describe('buildUpstreamProxyHeaders', () => {
     expect(headers['if-none-match']).toBeUndefined()
     expect(headers.referer).toBeUndefined()
     expect(headers.authorization).toBeUndefined()
-  })
-})
-
-describe('shouldRefreshProxyUrl', () => {
-  it('does not refresh media server proxy urls through cloud drive APIs', () => {
-    expect(shouldRefreshProxyUrl({
-      driveId: 'media_server',
-      proxyUrl: 'https://emby.example/Videos/1555651/stream',
-      proxyInfo: {
-        file_id: '1555651',
-        expires_time: 1,
-        videoQuality: 'Origin'
-      },
-      fileId: '1555651',
-      selectQuality: 'FHD'
-    })).toBe(false)
   })
 })

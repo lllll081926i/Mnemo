@@ -375,9 +375,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
     const token = UserDAL.GetUserToken(info.user_id)
     const sourceType = info.sourceType || ''
     const isExternalSource = sourceType === 'url'
-    const presetSource = typeof file.Down.DownUrl === 'string' ? file.Down.DownUrl.trim() : ''
-    const hasPresetDownloadUrl = /^https?:\/\//i.test(presetSource)
-    if ((!token || !token.access_token) && !isExternalSource && !(info.drive_id === 'media_server' && hasPresetDownloadUrl)) return '账号失效，操作取消'
+    if ((!token || !token.access_token) && !isExternalSource) return '账号失效，操作取消'
     if (info.isDir) {
       const dirFull = path.join(info.DownSavePath, info.name)
       if (!info.ariaRemote) {
