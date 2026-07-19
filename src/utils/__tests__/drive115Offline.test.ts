@@ -6,7 +6,13 @@ vi.mock('../../user/userdal', () => ({
   default: { GetUserToken: getUserToken }
 }))
 
+vi.mock('../debuglog', () => ({
+  default: { mSaveWarning: vi.fn() }
+}))
+
 import { apiDrive115OfflineCreate, apiDrive115OfflineProcess } from '../../cloud115/offline'
+import { apiDrive115FileList } from '../../cloud115/dirfilelist'
+import { isDrive115ApiSuccess, unwrapDrive115List } from '../drive115'
 
 describe('115 offline download API', () => {
   afterEach(() => {
@@ -63,5 +69,30 @@ describe('115 offline download API', () => {
       size: 2048,
       error: ''
     })
+  })
+
+  it('accepts string success codes and unwraps supported file-list response shapes', () => {
+    expect(isDrive115ApiSuccess({ status: true, code: '0' })).toBe(true)
+    expect(isDrive115ApiSuccess({ state: true, code: 0 })).toBe(true)
+    expect(isDrive115ApiSuccess({ status: false, code: '401' })).toBe(false)
+    expect(unwrapDrive115List({ status: true, code: '0', data: [{ fid: '1' }] })).toEqual([{ fid: '1' }])
+    expect(unwrapDrive115List({ state: true, code: 0, data: { data: [{ fid: '2' }] } })).toEqual([{ fid: '2' }])
+    expect(unwrapDrive115List({ state: true, code: 0, data: { list: [{ fid: '3' }] } })).toEqual([{ fid: '3' }])
+  })
+
+  it('loads nested file lists with the required 115 directory query', async () => {
+    getUserToken.mockReturnValue({ access_token: 'token-115' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      status: true,
+      code: '0',
+      data: { data: [{ fid: 'folder-1', pid: '0', fc: '0', fn: '目录' }] }
+    }), { status: 200 }))
+
+    await expect(apiDrive115FileList('115_user', 0, 200)).resolves.toEqual([{ fid: 'folder-1', pid: '0', fc: '0', fn: '目录' }])
+    const requestUrl = new URL(fetchMock.mock.calls[0][0] as string)
+    expect(requestUrl.searchParams.get('aid')).toBe('1')
+    expect(requestUrl.searchParams.get('count_folders')).toBe('1')
+    expect(requestUrl.searchParams.get('record_open_time')).toBe('1')
+    expect(requestUrl.searchParams.get('show_dir')).toBe('1')
   })
 })

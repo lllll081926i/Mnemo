@@ -5,6 +5,7 @@ import getFileIcon from '../aliapi/fileicon'
 import UserDAL from '../user/userdal'
 import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
+import { isDrive115ApiSuccess, unwrapDrive115List } from '../utils/drive115'
 
 export type Drive115FileItem = {
   fid: string | number
@@ -19,10 +20,11 @@ export type Drive115FileItem = {
 }
 
 export type Drive115FileListResp = {
-  state: boolean
-  code: number
+  state?: boolean
+  status?: boolean
+  code: number | string
   message: string
-  data?: Drive115FileItem[]
+  data?: Drive115FileItem[] | { data?: Drive115FileItem[]; list?: Drive115FileItem[] }
 }
 
 const API_URL = 'https://proapi.115.com/open/ufile/files'
@@ -104,10 +106,13 @@ export const apiDrive115FileList = async (
     return []
   }
   const params = new URLSearchParams()
+  params.set('aid', '1')
   params.set('cid', String(cid))
   params.set('limit', String(limit))
   params.set('offset', String(offset))
   params.set('cur', '1')
+  params.set('count_folders', '1')
+  params.set('record_open_time', '1')
   params.set('show_dir', showDir ? '1' : '0')
   const url = `${API_URL}?${params.toString()}`
   const resp = await enqueueListRequest(() => fetch(url, {
@@ -120,13 +125,14 @@ export const apiDrive115FileList = async (
     return []
   }
   const data = (await resp.json()) as Drive115FileListResp
-  if (data?.code !== 0 || !Array.isArray(data.data)) {
-    const msg = data?.message || '获取 115 网盘文件列表失败'
+  const items = unwrapDrive115List<Drive115FileItem>(data)
+  if (!isDrive115ApiSuccess(data)) {
+    const msg = data?.message || (data as any)?.error || '获取 115 网盘文件列表失败'
     if (isRateLimitMessage(msg)) rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
     reportDrive115ListError(msg, options)
     return []
   }
-  return data.data
+  return items
 }
 
 export const mapDrive115FileToAliModel = (item: Drive115FileItem, drive_id: string): IAliGetFileModel => {
@@ -178,11 +184,12 @@ export type Drive115SearchItem = {
 }
 
 export type Drive115SearchResp = {
-  state: boolean
-  code: number
+  state?: boolean
+  status?: boolean
+  code: number | string
   message: string
   count?: number
-  data?: Drive115SearchItem[]
+  data?: Drive115SearchItem[] | { data?: Drive115SearchItem[]; list?: Drive115SearchItem[]; count?: number }
 }
 
 export type Drive115TrashItem = {
@@ -222,8 +229,10 @@ export const apiDrive115Search = async (
     return { items: [], total: 0 }
   }
   const data = (await resp.json()) as Drive115SearchResp
-  if (data?.code !== 0 || !Array.isArray(data.data)) return { items: [], total: 0 }
-  return { items: data.data, total: Number(data.count || data.data.length) }
+  const items = unwrapDrive115List<Drive115SearchItem>(data)
+  if (!isDrive115ApiSuccess(data)) return { items: [], total: 0 }
+  const nestedCount = Array.isArray(data.data) ? 0 : Number(data.data?.count || 0)
+  return { items, total: Number(data.count || nestedCount || items.length) }
 }
 
 export const mapDrive115SearchToAliModel = (item: Drive115SearchItem, drive_id: string): IAliGetFileModel => {

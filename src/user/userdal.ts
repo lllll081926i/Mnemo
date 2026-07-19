@@ -37,12 +37,13 @@ export default class UserDAL {
         if (!token.access_token || (expireTime && expireTime <= Date.now())) {
           const refreshed = await refreshCloud123AccessToken(token.refresh_token)
           if (!refreshed) return null
-          refreshed.user_id = token.user_id || refreshed.user_id
+          const previousUserId = token.user_id
+          refreshed.user_id = refreshed.user_id || previousUserId
           refreshed.user_name = refreshed.user_name || token.user_name
           refreshed.nick_name = refreshed.nick_name || token.nick_name
           refreshed.avatar = refreshed.avatar || token.avatar
           refreshed.tokenfrom = 'cloud123'
-          this.SaveUserToken(refreshed)
+          await this.SaveUserToken(refreshed, previousUserId)
           return refreshed
         }
         return token
@@ -52,12 +53,13 @@ export default class UserDAL {
         if (!token.access_token || (expireTime && expireTime <= Date.now())) {
           const refreshed = await refreshBaiduAccessToken(token.refresh_token)
           if (!refreshed) return null
-          refreshed.user_id = token.user_id || refreshed.user_id
+          const previousUserId = token.user_id
+          refreshed.user_id = refreshed.user_id || previousUserId
           refreshed.user_name = refreshed.user_name || token.user_name
           refreshed.nick_name = refreshed.nick_name || token.nick_name
           refreshed.avatar = refreshed.avatar || token.avatar
           refreshed.tokenfrom = 'baidu'
-          this.SaveUserToken(refreshed)
+          await this.SaveUserToken(refreshed, previousUserId)
           return refreshed
         }
         return token
@@ -232,9 +234,9 @@ export default class UserDAL {
           if (expireTime && expireTime - dateNow <= 1000 * 60 * 5) {
             const refreshed = await refreshCloud123AccessToken(token.refresh_token)
             if (refreshed) {
-              refreshed.user_id = token.user_id
-              UserTokenMap.set(refreshed.user_id, refreshed)
-              await DB.saveUser(refreshed)
+              const previousUserId = token.user_id
+              refreshed.user_id = refreshed.user_id || previousUserId
+              await this.SaveUserToken(refreshed, previousUserId)
             }
           }
           continue
@@ -244,9 +246,9 @@ export default class UserDAL {
           if (expireTime && expireTime - dateNow <= 1000 * 60 * 5) {
             const refreshed = await refreshBaiduAccessToken(token.refresh_token)
             if (refreshed) {
-              refreshed.user_id = token.user_id
-              UserTokenMap.set(refreshed.user_id, refreshed)
-              await DB.saveUser(refreshed)
+              const previousUserId = token.user_id
+              refreshed.user_id = refreshed.user_id || previousUserId
+              await this.SaveUserToken(refreshed, previousUserId)
             }
           }
           continue
@@ -409,7 +411,7 @@ export default class UserDAL {
     for (const [_, token] of UserTokenMap) {
       list.push(token)
     }
-    return list.sort((a, b) => a.name.localeCompare(b.name))
+    return list.sort((a, b) => (a.name || a.nick_name || a.user_name || a.user_id).localeCompare(b.name || b.nick_name || b.user_name || b.user_id))
   }
 
   static async GetUserListFromDB(): Promise<ITokenInfo[]> {
@@ -419,124 +421,137 @@ export default class UserDAL {
         UserTokenMap.set(token.user_id, token)
       }
     }
-    return list.sort((a, b) => a.name.localeCompare(b.name))
+    return list.sort((a, b) => (a.name || a.nick_name || a.user_name || a.user_id).localeCompare(b.name || b.nick_name || b.user_name || b.user_id))
   }
 
-  static SaveUserToken(token: ITokenInfo, previousUserId: string = '') {
-    if (token.user_id) {
+  static async SaveUserToken(token: ITokenInfo, previousUserId: string = ''): Promise<boolean> {
+    if (!token.user_id) return false
+    try {
       const staleUserId = previousUserId && previousUserId !== token.user_id ? previousUserId : ''
-      if (staleUserId) UserTokenMap.delete(staleUserId)
+      if (staleUserId) {
+        UserTokenMap.delete(staleUserId)
+        await DB.deleteUser(staleUserId)
+      }
       UserTokenMap.set(token.user_id, token)
-      const persist = staleUserId ? DB.deleteUser(staleUserId).then(() => DB.saveUser(token)) : DB.saveUser(token)
-      persist
-        .then(() => {
-          window.WinMsgToUpload({ cmd: 'ClearUserToken' })
-          window.WinMsgToDownload({ cmd: 'ClearUserToken' })
-        })
-        .catch(() => {})
+      await DB.saveUser(token)
+      window.WinMsgToUpload?.({ cmd: 'ClearUserToken' })
+      window.WinMsgToDownload?.({ cmd: 'ClearUserToken' })
+      return true
+    } catch (err: any) {
+      DebugLog.mSaveDanger('SaveUserToken ' + token.user_id, err)
+      return false
     }
   }
 
   static async UserLogin(token: ITokenInfo, isInteractive: boolean = false) {
     const loadingKey = 'userlogin_' + Date.now().toString()
     message.loading('加载用户信息中...', 0, loadingKey)
+    const previousActiveUserId = useUserStore().user_id
+    const previousDefaultUserId = await DB.getValueString('uiDefaultUser')
     const initialUserId = token.user_id
-    if (initialUserId) {
-      await DB.saveValueString('uiDefaultUser', initialUserId)
-      useUserStore().userLogin(initialUserId)
-      UserTokenMap.set(initialUserId, token)
-    }
-    if (isCloud123User(token)) {
-      await AliUser.Drive123UserInfo(token)
-    } else if (isBaiduUser(token)) {
-      await AliUser.DriveBaiduUserInfo(token)
-    } else if (isDrive115User(token)) {
-      await AliUser.Drive115UserInfo(token)
-    } else if (isPikPakUser(token)) {
-      await applyPikPakQuota(token)
-    } else if (isQuarkUser(token)) {
-      token.default_drive_id = token.default_drive_id || 'quark'
-    } else if (isCloud139User(token)) {
-      token.default_drive_id = token.default_drive_id || 'cloud139'
-    } else if (isCloud189User(token)) {
-      token.default_drive_id = token.default_drive_id || 'cloud189'
-      if (!token.open_api_access_token || !token.open_api_refresh_token) {
-        const refreshed = await refreshCloud189Token(token)
-        if (refreshed) Object.assign(token, refreshed)
+    if (initialUserId) UserTokenMap.set(initialUserId, token)
+    try {
+      if (isCloud123User(token)) {
+        await AliUser.Drive123UserInfo(token)
+      } else if (isBaiduUser(token)) {
+        await AliUser.DriveBaiduUserInfo(token)
+      } else if (isDrive115User(token)) {
+        await AliUser.Drive115UserInfo(token)
+      } else if (isPikPakUser(token)) {
+        await applyPikPakQuota(token)
+      } else if (isQuarkUser(token)) {
+        token.default_drive_id = token.default_drive_id || 'quark'
+      } else if (isCloud139User(token)) {
+        token.default_drive_id = token.default_drive_id || 'cloud139'
+      } else if (isCloud189User(token)) {
+        token.default_drive_id = token.default_drive_id || 'cloud189'
+        if (!token.open_api_access_token || !token.open_api_refresh_token) {
+          const refreshed = await refreshCloud189Token(token)
+          if (refreshed) Object.assign(token, refreshed)
+        }
+      } else if (isGuangyaUser(token)) {
+        token.default_drive_id = token.default_drive_id || 'guangya'
+        const userInfo = await fetchGuangyaUserInfo(token).catch(() => null)
+        const info = userInfo?.data || userInfo || null
+        if (info) {
+          token.user_name = info.username || info.phone_number || info.phoneNumber || token.user_name
+          token.nick_name = info.nickname || info.nick_name || info.name || token.nick_name
+          token.name = info.name || token.nick_name || token.name
+          token.avatar = info.avatar || token.avatar
+          token.used_size = Number(info.used_size || info.usedSize || token.used_size || 0)
+          token.total_size = Number(info.total_size || info.totalSize || token.total_size || 0)
+        }
+      } else if (isDropboxUser(token)) {
+        await applyDropboxQuota(token)
+      } else if (isOneDriveUser(token)) {
+        await applyOneDriveQuota(token)
+      } else if (isBoxUser(token)) {
+        await applyBoxQuota(token)
+      } else if (isWebDavUser(token)) {
+        token.default_drive_id = token.default_drive_id || token.user_id
+      } else if (isS3User(token)) {
+        token.default_drive_id = token.default_drive_id || token.user_id
+      } else if (!isNonAliyunProvider(token)) {
+        await Promise.all([
+          AliUser.ApiUserInfo(token),
+          AliUser.ApiUserDriveInfo(token),
+          AliUser.ApiUserPic(token),
+          AliUser.ApiUserVip(token),
+          AliUser.ApiSessionRefreshAccount(token, false),
+          AliUser.OpenApiTokenRefreshAccount(token, false),
+          UserDAL.UserAutoSign(token)
+        ])
       }
-    } else if (isGuangyaUser(token)) {
-      token.default_drive_id = token.default_drive_id || 'guangya'
-      const userInfo = await fetchGuangyaUserInfo(token).catch(() => null)
-      const info = userInfo?.data || userInfo || null
-      if (info) {
-        token.user_name = info.username || info.phone_number || info.phoneNumber || token.user_name
-        token.nick_name = info.nickname || info.nick_name || info.name || token.nick_name
-        token.name = info.name || token.nick_name || token.name
-        token.avatar = info.avatar || token.avatar
-        token.used_size = Number(info.used_size || info.usedSize || token.used_size || 0)
-        token.total_size = Number(info.total_size || info.totalSize || token.total_size || 0)
-      }
-    } else if (isDropboxUser(token)) {
-      await applyDropboxQuota(token)
-    } else if (isOneDriveUser(token)) {
-      await applyOneDriveQuota(token)
-    } else if (isBoxUser(token)) {
-      await applyBoxQuota(token)
-    } else if (isWebDavUser(token)) {
-      token.default_drive_id = token.default_drive_id || token.user_id
-    } else if (isS3User(token)) {
-      token.default_drive_id = token.default_drive_id || token.user_id
-    } else if (isNonAliyunProvider(token)) {
-      // 已知非阿里云盘 provider 但未在上面 if 链命中,跳过 aliyun 兜底
-    } else {
-      // 加载用户信息
-      await Promise.all([
-        AliUser.ApiUserInfo(token),
-        AliUser.ApiUserDriveInfo(token),
-        AliUser.ApiUserPic(token),
-        AliUser.ApiUserVip(token),
-        // 刷新Session
-        AliUser.ApiSessionRefreshAccount(token, false),
-        // 刷新OpenApiToken
-        AliUser.OpenApiTokenRefreshAccount(token, false),
-        // 登陆后自动签到
-        UserDAL.UserAutoSign(token)
-      ])
-    }
-    if (token.user_id && token.user_id !== initialUserId) {
-      if (initialUserId) {
+
+      if (!token.user_id) throw new Error('账号信息缺少用户标识')
+      if (initialUserId && token.user_id !== initialUserId) {
         UserTokenMap.delete(initialUserId)
         await DB.deleteUser(initialUserId)
       }
+      if (!(await UserDAL.SaveUserToken(token))) throw new Error('账号信息保存失败')
+      window.WebUserToken({
+        user_id: token.user_id,
+        name: token.user_name,
+        access_token: token.access_token,
+        open_api_access_token: token.open_api_access_token,
+        tokenfrom: token.tokenfrom,
+        login: true
+      })
+      await UserDAL.LoadPanData(token)
+
       await DB.saveValueString('uiDefaultUser', token.user_id)
       useUserStore().userLogin(token.user_id)
-    } else if (token.user_id) {
-      useUserStore().userLogin(token.user_id)
-    }
-    UserDAL.SaveUserToken(token)
-    window.WebUserToken({
-      user_id: token.user_id,
-      name: token.user_name,
-      access_token: token.access_token,
-      open_api_access_token: token.open_api_access_token,
-      tokenfrom: token.tokenfrom,
-      login: true
-    })
-    // 加载网盘文件
-    await UserDAL.LoadPanData(token)
-    // 刷新所有状态
-    PanDAL.aReLoadQuickFile(token.user_id)
-    useAppStore().resetTab(useSettingStore().uiDefaultTab || 'pan')
-    useMyShareStore().$reset()
-    useMyFollowingStore().$reset()
-    useOtherFollowingStore().$reset()
-    useFootStore().mSaveUserInfo(token)
-    message.success('加载用户成功!', 2, loadingKey)
-    if (isInteractive && token.user_id) {
-      const label = token.nick_name || token.user_name || token.user_id
-      promptAutoScanForUser(token.user_id, label).catch(() => {
-        /* ignore */
-      })
+      PanDAL.aReLoadQuickFile(token.user_id)
+      useAppStore().resetTab(useSettingStore().uiDefaultTab || 'pan')
+      useMyShareStore().$reset()
+      useMyFollowingStore().$reset()
+      useOtherFollowingStore().$reset()
+      useFootStore().mSaveUserInfo(token)
+      message.success('加载用户成功!', 2, loadingKey)
+      if (isInteractive) {
+        const label = token.nick_name || token.user_name || token.user_id
+        promptAutoScanForUser(token.user_id, label).catch(() => {
+          /* ignore */
+        })
+      }
+    } catch (err: any) {
+      useFootStore().mSaveLoading('')
+      await DB.saveValueString('uiDefaultUser', previousDefaultUserId)
+      if (previousActiveUserId) useUserStore().userLogin(previousActiveUserId)
+      else useUserStore().userLogOff()
+      const previousToken = previousActiveUserId ? UserTokenMap.get(previousActiveUserId) : undefined
+      if (previousToken) {
+        window.WebUserToken({
+          user_id: previousToken.user_id,
+          name: previousToken.user_name,
+          access_token: previousToken.access_token,
+          open_api_access_token: previousToken.open_api_access_token,
+          tokenfrom: previousToken.tokenfrom,
+          login: true
+        })
+      }
+      message.error('加载账号失败：' + (err?.message || '网盘数据解析失败'), 5, loadingKey)
+      throw err
     }
   }
 

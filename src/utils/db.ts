@@ -236,7 +236,7 @@ class XBYDB3 extends Dexie {
     const list = await this.transaction('r', this.itoken, () => {
       return this.itoken.toArray()
     })
-    return list.sort((a: ITokenInfo, b: ITokenInfo) => b.used_size - a.used_size)
+    return list.sort((a: ITokenInfo, b: ITokenInfo) => Number(b.used_size || 0) - Number(a.used_size || 0))
   }
 
   async deleteUser(user_id: string): Promise<void> {
@@ -244,9 +244,9 @@ class XBYDB3 extends Dexie {
     return this.itoken.delete(user_id)
   }
 
-  async saveUser(token: ITokenInfo): Promise<string | void> {
+  async saveUser(token: ITokenInfo): Promise<string> {
     if (!this.isOpen()) await this.open().catch(() => {})
-    return this.itoken.put(token, token.user_id).catch(() => {})
+    return this.itoken.put(token)
   }
 
   async saveUserBatch(tokens: ITokenInfo[]): Promise<boolean | string> {

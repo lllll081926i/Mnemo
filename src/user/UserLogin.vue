@@ -982,7 +982,6 @@ const poll115Status = async () => {
         drive115Tips.value = '登录失败'
         return
       }
-      await AliUser.Drive115UserInfo(token)
       await UserDAL.UserLogin(token, true)
       useUserStore().userShowLogin = false
       return

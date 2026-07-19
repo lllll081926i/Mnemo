@@ -35,11 +35,34 @@ describe('multi-account provider boundaries', () => {
   it('migrates Baidu and 115 fallback ids to stable remote account ids', () => {
     const baidu = read('src/utils/baidu.ts')
     const user = read('src/aliapi/user.ts')
+    const userDal = read('src/user/userdal.ts')
 
     expect(baidu).toContain("buildDriveProviderUserId('baidu', uk)")
     expect(baidu).not.toContain('if (!token.user_id && uk)')
     expect(user).toContain("buildDriveProviderUserId('115', accountId)")
     expect(user).toContain('SaveUserToken(token, previousUserId)')
+    expect(userDal).toContain('SaveUserToken(refreshed, previousUserId)')
+    expect(userDal).not.toContain('refreshed.user_id = token.user_id || refreshed.user_id')
+  })
+
+  it('persists inline-key user records without passing a conflicting Dexie key', () => {
+    const db = read('src/utils/db.ts')
+    const userDal = read('src/user/userdal.ts')
+
+    expect(db).toContain('return this.itoken.put(token)')
+    expect(db).not.toContain('this.itoken.put(token, token.user_id)')
+    expect(userDal).toContain('static async SaveUserToken')
+    expect(userDal).toContain('await UserDAL.SaveUserToken(token)')
+  })
+
+  it('commits the active account only after its drive has loaded and restores failures', () => {
+    const source = read('src/user/userdal.ts')
+    const login = methodSource(source, 'static async UserLogin', 'static async LoadPanData')
+
+    expect(login.indexOf('await UserDAL.LoadPanData(token)')).toBeLessThan(login.indexOf("await DB.saveValueString('uiDefaultUser', token.user_id)"))
+    expect(login.indexOf('await UserDAL.LoadPanData(token)')).toBeLessThan(login.indexOf('useUserStore().userLogin(token.user_id)'))
+    expect(login).toContain('previousActiveUserId')
+    expect(login).toContain("message.error('加载账号失败")
   })
 
   it('disambiguates same-provider accounts and rejects duplicate mounted-storage names', () => {

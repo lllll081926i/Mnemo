@@ -8,6 +8,22 @@ const DRIVE115_QR_STATUS_URL = 'https://qrcodeapi.115.com/get/status/'
 const DRIVE115_TOKEN_URL = 'https://passportapi.115.com/open/deviceCodeToToken'
 const DRIVE115_REFRESH_URL = 'https://passportapi.115.com/open/refreshToken'
 
+export const isDrive115ApiSuccess = (data: any): boolean => {
+  if (!data || data.status === false || data.state === false || data.error) return false
+  if (data.errno !== undefined && data.errno !== null && Number(data.errno) !== 0) return false
+  if (data.code !== undefined && data.code !== null && data.code !== '' && Number(data.code) !== 0) return false
+  return true
+}
+
+export const unwrapDrive115List = <T = any>(data: any): T[] => {
+  const payload = data?.data
+  if (Array.isArray(payload)) return payload as T[]
+  if (Array.isArray(payload?.data)) return payload.data as T[]
+  if (Array.isArray(payload?.list)) return payload.list as T[]
+  if (Array.isArray(data?.list)) return data.list as T[]
+  return []
+}
+
 const base64UrlEncode = (input: ArrayBuffer): string => {
   const bytes = new Uint8Array(input)
   let binary = ''
@@ -55,7 +71,7 @@ export const requestDeviceCode = async (clientId: string, codeChallenge: string,
   })
   if (!resp.ok) return { error: '获取二维码失败' }
   const data = await resp.json()
-  if (data?.error || data?.errno) return { error: data?.message || '获取二维码失败' }
+  if (!isDrive115ApiSuccess(data)) return { error: data?.message || '获取二维码失败' }
   if (!data?.data?.uid) return { error: data?.message || '获取二维码失败' }
   return {
     uid: data.data.uid as string,
@@ -71,7 +87,7 @@ export const pollDeviceStatus = async (uid: string, time: string, sign: string) 
   const resp = await fetch(`${DRIVE115_QR_STATUS_URL}?${params.toString()}`)
   if (!resp.ok) return { error: '获取扫码状态失败' }
   const data = await resp.json()
-  if (data?.error || data?.errno) {
+  if (!isDrive115ApiSuccess(data)) {
     return { error: data?.message || '获取扫码状态失败' }
   }
   return {
@@ -91,7 +107,7 @@ export const exchangeDeviceCode = async (uid: string, codeVerifier: string) => {
   })
   if (!resp.ok) return { error: '获取 access_token 失败' }
   const data = await resp.json()
-  if (data?.error || data?.errno) {
+  if (!isDrive115ApiSuccess(data)) {
     return { error: data?.message || '获取 access_token 失败' }
   }
   return { data: data?.data || data, error: '' }
@@ -108,10 +124,10 @@ export const refresh115AccessToken = async (refreshToken: string) => {
   })
   if (!resp.ok) return { error: '刷新 access_token 失败' }
   const data = await resp.json()
-  if (data?.error || data?.errno || data?.code) {
+  if (!isDrive115ApiSuccess(data)) {
     return { error: data?.message || '刷新 access_token 失败' }
   }
-  const payload = data?.data || {}
+  const payload = data?.data || data || {}
   if (!payload?.access_token) return { error: '刷新 access_token 失败' }
   return {
     access_token: payload.access_token as string,

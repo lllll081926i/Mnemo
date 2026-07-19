@@ -11,6 +11,7 @@ import { useSettingStore } from '../store'
 import { refreshCloud123AccessToken } from '../utils/cloud123'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
 import { buildDriveProviderUserId } from '../utils/driveProvider'
+import { isDrive115ApiSuccess } from '../utils/drive115'
 
 export const TokenReTimeMap = new Map<string, number>()
 export const TokenLockMap = new Map<string, number>()
@@ -133,13 +134,13 @@ export default class AliUser {
       if (!forceRefresh && new Date(token.expire_time).getTime() >= Date.now()) return true
       const refreshed = await refreshCloud123AccessToken(token.refresh_token)
       if (refreshed) {
-        // 保留用户标识
-        refreshed.user_id = token.user_id || refreshed.user_id
+        const previousUserId = token.user_id
+        refreshed.user_id = refreshed.user_id || previousUserId
         refreshed.user_name = refreshed.user_name || token.user_name
         refreshed.nick_name = refreshed.nick_name || token.nick_name
         refreshed.avatar = refreshed.avatar || token.avatar
         refreshed.tokenfrom = 'cloud123'
-        UserDAL.SaveUserToken(refreshed)
+        await UserDAL.SaveUserToken(refreshed, previousUserId)
         await AliUser.Drive123UserInfo(refreshed)
         window.WebUserToken({
           user_id: refreshed.user_id,
@@ -351,7 +352,7 @@ export default class AliUser {
       })
       if (!resp.ok) return false
       const data = await resp.json()
-      if (data?.code !== 0 || !data?.data) return false
+      if (Number(data?.code) !== 0 || !data?.data) return false
       const info = data.data
       const previousUserId = token.user_id
       const accountId = info.uid ?? info.userId
@@ -369,7 +370,7 @@ export default class AliUser {
       if (vipCurrent?.vipLabel) token.vipname = vipCurrent.vipLabel
       if (vipCurrent?.endTime) token.vipexpire = vipCurrent.endTime
       if (info.vip) token.vipIcon = token.vipIcon || ''
-      UserDAL.SaveUserToken(token, previousUserId)
+      await UserDAL.SaveUserToken(token, previousUserId)
       return true
     } catch (err: any) {
       DebugLog.mSaveWarning('Drive123UserInfo err=' + (err?.message || ''), err)
@@ -388,7 +389,7 @@ export default class AliUser {
       })
       if (!resp.ok) return false
       const data = await resp.json()
-      if (data?.code !== 0 || !data?.data) return false
+      if (!isDrive115ApiSuccess(data) || !data?.data) return false
       const info = data.data
       const previousUserId = token.user_id
       const accountId = info.user_id ?? info.userId ?? info.uid
@@ -397,18 +398,18 @@ export default class AliUser {
       token.nick_name = info.user_name || token.nick_name
       token.avatar = info.user_face_m || info.user_face_l || info.user_face_s || token.avatar
       const space = info.rt_space_info || {}
-      const totalSize = space?.all_total?.size
-      const usedSize = space?.all_use?.size
-      if (typeof usedSize === 'number') token.used_size = usedSize
-      if (typeof totalSize === 'number') token.total_size = totalSize
-      if (typeof usedSize === 'number' && typeof totalSize === 'number') {
+      const totalSize = Number(space?.all_total?.size || 0)
+      const usedSize = Number(space?.all_use?.size || 0)
+      if (Number.isFinite(usedSize) && usedSize >= 0) token.used_size = usedSize
+      if (Number.isFinite(totalSize) && totalSize >= 0) token.total_size = totalSize
+      if (totalSize > 0 || usedSize > 0) {
         token.spaceinfo = humanSize(usedSize) + ' / ' + humanSize(totalSize)
       } else if (space?.all_use?.size_format && space?.all_total?.size_format) {
         token.spaceinfo = `${space.all_use.size_format} / ${space.all_total.size_format}`
       }
       if (info?.vip_info?.level_name) token.vipname = info.vip_info.level_name
       if (info?.vip_info?.expire) token.vipexpire = String(info.vip_info.expire)
-      UserDAL.SaveUserToken(token, previousUserId)
+      await UserDAL.SaveUserToken(token, previousUserId)
       return true
     } catch (err: any) {
       DebugLog.mSaveWarning('Drive115UserInfo err=' + (err?.message || ''), err)
@@ -463,7 +464,7 @@ export default class AliUser {
           }
         }
       }
-      UserDAL.SaveUserToken(token, previousUserId)
+      await UserDAL.SaveUserToken(token, previousUserId)
       return true
     } catch (err: any) {
       DebugLog.mSaveWarning('DriveBaiduUserInfo err=' + (err?.message || ''), err)
