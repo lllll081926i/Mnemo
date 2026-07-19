@@ -8,16 +8,6 @@ const cb = (val: any) => settingStore.updateStore(val)
 <template>
   <div class="ui-plain-list">
     <div class="ui-plain-row">
-      <span class="ui-plain-label">优先显示</span>
-      <div class="ui-plain-control">
-        <a-select class="ui-control-sm" size="small" :model-value="settingStore.uiShowPanRootFirst" @update:model-value="cb({ uiShowPanRootFirst: $event })">
-          <a-option value="all">全部</a-option>
-          <a-option value="backup">备份盘</a-option>
-          <a-option value="resource">资源盘</a-option>
-        </a-select>
-      </div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">独立排序</span>
       <div class="ui-plain-control">
         <a-select class="ui-control-md" size="small" :model-value="settingStore.uiFileOrderDuli" @update:model-value="cb({ uiFileOrderDuli: $event })">
@@ -80,10 +70,11 @@ const cb = (val: any) => settingStore.updateStore(val)
 <style scoped>
 .settings-tags {
   display: grid !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 4px 12px !important;
   width: 100%;
   min-width: 0;
-  min-height: 62px;
+  min-height: 88px;
   overflow: visible !important;
   white-space: normal !important;
   align-content: center;
@@ -104,5 +95,11 @@ const cb = (val: any) => settingStore.updateStore(val)
 .settings-tag :deep(.arco-input-wrapper) {
   width: 100% !important;
   min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .settings-tags {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
 }
 </style>

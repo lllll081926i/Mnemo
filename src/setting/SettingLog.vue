@@ -1,91 +1,47 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import message from '../utils/message'
-import DebugLog from '../utils/debuglog'
-import { useLogStore, useWinStore } from '../store'
-import { copyToClipboard } from '../utils/electronhelper'
+import { FileText } from 'lucide-vue-next'
+import MySwitch from '../layout/MySwitch.vue'
+import DebugLog, { type DebugLogLevel } from '../utils/debuglog'
+import { getUserDataPath } from '../utils/electronhelper'
+import useSettingStore from './settingstore'
 
-const logStore = useLogStore()
-const winStore = useWinStore()
-
-const logHeight = computed(() => winStore.height - 316)
-
-const handleSaveLogRefresh = () => {
-  DebugLog.aLoadFromDB()
-}
-
-const handleSaveLogClear = () => {
-  DebugLog.mSaveLogClear()
-}
-
-const handleSaveLogCopy = () => {
-  let logstr = ''
-  const logList = DebugLog.logList
-  for (let i = 0, maxi = logList.length; i < maxi; i++) {
-    const item = logList[i]
-    logstr += item.logtime + ' : ' + item.logtype + ' : ' + item.logmessage + '\n'
-  }
-  copyToClipboard(logstr)
-  message.success('运行日志已复制到剪切板')
-}
+const settingStore = useSettingStore()
+const logPath = getUserDataPath('mnemo.log')
+const cb = (val: any) => settingStore.updateStore(val)
+const setLogLevel = (level: DebugLogLevel) => cb({ debugLogLevel: level })
+const openLogFile = () => window.Electron.shell.showItemInFolder(logPath)
 </script>
 
 <template>
   <div class="ui-plain-list">
-    <div class="ui-plain-row ui-plain-row--top">
-      <span class="ui-plain-label">运行日志</span>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">写入日志</span>
+      <div class="ui-plain-control"><MySwitch :value="settingStore.debugLogEnabled" @update:value="cb({ debugLogEnabled: $event })" /></div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">日志等级</span>
       <div class="ui-plain-control">
-        <a-list
-          :bordered="false"
-          :max-height="logHeight"
-          :style="{ height: logHeight + 'px' }"
-          :data="DebugLog.logList"
-          class="loglist"
-          :data-refresh="logStore.logTime"
-          :virtual-list-props="{
-            height: logHeight,
-            threshold: 50
-          }"
-        >
-          <template #item="{ item, index }">
-            <a-list-item :key="index">
-              <a-typography-text :type="item.logtype">[{{ item.logtime }}]</a-typography-text>
-              {{ item.logmessage }}
-            </a-list-item>
-          </template>
-        </a-list>
-        <a-button type="outline" size="small" @click="handleSaveLogRefresh">刷新</a-button>
-        <a-button type="outline" size="small" @click="handleSaveLogClear">清空日志</a-button>
-        <a-button type="outline" size="small" @click="handleSaveLogCopy">复制日志</a-button>
+        <a-select class="ui-control-sm" size="small" :model-value="settingStore.debugLogLevel" @update:model-value="setLogLevel">
+          <a-option value="debug">Debug</a-option>
+          <a-option value="info">Info</a-option>
+          <a-option value="warn">Warn</a-option>
+          <a-option value="error">Error</a-option>
+        </a-select>
+      </div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">日志文件上限</span>
+      <div class="ui-plain-control">
+        <a-input-number class="ui-control-sm" size="small" :min="1" :max="100" :model-value="settingStore.debugLogMaxSizeMB" @update:model-value="cb({ debugLogMaxSizeMB: $event })" />
+        <span>MB</span>
+      </div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">日志位置</span>
+      <div class="ui-plain-control">
+        <a-input class="ui-control-lg" size="small" :model-value="DebugLog.logPath" readonly />
+        <a-button type="outline" size="small" title="打开日志位置" aria-label="打开日志位置" @click="openLogFile"><FileText :size="15" /></a-button>
       </div>
     </div>
   </div>
 </template>
-
-<style>
-.settings-page .loglist {
-  width: 100%;
-  max-height: 420px;
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 1px solid var(--border-light);
-  border-radius: 0;
-  background: transparent;
-}
-
-.settings-page .loglist .arco-list {
-  height: 100%;
-  overflow-y: hidden;
-}
-
-.settings-page .loglist .arco-list-item {
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.settings-page .loglist .arco-list-item-content {
-  user-select: text;
-  -webkit-user-drag: none;
-}
-</style>

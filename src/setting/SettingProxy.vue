@@ -65,7 +65,7 @@ const handleProxyConn = async () => {
     <div class="ui-plain-row">
       <span class="ui-plain-label">代理类型</span>
       <div class="ui-plain-control">
-        <a-select size="small" :model-value="settingStore.proxyType" @update:model-value="cb({ proxyType: $event })">
+        <a-select class="ui-control-sm" size="small" :model-value="settingStore.proxyType" @update:model-value="cb({ proxyType: $event })">
           <a-option value="none">None</a-option>
           <a-option value="http">HTTP</a-option>
           <a-option value="https">HTTPS</a-option>
@@ -82,12 +82,11 @@ const handleProxyConn = async () => {
       </div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">用户名</span>
-      <div class="ui-plain-control"><a-input class="ui-control-md" size="small" :model-value="settingStore.proxyUserName" @update:model-value="cb({ proxyUserName: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
-      <span class="ui-plain-label">密码</span>
-      <div class="ui-plain-control"><a-input class="ui-control-md" size="small" type="password" :model-value="settingStore.proxyPassword" @update:model-value="cb({ proxyPassword: $event })" /></div>
+      <span class="ui-plain-label">代理认证</span>
+      <div class="ui-plain-control ui-inline-fields">
+        <a-input class="ui-control-md" size="small" placeholder="用户名" :model-value="settingStore.proxyUserName" @update:model-value="cb({ proxyUserName: $event })" />
+        <a-input class="ui-control-md" size="small" type="password" placeholder="密码" :model-value="settingStore.proxyPassword" @update:model-value="cb({ proxyPassword: $event })" />
+      </div>
     </div>
     <div class="ui-plain-row">
       <span class="ui-plain-label">启用代理</span>

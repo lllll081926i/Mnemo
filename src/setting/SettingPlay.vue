@@ -56,7 +56,7 @@ onMounted(() => {
     <div class="ui-plain-row">
       <span class="ui-plain-label">默认清晰度</span>
       <div class="ui-plain-control">
-        <a-select size="small" :model-value="settingStore.uiVideoQuality" @update:model-value="cb({ uiVideoQuality: $event })">
+        <a-select class="ui-control-sm" size="small" :model-value="settingStore.uiVideoQuality" @update:model-value="cb({ uiVideoQuality: $event })">
           <a-option value="Origin">原画</a-option>
           <a-option value="QHD">2560p</a-option>
           <a-option value="FHD">1080P</a-option>
@@ -94,13 +94,13 @@ onMounted(() => {
       <div class="ui-plain-row">
         <span class="ui-plain-label">外部播放器</span>
         <div class="ui-plain-control">
-          <a-auto-complete v-if="platform === 'linux'" size="small" :data="['mpv', 'vlc', 'totem', 'mplayer', 'smplayer']" :model-value="settingStore.uiVideoPlayerPath" @change="cb({ uiVideoPlayerPath: $event })" />
-          <a-input-search v-else size="small" :readonly="true" button-text="选择" search-button :model-value="settingStore.uiVideoPlayerPath" @search="handleSelectPlayer" />
+          <a-auto-complete v-if="platform === 'linux'" class="ui-control-lg" size="small" :data="['mpv', 'vlc', 'totem', 'mplayer', 'smplayer']" :model-value="settingStore.uiVideoPlayerPath" @change="cb({ uiVideoPlayerPath: $event })" />
+          <a-input-search v-else class="ui-control-lg" size="small" :readonly="true" button-text="选择" search-button :model-value="settingStore.uiVideoPlayerPath" @search="handleSelectPlayer" />
         </div>
       </div>
       <div class="ui-plain-row">
         <span class="ui-plain-label">启动参数</span>
-        <div class="ui-plain-control"><a-input size="small" v-model.trim="settingStore.uiVideoPlayerParams" allow-clear @update:model-value="cb({ uiVideoPlayerParams: $event })" /></div>
+        <div class="ui-plain-control"><a-input class="ui-control-lg" size="small" v-model.trim="settingStore.uiVideoPlayerParams" allow-clear @update:model-value="cb({ uiVideoPlayerParams: $event })" /></div>
       </div>
       <div v-if="playerType.includes('mpv') || playerType.includes('potplayer')" class="ui-plain-row">
         <span class="ui-plain-label">启用播放列表</span>

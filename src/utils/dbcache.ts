@@ -1,5 +1,4 @@
 import Dexie from 'dexie'
-import { IStateDebugLog } from './debuglog'
 
 export interface IStateFileHash {
   size: number
@@ -10,7 +9,6 @@ export interface IStateFileHash {
   name: string
 }
 class XBYDB3Cache extends Dexie {
-  ilog: Dexie.Table<IStateDebugLog>
   ifilehash: Dexie.Table<IStateFileHash>
   iobject: Dexie.Table<object, string>
 
@@ -26,35 +24,8 @@ class XBYDB3Cache extends Dexie {
       .upgrade((tx: any) => {
         console.log('upgrade', tx)
       })
-    this.ilog = this.table('ilog')
     this.ifilehash = this.table('ifilehash')
     this.iobject = this.table('iobject')
-  }
-
-  async saveLog(value: IStateDebugLog) {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.ilog.put(value).catch(() => {})
-  }
-
-  async getLogAll(): Promise<IStateDebugLog[]> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.transaction('r', this.ilog, () => {
-      return this.ilog.reverse().limit(500).toArray()
-    })
-  }
-
-  async deleteLogAll(): Promise<void> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    return this.ilog.clear()
-  }
-
-  async deleteLogOutCount(max: number): Promise<number> {
-    if (!this.isOpen()) await this.open().catch(() => {})
-    const count = await this.ilog.count()
-    if (count > max) {
-      return this.ilog.limit(max - count).delete()
-    }
-    return 0
   }
 
   async getFileHashList(size: number, mtime: number): Promise<IStateFileHash[]> {

@@ -11,10 +11,10 @@
   --layout-footer-height: 0px;
   --layout-rail-width: 220px;
   --layout-page-gutter: clamp(18px, 3vw, 32px);
-  --layout-content-width: 960px;
-  --layout-row-label-width: 220px;
-  --layout-row-gap: 16px;
-  --layout-row-min-height: 42px;
+  --layout-content-width: 980px;
+  --layout-row-label-width: 190px;
+  --layout-row-gap: 12px;
+  --layout-row-min-height: 36px;
   --ui-font-size: 13px;
   --ui-font-size-small: 12px;
   --ui-line-height: 1.5;
@@ -195,7 +195,7 @@ body .arco-select-option.selected {
   box-sizing: border-box;
   width: min(100%, var(--layout-content-width));
   min-height: 100%;
-  padding: 18px var(--layout-page-gutter) 32px;
+  padding: 12px var(--layout-page-gutter) 24px;
 }
 
 /* Arco workspaces keep the library layout element but share the same rail geometry. */
@@ -252,7 +252,7 @@ body .arco-select-option.selected {
   gap: var(--layout-row-gap);
   align-items: center;
   min-height: var(--layout-row-min-height);
-  padding: 3px 0;
+  padding: 2px 0;
 }
 
 .ui-plain-label {
@@ -269,7 +269,7 @@ body .arco-select-option.selected {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow-x: auto;
+  overflow: visible;
   color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;

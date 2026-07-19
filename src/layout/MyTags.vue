@@ -51,6 +51,14 @@ export default defineComponent({
   margin-bottom: 4px;
   user-select: none;
 }
+.mytags {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
 .mytags .arco-input-search {
   height: 30px;
   margin-right: 8px;

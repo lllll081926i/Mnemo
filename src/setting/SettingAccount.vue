@@ -2,27 +2,11 @@
 import message from '../utils/message'
 import UserDAL, { UserTokenMap } from '../user/userdal'
 import { ITokenInfo } from '../store'
-import { copyToClipboard } from '../utils/electronhelper'
 import Db from '../utils/db'
 import fs from 'node:fs'
 import path from 'path'
 import { decodeName, encodeName } from '../module/flow-enc/utils'
 import { localPwd } from '../utils/aria2c'
-
-const copyCookies = async () => {
-  let cookies = (await window.WebGetCookies({ url: 'https://www.aliyundrive.com' })) as []
-  if (cookies.length == 0) cookies = (await window.WebGetCookies({ url: 'https://www.aliyundrive.com' })) as []
-  if (cookies.length > 0) {
-    let cookiesText = ''
-    cookies.forEach((cookie) => {
-      cookiesText += cookie['name'] + '=' + cookie['value'] + ';'
-    })
-    copyToClipboard(cookiesText)
-    message.success('当前账号的Cookies已复制到剪切板')
-  } else {
-    message.error('当前账号的Cookies不存在')
-  }
-}
 
 const handlerAccountImport = () => {
   window.WebShowOpenDialogSync(
@@ -103,10 +87,6 @@ const handlerAccountExport = () => {
 
 <template>
   <div class="ui-plain-list">
-    <div class="ui-plain-row">
-      <span class="ui-plain-label">当前账号 Cookie</span>
-      <div class="ui-plain-control"><a-button type="outline" size="small" tabindex="-1" @click="copyCookies">复制</a-button></div>
-    </div>
     <div class="ui-plain-row">
       <span class="ui-plain-label">账号数据</span>
       <div class="ui-plain-control">

@@ -1,24 +1,63 @@
-import { useLogStore } from '../store'
-import DBCache from './dbcache'
+import { appendFile, stat, unlink } from 'node:fs/promises'
+import { getUserDataPath } from './electronhelper'
 
-export interface IStateDebugLog {
-  logid: number
-  logtime: string
-  logtype: string
-  logmessage: string
+export type DebugLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+interface DebugLogOptions {
+  enabled: boolean
+  level: DebugLogLevel
+  maxSizeMB: number
+}
+
+const levelWeight: Record<DebugLogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40
+}
+
+const levelAliases: Record<string, DebugLogLevel> = {
+  debug: 'debug',
+  info: 'info',
+  success: 'info',
+  log: 'info',
+  warning: 'warn',
+  warn: 'warn',
+  danger: 'error',
+  error: 'error'
+}
+
+const normalizeError = (err: any): string => {
+  if (!err) return ''
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return `${err.message}${err.stack ? `\n${err.stack}` : ''}`
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return 'stringify failed'
+  }
 }
 
 class DebugLogC {
-  public logList: IStateDebugLog[] = []
-  public logTime: number = 0
-  mSaveLogClear() {
-    this.logList = []
-    this.logTime = Date.now()
+  private options: DebugLogOptions = { enabled: true, level: 'info', maxSizeMB: 5 }
+  private writeQueue: Promise<void> = Promise.resolve()
 
-    try {
-      DBCache.deleteLogAll().catch(() => {})
-      useLogStore().logRefresh(this.logTime)
-    } catch {}
+  get logPath(): string {
+    return getUserDataPath('mnemo.log')
+  }
+
+  configure(options: Partial<DebugLogOptions>) {
+    if (typeof options.enabled === 'boolean') this.options.enabled = options.enabled
+    if (options.level && levelAliases[options.level] === options.level) this.options.level = options.level
+    if (typeof options.maxSizeMB === 'number' && Number.isFinite(options.maxSizeMB)) this.options.maxSizeMB = Math.min(100, Math.max(1, Math.round(options.maxSizeMB)))
+  }
+
+  mSaveDebug(logmessage: string, err: any = undefined) {
+    this.mSaveLog('debug', logmessage, err)
+  }
+
+  mSaveInfo(logmessage: string, err: any = undefined) {
+    this.mSaveLog('info', logmessage, err)
   }
 
   mSaveDanger(logmessage: string, err: any = undefined) {
@@ -33,49 +72,26 @@ class DebugLogC {
     this.mSaveLog('success', logmessage, err)
   }
 
-  mSaveLog(logtype: string, logmessage: string, err: any) {
-    if (!logmessage && !err) return
-    if (logmessage && logmessage.length > 500) logmessage = logmessage.substring(0, 500) + '...'
-    const time = new Date()
-    if (this.logList.length > 500) {
-      this.logList.splice(400)
-      DBCache.deleteLogOutCount(400)
-    }
-    
-    const log = {
-      logid: time.getTime(),
-      logtime: time.getDate().toString().padStart(2, '0') + ' ' + time.getHours().toString().padStart(2, '0') + ':' + time.getMinutes().toString().padStart(2, '0') + ':' + time.getSeconds().toString().padStart(2, '0'),
-      logtype: logtype,
-      logmessage: logmessage
-    }
-
-    if (err) {
-      if (typeof err == 'string') {
-        log.logmessage = logmessage + ' \n//== Error ==//\n ' + err
-      } else if (err.message) {
-        let m = err.message + (err.stack ? ' \n//== Stack ===//\n ' + err.stack : '')
-        if (m.length > 500) m = m.substring(0, 500) + '...'
-        log.logmessage = logmessage + ' \n//== Error ==//\n ' + m
-      } else {
-        try {
-          log.logmessage = logmessage + ' \n//== Error ==//\n ' + JSON.stringify(err)
-        } catch {
-          log.logmessage = logmessage + ' \n//== Error ==//\n stringify failed'
-        }
-      }
-    }
-    this.logList = [log].concat(this.logList)
-    this.logTime = time.getTime()
-    try {
-      DBCache.saveLog(log).catch(() => {})
-      useLogStore().logRefresh(this.logTime)
-    } catch {}
+  mSaveLog(logtype: string, logmessage: string, err: any = undefined) {
+    const level = levelAliases[String(logtype || '').toLowerCase()] || 'info'
+    if (!this.options.enabled || levelWeight[level] < levelWeight[this.options.level]) return
+    const message = [String(logmessage || '').trim(), normalizeError(err)].filter(Boolean).join('\n')
+    if (!message) return
+    const line = `${new Date().toISOString()} [${level.toUpperCase()}] ${message}\n`
+    this.writeQueue = this.writeQueue.then(() => this.append(line)).catch((writeError) => console.warn('Write log failed', writeError))
   }
 
-  async aLoadFromDB() {
-    const logList2 = await DBCache.getLogAll()
-    if (logList2) this.logList = logList2 as IStateDebugLog[]
-    this.logTime = Date.now()
+  private async append(line: string) {
+    if (!this.logPath) return
+    const maxBytes = this.options.maxSizeMB * 1024 * 1024
+    const incomingBytes = Buffer.byteLength(line, 'utf8')
+    try {
+      const current = await stat(this.logPath)
+      if (current.size + incomingBytes >= maxBytes) await unlink(this.logPath)
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') throw err
+    }
+    await appendFile(this.logPath, line, 'utf8')
   }
 }
 

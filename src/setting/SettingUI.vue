@@ -121,7 +121,7 @@ const openProject = () => openExternal('https://github.com/gaozhangmin/mnemo')
     </div>
     <div v-if="settingStore.uiUpdateProxyEnable" class="ui-plain-row">
       <span class="ui-plain-label">代理地址</span>
-      <div class="ui-plain-control"><a-input v-model.trim="settingStore.uiUpdateProxyUrl" allow-clear size="small" @update:model-value="cb({ uiUpdateProxyUrl: $event })" /></div>
+      <div class="ui-plain-control"><a-input class="ui-control-lg" v-model.trim="settingStore.uiUpdateProxyUrl" allow-clear size="small" @update:model-value="cb({ uiUpdateProxyUrl: $event })" /></div>
     </div>
   </div>
 </template>

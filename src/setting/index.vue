@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component, wa
 import { Cloud, FolderCog, MonitorCog, Network, ShieldCheck, SlidersHorizontal, X } from 'lucide-vue-next'
 import { useAppStore, useUserStore } from '../store'
 import { isAliyunUser } from '../aliapi/utils'
+import UserDAL from '../user/userdal'
 import SettingAliyun from './SettingAliyun.vue'
 import SettingAccount from './SettingAccount.vue'
 import SettingDebug from './SettingDebug.vue'
@@ -14,8 +15,6 @@ import SettingProxy from './SettingProxy.vue'
 import SettingSecurity from './SettingSecurity.vue'
 import SettingUI from './SettingUI.vue'
 import SettingUpload from './SettingUpload.vue'
-import SettingWebDav from './SettingWebDav.vue'
-import SettingS3 from './SettingS3.vue'
 
 type SettingSectionKey = 'general' | 'account-security' | 'files-playback' | 'transfer' | 'aliyun' | 'advanced'
 
@@ -32,6 +31,10 @@ interface SettingSection {
 
 const appStore = useAppStore()
 const userStore = useUserStore()
+const hasAliyunAccount = computed(() => {
+  void userStore.user_id
+  return UserDAL.GetUserList().some((token) => isAliyunUser(token))
+})
 
 const sections: SettingSection[] = [
   {
@@ -44,7 +47,7 @@ const sections: SettingSection[] = [
     key: 'account-security',
     label: '账号与安全',
     icon: ShieldCheck,
-    panels: [{ component: SettingAccount }, { component: SettingWebDav }, { component: SettingS3 }, { component: SettingSecurity }]
+    panels: [{ component: SettingAccount }, { component: SettingSecurity }]
   },
   {
     key: 'files-playback',
@@ -71,7 +74,7 @@ const sections: SettingSection[] = [
     panels: [{ component: SettingProxy }, { component: SettingDebug }, { component: SettingLog }]
   }
 ]
-const visibleSections = computed(() => sections.filter((section) => section.key !== 'aliyun' || isAliyunUser(userStore.user_id || userStore.GetUserToken)))
+const visibleSections = computed(() => sections.filter((section) => section.key !== 'aliyun' || hasAliyunAccount.value))
 
 const legacySectionMap: Record<string, SettingSectionKey> = {
   SettingUI: 'general',
@@ -150,18 +153,14 @@ const closeSettings = () => appStore.closeSettings()
     </aside>
 
     <main class="settings-main">
-      <header class="settings-header">
-        <h1>设置</h1>
-        <button type="button" class="settings-close" title="关闭设置" aria-label="关闭设置" @click="closeSettings">
-          <X :size="17" :stroke-width="1.9" />
-        </button>
-      </header>
+      <button type="button" class="settings-close" title="关闭设置" aria-label="关闭设置" @click="closeSettings">
+        <X :size="17" :stroke-width="1.9" />
+      </button>
 
       <div ref="settingsScroll" class="settings-scroll ui-page-content">
         <div class="settings-content ui-content-column">
           <section v-for="section in visibleSections" :id="`setting-${section.key}`" :key="section.key" class="settings-section" :data-settings-section="section.key">
             <header class="settings-section-heading">
-              <component :is="section.icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
               <h2>{{ section.label }}</h2>
             </header>
             <component v-for="(panel, index) in section.panels" :is="panel.component" :key="index" />
@@ -187,14 +186,14 @@ body:not([arco-theme='dark']) .settings-content {
 }
 
 body:not([arco-theme='dark']) .settings-sidebar {
-  background: #f8fafc;
+  background: #fff;
   border-right-color: #e5e7eb;
 }
 
 .settings-sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--bg-subtle);
+  background: var(--bg-surface);
   border-right: 1px solid var(--border-light);
 }
 
@@ -222,8 +221,8 @@ body:not([arco-theme='dark']) .settings-sidebar {
   gap: 10px;
   align-items: center;
   width: 100%;
-  min-height: 36px;
-  padding: 7px 14px;
+  min-height: 32px;
+  padding: 5px 12px;
   color: var(--text-secondary);
   text-align: left;
   background: transparent;
@@ -255,6 +254,7 @@ body:not([arco-theme='dark']) .settings-sidebar {
 }
 
 .settings-main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -262,24 +262,11 @@ body:not([arco-theme='dark']) .settings-sidebar {
   background: var(--bg-surface);
 }
 
-.settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 44px;
-  padding: 0 clamp(18px, 3vw, 32px);
-  border-bottom: 1px solid var(--border-light);
-}
-
-.settings-header h1 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 650;
-  line-height: 1.3;
-}
-
 .settings-close {
+  position: absolute;
+  top: 8px;
+  right: max(12px, var(--layout-page-gutter));
+  z-index: 3;
   display: grid;
   flex-shrink: 0;
   place-items: center;
@@ -303,8 +290,9 @@ body:not([arco-theme='dark']) .settings-sidebar {
 }
 
 .settings-content {
-  padding-top: 8px;
-  padding-bottom: 24px;
+  padding-top: 10px;
+  padding-right: max(52px, var(--layout-page-gutter));
+  padding-bottom: 18px;
 }
 
 .settings-section {
@@ -313,28 +301,23 @@ body:not([arco-theme='dark']) .settings-sidebar {
 }
 
 .settings-section + .settings-section {
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--border-light);
 }
 
 .settings-section-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 26px;
-  margin: 0 0 3px;
+  min-height: 24px;
+  margin: 0 0 2px;
   color: var(--text-primary);
-}
-
-.settings-section-heading svg {
-  color: var(--color-primary);
 }
 
 .settings-section-heading h2 {
   margin: 0;
   color: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 650;
   line-height: 1.4;
 }
@@ -370,10 +353,13 @@ body:not([arco-theme='dark']) .settings-sidebar {
     padding-inline: 8px;
   }
 
-  .settings-content,
-  .settings-header {
+  .settings-content {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  .settings-close {
+    right: 8px;
   }
 }
 </style>

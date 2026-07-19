@@ -1,4 +1,3 @@
-import DebugLog from '../utils/debuglog'
 import { onHideRightMenu } from '../utils/keyboardhelper'
 import { defineStore } from 'pinia'
 import { IAliGetFileModel } from '../aliapi/alimodels'
@@ -106,16 +105,16 @@ export interface IPageVideo {
   media_server_source_id?: string
   media_server_source_label?: string
   media_server_play_session_id?: string
-  media_server_source_options?: Array<{ id: string, label: string, subLabel?: string }>
+  media_server_source_options?: Array<{ id: string; label: string; subLabel?: string }>
   media_server_video_label?: string
   media_server_audio_label?: string
   media_server_subtitle_label?: string
-  media_server_video_options?: Array<{ streamIndex: number, label: string }>
-  media_server_audio_options?: Array<{ streamIndex: number, label: string }>
-  media_server_subtitle_options?: Array<{ streamIndex: number, label: string }>
+  media_server_video_options?: Array<{ streamIndex: number; label: string }>
+  media_server_audio_options?: Array<{ streamIndex: number; label: string }>
+  media_server_subtitle_options?: Array<{ streamIndex: number; label: string }>
   media_server_playlist_label?: string
-  media_server_episode_playlist?: Array<{ id: string, title: string }>
-  media_server_chapters?: Array<{ start: number, end: number, title: string }>
+  media_server_episode_playlist?: Array<{ id: string; title: string }>
+  media_server_chapters?: Array<{ start: number; end: number; title: string }>
   custom_playlist_label?: string
   custom_playlist?: IPageVideoPlaylistEntry[]
 }
@@ -157,10 +156,11 @@ export interface AppState {
 
   appTab: string
 
+  lastMainTab: string
+
   appTabMenuMap: Map<string, string>
   appDark: boolean
   appShutDown: boolean
-
 
   pageOffice?: IPageOffice
   pagePdf?: IPagePdf
@@ -179,16 +179,12 @@ const useAppStore = defineStore('app', {
     appTheme: 'light',
     appPage: 'PageLoading',
     appTab: 'pan',
+    lastMainTab: 'pan',
     appTabMenuMap: new Map<string, string>([
       ['pan', 'wangpan'],
       ['down', 'DowningRight'],
-      ['share', 'ShareSiteRight'],
-      ['rss', 'RssXiMa'],
-      ['media', 'MediaLibrary'],
-      ['media-server', 'MediaServerWorkspace'],
-      ['music', 'MusicLibrary'],
-      ['book', 'BookLibrary'],
-      ['setting', 'SettingUI']
+      ['share', 'MyShareRight'],
+      ['setting', 'general']
     ]),
     appDark: false,
     appShutDown: false
@@ -208,20 +204,26 @@ const useAppStore = defineStore('app', {
     toggleTheme(theme: string) {
       // console.log('toggleTheme', theme, this)
       this.appTheme = theme
-      if (this.appTheme == 'dark' || (this.appTheme == 'system' && this.appDark)) {
+      const isDark = this.appTheme == 'dark' || (this.appTheme == 'system' && this.appDark)
+      if (isDark) {
         document.body.setAttribute('arco-theme', 'dark')
+        document.documentElement.classList.add('dark')
       } else {
         document.body.removeAttribute('arco-theme')
+        document.documentElement.classList.remove('dark')
       }
     },
 
     toggleDark(dark: boolean) {
       console.log('toggleDark', dark, this)
       this.appDark = dark
-      if (this.appTheme == 'dark' || (this.appTheme == 'system' && dark)) {
+      const isDark = this.appTheme == 'dark' || (this.appTheme == 'system' && dark)
+      if (isDark) {
         document.body.setAttribute('arco-theme', 'dark')
+        document.documentElement.classList.add('dark')
       } else {
         document.body.removeAttribute('arco-theme')
+        document.documentElement.classList.remove('dark')
       }
     },
 
@@ -230,125 +232,131 @@ const useAppStore = defineStore('app', {
       this.appPage = page
     },
     resetTab(defaultTab = 'pan') {
+      const safeDefaultTab = ['pan', 'down', 'share', 'setting'].includes(defaultTab) ? defaultTab : 'pan'
+      const mainTab = ['pan', 'down', 'share'].includes(defaultTab) ? defaultTab : 'pan'
       this.$patch({
-        appTab: defaultTab,
+        appTab: safeDefaultTab,
+        lastMainTab: mainTab,
         appTabMenuMap: new Map<string, string>([
           ['pan', 'wangpan'],
           ['down', 'DowningRight'],
-          ['share', 'ShareSiteRight'],
-          ['rss', 'RssXiMa'],
-          ['media', 'MediaLibrary'],
-          ['media-server', 'MediaServerWorkspace'],
-          ['music', 'MusicLibrary'],
-          ['book', 'BookLibrary'],
-          ['setting', 'SettingUI']
+          ['share', 'MyShareRight'],
+          ['setting', 'general']
         ])
       })
     },
 
+    openSettings() {
+      if (this.appTab === 'setting') return
+      if (['pan', 'down', 'share'].includes(this.appTab)) this.lastMainTab = this.appTab
+      this.appTab = 'setting'
+      onHideRightMenu()
+    },
+
+    closeSettings() {
+      this.appTab = ['pan', 'down', 'share'].includes(this.lastMainTab) ? this.lastMainTab : 'pan'
+      onHideRightMenu()
+    },
+
     toggleTab(tab: string) {
+      if (tab === 'setting') {
+        if (this.appTab === 'setting') {
+          this.closeSettings()
+          return
+        }
+
+        this.openSettings()
+        return
+      }
+
       if (this.appTab != tab) {
         this.appTab = tab
-        if (tab == 'setting') DebugLog.aLoadFromDB()
+        if (['pan', 'down', 'share'].includes(tab)) this.lastMainTab = tab
         onHideRightMenu()
       }
     },
 
     toggleTabMenu(tab: string, menu: string) {
       if (this.appTab != tab) {
-        this.appTab = tab
-        if (tab == 'setting') DebugLog.aLoadFromDB()
+        if (tab === 'setting') this.openSettings()
+        else {
+          this.appTab = tab
+          if (['pan', 'down', 'share'].includes(tab)) this.lastMainTab = tab
+        }
       }
-      this.appTabMenuMap.set(tab, menu)
-      if (tab == 'setting') document.getElementById(menu)?.scrollIntoView()
+      // Map.set 不会触发 Pinia 响应式，必须替换引用
+      const nextMap = new Map(this.appTabMenuMap)
+      nextMap.set(tab, menu)
+      this.appTabMenuMap = nextMap
       onHideRightMenu()
     },
 
     toggleTabSetting(tab: string, menu: string) {
       if (tab == this.appTab && this.appTabMenuMap.get(tab) == menu) return
       if (this.appTab != tab) {
-        this.appTab = tab
+        if (tab === 'setting') this.openSettings()
+        else {
+          this.appTab = tab
+          if (['pan', 'down', 'share'].includes(tab)) this.lastMainTab = tab
+        }
       }
       if (menu) {
-        this.appTabMenuMap.set(tab, menu)
+        const nextMap = new Map(this.appTabMenuMap)
+        nextMap.set(tab, menu)
+        this.appTabMenuMap = nextMap
       }
     },
 
     toggleTabNext() {
       switch (this.appTab) {
-        case 'pan': {
+        case 'pan':
           this.appTab = 'down'
           break
-        }
-        case 'down': {
+        case 'down':
           this.appTab = 'share'
           break
-        }
-        case 'share': {
-          this.appTab = 'rss'
+        case 'share':
+          this.openSettings()
           break
-        }
-        case 'rss': {
-          this.appTab = 'media'
-          break
-        }
-        case 'media': {
-          this.appTab = 'media-server'
-          break
-        }
-        case 'media-server': {
-          this.appTab = 'music'
-          break
-        }
-        case 'music': {
-          this.appTab = 'book'
-          break
-        }
-        case 'book': {
-          this.appTab = 'setting'
-          DebugLog.aLoadFromDB()
-          break
-        }
-        case 'setting': {
+        case 'setting':
+          this.closeSettings()
+          return
+        default:
           this.appTab = 'pan'
           break
-        }
       }
       onHideRightMenu()
     },
 
     toggleTabNextMenu() {
-      const next = function(map: Map<string, string>, tab: string, menuList: string[]) {
-        const menu = map.get(tab)!
+      const next = (tab: string, menuList: string[]) => {
+        const menu = this.appTabMenuMap.get(tab)!
+        const nextMap = new Map(this.appTabMenuMap)
         for (let i = 0, maxi = menuList.length; i < maxi; i++) {
           if (menuList[i] == menu) {
-            if (i + 1 >= menuList.length) map.set(tab, menuList[0])
-            else map.set(tab, menuList[i + 1])
+            if (i + 1 >= menuList.length) nextMap.set(tab, menuList[0])
+            else nextMap.set(tab, menuList[i + 1])
+            break
           }
         }
+        this.appTabMenuMap = nextMap
       }
 
       switch (this.appTab) {
         case 'pan': {
-          next(this.appTabMenuMap, this.appTab, ['wangpan', 'kuaijie'])
+          next(this.appTab, ['wangpan', 'kuaijie'])
           break
         }
         case 'down': {
-          next(this.appTabMenuMap, this.appTab, ['DowningRight', 'DownedRight', 'UploadingRight', 'UploadedRight', 'SyncRight'])
+          next(this.appTab, ['DowningRight', 'DownedRight', 'UploadingRight', 'UploadedRight'])
           break
         }
         case 'share': {
-          next(this.appTabMenuMap, this.appTab, ['ShareSiteRight', 'OtherShareRight', 'MyShareRight', 'ShareHistoryRight', 'MyTransferShareRight', 'ShareBottleFishRight', 'MyFollowingRight', 'OtherFollowingRight'])
-          break
-        }
-        case 'rss': {
-          next(this.appTabMenuMap, this.appTab, ['RssXiMa', 'RssJiaMi', 'RssEmptyDirs', 'AppSame', 'RssScanClean', 'RssScanSame', 'RssScanPunish', 'RssScanEnmpty', 'RssDriveCopy'])
+          next(this.appTab, ['OtherShareRight', 'ShareHistoryRight', 'MyShareRight'])
           break
         }
         case 'setting': {
-          next(this.appTabMenuMap, this.appTab, ['SettingUI', 'SettingAccount', 'SettingSecurity', 'SettingPlay', 'SettingPan', 'SettingDown', 'SettingUpload', 'SettingWebDav', 'SettingDebug', 'SettingProxy', 'SettingAria', 'SettingDownloadAdvanced', 'SettingAPI', 'SettingLog'])
-          const menu = this.appTabMenuMap.get('setting')!
-          document.getElementById(menu)?.scrollIntoView()
+          next(this.appTab, ['general', 'account-security', 'files-playback', 'transfer', 'advanced'])
           break
         }
       }

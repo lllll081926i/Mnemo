@@ -215,7 +215,7 @@ export function createElectronWindow(width: number, height: number, center: bool
     backgroundColor: theme && theme == 'dark' ? '#23232e' : '#ffffff',
     webPreferences: {
       spellcheck: false,
-      devTools: true,
+      devTools: DEBUGGING && devTools,
       webviewTag: true,
       nodeIntegration: true,
       nodeIntegrationInWorker: true,
@@ -248,23 +248,18 @@ export function createElectronWindow(width: number, height: number, center: bool
     })
   }
 
-  if (DEBUGGING && devTools) {
+  const allowDevTools = DEBUGGING && devTools
+  if (allowDevTools) {
     if (width < 100) {
       win.setSize(800, 680)
     }
     win.show()
     win.webContents.openDevTools({ mode: 'bottom' })
-  } else {
-    win.webContents.on('devtools-opened', () => {
-      if (win && win.webContents.getType() === 'webview') {
-        win.webContents.closeDevTools()
-      }
-    })
   }
   if (page == 'main2') {
     handleWinCmd(win)
   }
-  handleWebView(win)
+  handleWebView(win, allowDevTools)
   win.webContents.on('will-navigate', (e, url) => {
     e.preventDefault()
     if (!url.includes(process.env.VITE_DEV_SERVER_URL)) {
@@ -279,20 +274,35 @@ export function createElectronWindow(width: number, height: number, center: bool
   return win
 }
 
-function handleWebView(win: BrowserWindow) {
-  // 处理DevTools
-  win.webContents.on('before-input-event', (_, input: Electron.Input) => {
+function registerDevToolsShortcut(webContent: Electron.WebContents) {
+  webContent.on('before-input-event', (_, input: Electron.Input) => {
     if (input.type === 'keyDown' && input.control && input.shift && input.key === 'F12') {
-      win.webContents.isDevToolsOpened() ? win.webContents.closeDevTools() : win.webContents.openDevTools({ mode: 'undocked' })
+      webContent.isDevToolsOpened() ? webContent.closeDevTools() : webContent.openDevTools({ mode: 'undocked' })
     }
+  })
+}
+
+function disableDevTools(webContent: Electron.WebContents) {
+  webContent.on('devtools-opened', () => webContent.closeDevTools())
+  if (webContent.isDevToolsOpened()) webContent.closeDevTools()
+}
+
+function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
+  if (allowDevTools) {
+    registerDevToolsShortcut(win.webContents)
+  } else {
+    disableDevTools(win.webContents)
+  }
+  win.webContents.on('will-attach-webview', (_event, webPreferences) => {
+    if (!allowDevTools) webPreferences.devTools = false
   })
   // 处理webview跳转
   win.webContents.addListener('did-attach-webview', (event, webContent) => {
-    webContent.on('before-input-event', (_, input: Electron.Input) => {
-      if (input.type === 'keyDown' && input.control && input.shift && input.key === 'F12') {
-        webContent.isDevToolsOpened() ? webContent.closeDevTools() : webContent.openDevTools({ mode: 'undocked' })
-      }
-    })
+    if (allowDevTools) {
+      registerDevToolsShortcut(webContent)
+    } else {
+      disableDevTools(webContent)
+    }
     // 不允许的网址则阻止页面跳转并拉取浏览器展示页面
     webContent.setWindowOpenHandler((details) => {
       let url = details.url
@@ -477,7 +487,7 @@ export function createReaderWindow(bookData: any) {
     backgroundColor: '#1a1a1a',
     webPreferences: {
       spellcheck: false,
-      devTools: true,
+      devTools: DEBUGGING,
       webviewTag: true,
       nodeIntegration: true,
       nodeIntegrationInWorker: true,
@@ -509,6 +519,7 @@ export function createReaderWindow(bookData: any) {
     AppWindow.readerWindow = undefined
   })
 
+  handleWebView(AppWindow.readerWindow, DEBUGGING)
   handleWinCmd(AppWindow.readerWindow)
 
   AppWindow.readerWindow.webContents.on('will-navigate', (e, url) => {

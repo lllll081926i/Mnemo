@@ -1,5 +1,5 @@
 <script lang="ts">
-import { defineComponent, ref, watchEffect } from 'vue'
+import { defineComponent, ref, watch } from 'vue'
 import { useWinStore, WinState } from '../store'
 
 export default defineComponent({
@@ -8,87 +8,76 @@ export default defineComponent({
       type: Boolean,
       required: false,
       default: true
-    },
+    }
   },
   emits: ['splitSize'],
-  setup(props) {
-    const leftMinWidth = 0
-    const rightMinWidth = 220
+  setup(props, { emit }) {
+    const defaultWidth = 220
+    const leftMinWidth = 188
+    const rightMinWidth = 320
     const winStore = useWinStore()
     const bodyWidth = ref(Math.max(winStore.width, 900))
-    const splitMoveing = ref(false)
-    const splitSize = ref(bodyWidth.value < 900 ? '220px' : '240px')
-    const splitSizeMax = ref(bodyWidth.value - rightMinWidth)
+    const splitMoving = ref(false)
+    const expandedSize = ref(defaultWidth)
+    const splitSize = ref<string | number>(`${defaultWidth}px`)
+    const splitSizeMax = ref(Math.max(leftMinWidth, bodyWidth.value - rightMinWidth))
+
+    const toPixels = (value: string | number) => Number.parseFloat(String(value)) || 0
+    const clampExpandedSize = (value: number) => Math.min(Math.max(value, leftMinWidth), splitSizeMax.value)
 
     winStore.$subscribe((_m: any, state: WinState) => {
       const width = state.width
       if (width > 0 && bodyWidth.value != width) {
         bodyWidth.value = width
-        splitSizeMax.value = width - rightMinWidth
-        const tempSize = parseInt(splitSize.value, 10)
-        if (tempSize < leftMinWidth) {
-          splitSize.value = leftMinWidth.toString() + 'px'
-        } else if (tempSize > leftMinWidth && tempSize > splitSizeMax.value) {
-          splitSize.value = splitSizeMax.value.toString() + 'px'
-        }
+        splitSizeMax.value = Math.max(leftMinWidth, width - rightMinWidth)
+        expandedSize.value = clampExpandedSize(expandedSize.value)
+        if (props.visible) splitSize.value = `${expandedSize.value}px`
       }
     })
-    watchEffect(() => {
-      if(props.visible){
-        splitSize.value = bodyWidth.value < 900 ? '220px' : '240px'
-      }else {
-        splitSize.value = '0px'
-      }
+
+    watch(splitSize, (value) => {
+      if (!props.visible) return
+      const pixels = toPixels(value)
+      if (pixels >= leftMinWidth) expandedSize.value = clampExpandedSize(pixels)
     })
-    return { splitSize, leftMinWidth, splitSizeMax, splitMoveing,  }
+
+    watch(
+      () => props.visible,
+      (visible) => {
+        splitSize.value = visible ? `${clampExpandedSize(expandedSize.value)}px` : '0px'
+      },
+      { immediate: true }
+    )
+
+    const handleMoveEnd = () => {
+      splitMoving.value = false
+      emit('splitSize', expandedSize.value)
+    }
+
+    return { splitSize, expandedSize, leftMinWidth, splitSizeMax, splitMoving, handleMoveEnd }
   }
 })
 </script>
 
 <template>
-  <a-split v-model:size="splitSize" class="MySplit" style="height: 100%; width: 100%;"
-           :min="leftMinWidth" :max="splitSizeMax" tabindex="-1"
-           @move-start="splitMoveing = true" @move-end="splitMoveing = false">
+  <a-split
+    v-model:size="splitSize"
+    class="MySplit"
+    :class="{ 'is-collapsed': !visible, 'is-resizing': splitMoving }"
+    :disabled="!visible"
+    :min="visible ? leftMinWidth : 0"
+    :max="splitSizeMax"
+    tabindex="-1"
+    @move-start="splitMoving = true"
+    @move-end="handleMoveEnd">
     <template #first>
       <slot name="first">first</slot>
     </template>
     <template #resize-trigger>
-      <div class="splitline" :class="splitMoveing ? 'resize' : ''" draggable="false">
-        <div class="line" draggable="false"></div>
-      </div>
+      <div class="splitline" :class="{ resize: splitMoving }" draggable="false"></div>
     </template>
     <template #second>
       <slot name="second">second</slot>
     </template>
   </a-split>
 </template>
-<style>
-.MySplit .arco-split-pane {
-  overflow: hidden;
-}
-.splitline {
-  box-sizing: border-box;
-  width: 4px;
-  height: 100%;
-  border-right: 2px solid transparent;
-  border-left: 1px solid var(--color-border-2);
-  user-select: none;
-  margin-right: 2px;
-}
-.splitline:hover {
-  border-left: 0 solid transparent;
-  background: rgb(var(--primary-6));
-  cursor: col-resize;
-}
-.splitline.resize {
-  background: rgb(var(--primary-6));
-}
-.splitline .line {
-  position: absolute;
-  top: 50%;
-  width: 2px;
-  height: 60px;
-  margin-top: -30px;
-  background: rgb(var(--primary-6));
-}
-</style>

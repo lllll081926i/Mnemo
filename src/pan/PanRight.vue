@@ -1,57 +1,22 @@
 <!-- eslint-disable no-irregular-whitespace -->
-<script setup lang='ts'>
+<script setup lang="ts">
 import { IAliGetFileModel } from '../aliapi/alimodels'
-import {
-  KeyboardState,
-  MouseState,
-  useAppStore,
-  useFootStore,
-  useKeyboardStore,
-  useMouseStore,
-  usePanFileStore,
-  useSettingStore
-} from '../store'
+import { KeyboardState, MouseState, useAppStore, useFootStore, useKeyboardStore, useMouseStore, usePanFileStore, useSettingStore } from '../store'
 import useWinStore from '../store/winstore'
-import {
-  onHideRightMenuScroll,
-  onShowRightMenu,
-  TestCtrl,
-  TestCtrlShift,
-  TestKey,
-  TestKeyboardScroll,
-  TestKeyboardSelect
-} from '../utils/keyboardhelper'
+import { onHideRightMenuScroll, onShowRightMenu, TestCtrl, TestCtrlShift, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
 import { computed, onMounted, ref, watchEffect } from 'vue'
 import PanDAL from './pandal'
 
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
 
-import {
-  dropMoveSelectedFile,
-  handleUpload,
-  menuCopySelectedFile,
-  menuCreatShare,
-  menuFavSelectFile,
-  menuTrashSelectFile,
-  topSearchAll
-} from './topbtns/topbtn'
-import {
-  modalCreatNewDir,
-  modalCreatNewFile,
-  modalDaoRuShareLink,
-  modalPassword,
-  modalRename,
-  modalSelectPanDir,
-  modalUpload,
-  modalCloud123OfflineDownload
-} from '../utils/modal'
+import { dropMoveSelectedFile, handleUpload, menuCopySelectedFile, menuCreatShare, menuFavSelectFile, menuTrashSelectFile, topSearchAll } from './topbtns/topbtn'
+import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalPassword, modalRename, modalSelectPanDir, modalUpload, modalCloud123OfflineDownload } from '../utils/modal'
 import { PanFileState } from './panfilestore'
 import PanTopbtn from './menus/PanTopbtn.vue'
 import FileTopbtn from './menus/FileTopbtn.vue'
 import FileRightMenu from './menus/FileRightMenu.vue'
 import TrashRightMenu from './menus/TrashRightMenu.vue'
 import TrashTopbtn from './menus/TrashTopbtn.vue'
-import DirTopPath from './menus/DirTopPath.vue'
 import message from '../utils/message'
 import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
@@ -61,7 +26,6 @@ import { GetDriveID, GetDriveType, isAliyunUser, isCloud123User, isDrive115User,
 import { xorWith } from 'lodash'
 import { flattenDriveToolFolders, moveDriveToolFiles, type OrganizeFileItem } from '../utils/drive-tools/organize'
 import { buildMediaOrganizePlan, executeMediaOrganizePlan, mapMediaOrganizeFiles } from '../utils/drive-tools/mediaOrganize'
-
 
 const viewlist = ref()
 const inputsearch = ref()
@@ -93,8 +57,7 @@ const isOfflineDownloadSupported = computed(() => {
   if (panfileStore.SelectDirType !== 'pan') return false
   const user = panTreeStore.user_id || ''
   const drive = panTreeStore.drive_id || panfileStore.DriveID
-  return isCloud123User(user) || isPikPakUser(user) || isGuangyaUser(user) || isDrive115User(user)
-    || ['cloud123', 'pikpak', 'guangya', 'drive115'].includes(drive)
+  return isCloud123User(user) || isPikPakUser(user) || isGuangyaUser(user) || isDrive115User(user) || ['cloud123', 'pikpak', 'guangya', 'drive115'].includes(drive)
 })
 
 const handleOfflineDownload = () => {
@@ -112,7 +75,7 @@ const getSelectedOrganizeFiles = (): OrganizeFileItem[] => {
   return panfileStore.GetSelected().map((file: any) => ({ userId, driveId: file.drive_id || panfileStore.DriveID, fileId: file.file_id, name: file.name || file.file_name }))
 }
 
-const allSelectedInCurrentDrive = (files: OrganizeFileItem[]) => files.every(file => file.driveId === panfileStore.DriveID)
+const allSelectedInCurrentDrive = (files: OrganizeFileItem[]) => files.every((file) => file.driveId === panfileStore.DriveID)
 
 const handleMoveOrganizeToParent = async () => {
   const files = getSelectedOrganizeFiles()
@@ -165,7 +128,7 @@ const handleMoveOrganizeToSelectedDir = () => {
     return
   }
   modalSelectPanDir('cut', panfileStore.DirID || '', async (_userId: string, driveId: string, selectFile: any) => {
-    if (files.some(file => file.driveId !== driveId)) {
+    if (files.some((file) => file.driveId !== driveId)) {
       message.warning('当前仅支持在同一个网盘内移动整理')
       return
     }
@@ -190,7 +153,7 @@ const handleMediaOrganize = async () => {
     return
   }
   const plans = buildMediaOrganizePlan(mapMediaOrganizeFiles(files, userId), rootId)
-  if (!plans.every(plan => plan.driveId === panfileStore.DriveID)) {
+  if (!plans.every((plan) => plan.driveId === panfileStore.DriveID)) {
     message.warning('当前仅支持整理当前网盘内的媒体项目')
     return
   }
@@ -198,7 +161,10 @@ const handleMediaOrganize = async () => {
     message.warning('没有识别到可整理的媒体文件或文件夹')
     return
   }
-  const preview = plans.slice(0, 8).map(item => `${item.name} → ${item.targetPath}`).join('\n')
+  const preview = plans
+    .slice(0, 8)
+    .map((item) => `${item.name} → ${item.targetPath}`)
+    .join('\n')
   if (!window.confirm(`准备整理 ${plans.length} 项到当前目录：\n${preview}${plans.length > 8 ? '\n...' : ''}\n是否继续？`)) return
   const result = await executeMediaOrganizePlan(plans, rootId)
   if (result.failed) message.warning(result.report)
@@ -253,7 +219,8 @@ keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
         document.getElementById('searchpanInput')?.focus()
       }, 300)
     })
-  ) return
+  )
+    return
   if (TestCtrl('f', state.KeyDownEvent, () => inputsearch.value.focus())) return
   if (TestKey('f3', state.KeyDownEvent, () => inputsearch.value.focus())) return
   if (TestKey(' ', state.KeyDownEvent, () => inputsearch.value.focus())) return
@@ -275,9 +242,12 @@ keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestKey('Backspace', state.KeyDownEvent, handleBack)) return
   if (TestKey('f2', state.KeyDownEvent, () => modalRename(false, panfileStore.IsListSelectedMulti, false))) return
   if (TestCtrl('e', state.KeyDownEvent, () => modalRename(false, panfileStore.IsListSelectedMulti, false))) return
-  if (TestCtrl('s', state.KeyDownEvent, () => {
-    isresourcedrive && menuCreatShare(false, 'pan', 'resource_root')
-  })) return
+  if (
+    TestCtrl('s', state.KeyDownEvent, () => {
+      isresourcedrive && menuCreatShare(false, 'pan', 'resource_root')
+    })
+  )
+    return
   if (TestCtrl('t', state.KeyDownEvent, () => menuCreatShare(false, 'pan', 'backup_root'))) return
   if (TestCtrl('g', state.KeyDownEvent, () => menuFavSelectFile(false, !panfileStore.IsListSelectedFavAll))) return
   if (TestCtrl('q', state.KeyDownEvent, onSelectRangStart)) return
@@ -290,15 +260,18 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (appStore.appTab != 'pan') return
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
-  if (TestButton(0, mouseEvent, () => {
-    if (mouseEvent.srcElement) {
-      // @ts-ignore
-      const className = mouseEvent.srcElement.className
-      if (className && className.toString().startsWith('arco-virtual-list')) {
-        onSelectCancel()
+  if (
+    TestButton(0, mouseEvent, () => {
+      if (mouseEvent.srcElement) {
+        // @ts-ignore
+        const className = mouseEvent.srcElement.className
+        if (className && className.toString().startsWith('arco-virtual-list')) {
+          onSelectCancel()
+        }
       }
-    }
-  })) return
+    })
+  )
+    return
   if (TestButton(3, mouseEvent, () => handleBack())) return
 })
 const handleRefresh = () => {
@@ -346,7 +319,6 @@ const handleHome = () => {
 const handleSelectAll = () => {
   panfileStore.mSelectAll()
 }
-
 
 const handleSelect = (file_id: string, event: any, isCtrl: boolean = false) => {
   onHideRightMenuScroll()
@@ -416,7 +388,8 @@ const handleOpenFile = (event: Event, file: IAliGetFileModel | undefined) => {
       modalPassword('new', (success) => {
         success && file && menuOpenFile(file)
       })
-    } else {// 自动解密
+    } else {
+      // 自动解密
       menuOpenFile(file)
     }
   } else {
@@ -441,7 +414,6 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
   const dirType = panfileStore.SelectDirType
   onShowRightMenu(dirType == 'trash' || dirType == 'recover' ? 'rightpantrashmenu' : 'rightpanmenu', e.event.clientX, e.event.clientY)
 }
-
 
 const handleFileListOrder = (order: string) => {
   panfileStore.mOrderListData(order)
@@ -503,7 +475,6 @@ const handleListGridMode = (mode: string) => {
   panfileStore.mGridListData(mode, listGridColumn.value)
 }
 
-
 const rangIsSelecting = ref(false)
 const rangSelectID = ref('')
 const rangSelectStart = ref('')
@@ -524,7 +495,10 @@ const onSelectReverse = () => {
   panfileStore.ListSelected.clear()
   panfileStore.ListFocusKey = ''
   if (reverseSelect.length > 0) {
-    panfileStore.mRangSelect(reverseSelect[0].file_id, reverseSelect.map(r => r.file_id))
+    panfileStore.mRangSelect(
+      reverseSelect[0].file_id,
+      reverseSelect.map((r) => r.file_id)
+    )
   }
   panfileStore.mRefreshListDataShow(false)
 }
@@ -540,7 +514,6 @@ const onSelectRangStart = () => {
 
 const onSelectRang = (file_id: string) => {
   if (rangIsSelecting.value && rangSelectID.value != '') {
-
     let startid = rangSelectID.value
     let endid = ''
     const s: { [k: string]: any } = {}
@@ -646,7 +619,6 @@ const onRowItemDragEnd = (ev: any) => {
   }
 }
 
-
 const showDragUpload = ref(false)
 const onPanDrop = (e: any) => {
   if (!e.dataTransfer.files || e.dataTransfer.files.length == 0) return
@@ -673,7 +645,6 @@ const onPanDrop = (e: any) => {
     message.error('错误的上传位置！请先选择一个网盘里的文件夹')
     return
   }
-
 
   const filesList = e.dataTransfer.files
   if (filesList && filesList.length > 0) {
@@ -713,57 +684,31 @@ const onPanDragEnd = (ev: any) => {
 </script>
 
 <template>
-  <div style='height: 7px'></div>
-  <div class='toppanbtns' style='height: 26px'>
-    <DirTopPath />
-    <div style='flex-grow: 1'></div>
-    <div v-if="panfileStore.SelectDirType == 'trash'" class='toppantip'>
-      <span v-if="isCloud123User(panTreeStore.user_id || '')" style='color: crimson'>回收站内容保存30天，到期后自动清理，会员可延长期限至100天</span>
-      <span v-else style='color: crimson'> 免费=10天 会员=30天 超级会员=60天</span>
-    </div>
-    <div v-if="panfileStore.SelectDirType == 'recover'" class='toppantip'>
-      <span style='color: crimson'>仅会员可用 恢复60天内彻底删除的文件(不保留文件夹路径)</span>
-    </div>
-    <div v-if="panfileStore.SelectDirType == 'favorite'" class='toppantip'>
-      <span style='color: crimson'>列出已收藏的文件和文件夹 右键可定位到文件夹</span>
-    </div>
-    <div v-if="panfileStore.SelectDirType == 'color'" class='toppantip'>
-      <span style='color: crimson'>列出已标记的文件和文件夹 右键可定位到文件夹</span>
-    </div>
-    <div v-if="panfileStore.SelectDirType == 'video'" class='toppantip'>
-      <span style='color: crimson'>同步手机APP的放映室 设置为内置网页播放器时可继续播放</span>
-    </div>
-  </div>
-  <div style='height: 14px'></div>
-  <div class='toppanbtns' style='height: 26px' tabindex='-1'>
-    <div class='toppanbtn'>
-      <a-button type='text' size='small' tabindex='-1' :disabled='panfileStore.ListLoading' title='后退 Back Space'
-                @click='handleBack'>
+  <div class="toppanbtns" tabindex="-1">
+    <div class="toppanbtn">
+      <a-button type="text" size="small" tabindex="-1" :disabled="panfileStore.ListLoading" title="后退 Back Space" @click="handleBack">
         <template #icon>
           <IconFont name="iconarrow-left-2-icon" />
         </template>
       </a-button>
-      <a-button type='text' size='small' tabindex='-1' :loading='panfileStore.ListLoading' title='刷新 F5'
-                @click='handleRefresh'>
+      <a-button type="text" size="small" tabindex="-1" :loading="panfileStore.ListLoading" title="刷新 F5" @click="handleRefresh">
         <template #icon>
           <IconFont name="iconreload-1-icon" />
         </template>
       </a-button>
-      <a-button type='text' size='small' tabindex='-1' :disabled='panfileStore.ListLoading' title='定位 F6'
-                @click='handleDingWei'>
+      <a-button type="text" size="small" tabindex="-1" :disabled="panfileStore.ListLoading" title="定位 F6" @click="handleDingWei">
         <template #icon>
           <IconFont name="icondingwei" />
         </template>
       </a-button>
-      <a-button v-if='isOfflineDownloadSupported' type='text' size='small' tabindex='-1' title='云下载'
-                @click='handleOfflineDownload'>
+      <a-button v-if="isOfflineDownloadSupported" type="text" size="small" tabindex="-1" title="云下载" @click="handleOfflineDownload">
         <template #icon>
           <IconFont name="iconcloud-download" />
         </template>
         云下载
       </a-button>
       <a-dropdown v-if="panfileStore.SelectDirType === 'pan' && panfileStore.IsListSelected" trigger="click">
-        <a-button type='text' size='small' tabindex='-1' title='整理选中项'>
+        <a-button type="text" size="small" tabindex="-1" title="整理选中项">
           <template #icon>
             <IconFont name="iconmoveto" />
           </template>
@@ -771,118 +716,97 @@ const onPanDragEnd = (ev: any) => {
         </a-button>
         <template #content>
           <a-doption @click="handleMoveOrganizeToParent">
-            <span class="arco-dropdown-option-icon"><IconFont name="iconmoveto" /></span>整体上移一层
+            <span class="arco-dropdown-option-icon"><IconFont name="iconmoveto" /></span>
+            整体上移一层
           </a-doption>
           <a-doption @click="handleMoveOrganizeFlatten">
-            <span class="arco-dropdown-option-icon"><IconFont name="iconfile-folder" /></span>拆开到当前目录
+            <span class="arco-dropdown-option-icon"><IconFont name="iconfile-folder" /></span>
+            拆开到当前目录
           </a-doption>
           <a-doption @click="handleMoveOrganizeToSelectedDir">
-            <span class="arco-dropdown-option-icon"><IconFont name="iconmoveto" /></span>选择目录并移动
+            <span class="arco-dropdown-option-icon"><IconFont name="iconmoveto" /></span>
+            选择目录并移动
           </a-doption>
           <a-doption @click="handleMediaOrganize">
-            <span class="arco-dropdown-option-icon"><IconFont name="iconscan" /></span>媒体整理
+            <span class="arco-dropdown-option-icon"><IconFont name="iconscan" /></span>
+            媒体整理
           </a-doption>
         </template>
       </a-dropdown>
     </div>
-    <div v-show="!panfileStore.IsListSelected && panfileStore.SelectDirType.includes('pic')" class='toppanbtn'>
-      <a-select v-model:model-value='inputpicType' size='small' tabindex='-1'
-                @update:model-value='handleChangePic'
-                style='width: 120px; flex-shrink: 0; margin: 0 -8px' :disabled='panfileStore.ListLoading'>
-        <a-option value='pic_root'>全部相册</a-option>
-        <a-option value='mypic'>我的相册</a-option>
-      </a-select>
-    </div>
-    <div v-show="!panfileStore.IsListSelected && ['trash', 'recover', 'favorite'].includes(panfileStore.SelectDirType) && isAliyunUser(panTreeStore.user_id || '')"
-         class='toppanbtn'>
-      <a-select v-model:model-value='inputselectType'
-                size='small' tabindex='-1'
-                @update:model-value='handleChangeDrive'
-                style='width: 100px; flex-shrink: 0; margin: 0 -8px'
-                :disabled='panfileStore.ListLoading'>
-        <a-option value='backup' :disabled="useSettingStore().securityHideBackupDrive">备份盘</a-option>
-        <a-option value='resource' :disabled="useSettingStore().securityHideResourceDrive">资源盘</a-option>
-        <a-option value='pic' :disabled="useSettingStore().securityHidePicDrive">相册</a-option>
-      </a-select>
-    </div>
-    <div v-show="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected && isAliyunUser(panTreeStore.user_id || '')" class='toppanbtn'>
-      <a-dropdown style='width: 100px;' @popup-visible-change="handleSearchCheck">
-        <a-button :disabled='panfileStore.ListLoading'>范围</a-button>
+    <div v-if="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected && isAliyunUser(panTreeStore.user_id || '')" class="toppanbtn">
+      <a-dropdown style="width: 100px" @popup-visible-change="handleSearchCheck">
+        <a-button :disabled="panfileStore.ListLoading">范围</a-button>
         <template #content>
           <a-checkbox-group v-model="inputsearchType" direction="vertical">
-            <a-checkbox value='backup' :disabled="useSettingStore().securityHideBackupDrive">备份盘</a-checkbox>
-            <a-checkbox value='resource' :disabled="useSettingStore().securityHideResourceDrive">资源盘</a-checkbox>
-            <a-checkbox value='pic' :disabled="useSettingStore().securityHidePicDrive">相册</a-checkbox>
+            <a-checkbox value="backup" :disabled="useSettingStore().securityHideBackupDrive">备份盘</a-checkbox>
+            <a-checkbox value="resource" :disabled="useSettingStore().securityHideResourceDrive">资源盘</a-checkbox>
+            <a-checkbox value="pic" :disabled="useSettingStore().securityHidePicDrive">相册</a-checkbox>
           </a-checkbox-group>
         </template>
       </a-dropdown>
     </div>
-    <div v-show="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected" class='toppanbtn'>
+    <div v-if="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected" class="toppanbtn">
       <a-input-search
-        class='searchpan'
-        style='width: 240px'
-        :loading='panfileStore.ListLoading'
-        placeholder='输入关键字进行搜索'
-        button-text='搜索'
+        class="searchpan"
+        style="width: 240px"
+        :loading="panfileStore.ListLoading"
+        placeholder="输入关键字进行搜索"
+        button-text="搜索"
         search-button
         allow-clear
         :input-attrs="{ id: 'searchpanInput' }"
-        @search='(val:string)=>topSearchAll(val, inputsearchType)'
-        @press-enter='($event:any)=>topSearchAll($event.srcElement.value as string, inputsearchType)'
-        @keydown.esc=';($event.target as any).blur()' />
-      <a-button v-show=" isAliyunUser(panTreeStore.user_id || '')" type='text' size='small' tabindex='-1' style='border: none'
-                @click="() => topSearchAll('topSearchAll高级搜索', inputsearchType)">高级
-      </a-button>
+        @search="(val: string) => topSearchAll(val, inputsearchType)"
+        @press-enter="($event: any) => topSearchAll($event.srcElement.value as string, inputsearchType)"
+        @keydown.esc=";($event.target as any).blur()"
+      />
+      <a-button v-if="isAliyunUser(panTreeStore.user_id || '')" type="text" size="small" tabindex="-1" style="border: none" @click="() => topSearchAll('topSearchAll高级搜索', inputsearchType)">高级</a-button>
     </div>
 
-    <PanTopbtn :dirtype='panfileStore.SelectDirType'
-               :inputpicType='inputpicType'
-               :inputselectType='inputselectType'
-               :isselected='panfileStore.IsListSelected' />
-    <FileTopbtn :dirtype='panfileStore.SelectDirType'
-                :isselected='panfileStore.IsListSelected'
-                :isvideo='menuShowVideo'
-                :inputselectType='inputselectType'
-                :inputpicType='inputpicType'
-                :isselectedmulti='panfileStore.IsListSelectedMulti'
-                :isallfavored='panfileStore.IsListSelectedFavAll'
-                :isallcolored='panfileStore.IsListSelectedColorAll' />
-    <TrashTopbtn :dirtype='panfileStore.SelectDirType' :isselected='panfileStore.IsListSelected' />
+    <PanTopbtn :dirtype="panfileStore.SelectDirType" :inputpicType="inputpicType" :inputselectType="inputselectType" :isselected="panfileStore.IsListSelected" />
+    <FileTopbtn
+      :dirtype="panfileStore.SelectDirType"
+      :isselected="panfileStore.IsListSelected"
+      :isvideo="menuShowVideo"
+      :inputselectType="inputselectType"
+      :inputpicType="inputpicType"
+      :isselectedmulti="panfileStore.IsListSelectedMulti"
+      :isallfavored="panfileStore.IsListSelectedFavAll"
+      :isallcolored="panfileStore.IsListSelectedColorAll"
+    />
+    <TrashTopbtn :dirtype="panfileStore.SelectDirType" :isselected="panfileStore.IsListSelected" />
 
-    <div style='flex-grow: 1'></div>
-    <div class='toppanbtn'>
+    <div style="flex-grow: 1"></div>
+    <div class="toppanbtn">
       <a-input-search
-        ref='inputsearch'
-        v-model='panfileStore.ListSearchKey'
+        ref="inputsearch"
+        v-model="panfileStore.ListSearchKey"
         :input-attrs="{ tabindex: '-1' }"
-        size='small'
-        title='Ctrl+F / F3 / Space'
-        placeholder='快速筛选'
-        draggable='false'
+        size="small"
+        title="Ctrl+F / F3 / Space"
+        placeholder="快速筛选"
+        draggable="false"
         allow-clear
-        @dragenter.stop='() => false'
-        @clear='(e:any)=>handleSearchInput("")'
-        @input='(val:any)=>handleSearchInput(val as string)'
-        @press-enter='handleSearchEnter'
-        @keydown.esc=';($event.target as any).blur()' />
+        @dragenter.stop="() => false"
+        @clear="(e: any) => handleSearchInput('')"
+        @input="(val: any) => handleSearchInput(val as string)"
+        @press-enter="handleSearchEnter"
+        @keydown.esc=";($event.target as any).blur()"
+      />
     </div>
-    <div></div>
   </div>
-  <div style='height: 9px'></div>
-  <div class='toppanarea' tabindex='-1'>
-    <div style='margin: 0 3px'>
-      <AntdTooltip title='点击全选' placement='left'>
-        <a-button shape='circle' type='text' tabindex='-1' class='select all' title='Ctrl+A' @click='handleSelectAll'>
+  <div class="toppanarea" tabindex="-1">
+    <div style="margin: 0 3px">
+      <AntdTooltip title="点击全选" placement="left">
+        <a-button shape="circle" type="text" tabindex="-1" class="select all" title="Ctrl+A" @click="handleSelectAll">
           <IconFont :name="panfileStore.IsListSelectedAll ? 'iconrsuccess' : 'iconpic2'" />
         </a-button>
       </AntdTooltip>
     </div>
-    <div class='selectInfo'>{{ panfileStore.ListDataSelectCountInfo }}</div>
-    <div style='margin: 0 2px'>
-      <AntdTooltip placement='rightTop'
-                   v-if="panfileStore.SelectDirType !== 'video' && panfileStore.ListDataShow.length > 0">
-        <a-button shape='square' type='text' tabindex='-1' class='qujian'
-                  :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
+    <div class="selectInfo">{{ panfileStore.ListDataSelectCountInfo }}</div>
+    <div style="margin: 0 2px">
+      <AntdTooltip placement="rightTop" v-if="panfileStore.SelectDirType !== 'video' && panfileStore.ListDataShow.length > 0">
+        <a-button shape="square" type="text" tabindex="-1" class="qujian" :status="rangIsSelecting ? 'danger' : 'normal'" title="Ctrl+Q" @click="onSelectRangStart">
           {{ rangIsSelecting ? '取消选择' : '区间选择' }}
         </a-button>
         <template #title>
@@ -895,92 +819,78 @@ const onPanDragEnd = (ev: any) => {
           </div>
         </template>
       </AntdTooltip>
-      <a-button shape='square'
-                v-if='!rangIsSelecting && panfileStore.ListSelected.size > 0 && panfileStore.ListSelected.size < panfileStore.ListDataShow.length'
-                type='text'
-                tabindex='-1'
-                class='qujian'
-                status='normal' @click='onSelectReverse'>
+      <a-button shape="square" v-if="!rangIsSelecting && panfileStore.ListSelected.size > 0 && panfileStore.ListSelected.size < panfileStore.ListDataShow.length" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectReverse">
         反向选择
       </a-button>
-      <a-button shape='square' v-if='!rangIsSelecting && panfileStore.ListSelected.size > 0' type='text' tabindex='-1'
-                class='qujian'
-                status='normal' @click='onSelectCancel'>
-        取消已选
-      </a-button>
+      <a-button shape="square" v-if="!rangIsSelecting && panfileStore.ListSelected.size > 0" type="text" tabindex="-1" class="qujian" status="normal" @click="onSelectCancel">取消已选</a-button>
     </div>
-    <div style='flex-grow: 1'></div>
-    <div class='fileorder' v-if='!["pic", "video"].includes(panfileStore.SelectDirType)'>
-      <a-dropdown trigger='hover' position='bl' @select='(val:any)=>handleFileListOrder(val as string)'>
-        <a-button type='text' size='small' tabindex='-1' :disabled='panfileStore.ListLoading'>
+    <div style="flex-grow: 1"></div>
+    <div class="fileorder" v-if="!['pic', 'video'].includes(panfileStore.SelectDirType)">
+      <a-dropdown trigger="hover" position="bl" @select="(val: any) => handleFileListOrder(val as string)">
+        <a-button type="text" size="small" tabindex="-1" :disabled="panfileStore.ListLoading">
           <IconFont name="iconpaixu1" />
           {{ panfileStore.FileOrderDesc }}
           <IconFont name="icondown" />
         </a-button>
         <template #content>
-          <a-doption value='name asc'>
+          <a-doption value="name asc">
             <template #default>　名称 · 升序　</template>
           </a-doption>
-          <a-doption value='name desc'>
+          <a-doption value="name desc">
             <template #default>　名称 · 降序　</template>
           </a-doption>
-          <a-doption value='updated_at asc'>
+          <a-doption value="updated_at asc">
             <template #default>　时间 · 升序　</template>
           </a-doption>
-          <a-doption value='updated_at desc'>
+          <a-doption value="updated_at desc">
             <template #default>　时间 · 降序　</template>
           </a-doption>
-          <a-doption value='size asc'>
+          <a-doption value="size asc">
             <template #default>　大小 · 升序　</template>
           </a-doption>
-          <a-doption value='size desc'>
+          <a-doption value="size desc">
             <template #default>　大小 · 降序　</template>
           </a-doption>
         </template>
       </a-dropdown>
     </div>
     <div>
-      <AntdTooltip title='列表模式' placement='bottom'>
-        <a-button shape='square' type='text' tabindex='-1'
-                  :class="settingStore.uiFileListMode === 'list' ? 'select active' : 'select'"
-                  @click="() => handleListGridMode('list')">
+      <AntdTooltip title="列表模式" placement="bottom">
+        <a-button shape="square" type="text" tabindex="-1" :class="settingStore.uiFileListMode === 'list' ? 'select active' : 'select'" @click="() => handleListGridMode('list')">
           <IconFont name="iconliebiaomoshi" />
         </a-button>
       </AntdTooltip>
-      <AntdTooltip title='缩略图模式' placement='bottom'>
-        <a-button shape='square' type='text' tabindex='-1'
-                  :class="settingStore.uiFileListMode === 'image' ? 'select active' : 'select'"
-                  @click="() => handleListGridMode('image')">
+      <AntdTooltip title="缩略图模式" placement="bottom">
+        <a-button shape="square" type="text" tabindex="-1" :class="settingStore.uiFileListMode === 'image' ? 'select active' : 'select'" @click="() => handleListGridMode('image')">
           <IconFont name="iconxiaotumoshi" />
         </a-button>
       </AntdTooltip>
-      <AntdTooltip title='大图模式' placement='bottom'>
-        <a-button shape='square' type='text' tabindex='-1'
-                  :class="settingStore.uiFileListMode === 'bigimage' ? 'select active' : 'select'"
-                  @click="() => handleListGridMode('bigimage')">
+      <AntdTooltip title="大图模式" placement="bottom">
+        <a-button shape="square" type="text" tabindex="-1" :class="settingStore.uiFileListMode === 'bigimage' ? 'select active' : 'select'" @click="() => handleListGridMode('bigimage')">
           <IconFont name="iconsuoluetumoshi" />
         </a-button>
       </AntdTooltip>
     </div>
-    <div class='cell pr'></div>
+    <div class="cell pr"></div>
   </div>
   <div
-    id='panfilelist'
+    id="panfilelist"
     :class="'toppanlist' + (showDragUpload ? ' pandraging' : '') + (dragingRowItem ? ' draging' : '') + (rangIsSelecting ? ' ranging' : '')"
-    tabindex='-1'
-    :style='{ height: winStore.GetListHeight }'
-    @keydown.space.prevent='() => true'
-    @drop='onPanDrop'
-    @dragenter='onPanDragEnter'>
-    <a-skeleton v-if='panfileStore.ListLoading && panfileStore.ListDataCount == 0' :loading='true' :animation='true'>
-      <a-skeleton-line :rows='10' :line-height='50' :line-spacing='50' />
+    tabindex="-1"
+    :style="{ height: winStore.GetListHeight }"
+    @keydown.space.prevent="() => true"
+    @drop="onPanDrop"
+    @dragenter="onPanDragEnter"
+  >
+    <a-skeleton v-if="panfileStore.ListLoading && panfileStore.ListDataCount == 0" :loading="true" :animation="true">
+      <a-skeleton-line :rows="10" :line-height="50" :line-spacing="50" />
     </a-skeleton>
     <a-list
       v-else-if="settingStore.uiFileListMode === 'list'"
-      ref='viewlist'
-      :bordered='false'
-      :split='false'
-      :max-height='winStore.GetListHeightNumber'
+      ref="viewlist"
+      :bordered="false"
+      :split="false"
+      :max-height="winStore.GetListHeightNumber"
       :virtual-list-props="{
         height: winStore.GetListHeightNumber,
         fixedSize: true,
@@ -988,148 +898,146 @@ const onPanDragEnd = (ev: any) => {
         threshold: 1,
         itemKey: 'file_id'
       }"
-      style='width: 100%'
-      :data='panfileStore.ListDataShow'
-      tabindex='-1'
-      @scroll='handleListScroll'>
+      style="width: 100%"
+      :data="panfileStore.ListDataShow"
+      tabindex="-1"
+      @scroll="handleListScroll"
+    >
       <template #empty>
-        <a-empty description='空文件夹' />
+        <a-empty description="空文件夹" />
       </template>
-      <template #item='{ item, index }'>
-        <div :key="'l-' + item.file_id" class='listitemdiv'>
+      <template #item="{ item, index }">
+        <div :key="'l-' + item.file_id" class="listitemdiv">
           <div
-            v-if='item.isDir'
+            v-if="item.isDir"
             :class="'fileitem' + (panfileStore.ListSelected.has(item.file_id) ? ' selected' : '') + (panfileStore.ListFocusKey == item.file_id ? ' focus' : '')"
-            draggable='true'
-            @click='handleSelect(item.file_id, $event)'
-            @mouseover='onSelectRang(item.file_id)'
-            @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:item.file_id}} )'
-            @dragstart='(ev) => onRowItemDragStart(ev, item.file_id)'
-            @dragend='onRowItemDragEnd'
-            @drop='onRowItemDrop($event, item)'
-            @dragover='onRowItemDragOver'
-            @dragenter='onRowItemDragEnter'
-            @dragleave='onRowItemDragLeave'>
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
-              <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
-                        @click.prevent.stop='handleSelect(item.file_id, $event, true)'>
+            draggable="true"
+            @click="handleSelect(item.file_id, $event)"
+            @mouseover="onSelectRang(item.file_id)"
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.file_id } })"
+            @dragstart="(ev) => onRowItemDragStart(ev, item.file_id)"
+            @dragend="onRowItemDragEnd"
+            @drop="onRowItemDrop($event, item)"
+            @dragover="onRowItemDragOver"
+            @dragenter="onRowItemDragEnter"
+            @dragleave="onRowItemDragLeave"
+          >
+            <div :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.file_id, $event, true)">
                 <IconFont :name="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconcrown3' : 'iconrsuccess') : item.starred ? 'iconcrown' : 'iconpic2'" />
               </a-button>
             </div>
-            <div class='fileicon'>
-              <IconFont :name="item.icon" aria-hidden='true' />
+            <div class="fileicon">
+              <IconFont :name="item.icon" aria-hidden="true" />
             </div>
-            <div class='filename' droppable='false'>
-              <div @click='handleOpenFile($event, item)'>
+            <div class="filename" droppable="false">
+              <div @click="handleOpenFile($event, item)">
                 {{ item.name }}
               </div>
             </div>
-            <div class='filebtn'>
-              <template v-if='!item.album_id && item.description'>
-                <a-button v-if='!item.description.includes(",") && !item.description.includes("xbyEncrypt")'
-                          type='text' tabindex='-1' class='label' title='标记'>
-                  <IconFont name="iconwbiaoqian" :class='item.description' />
+            <div class="filebtn">
+              <template v-if="!item.album_id && item.description">
+                <a-button v-if="!item.description.includes(',') && !item.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="item.description" />
                 </a-button>
-                <a-button v-else-if='item.description.includes(",")' type='text' tabindex='-1' class='label'
-                          title='标记'>
-                  <IconFont name="iconwbiaoqian"
-                     :class='item.description.split(",").filter((v: string)=> !v.includes("xbyEncrypt")).join("")' />
+                <a-button v-else-if="item.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont
+                    name="iconwbiaoqian"
+                    :class="
+                      item.description
+                        .split(',')
+                        .filter((v: string) => !v.includes('xbyEncrypt'))
+                        .join('')
+                    "
+                  />
                 </a-button>
               </template>
-              <a-popover v-if='item.thumbnail && !item.description.includes("xbyEncrypt")'
-                         content-class='popimg' position='lt'>
-                <a-button type='text' tabindex='-1' class='gengduo' title='缩略图'>
+              <a-popover v-if="item.thumbnail && !item.description.includes('xbyEncrypt')" content-class="popimg" position="lt">
+                <a-button type="text" tabindex="-1" class="gengduo" title="缩略图">
                   <IconFont name="icongengduo" />
                 </a-button>
                 <template #content>
-                  <div class='preimg'>
-                    <img :src='item.thumbnail' onerror="javascript:this.src='imgerror.png';" />
+                  <div class="preimg">
+                    <img :src="item.thumbnail" onerror="javascript: this.src = 'imgerror.png'" />
                   </div>
                 </template>
               </a-popover>
-              <a-button v-if='item.description.includes("xbyEncrypt1")'
-                        type='text' tabindex='-1' class='label'
-                        title='加密文件'>
+              <a-button v-if="item.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                 <IconFont name="iconsafebox" style="color: grey" />
               </a-button>
-              <a-button v-else-if='item.description.includes("xbyEncrypt2")'
-                        type='text' tabindex='-1' class='label'
-                        title='私密文件'>
+              <a-button v-else-if="item.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                 <IconFont name="iconsafebox" style="color: pink" />
               </a-button>
-              <a-button v-else type='text' tabindex='-1' class='gengduo' disabled></a-button>
+              <a-button v-else type="text" tabindex="-1" class="gengduo" disabled></a-button>
             </div>
 
-            <div v-show='!item.album_id' class='filesize'>{{ item.sizeStr }}</div>
-            <div v-show='item.file_count' class='filesize'>{{ '文件数: ' + item.file_count }}</div>
-            <div class='filetime'>{{ item.timeStr }}</div>
+            <div v-show="!item.album_id" class="filesize">{{ item.sizeStr }}</div>
+            <div v-show="item.file_count" class="filesize">{{ '文件数: ' + item.file_count }}</div>
+            <div class="filetime">{{ item.timeStr }}</div>
           </div>
           <div
             v-else
             :class="'fileitem' + (panfileStore.ListSelected.has(item.file_id) ? ' selected' : '') + (panfileStore.ListFocusKey == item.file_id ? ' focus' : '')"
-            draggable='true'
-            @click='handleSelect(item.file_id, $event)'
-            @mouseover='onSelectRang(item.file_id)'
-            @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:item.file_id}} )'
-            @dragstart='(ev) => onRowItemDragStart(ev, item.file_id)'
-            @dragend='onRowItemDragEnd'>
-            <div
-              :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
-              <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
-                        @click.prevent.stop='handleSelect(item.file_id, $event, true)'>
+            draggable="true"
+            @click="handleSelect(item.file_id, $event)"
+            @mouseover="onSelectRang(item.file_id)"
+            @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: item.file_id } })"
+            @dragstart="(ev) => onRowItemDragStart(ev, item.file_id)"
+            @dragend="onRowItemDragEnd"
+          >
+            <div :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
+              <a-button shape="circle" type="text" tabindex="-1" class="select" :title="index" @click.prevent.stop="handleSelect(item.file_id, $event, true)">
                 <IconFont :name="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconcrown3' : 'iconrsuccess') : item.starred ? 'iconcrown' : 'iconpic2'" />
               </a-button>
             </div>
-            <div class='fileicon'
-                 :title="item.icon == 'iconweifa' ? '违规': item.icon == 'iconweixiang' ? '禁止分享': ''">
-              <IconFont :name="item.icon" aria-hidden='true' />
+            <div class="fileicon" :title="item.icon == 'iconweifa' ? '违规' : item.icon == 'iconweixiang' ? '禁止分享' : ''">
+              <IconFont :name="item.icon" aria-hidden="true" />
             </div>
-            <div class='filename' droppable='false'>
-              <div @click='handleOpenFile($event, item)'>
+            <div class="filename" droppable="false">
+              <div @click="handleOpenFile($event, item)">
                 {{ item.name }}
               </div>
             </div>
-            <div class='filebtn'>
-              <template v-if='!item.album_id && item.description'>
-                <a-button v-if='!item.description.includes(",") && !item.description.includes("xbyEncrypt")'
-                          type='text' tabindex='-1' class='label' title='标记'>
-                  <IconFont name="iconwbiaoqian" :class='item.description' />
+            <div class="filebtn">
+              <template v-if="!item.album_id && item.description">
+                <a-button v-if="!item.description.includes(',') && !item.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="item.description" />
                 </a-button>
-                <a-button v-else-if='item.description.includes(",")' type='text' tabindex='-1' class='label'
-                          title='标记'>
-                  <IconFont name="iconwbiaoqian"
-                     :class='item.description.split(",").filter((v: string)=> !v.includes("xbyEncrypt")).join("")' />
+                <a-button v-else-if="item.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont
+                    name="iconwbiaoqian"
+                    :class="
+                      item.description
+                        .split(',')
+                        .filter((v: string) => !v.includes('xbyEncrypt'))
+                        .join('')
+                    "
+                  />
                 </a-button>
               </template>
-              <a-popover v-if='item.thumbnail && !item.description.includes("xbyEncrypt")' content-class='popimg'
-                         position='lt'>
-                <a-button type='text' tabindex='-1' class='gengduo'>
+              <a-popover v-if="item.thumbnail && !item.description.includes('xbyEncrypt')" content-class="popimg" position="lt">
+                <a-button type="text" tabindex="-1" class="gengduo">
                   <IconFont name="icontupianyulan" />
                 </a-button>
                 <template #content>
-                  <div class='preimg'>
-                    <img :src='item.thumbnail' onerror="javascript:this.src='imgerror.png';" />
+                  <div class="preimg">
+                    <img :src="item.thumbnail" onerror="javascript: this.src = 'imgerror.png'" />
                   </div>
                 </template>
               </a-popover>
-              <a-button v-if='item.description.includes("xbyEncrypt1")'
-                        type='text' tabindex='-1' class='label'
-                        title='加密文件'>
+              <a-button v-if="item.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                 <IconFont name="iconsafebox" style="color: grey" />
               </a-button>
-              <a-button v-else-if='item.description.includes("xbyEncrypt2")'
-                        type='text' tabindex='-1' class='label'
-                        title='私密文件'>
+              <a-button v-else-if="item.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                 <IconFont name="iconsafebox" style="color: pink" />
               </a-button>
-              <a-button v-if="false" type='text' tabindex='-1' class='gengduo' disabled></a-button>
+              <a-button v-if="false" type="text" tabindex="-1" class="gengduo" disabled></a-button>
             </div>
-            <div class='filesize'>
+            <div class="filesize">
               {{ item.sizeStr }}
             </div>
-            <div class='filetime'>{{ item.timeStr }}</div>
-            <div class='filesize' v-show="item.media_duration || item.media_play_cursor">
+            <div class="filetime">{{ item.timeStr }}</div>
+            <div class="filesize" v-show="item.media_duration || item.media_play_cursor">
               <span>{{ '总时:' + (item.media_duration || '未知时长') }}</span>
               <span>{{ '观看:' + (item.media_play_cursor || '未知状态') }}</span>
               <span>{{ item.media_width > 0 ? item.media_width + 'x' + item.media_height : '' }}</span>
@@ -1141,10 +1049,10 @@ const onPanDragEnd = (ev: any) => {
 
     <a-list
       v-else-if="settingStore.uiFileListMode === 'image'"
-      ref='viewlist'
-      :bordered='false'
-      :split='false'
-      :max-height='winStore.GetListHeightNumber'
+      ref="viewlist"
+      :bordered="false"
+      :split="false"
+      :max-height="winStore.GetListHeightNumber"
       :virtual-list-props="{
         height: winStore.GetListHeightNumber,
         fixedSize: true,
@@ -1153,78 +1061,84 @@ const onPanDragEnd = (ev: any) => {
         itemKey: 'file_id',
         buffer: 5
       }"
-      style='width: 100%'
-      :data='panfileStore.ListDataGrid'
-      tabindex='-1'
-      @scroll='handleListScroll'>
+      style="width: 100%"
+      :data="panfileStore.ListDataGrid"
+      tabindex="-1"
+      @scroll="handleListScroll"
+    >
       <template #empty>
-        <a-empty description='空文件夹' />
+        <a-empty description="空文件夹" />
       </template>
-      <template #item='{ item, index }'>
-        <div :key="'g-' + item.file_id" class='listitemdiv'>
-          <div class='gridrow' :style="{ gridTemplateColumns: 'repeat(' + listGridColumn + ', 150px)' }">
-            <template v-for='(grid, gindex) in item.files' :key='grid.file_id'>
+      <template #item="{ item, index }">
+        <div :key="'g-' + item.file_id" class="listitemdiv">
+          <div class="gridrow" :style="{ gridTemplateColumns: 'repeat(' + listGridColumn + ', 150px)' }">
+            <template v-for="(grid, gindex) in item.files" :key="grid.file_id">
               <div
-                v-if='grid.isDir'
+                v-if="grid.isDir"
                 :class="'griditem ' + settingStore.uiFileListMode + ' ' + (panfileStore.ListSelected.has(grid.file_id) ? ' selected' : '') + (panfileStore.ListFocusKey == grid.file_id ? ' focus' : '')"
-                draggable='true'
-                @click='handleSelect(grid.file_id, $event)'
-                @mouseover='() => onSelectRang(grid.file_id)'
-                @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:grid.file_id}} )'
-                @dragstart='(ev) => onRowItemDragStart(ev, grid.file_id)'
-                @dragend='onRowItemDragEnd'
-                @drop='onRowItemDrop($event, grid.file_id)'
-                @dragover='onRowItemDragOver'
-                @dragenter='onRowItemDragEnter'
-                @dragleave='onRowItemDragLeave'>
-                <div class='gridicon'>
-                  <IconFont :name="grid.icon" aria-hidden='true' role='img' />
+                draggable="true"
+                @click="handleSelect(grid.file_id, $event)"
+                @mouseover="() => onSelectRang(grid.file_id)"
+                @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: grid.file_id } })"
+                @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
+                @dragend="onRowItemDragEnd"
+                @drop="onRowItemDrop($event, grid.file_id)"
+                @dragover="onRowItemDragOver"
+                @dragenter="onRowItemDragEnter"
+                @dragleave="onRowItemDragLeave"
+              >
+                <div class="gridicon">
+                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
-                <div class='gridicon'>
-                  <img v-if='grid.thumbnail' :src='grid.thumbnail'
-                       @error="(e) => {(e.currentTarget! as any).style.display = 'none'}" />
+                <div class="gridicon">
+                  <img
+                    v-if="grid.thumbnail"
+                    :src="grid.thumbnail"
+                    @error="
+                      (e) => {
+                        ;(e.currentTarget! as any).style.display = 'none'
+                      }
+                    "
+                  />
                 </div>
-                <div class='gridicon'>
-                  <span v-if="grid.category.startsWith('video')" class='playicon' @click='handleOpenFile($event, grid)'>
-                    <svg viewBox='0 0 1024 1024'>
-                      <path
-                        d='M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z'></path>
+                <div class="gridicon">
+                  <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
+                    <svg viewBox="0 0 1024 1024">
+                      <path d="M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z"></path>
                     </svg>
                   </span>
                   <span v-else></span>
                 </div>
-                <div class='gridname'>
-                  <div :title="grid.sizeStr + ' ' + grid.name" @click='handleOpenFile($event, grid)'>
+                <div class="gridname">
+                  <div :title="grid.sizeStr + ' ' + grid.name" @click="handleOpenFile($event, grid)">
                     {{ grid.name }}
                   </div>
                 </div>
-                <div class='gridinfo'>{{ grid.timeStr }}</div>
-                <div
-                  :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
-                  <a-button shape='circle' type='text' tabindex='-1' class='select'
-                            :title='(index * listGridColumn + gindex).toString()'
-                            @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
+                <div class="gridinfo">{{ grid.timeStr }}</div>
+                <div :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
+                  <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if='!grid.album_id && grid.description'>
-                    <a-button v-if='!grid.description.includes(",") && !grid.description.includes("xbyEncrypt")'
-                              type='text' tabindex='-1' class='label' title='标记'>
-                      <IconFont name="iconwbiaoqian" :class='grid.description' />
+                  <template v-if="!grid.album_id && grid.description">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
-                    <a-button v-else-if='grid.description.includes(",")' type='text' tabindex='-1' class='label'
-                              title='标记'>
-                      <IconFont name="iconwbiaoqian"
-                         :class='grid.description.split(",").filter((v: string)=> !v.includes("xbyEncrypt")).join("")' />
+                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont
+                        name="iconwbiaoqian"
+                        :class="
+                          grid.description
+                            .split(',')
+                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .join('')
+                        "
+                      />
                     </a-button>
                   </template>
-                  <a-button v-if='grid.description.includes("xbyEncrypt1")'
-                            type='text' tabindex='-1' class='label'
-                            title='加密文件'>
+                  <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
-                  <a-button v-else-if='grid.description.includes("xbyEncrypt2")'
-                            type='text' tabindex='-1' class='label'
-                            title='私密文件'>
+                  <a-button v-else-if="grid.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                     <IconFont name="iconsafebox" style="color: pink" />
                   </a-button>
                 </div>
@@ -1232,60 +1146,65 @@ const onPanDragEnd = (ev: any) => {
               <div
                 v-else
                 :class="'griditem ' + settingStore.uiFileListMode + ' ' + (panfileStore.ListSelected.has(grid.file_id) ? ' selected' : '') + (panfileStore.ListFocusKey == grid.file_id ? ' focus' : '')"
-                draggable='true'
-                @click='handleSelect(grid.file_id, $event)'
-                @mouseover='() => onSelectRang(grid.file_id)'
-                @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:grid.file_id}} )'
-                @dragstart='(ev) => onRowItemDragStart(ev, grid.file_id)'
-                @dragend='onRowItemDragEnd'>
-                <div class='gridicon'>
-                  <IconFont :name="grid.icon" aria-hidden='true' role='img' />
+                draggable="true"
+                @click="handleSelect(grid.file_id, $event)"
+                @mouseover="() => onSelectRang(grid.file_id)"
+                @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: grid.file_id } })"
+                @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
+                @dragend="onRowItemDragEnd"
+              >
+                <div class="gridicon">
+                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
-                <div class='gridicon'>
-                  <img v-if='grid.thumbnail' :src='grid.thumbnail'
-                       @error="(e) => {(e.currentTarget! as any).style.display = 'none'}" />
+                <div class="gridicon">
+                  <img
+                    v-if="grid.thumbnail"
+                    :src="grid.thumbnail"
+                    @error="
+                      (e) => {
+                        ;(e.currentTarget! as any).style.display = 'none'
+                      }
+                    "
+                  />
                 </div>
-                <div class='gridicon'>
-                  <span v-if="grid.category.startsWith('video')" class='playicon' @click='handleOpenFile($event, grid)'>
-                    <svg viewBox='0 0 1024 1024'>
-                      <path
-                        d='M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z'></path>
+                <div class="gridicon">
+                  <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
+                    <svg viewBox="0 0 1024 1024">
+                      <path d="M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z"></path>
                     </svg>
                   </span>
                   <span v-else></span>
                 </div>
-                <div class='gridname'>
-                  <div :title="grid.sizeStr + ' ' + grid.name" @click='handleOpenFile($event, grid)'>
+                <div class="gridname">
+                  <div :title="grid.sizeStr + ' ' + grid.name" @click="handleOpenFile($event, grid)">
                     {{ grid.name }}
                   </div>
                 </div>
-                <div class='gridinfo'>{{ grid.timeStr }}</div>
-                <div
-                  :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
-                  <a-button shape='circle' type='text' tabindex='-1' class='select'
-                            :title='(index * listGridColumn + gindex).toString()'
-                            @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
+                <div class="gridinfo">{{ grid.timeStr }}</div>
+                <div :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
+                  <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if='!grid.album_id && grid.description'>
-                    <a-button v-if='!grid.description.includes(",") && !grid.description.includes("xbyEncrypt")'
-                              type='text' tabindex='-1' class='label' title='标记'>
-                      <IconFont name="iconwbiaoqian" :class='grid.description' />
+                  <template v-if="!grid.album_id && grid.description">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
-                    <a-button v-else-if='grid.description.includes(",")' type='text' tabindex='-1' class='label'
-                              title='标记'>
-                      <IconFont name="iconwbiaoqian"
-                         :class='grid.description.split(",").filter((v: string)=> !v.includes("xbyEncrypt")).join("")' />
+                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont
+                        name="iconwbiaoqian"
+                        :class="
+                          grid.description
+                            .split(',')
+                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .join('')
+                        "
+                      />
                     </a-button>
                   </template>
-                  <a-button v-if='grid.description.includes("xbyEncrypt1")'
-                            type='text' tabindex='-1' class='label'
-                            title='加密文件'>
+                  <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
-                  <a-button v-else-if='grid.description.includes("xbyEncrypt2")'
-                            type='text' tabindex='-1' class='label'
-                            title='私密文件'>
+                  <a-button v-else-if="grid.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                     <IconFont name="iconsafebox" style="color: pink" />
                   </a-button>
                 </div>
@@ -1298,10 +1217,10 @@ const onPanDragEnd = (ev: any) => {
 
     <a-list
       v-else
-      ref='viewlist'
-      :bordered='false'
-      :split='false'
-      :max-height='winStore.GetListHeightNumber'
+      ref="viewlist"
+      :bordered="false"
+      :split="false"
+      :max-height="winStore.GetListHeightNumber"
       :virtual-list-props="{
         height: winStore.GetListHeightNumber,
         fixedSize: true,
@@ -1310,78 +1229,84 @@ const onPanDragEnd = (ev: any) => {
         itemKey: 'file_id',
         buffer: 5
       }"
-      style='width: 100%'
-      :data='panfileStore.ListDataGrid'
-      tabindex='-1'
-      @scroll='handleListScroll'>
+      style="width: 100%"
+      :data="panfileStore.ListDataGrid"
+      tabindex="-1"
+      @scroll="handleListScroll"
+    >
       <template #empty>
-        <a-empty description='空文件夹' />
+        <a-empty description="空文件夹" />
       </template>
-      <template #item='{ item, index }'>
-        <div :key="'g-' + item.file_id" class='listitemdiv'>
-          <div class='gridrow' :style="{ gridTemplateColumns: 'repeat(' + listGridColumn + ', 200px)' }">
-            <template v-for='(grid, gindex) in item.files' :key='grid.file_id'>
+      <template #item="{ item, index }">
+        <div :key="'g-' + item.file_id" class="listitemdiv">
+          <div class="gridrow" :style="{ gridTemplateColumns: 'repeat(' + listGridColumn + ', 200px)' }">
+            <template v-for="(grid, gindex) in item.files" :key="grid.file_id">
               <div
-                v-if='grid.isDir'
+                v-if="grid.isDir"
                 :class="'griditem ' + settingStore.uiFileListMode + ' ' + (panfileStore.ListSelected.has(grid.file_id) ? ' selected' : '') + (panfileStore.ListFocusKey == grid.file_id ? ' focus' : '')"
-                draggable='true'
-                @click='handleSelect(grid.file_id, $event)'
-                @mouseover='onSelectRang(grid.file_id)'
-                @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:grid.file_id}} )'
-                @dragstart='(ev) => onRowItemDragStart(ev, grid.file_id)'
-                @dragend='onRowItemDragEnd'
-                @drop='onRowItemDrop($event, grid.file_id)'
-                @dragover='onRowItemDragOver'
-                @dragenter='onRowItemDragEnter'
-                @dragleave='onRowItemDragLeave'>
-                <div class='gridicon'>
-                  <IconFont :name="grid.icon" aria-hidden='true' role='img' />
+                draggable="true"
+                @click="handleSelect(grid.file_id, $event)"
+                @mouseover="onSelectRang(grid.file_id)"
+                @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: grid.file_id } })"
+                @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
+                @dragend="onRowItemDragEnd"
+                @drop="onRowItemDrop($event, grid.file_id)"
+                @dragover="onRowItemDragOver"
+                @dragenter="onRowItemDragEnter"
+                @dragleave="onRowItemDragLeave"
+              >
+                <div class="gridicon">
+                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
-                <div class='gridicon'>
-                  <img v-if='grid.thumbnail' :src='grid.thumbnail'
-                       @error="(e) => {(e.currentTarget! as any).style.display = 'none'}" />
+                <div class="gridicon">
+                  <img
+                    v-if="grid.thumbnail"
+                    :src="grid.thumbnail"
+                    @error="
+                      (e) => {
+                        ;(e.currentTarget! as any).style.display = 'none'
+                      }
+                    "
+                  />
                 </div>
-                <div class='gridicon'>
-                  <span v-if="grid.category.startsWith('video')" class='playicon' @click='handleOpenFile($event, grid)'>
-                    <svg viewBox='0 0 1024 1024'>
-                      <path
-                        d='M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z'></path>
+                <div class="gridicon">
+                  <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
+                    <svg viewBox="0 0 1024 1024">
+                      <path d="M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z"></path>
                     </svg>
                   </span>
                   <span v-else></span>
                 </div>
-                <div class='gridname'>
-                  <div :title="grid.sizeStr + ' ' + grid.name" @click='handleOpenFile($event, grid)'>
+                <div class="gridname">
+                  <div :title="grid.sizeStr + ' ' + grid.name" @click="handleOpenFile($event, grid)">
                     {{ grid.name }}
                   </div>
                 </div>
-                <div class='gridinfo'>{{ grid.timeStr }}</div>
-                <div
-                  :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
-                  <a-button shape='circle' type='text' tabindex='-1' class='select'
-                            :title='(index * listGridColumn + gindex).toString()'
-                            @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
+                <div class="gridinfo">{{ grid.timeStr }}</div>
+                <div :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
+                  <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if='!grid.album_id && grid.description'>
-                    <a-button v-if='!grid.description.includes(",") && !grid.description.includes("xbyEncrypt")'
-                              type='text' tabindex='-1' class='label' title='标记'>
-                      <IconFont name="iconwbiaoqian" :class='grid.description' />
+                  <template v-if="!grid.album_id && grid.description">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
-                    <a-button v-else-if='grid.description.includes(",")' type='text' tabindex='-1' class='label'
-                              title='标记'>
-                      <IconFont name="iconwbiaoqian"
-                         :class='grid.description.split(",").filter((v: string)=> !v.includes("xbyEncrypt")).join("")' />
+                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont
+                        name="iconwbiaoqian"
+                        :class="
+                          grid.description
+                            .split(',')
+                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .join('')
+                        "
+                      />
                     </a-button>
                   </template>
-                  <a-button v-if='grid.description.includes("xbyEncrypt1")'
-                            type='text' tabindex='-1' class='label'
-                            title='加密文件'>
+                  <a-button v-if="grid.description.includes('xbyEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
-                  <a-button v-else-if='grid.description.includes("xbyEncrypt2")'
-                            type='text' tabindex='-1' class='label'
-                            title='私密文件'>
+                  <a-button v-else-if="grid.description.includes('xbyEncrypt2')" type="text" tabindex="-1" class="label" title="私密文件">
                     <IconFont name="iconsafebox" style="color: pink" />
                   </a-button>
                 </div>
@@ -1389,57 +1314,65 @@ const onPanDragEnd = (ev: any) => {
               <div
                 v-else
                 :class="'griditem ' + settingStore.uiFileListMode + ' ' + (panfileStore.ListSelected.has(grid.file_id) ? ' selected' : '') + (panfileStore.ListFocusKey == grid.file_id ? ' focus' : '')"
-                draggable='true'
-                @click='handleSelect(grid.file_id, $event)'
-                @mouseover='() => onSelectRang(grid.file_id)'
-                @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:grid.file_id}} )'
-                @dragstart='(ev) => onRowItemDragStart(ev, grid.file_id)'
-                @dragend='onRowItemDragEnd'>
-                <div class='gridicon'>
-                  <IconFont :name="grid.icon" aria-hidden='true' role='img' />
+                draggable="true"
+                @click="handleSelect(grid.file_id, $event)"
+                @mouseover="() => onSelectRang(grid.file_id)"
+                @contextmenu="(event: MouseEvent) => handleRightClick({ event, node: { key: grid.file_id } })"
+                @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
+                @dragend="onRowItemDragEnd"
+              >
+                <div class="gridicon">
+                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
                 </div>
-                <div class='gridicon'>
-                  <img v-if='grid.thumbnail' :src='grid.thumbnail'
-                       @error="(e) => {(e.currentTarget! as any).style.display = 'none'}" />
+                <div class="gridicon">
+                  <img
+                    v-if="grid.thumbnail"
+                    :src="grid.thumbnail"
+                    @error="
+                      (e) => {
+                        ;(e.currentTarget! as any).style.display = 'none'
+                      }
+                    "
+                  />
                 </div>
-                <div class='gridicon'>
-                  <span v-if="grid.category.startsWith('video')" class='playicon' @click='handleOpenFile($event, grid)'>
-                    <svg viewBox='0 0 1024 1024'>
-                      <path
-                        d='M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z'></path>
+                <div class="gridicon">
+                  <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
+                    <svg viewBox="0 0 1024 1024">
+                      <path d="M689.066667 480l-196.266667-177.066667c-27.733333-25.6-70.4-6.4-70.4 32v356.266667c0 36.266667 44.8 55.466667 70.4 32l196.266667-177.066667c17.066667-19.2 17.066667-49.066667 0-66.133333z"></path>
                     </svg>
                   </span>
                   <span v-else></span>
                 </div>
 
-                <div class='gridname'>
-                  <div :title="grid.sizeStr + ' ' + grid.name" @click='handleOpenFile($event, grid)'>
+                <div class="gridname">
+                  <div :title="grid.sizeStr + ' ' + grid.name" @click="handleOpenFile($event, grid)">
                     {{ grid.name }}
                   </div>
                 </div>
 
-                <div class='gridinfo'>{{ grid.timeStr }}</div>
+                <div class="gridinfo">{{ grid.timeStr }}</div>
 
-                <div
-                  :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
-                  <a-button shape='circle' type='text' tabindex='-1' class='select'
-                            :title='(index * listGridColumn + gindex).toString()'
-                            @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
+                <div :class="'rangselect ' + (rangSelectFiles[grid.file_id] ? (rangSelectStart == grid.file_id ? 'rangstart' : rangSelectEnd == grid.file_id ? 'rangend' : 'rang') : '')">
+                  <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if='!grid.album_id && grid.description'>
-                    <a-button v-if='!grid.description.includes(",") && !grid.description.includes("xbyEncrypt")'
-                              type='text' tabindex='-1' class='label' title='标记'>
-                      <IconFont name="iconwbiaoqian" :class='grid.description' />
+                  <template v-if="!grid.album_id && grid.description">
+                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont name="iconwbiaoqian" :class="grid.description" />
                     </a-button>
-                    <a-button v-else-if='grid.description.includes(",")' type='text' tabindex='-1' class='label'
-                              title='标记'>
-                      <IconFont name="iconwbiaoqian"
-                         :class='grid.description.split(",").filter((v: string)=> !v.includes("xbyEncrypt")).join("")' />
+                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
+                      <IconFont
+                        name="iconwbiaoqian"
+                        :class="
+                          grid.description
+                            .split(',')
+                            .filter((v: string) => !v.includes('xbyEncrypt'))
+                            .join('')
+                        "
+                      />
                     </a-button>
                   </template>
-                  <a-button v-if='grid.description.includes("xbyEncrypt")' type='text' tabindex='-1' class='label'
-                            title='加密文件'>
+                  <a-button v-if="grid.description.includes('xbyEncrypt')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
                 </div>
@@ -1450,27 +1383,26 @@ const onPanDragEnd = (ev: any) => {
       </template>
     </a-list>
 
-    <FileRightMenu :dirtype='panfileStore.SelectDirType'
-                   :isvideo='menuShowVideo'
-                   :isselected='panfileStore.IsListSelected'
-                   :isselectedmulti='panfileStore.IsListSelectedMulti'
-                   :inputselectType='inputselectType'
-                   :inputpicType='inputpicType'
-                   :isallfavored='panfileStore.IsListSelectedFavAll' />
-    <TrashRightMenu :dirtype='panfileStore.SelectDirType' />
+    <FileRightMenu
+      :dirtype="panfileStore.SelectDirType"
+      :isvideo="menuShowVideo"
+      :isselected="panfileStore.IsListSelected"
+      :isselectedmulti="panfileStore.IsListSelectedMulti"
+      :inputselectType="inputselectType"
+      :inputpicType="inputpicType"
+      :isallfavored="panfileStore.IsListSelectedFavAll"
+    />
+    <TrashRightMenu :dirtype="panfileStore.SelectDirType" />
   </div>
 
-  <div id='PanRightShowUpload' :style="{ display: showDragUpload ? '' : 'none' }" @drop='onPanDrop'
-       @dragover='onPanDragOver' @dragleave='onPanDragLeave' @dragend='onPanDragEnd'>
-    <div class='ShowUpload'>
-      <IconFont name="iconyouxian" style='font-size: 64px' />
-      <div class='ShowUploadTitle'>
-        <span class='link'>上传到：{{ panfileStore.DirName }}</span>
+  <div id="PanRightShowUpload" :style="{ display: showDragUpload ? '' : 'none' }" @drop="onPanDrop" @dragover="onPanDragOver" @dragleave="onPanDragLeave" @dragend="onPanDragEnd">
+    <div class="ShowUpload">
+      <IconFont name="iconyouxian" style="font-size: 64px" />
+      <div class="ShowUploadTitle">
+        <span class="link">上传到：{{ panfileStore.DirName }}</span>
       </div>
     </div>
   </div>
-
-
 </template>
 
 <style>

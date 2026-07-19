@@ -4,7 +4,6 @@ import type { KeyboardState } from './keyboardstore'
 import useKeyboardStore from './keyboardstore'
 import type { MouseState } from './mousestore'
 import useMouseStore from './mousestore'
-import useLogStore from './logstore'
 import type { ModalState } from './modalstore'
 import useModalStore from './modalstore'
 import type { WinState } from './winstore'
@@ -41,7 +40,6 @@ const pinia = createPinia()
 export {
   useAppStore,
   useSettingStore,
-  useLogStore,
   useModalStore,
   ModalState,
   useWinStore,

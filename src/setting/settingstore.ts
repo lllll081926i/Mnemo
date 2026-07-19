@@ -177,6 +177,9 @@ export interface SettingState {
   debugFolderSizeCacheHour: number
   debugProxyHost: string
   debugProxyPort: string
+  debugLogEnabled: boolean
+  debugLogLevel: 'debug' | 'info' | 'warn' | 'error'
+  debugLogMaxSizeMB: number
   // 自动填写 分享链接提取码
   yinsiLinkPassword: boolean
   yinsiZipPassword: boolean
@@ -369,6 +372,9 @@ const setting: SettingState = {
   debugFolderSizeCacheHour: 72,
   debugProxyHost: '127.0.0.1',
   debugProxyPort: '6666',
+  debugLogEnabled: true,
+  debugLogLevel: 'info',
+  debugLogMaxSizeMB: 5,
   // 自动填写 分享链接提取码
   yinsiLinkPassword: false,
   yinsiZipPassword: false,
@@ -576,6 +582,9 @@ function _loadSetting(val: any) {
   // Migrate the historical default so media playback can reach the local proxy.
   const debugProxyPort = defaultString(val.debugProxyPort, '18888')
   setting.debugProxyPort = debugProxyPort === '6666' ? '18888' : debugProxyPort
+  setting.debugLogEnabled = defaultBool(val.debugLogEnabled, true)
+  setting.debugLogLevel = defaultValue(val.debugLogLevel, ['info', 'debug', 'warn', 'error'])
+  setting.debugLogMaxSizeMB = defaultNumberSub(val.debugLogMaxSizeMB, 5, 1, 100)
   // 自动填写 分享链接提取码
   setting.yinsiLinkPassword = defaultBool(val.yinsiLinkPassword, false)
   setting.yinsiZipPassword = defaultBool(val.yinsiZipPassword, false)
@@ -631,6 +640,7 @@ export function LoadSetting() {
   } catch {
     SaveSetting()
   }
+  DebugLog.configure({ enabled: setting.debugLogEnabled, level: setting.debugLogLevel, maxSizeMB: setting.debugLogMaxSizeMB })
   return setting
 }
 
@@ -695,6 +705,9 @@ const useSettingStore = defineStore('setting', {
           .replace('mm-dd', 'MM-dd').replace('HH-MM', 'HH-mm')
       }
       this.$patch(partial)
+      if (Object.hasOwn(partial, 'debugLogEnabled') || Object.hasOwn(partial, 'debugLogLevel') || Object.hasOwn(partial, 'debugLogMaxSizeMB')) {
+        DebugLog.configure({ enabled: this.debugLogEnabled, level: this.debugLogLevel, maxSizeMB: this.debugLogMaxSizeMB })
+      }
       if (Object.hasOwn(partial, 'uiLaunchStart')) {
         window.WebToElectron({ cmd: { launchStart: this.uiLaunchStart, launchStartShow: this.uiLaunchStartShow } })
       }
