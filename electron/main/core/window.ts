@@ -136,7 +136,6 @@ export function createMainWindow() {
     if (is.linux()) {
       AppWindow.mainWindow!.show()
     }
-    creatUploadPort()
     creatDownloadPort()
   })
 
@@ -146,7 +145,6 @@ export function createMainWindow() {
     }
   })
 
-  createUpload()
   createDownload()
 }
 
@@ -423,6 +421,14 @@ function creatUploadPort() {
   }, 1000)
 }
 
+ipcMain.on('ensureUploadWorker', () => {
+  createUpload()
+})
+
+ipcMain.on('uploadWorkerReady', (event) => {
+  if (event.sender === AppWindow.uploadWindow?.webContents) creatUploadPort()
+})
+
 function creatDownloadPort() {
   debounceDownload(function () {
     if (AppWindow.mainWindow && AppWindow.downloadWindow && AppWindow.downloadWindow.isDestroyed() == false) {
@@ -438,13 +444,13 @@ function createUpload() {
   AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false, false)
 
   AppWindow.uploadWindow.on('ready-to-show', function () {
-    creatUploadPort()
     AppWindow.uploadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'upload' } })
     AppWindow.uploadWindow!.setTitle('mnemo上传进程')
   })
 
   AppWindow.uploadWindow.webContents.on('render-process-gone', function (event, details) {
     if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed' || details.reason == 'integrity-failure') {
+      AppWindow.mainWindow?.webContents.send('clearUploadPort')
       try {
         AppWindow.uploadWindow?.destroy()
       } catch {}

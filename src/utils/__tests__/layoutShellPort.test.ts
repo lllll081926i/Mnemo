@@ -354,6 +354,22 @@ describe('deep layout shell port', () => {
     expect(windowSource).toContain("createElectronWindow(10, 10, false, 'main', 'dark', false, false)")
   })
 
+  it('starts the upload worker only when a message needs it and preserves the first message', () => {
+    const windowSource = read('electron/main/core/window.ts')
+    const rendererEntry = read('src/main.ts')
+
+    expect(windowSource).toContain("ipcMain.on('ensureUploadWorker', () => {")
+    expect(windowSource).toContain("ipcMain.on('uploadWorkerReady', (event) => {")
+    expect(windowSource).toContain("AppWindow.mainWindow?.webContents.send('clearUploadPort')")
+    expect(windowSource).not.toContain('  createUpload()\n  createDownload()')
+    expect(windowSource).not.toContain('    creatUploadPort()\n    creatDownloadPort()')
+    expect(rendererEntry).toContain('const pendingUploadMessages: any[] = []')
+    expect(rendererEntry).toContain("window.Electron.ipcRenderer.send('ensureUploadWorker')")
+    expect(rendererEntry).toContain('flushPendingUploadMessages()')
+    expect(rendererEntry).toContain("window.Electron.ipcRenderer.on('clearUploadPort'")
+    expect(read('src/workerpage/workercmd.ts')).toContain("window.Electron.ipcRenderer.send('uploadWorkerReady')")
+  })
+
   it('starts the packaged window without global TLS bypasses or remote icon fonts', () => {
     const launch = read('electron/main/launch.ts')
     const windowSource = read('electron/main/core/window.ts')

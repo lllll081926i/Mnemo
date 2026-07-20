@@ -78,8 +78,23 @@ app.mount('#app')
 window.WinMsgToMain = function (event: any) {
   if (window.MainPort) window.MainPort.postMessage(event)
 }
+const pendingUploadMessages: any[] = []
+
+function flushPendingUploadMessages() {
+  if (!window.UploadPort || pendingUploadMessages.length === 0) return
+  const messages = pendingUploadMessages.splice(0, pendingUploadMessages.length)
+  for (const messageToSend of messages) {
+    window.UploadPort.postMessage(messageToSend)
+  }
+}
+
 window.WinMsgToUpload = function (event: any) {
-  if (window.UploadPort) window.UploadPort.postMessage(event)
+  if (window.UploadPort) {
+    window.UploadPort.postMessage(event)
+    return
+  }
+  pendingUploadMessages.push(event)
+  window.Electron.ipcRenderer.send('ensureUploadWorker')
 }
 window.WinMsgToDownload = function (event: any) {
   if (window.DownloadPort) window.DownloadPort.postMessage(event)
@@ -106,6 +121,10 @@ window.Electron.ipcRenderer.on('setUploadPort', (_event: any, args: any) => {
       } catch {}
     })
   }
+  flushPendingUploadMessages()
+})
+window.Electron.ipcRenderer.on('clearUploadPort', () => {
+  window.UploadPort = undefined
 })
 window.Electron.ipcRenderer.on('setDownloadPort', (_event: any, args: any) => {
   const [port] = _event.ports
