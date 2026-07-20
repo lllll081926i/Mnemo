@@ -3,7 +3,8 @@ import path from 'path'
 import { describe, expect, it } from 'vitest'
 
 const root = process.cwd()
-const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8')
+// Normalize CRLF so multi-line toContain expectations pass on Windows CI checkouts.
+const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n')
 
 describe('deep layout shell port', () => {
   it('loads the Aliyun Office SDK only inside the Office preview window', () => {
@@ -341,6 +342,16 @@ describe('deep layout shell port', () => {
     expect(loginSource).toContain('cleanupAliyunLoginWebview()')
     expect(loginSource).not.toContain('webview.stop()')
     expect(loginSource).not.toContain('unmount-on-close')
+  })
+
+  it('keeps background execution only for the hidden transfer workers', () => {
+    const launch = read('electron/main/launch.ts')
+    const windowSource = read('electron/main/core/window.ts')
+
+    expect(launch).not.toContain("appendSwitch('disable-renderer-backgrounding')")
+    expect(windowSource).toContain('backgroundThrottling: boolean = true')
+    expect(windowSource).toContain('backgroundThrottling,')
+    expect(windowSource).toContain("createElectronWindow(10, 10, false, 'main', 'dark', false, false)")
   })
 
   it('starts the packaged window without global TLS bypasses or remote icon fonts', () => {
