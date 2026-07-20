@@ -32,8 +32,6 @@ const closeOAuthWindow = (state: string) => {
   if (window && !window.isDestroyed()) window.close()
 }
 
-const QUARK_DOWNLOAD_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch'
-
 function pathToFileUrl(filePath: string): string {
   const normalized = path.resolve(filePath).replace(/\\/g, '/')
   return 'file://' + (normalized.startsWith('/') ? normalized : '/' + normalized)
@@ -137,8 +135,6 @@ export default class ipcEvent {
     this.handleWebSaveTheme()
     this.handleWebClearCookies()
     this.handleWebGetCookies()
-    this.handleWebQuarkAccountInfo()
-    this.handleWebQuarkDownloadUrl()
     this.handleWebSetCookies()
     this.handleWebClearCache()
     this.handleWebReload()
@@ -471,154 +467,6 @@ export default class ipcEvent {
     ipcMain.handle('WebGetCookies', async (event, data) => {
       return await session.defaultSession.cookies.get(data)
     })
-  }
-
-  private static handleWebQuarkAccountInfo() {
-    ipcMain.handle('WebQuarkAccountInfo', async (_event, data: { serviceTicket?: string }) => {
-      const serviceTicket = String(data?.serviceTicket || '')
-      if (!serviceTicket) return { ok: false, status: 0, body: '', cookies: [], error: '夸克登录凭证为空' }
-      const params = new URLSearchParams({ st: serviceTicket, lw: 'scan' })
-      const url = `https://pan.quark.cn/account/info?${params.toString()}`
-      const existingCookies = await session.defaultSession.cookies.get({ domain: 'quark.cn' })
-      const cookieHeader = existingCookies
-        .filter((cookie) => cookie.name && cookie.value)
-        .map((cookie) => `${cookie.name}=${cookie.value}`)
-        .join('; ')
-
-      return await new Promise((resolve) => {
-        const request = net.request({
-          method: 'GET',
-          url,
-          useSessionCookies: true
-        } as any)
-        request.setHeader('Accept', 'application/json, text/plain, */*')
-        request.setHeader('Accept-Language', 'zh-CN,zh;q=0.9')
-        request.setHeader('Cache-Control', 'no-cache')
-        request.setHeader('Pragma', 'no-cache')
-        request.setHeader('Origin', 'https://pan.quark.cn')
-        request.setHeader('Referer', 'https://pan.quark.cn/')
-        request.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Safari/537.36 Core/1.94.225.400 QQBrowser/12.2.5544.400')
-        if (cookieHeader) request.setHeader('Cookie', cookieHeader)
-        request.on('response', (response) => {
-          const chunks: Buffer[] = []
-          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-          response.on('end', async () => {
-            const body = Buffer.concat(chunks).toString('utf8')
-            const setCookie = response.headers['set-cookie']
-            const setCookieList = Array.isArray(setCookie) ? setCookie : setCookie ? [String(setCookie)] : []
-            for (const rawCookie of setCookieList) {
-              const cookie = ipcEvent.parseSetCookie(rawCookie, 'https://pan.quark.cn')
-              if (cookie) {
-                try {
-                  await session.defaultSession.cookies.set(cookie)
-                } catch (err) {
-                  console.error(err)
-                }
-              }
-            }
-            const cookies = await session.defaultSession.cookies.get({ domain: 'quark.cn' })
-            resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, body, cookies })
-          })
-        })
-        request.on('error', (error) => resolve({ ok: false, status: 0, body: '', cookies: [], error: error.message }))
-        request.end()
-      })
-    })
-  }
-
-  private static handleWebQuarkDownloadUrl() {
-    ipcMain.handle('WebQuarkDownloadUrl', async (_event, data: { fileId?: string; cookie?: string }) => {
-      const fileId = String(data?.fileId || '')
-      if (!fileId) return { ok: false, status: 0, body: '', cookies: [], error: '夸克文件 ID 为空' }
-      const params = new URLSearchParams({
-        pr: 'ucpro',
-        fr: 'pc',
-        sys: 'win32',
-        ve: '2.5.56',
-        ut: '',
-        guid: ''
-      })
-      const url = `https://drive-pc.quark.cn/1/clouddrive/file/download?${params.toString()}`
-      const existingCookies = await session.defaultSession.cookies.get({ domain: 'quark.cn' })
-      const cookieHeader =
-        String(data?.cookie || '') ||
-        existingCookies
-          .filter((cookie) => cookie.name && cookie.value)
-          .map((cookie) => `${cookie.name}=${cookie.value}`)
-          .join('; ')
-
-      return await new Promise((resolve) => {
-        const request = net.request({
-          method: 'POST',
-          url,
-          useSessionCookies: true
-        } as any)
-        request.setHeader('Accept', 'application/json, text/plain, */*')
-        request.setHeader('Accept-Language', 'zh-CN,zh;q=0.9')
-        request.setHeader('Content-Type', 'application/json')
-        request.setHeader('Origin', 'https://pan.quark.cn')
-        request.setHeader('Referer', 'https://pan.quark.cn/')
-        request.setHeader('User-Agent', QUARK_DOWNLOAD_AGENT)
-        if (cookieHeader) request.setHeader('Cookie', cookieHeader)
-        request.on('response', (response) => {
-          const chunks: Buffer[] = []
-          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-          response.on('end', async () => {
-            const body = Buffer.concat(chunks).toString('utf8')
-            const setCookie = response.headers['set-cookie']
-            const setCookieList = Array.isArray(setCookie) ? setCookie : setCookie ? [String(setCookie)] : []
-            for (const rawCookie of setCookieList) {
-              const cookie = ipcEvent.parseSetCookie(rawCookie, 'https://pan.quark.cn')
-              if (cookie) {
-                try {
-                  await session.defaultSession.cookies.set(cookie)
-                } catch (err) {
-                  console.error(err)
-                }
-              }
-            }
-            const cookies = await session.defaultSession.cookies.get({ domain: 'quark.cn' })
-            resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, body, cookies })
-          })
-        })
-        request.on('error', (error) => resolve({ ok: false, status: 0, body: '', cookies: [], error: error.message }))
-        request.write(JSON.stringify({ fids: [fileId] }))
-        request.end()
-      })
-    })
-  }
-
-  private static parseSetCookie(rawCookie: string, defaultUrl: string) {
-    const parts = rawCookie
-      .split(';')
-      .map((part) => part.trim())
-      .filter(Boolean)
-    const [nameValue, ...attrs] = parts
-    if (!nameValue || !nameValue.includes('=')) return undefined
-    const [name, ...valueParts] = nameValue.split('=')
-    const cookie: any = {
-      url: defaultUrl,
-      name,
-      value: valueParts.join('='),
-      path: '/',
-      secure: true
-    }
-    for (const attr of attrs) {
-      const [key, ...attrValueParts] = attr.split('=')
-      const lowerKey = key.toLowerCase()
-      const attrValue = attrValueParts.join('=')
-      if (lowerKey === 'domain' && attrValue) cookie.domain = attrValue
-      else if (lowerKey === 'path' && attrValue) cookie.path = attrValue
-      else if (lowerKey === 'expires' && attrValue) {
-        const expires = Date.parse(attrValue)
-        if (Number.isFinite(expires)) cookie.expirationDate = Math.floor(expires / 1000)
-      } else if (lowerKey === 'max-age' && attrValue) {
-        const maxAge = Number(attrValue)
-        if (Number.isFinite(maxAge)) cookie.expirationDate = Math.floor(Date.now() / 1000) + maxAge
-      } else if (lowerKey === 'secure') cookie.secure = true
-      else if (lowerKey === 'httponly') cookie.httpOnly = true
-    }
-    return cookie
   }
 
   private static handleWebSetCookies() {

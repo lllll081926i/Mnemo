@@ -26,12 +26,7 @@ const inputsearch = ref()
 const appStore = useAppStore()
 const winStore = useWinStore()
 const othershareStore = useOtherShareStore()
-const shareUrl = (share: IOtherShareLinkModel) =>
-  share.share_id.startsWith('quark:')
-    ? `https://pan.quark.cn/s/${share.share_id.replace('quark:', '')}`
-    : share.share_id.startsWith('guangya:')
-      ? `https://www.guangyapan.com/s/${share.share_id.replace('guangya:', '')}`
-      : `https://www.aliyundrive.com/s/${share.share_id}`
+const shareUrl = (share: IOtherShareLinkModel) => `https://www.aliyundrive.com/s/${share.share_id}`
 
 const keyboardStore = useKeyboardStore()
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
@@ -267,7 +262,7 @@ const handleDeleteSelectedLink = (delby: any) => {
 const handleDaoRuLink = () => {
   daoruModel.value = true
   const txt = getFromClipboard()
-  if (txt.indexOf('.aliyundrive.com/s/') > 0 || txt.indexOf('.alipan.com/s/') > 0 || txt.indexOf('pan.quark.cn/s/') >= 0) {
+  if (txt.indexOf('.aliyundrive.com/s/') > 0 || txt.indexOf('.alipan.com/s/') > 0) {
     daoruModelText.value = txt
     setTimeout(() => {
       document.getElementById('OSRDaoRuLink')?.focus()
@@ -531,7 +526,7 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
     <template #title>导入分享链接</template>
     <div class="compact-modal-form">
       <div class="arco-textarea-wrapper arco-textarea-scroll compact-modal-textarea">
-          <textarea v-model="daoruModelText" class="arco-textarea daoruinput" placeholder="请粘贴，每行一条分享链接，例如：https://www.aliyundrive.com/s/9inQ0eeZ8w8 提取码: CNp7 或 https://pan.quark.cn/s/abcd?pwd=123456"></textarea>
+          <textarea v-model="daoruModelText" class="arco-textarea daoruinput" placeholder="请粘贴，每行一条分享链接，例如：https://www.aliyundrive.com/s/9inQ0eeZ8w8 提取码: CNp7"></textarea>
       </div>
       <div class="compact-modal-actions">
         <a-button id="OSRDaoRuLink" type="primary" size="small" tabindex="-1" :loading="daoruModelLoading" @click="handleSaveDaoRuLink">批量导入</a-button>

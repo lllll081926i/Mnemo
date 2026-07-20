@@ -2,23 +2,24 @@ import { describe, expect, it } from 'vitest'
 import { driveToolDriveIdForPlatform, driveToolPlatformMatches, driveToolRootIdFor, normalizeDriveToolDriveId, normalizeDriveToolPlatform } from '../drive-tools/directLinks'
 
 describe('drive tool target helpers', () => {
-  it('normalizes provider aliases used by stored tokens', () => {
-    expect(normalizeDriveToolDriveId('139')).toBe('cloud139')
-    expect(normalizeDriveToolDriveId('189')).toBe('cloud189')
+  it('passes through retained drive ids', () => {
+    expect(normalizeDriveToolDriveId('pikpak')).toBe('pikpak')
+    expect(normalizeDriveToolDriveId('onedrive')).toBe('onedrive')
   })
 
-  it('builds non-aliyun drive ids from token platform names', () => {
-    expect(driveToolDriveIdForPlatform('guangya', '')).toBe('guangya')
+  it('builds drive ids from token platform names', () => {
+    expect(driveToolDriveIdForPlatform('pikpak', '')).toBe('pikpak')
+    expect(driveToolDriveIdForPlatform('gdrive', '')).toBe('gdrive')
+    expect(driveToolDriveIdForPlatform('gdrive', 'fallback')).toBe('fallback')
   })
 
-  it('normalizes AI requested platform aliases to tokenfrom values', () => {
-    expect(normalizeDriveToolPlatform('cloud139')).toBe('139')
-    expect(normalizeDriveToolPlatform('cloud189')).toBe('189')
-    expect(driveToolPlatformMatches('139', 'cloud139')).toBe(true)
+  it('matches platform names against tokenfrom values', () => {
+    expect(normalizeDriveToolPlatform('pikpak')).toBe('pikpak')
+    expect(driveToolPlatformMatches('pikpak', 'pikpak')).toBe(true)
   })
 
-  it('resolves provider root ids from normalized drive ids', () => {
-    expect(driveToolRootIdFor('139')).toBe('cloud139_root')
-    expect(driveToolRootIdFor('189')).toBe('cloud189_root')
+  it('resolves provider root ids from retained drive ids', () => {
+    expect(driveToolRootIdFor('pikpak')).toBe('pikpak_root')
+    expect(driveToolRootIdFor('unknown')).toBe('root')
   })
 })

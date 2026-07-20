@@ -20,7 +20,7 @@ const okBatchLoading = ref(false)
 const settingStore = useSettingStore()
 const shareType = ref()
 const activeProvider = ref<DriveProvider>('unknown')
-const supportsShareSettings = computed(() => ['aliyun', 'pikpak', 'quark', 'guangya', 'dropbox'].includes(activeProvider.value))
+const supportsShareSettings = computed(() => ['pikpak', 'dropbox'].includes(activeProvider.value))
 const supportsCombinedShare = computed(() => !['onedrive', 'dropbox', 'gdrive', 'gofile'].includes(activeProvider.value))
 
 const form = reactive({

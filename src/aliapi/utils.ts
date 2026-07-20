@@ -19,20 +19,11 @@ export function GetDriveID(user_id: string, drive: string): string {
   if (/^(webdav|s3|onedrive|dropbox|gdrive|gofile):/.test(drive || '')) return drive
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
-    if (isCloud139User(user_id)) {
-      return token.default_drive_id || 'cloud139'
-    }
-    if (isCloud189User(user_id)) {
-      return token.default_drive_id || 'cloud189'
-    }
-    if (isGuangyaUser(user_id)) {
-      return token.default_drive_id || 'guangya'
-    }
     if (isPikPakUser(user_id)) {
       return token.default_drive_id || 'pikpak'
     }
-    if (isQuarkUser(user_id)) {
-      return token.default_drive_id || 'quark'
+    if (isOneDriveUser(user_id) || isDropboxUser(user_id) || isGoogleDriveUser(user_id) || isGofileUser(user_id) || isWebDavUser(user_id) || isS3User(user_id)) {
+      return token.default_drive_id || drive
     }
     if (drive.includes('backup')) {
       return token.backup_drive_id
@@ -58,21 +49,15 @@ export function GetDriveType(user_id: string, drive_id: string): any {
   if ((drive_id || '').startsWith('gofile:')) return { title: 'GoFile', name: 'gofile', key: 'gofile_root' }
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
-    if (isCloud139User(user_id)) {
-      return { title: '网盘文件', name: 'cloud139', key: 'cloud139_root' }
-    }
-    if (isCloud189User(user_id)) {
-      return { title: '网盘文件', name: 'cloud189', key: 'cloud189_root' }
-    }
-    if (isGuangyaUser(user_id)) {
-      return { title: '网盘文件', name: 'guangya', key: 'guangya_root' }
-    }
     if (isPikPakUser(user_id)) {
       return { title: '网盘文件', name: 'pikpak', key: 'pikpak_root' }
     }
-    if (isQuarkUser(user_id)) {
-      return { title: '网盘文件', name: 'quark', key: 'quark_root' }
-    }
+    if (isOneDriveUser(user_id)) return { title: 'OneDrive', name: 'onedrive', key: 'onedrive_root' }
+    if (isDropboxUser(user_id)) return { title: 'Dropbox', name: 'dropbox', key: 'dropbox_root' }
+    if (isGoogleDriveUser(user_id)) return { title: 'Google Drive', name: 'gdrive', key: 'gdrive_root' }
+    if (isGofileUser(user_id)) return { title: 'GoFile', name: 'gofile', key: 'gofile_root' }
+    if (isWebDavUser(user_id)) return { title: 'WebDAV', name: 'webdav', key: '/' }
+    if (isS3User(user_id)) return { title: 'S3', name: 's3', key: '/' }
     switch (drive_id) {
       case token.resource_drive_id:
         return { title: '网盘文件', name: 'resource', key: 'resource_root' }
@@ -102,40 +87,15 @@ function resolveUserTokenInfo(user: string | { user_id?: string; tokenfrom?: str
   }
 }
 
-export function isCloud139User(user: string | { user_id?: string; tokenfrom?: string }): boolean {
-  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === '139') return true
-  return user_id.startsWith('cloud139_')
-}
-
-export function isCloud189User(user: string | { user_id?: string; tokenfrom?: string }): boolean {
-  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === '189') return true
-  return user_id.startsWith('cloud189_')
-}
-
-export function isGuangyaUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
-  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === 'guangya') return true
-  return user_id.startsWith('guangya_')
-}
-
-export function isAliyunUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
-  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === 'aliyun') return true
-  return user_id.startsWith('aliyun_')
+/** Aliyun Drive is no longer a product login surface; keep helper for legacy guards only. */
+export function isAliyunUser(_user?: string | { user_id?: string; tokenfrom?: string }): boolean {
+  return false
 }
 
 export function isPikPakUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   const { user_id, tokenfrom } = resolveUserTokenInfo(user)
   if (tokenfrom === 'pikpak') return true
   return user_id.startsWith('pikpak_')
-}
-
-export function isQuarkUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
-  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === 'quark') return true
-  return user_id.startsWith('quark_')
 }
 
 export function isWebDavUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
@@ -172,11 +132,7 @@ export function isGofileUser(user: string | { user_id?: string; tokenfrom?: stri
 
 export function isNonAliyunProvider(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   return (
-    isCloud139User(user) ||
-    isCloud189User(user) ||
-    isGuangyaUser(user) ||
     isPikPakUser(user) ||
-    isQuarkUser(user) ||
     isOneDriveUser(user) ||
     isDropboxUser(user) ||
     isGoogleDriveUser(user) ||

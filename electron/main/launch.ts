@@ -20,21 +20,6 @@ type UserToken = {
   refresh: boolean
 }
 
-const QUARK_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Safari/537.36 Core/1.94.225.400 QQBrowser/12.2.5544.400'
-const QUARK_DOWNLOAD_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch'
-const QUARK_OSS_DOWNLOAD_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0'
-
-const getUrlPath = (url: string) => {
-  try {
-    return new URL(url).pathname
-  } catch {
-    return ''
-  }
-}
-
 const isHost = (hostname: string, domain: string) => hostname === domain || hostname.endsWith(`.${domain}`)
 
 const parseRequestUrl = (url: string) => {
@@ -46,22 +31,6 @@ const parseRequestUrl = (url: string) => {
   }
 }
 
-const getHeaderValue = (headers: Record<string, string | string[] | undefined>, name: string) => {
-  const item = Object.entries(headers || {}).find(([key]) => key.toLowerCase() === name.toLowerCase())
-  const value = item?.[1]
-  return Array.isArray(value) ? value.join('; ') : value || ''
-}
-
-const mergeCookieHeader = (loginCookie: string, existingCookie = '') => {
-  if (!loginCookie) return existingCookie
-  const loginKeys = new Set(loginCookie.split(';').map((item) => item.trim().split('=')[0].toLowerCase()).filter(Boolean))
-  const extraCookies = existingCookie
-    .split(';')
-    .map((item) => item.trim())
-    .filter((item) => item && !loginKeys.has(item.split('=')[0].toLowerCase()))
-  return [loginCookie, ...extraCookies].filter(Boolean).join('; ')
-}
-
 export default class launch extends EventEmitter {
   private userToken: UserToken = {
     access_token: '',
@@ -69,7 +38,6 @@ export default class launch extends EventEmitter {
     user_id: '',
     refresh: false
   }
-  private quarkCookie = ''
   public motrixApp!: MotrixApplication
 
   constructor() {
@@ -176,28 +144,15 @@ export default class launch extends EventEmitter {
           const shouldGieeReferer = isHost(hostname, 'gitee.com')
           const shouldBiliBili = isHost(hostname, 'bilibili.com')
           const shouldQQTv = hostname === 'v.qq.com' || hostname === 'video.qq.com'
-          const shouldQuark = isHost(hostname, 'quark.cn')
-          const shouldQuarkDownload = hostname === 'drive-pc.quark.cn' && pathname.includes('/1/clouddrive/file/download')
-          const shouldQuarkOssDownload = hostname.endsWith('.pds.quark.cn')
-          const quarkUrlPath = shouldQuarkOssDownload ? getUrlPath(details.url) : ''
           const shouldAliPanOrigin = isHost(hostname, 'aliyundrive.com') || isHost(hostname, 'alipan.com')
-          const shouldAliReferer = !shouldQuark && !shouldQQTv && !shouldBiliBili && !shouldGieeReferer && (!details.referrer || details.referrer.trim() === '' || /(\/localhost:)|(^file:\/\/)|(\/127.0.0.1:)/.exec(details.referrer) !== null)
+          const shouldAliReferer = !shouldQQTv && !shouldBiliBili && !shouldGieeReferer && (!details.referrer || details.referrer.trim() === '' || /(\/localhost:)|(^file:\/\/)|(\/127.0.0.1:)/.exec(details.referrer) !== null)
           const shouldToken = shouldAliPanOrigin && pathname.includes('download')
           const shouldOpenApiToken = shouldAliPanOrigin && (pathname.includes('/adrive/v1.0') || pathname.includes('/adrive/v1.1'))
           const forbidUrl = details.url.includes('younoyes') || details.url.includes('onatoshi')
           const hasAuthorizationHeader = Object.keys(details.requestHeaders || {}).some((key) => key.toLowerCase() === 'authorization')
           const fallbackAccessToken = this.userToken?.access_token || ''
           const fallbackOpenApiToken = this.userToken?.open_api_access_token || ''
-          const fallbackQuarkCookie = this.quarkCookie || (this.userToken?.tokenfrom === 'quark' ? fallbackAccessToken : '')
-          const quarkCookieHeader = shouldQuark && fallbackQuarkCookie
-            ? mergeCookieHeader(fallbackQuarkCookie, getHeaderValue(details.requestHeaders || {}, 'cookie'))
-            : ''
           const baseRequestHeaders = { ...details.requestHeaders }
-          if (shouldQuark && quarkCookieHeader) {
-            Object.keys(baseRequestHeaders).forEach((key) => {
-              if (key.toLowerCase() === 'cookie') delete baseRequestHeaders[key]
-            })
-          }
 
           cb({
             cancel: false,
@@ -210,13 +165,6 @@ export default class launch extends EventEmitter {
               ...(shouldAliPanOrigin && {
                 Origin: 'https://www.aliyundrive.com',
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-              }),
-              ...(shouldQuark && {
-                Origin: 'https://pan.quark.cn',
-                Referer: 'https://pan.quark.cn/',
-                ...(quarkCookieHeader ? { Cookie: quarkCookieHeader } : {}),
-                ...(shouldQuarkOssDownload && quarkUrlPath ? { 'x-urlp': quarkUrlPath } : {}),
-                'user-agent': shouldQuarkOssDownload ? QUARK_OSS_DOWNLOAD_AGENT : shouldQuarkDownload ? QUARK_DOWNLOAD_AGENT : QUARK_AGENT
               }),
               ...(shouldAliReferer && {
                 Referer: 'https://www.aliyundrive.com/',
@@ -273,16 +221,10 @@ export default class launch extends EventEmitter {
 
   handleUserToken() {
     ipcMain.on('WebUserToken', (event, data) => {
-      if (data?.tokenfrom === 'quark' && data.access_token) {
-        this.quarkCookie = data.access_token
-      }
       if (data.login) {
         this.userToken = data
       } else if (this.userToken.user_id == data.user_id) {
         this.userToken = data
-        // ShowError('WebUserToken', 'update' + data.name)
-      } else {
-        // ShowError('WebUserToken', 'nothing' + data.name)
       }
     })
   }

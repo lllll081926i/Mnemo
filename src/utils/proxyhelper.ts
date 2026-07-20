@@ -12,12 +12,11 @@ import { localPwd } from './aria2c'
 import os from 'os'
 import DebugLog from './debuglog'
 import message from './message'
-import UserDAL, { UserTokenMap } from '../user/userdal'
+import UserDAL from '../user/userdal'
 import { buildUpstreamProxyHeaders } from './proxyHeaders'
 import { shouldRefreshProxyUrl } from './proxyCache'
-import { isAliyunUser, isQuarkUser } from '../aliapi/utils'
+import { isAliyunUser } from '../aliapi/utils'
 import { isWebDavDrive } from './webdavClient'
-import { QUARK_DOWNLOAD_AGENT, readQuarkCookieStringFromElectron } from '../quark/auth'
 
 // 默认maxFreeSockets=256
 const httpsAgent = new HttpsAgent({ keepAlive: true })
@@ -64,74 +63,6 @@ interface FileInfo {
   proxy_headers?: string
 
   [key: string]: string | number | undefined
-}
-
-const isUsableQuarkToken = (token: any) => token?.tokenfrom === 'quark' && !!token.access_token
-
-async function getQuarkProxyToken(userId: string) {
-  const directToken = UserDAL.GetUserToken(userId)
-  if (isUsableQuarkToken(directToken)) return directToken
-
-  const quarkUserId = userId && !userId.startsWith('quark_') ? `quark_${userId}` : ''
-  if (quarkUserId) {
-    const prefixedToken = UserDAL.GetUserToken(quarkUserId)
-    if (isUsableQuarkToken(prefixedToken)) return prefixedToken
-  }
-
-  if (userId) {
-    const dbDirectToken = await UserDAL.GetUserTokenFromDB(userId)
-    if (isUsableQuarkToken(dbDirectToken)) return dbDirectToken
-  }
-  if (quarkUserId) {
-    const dbPrefixedToken = await UserDAL.GetUserTokenFromDB(quarkUserId)
-    if (isUsableQuarkToken(dbPrefixedToken)) return dbPrefixedToken
-  }
-
-  for (const [storedUserId, token] of UserTokenMap) {
-    if (!isUsableQuarkToken(token)) continue
-    if (storedUserId === userId || storedUserId === quarkUserId) {
-      return token
-    }
-  }
-
-  const dbTokens = await Db.getUserAll().catch(() => [])
-  for (const token of dbTokens) {
-    if (!isUsableQuarkToken(token)) continue
-    const storedUserId = token.user_id || ''
-    if (storedUserId === userId || storedUserId === quarkUserId) {
-      UserTokenMap.set(storedUserId, token)
-      return token
-    }
-  }
-  return undefined
-}
-
-function getQuarkProxyCookieKeys(cookie = '') {
-  return cookie
-    .split(';')
-    .map((item) => item.trim().split('=')[0])
-    .filter(Boolean)
-}
-
-function mergeCookieStrings(...cookies: string[]) {
-  const cookieMap = new Map<string, string>()
-  for (const cookieString of cookies) {
-    for (const part of cookieString.split(';')) {
-      const item = part.trim()
-      if (!item || !item.includes('=')) continue
-      const key = item.split('=')[0].trim()
-      if (key) cookieMap.set(key, item)
-    }
-  }
-  return Array.from(cookieMap.values()).join('; ')
-}
-
-function getQuarkUrlPath(proxyUrl: string) {
-  try {
-    return new URL(proxyUrl).pathname
-  } catch {
-    return ''
-  }
 }
 
 export function getIPAddress() {
@@ -376,33 +307,6 @@ export async function createProxyServer(port: number) {
         }
       }
       const upstreamHeaders = buildUpstreamProxyHeaders(clientReq.headers, resolvedProxyHeaders)
-      if (query.drive_id === 'quark' || isQuarkUser(String(query.user_id || ''))) {
-        const token = await getQuarkProxyToken(String(query.user_id || ''))
-        const sessionCookie = await readQuarkCookieStringFromElectron().catch(() => '')
-        const quarkCookie = mergeCookieStrings(token?.access_token || '', sessionCookie)
-        if (quarkCookie) {
-          upstreamHeaders.cookie = quarkCookie
-        }
-        upstreamHeaders.accept = '*/*'
-        upstreamHeaders.origin = 'https://pan.quark.cn'
-        upstreamHeaders.referer = 'https://pan.quark.cn/'
-        upstreamHeaders['user-agent'] = QUARK_DOWNLOAD_AGENT
-        upstreamHeaders['accept-language'] = 'zh-CN,zh;q=0.9'
-        upstreamHeaders['sec-fetch-dest'] = 'video'
-        upstreamHeaders['sec-fetch-mode'] = 'no-cors'
-        upstreamHeaders['sec-fetch-site'] = 'cross-site'
-        upstreamHeaders['sec-ch-ua'] = '"Not;A=Brand";v="99", "Chromium";v="106"'
-        upstreamHeaders['sec-ch-ua-mobile'] = '?0'
-        upstreamHeaders['sec-ch-ua-platform'] = '"macOS"'
-        const urlPath = getQuarkUrlPath(String(proxyUrl || ''))
-        if (urlPath) upstreamHeaders['x-urlp'] = urlPath
-        const cookieKeys = getQuarkProxyCookieKeys(quarkCookie)
-        clientRes.setHeader('x-quark-proxy-has-cookie', quarkCookie ? '1' : '0')
-        clientRes.setHeader('x-quark-proxy-has-session-cookie', sessionCookie ? '1' : '0')
-        clientRes.setHeader('x-quark-proxy-cookie-keys', cookieKeys.join(','))
-        clientRes.setHeader('x-quark-proxy-referer', String(upstreamHeaders.referer || ''))
-        clientRes.setHeader('x-quark-proxy-x-urlp', String(upstreamHeaders['x-urlp'] || ''))
-      }
       await new Promise((resolve, reject) => {
         // 处理请求，让下载的流量经过代理服务器
         const httpRequest = ~proxyUrl.indexOf('https') ? https : http

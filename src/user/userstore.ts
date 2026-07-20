@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import UserDAL from './userdal'
 
 export interface ITokenInfo {
-  tokenfrom: 'aliyun' | '139' | '189' | 'guangya' | 'pikpak' | 'quark' | 'onedrive' | 'dropbox' | 'gdrive' | 'gofile' | 'webdav' | 's3' | 'unknown'
+  tokenfrom: 'pikpak' | 'onedrive' | 'dropbox' | 'gdrive' | 'gofile' | 'webdav' | 's3' | 'unknown'
 
   access_token: string
   refresh_token: string

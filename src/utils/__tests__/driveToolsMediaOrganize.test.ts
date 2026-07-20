@@ -26,7 +26,7 @@ vi.mock('../webdavClient', () => ({
 describe('drive-tools media organize', () => {
   it('builds helper-style preview paths from media names', () => {
     const result = buildMediaOrganizePlan([
-      { userId: 'u', driveId: 'guangya', fileId: '1', name: '测试剧 S02E01 2025.mp4', isDir: false }
+      { userId: 'u', driveId: 'pikpak', fileId: '1', name: '测试剧 S02E01 2025.mp4', isDir: false }
     ], 'root')
     expect(result[0].category).toBe('电视剧')
     expect(result[0].targetPath).toContain('电视剧')

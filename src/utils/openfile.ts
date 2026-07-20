@@ -11,7 +11,8 @@ import message from './message'
 import { modalArchive, modalArchivePassword, modalSelectPanDir, modalSelectVideoQuality } from './modal'
 import PlayerUtils from './playerhelper'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from './proxyhelper'
-import { isAliyunUser, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser } from '../aliapi/utils'
+import { isPikPakUser } from '../aliapi/utils'
+import { resolveDriveProvider } from './driveProvider'
 
 async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo | undefined> {
   const explicitUserId = (file as any).user_id as string | undefined
@@ -22,23 +23,20 @@ async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo |
   const currentUserId = useUserStore().user_id
   const currentToken = await UserDAL.GetUserTokenFromDB(currentUserId)
   const driveId = file.drive_id || ''
+  const driveProvider = resolveDriveProvider({ driveId, tokenfrom: currentToken?.tokenfrom, userId: currentToken?.user_id })
   const matchesCurrent = currentToken && (
     (driveId === 'pikpak' && isPikPakUser(currentToken))
-    || (driveId === 'guangya' && isGuangyaUser(currentToken))
-    || (driveId === 'cloud139' && isCloud139User(currentToken))
-    || (driveId === 'cloud189' && isCloud189User(currentToken))
-    || (!['pikpak', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(currentToken))
+    || (driveProvider !== 'unknown' && currentToken.tokenfrom === driveProvider)
+    || (driveId.startsWith(`${currentToken.tokenfrom}:`))
   )
   if (matchesCurrent && currentToken?.access_token) return currentToken
 
   const userList = await UserDAL.GetUserListFromDB()
-  const matched = userList.find((token) => (
-    (driveId === 'pikpak' && isPikPakUser(token))
-    || (driveId === 'guangya' && isGuangyaUser(token))
-    || (driveId === 'cloud139' && isCloud139User(token))
-    || (driveId === 'cloud189' && isCloud189User(token))
-    || (!['pikpak', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(token))
-  ))
+  const matched = userList.find((token) => {
+    if (driveId === 'pikpak' && isPikPakUser(token)) return true
+    const provider = resolveDriveProvider({ driveId, tokenfrom: token.tokenfrom, userId: token.user_id })
+    return provider !== 'unknown' && (token.tokenfrom === provider || driveId.startsWith(`${token.tokenfrom}:`))
+  })
   if (!matched?.user_id) return currentToken || undefined
   return await UserDAL.GetUserTokenFromDB(matched.user_id) || undefined
 }
@@ -526,7 +524,7 @@ async function Office(file: IAliGetFileModel): Promise<void> {
   }
   message.loading('加载中...', 2)
   let data = await AliFile.ApiOfficePreViewUrl(token.user_id, file.drive_id, file.file_id)
-  if (!data?.preview_url && !isAliyunUser(token)) {
+  if (!data?.preview_url) {
     const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), '', file.icon == 'iconweifa', 'other', 'Origin')
     if (typeof rawData !== 'string' && rawData.url) {
       data = {

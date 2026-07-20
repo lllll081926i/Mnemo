@@ -19,8 +19,6 @@ declare interface Window {
   WebRelaunchAria: () => Promise<number>
   WebSetProgressBar: any
   WebGetCookies: any
-  WebQuarkAccountInfo: any
-  WebQuarkDownloadUrl: any
   WebSetCookies: any
   WebOpenWindow: any
   WebOpenExternal: (url: string) => Promise<{ ok: boolean; error?: string }>

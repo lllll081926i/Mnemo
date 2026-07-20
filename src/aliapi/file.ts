@@ -317,18 +317,6 @@ export default class AliFile {
     if (provider === 'pikpak') {
       return '暂无转码信息'
     }
-    if (provider === 'quark') {
-      return '暂无转码信息'
-    }
-    if (provider === 'guangya') {
-      return '暂无转码信息'
-    }
-    if (provider === '139') {
-      return '暂无转码信息'
-    }
-    if (provider === '189') {
-      return '暂无转码信息'
-    }
     if (!canUseAliyunPreviewApi(provider)) return `${getDriveProviderLabel(provider)} 暂无转码信息`
     let url = ''
     let need_open_api = true

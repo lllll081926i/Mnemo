@@ -120,18 +120,6 @@ window.WebGetCookies = async function(data: any) {
   } catch {
   }
 }
-window.WebQuarkAccountInfo = async function(data: any) {
-  try {
-    return await ipcRenderer.invoke('WebQuarkAccountInfo', data)
-  } catch {
-  }
-}
-window.WebQuarkDownloadUrl = async function(data: any) {
-  try {
-    return await ipcRenderer.invoke('WebQuarkDownloadUrl', data)
-  } catch {
-  }
-}
 window.WebSetCookies = function(cookies: any) {
   try {
     ipcRenderer.send('WebSetCookies', cookies)

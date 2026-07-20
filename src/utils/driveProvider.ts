@@ -256,32 +256,7 @@ export const getDriveProviderSidebarEntries = (context: DriveProviderContext | s
 
   if (capabilities.favorite) entries.push({ key: 'favorite', title: '收藏夹', icon: getDriveSidebarIcon('favorite'), kind: 'feature' })
   if (capabilities.trashView) entries.push({ key: 'trash', title: '回收站', icon: getDriveSidebarIcon('trash'), kind: 'feature' })
-  if (provider === 'aliyun') entries.push({ key: 'recover', title: '文件恢复', icon: getDriveSidebarIcon('recover'), kind: 'feature' })
   if (capabilities.search) entries.push({ key: 'search', title: '全盘搜索', icon: getDriveSidebarIcon('search'), kind: 'feature' })
-  if (provider === 'aliyun' && token && capabilities.photoAlbum && token.pic_drive_id && !options.hideAlbum) {
-    entries.push({ key: 'pic_root', title: '相册', icon: getDriveSidebarIcon('pic_root'), kind: 'space', driveId: token.pic_drive_id })
-  }
-
-  if (provider === 'aliyun' && token) {
-    const spaces: DriveSidebarEntry[] = []
-    const usedDriveIds = new Set<string>()
-    const addSpace = (key: string, title: string, driveId: string | undefined) => {
-      if (!driveId || usedDriveIds.has(driveId)) return
-      usedDriveIds.add(driveId)
-      spaces.push({ key, title, icon: getDriveSidebarIcon(key), kind: 'space', driveId })
-    }
-
-    const mergedDrive = token.resource_drive_id && token.resource_drive_id === token.backup_drive_id
-    if (mergedDrive) {
-      if (!options.hideResourceDrive || !options.hideBackupDrive) addSpace('resource_root', '网盘文件', token.resource_drive_id)
-    } else {
-      if (!options.hideResourceDrive) addSpace('resource_root', '网盘文件', token.resource_drive_id)
-      if (!options.hideBackupDrive) addSpace('backup_root', spaces.length ? '备份空间' : '网盘文件', token.backup_drive_id)
-    }
-    if (!token.resource_drive_id && !token.backup_drive_id) addSpace('backup_root', '网盘文件', token.default_drive_id)
-    addSpace('safe_root', '安全盘', token.default_sbox_drive_id || token.sbox_drive_id)
-    entries.push(...spaces)
-  }
   return entries
 }
 

@@ -18,7 +18,6 @@ declare global {
     WebClearCache: any
     WebRelaunch: any
     WebGetCookies: any
-    WebQuarkAccountInfo: any
     WebSetCookies: any
     WebClearCookies: any
     WebShutDown: any
