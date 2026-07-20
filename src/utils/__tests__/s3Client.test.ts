@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { copyS3Path, createS3Connection, createS3Directory, createS3UserToken, getS3Connections, isS3Drive, listS3Directory, moveS3Path, normalizeS3Prefix, normalizeS3RelativePath, renameS3Path, saveS3Connection, type S3ConnectionInput } from '../s3Client'
-import { createWebDavConnection, getWebDavConnections, saveWebDavConnection } from '../webdavClient'
+import { createClient } from 'webdav'
+import { buildWebDavDownloadUrl, createWebDavConnection, getWebDavConnections, getWebDavRequestHeaders, listWebDavDirectory, normalizeWebDavPath, saveWebDavConnection } from '../webdavClient'
+
+vi.mock('webdav', () => ({ createClient: vi.fn() }))
 
 const storage = new Map<string, string>()
 
@@ -80,6 +83,29 @@ describe('S3 connection model', () => {
     expect(webdavRaw).not.toContain('dav-user')
     expect(webdavRaw).not.toContain('dav-password')
     expect(getWebDavConnections()[0]).toMatchObject({ username: 'dav-user', password: 'dav-password' })
+  })
+
+  it('does not load removed media-library WebDAV connection storage', () => {
+    storage.set('MediaLibrary_WebDavConnections', JSON.stringify([{ id: 'legacy', name: 'Legacy', url: 'https://dav.example.com', username: 'legacy', password: 'secret', rootPath: '/', createdAt: '2026-01-01T00:00:00.000Z' }]))
+
+    expect(getWebDavConnections()).toEqual([])
+  })
+
+  it('maps WebDAV paths beneath the configured endpoint and sends basic credentials', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV', url: 'https://dav.example.com/dav/', username: 'dav-user', password: 'secret', rootPath: '/home' })
+    const getDirectoryContents = vi.fn().mockResolvedValue([
+      { filename: '/dav/home/projects', basename: 'projects', type: 'directory' },
+      { filename: '/dav/home/projects/movie.mp4', basename: 'movie.mp4', type: 'file', size: 12, mime: 'video/mp4', lastmod: '2026-01-01T00:00:00.000Z' }
+    ])
+    vi.mocked(createClient).mockReturnValue({ getDirectoryContents } as any)
+
+    const items = await listWebDavDirectory(connection, '/projects')
+
+    expect(normalizeWebDavPath('/projects//archive/')).toBe('/projects/archive')
+    expect(getDirectoryContents).toHaveBeenCalledWith('/home/projects')
+    expect(items).toMatchObject([{ file_id: '/projects/movie.mp4', parent_file_id: '/projects', category: 'video' }])
+    expect(getWebDavRequestHeaders(connection)).toEqual({ Authorization: 'Basic ZGF2LXVzZXI6c2VjcmV0' })
+    expect(buildWebDavDownloadUrl(connection, '/projects/movie.mp4')).toBe('https://dav.example.com/dav/home/projects/movie.mp4')
   })
 
   it('creates isolated account and drive ids for every connection', () => {

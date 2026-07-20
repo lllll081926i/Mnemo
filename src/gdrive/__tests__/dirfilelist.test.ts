@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as GoogleClient from '../client'
-import { GOOGLE_FOLDER_MIME, mapGoogleDriveItemToAliModel } from '../dirfilelist'
+import { GOOGLE_FOLDER_MIME, apiGoogleDriveFileList, apiGoogleDriveSearch, mapGoogleDriveItemToAliModel } from '../dirfilelist'
 import { apiGoogleDriveCopyBatch, apiGoogleDriveDeleteBatch, apiGoogleDriveRestoreBatch } from '../filecmd'
 
 describe('Google Drive file mapping', () => {
@@ -36,6 +36,24 @@ describe('Google Drive file mapping', () => {
 
     expect(request).toHaveBeenNthCalledWith(2, 'gdrive_account-a', '/files?supportsAllDrives=true', { method: 'POST', body: JSON.stringify({ name: 'Folder', mimeType: GOOGLE_FOLDER_MIME, parents: ['root'] }) })
     expect(request).toHaveBeenNthCalledWith(4, 'gdrive_account-a', '/files/child/copy?supportsAllDrives=true', { method: 'POST', body: JSON.stringify({ parents: ['new-folder'] }) })
+    request.mockRestore()
+  })
+
+  it('paginates file listings and safely escapes search query apostrophes', async () => {
+    const request = vi.spyOn(GoogleClient, 'googleDriveRequest')
+      .mockResolvedValueOnce({ files: [{ id: 'first', name: 'first.txt', mimeType: 'text/plain' }], nextPageToken: 'page-2' } as any)
+      .mockResolvedValueOnce({ files: [{ id: 'second', name: 'second.txt', mimeType: 'text/plain' }] } as any)
+
+    await expect(apiGoogleDriveFileList('gdrive_account-a', 'folder-a')).resolves.toHaveLength(2)
+    const firstPath = request.mock.calls[0][1] as string
+    const secondPath = request.mock.calls[1][1] as string
+    expect(new URLSearchParams(firstPath.split('?')[1]).get('q')).toBe("'folder-a' in parents and trashed = false")
+    expect(new URLSearchParams(secondPath.split('?')[1]).get('pageToken')).toBe('page-2')
+
+    request.mockReset().mockResolvedValue({ files: [] } as any)
+    await apiGoogleDriveSearch('gdrive_account-a', "owner's file")
+    const searchPath = request.mock.calls[0][1] as string
+    expect(new URLSearchParams(searchPath.split('?')[1]).get('q')).toBe("name contains 'owner\\'s file' and trashed = false")
     request.mockRestore()
   })
 })

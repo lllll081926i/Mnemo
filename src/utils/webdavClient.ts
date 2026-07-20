@@ -6,7 +6,6 @@ import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
 
 const STORAGE_KEY = 'mnemo.webdav.connections'
-const LEGACY_STORAGE_KEY = 'MediaLibrary_WebDavConnections'
 
 export interface WebDavConnectionConfig {
   id: string
@@ -140,15 +139,12 @@ const saveWebDavConnections = (connections: WebDavConnectionConfig[]) => {
 
 export const getWebDavConnections = (): WebDavConnectionConfig[] => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
     const connections = (parsed as PersistedWebDavConnection[]).map(revealWebDavConnection)
-    if (!localStorage.getItem(STORAGE_KEY) || parsed.some((item) => !item?.__mnemo_secret)) {
-      saveWebDavConnections(connections)
-      localStorage.removeItem(LEGACY_STORAGE_KEY)
-    }
+    if (parsed.some((item) => !item?.__mnemo_secret)) saveWebDavConnections(connections)
     return connections
   } catch (error) {
     console.error('读取 WebDAV 连接配置失败:', error)
@@ -284,7 +280,7 @@ export const listWebDavDirectory = async (config: WebDavConnectionConfig, relati
   const requestPath = joinDavPath(config.rootPath, normalizedRelativePath)
   const client = createWebDavClient(config)
   const stats = (await client.getDirectoryContents(requestPath)) as FileStat[]
-  return stats.filter((stat) => normalizeWebDavPath(stat.filename) !== normalizeWebDavPath(requestPath)).map((stat) => toAliModel(config, stat))
+  return stats.filter((stat) => getRelativeDavPath(stat.filename, config) !== normalizedRelativePath).map((stat) => toAliModel(config, stat))
 }
 
 export const statWebDavPath = async (config: WebDavConnectionConfig, relativePath: string) => {
