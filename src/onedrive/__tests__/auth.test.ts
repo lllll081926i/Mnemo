@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildOneDriveAuthUrl, exchangeOneDriveCodeForToken, ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET, ONEDRIVE_SCOPE, refreshOneDriveAccessToken } from '../auth'
+import { buildOneDriveAuthUrl, exchangeOneDriveCodeForToken, ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET, ONEDRIVE_SCOPE, refreshOneDriveAccessToken, resolveOneDriveCredentials } from '../auth'
 
 describe('OneDrive auth helpers', () => {
   it('ships an in-app OAuth client id when no release override is configured', () => {
     expect(ONEDRIVE_CLIENT_ID.trim()).not.toBe('')
     expect(ONEDRIVE_CLIENT_SECRET.trim()).not.toBe('')
+  })
+
+  it('pairs the bundled secret only with its matching client id', () => {
+    expect(resolveOneDriveCredentials()).toEqual({ clientId: ONEDRIVE_CLIENT_ID, clientSecret: ONEDRIVE_CLIENT_SECRET })
+    expect(resolveOneDriveCredentials('custom-client-id')).toEqual({ clientId: 'custom-client-id', clientSecret: '' })
+    expect(resolveOneDriveCredentials('custom-client-id', 'custom-secret')).toEqual({ clientId: 'custom-client-id', clientSecret: 'custom-secret' })
   })
 
   it('builds Microsoft identity v2 authorize URL with PKCE and Graph scopes', async () => {

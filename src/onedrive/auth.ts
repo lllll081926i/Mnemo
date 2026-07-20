@@ -9,7 +9,7 @@ const BUILTIN_ONEDRIVE_CLIENT_SECRET = 'qtyfaBBYA403=unZUP40~_#'
 export const ONEDRIVE_CLIENT_ID = CONFIGURED_ONEDRIVE_CLIENT_ID.trim() || BUILTIN_ONEDRIVE_CLIENT_ID
 export const ONEDRIVE_CLIENT_SECRET = CONFIGURED_ONEDRIVE_CLIENT_ID.trim() ? CONFIGURED_ONEDRIVE_CLIENT_SECRET.trim() : BUILTIN_ONEDRIVE_CLIENT_SECRET
 
-const resolveOneDriveCredentials = (clientId = '', clientSecret = '') => {
+export const resolveOneDriveCredentials = (clientId = '', clientSecret = '') => {
   const effectiveClientId = clientId.trim() || ONEDRIVE_CLIENT_ID
   return {
     clientId: effectiveClientId,
@@ -22,7 +22,6 @@ const ONEDRIVE_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0
 const ONEDRIVE_ME_URL = 'https://graph.microsoft.com/v1.0/me'
 const ONEDRIVE_DRIVE_URL = 'https://graph.microsoft.com/v1.0/me/drive'
 export const ONEDRIVE_SCOPE = 'offline_access Files.ReadWrite User.Read'
-// OneDrive desktop OAuth uses the PKCE public-client flow; token requests must not send client_secret.
 
 const hashString = (value: string): string => {
   let hash = 0

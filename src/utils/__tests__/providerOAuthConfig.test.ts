@@ -41,6 +41,17 @@ describe('provider OAuth runtime configuration', () => {
     expect(login).not.toContain('uiOpenApiClientSecret')
   })
 
+  it('injects complete confidential OAuth credentials into Windows release builds', () => {
+    const workflow = read('.github/workflows/release.yml')
+    const envExample = read('.env.example')
+    expect(workflow).toContain('ONEDRIVE_CLIENT_SECRET: ${{ secrets.ONEDRIVE_CLIENT_SECRET }}')
+    expect(workflow).toContain('DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}')
+    expect(workflow).toContain('REQUIRED_RELEASE_SECRETS:')
+    expect(workflow).toContain('DROPBOX_APP_SECRET')
+    expect(envExample).toContain('ONEDRIVE_CLIENT_SECRET=')
+    expect(envExample).toContain('DROPBOX_APP_SECRET=')
+  })
+
   it('keeps the current drive id when a single-root provider node is selected', () => {
     const selector = read('src/pan/topbtns/SelectPanDirModal.vue')
     expect(selector).toContain('const selectedDriveId = GetDriveID(user_id.value, parentNode.key || key) || drive_id.value')

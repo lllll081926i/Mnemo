@@ -9,6 +9,14 @@ const BUILTIN_GOOGLE_DRIVE_CLIENT_SECRET = 'X4Z3ca8xfWDb1Voo-F9a7ZxJ'
 export const GOOGLE_DRIVE_CLIENT_ID = CONFIGURED_GOOGLE_DRIVE_CLIENT_ID.trim() || BUILTIN_GOOGLE_DRIVE_CLIENT_ID
 export const GOOGLE_DRIVE_CLIENT_SECRET = CONFIGURED_GOOGLE_DRIVE_CLIENT_SECRET.trim() || BUILTIN_GOOGLE_DRIVE_CLIENT_SECRET
 
+export const resolveGoogleDriveCredentials = (clientId = '', clientSecret = '') => {
+  const effectiveClientId = clientId.trim() || GOOGLE_DRIVE_CLIENT_ID
+  return {
+    clientId: effectiveClientId,
+    clientSecret: clientSecret.trim() || (effectiveClientId === GOOGLE_DRIVE_CLIENT_ID ? GOOGLE_DRIVE_CLIENT_SECRET : '')
+  }
+}
+
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const ABOUT_URL = 'https://www.googleapis.com/drive/v3/about?fields=user,storageQuota'
@@ -76,8 +84,9 @@ const applyGoogleDriveAccount = async (token: ITokenInfo) => {
 }
 
 export const exchangeGoogleDriveCodeForToken = async (code: string, clientId: string, clientSecret: string, verifier: string, redirectUri: string) => {
-  const body = new URLSearchParams({ client_id: clientId.trim(), code, code_verifier: verifier, grant_type: 'authorization_code', redirect_uri: redirectUri })
-  if (clientSecret.trim()) body.set('client_secret', clientSecret.trim())
+  const credentials = resolveGoogleDriveCredentials(clientId, clientSecret)
+  const body = new URLSearchParams({ client_id: credentials.clientId, code, code_verifier: verifier, grant_type: 'authorization_code', redirect_uri: redirectUri })
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const payload = await tokenRequest(body)
   const token = createProviderToken('gdrive', {
     access_token: payload.access_token || '',
@@ -85,7 +94,7 @@ export const exchangeGoogleDriveCodeForToken = async (code: string, clientId: st
     token_type: payload.token_type || 'Bearer',
     expires_in: Number(payload.expires_in || 3600),
     expire_time: new Date(Date.now() + Number(payload.expires_in || 3600) * 1000).toISOString(),
-    device_id: clientId.trim()
+    device_id: credentials.clientId
   })
   if (!token.access_token) throw new Error('Google Drive access_token 缺失')
   await applyGoogleDriveAccount(token)
@@ -93,10 +102,10 @@ export const exchangeGoogleDriveCodeForToken = async (code: string, clientId: st
 }
 
 export const refreshGoogleDriveAccessToken = async (token: ITokenInfo) => {
-  const clientId = token.device_id || GOOGLE_DRIVE_CLIENT_ID
-  if (!clientId || !token.refresh_token) return null
-  const body = new URLSearchParams({ client_id: clientId, refresh_token: token.refresh_token, grant_type: 'refresh_token' })
-  if (GOOGLE_DRIVE_CLIENT_SECRET.trim()) body.set('client_secret', GOOGLE_DRIVE_CLIENT_SECRET.trim())
+  const credentials = resolveGoogleDriveCredentials(token.device_id)
+  if (!credentials.clientId || !token.refresh_token) return null
+  const body = new URLSearchParams({ client_id: credentials.clientId, refresh_token: token.refresh_token, grant_type: 'refresh_token' })
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const payload = await tokenRequest(body)
   token.access_token = payload.access_token || token.access_token
   token.expires_in = Number(payload.expires_in || token.expires_in || 3600)

@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildGoogleDriveAuthUrl, createGoogleDrivePkceVerifier, GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_SCOPE } from '../auth'
+import { buildGoogleDriveAuthUrl, createGoogleDrivePkceVerifier, GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_SCOPE, resolveGoogleDriveCredentials } from '../auth'
 
 describe('Google Drive OAuth', () => {
   it('ships internal desktop OAuth credentials when no release override is configured', () => {
     expect(GOOGLE_DRIVE_CLIENT_ID.trim()).not.toBe('')
     expect(GOOGLE_DRIVE_CLIENT_SECRET.trim()).not.toBe('')
+  })
+
+  it('pairs the configured secret only with its matching client id', () => {
+    expect(resolveGoogleDriveCredentials()).toEqual({ clientId: GOOGLE_DRIVE_CLIENT_ID, clientSecret: GOOGLE_DRIVE_CLIENT_SECRET })
+    expect(resolveGoogleDriveCredentials('custom-client-id')).toEqual({ clientId: 'custom-client-id', clientSecret: '' })
+    expect(resolveGoogleDriveCredentials('custom-client-id', 'custom-secret')).toEqual({ clientId: 'custom-client-id', clientSecret: 'custom-secret' })
   })
 
   it('builds a PKCE authorization URL for the in-app callback session', async () => {

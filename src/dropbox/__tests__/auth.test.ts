@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DROPBOX_APP_KEY, DROPBOX_APP_SECRET, buildDropboxAuthUrl, createDropboxPkceVerifier } from '../auth'
+import { DROPBOX_APP_KEY, DROPBOX_APP_SECRET, buildDropboxAuthUrl, createDropboxPkceVerifier, resolveDropboxCredentials } from '../auth'
 
 describe('Dropbox auth helpers', () => {
   it('builds a PKCE authorization url using the app key and verifier challenge', async () => {
@@ -31,6 +31,12 @@ describe('Dropbox auth helpers', () => {
   it('exports Dropbox app credentials as cleanable constants', () => {
     expect(DROPBOX_APP_KEY.trim()).not.toBe('')
     expect(DROPBOX_APP_SECRET.trim()).not.toBe('')
+  })
+
+  it('pairs the bundled secret only with its matching app key', () => {
+    expect(resolveDropboxCredentials()).toEqual({ appKey: DROPBOX_APP_KEY, appSecret: DROPBOX_APP_SECRET })
+    expect(resolveDropboxCredentials('custom-key')).toEqual({ appKey: 'custom-key', appSecret: '' })
+    expect(resolveDropboxCredentials('custom-key', 'custom-secret')).toEqual({ appKey: 'custom-key', appSecret: 'custom-secret' })
   })
 
   it('uses the built-in confidential client without PKCE parameters', async () => {
