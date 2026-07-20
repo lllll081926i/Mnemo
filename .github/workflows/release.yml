@@ -107,14 +107,16 @@ jobs:
           if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
             is_prerelease=true
           fi
+          # Avoid --latest=false (unsupported / 422 on some gh versions); use release API for prerelease.
           if [[ "${is_prerelease}" == "true" ]]; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
               --title "Mnemo ${GITHUB_REF_NAME}" \
               --notes-file release-notes.md \
               --prerelease \
-              --latest=false \
               --draft=false
+            release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id)"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" -f make_latest=false >/dev/null
           else
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \

@@ -3,15 +3,20 @@
 ## Product
 
 **Mnemo** is a free multi-cloud desktop file manager (Electron + Vue 3).  
-Mythology: Mnemosyne — memory. Product focus: remember and manage files across cloud drives.
+Mythology: Mnemosyne — memory.
+
+**Active providers** (login + `driveProvider`):  
+`pikpak` · `onedrive` · `dropbox` · `gdrive` · `gofile` · `webdav` · `s3`
+
+Default login provider: **PikPak**.
 
 ## Quick reference
 
 ```bash
-npm install          # npm, use npm (not pnpm/yarn)
+npm install          # npm only (package-lock.json)
 npm run dev
-npm run build        # version bump → vue-tsc → vite build
-npm run test         # focused Vitest subset
+npm run build        # typecheck → vite build
+npm run test
 npm run secrets:generate
 ```
 
@@ -22,45 +27,51 @@ npm run secrets:generate
 
 ## Build order
 
-`npm run build` = **version.mjs bump → typecheck → vite bundle** (clears `dist/`; build also clears `release/`).  
-`npm run build:electron` runs build then electron-builder. Product name: **Mnemo**, appId `com.mnemo.app`.
+`npm run build` = **typecheck → vite bundle** (clears `dist/`; full electron build also clears `release/`).  
+`npm run build:electron` runs build then electron-builder. Product name: **Mnemo**, appId `com.mnemo.app`.  
+Version line: `0.1.1-preview.x` during preview.
 
 ## Secrets
 
-Real keys live in `.env.local` / GitHub Secrets → `scripts/generate-secrets.mjs` → `src/secrets.generated.ts` (gitignored).
+Real keys: `.env.local` / GitHub Secrets → `scripts/generate-secrets.mjs` → `src/secrets.generated.ts` (gitignored).  
+Typical: OneDrive / Dropbox / Google Drive OAuth, optional subtitle keys, Apple signing.
 
 ## Architecture
 
 | Directory | Purpose |
 |---|---|
-| `electron/main/` | Main process |
+| `electron/main/` | Main process (Aria lazy-start, OAuth callback, windows) |
 | `electron/preload/` | Preload |
+| `worker.html` + `src/workerpage/` | Light upload worker entry |
 | `src/` | Vue renderer + providers |
 | `shared/` | Shared code |
 | `scripts/` | Build / secrets |
-| `static/engine/` | aria2 / mpv binaries |
+| `static/engine/` | aria2 / platform resources |
 
-Providers under `src/`: `aliapi/`, `pikpak/`, `quark/`, `cloud139/`, `cloud189/`, `guangya/`; mounted-storage clients live in `utils/webdavClient.ts` and `utils/s3Client.ts`.
+Providers under `src/`: `pikpak/`, `onedrive/`, `dropbox/`, `gdrive/`, `gofile/`.  
+Mounted storage: `utils/webdavClient.ts`, `utils/s3Client.ts`.  
+`src/aliapi/` may still hold shared file models / legacy helpers — **not** an active login product surface.
 
 Aliases: `@shared/*`, `@main/*`.
 
-## Out of scope (removed)
+## Out of scope (removed from product)
 
-Media library UI, media-server clients, music, books/Reedy, clouddrive-cli/MCP, local BT seeding/UPnP tracker sync, WebDAV **server**, App Pro/paywall, rss toolbox.
+Media library UI, media-server clients, music library product, books/Reedy/AI, clouddrive-cli/MCP, local BT seeding, WebDAV **server**, App Pro/paywall, RSS toolbox.  
+Login removed for Aliyun / Quark / 139 / 189 / Guangya / Nextcloud (do not re-add menus without full AGENTS checklist).
 
-Keep: cloud file manager, HTTP Aria download, provider cloud offline, video/file preview, slim share.
+Keep: multi-cloud file manager, HTTP Aria download, PikPak cloud offline, video/file preview, slim share.
 
 ## Testing
 
-Vitest Node env; explicit dirs in `vitest.config.ts`. Default `npm test` is a small aria/utils subset.
+Vitest Node env; explicit dirs in `vitest.config.ts`. Prefer normalizing CRLF when asserting multi-line source strings on Windows.
 
 ## Provider checklist
 
 When adding a provider, implement in order (do not ship list-only):
 
 1. Account/auth (`auth.ts`, secrets placeholders, userstore/userdal, login UI)  
-2. Detection (`isXxxUser`, drive model)  
-3. List/detail (`dirfilelist.ts` → `IAliGetFileModel`)  
+2. Detection (`tokenfrom`, drive model, `driveProvider` meta + capabilities)  
+3. List/detail → shared file model  
 4. Download/playback URLs (no wrong-provider APIs)  
 5. Search if supported  
 6. Thumbnails  

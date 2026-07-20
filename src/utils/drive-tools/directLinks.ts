@@ -23,18 +23,11 @@ export interface DirectLinkExportResult {
 }
 
 export const normalizeDriveToolDriveId = (driveId: string): string => {
-  const id = String(driveId || '')
-  const aliases: Record<string, string> = { '139': 'cloud139', '189': 'cloud189' }
-  return aliases[id] || id
+  return String(driveId || '')
 }
 
 export const normalizeDriveToolPlatform = (platform: string): string => {
-  const value = String(platform || '')
-  const aliases: Record<string, string> = {
-    cloud139: '139',
-    cloud189: '189'
-  }
-  return aliases[value] || value
+  return String(platform || '')
 }
 
 export const driveToolPlatformMatches = (tokenfrom: string, requested?: string): boolean => {
@@ -44,11 +37,7 @@ export const driveToolPlatformMatches = (tokenfrom: string, requested?: string):
 
 export const driveToolRootIdFor = (driveId: string): string => {
   const map: Record<string, string> = {
-    pikpak: 'pikpak_root',
-    quark: 'quark_root',
-    cloud139: 'cloud139_root',
-    cloud189: 'cloud189_root',
-    guangya: 'guangya_root',
+    pikpak: 'pikpak_root'
   }
   return map[normalizeDriveToolDriveId(driveId)] || 'root'
 }
@@ -61,10 +50,6 @@ export const driveToolDriveIdForPlatform = (platform: string, defaultDriveId = '
 const providerRootParent = (driveId: string, fileId: string) => {
   const providerDriveId = normalizeDriveToolDriveId(driveId)
   if (providerDriveId === 'pikpak') return fileId === 'pikpak_root' ? 'pikpak_root' : fileId
-  if (providerDriveId === 'quark') return fileId === 'quark_root' ? '0' : fileId
-  if (providerDriveId === 'cloud139') return fileId === 'cloud139_root' ? '/' : fileId
-  if (providerDriveId === 'cloud189') return fileId === 'cloud189_root' ? '-11' : fileId
-  if (providerDriveId === 'guangya') return fileId === 'guangya_root' ? 'guangya_root' : fileId
   return fileId
 }
 
@@ -80,23 +65,6 @@ export const listDriveToolChildren = async (userId: string, driveId: string, fil
     const { apiPikPakFileList, mapPikPakFileToAliModel } = await import('../../pikpak/dirfilelist')
     const { items } = await apiPikPakFileList(userId, parentId, 100)
     return items.map(item => mapPikPakFileToAliModel(item, providerDriveId, parentId))
-  }
-  if (providerDriveId === 'quark') {
-    const { apiQuarkFileList, mapQuarkFileToAliModel } = await import('../../quark/dirfilelist')
-    const { items } = await apiQuarkFileList(userId, parentId, 200)
-    return items.map(item => mapQuarkFileToAliModel(item, providerDriveId, fileId))
-  }
-  if (providerDriveId === 'cloud139') {
-    const { apiCloud139FileList, mapCloud139FileToAliModel } = await import('../../cloud139/dirfilelist')
-    return (await apiCloud139FileList(userId, parentId, 200)).map(item => mapCloud139FileToAliModel(item, providerDriveId, fileId))
-  }
-  if (providerDriveId === 'cloud189') {
-    const { apiCloud189FileList, mapCloud189FileToAliModel } = await import('../../cloud189/dirfilelist')
-    return (await apiCloud189FileList(userId, parentId, 200)).map(item => mapCloud189FileToAliModel(item, providerDriveId, fileId))
-  }
-  if (providerDriveId === 'guangya') {
-    const { apiGuangyaFileList, mapGuangyaFileToAliModel } = await import('../../guangya/dirfilelist')
-    return (await apiGuangyaFileList(userId, parentId, 200)).map(item => mapGuangyaFileToAliModel(item, providerDriveId, fileId))
   }
   const { default: AliDirFileList } = await import('../../aliapi/dirfilelist')
   const dir = await AliDirFileList.ApiDirFileList(userId, driveId, fileId, '', 'name asc')
