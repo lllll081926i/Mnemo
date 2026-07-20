@@ -665,6 +665,7 @@ export default class ipcEvent {
 
   private static handleWebRelaunchAria() {
     ipcMain.handle('WebRelaunchAria', async (event, data) => {
+      await (globalThis as any).motrixApplication?.ensureEngineReady?.()
       return getMotrixApplicationRpcPort()
     })
   }

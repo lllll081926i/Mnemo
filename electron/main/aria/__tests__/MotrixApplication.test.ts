@@ -5,7 +5,9 @@ vi.mock('electron', () => ({
     getPath: vi.fn(() => '/tmp/motrix-app-test'),
     getAppPath: vi.fn(() => '/tmp'),
     getLocale: vi.fn(() => 'zh-CN'),
-    getLoginItemSettings: vi.fn(() => ({ openAtLogin: false }))
+    getLoginItemSettings: vi.fn(() => ({ openAtLogin: false })),
+    setAsDefaultProtocolClient: vi.fn(),
+    removeAsDefaultProtocolClient: vi.fn()
   },
   ipcMain: { handle: vi.fn(), on: vi.fn(), off: vi.fn() },
   BrowserWindow: { getAllWindows: vi.fn(() => []) },
@@ -43,6 +45,21 @@ describe('MotrixApplication', () => {
     const { default: MotrixApplication } = await import('../MotrixApplication')
     const app = new MotrixApplication() as any
     expect(app.initialized).toBe(false)
+  })
+
+  it('defers the aria engine until a download client requests it', async () => {
+    const { default: MotrixApplication } = await import('../MotrixApplication')
+    const app = new MotrixApplication()
+    const startEngine = vi.spyOn(app, 'startEngine').mockImplementation(() => {})
+    const initEngineClient = vi.spyOn(app, 'initEngineClient').mockImplementation(() => {})
+
+    await app.init()
+    expect(startEngine).not.toHaveBeenCalled()
+    expect(initEngineClient).not.toHaveBeenCalled()
+
+    await Promise.all([app.ensureEngineReady(), app.ensureEngineReady()])
+    expect(startEngine).toHaveBeenCalledTimes(1)
+    expect(initEngineClient).toHaveBeenCalledTimes(1)
   })
 
   it('quit() resolves without throwing when not started', async () => {

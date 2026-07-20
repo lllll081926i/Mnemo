@@ -250,22 +250,21 @@ export default class launch extends EventEmitter {
             }
           })
         })
+        this.motrixApp = new MotrixApplication()
+        this.motrixApp.init().catch((err: any) => console.error('[MotrixApp] init failed', err))
         createMainWindow()
         createTray()
         registerAutoUpdate()
 
-        setImmediate(() => {
-          this.motrixApp = new MotrixApplication()
-          this.motrixApp.init().catch((err: any) => console.error('[MotrixApp] init failed', err))
-
-          if (!app.isPackaged) {
+        if (!app.isPackaged) {
+          setImmediate(() => {
             const defaultSessionExtensions = session.defaultSession.extensions
             const loadCrxExtension = defaultSessionExtensions?.loadExtension ? defaultSessionExtensions.loadExtension.bind(defaultSessionExtensions) : session.defaultSession.loadExtension.bind(session.defaultSession)
             loadCrxExtension(getStaticPath('crx'), { allowFileAccess: true }).catch((err: any) => {
               console.error('[launch] load crx extension failed', err)
             })
-          }
-        })
+          })
+        }
       })
       .catch((err: any) => {
         console.log(err)

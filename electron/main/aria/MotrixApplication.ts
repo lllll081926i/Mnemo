@@ -17,13 +17,12 @@ export default class MotrixApplication extends EventEmitter {
   protocolManager!: ProtocolManager
   context!: Context
   private initialized = false
+  private engineReady: Promise<void> | undefined
 
   async init (): Promise<void> {
     if (this.initialized) return
     this.initContext()
     this.initConfigManager()
-    this.startEngine()
-    this.initEngineClient()
     this.initEnergyManager()
     this.initProtocolManager()
     this.handleConfigChanges()
@@ -32,6 +31,16 @@ export default class MotrixApplication extends EventEmitter {
     this.initialized = true
     this.emit('application:initialized')
     setTimeout(() => this.afterInit(), 0)
+  }
+
+  async ensureEngineReady (): Promise<void> {
+    if (this.engineClient) return
+    if (this.engineReady) return this.engineReady
+    this.engineReady = Promise.resolve().then(() => {
+      this.startEngine()
+      this.initEngineClient()
+    })
+    return this.engineReady
   }
 
   initContext (): void { this.context = new Context() }
@@ -123,12 +132,13 @@ export default class MotrixApplication extends EventEmitter {
   }
 
   afterInit (): void {
-    this.autoResumeTask()
+    if (this.configManager.getUserConfig('resume-all-when-app-launched')) {
+      this.ensureEngineReady().then(() => this.autoResumeTask()).catch((err: any) => logger.warn('[motrix] resume engine failed: ' + err.message))
+    }
   }
 
   autoResumeTask (): void {
-    if (!this.configManager.getUserConfig('resume-all-when-app-launched')) return
-    this.engineClient.call('unpauseAll').catch(() => undefined)
+    this.engineClient?.call('unpauseAll').catch(() => undefined)
   }
 
   async quit (): Promise<void> {
