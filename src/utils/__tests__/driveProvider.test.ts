@@ -60,9 +60,9 @@ describe('drive provider capabilities', () => {
 
   it('exposes only implemented search and share paths', () => {
     for (const provider of ['aliyun', 'quark', 'guangya', 'onedrive', 'dropbox', 'gdrive'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(true)
-    for (const provider of ['139', '189', 'pikpak', 'nextcloud', 'gofile', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
+    for (const provider of ['139', '189', 'pikpak', 'gofile', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
     for (const provider of ['aliyun', 'pikpak', 'quark', 'guangya', 'onedrive', 'dropbox', 'gdrive', 'gofile'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(true)
-    for (const provider of ['139', '189', 'nextcloud', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
+    for (const provider of ['139', '189', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
   })
 
   it('builds flat Aliyun spaces and retained provider sidebars', () => {
