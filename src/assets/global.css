@@ -81,15 +81,33 @@ body {
   flex-basis: unset !important;
 }
 
+#mnemohead,
 .q-electron-drag {
   user-select: none;
   -webkit-app-region: drag;
 }
 
+.q-electron-no-drag,
 .q-electron-drag--exception,
+#mnemohead button,
+#mnemohead a,
+#mnemohead input,
+#mnemohead select,
+#mnemohead textarea,
+#mnemohead [contenteditable='true'],
+#mnemohead [role='button'],
+#mnemohead .arco-menu-item,
+#mnemohead .arco-menu-pop,
+#mnemohead .arco-menu-pop-header,
+#mnemohead .arco-menu-overflow-wrap,
+#mnemohead .arco-avatar,
 .q-electron-drag button,
-.q-electron-drag ul,
-.q-electron-drag li,
+.q-electron-drag a,
+.q-electron-drag input,
+.q-electron-drag select,
+.q-electron-drag textarea,
+.q-electron-drag [contenteditable='true'],
+.q-electron-drag [role='button'],
 .q-electron-drag .arco-menu-item,
 .q-electron-drag .arco-menu-pop,
 .q-electron-drag .arco-menu-pop-header,

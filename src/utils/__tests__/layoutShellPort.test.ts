@@ -77,6 +77,17 @@ describe('deep layout shell port', () => {
     expect(css).toContain('--layout-rail-width: 220px')
   })
 
+  it('keeps the full titlebar draggable while interactive controls remain clickable', () => {
+    const css = read('src/assets/global.css')
+    expect(css).toContain('#mnemohead,\n.q-electron-drag')
+    expect(css).toContain('-webkit-app-region: drag')
+    expect(css).toContain('.q-electron-no-drag')
+    expect(css).toContain('#mnemohead button')
+    expect(css).toContain('#mnemohead [role=\'button\']')
+    expect(css).not.toContain('.q-electron-drag ul,')
+    expect(css).not.toContain('.q-electron-drag li,')
+  })
+
   it('pan left has drive switcher and recalculated tree height', () => {
     const pan = read('src/pan/PanLeft.vue')
     const split = read('src/layout/MySplit.vue')
