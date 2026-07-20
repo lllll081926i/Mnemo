@@ -91,10 +91,24 @@ jobs:
               -f tag_name="${GITHUB_REF_NAME}" \
               --jq .body > release-notes.md
           fi
-          gh release edit "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Mnemo ${GITHUB_REF_NAME}" \
-            --notes-file release-notes.md \
-            --prerelease=false \
-            --latest \
-            --draft=false
+          is_prerelease=false
+          if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
+            is_prerelease=true
+          fi
+          if [[ "${is_prerelease}" == "true" ]]; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Mnemo ${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md \
+              --prerelease \
+              --latest=false \
+              --draft=false
+          else
+            gh release edit "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Mnemo ${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md \
+              --prerelease=false \
+              --latest \
+              --draft=false
+          fi

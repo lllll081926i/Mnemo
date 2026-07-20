@@ -337,7 +337,10 @@ describe('deep layout shell port', () => {
     expect(windowSource).toContain('disableDevTools(webContent)')
     expect(windowSource).toContain('if (!allowDevTools) webPreferences.devTools = false')
     expect(windowSource).not.toContain('readerWindow')
-    expect(loginSource).toContain('if (import.meta.env.DEV)')
+    expect(loginSource).not.toContain('webview.openDevTools')
+    expect(loginSource).toContain('cleanupAliyunLoginWebview()')
+    expect(loginSource).not.toContain('webview.stop()')
+    expect(loginSource).not.toContain('unmount-on-close')
   })
 
   it('starts the packaged window without global TLS bypasses or remote icon fonts', () => {

@@ -39,6 +39,7 @@ src/secrets.generated.ts
 docs/
 !docs/
 docs/*
+!docs/PROJECT_REVIEW.md
 !docs/releases/
 docs/releases/*
 !docs/releases/*.md
@@ -68,6 +69,9 @@ rclone/
 tmp_video_frames/
 tmp_video_xhs/
 .codeflicker/
+.tmp_migrate/
+logo/
+*.tsbuildinfo
 
 # stale tsc compile output for ts source files (must be regenerated only via vite-plugin-electron)
 electron/**/*.js
@@ -77,10 +81,12 @@ electron/**/*.d.ts.map
 !electron/preload/preload-env.d.ts
 !electron/main/**/__tests__/**
 
-# 文档与媒体产物：只保留 README 类 Markdown
+# 文档与媒体产物：只保留 README 类 Markdown 与指定审查文档
 *.md
 !README*.md
 !**/README*.md
+!docs/PROJECT_REVIEW.md
+!docs/releases/*.md
 *.html
 *.mp4
 *.mov

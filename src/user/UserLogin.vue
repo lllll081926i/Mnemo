@@ -82,17 +82,13 @@ let cloud189Timer: any = null
 let cloud189Polling = false
 let loginOpenTimer: any = null
 let aliyunLoginHandled = false
+let removeAliyunWebviewListeners: (() => void) | null = null
 
 const getAliyunLoginWebview = () => document.getElementById('loginiframe') as any
 
-const stopAliyunLoginWebview = () => {
-  const webview = getAliyunLoginWebview()
-  if (!webview) return
-  try {
-    webview.stop()
-  } catch {
-    // ignore webview stop errors while switching providers
-  }
+const cleanupAliyunLoginWebview = () => {
+  removeAliyunWebviewListeners?.()
+  removeAliyunWebviewListeners = null
 }
 
 const clearOpenTimers = () => {
@@ -131,7 +127,7 @@ watch(loginProvider, () => {
   clearOpenTimers()
   if (loginProvider.value !== 'quark') clearQuarkTimer()
   if (loginProvider.value !== '189') clearCloud189Timer()
-  if (loginProvider.value !== 'aliyun') stopAliyunLoginWebview()
+  if (loginProvider.value !== 'aliyun') cleanupAliyunLoginWebview()
   if (loginProvider.value === 'pikpak') {
     loginLoading.value = false
   } else if (loginProvider.value === 'quark') {
@@ -196,13 +192,7 @@ const handleOpen = () => {
       message.error('严重错误：无法打开登录弹窗，请退出Mnemo后重新运行')
       return
     }
-    if (import.meta.env.DEV) {
-      try {
-        webview.openDevTools({ mode: 'bottom', activate: false })
-      } catch (err: any) {
-        DebugLog.mSaveWarning('Aliyun login webview DevTools open failed ' + (err?.message || err))
-      }
-    }
+    cleanupAliyunLoginWebview()
     aliyunLoginHandled = false
     const extractBizExt = (payload: string) => {
       try {
@@ -220,11 +210,6 @@ const handleOpen = () => {
         if (parsed?.code && !aliyunLoginHandled) {
           aliyunLoginHandled = true
           loginStepFirst(payload)
-          try {
-            webview.stop()
-          } catch {
-            // ignore navigation stop errors after the OAuth callback is received
-          }
           return true
         }
       } catch {
@@ -234,11 +219,6 @@ const handleOpen = () => {
       if (aliyunLoginHandled || !bizExt) return false
       aliyunLoginHandled = true
       loginStepFirst(JSON.stringify({ bizExt }))
-      try {
-        webview.stop()
-      } catch {
-        // ignore navigation stop errors after the login callback is received
-      }
       return true
     }
     const handleLoginNavigation = (event: any) => {
@@ -262,24 +242,43 @@ const handleOpen = () => {
     webview.addEventListener('did-navigate', handleLoginNavigation)
     webview.addEventListener('did-redirect-navigation', handleLoginNavigation)
     webview.addEventListener('did-navigate-in-page', handleLoginNavigation)
-    webview.addEventListener('console-message', (e: any) => {
+    const handleConsoleMessage = (e: any) => {
       const msg = e.message || ''
-      loginLoading.value = false
+      if (loginProvider.value === 'aliyun' && useUser.userShowLogin) loginLoading.value = false
       handleLoginPayload(msg)
-    })
+    }
+    const handleLoadFinished = () => {
+      if (loginProvider.value === 'aliyun' && useUser.userShowLogin) loginLoading.value = false
+    }
+    const handleLoadFailed = (event: any) => {
+      if (event?.errorCode === -3) return
+      if (loginProvider.value === 'aliyun' && useUser.userShowLogin) loginLoading.value = false
+    }
+    webview.addEventListener('console-message', handleConsoleMessage)
+    webview.addEventListener('did-finish-load', handleLoadFinished)
+    webview.addEventListener('did-fail-load', handleLoadFailed)
+    removeAliyunWebviewListeners = () => {
+      webview.removeEventListener('will-navigate', handleLoginNavigation)
+      webview.removeEventListener('did-navigate', handleLoginNavigation)
+      webview.removeEventListener('did-redirect-navigation', handleLoginNavigation)
+      webview.removeEventListener('did-navigate-in-page', handleLoginNavigation)
+      webview.removeEventListener('console-message', handleConsoleMessage)
+      webview.removeEventListener('did-finish-load', handleLoadFinished)
+      webview.removeEventListener('did-fail-load', handleLoadFailed)
+    }
+    try {
+      if (webview.isLoading?.()) return
+    } catch {
+      // The guest may not be attached yet; loadURL below will attach it.
+    }
     const load = webview.loadURL(Config.loginUrl, { httpReferrer: Config.referer })
     if (load?.catch) {
       load.catch((err: any) => {
+        if (loginProvider.value !== 'aliyun' || !useUser.userShowLogin) return
         loginLoading.value = false
-        if (loginProvider.value === 'aliyun' && useUser.userShowLogin) DebugLog.mSaveWarning('Aliyun login webview load failed ' + (err?.message || err))
+        if (!/ERR_(ABORTED|FAILED)/i.test(err?.message || '')) DebugLog.mSaveWarning('Aliyun login webview load failed ' + (err?.message || err))
       })
     }
-    webview.addEventListener('did-finish-load', () => {
-      loginLoading.value = false
-    })
-    webview.addEventListener('did-fail-load', () => {
-      loginLoading.value = false
-    })
   }, 1000)
 }
 
@@ -354,6 +353,7 @@ const removeOAuthCallback = window.WebOAuthOnCallback?.(async (payload) => {
 })
 
 onBeforeUnmount(() => {
+  cleanupAliyunLoginWebview()
   removeOAuthCallback?.()
   cancelOAuthLogins()
 })
@@ -364,7 +364,7 @@ const handleClose = () => {
   client_secret.value = ALIYUN_APP_SECRET
   clearInterval(intervalId.value)
   clearOpenTimers()
-  stopAliyunLoginWebview()
+  cleanupAliyunLoginWebview()
   clearQuarkTimer()
   clearCloud189Timer()
   cancelOAuthLogins()
@@ -908,7 +908,7 @@ const loginSuccess = (token: ITokenInfo) => {
 </script>
 
 <template>
-  <a-modal title="网盘账号登录" v-model:visible="useUser.userShowLogin" :mask-closable="false" unmount-on-close :footer="false" class="userloginmodal" @before-open="handleModalOpen" @close="handleClose">
+  <a-modal title="网盘账号登录" v-model:visible="useUser.userShowLogin" :mask-closable="false" :footer="false" class="userloginmodal" @before-open="handleModalOpen" @close="handleClose">
     <div class="modalbody login-modal-body">
       <aside class="login-provider-sidebar">
         <button v-for="provider in loginProviders" :key="provider" class="login-provider-side-item" :class="{ active: loginProvider === provider }" :title="getLoginProviderMeta(provider).label" @click="loginProvider = provider">

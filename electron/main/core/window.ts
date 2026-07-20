@@ -321,7 +321,7 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
   })
   // 处理webview跳转
   win.webContents.addListener('did-attach-webview', (event, webContent) => {
-    void webContent.session.setProxy({ mode: 'direct' }).then(() => webContent.session.closeAllConnections())
+    void webContent.session.setProxy({ mode: 'direct' }).then(() => webContent.session.closeAllConnections()).catch((error) => console.warn('[webview] proxy setup failed:', error?.message || error))
     if (allowDevTools) {
       registerDevToolsShortcut(webContent)
     } else {
@@ -329,7 +329,11 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
     }
     // 不允许的网址则阻止页面跳转并拉取浏览器展示页面
     webContent.setWindowOpenHandler((details) => {
-      if (isAllowedLoginUrl(details.url)) webContent.loadURL(details.url)
+      if (isAllowedLoginUrl(details.url) && !webContent.isDestroyed()) {
+        void webContent.loadURL(details.url).catch((error) => {
+          if (!/ERR_(ABORTED|FAILED)/i.test(error?.message || '')) console.warn('[webview] redirect load failed:', error?.message || error)
+        })
+      }
       return { action: 'deny' }
     })
     webContent.on('will-redirect', (e, url) => {
