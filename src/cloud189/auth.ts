@@ -1,6 +1,6 @@
 import { HmacSHA1 } from 'crypto-js'
 import type { ITokenInfo } from '../user/userstore'
-import { CLOUD189_APP_ID } from '../secrets.generated'
+const CLOUD189_APP_ID = ''
 
 export { CLOUD189_APP_ID }
 

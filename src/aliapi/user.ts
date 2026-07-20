@@ -7,15 +7,12 @@ import DebugLog from '../utils/debuglog'
 import { IAliUserDriveCapacity, IAliUserDriveDetails } from './models'
 import { GetDeviceId, GetSignature } from './utils'
 import { useSettingStore } from '../store'
-import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
-
-// The desktop OAuth client used by the original application. Release secrets can override it.
 const BUILTIN_ALIYUN_APP_ID = 'df43e22f022d4c04b6e29964f3b8b46d'
 const BUILTIN_ALIYUN_APP_SECRET = '63f06c3c5c5d4e1196e2c13e8588ae29'
 
 export const getAliyunOpenApiCredentials = () => ({
-  clientId: ALIYUN_APP_ID.trim() || BUILTIN_ALIYUN_APP_ID,
-  clientSecret: ALIYUN_APP_SECRET.trim() || BUILTIN_ALIYUN_APP_SECRET
+  clientId: BUILTIN_ALIYUN_APP_ID,
+  clientSecret: BUILTIN_ALIYUN_APP_SECRET
 })
 
 export const TokenReTimeMap = new Map<string, number>()

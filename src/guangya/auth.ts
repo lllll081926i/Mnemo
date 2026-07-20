@@ -1,5 +1,5 @@
 import type { ITokenInfo } from '../user/userstore'
-import { GUANGYA_CLIENT_ID } from '../secrets.generated'
+const GUANGYA_CLIENT_ID = ''
 
 export { GUANGYA_CLIENT_ID }
 
