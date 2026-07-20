@@ -2,13 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Artplayer from 'artplayer'
 import type { Option } from 'artplayer/types/option'
-import HlsJs from 'hls.js'
-import * as dashjs from 'dashjs'
-import artplayerPluginJassub from 'artplayer-plugin-jassub'
-import JASSUBWorker from 'jassub/dist/jassub-worker.js?url'
-import JASSUBWorkerWasm from 'jassub/dist/jassub-worker.wasm?url'
-import JASSUBWorkerModernWasm from 'jassub/dist/jassub-worker-modern.wasm?url'
-import JASSUBDefaultFont from 'jassub/dist/default.woff2?url'
 import { ListVideo, Maximize2, Minus, Pin, PinOff, X } from 'lucide-vue-next'
 import { useAppStore, useSettingStore } from '../store'
 import type { IPageVideoPlaylistEntry } from '../store/appstore'
@@ -55,9 +48,11 @@ const mpvExternalSubtitle = ref<{ url: string; title?: string } | undefined>()
 const useEmbeddedMpv = settingStore.uiVideoPlayer === 'mpv' && window.platform === 'darwin'
 const playlist = ref<IPageVideoPlaylistEntry[]>(pageVideo?.custom_playlist?.length ? [...pageVideo.custom_playlist] : [])
 let art: Artplayer | null = null
-let hls: HlsJs | null = null
+let hls: { destroy: () => void } | null = null
 let dashPlayer: any = null
 let loadToken = 0
+let streamingLoadToken = 0
+let jassubPlayer: Artplayer | null = null
 let pendingPosition = Number(pageVideo?.play_cursor || 0)
 let lastSavedSecond = -1
 
@@ -73,6 +68,7 @@ function inferVideoType(url: string, hint = '') {
 }
 
 function destroyStreamingPlayers() {
+  streamingLoadToken++
   hls?.destroy()
   hls = null
   if (dashPlayer) {
@@ -83,19 +79,41 @@ function destroyStreamingPlayers() {
 
 function playHls(video: HTMLMediaElement, url: string) {
   destroyStreamingPlayers()
-  if (HlsJs.isSupported()) {
-    hls = new HlsJs()
-    hls.loadSource(url)
-    hls.attachMedia(video)
-  } else {
-    video.src = url
-  }
+  const token = streamingLoadToken
+  void import('hls.js').then(({ default: HlsJs }) => {
+    if (token !== streamingLoadToken) return
+    if (!HlsJs.isSupported()) {
+      video.src = url
+      return
+    }
+    const player = new HlsJs()
+    if (token !== streamingLoadToken) {
+      player.destroy()
+      return
+    }
+    hls = player
+    player.loadSource(url)
+    player.attachMedia(video)
+  }).catch(() => {
+    if (token === streamingLoadToken) video.src = url
+  })
 }
 
 function playDash(video: HTMLMediaElement, url: string) {
   destroyStreamingPlayers()
-  dashPlayer = dashjs.MediaPlayer().create()
-  dashPlayer.initialize(video, url, true)
+  const token = streamingLoadToken
+  void import('dashjs').then((dashjs) => {
+    if (token !== streamingLoadToken) return
+    const player = dashjs.MediaPlayer().create()
+    if (token !== streamingLoadToken) {
+      player.reset()
+      return
+    }
+    dashPlayer = player
+    player.initialize(video, url, true)
+  }).catch(() => {
+    if (token === streamingLoadToken) errorText.value = 'DASH 播放组件加载失败'
+  })
 }
 
 function toLocalFileUrl(filePath: string) {
@@ -180,6 +198,35 @@ function subtitleUrl(subtitle: IRawUrl['subtitles'][number]) {
   })
 }
 
+function hasAssSubtitle(source: ResolvedVideoSource) {
+  return source.subtitles.some((subtitle) => /\.(ass|ssa)(?:$|[?#])/i.test(subtitle.url))
+}
+
+async function installJassubPlugin(player: Artplayer, source: ResolvedVideoSource, token: number) {
+  if (!hasAssSubtitle(source) || jassubPlayer === player) return
+  try {
+    const [pluginModule, workerModule, wasmModule, modernWasmModule, fontModule] = await Promise.all([
+      import('artplayer-plugin-jassub'),
+      import('jassub/dist/jassub-worker.js?url'),
+      import('jassub/dist/jassub-worker.wasm?url'),
+      import('jassub/dist/jassub-worker-modern.wasm?url'),
+      import('jassub/dist/default.woff2?url')
+    ])
+    if (art !== player || token !== loadToken) return
+    player.plugins.add(pluginModule.default({
+      workerUrl: workerModule.default,
+      wasmUrl: wasmModule.default,
+      modernWasmUrl: modernWasmModule.default,
+      availableFonts: { 'liberation sans': fontModule.default },
+      fallbackFont: 'liberation sans',
+      subContent: '[Script Info]\nScriptType: v4.00+'
+    }))
+    jassubPlayer = player
+  } catch (error) {
+    console.warn('ASS 字幕渲染组件加载失败:', error)
+  }
+}
+
 function installQualityControl(source: ResolvedVideoSource) {
   if (!art || source.qualities.length < 2) return
   art.controls.update({
@@ -255,14 +302,6 @@ function createArtplayer() {
     }
   }
   art = new Artplayer(options)
-  art.plugins.add(artplayerPluginJassub({
-    workerUrl: JASSUBWorker,
-    wasmUrl: JASSUBWorkerWasm,
-    modernWasmUrl: JASSUBWorkerModernWasm,
-    availableFonts: { 'liberation sans': JASSUBDefaultFont },
-    fallbackFont: 'liberation sans',
-    subContent: '[Script Info]\nScriptType: v4.00+'
-  }))
   art.on('ready', () => {
     if (!art) return
     if (pendingPosition > 0) art.currentTime = pendingPosition
@@ -305,6 +344,9 @@ async function loadCurrentVideo() {
       mpvHeaders.value = source.headers
       mpvExternalSubtitle.value = source.subtitles[0] ? { url: subtitleUrl(source.subtitles[0]), title: source.subtitles[0].language } : undefined
     } else if (art) {
+      await installJassubPlugin(art, source, token)
+      if (token !== loadToken || !art) return
+      destroyStreamingPlayers()
       art.type = source.type as any
       art.url = source.url
       installQualityControl(source)
@@ -421,6 +463,7 @@ onBeforeUnmount(() => {
   destroyStreamingPlayers()
   art?.destroy(false)
   art = null
+  jassubPlayer = null
 })
 </script>
 

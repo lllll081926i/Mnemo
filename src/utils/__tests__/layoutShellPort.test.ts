@@ -209,6 +209,19 @@ describe('deep layout shell port', () => {
     expect(properties).toContain('proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined')
   })
 
+  it('loads streaming and ASS playback runtimes only for the media that requires them', () => {
+    const video = read('src/layout/PageVideo.vue')
+
+    expect(video).not.toContain("import HlsJs from 'hls.js'")
+    expect(video).not.toContain("import * as dashjs from 'dashjs'")
+    expect(video).not.toContain("import artplayerPluginJassub from 'artplayer-plugin-jassub'")
+    expect(video).toContain("void import('hls.js')")
+    expect(video).toContain("void import('dashjs')")
+    expect(video).toContain("import('artplayer-plugin-jassub')")
+    expect(video).toContain('function hasAssSubtitle(source: ResolvedVideoSource)')
+    expect(video).toContain('await installJassubPlugin(art, source, token)')
+  })
+
   it('keeps active workspace toolbars free of fixed spacer nodes', () => {
     const pages = [
       'src/pan/PanRight.vue',
