@@ -6,7 +6,6 @@ import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
 import { IAliUserDriveCapacity, IAliUserDriveDetails } from './models'
 import { GetDeviceId, GetSignature } from './utils'
-import { useSettingStore } from '../store'
 const BUILTIN_ALIYUN_APP_ID = 'df43e22f022d4c04b6e29964f3b8b46d'
 const BUILTIN_ALIYUN_APP_SECRET = '63f06c3c5c5d4e1196e2c13e8588ae29'
 
@@ -146,7 +145,6 @@ export default class AliUser {
       OpenApiTokenLockMap.delete(token.user_id)
       return true
     }
-    let { uiEnableOpenApiType, uiOpenApiClientId, uiOpenApiClientSecret } = useSettingStore()
     let url = 'https://openapi.alipan.com/oauth/access_token'
     const credentials = getAliyunOpenApiCredentials()
     const postData = {

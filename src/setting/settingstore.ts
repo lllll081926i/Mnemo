@@ -18,11 +18,6 @@ export interface SettingState {
   uiLaunchStart: boolean
   uiLaunchStartShow: boolean
 
-  // 账户设置
-  uiEnableOpenApiType: string
-  uiOpenApiClientId: string
-  uiOpenApiClientSecret: string
-
   // 安全设置
   securityEncType: string
   securityPassword: string
@@ -146,11 +141,6 @@ const setting: SettingState = {
   uiLaunchAutoSign: false,
   uiLaunchStart: false,
   uiLaunchStartShow: false,
-
-  // 账户设置
-  uiEnableOpenApiType: 'inline',
-  uiOpenApiClientId: '',
-  uiOpenApiClientSecret: '',
 
   // 安全设置
   securityEncType: 'aesctr',
@@ -280,11 +270,6 @@ function _loadSetting(val: any) {
   setting.uiLaunchAutoSign = defaultBool(val.uiLaunchAutoSign, false)
   setting.uiLaunchStart = defaultBool(val.uiLaunchStart, false)
   setting.uiLaunchStartShow = defaultBool(val.uiLaunchStartShow, false)
-
-  // 账户设置
-  setting.uiEnableOpenApiType = defaultValue(val.uiEnableOpenApiType, ['inline', 'custom'])
-  setting.uiOpenApiClientId = defaultString(val.uiOpenApiClientId, '')
-  setting.uiOpenApiClientSecret = defaultString(val.uiOpenApiClientSecret, '')
 
   // 安全设置
   setting.securityEncType = defaultValue(val.securityEncType, ['aesctr', 'rc4md5'])
