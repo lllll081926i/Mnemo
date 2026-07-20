@@ -8,7 +8,6 @@ import DebugLog from '../utils/debuglog'
 import message from '../utils/message'
 import usePanTreeStore from './pantreestore'
 import { GetDriveID, GetDriveType, isPikPakUser } from '../aliapi/utils'
-import AliAlbum from '../aliapi/album'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, isS3Drive, listS3Directory } from '../utils/s3Client'
@@ -289,7 +288,7 @@ export default class PanDAL {
         if (!album_id) {
           findPath = await AliFile.ApiFileGetPath(panTreeStore.user_id, drive_id, file_id)
         } else {
-          findPath = await AliAlbum.ApiAlbumGetPath(panTreeStore.user_id, drive_id, album_id)
+          findPath = []
         }
         if (findPath.length > 0) {
           dirPath = findPath

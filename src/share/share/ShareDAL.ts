@@ -8,8 +8,6 @@ import { IID, ParseShareIDList } from '../../utils/shareurl'
 import { RunBatch } from '../../aliapi/batch'
 import AliShare from '../../aliapi/share'
 import { IAliShareAnonymous } from '../../aliapi/alimodels'
-import useMyTransferShareStore from './MyShareTransferStore'
-import AliTransferShareList from '../../aliapi/transfersharelist'
 import useShareHistoryStore from './ShareHistoryStore'
 import UserDAL from '../../user/userdal'
 import type { ITokenInfo } from '../../user/userstore'
@@ -108,16 +106,6 @@ export default class ShareDAL {
     shareHistoryStore.ListLoading = false
   }
 
-  static async aReloadMyTransferShare(user_id: string, force: boolean): Promise<void> {
-    if (!user_id) return
-    const myTransferShareStore = useMyTransferShareStore()
-    if (!force && myTransferShareStore.ListDataRaw.length > 0) return
-    if (myTransferShareStore.ListLoading == true) return
-    myTransferShareStore.ListLoading = true
-    const resp = await AliTransferShareList.ApiTransferShareListAll(user_id)
-    myTransferShareStore.aLoadListData(resp.items)
-    myTransferShareStore.ListLoading = false
-  }
 
   static async aReloadMyShareUntilShareID(user_id: string, share_id: string): Promise<void> {
     if (!user_id) return
@@ -125,11 +113,6 @@ export default class ShareDAL {
     if (find) await ShareDAL.aReloadMyShare(user_id, true)
   }
 
-  static async aReloadMyTransferShareUntilShareID(user_id: string, share_id: string): Promise<void> {
-    if (!user_id) return
-    const find = await AliTransferShareList.ApiTransferShareListUntilShareID(user_id, share_id, 20)
-    if (find) await ShareDAL.aReloadMyTransferShare(user_id, true)
-  }
 
   static async aReloadOtherShare(): Promise<void> {
     const othershareStore = useOtherShareStore()

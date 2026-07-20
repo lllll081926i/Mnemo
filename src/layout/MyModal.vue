@@ -2,7 +2,6 @@
 import { defineComponent } from 'vue'
 import { useModalStore } from '../store'
 import CreatNewFileModal from '../pan/topbtns/CreatNewFileModal.vue'
-import CreatNewAlbumModal from '../pan/topbtns/CreatNewAlbumModal.vue'
 import RenameModal from '../pan/topbtns/RenameModal.vue'
 import RenameMultiModal from '../pan/topbtns/RenameMultiModal.vue'
 import CreatNewDirModal from '../pan/topbtns/CreatNewDirModal.vue'
@@ -20,7 +19,6 @@ import ArchiveModal from '../pan/topbtns/ArchiveModal.vue'
 import ArchivePasswordModal from '../pan/topbtns/ArchivePasswordModal.vue'
 import UploadModal from '../pan/topbtns/UploadModal.vue'
 import DownloadModal from '../pan/topbtns/DownloadModal.vue'
-import MoveToAlbumModal from '../pan/topbtns/MoveToAlbumModal.vue'
 import PostModal from '../pan/topbtns/PostModal.vue'
 import PasswordModal from '../pan/topbtns/PasswordModal.vue'
 import SelectVideoQualityModal from '../pan/topbtns/SelectVideoQualityModal.vue'
@@ -33,9 +31,7 @@ export default defineComponent({
     PasswordModal,
     RenameModal,
     RenameMultiModal,
-    MoveToAlbumModal,
     CreatNewFileModal,
-    CreatNewAlbumModal,
     CreatNewDirModal,
     CreatNewShareLinkModal,
     DaoRuShareLinkModal,
@@ -62,8 +58,6 @@ export default defineComponent({
 
 <template>
   <CreatNewFileModal :visible="modalStore.modalName == 'creatfile'" :encType="modalStore.modalData.encType || ''" />
-  <CreatNewAlbumModal :visible="modalStore.modalName == 'creatalbum'" />
-  <MoveToAlbumModal :visible="modalStore.modalName == 'movetoalbum'" :istree='modalStore.modalData.istree || false' />
   <CreatNewDirModal :visible="modalStore.modalName == 'creatdir'"
                     :dirtype="modalStore.modalData.dirtype || ''"
                     :encType="modalStore.modalData.encType || ''"

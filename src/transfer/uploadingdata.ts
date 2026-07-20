@@ -7,7 +7,6 @@ import { humanSize, humanSizeSpeed, humanTime, humanTimeFM } from '../utils/form
 import { MapValueToArray } from '../utils/utils'
 import { throttle } from '../utils/debounce'
 import { SetProgressBar } from '../utils/electronhelper'
-import AliAlbum from '../aliapi/album'
 import path from 'node:path'
 
 const UploadingTaskList = new Map<number, IStateUploadTask>()
@@ -637,18 +636,7 @@ export default class UploadingData {
       if (saveUploadedList.length > 0) {
         let panTreeStore = usePanTreeStore()
         let album_id = panTreeStore.selectDir.album_id || ''
-        // 上传完毕，若为相册上传则添加到相册
-        if (album_id) {
-          let drive_file_list: { drive_id: string, file_id: string }[] = []
-          saveUploadedList.forEach(info => {
-            drive_file_list.push({
-              drive_id: info.drive_id,
-              file_id: info.TaskFileID
-            })
-          })
-          await AliAlbum.ApiAlbumAddFiles(panTreeStore.user_id, album_id, drive_file_list)
-          await PanDAL.aReLoadOneDirToShow(drive_file_list[0].drive_id, 'refresh', false, album_id)
-        }
+        // 相册功能已移除；忽略 album_id
         await DBUpload.saveUploadedBatch(saveUploadedList)
         await UploadDAL.aReloadUploaded()
       }
@@ -872,18 +860,7 @@ export default class UploadingData {
         await DBUpload.saveUploadedBatch([task])
         await UploadDAL.aReloadUploaded()
         let panTreeStore = usePanTreeStore()
-        let album_id = panTreeStore.selectDir.album_id || ''
-        // 重新上传完毕，若为相册上传则添加到相册
-        if (album_id) {
-          let drive_file_list: { drive_id: string, file_id: string }[] = [{
-            drive_id: task.drive_id,
-            file_id: task.TaskFileID
-          }]
-          await AliAlbum.ApiAlbumAddFiles(panTreeStore.user_id, album_id, drive_file_list)
-          await PanDAL.aReLoadOneDirToShow(task.drive_id, 'refresh', false, album_id)
-        } else {
-          await PanDAL.aReLoadOneDirToRefreshTree(task.user_id, task.drive_id, task.parent_file_id)
-        }
+        await PanDAL.aReLoadOneDirToRefreshTree(task.user_id, task.drive_id, task.parent_file_id)
       } else {
         SaveTaskList.set(task.TaskID, task)
         SaveTaskToDB()

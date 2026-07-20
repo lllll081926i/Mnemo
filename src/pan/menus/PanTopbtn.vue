@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { handleUpload, topFavorDeleteAll } from '../topbtns/topbtn'
-import { modalCreatNewAlbum, modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink } from '../../utils/modal'
+import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink } from '../../utils/modal'
 import PanDAL from '../pandal'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
@@ -112,10 +112,6 @@ const handleSelectRecentPlay = () => {
         </a-dgroup>
       </template>
     </a-dropdown>
-    <a-button v-else-if="dirtype === 'pic' && inputpicType != 'pic_root'" type="text" size="small" tabindex="-1" @click="modalCreatNewAlbum">
-      <IconFont name="iconplus" />
-      创建相册
-    </a-button>
     <a-dropdown v-if="isShowBtn && !dirtype.includes('pic') && capabilities.upload" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconupload" />
@@ -151,33 +147,6 @@ const handleSelectRecentPlay = () => {
           <a-doption value="uploaddir" title="Ctrl+Shift+M" @click="() => handleUpload('folder', 'mnemoEncrypt2')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>上传文件夹（私密）</template>
-          </a-doption>
-        </a-dgroup>
-      </template>
-    </a-dropdown>
-    <a-dropdown v-if="isShowBtn && dirtype.includes('pic') && capabilities.photoAlbum" trigger="hover" class="rightmenu" position="bl">
-      <a-button type="text" size="small" tabindex="-1">
-        <IconFont name="iconupload" />
-        上传照片/视频
-        <IconFont name="icondown" />
-      </a-button>
-      <template #content>
-        <a-dgroup title="普通上传">
-          <a-doption value="uploadfile" @click="() => handleUpload('pic_file')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>上传照片/视频</template>
-          </a-doption>
-        </a-dgroup>
-        <a-dgroup title="加密上传">
-          <a-doption value="uploadfile" @click="() => handleUpload('pic_file', 'mnemoEncrypt1')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>上传照片/视频（加密）</template>
-          </a-doption>
-        </a-dgroup>
-        <a-dgroup title="私密上传">
-          <a-doption value="uploadfile" title="Ctrl+U" @click="() => handleUpload('pic_file', 'mnemoEncrypt2')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>上传照片/视频（私密）</template>
           </a-doption>
         </a-dgroup>
       </template>

@@ -11,14 +11,6 @@ export function modalCreatNewFile(encType: string = '') {
   useModalStore().showModal('creatfile', { encType })
 }
 
-export function modalCreatNewAlbum() {
-  useModalStore().showModal('creatalbum', {})
-}
-
-export function modalMoveToAlbum() {
-  useModalStore().showModal('movetoalbum', {})
-}
-
 export function modalCreatNewDir(dirtype: string, encType: string = '', parentdirid: string = '', callback: any = undefined) {
   useModalStore().showModal('creatdir', { dirtype, encType, parentdirid, callback })
 }

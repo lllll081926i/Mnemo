@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  menuAddAlbumSelectFile,
   menuCopyFileName,
   menuCopyFileTree,
   menuCopySelectedFile,
@@ -60,7 +59,7 @@ const isPic = computed(() => {
   return props.dirtype === 'pic' && props.inputpicType == 'mypic'
 })
 const { provider, capabilities } = useCurrentDriveProvider()
-const canCreateShare = computed(() => capabilities.value.createShare && (provider.value !== 'aliyun' || props.inputselectType.includes('resource')))
+const canCreateShare = computed(() => capabilities.value.createShare)
 </script>
 
 <template>
@@ -73,10 +72,6 @@ const canCreateShare = computed(() => capabilities.value.createShare && (provide
       <a-doption v-if="canCreateShare" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>
-      </a-doption>
-      <a-doption v-if="capabilities.quickTransfer" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
-        <template #icon><IconFont name="iconrss" /></template>
-        <template #default>快传</template>
       </a-doption>
 
       <a-dsubmenu v-if="dirtype !== 'pic' && capabilities.colorTag" id="rightpansubbiaoji" class="rightmenu" trigger="hover">
@@ -114,14 +109,6 @@ const canCreateShare = computed(() => capabilities.value.createShare && (provide
           </div>
         </template>
         <template #content>
-          <a-doption v-if="isShowBtn && inputpicType !== 'mypic' && dirtype !== 'pan'" @click="() => menuAddAlbumSelectFile()">
-            <template #icon><IconFont name="iconmoveto" /></template>
-            <template #default>移入相册</template>
-          </a-doption>
-          <a-doption v-if="dirtype === 'mypic'" @click="() => menuTrashSelectFile(istree, false, true)">
-            <template #icon><IconFont name="iconqingkong" /></template>
-            <template #default>移出相册</template>
-          </a-doption>
           <a-doption v-if="isShowBtn && capabilities.move" @click="() => menuCopySelectedFile(istree, 'cut')">
             <template #icon><IconFont name="iconscissor" /></template>
             <template #default>移动到...</template>

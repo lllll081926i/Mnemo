@@ -4,7 +4,6 @@ import { usePanFileStore } from '../../store'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 import {
-  menuAddAlbumSelectFile,
   menuCopyFileName,
   menuCopyFileTree,
   menuCopySelectedFile,
@@ -78,8 +77,7 @@ const canSendToTrash = computed(() => capabilities.value.recycleBin && (canMutat
 const canPermanentlyDelete = computed(() => capabilities.value.permanentDelete)
 const canShowDelete = computed(() => canSendToTrash.value || canPermanentlyDelete.value)
 const canShowMore = computed(() => hasSelection.value && (canMutateSelection.value || !isPic.value || props.isvideo || props.dirtype === 'mypic'))
-const canCreateShare = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && capabilities.value.createShare && (provider.value !== 'aliyun' || props.inputselectType.includes('resource')))
-const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && capabilities.value.quickTransfer)
+const canCreateShare = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && capabilities.value.createShare)
 </script>
 
 <template>
@@ -91,10 +89,6 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
     <a-button v-if="canCreateShare" type="text" size="small" tabindex="-1" title="Ctrl+S" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
       <IconFont name="iconfenxiang" />
       分享
-    </a-button>
-    <a-button v-if="canCreateQuickTransfer" type="text" size="small" tabindex="-1" title="Ctrl+T" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
-      <IconFont name="iconrss" />
-      快传
     </a-button>
     <a-button v-if="!isPic && !isallfavored && capabilities.favorite" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, true)">
       <IconFont name="iconcrown" />
@@ -143,14 +137,6 @@ const canCreateQuickTransfer = computed(() => hasSelection.value && !isPic.value
         <IconFont name="icondown" />
       </a-button>
       <template #content>
-        <a-doption v-if="hasSelectedFile && inputpicType !== 'mypic' && dirtype === 'pic'" title="Ctrl+X" @click="() => menuAddAlbumSelectFile()">
-          <template #icon><IconFont name="iconscissor" /></template>
-          <template #default>移入相册</template>
-        </a-doption>
-        <a-doption v-if="hasSelectedFile && dirtype === 'mypic'" title="Ctrl+X" @click="() => menuTrashSelectFile(istree, false, true)">
-          <template #icon><IconFont name="iconscissor" /></template>
-          <template #default>移出相册</template>
-        </a-doption>
         <a-doption v-if="canMoveSelection" title="Ctrl+X" @click="() => menuCopySelectedFile(istree, 'cut')">
           <template #icon><IconFont name="iconscissor" /></template>
           <template #default>移动到...</template>

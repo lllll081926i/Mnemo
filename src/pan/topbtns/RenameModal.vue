@@ -6,7 +6,6 @@ import { CheckFileName, ClearFileName } from '../../utils/filehelper'
 import { nextTick, reactive, ref } from 'vue'
 import { IAliGetFileModel } from '../../aliapi/alimodels'
 import AliFileCmd from '../../aliapi/filecmd'
-import AliAlbum from '../../aliapi/album'
 import PanDAL from '../pandal'
 import { getEncType } from '../../utils/proxyhelper'
 import { EncodeEncName } from '../../aliapi/utils'
@@ -197,28 +196,8 @@ const handleRename = (newName: string, encType: string = '', inputpassword: stri
         modalCloseAll()
       })
   } else {
-    let album_id = form.file_id
-    let description = form.description
-    if (encType) {
-      okLoading.value = false
-      message.error('相册加密文件无法重命名，需要移动到其他盘修改')
-      return
-    }
-    AliAlbum.ApiAlbumUpdate(pantreeStore.user_id, album_id, newName, description)
-      .then((data) => {
-        if (data) {
-          PanDAL.aReLoadOneDirToShow(pantreeStore.drive_id, 'refresh', false, album_id)
-          message.success('相册重命名 成功')
-        } else {
-          message.error('相册重命名 失败')
-        }
-      })
-      .catch((err: any) => {
-        message.error('相册重命名 失败', err)
-      })
-      .then(() => {
-        modalCloseAll()
-      })
+    okLoading.value = false
+    message.error('当前版本不支持相册操作')
   }
 }
 </script>

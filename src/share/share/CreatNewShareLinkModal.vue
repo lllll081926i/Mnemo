@@ -11,7 +11,6 @@ import ShareDAL from './ShareDAL'
 import { ArrayKeyList } from '../../utils/utils'
 import { copyToClipboard } from '../../utils/electronhelper'
 import { GetShareUrlFormate } from '../../utils/shareurl'
-import AliTransferShare from '../../aliapi/transfershare'
 import { getDriveProviderCapabilities, resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'
 
 const formRef = ref()
@@ -47,10 +46,7 @@ const props = defineProps({
     required: true
   }
 })
-const getShareType = (): any => {
-  const key = props.driveType
-  return key.includes('backup') ? { type: 't', title: '快传' } : { type: 's', title: '分享' }
-}
+const getShareType = (): any => ({ type: 's', title: '分享' })
 
 const handleOpen = async () => {
   const pantreeStore = usePanTreeStore()
@@ -114,32 +110,19 @@ const handleOK = async (multi: boolean) => {
     okLoading.value = true
     let result = undefined
     let url = ''
-    if (shareType.value.type === 's') {
-      result = await AliShare.ApiCreatShare(user_id, drive_id, expiration, share_pwd, share_name, file_id_list)
-      if (typeof result == 'string') {
-        okLoading.value = false
-        message.error(result)
-        return
-      }
-      // 更新分享链接
-      if (hasManagedShareList && result.share_name != share_name && shareType.value.type === 's') {
-        await AliShare.ApiUpdateShareBatch(user_id, [result.share_id],
-          [result.expiration], [result.share_pwd], [share_name])
-      }
-      if (hasManagedShareList) await ShareDAL.aReloadMyShareUntilShareID(user_id, result.share_id)
-      url = GetShareUrlFormate(result.share_name, result.share_url, result.share_pwd || '')
-      message.success('创建分享链接成功，分享链接已复制到剪切板')
-    } else {
-      result = await AliTransferShare.ApiCreatTransferShare(user_id, drive_id, file_id_list)
-      if (typeof result == 'string') {
-        okLoading.value = false
-        message.error(result)
-        return
-      }
-      await ShareDAL.aReloadMyTransferShareUntilShareID(user_id, result.share_id)
-      message.success('创建快传链接成功，快传链接已复制到剪切板')
-      url = '【快传链接】' + GetShareUrlFormate(result.share_name, result.share_url, result.share_pwd || '')
+    result = await AliShare.ApiCreatShare(user_id, drive_id, expiration, share_pwd, share_name, file_id_list)
+    if (typeof result == 'string') {
+      okLoading.value = false
+      message.error(result)
+      return
     }
+    if (hasManagedShareList && result.share_name != share_name) {
+      await AliShare.ApiUpdateShareBatch(user_id, [result.share_id],
+        [result.expiration], [result.share_pwd], [share_name])
+    }
+    if (hasManagedShareList) await ShareDAL.aReloadMyShareUntilShareID(user_id, result.share_id)
+    url = GetShareUrlFormate(result.share_name, result.share_url, result.share_pwd || '')
+    message.success('创建分享链接成功，分享链接已复制到剪切板')
     copyToClipboard(url)
     okLoading.value = false
     modalCloseAll()
@@ -149,28 +132,19 @@ const handleOK = async (multi: boolean) => {
     let sharedCount = 0
     let result = undefined
     for (let i = 0; i < file_id_list.length; i++) {
-      if (shareType.value.type === 's') {
-        result = await AliShare.ApiCreatShare(user_id, drive_id, expiration, share_pwd, share_name, file_id_list.slice(i, i + 1))
-      } else {
-        result = await AliTransferShare.ApiCreatTransferShare(user_id, drive_id, file_id_list.slice(i, i + 1))
-      }
+      result = await AliShare.ApiCreatShare(user_id, drive_id, expiration, share_pwd, share_name, file_id_list.slice(i, i + 1))
       if (typeof result == 'string') {
         okBatchLoading.value = false
         message.error(result)
         continue
       }
       sharedCount += 1
-      // 更新分享链接
-      if (hasManagedShareList && result.share_id && shareType.value.type === 's') {
+      if (hasManagedShareList && result.share_id) {
         await ShareDAL.aReloadMyShareUntilShareID(user_id, result.share_id)
       }
       url += GetShareUrlFormate(result.share_name, result.share_url, result.share_pwd) + '\n'
     }
-    if (shareType.value.type === 's') {
-      message.success('创建 ' + sharedCount + '条 分享链接成功，分享链接已复制到剪切板')
-    } else {
-      message.success('创建 ' + sharedCount + '条 快传链接成功，快传链接已复制到剪切板')
-    }
+    message.success('创建 ' + sharedCount + '条 分享链接成功，分享链接已复制到剪切板')
     copyToClipboard(url)
     okBatchLoading.value = false
     modalCloseAll()

@@ -79,10 +79,6 @@ const handleExpandAll = (isExpand: boolean) => {
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>
       </a-doption>
-      <a-doption v-if="capabilities.quickTransfer" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
-        <template #icon><IconFont name="iconrss" /></template>
-        <template #default>快传</template>
-      </a-doption>
 
       <a-dsubmenu v-if="capabilities.move || capabilities.copy || canDelete" id="leftpansubmove" class="rightmenu" trigger="hover">
         <template #default>
