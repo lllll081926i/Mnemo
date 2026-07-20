@@ -259,7 +259,7 @@ export default defineComponent({
           :show-line="{ showLeafIcon: false }"
           @select="treeSelectToExpand">
           <template #switcherIcon>
-            <i class="ant-tree-switcher-icon iconfont Arrow" />
+            <IconFont name="iconarrow-right-2-icon" />
           </template>
           <template #title="{ dataRef }">
             <span class="sharetitleleft">{{ dataRef.title }}</span>

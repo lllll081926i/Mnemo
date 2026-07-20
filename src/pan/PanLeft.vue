@@ -429,7 +429,7 @@ const handleOpenDriveLogin = () => {
             @right-click="handleTreeRightClick"
             @scroll="onTreeScroll">
             <template #switcherIcon>
-              <i class="ant-tree-switcher-icon iconfont Arrow" />
+              <IconFont name="iconarrow-right-2-icon" />
             </template>
             <template #icon="{ dataRef }">
               <IconFont :name="typeof dataRef.icon === 'string' ? dataRef.icon : getDriveSidebarIcon(String(dataRef.key || ''))" />

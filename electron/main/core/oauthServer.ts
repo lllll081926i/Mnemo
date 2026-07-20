@@ -22,7 +22,6 @@ interface OAuthSession {
   expiresAt: number
 }
 
-const CALLBACK_PATH = '/oauth/callback'
 const CALLBACK_CHANNEL = 'OAuth:callback'
 const SESSION_TTL_MS = 10 * 60 * 1000
 const supportedProviders = new Set<OAuthProvider>(['onedrive', 'dropbox', 'gdrive'])
@@ -31,6 +30,12 @@ const authorizationEndpoints: Record<OAuthProvider, { origin: string; pathname: 
   onedrive: { origin: 'https://login.microsoftonline.com', pathname: '/common/oauth2/v2.0/authorize' },
   dropbox: { origin: 'https://www.dropbox.com', pathname: '/oauth2/authorize' },
   gdrive: { origin: 'https://accounts.google.com', pathname: '/o/oauth2/v2/auth' }
+}
+
+const callbackEndpoints: Record<OAuthProvider, { hostname: string; pathname: string }> = {
+  onedrive: { hostname: 'localhost', pathname: '/' },
+  dropbox: { hostname: 'localhost', pathname: '/' },
+  gdrive: { hostname: '127.0.0.1', pathname: '/' }
 }
 
 export const isOAuthAuthorizationUrl = (provider: OAuthProvider, value: string, state: string, redirectUri: string) => {
@@ -58,7 +63,7 @@ export class OAuthCallbackServer {
     this.pruneExpiredSessions()
     const state = randomBytes(24).toString('base64url')
     this.sessions.set(state, { provider: provider as OAuthProvider, target, expiresAt: Date.now() + SESSION_TTL_MS })
-    return { state, redirectUri: this.getRedirectUri() }
+    return { state, redirectUri: this.getRedirectUri(provider as OAuthProvider) }
   }
 
   cancel(state: string, target?: OAuthCallbackTarget) {
@@ -97,10 +102,11 @@ export class OAuthCallbackServer {
     return this.listenPromise
   }
 
-  private getRedirectUri() {
+  private getRedirectUri(provider: OAuthProvider) {
     const address = this.server?.address()
     const port = typeof address === 'object' && address ? address.port : this.port
-    return `http://${this.host}:${port}${CALLBACK_PATH}`
+    const endpoint = callbackEndpoints[provider]
+    return `http://${endpoint.hostname}:${port}${endpoint.pathname}`
   }
 
   private pruneExpiredSessions() {
@@ -111,8 +117,8 @@ export class OAuthCallbackServer {
   }
 
   private handleRequest(request: IncomingMessage, response: ServerResponse) {
-    const requestUrl = new URL(request.url || '/', this.getRedirectUri())
-    if (request.method !== 'GET' || requestUrl.pathname !== CALLBACK_PATH) {
+    const requestUrl = new URL(request.url || '/', `http://${this.host}:${this.port}/`)
+    if (request.method !== 'GET') {
       this.sendResponse(response, 404, false)
       return
     }
@@ -122,6 +128,10 @@ export class OAuthCallbackServer {
     const session = this.sessions.get(state)
     if (!session) {
       this.sendResponse(response, 400, false)
+      return
+    }
+    if (requestUrl.pathname !== callbackEndpoints[session.provider].pathname) {
+      this.sendResponse(response, 404, false)
       return
     }
     this.sessions.delete(state)

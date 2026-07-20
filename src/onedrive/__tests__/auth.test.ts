@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildOneDriveAuthUrl, exchangeOneDriveCodeForToken, ONEDRIVE_SCOPE, refreshOneDriveAccessToken } from '../auth'
+import { buildOneDriveAuthUrl, exchangeOneDriveCodeForToken, ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET, ONEDRIVE_SCOPE, refreshOneDriveAccessToken } from '../auth'
 
 describe('OneDrive auth helpers', () => {
+  it('ships an in-app OAuth client id when no release override is configured', () => {
+    expect(ONEDRIVE_CLIENT_ID.trim()).not.toBe('')
+    expect(ONEDRIVE_CLIENT_SECRET.trim()).not.toBe('')
+  })
+
   it('builds Microsoft identity v2 authorize URL with PKCE and Graph scopes', async () => {
     const redirectUri = 'http://127.0.0.1:53682/oauth/callback'
     const url = await buildOneDriveAuthUrl('client-id', 'verifier', 'state-1', redirectUri)

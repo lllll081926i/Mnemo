@@ -119,17 +119,10 @@ export default class launch extends EventEmitter {
     if (release().startsWith('6.1')) {
       app.disableHardwareAcceleration()
     }
-    process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-    app.commandLine.appendSwitch('no-sandbox')
     app.commandLine.appendSwitch('disable-renderer-backgrounding')
-    app.commandLine.appendSwitch('disable-site-isolation-trials')
-    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure,BlockInsecurePrivateNetworkRequests')
     app.commandLine.appendSwitch('ignore-connections-limit', 'bj29-enet.cn-beijing.data.alicloudccp.com,bj29-hz.cn-hangzhou.data.alicloudccp.com,bj29.cn-beijing.data.alicloudccp.com,alicloudccp.com,api.aliyundrive.com,aliyundrive.com,api.alipan.com,alipan.com')
-    app.commandLine.appendSwitch('ignore-certificate-errors')
     app.commandLine.appendSwitch('wm-window-animations-disabled')
     app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
-    app.commandLine.appendSwitch('force_high_performance_gpu')
 
     app.name = 'Mnemo'
     if (is.windows()) {
@@ -258,20 +251,22 @@ export default class launch extends EventEmitter {
             }
           })
         })
-        this.motrixApp = new MotrixApplication()
-        this.motrixApp.init().catch((err: any) => console.error('[MotrixApp] init failed', err))
+        createMainWindow()
+        createTray()
+        registerAutoUpdate()
 
-        const defaultSessionExtensions = session.defaultSession.extensions
-        const loadCrxExtension = defaultSessionExtensions?.loadExtension ? defaultSessionExtensions.loadExtension.bind(defaultSessionExtensions) : session.defaultSession.loadExtension.bind(session.defaultSession)
-        loadCrxExtension(getStaticPath('crx'), { allowFileAccess: true })
-          .catch((err: any) => {
-            console.error('[launch] load crx extension failed', err)
-          })
-          .finally(() => {
-            createMainWindow()
-            createTray()
-            registerAutoUpdate()
-          })
+        setImmediate(() => {
+          this.motrixApp = new MotrixApplication()
+          this.motrixApp.init().catch((err: any) => console.error('[MotrixApp] init failed', err))
+
+          if (!app.isPackaged) {
+            const defaultSessionExtensions = session.defaultSession.extensions
+            const loadCrxExtension = defaultSessionExtensions?.loadExtension ? defaultSessionExtensions.loadExtension.bind(defaultSessionExtensions) : session.defaultSession.loadExtension.bind(session.defaultSession)
+            loadCrxExtension(getStaticPath('crx'), { allowFileAccess: true }).catch((err: any) => {
+              console.error('[launch] load crx extension failed', err)
+            })
+          }
+        })
       })
       .catch((err: any) => {
         console.log(err)

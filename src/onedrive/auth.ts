@@ -1,10 +1,21 @@
 import type { ITokenInfo } from '../user/userstore'
 import { humanSize } from '../utils/format'
 import message from '../utils/message'
-import { ONEDRIVE_CLIENT_ID } from '../secrets.generated'
+import { ONEDRIVE_CLIENT_ID as CONFIGURED_ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET as CONFIGURED_ONEDRIVE_CLIENT_SECRET } from '../secrets.generated'
 import { buildDriveProviderDriveId, buildDriveProviderUserId } from '../utils/driveProvider'
 
-export { ONEDRIVE_CLIENT_ID }
+const BUILTIN_ONEDRIVE_CLIENT_ID = 'b15665d9-eda6-4092-8539-0eec376afd59'
+const BUILTIN_ONEDRIVE_CLIENT_SECRET = 'qtyfaBBYA403=unZUP40~_#'
+export const ONEDRIVE_CLIENT_ID = CONFIGURED_ONEDRIVE_CLIENT_ID.trim() || BUILTIN_ONEDRIVE_CLIENT_ID
+export const ONEDRIVE_CLIENT_SECRET = CONFIGURED_ONEDRIVE_CLIENT_ID.trim() ? CONFIGURED_ONEDRIVE_CLIENT_SECRET.trim() : BUILTIN_ONEDRIVE_CLIENT_SECRET
+
+const resolveOneDriveCredentials = (clientId = '', clientSecret = '') => {
+  const effectiveClientId = clientId.trim() || ONEDRIVE_CLIENT_ID
+  return {
+    clientId: effectiveClientId,
+    clientSecret: clientSecret.trim() || (effectiveClientId === ONEDRIVE_CLIENT_ID ? ONEDRIVE_CLIENT_SECRET : '')
+  }
+}
 
 const ONEDRIVE_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
 const ONEDRIVE_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
@@ -151,14 +162,16 @@ const normalizeOneDriveToken = (data: any, clientId: string): ITokenInfo | null 
 }
 
 export const exchangeOneDriveCodeForToken = async (code: string, clientId: string, verifier: string, redirectUri: string): Promise<ITokenInfo | null> => {
+  const credentials = resolveOneDriveCredentials(clientId)
   const body = new URLSearchParams({
-    client_id: clientId.trim(),
+    client_id: credentials.clientId,
     scope: ONEDRIVE_SCOPE,
     code,
     redirect_uri: redirectUri,
     grant_type: 'authorization_code',
     code_verifier: verifier
   })
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const data = await graphJson<any>(
     ONEDRIVE_TOKEN_URL,
     {
@@ -168,7 +181,7 @@ export const exchangeOneDriveCodeForToken = async (code: string, clientId: strin
     },
     '获取 OneDrive access_token 失败'
   )
-  const token = normalizeOneDriveToken(data, clientId)
+  const token = normalizeOneDriveToken(data, credentials.clientId)
   if (token) {
     await applyOneDriveAccount(token)
     const { default: UserDAL } = await import('../user/userdal')
@@ -178,14 +191,15 @@ export const exchangeOneDriveCodeForToken = async (code: string, clientId: strin
 }
 
 export const refreshOneDriveAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
-  const clientId = token.device_id || ONEDRIVE_CLIENT_ID
-  if (!clientId || !token.refresh_token) return null
+  const credentials = resolveOneDriveCredentials(token.device_id)
+  if (!credentials.clientId || !token.refresh_token) return null
   const body = new URLSearchParams({
-    client_id: clientId.trim(),
+    client_id: credentials.clientId,
     scope: ONEDRIVE_SCOPE,
     refresh_token: token.refresh_token,
     grant_type: 'refresh_token'
   })
+  if (credentials.clientSecret) body.set('client_secret', credentials.clientSecret)
   const data = await graphJson<any>(
     ONEDRIVE_TOKEN_URL,
     {

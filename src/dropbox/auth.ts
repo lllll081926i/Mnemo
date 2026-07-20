@@ -1,10 +1,13 @@
 import type { ITokenInfo } from '../user/userstore'
 import { humanSize } from '../utils/format'
 import message from '../utils/message'
-import { DROPBOX_APP_KEY } from '../secrets.generated'
+import { DROPBOX_APP_KEY as CONFIGURED_DROPBOX_APP_KEY, DROPBOX_APP_SECRET as CONFIGURED_DROPBOX_APP_SECRET } from '../secrets.generated'
 import { buildDriveProviderDriveId, buildDriveProviderUserId } from '../utils/driveProvider'
 
-export { DROPBOX_APP_KEY }
+const BUILTIN_DROPBOX_APP_KEY = '5jcck7diasz0rqy'
+const BUILTIN_DROPBOX_APP_SECRET = '1n9m04y2zx7bf26'
+export const DROPBOX_APP_KEY = CONFIGURED_DROPBOX_APP_KEY.trim() || BUILTIN_DROPBOX_APP_KEY
+export const DROPBOX_APP_SECRET = CONFIGURED_DROPBOX_APP_KEY.trim() ? CONFIGURED_DROPBOX_APP_SECRET.trim() : BUILTIN_DROPBOX_APP_SECRET
 
 const DROPBOX_AUTH_URL = 'https://www.dropbox.com/oauth2/authorize'
 const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
@@ -12,7 +15,13 @@ const DROPBOX_ACCOUNT_URL = 'https://api.dropboxapi.com/2/users/get_current_acco
 const DROPBOX_SPACE_URL = 'https://api.dropboxapi.com/2/users/get_space_usage'
 const DROPBOX_SCOPE = 'account_info.read files.metadata.read files.content.read files.content.write sharing.read sharing.write'
 
-export const resolveDropboxCredentials = (appKey = '') => ({ appKey: appKey.trim() || DROPBOX_APP_KEY.trim() })
+export const resolveDropboxCredentials = (appKey = '', appSecret = '') => {
+  const effectiveAppKey = appKey.trim() || DROPBOX_APP_KEY
+  return {
+    appKey: effectiveAppKey,
+    appSecret: appSecret.trim() || (effectiveAppKey === DROPBOX_APP_KEY ? DROPBOX_APP_SECRET : '')
+  }
+}
 
 const hashString = (value: string): string => {
   let hash = 0
@@ -44,18 +53,20 @@ export const createDropboxPkceVerifier = (): string => {
 }
 
 export const buildDropboxAuthUrl = async (appKey: string, verifier: string, state: string, redirectUri: string): Promise<string> => {
-  const challenge = base64UrlEncode(await sha256(verifier))
+  const credentials = resolveDropboxCredentials(appKey)
   const params = new URLSearchParams({
-    client_id: appKey.trim(),
+    client_id: credentials.appKey,
     response_type: 'code',
     redirect_uri: redirectUri,
     token_access_type: 'offline',
     force_reapprove: 'true',
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
     scope: DROPBOX_SCOPE,
     state
   })
+  if (!credentials.appSecret) {
+    params.set('code_challenge', base64UrlEncode(await sha256(verifier)))
+    params.set('code_challenge_method', 'S256')
+  }
   return `${DROPBOX_AUTH_URL}?${params.toString()}`
 }
 
@@ -179,9 +190,10 @@ export const exchangeDropboxCodeForToken = async (code: string, appKey: string, 
     code,
     grant_type: 'authorization_code',
     client_id: credentials.appKey,
-    redirect_uri: redirectUri,
-    code_verifier: verifier
+    redirect_uri: redirectUri
   })
+  if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
+  else body.set('code_verifier', verifier)
   const data = await dropboxJson<any>(
     DROPBOX_TOKEN_URL,
     {
@@ -209,6 +221,7 @@ export const refreshDropboxAccessToken = async (token: ITokenInfo): Promise<ITok
     refresh_token: token.refresh_token,
     client_id: appKey
   })
+  if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
   const data = await dropboxJson<any>(
     DROPBOX_TOKEN_URL,
     {

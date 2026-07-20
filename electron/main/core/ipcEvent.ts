@@ -24,6 +24,7 @@ interface OAuthSessionOwner {
 
 const oauthSessionOwners = new Map<string, OAuthSessionOwner>()
 const oauthWindows = new Map<string, BrowserWindow>()
+const ipcEventsRegisteredKey = Symbol.for('mnemo.ipc-events-registered')
 
 const closeOAuthWindow = (state: string) => {
   const window = oauthWindows.get(state)
@@ -124,6 +125,8 @@ export default class ipcEvent {
   private constructor() {}
 
   static handleEvents() {
+    const runtime = globalThis as any
+    if (runtime[ipcEventsRegisteredKey]) return
     this.handleWebToElectron()
     this.handleWebToElectronCB()
     this.handleShowContextMenu()
@@ -153,6 +156,7 @@ export default class ipcEvent {
     this.handleWebOpenWindow()
     this.handlePowerSaveBlocker()
     this.handleMpvEmbedded()
+    runtime[ipcEventsRegisteredKey] = true
   }
 
   private static handleAutoUpdate() {
@@ -207,6 +211,7 @@ export default class ipcEvent {
         minWidth: 420,
         minHeight: 560,
         title: `${owner.provider} 登录`,
+        icon: getStaticPath('icon_256x256.ico'),
         autoHideMenuBar: true,
         webPreferences: {
           nodeIntegration: false,
@@ -409,17 +414,13 @@ export default class ipcEvent {
 
   private static handleWebShowOpenDialogSync() {
     ipcMain.on('WebShowOpenDialogSync', (event, config) => {
-      dialog.showOpenDialog(AppWindow.mainWindow!, config).then((result) => {
-        event.returnValue = result.filePaths
-      })
+      event.returnValue = dialog.showOpenDialogSync(AppWindow.mainWindow!, config) || []
     })
   }
 
   private static handleWebShowSaveDialogSync() {
     ipcMain.on('WebShowSaveDialogSync', (event, config) => {
-      dialog.showSaveDialog(AppWindow.mainWindow!, config).then((result) => {
-        event.returnValue = result.filePath || ''
-      })
+      event.returnValue = dialog.showSaveDialogSync(AppWindow.mainWindow!, config) || ''
     })
   }
 
@@ -703,9 +704,7 @@ export default class ipcEvent {
           cmdArguments.push('now')
         }
         if (is.windows()) {
-          cmdArguments.push('-s')
-          cmdArguments.push('-f')
-          cmdArguments.push('-t 0')
+          cmdArguments.push('/s', '/f', '/t', '0')
         }
 
         execFile(command, cmdArguments, (err: any) => {

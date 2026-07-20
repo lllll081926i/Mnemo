@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DROPBOX_APP_KEY, buildDropboxAuthUrl, createDropboxPkceVerifier } from '../auth'
+import { DROPBOX_APP_KEY, DROPBOX_APP_SECRET, buildDropboxAuthUrl, createDropboxPkceVerifier } from '../auth'
 
 describe('Dropbox auth helpers', () => {
   it('builds a PKCE authorization url using the app key and verifier challenge', async () => {
@@ -29,6 +29,13 @@ describe('Dropbox auth helpers', () => {
   })
 
   it('exports Dropbox app credentials as cleanable constants', () => {
-    expect(typeof DROPBOX_APP_KEY).toBe('string')
+    expect(DROPBOX_APP_KEY.trim()).not.toBe('')
+    expect(DROPBOX_APP_SECRET.trim()).not.toBe('')
+  })
+
+  it('uses the built-in confidential client without PKCE parameters', async () => {
+    const url = new URL(await buildDropboxAuthUrl(DROPBOX_APP_KEY, 'unused-verifier', 'state-2', 'http://localhost:53682/'))
+    expect(url.searchParams.has('code_challenge')).toBe(false)
+    expect(url.searchParams.has('code_challenge_method')).toBe(false)
   })
 })

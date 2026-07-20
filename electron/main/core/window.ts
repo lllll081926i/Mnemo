@@ -315,8 +315,8 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
-    webPreferences.webSecurity = false
-    webPreferences.allowRunningInsecureContent = true
+    webPreferences.webSecurity = true
+    webPreferences.allowRunningInsecureContent = false
     if (!allowDevTools) webPreferences.devTools = false
   })
   // 处理webview跳转

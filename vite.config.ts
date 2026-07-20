@@ -98,7 +98,7 @@ export default defineConfig(({ command }) => {
     server: {
       host: devServerUrl.hostname,
       port: Number(devServerUrl.port),
-      strictPort: true,
+      strictPort: false,
       hmr: true
     }
   }

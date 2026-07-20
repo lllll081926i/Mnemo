@@ -272,6 +272,9 @@ describe('deep layout shell port', () => {
     expect(login).toContain('手机号，例如 +86 13800138000')
     expect(login).toContain('<a-image width="250"')
     expect(login).toContain('AntQRCode v-if="quarkQrUrl"')
+    expect(login).toContain('class="qrcodeframe quark-qrcodeframe"')
+    expect(login).toContain('.quark-qrcodeframe')
+    expect(login).toContain('align-items: center')
     expect(login).not.toContain('api.qrserver.com')
     expect(login).not.toContain('请先在 src/')
   })
@@ -326,6 +329,41 @@ describe('deep layout shell port', () => {
     expect(loginSource).toContain('if (import.meta.env.DEV)')
   })
 
+  it('starts the packaged window without global TLS bypasses or remote icon fonts', () => {
+    const launch = read('electron/main/launch.ts')
+    const windowSource = read('electron/main/core/window.ts')
+    const html = read('index.html')
+    const treeViews = [
+      'src/pan/PanLeft.vue',
+      'src/pan/topbtns/ArchiveModal.vue',
+      'src/pan/topbtns/RenameMultiModal.vue',
+      'src/pan/topbtns/SelectPanDirModal.vue',
+      'src/share/share/ShowShareLinkModal.vue'
+    ]
+
+    expect(launch).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED')
+    expect(launch).not.toContain("appendSwitch('ignore-certificate-errors')")
+    expect(launch).not.toContain("appendSwitch('no-sandbox')")
+    expect(launch).not.toContain("appendSwitch('disable-site-isolation-trials')")
+    expect(launch).not.toContain('OutOfBlinkCors')
+    expect(launch.indexOf('createMainWindow()')).toBeLessThan(launch.indexOf("loadCrxExtension(getStaticPath('crx')"))
+    expect(launch).toContain('if (!app.isPackaged)')
+    expect(windowSource).toContain('webPreferences.webSecurity = true')
+    expect(windowSource).toContain('webPreferences.allowRunningInsecureContent = false')
+    expect(html).not.toContain('at.alicdn.com')
+    expect(read('electron/main/core/ipcEvent.ts')).toContain('dialog.showOpenDialogSync(')
+    expect(read('electron/main/core/ipcEvent.ts')).toContain('dialog.showSaveDialogSync(')
+    expect(read('electron/main/core/ipcEvent.ts')).toContain("cmdArguments.push('/s', '/f', '/t', '0')")
+    expect(read('electron/main/index.ts')).toContain('__mnemoLaunchInstance')
+    expect(read('electron/main/core/ipcEvent.ts')).toContain("Symbol.for('mnemo.ipc-events-registered')")
+    expect(read('electron/main/core/ipcEvent.ts')).toContain("icon: getStaticPath('icon_256x256.ico')")
+    for (const view of treeViews) {
+      const source = read(view)
+      expect(source).toContain('<IconFont name="iconarrow-right-2-icon" />')
+      expect(source).not.toMatch(/<i[^>]*iconfont[^>]*>/)
+    }
+  })
+
   it('uses the operating system proxy by default and applies proxy modes explicitly', () => {
     const settingStore = read('src/setting/settingstore.ts')
     const settingPage = read('src/setting/SettingProxy.vue')
@@ -369,5 +407,8 @@ describe('deep layout shell port', () => {
     expect(vite).toContain("const sourceExtensions = ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']")
     expect(vite).toContain('extensions: sourceExtensions')
     expect(vite.match(/resolve: \{ alias: sharedAlias, extensions: sourceExtensions \}/g)).toHaveLength(2)
+    expect(vite).toContain('strictPort: false')
+    expect(vite).toContain('onstart({ reload })')
+    expect(vite).toContain('reload()')
   })
 })

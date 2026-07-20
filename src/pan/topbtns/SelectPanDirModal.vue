@@ -713,7 +713,7 @@ const handleOK = () => {
         @select='handleTreeSelect'
         @expand='handleTreeExpand'>
         <template #switcherIcon>
-          <i class='ant-tree-switcher-icon iconfont Arrow' />
+          <IconFont name="iconarrow-right-2-icon" />
         </template>
         <template #icon>
           <IconFont name="iconfile-folder" />

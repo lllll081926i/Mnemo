@@ -1033,7 +1033,7 @@ const handleSelectRow = (visible: boolean, treeNodeKey: string) => {
               @check='handleTreeCheck'
               @drop='onDrop'>
               <template #switcherIcon>
-                <i class='ant-tree-switcher-icon iconfont Arrow' />
+                <IconFont name="iconarrow-right-2-icon" />
               </template>
               <template #title='{ dataRef }'>
                 <a-dropdown class='smallmenu' :trigger="['contextMenu']"

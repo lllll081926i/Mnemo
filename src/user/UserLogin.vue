@@ -1015,7 +1015,7 @@ const loginSuccess = (token: ITokenInfo) => {
           <div id="logindiv">
             <div class="logincontent quark-logincontent">
               <a-spin class="loading" :size="32" v-if="loginLoading" tip="加载中，请稍后..." />
-              <div class="qrcodeframe" v-if="!loginLoading">
+              <div class="qrcodeframe quark-qrcodeframe" v-if="!loginLoading">
                 <AntQRCode v-if="quarkQrUrl" :value="quarkQrUrl" :size="250" color="#000" bg-color="#fff" @click="handleOpenQuark" />
                 <a-alert banner center :show-icon="false" :type="quarkQrStatusType">
                   {{ quarkTips }}
@@ -1353,6 +1353,13 @@ const loginSuccess = (token: ITokenInfo) => {
 .quark-logincontent {
   height: 430px !important;
   min-height: 430px !important;
+}
+
+.quark-qrcodeframe {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .quark-login-toolbar {

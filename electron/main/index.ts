@@ -10,4 +10,5 @@ app.setAboutPanelOptions({
   applicationVersion: app.getVersion()
 })
 
-const appLaunch = new launch()
+const runtime = globalThis as typeof globalThis & { __mnemoLaunchInstance?: launch }
+runtime.__mnemoLaunchInstance ??= new launch()

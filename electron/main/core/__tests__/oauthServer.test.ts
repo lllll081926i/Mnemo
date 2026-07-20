@@ -16,6 +16,11 @@ describe('OAuthCallbackServer', () => {
     const first = await server.begin('onedrive', firstTarget)
     const second = await server.begin('gdrive', secondTarget)
 
+    expect(new URL(first.redirectUri).hostname).toBe('localhost')
+    expect(new URL(first.redirectUri).pathname).toBe('/')
+    expect(new URL(second.redirectUri).hostname).toBe('127.0.0.1')
+    expect(new URL(second.redirectUri).pathname).toBe('/')
+
     const secondResponse = await fetch(`${second.redirectUri}?state=${second.state}&code=google-code`)
     const firstResponse = await fetch(`${first.redirectUri}?state=${first.state}&code=microsoft-code`)
 

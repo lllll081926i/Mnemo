@@ -1,10 +1,13 @@
 import type { ITokenInfo } from '../user/userstore'
-import { GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET } from '../secrets.generated'
+import { GOOGLE_DRIVE_CLIENT_ID as CONFIGURED_GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET as CONFIGURED_GOOGLE_DRIVE_CLIENT_SECRET } from '../secrets.generated'
 import { humanSize } from '../utils/format'
 import { buildDriveProviderDriveId, buildDriveProviderUserId } from '../utils/driveProvider'
 import { createProviderToken } from '../utils/providerToken'
 
-export { GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET }
+const BUILTIN_GOOGLE_DRIVE_CLIENT_ID = '202264815644.apps.googleusercontent.com'
+const BUILTIN_GOOGLE_DRIVE_CLIENT_SECRET = 'X4Z3ca8xfWDb1Voo-F9a7ZxJ'
+export const GOOGLE_DRIVE_CLIENT_ID = CONFIGURED_GOOGLE_DRIVE_CLIENT_ID.trim() || BUILTIN_GOOGLE_DRIVE_CLIENT_ID
+export const GOOGLE_DRIVE_CLIENT_SECRET = CONFIGURED_GOOGLE_DRIVE_CLIENT_SECRET.trim() || BUILTIN_GOOGLE_DRIVE_CLIENT_SECRET
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
