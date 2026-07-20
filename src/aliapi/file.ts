@@ -36,7 +36,7 @@ export default class AliFile {
   static async ApiFileInfo(user_id: string, drive_id: string, file_id: string, ispic: boolean = false): Promise<any | undefined> {
     if (!drive_id || !file_id) return undefined
     const provider = await resolveFileProvider(user_id, drive_id)
-    if (provider === 'webdav' || provider === 'nextcloud') {
+  if (provider === 'webdav') {
       const connection = getWebDavConnection(getWebDavConnectionId(drive_id))
       const normalizedPath = file_id === 'root' ? '/' : file_id
       if (normalizedPath === '/') {
@@ -244,7 +244,7 @@ export default class AliFile {
   static async ApiFileDownloadUrl(user_id: string, drive_id: string, file_id: string, expire_sec: number): Promise<IDownloadUrl | string> {
     if (!drive_id || !file_id) return '参数错误'
     const provider = await resolveFileProvider(user_id, drive_id)
-    if (provider === 'webdav' || provider === 'nextcloud') {
+  if (provider === 'webdav') {
       const connectionId = getWebDavConnectionId(drive_id)
       const connection = getWebDavConnection(connectionId)
       if (!connection) return 'WebDAV 连接不存在，请重新连接'
@@ -387,7 +387,7 @@ export default class AliFile {
       if (lower.endsWith('.ts')) return 'ts'
       return fallback
     }
-    if (provider === 'webdav' || provider === 'nextcloud' || provider === 's3') {
+  if (provider === 'webdav' || provider === 's3') {
       return '暂无转码信息'
     }
     if (!user_id || !drive_id || !file_id) return '参数错误'
@@ -592,7 +592,7 @@ export default class AliFile {
   static async ApiGetFile(user_id: string, drive_id: string, file_id: string): Promise<IAliGetFileModel | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
     const provider = await resolveFileProvider(user_id, drive_id)
-    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile' || provider === 'webdav' || provider === 'nextcloud' || provider === 's3') {
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile' || provider === 'webdav' || provider === 's3') {
       const info = await AliFile.ApiFileInfo(user_id, drive_id, file_id)
       return typeof info === 'object' ? info as IAliGetFileModel : undefined
     }

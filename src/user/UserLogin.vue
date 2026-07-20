@@ -17,7 +17,6 @@ import { GuangyaSmsState, generateGuangyaDid, requestGuangyaSmsCode, submitGuang
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
-import { createNextcloudConnection, createNextcloudUserToken } from '../nextcloud/auth'
 import { loginGofile } from '../gofile/auth'
 import { buildOneDriveAuthUrl, createOneDrivePkceVerifier, exchangeOneDriveCodeForToken, ONEDRIVE_CLIENT_ID } from '../onedrive/auth'
 import { buildDropboxAuthUrl, createDropboxPkceVerifier, DROPBOX_APP_KEY, exchangeDropboxCodeForToken } from '../dropbox/auth'
@@ -38,12 +37,12 @@ const qrCodeUrl = ref('')
 const qrCodeStatusType = ref()
 const qrCodeStatusTips = ref()
 
-type LoginProvider = 'aliyun' | '139' | '189' | 'guangya' | 'pikpak' | 'quark' | 'onedrive' | 'dropbox' | 'gdrive' | 'nextcloud' | 'gofile' | 'webdav' | 's3'
+type LoginProvider = 'aliyun' | '139' | '189' | 'guangya' | 'pikpak' | 'quark' | 'onedrive' | 'dropbox' | 'gdrive' | 'gofile' | 'webdav' | 's3'
 type OAuthLoginProvider = 'onedrive' | 'dropbox' | 'gdrive'
 type OAuthLoginContext = { provider: OAuthLoginProvider; verifier: string; redirectUri: string }
 
 const loginProvider = ref<LoginProvider>('aliyun')
-const loginProviders: LoginProvider[] = ['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'onedrive', 'dropbox', 'gdrive', 'nextcloud', 'gofile', 'webdav', 's3']
+const loginProviders: LoginProvider[] = ['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3']
 const getLoginProviderMeta = (provider: LoginProvider) => getDriveProviderMeta(provider)
 const activeLoginProviderMeta = computed(() => getLoginProviderMeta(loginProvider.value))
 const pikpakUsername = ref('')
@@ -68,8 +67,6 @@ const guangyaSmsState = ref<GuangyaSmsState | null>(null)
 const guangyaLoading = ref(false)
 const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
 const webDavLoading = ref(false)
-const nextcloudForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
-const nextcloudLoading = ref(false)
 const gofileToken = ref('')
 const gofileLoading = ref(false)
 const oauthLoading = ref<OAuthLoginProvider | ''>('')
@@ -115,7 +112,7 @@ const handleModalOpen = () => {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
     loginLoading.value = false
-  } else if (loginProvider.value === 'onedrive' || loginProvider.value === 'dropbox' || loginProvider.value === 'gdrive' || loginProvider.value === 'nextcloud' || loginProvider.value === 'gofile') {
+  } else if (loginProvider.value === 'onedrive' || loginProvider.value === 'dropbox' || loginProvider.value === 'gdrive' || loginProvider.value === 'gofile') {
     loginLoading.value = false
   } else {
     handleOpen()
@@ -142,7 +139,7 @@ watch(loginProvider, () => {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
     loginLoading.value = false
-  } else if (loginProvider.value === 'onedrive' || loginProvider.value === 'dropbox' || loginProvider.value === 'gdrive' || loginProvider.value === 'nextcloud' || loginProvider.value === 'gofile') {
+  } else if (loginProvider.value === 'onedrive' || loginProvider.value === 'dropbox' || loginProvider.value === 'gdrive' || loginProvider.value === 'gofile') {
     loginLoading.value = false
   } else {
     handleOpen()
@@ -389,34 +386,12 @@ const handleClose = () => {
   guangyaLoading.value = false
   webDavForm.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
   webDavLoading.value = false
-  nextcloudForm.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
-  nextcloudLoading.value = false
   gofileToken.value = ''
   gofileLoading.value = false
   s3Form.value = { name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true }
   s3Loading.value = false
 }
 
-const submitNextcloudLogin = async () => {
-  if (nextcloudLoading.value) return
-  const form = nextcloudForm.value
-  if (!form.name.trim() || !form.url.trim() || !form.username.trim() || !form.password.trim()) {
-    message.error('请填写 Nextcloud 名称、服务器地址、用户名和应用密码')
-    return
-  }
-  nextcloudLoading.value = true
-  try {
-    const connection = createNextcloudConnection(form)
-    await testWebDavConnection(connection)
-    saveWebDavConnection(connection)
-    await UserDAL.UserLogin(createNextcloudUserToken(connection), true)
-    useUserStore().userShowLogin = false
-  } catch (error: any) {
-    message.error(`添加 Nextcloud 失败: ${error?.message || '未知错误'}`)
-  } finally {
-    nextcloudLoading.value = false
-  }
-}
 
 const submitGofileLogin = async () => {
   if (gofileLoading.value) return
@@ -1038,21 +1013,6 @@ const loginSuccess = (token: ITokenInfo) => {
                 <div class="oauth-provider-name">{{ activeLoginProviderMeta.label }}</div>
                 <a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">在 Mnemo 中登录</a-button>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-else-if="loginProvider === 'nextcloud'">
-          <div id="logindiv">
-            <div class="logincontent">
-              <form class="webdav-login-form" @submit.prevent="submitNextcloudLogin">
-                <a-input v-model="nextcloudForm.name" placeholder="连接名称（必填）" allow-clear />
-                <a-input v-model="nextcloudForm.url" placeholder="Nextcloud 服务器地址" allow-clear />
-                <a-input v-model="nextcloudForm.username" placeholder="用户名" allow-clear />
-                <a-input-password v-model="nextcloudForm.password" placeholder="应用密码" allow-clear />
-                <a-input v-model="nextcloudForm.rootPath" placeholder="挂载路径，默认 /" allow-clear />
-                <a-button html-type="submit" type="primary" long :loading="nextcloudLoading">连接 Nextcloud</a-button>
-              </form>
             </div>
           </div>
         </div>

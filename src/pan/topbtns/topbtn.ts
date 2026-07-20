@@ -63,7 +63,7 @@ export async function uploadLocalPaths(files: string[] | undefined, parentFileId
     message.error(`${getDriveProviderLabel(provider)} 暂不支持加密上传`)
     return
   }
-  if (provider === 'webdav' || provider === 'nextcloud') {
+  if (provider === 'webdav') {
     const connection = getWebDavConnection(getWebDavConnectionId(pantreeStore.drive_id))
     if (!connection) {
       message.error(`${getDriveProviderLabel(provider)} 连接不存在`)

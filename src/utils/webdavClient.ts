@@ -10,7 +10,7 @@ const LEGACY_STORAGE_KEY = 'MediaLibrary_WebDavConnections'
 
 export interface WebDavConnectionConfig {
   id: string
-  provider?: 'webdav' | 'nextcloud'
+  provider?: 'webdav'
   name: string
   url: string
   username: string
@@ -50,8 +50,7 @@ const createWebDavClient = (config: WebDavConnectionConfig) => {
   })
 }
 
-const getWebDavProvider = (config: WebDavConnectionConfig) => config.provider === 'nextcloud' ? 'nextcloud' : 'webdav'
-const getWebDavDriveId = (config: WebDavConnectionConfig) => `${getWebDavProvider(config)}:${config.id}`
+const getWebDavDriveId = (config: WebDavConnectionConfig) => `webdav:${config.id}`
 
 const getDavBasePath = (config: WebDavConnectionConfig) => {
   const currentUrl = new URL(config.url.endsWith('/') ? config.url : `${config.url}/`)
@@ -112,12 +111,10 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
   }
 }
 
-export const isWebDavDrive = (driveId?: string, driveServerId?: string) => {
-  return /^(webdav|nextcloud):/.test(driveId || '') || driveServerId === 'webdav' || driveServerId === 'nextcloud'
-}
+export const isWebDavDrive = (driveId?: string, driveServerId?: string) => /^webdav:/.test(driveId || '') || driveServerId === 'webdav'
 
 export const getWebDavConnectionId = (driveId?: string) => {
-  const match = /^(?:webdav|nextcloud):(.*)$/.exec(driveId || '')
+  const match = /^webdav:(.*)$/.exec(driveId || '')
   return match?.[1] || ''
 }
 
@@ -184,7 +181,7 @@ export const getWebDavConnection = (id: string) => {
   return getWebDavConnections().find((item) => item.id === id)
 }
 
-export const createWebDavConnection = (input: { provider?: 'webdav' | 'nextcloud'; name: string; url: string; username: string; password: string; rootPath?: string }): WebDavConnectionConfig => {
+export const createWebDavConnection = (input: { name: string; url: string; username: string; password: string; rootPath?: string }): WebDavConnectionConfig => {
   if (!input.name.trim()) throw new Error('请填写 WebDAV 连接名称')
   const normalizedUrl = normalizeUrl(input.url)
   const normalizedRoot = normalizeWebDavPath(input.rootPath || '/')
@@ -194,7 +191,7 @@ export const createWebDavConnection = (input: { provider?: 'webdav' | 'nextcloud
   const id = randomId || btoa(unescape(encodeURIComponent(idSeed))).replace(/[^a-zA-Z0-9]/g, '').slice(-24)
   return {
     id,
-    provider: input.provider === 'nextcloud' ? 'nextcloud' : 'webdav',
+    provider: 'webdav',
     name: input.name.trim(),
     url: normalizedUrl,
     username: input.username.trim(),
@@ -205,7 +202,7 @@ export const createWebDavConnection = (input: { provider?: 'webdav' | 'nextcloud
 }
 
 export const createWebDavUserToken = (connection: WebDavConnectionConfig): ITokenInfo => ({
-  tokenfrom: getWebDavProvider(connection),
+  tokenfrom: 'webdav',
   access_token: '',
   refresh_token: '',
   session_expires_in: 0,

@@ -278,7 +278,7 @@ const handleTreeSelect = (keys: any[], info: {
 const apiLoad = (key: any) => {
   const onlyDirs = props.selecttype !== 'select'
   const provider = resolveDriveProvider({ userId: user_id.value, driveId: drive_id.value })
-  if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile' || provider === 'webdav' || provider === 'nextcloud' || provider === 's3') {
+  if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile' || provider === 'webdav' || provider === 's3') {
     const loadItems = async () => {
       if (provider === 'onedrive') return (await apiOneDriveFileList(user_id.value, key)).map((item) => mapOneDriveItemToAliModel(item, drive_id.value, key))
       if (provider === 'dropbox') return (await apiDropboxFileList(user_id.value, key)).map((item) => mapDropboxFileToAliModel(item, drive_id.value, key))

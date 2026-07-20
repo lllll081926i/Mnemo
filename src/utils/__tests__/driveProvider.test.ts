@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderMeta, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
-const retainedProviders = ['aliyun', 'pikpak', 'quark', '139', '189', 'guangya', 'onedrive', 'dropbox', 'gdrive', 'nextcloud', 'gofile', 'webdav', 's3'] as const
+const retainedProviders = ['aliyun', 'pikpak', 'quark', '139', '189', 'guangya', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'] as const
 
 describe('drive provider capabilities', () => {
   it('resolves every retained provider', () => {
@@ -17,7 +17,7 @@ describe('drive provider capabilities', () => {
     expect(resolveDriveProvider({ userId: 'onedrive_account-id' })).toBe('onedrive')
     expect(resolveDriveProvider({ userId: 'dropbox_account-id' })).toBe('dropbox')
     expect(resolveDriveProvider({ userId: 'gdrive_account-id' })).toBe('gdrive')
-    expect(resolveDriveProvider({ userId: 'nextcloud:connection-id' })).toBe('nextcloud')
+    expect(resolveDriveProvider({ userId: 'nextcloud:connection-id' })).toBe('unknown')
     expect(resolveDriveProvider({ userId: 'gofile_account-id' })).toBe('gofile')
     expect(resolveDriveProvider({ driveId: 'onedrive:drive-id' })).toBe('onedrive')
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
@@ -35,7 +35,7 @@ describe('drive provider capabilities', () => {
     expect(buildDriveProviderDriveId('onedrive', 'account-a')).toBe('onedrive:account-a')
     expect(buildDriveProviderDriveId('onedrive', 'account-b')).toBe('onedrive:account-b')
     expect(buildDriveProviderDriveId('dropbox', 'account-a')).toBe('dropbox:account-a')
-    expect(buildDriveProviderDriveId('nextcloud', 'connection-a')).toBe('nextcloud:connection-a')
+    expect(buildDriveProviderDriveId('webdav', 'connection-a')).toBe('webdav:connection-a')
     expect(getDriveProviderDriveAccountId('gdrive:account-a')).toBe('account-a')
     expect(resolveDriveProvider({ driveId: buildDriveProviderDriveId('gofile', 'account-a') })).toBe('gofile')
   })
@@ -102,7 +102,7 @@ describe('drive provider capabilities', () => {
   })
 
   it('defaults removed and unknown providers to no capabilities', () => {
-    for (const id of ['cloud123', '115', 'baidu', 'box', 'unrecognized-account']) {
+    for (const id of ['cloud123', '115', 'baidu', 'box', 'nextcloud:connection-id', 'unrecognized-account']) {
       const capabilities = getDriveProviderCapabilities({ userId: id })
       expect(capabilities.provider, id).toBe('unknown')
       expect(capabilities.download, id).toBe(false)

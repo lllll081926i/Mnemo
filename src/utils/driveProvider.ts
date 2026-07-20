@@ -1,6 +1,6 @@
 import type { ITokenInfo } from '../user/userstore'
 
-export type DriveProvider = ITokenInfo['tokenfrom']
+export type DriveProvider = Exclude<ITokenInfo['tokenfrom'], 'nextcloud'>
 
 export interface DriveProviderMeta {
   key: DriveProvider
@@ -94,11 +94,6 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
     key: 'gdrive',
     label: 'Google Drive',
     icon: 'images/drive-icons/gdrive.svg'
-  },
-  nextcloud: {
-    key: 'nextcloud',
-    label: 'Nextcloud',
-    icon: 'images/drive-icons/nextcloud.svg'
   },
   gofile: {
     key: 'gofile',
@@ -202,7 +197,6 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
   onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
   dropbox: createCapabilities('dropbox', { search: true, createShare: true }),
   gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
-  nextcloud: createCapabilities('nextcloud', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   gofile: createCapabilities('gofile', { createShare: true, recycleBin: false, permanentDelete: true }),
   webdav: createCapabilities('webdav', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   s3: createCapabilities('s3', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
@@ -220,7 +214,6 @@ const providerAliases: Array<[DriveProvider, string[], string[]]> = [
   ['onedrive', ['onedrive_'], ['onedrive']],
   ['dropbox', ['dropbox_'], ['dropbox']],
   ['gdrive', ['gdrive_'], ['gdrive']],
-  ['nextcloud', ['nextcloud:'], ['nextcloud']],
   ['gofile', ['gofile_'], ['gofile']],
   ['aliyun', ['aliyun_'], []]
 ]
@@ -235,7 +228,6 @@ const driveProviderUserIdPrefixes: Record<DriveProvider, string> = {
   onedrive: 'onedrive_',
   dropbox: 'dropbox_',
   gdrive: 'gdrive_',
-  nextcloud: 'nextcloud:',
   gofile: 'gofile_',
   webdav: 'webdav:',
   s3: 's3:',
