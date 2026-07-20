@@ -13,10 +13,8 @@ import { getEncType, getProxyUrl } from './proxyhelper'
 import { CleanStringForCmd } from './filehelper'
 import Db from './db'
 import { humanTime } from './format'
-import { isAliyunUser, isGuangyaUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
+import { isAliyunUser, isPikPakUser } from '../aliapi/utils'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
-import { apiQuarkFileList, mapQuarkFileToAliModel } from '../quark/dirfilelist'
-import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../guangya/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from './webdavClient'
 import { buildDirectPlayerInvocation, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
 import { findBestSubtitleMatch } from './subtitleMatching'
@@ -32,8 +30,6 @@ const PlayerUtils = {
   async getPlayCursor(user_id: string, drive_id: string, file_id: string) {
     if (isWebDavDrive(drive_id)) return undefined
     if (isPikPakUser(user_id) || drive_id === 'pikpak') return undefined
-    if (isQuarkUser(user_id) || drive_id === 'quark') return undefined
-    if (isGuangyaUser(user_id) || drive_id === 'guangya') return undefined
     // 获取文件信息
     const info = await AliFile.ApiFileInfo(user_id, drive_id, file_id)
     if (info && typeof info == 'string') {
@@ -72,14 +68,6 @@ const PlayerUtils = {
       const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'pikpak_root'
       const list = await apiPikPakFileList(user_id, parentId, 500)
       items = list.items.map(item => mapPikPakFileToAliModel(item, drive_id, parentId))
-    } else if (isQuarkUser(user_id) || drive_id === 'quark') {
-      const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : '0'
-      const list = await apiQuarkFileList(user_id, parentId, 500)
-      items = list.items.map(item => mapQuarkFileToAliModel(item, drive_id, parentId))
-    } else if (isGuangyaUser(user_id) || drive_id === 'guangya') {
-      const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'guangya_root'
-      const list = await apiGuangyaFileList(user_id, parentId, 500)
-      items = list.map(item => mapGuangyaFileToAliModel(item, drive_id, parentId))
     } else if (canUseAliyunFileList(user_id)) {
       const dir = await AliDirFileList.ApiDirFileList(user_id, drive_id, parent_file_id, '', 'name asc', '')
       items = dir.items
@@ -228,7 +216,7 @@ const PlayerUtils = {
           currentFileInfo = playList[status.value]
           // 自动标记
           const { drive_id, file_id, description } = currentFileInfo
-          if (uiAutoColorVideo && !isPikPakUser(token) && !isQuarkUser(token) && !isGuangyaUser(token) && drive_id !== 'pikpak' && drive_id !== 'quark' && drive_id !== 'guangya' && (!description || !description.includes('ce74c3c'))) {
+          if (uiAutoColorVideo && !isPikPakUser(token) && drive_id !== 'pikpak' && (!description || !description.includes('ce74c3c'))) {
             AliFileCmd.ApiFileColorBatch(token.user_id, drive_id, description, 'ce74c3c', [file_id])
           }
         }
