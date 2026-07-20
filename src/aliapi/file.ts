@@ -6,13 +6,9 @@ import AliHttp from './alihttp'
 import { IAliFileItem, IAliGetDirModel, IAliGetFileModel, IAliGetForderSizeModel } from './alimodels'
 import AliDirFileList from './dirfilelist'
 import { ICompilationList, IDownloadUrl, IOfficePreViewUrl, IVideoPreviewUrl, IVideoXBTUrl } from './models'
-import { DecodeEncName, GetDriveType, isAliyunUser, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser } from './utils'
+import { DecodeEncName, GetDriveType, isAliyunUser, isPikPakUser } from './utils'
 import { getProxyUrl, getRawUrl } from '../utils/proxyhelper'
 import { apiPikPakDownloadInfo, apiPikPakFileDetail, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
-import { apiQuarkDownloadUrl, apiQuarkFileDetail, mapQuarkFileToAliModel } from '../quark/dirfilelist'
-import { apiCloud139DownloadInfo, apiCloud139FileDetail, mapCloud139FileToAliModel } from '../cloud139/dirfilelist'
-import { apiCloud189DownloadInfo, apiCloud189FileDetail, mapCloud189FileToAliModel } from '../cloud189/dirfilelist'
-import { apiGuangyaDownloadInfo, apiGuangyaFileDetail, mapGuangyaFileToAliModel } from '../guangya/dirfilelist'
 import TreeStore from '../store/treestore'
 import UserDAL from '../user/userdal'
 import { ITokenInfo } from '../user/userstore'
@@ -89,53 +85,6 @@ export default class AliFile {
       const detail = await apiPikPakFileDetail(user_id, file_id)
       if (!detail) return undefined
       const mapped = mapPikPakFileToAliModel(detail, drive_id, detail.parent_id || 'pikpak_root') as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === 'quark') {
-      if (file_id === 'quark_root' || file_id === '0') {
-        return {
-          drive_id,
-          file_id: 'quark_root',
-          parent_file_id: '',
-          name: '网盘文件',
-          type: 'folder',
-          isDir: true
-        }
-      }
-      const detail = await apiQuarkFileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapQuarkFileToAliModel(detail, drive_id, detail.pdir_fid || 'quark_root') as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === '139') {
-      if (file_id === 'cloud139_root' || file_id === '/' || file_id === '0') {
-        return { drive_id, file_id: 'cloud139_root', parent_file_id: '', name: '网盘文件', type: 'folder', isDir: true }
-      }
-      const detail = await apiCloud139FileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapCloud139FileToAliModel(detail, drive_id, detail.parentFileId || detail.parentCatalogId || 'cloud139_root') as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === '189') {
-      if (file_id === 'cloud189_root' || file_id === '-11' || file_id === '0') {
-        return { drive_id, file_id: 'cloud189_root', parent_file_id: '', name: '网盘文件', type: 'folder', isDir: true }
-      }
-      const detail = await apiCloud189FileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapCloud189FileToAliModel(detail, drive_id, detail.parentId || detail.parentFolderId || 'cloud189_root') as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === 'guangya') {
-      if (file_id === 'guangya_root' || file_id === '0' || file_id === '/') {
-        return { drive_id, file_id: 'guangya_root', parent_file_id: '', name: '网盘文件', type: 'folder', isDir: true }
-      }
-      const detail = await apiGuangyaFileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapGuangyaFileToAliModel(detail, drive_id, detail.parentId || detail.parentFileId || 'guangya_root') as any
       mapped.type = mapped.isDir ? 'folder' : 'file'
       return mapped
     }
@@ -280,32 +229,6 @@ export default class AliFile {
         url,
         size: Number(detail?.size || 0)
       }
-    }
-    if (provider === 'quark') {
-      const info = await apiQuarkDownloadUrl(user_id, file_id)
-      if (info.error) return info.error
-      return {
-        drive_id,
-        file_id,
-        expire_time: GetExpiresTime(info.url),
-        url: info.url,
-        size: Number(info.size || 0)
-      }
-    }
-    if (provider === '139') {
-      const info = await apiCloud139DownloadInfo(user_id, file_id)
-      if (info.error) return info.error
-      return { drive_id, file_id, expire_time: GetExpiresTime(info.url), url: info.url, size: Number(info.size || 0) }
-    }
-    if (provider === '189') {
-      const info = await apiCloud189DownloadInfo(user_id, file_id)
-      if (info.error) return info.error
-      return { drive_id, file_id, expire_time: GetExpiresTime(info.url), url: info.url, size: Number(info.size || 0) }
-    }
-    if (provider === 'guangya') {
-      const info = await apiGuangyaDownloadInfo(user_id, file_id)
-      if (info.error) return info.error
-      return { drive_id, file_id, expire_time: GetExpiresTime(info.url), url: info.url, size: Number(info.size || 0) }
     }
     if (provider === 'onedrive') {
       const item = await apiOneDriveFileDetail(user_id, file_id)
@@ -601,26 +524,6 @@ export default class AliFile {
       if (!detail) return undefined
       return mapPikPakFileToAliModel(detail, drive_id, detail.parent_id || 'pikpak_root')
     }
-    if (isQuarkUser(user_id) || drive_id === 'quark') {
-      const detail = await apiQuarkFileDetail(user_id, file_id)
-      if (!detail) return undefined
-      return mapQuarkFileToAliModel(detail, drive_id, detail.pdir_fid || 'quark_root')
-    }
-    if (isCloud139User(user_id) || drive_id === 'cloud139') {
-      const detail = await apiCloud139FileDetail(user_id, file_id)
-      if (!detail) return undefined
-      return mapCloud139FileToAliModel(detail, drive_id, detail.parentFileId || detail.parentCatalogId || 'cloud139_root')
-    }
-    if (isCloud189User(user_id) || drive_id === 'cloud189') {
-      const detail = await apiCloud189FileDetail(user_id, file_id)
-      if (!detail) return undefined
-      return mapCloud189FileToAliModel(detail, drive_id, detail.parentId || detail.parentFolderId || 'cloud189_root')
-    }
-    if (isGuangyaUser(user_id) || drive_id === 'guangya') {
-      const detail = await apiGuangyaFileDetail(user_id, file_id)
-      if (!detail) return undefined
-      return mapGuangyaFileToAliModel(detail, drive_id, detail.parentId || detail.parentFileId || 'guangya_root')
-    }
     const url = 'v2/file/get'
     const postData = {
       drive_id: drive_id,
@@ -645,20 +548,6 @@ export default class AliFile {
     if (!user_id || !drive_id || !file_id) return []
     const provider = await resolveFileProvider(user_id, drive_id)
     if (provider !== 'aliyun') return TreeStore.GetDirPath(drive_id, file_id) as IAliGetDirModel[]
-    if (
-      isPikPakUser(user_id) ||
-      drive_id === 'pikpak' ||
-      isQuarkUser(user_id) ||
-      drive_id === 'quark' ||
-      isCloud139User(user_id) ||
-      drive_id === 'cloud139' ||
-      isCloud189User(user_id) ||
-      drive_id === 'cloud189' ||
-      isGuangyaUser(user_id) ||
-      drive_id === 'guangya'
-    ) {
-      return TreeStore.GetDirPath(drive_id, file_id) as IAliGetDirModel[]
-    }
     const url = 'adrive/v1/file/get_path'
     const postData = {
       drive_id: drive_id,
@@ -712,20 +601,6 @@ export default class AliFile {
     if (provider !== 'aliyun') {
       const pathList = TreeStore.GetDirPath(drive_id, file_id)
       return pathList.map((item) => item.name).filter(Boolean).join(dirsplit)
-    }
-    if (
-      isPikPakUser(user_id) ||
-      drive_id === 'pikpak' ||
-      isGuangyaUser(user_id) ||
-      drive_id === 'guangya' ||
-      isCloud139User(user_id) ||
-      drive_id === 'cloud139' ||
-      isCloud189User(user_id) ||
-      drive_id === 'cloud189'
-    ) {
-      const pathList = TreeStore.GetDirPath(drive_id, file_id)
-      const pathNames = pathList.map((item) => item.name).filter((name) => name)
-      return pathNames.join(dirsplit)
     }
     if (file_id.includes('root')) {
       if (file_id.startsWith('backup')) {
