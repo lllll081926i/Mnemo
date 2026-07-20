@@ -77,7 +77,7 @@ export interface IStateDownInfo {
   allProxy?: string
   sourceType?: 'url'
   split?: number
-  offlineProvider?: 'pikpak' | 'guangya'
+  offlineProvider?: 'pikpak'
   offlineTaskId?: string
   offlineDirId?: string
 }
@@ -461,7 +461,6 @@ export default class DownDAL {
       useFootStore().mSaveDownTotalSpeedInfo('')
     }
     await DownDAL.aPikPakOfflineProgress()
-    await DownDAL.aGuangyaOfflineProgress()
 
     downingStore.mRefreshListDataShow(true)
     downedStore.mRefreshListDataShow(true)
@@ -676,55 +675,6 @@ export default class DownDAL {
     return { success: true, message: '' }
   }
 
-  static async aAddGuangyaOfflineDownload(url: string, fileName: string, dirID: string | undefined) {
-    const userID = useUserStore().user_id
-    if (!userID) return { success: false, message: '请先登录' }
-    const { apiGuangyaOfflineCreate } = await import('../guangya/offline')
-    const resp = await apiGuangyaOfflineCreate(userID, url, fileName, dirID)
-    if (!resp.taskId && !resp.fileId) return { success: false, message: resp.error || '创建离线下载失败' }
-    const taskId = String(resp.taskId || resp.fileId)
-    const downitem: IStateDownFile = {
-      DownID: `${userID}|guangya_offline_${taskId}`,
-      Info: {
-        GID: `guangya_offline_${taskId}`,
-        user_id: userID,
-        DownSavePath: '',
-        ariaRemote: false,
-        file_id: resp.fileId,
-        drive_id: 'guangya',
-        name: fileName || url,
-        size: 0,
-        sizestr: '',
-        icon: 'iconcloud-download',
-        isDir: false,
-        encType: '',
-        sha1: '',
-        crc64: '',
-        offlineProvider: 'guangya',
-        offlineTaskId: taskId,
-        offlineDirId: dirID || ''
-      },
-      Down: {
-        DownState: '离线下载中',
-        DownTime: Date.now(),
-        DownSize: 0,
-        DownSpeed: 0,
-        DownSpeedStr: '',
-        DownProcess: 0,
-        IsStop: false,
-        IsDowning: true,
-        IsCompleted: false,
-        IsFailed: false,
-        FailedCode: 0,
-        FailedMessage: '',
-        AutoTry: 0,
-        DownUrl: url
-      }
-    }
-    useDowningStore().mAddDownload({ downlist: [downitem] })
-    return { success: true, message: '' }
-  }
-
   private static pikpakOfflineTick = 0
 
   static async aPikPakOfflineProgress() {
@@ -757,55 +707,6 @@ export default class DownDAL {
         item.Down.DownState = '离线下载完成'
         item.Down.DownProcess = 100
       } else if (info.status === 1) {
-        item.Down.IsFailed = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载失败'
-      } else if (info.status === 3) {
-        item.Down.IsDowning = true
-        item.Down.DownState = `离线下载等待中 ${process}%`
-      } else {
-        item.Down.IsDowning = true
-        item.Down.DownState = `离线下载中 ${process}%`
-      }
-      saveList.push(item)
-    }
-    if (saveList.length) {
-      DBDown.saveDownings(JSON.parse(JSON.stringify(saveList)))
-    }
-  }
-
-  private static guangyaOfflineTick = 0
-
-  static async aGuangyaOfflineProgress() {
-    const downingStore = useDowningStore()
-    const list = downingStore.ListDataRaw
-    if (!list.length) return
-    DownDAL.guangyaOfflineTick = (DownDAL.guangyaOfflineTick + 1) % 5
-    if (DownDAL.guangyaOfflineTick !== 0) return
-    const { apiGuangyaOfflineProcess } = await import('../guangya/offline')
-    const saveList: IStateDownFile[] = []
-    for (let i = 0; i < list.length; i++) {
-      const item = list[i]
-      if (item.Info.offlineProvider !== 'guangya' || !item.Info.offlineTaskId) continue
-      if (item.Down.IsCompleted || item.Down.IsFailed) continue
-      const info = await apiGuangyaOfflineProcess(item.Info.user_id, item.Info.offlineTaskId)
-      if (info.error) {
-        item.Down.IsFailed = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载失败'
-        item.Down.FailedMessage = info.error
-        saveList.push(item)
-        continue
-      }
-      const process = Math.max(0, Math.min(100, info.process))
-      item.Down.DownProcess = process
-      item.Down.DownSpeedStr = ''
-      if (info.status === 2 || process >= 100) {
-        item.Down.IsCompleted = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载完成'
-        item.Down.DownProcess = 100
-      } else if (info.status === 4) {
         item.Down.IsFailed = true
         item.Down.IsDowning = false
         item.Down.DownState = '离线下载失败'

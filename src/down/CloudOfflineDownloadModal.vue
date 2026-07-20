@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { modalCloseAll, modalSelectPanDir } from '../utils/modal'
 import { useModalStore, useUserStore } from '../store'
-import { isGuangyaUser, isPikPakUser } from '../aliapi/utils'
+import { isPikPakUser } from '../aliapi/utils'
 import message from '../utils/message'
 import DownDAL from './DownDAL'
 
@@ -20,11 +20,10 @@ const userStore = useUserStore()
 const provider = computed(() => {
   const user = userStore.user_id || ''
   if (isPikPakUser(user)) return 'pikpak'
-  if (isGuangyaUser(user)) return 'guangya'
   return ''
 })
 const urlPlaceholder = 'http/https、magnet 或 ed2k 链接'
-const providerLabel = computed(() => provider.value === 'pikpak' ? 'PikPak' : provider.value === 'guangya' ? '光鸭云盘' : '当前网盘')
+const providerLabel = computed(() => provider.value === 'pikpak' ? 'PikPak' : '当前网盘')
 const form = reactive({
   url: '',
   fileName: '',
@@ -96,9 +95,7 @@ const handleCreate = async () => {
   for (const url of urls) {
     const result = provider.value === 'pikpak'
       ? await DownDAL.aAddPikPakOfflineDownload(url, urls.length === 1 ? form.fileName.trim() : '', form.dirId)
-      : provider.value === 'guangya'
-        ? await DownDAL.aAddGuangyaOfflineDownload(url, urls.length === 1 ? form.fileName.trim() : '', form.dirId)
-        : { success: false, message: '当前账号不支持离线下载' }
+      : { success: false, message: '当前账号不支持离线下载' }
     if (result.success) success++
     else failures.push(`${url.slice(0, 80)}：${result.message || '创建失败'}`)
   }
