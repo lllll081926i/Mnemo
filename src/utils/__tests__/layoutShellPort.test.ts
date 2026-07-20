@@ -222,6 +222,20 @@ describe('deep layout shell port', () => {
     expect(video).toContain('await installJassubPlugin(art, source, token)')
   })
 
+  it('does not generate unused AI or legacy service configuration', () => {
+    const secretsGenerator = read('scripts/generate-secrets.mjs')
+    const config = read('src/config.ts')
+    const secretsExample = read('src/secrets.example.ts')
+    const envExample = read('.env.example')
+
+    expect(secretsGenerator).not.toContain('MNEMO_AI_API_URL')
+    expect(config).not.toContain('MNEMO_AI_API_URL')
+    expect(secretsExample).not.toContain('MNEMO_AI_API_URL')
+    expect(envExample).not.toContain('TMDB_API_KEY')
+    expect(envExample).not.toContain('BOXPLAYER_')
+    expect(envExample).not.toContain('SUPABASE_')
+  })
+
   it('keeps active workspace toolbars free of fixed spacer nodes', () => {
     const pages = [
       'src/pan/PanRight.vue',
