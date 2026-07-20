@@ -5,14 +5,15 @@ import { describe, expect, it } from 'vitest'
 const read = (file: string) => readFileSync(path.resolve(process.cwd(), file), 'utf8').replace(/\r\n/g, '\n')
 
 describe('provider upload routing', () => {
-  it('routes every queue-enabled aggregate provider to a concrete handler', () => {
+  it('routes every retained queue-enabled provider to a concrete handler', () => {
     const uploader = read('src/workerpage/uploader.ts')
-    for (const provider of ['guangya', 'pikpak', 'quark', '139', '189', 'onedrive', 'dropbox', 'gdrive', 'gofile']) {
+    for (const provider of ['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile']) {
       expect(uploader).toContain(`if (provider === '${provider}') return runUploadDisk`)
     }
-    for (const handler of ['GuangyaUploadDisk', 'PikPakUploadDisk', 'QuarkUploadDisk', 'Cloud139UploadDisk', 'Cloud189UploadDisk', 'OneDriveUploadDisk', 'DropboxUploadDisk', 'GoogleDriveUploadDisk', 'GofileUploadDisk']) {
+    for (const handler of ['PikPakUploadDisk', 'OneDriveUploadDisk', 'DropboxUploadDisk', 'GoogleDriveUploadDisk', 'GofileUploadDisk']) {
       expect(uploader).toContain(handler)
     }
+    for (const handler of ['GuangyaUploadDisk', 'QuarkUploadDisk', 'Cloud139UploadDisk', 'Cloud189UploadDisk', 'AliUploadDisk', 'AliUploadHashPool']) expect(uploader).not.toContain(handler)
   })
 
   it('routes added providers through their own file and share APIs', () => {
