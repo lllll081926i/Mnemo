@@ -64,6 +64,7 @@ boxplayer-site/
 boxplayer-ai-api/
 boxplayer-api/
 OpenList/
+rclone/
 tmp_video_frames/
 tmp_video_xhs/
 .codeflicker/
