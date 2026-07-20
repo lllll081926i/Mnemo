@@ -11,8 +11,25 @@ import { getMotrixApplicationRpcPort, parseElectronProxyRules, syncMotrixApplica
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
 import { convert as convertOpenDataLoaderPdf, type ConvertOptions as OpenDataLoaderPdfOptions } from '@opendataloader/pdf'
 import { checkForUpdatesNow } from './autoUpdate'
+import { isOAuthAuthorizationUrl, oauthCallbackServer, type OAuthCallbackTarget, type OAuthProvider } from './oauthServer'
 
 let psbId: any
+
+interface OAuthSessionOwner {
+  provider: OAuthProvider
+  redirectUri: string
+  senderId: number
+  target: OAuthCallbackTarget
+}
+
+const oauthSessionOwners = new Map<string, OAuthSessionOwner>()
+const oauthWindows = new Map<string, BrowserWindow>()
+
+const closeOAuthWindow = (state: string) => {
+  const window = oauthWindows.get(state)
+  oauthWindows.delete(state)
+  if (window && !window.isDestroyed()) window.close()
+}
 
 const QUARK_DOWNLOAD_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch'
 
@@ -128,6 +145,7 @@ export default class ipcEvent {
     this.handleWebShutDown()
     this.handleWebSetProxy()
     this.handleWebOpenExternal()
+    this.handleOAuthCallback()
     this.handleAutoUpdate()
     this.handleSafeStorage()
     this.handleOfficePreviewConvertToPdf()
@@ -151,6 +169,82 @@ export default class ipcEvent {
       } catch (error: any) {
         return { ok: false, error: error?.message || '无法打开系统浏览器' }
       }
+    })
+  }
+
+  private static handleOAuthCallback() {
+    ipcMain.handle('OAuth:begin', async (event, value: { provider?: string }) => {
+      try {
+        const provider = String(value?.provider || '') as OAuthProvider
+        const target: OAuthCallbackTarget = {
+          isDestroyed: () => event.sender.isDestroyed(),
+          send: (channel, payload) => {
+            oauthSessionOwners.delete(payload.state)
+            closeOAuthWindow(payload.state)
+            if (!event.sender.isDestroyed()) event.sender.send(channel, payload)
+          }
+        }
+        const session = await oauthCallbackServer.begin(provider, target)
+        oauthSessionOwners.set(session.state, { provider, redirectUri: session.redirectUri, senderId: event.sender.id, target })
+        return { ok: true, ...session }
+      } catch (error: any) {
+        return { ok: false, error: error?.message || 'OAuth 回调服务启动失败' }
+      }
+    })
+    ipcMain.handle('OAuth:open', async (event, value: { state?: string; url?: string }) => {
+      const state = String(value?.state || '')
+      const owner = oauthSessionOwners.get(state)
+      if (!owner || owner.senderId !== event.sender.id) return { ok: false, error: 'OAuth 会话不存在或已过期' }
+      const authUrl = String(value?.url || '')
+      if (!isOAuthAuthorizationUrl(owner.provider, authUrl, state, owner.redirectUri)) return { ok: false, error: 'OAuth 授权地址校验失败' }
+      closeOAuthWindow(state)
+      const authWindow = new BrowserWindow({
+        parent: AppWindow.mainWindow,
+        modal: true,
+        show: false,
+        width: 520,
+        height: 720,
+        minWidth: 420,
+        minHeight: 560,
+        title: `${owner.provider} 登录`,
+        autoHideMenuBar: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          devTools: false,
+          webSecurity: true
+        }
+      })
+      oauthWindows.set(state, authWindow)
+      authWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      authWindow.once('ready-to-show', () => authWindow.show())
+      authWindow.once('closed', () => {
+        if (oauthWindows.get(state) !== authWindow) return
+        oauthWindows.delete(state)
+        oauthSessionOwners.delete(state)
+        oauthCallbackServer.cancel(state, owner.target)
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('OAuth:callback', { provider: owner.provider, state, code: '', error: 'window_closed', errorDescription: '登录窗口已关闭' })
+        }
+      })
+      try {
+        await authWindow.loadURL(authUrl)
+        return { ok: true }
+      } catch (error: any) {
+        closeOAuthWindow(state)
+        oauthSessionOwners.delete(state)
+        oauthCallbackServer.cancel(state, owner.target)
+        return { ok: false, error: error?.message || '加载 OAuth 登录页面失败' }
+      }
+    })
+    ipcMain.handle('OAuth:cancel', (event, value: { state?: string }) => {
+      const state = String(value?.state || '')
+      const owner = oauthSessionOwners.get(state)
+      if (!owner || owner.senderId !== event.sender.id) return { ok: false }
+      oauthSessionOwners.delete(state)
+      closeOAuthWindow(state)
+      return { ok: oauthCallbackServer.cancel(state, owner.target) }
     })
   }
 

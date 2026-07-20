@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
+import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
-const retainedProviders = ['aliyun', 'pikpak', 'quark', '139', '189', 'guangya', 'webdav', 's3'] as const
+const retainedProviders = ['aliyun', 'pikpak', 'quark', '139', '189', 'guangya', 'onedrive', 'dropbox', 'gdrive', 'nextcloud', 'gofile', 'webdav', 's3'] as const
 
 describe('drive provider capabilities', () => {
   it('resolves every retained provider', () => {
@@ -12,7 +12,22 @@ describe('drive provider capabilities', () => {
     expect(resolveDriveProvider({ userId: 'cloud139_account-id' })).toBe('139')
     expect(resolveDriveProvider({ userId: 'cloud189_account-id' })).toBe('189')
     expect(resolveDriveProvider({ userId: 'guangya_account-id' })).toBe('guangya')
+    expect(resolveDriveProvider({ userId: 'onedrive_account-id' })).toBe('onedrive')
+    expect(resolveDriveProvider({ userId: 'dropbox_account-id' })).toBe('dropbox')
+    expect(resolveDriveProvider({ userId: 'gdrive_account-id' })).toBe('gdrive')
+    expect(resolveDriveProvider({ userId: 'nextcloud:connection-id' })).toBe('nextcloud')
+    expect(resolveDriveProvider({ userId: 'gofile_account-id' })).toBe('gofile')
+    expect(resolveDriveProvider({ driveId: 'onedrive:drive-id' })).toBe('onedrive')
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
+  })
+
+  it('builds account-scoped drive ids for concurrent provider accounts', () => {
+    expect(buildDriveProviderDriveId('onedrive', 'account-a')).toBe('onedrive:account-a')
+    expect(buildDriveProviderDriveId('onedrive', 'account-b')).toBe('onedrive:account-b')
+    expect(buildDriveProviderDriveId('dropbox', 'account-a')).toBe('dropbox:account-a')
+    expect(buildDriveProviderDriveId('nextcloud', 'connection-a')).toBe('nextcloud:connection-a')
+    expect(getDriveProviderDriveAccountId('gdrive:account-a')).toBe('account-a')
+    expect(resolveDriveProvider({ driveId: buildDriveProviderDriveId('gofile', 'account-a') })).toBe('gofile')
   })
 
   it('keeps stable mounted-storage account ids', () => {
@@ -34,10 +49,10 @@ describe('drive provider capabilities', () => {
   })
 
   it('exposes only implemented search and share paths', () => {
-    for (const provider of ['aliyun', 'quark', 'guangya'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(true)
-    for (const provider of ['139', '189', 'pikpak', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
-    for (const provider of ['aliyun', 'pikpak', 'quark', 'guangya'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(true)
-    for (const provider of ['139', '189', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
+    for (const provider of ['aliyun', 'quark', 'guangya', 'onedrive', 'dropbox', 'gdrive'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(true)
+    for (const provider of ['139', '189', 'pikpak', 'nextcloud', 'gofile', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
+    for (const provider of ['aliyun', 'pikpak', 'quark', 'guangya', 'onedrive', 'dropbox', 'gdrive', 'gofile'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(true)
+    for (const provider of ['139', '189', 'nextcloud', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
   })
 
   it('builds flat Aliyun spaces and retained provider sidebars', () => {
@@ -72,7 +87,7 @@ describe('drive provider capabilities', () => {
   })
 
   it('defaults removed and unknown providers to no capabilities', () => {
-    for (const id of ['cloud123', '115', 'baidu', 'dropbox', 'onedrive', 'box', 'unrecognized-account']) {
+    for (const id of ['cloud123', '115', 'baidu', 'box', 'unrecognized-account']) {
       const capabilities = getDriveProviderCapabilities({ userId: id })
       expect(capabilities.provider, id).toBe('unknown')
       expect(capabilities.download, id).toBe(false)

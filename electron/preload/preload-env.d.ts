@@ -24,6 +24,10 @@ declare interface Window {
   WebSetCookies: any
   WebOpenWindow: any
   WebOpenExternal: (url: string) => Promise<{ ok: boolean; error?: string }>
+  WebOAuthBegin: (provider: 'onedrive' | 'dropbox' | 'gdrive') => Promise<{ ok: boolean; state?: string; redirectUri?: string; error?: string }>
+  WebOAuthOpen: (state: string, url: string) => Promise<{ ok: boolean; error?: string }>
+  WebOAuthCancel: (state: string) => Promise<{ ok: boolean }>
+  WebOAuthOnCallback: (callback: (payload: { provider: 'onedrive' | 'dropbox' | 'gdrive'; state: string; code: string; error: string; errorDescription: string }) => void) => () => void
   WebCheckUpdate: () => Promise<{ ok: boolean; version?: string; error?: string }>
   WebSafeStorageEncrypt: (value: string) => Promise<string>
   WebSafeStorageDecrypt: (value: string) => Promise<string>

@@ -28,7 +28,12 @@ export default defineConfig({
       'src/quark/__tests__/**/*.test.ts',
       'src/guangya/__tests__/**/*.test.ts',
       'src/cloud139/__tests__/**/*.test.ts',
-      'src/cloud189/__tests__/**/*.test.ts'
+      'src/cloud189/__tests__/**/*.test.ts',
+      'src/onedrive/__tests__/**/*.test.ts',
+      'src/dropbox/__tests__/**/*.test.ts',
+      'src/gdrive/__tests__/**/*.test.ts',
+      'src/gofile/__tests__/**/*.test.ts',
+      'src/nextcloud/__tests__/**/*.test.ts'
     ]
   }
 })

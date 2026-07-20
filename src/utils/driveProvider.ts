@@ -80,6 +80,31 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
     label: '夸克网盘',
     icon: 'images/drive-icons/quark.svg'
   },
+  onedrive: {
+    key: 'onedrive',
+    label: 'Microsoft OneDrive',
+    icon: 'images/drive-icons/onedrive.svg'
+  },
+  dropbox: {
+    key: 'dropbox',
+    label: 'Dropbox',
+    icon: 'images/drive-icons/dropbox.svg'
+  },
+  gdrive: {
+    key: 'gdrive',
+    label: 'Google Drive',
+    icon: ''
+  },
+  nextcloud: {
+    key: 'nextcloud',
+    label: 'Nextcloud',
+    icon: ''
+  },
+  gofile: {
+    key: 'gofile',
+    label: 'GoFile',
+    icon: ''
+  },
   webdav: {
     key: 'webdav',
     label: 'WebDAV',
@@ -174,6 +199,11 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
   guangya: createCapabilities('guangya', { search: true, createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
   quark: createCapabilities('quark', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
+  onedrive: createCapabilities('onedrive', { search: true, createShare: true, trashView: true }),
+  dropbox: createCapabilities('dropbox', { search: true, createShare: true, recycleBin: false, permanentDelete: true }),
+  gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true }),
+  nextcloud: createCapabilities('nextcloud', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
+  gofile: createCapabilities('gofile', { createShare: true, recycleBin: false, permanentDelete: true }),
   webdav: createCapabilities('webdav', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   s3: createCapabilities('s3', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   unknown: { ...noCapabilities, provider: 'unknown' }
@@ -187,6 +217,11 @@ const providerAliases: Array<[DriveProvider, string[], string[]]> = [
   ['guangya', ['guangya_'], ['guangya']],
   ['pikpak', ['pikpak_'], ['pikpak']],
   ['quark', ['quark_'], ['quark']],
+  ['onedrive', ['onedrive_'], ['onedrive']],
+  ['dropbox', ['dropbox_'], ['dropbox']],
+  ['gdrive', ['gdrive_'], ['gdrive']],
+  ['nextcloud', ['nextcloud:'], ['nextcloud']],
+  ['gofile', ['gofile_'], ['gofile']],
   ['aliyun', ['aliyun_'], []]
 ]
 
@@ -197,6 +232,11 @@ const driveProviderUserIdPrefixes: Record<DriveProvider, string> = {
   guangya: 'guangya_',
   pikpak: 'pikpak_',
   quark: 'quark_',
+  onedrive: 'onedrive_',
+  dropbox: 'dropbox_',
+  gdrive: 'gdrive_',
+  nextcloud: 'nextcloud:',
+  gofile: 'gofile_',
   webdav: 'webdav:',
   s3: 's3:',
   unknown: ''
@@ -209,7 +249,7 @@ export const resolveDriveProvider = (context: DriveProviderContext | string = {}
   const userId = resolvedContext.userId || ''
   const driveId = resolvedContext.driveId || ''
   for (const [provider, userPrefixes] of providerAliases) if (userPrefixes.some((prefix) => userId.startsWith(prefix))) return provider
-  for (const [provider, , driveIds] of providerAliases) if (driveIds.includes(driveId)) return provider
+  for (const [provider, , driveIds] of providerAliases) if (driveIds.some((value) => driveId === value || driveId.startsWith(`${value}:`))) return provider
   return 'unknown'
 }
 
@@ -229,6 +269,22 @@ export const getDriveProviderAccountId = (userId: string, provider?: DriveProvid
   const resolvedProvider = provider || resolveDriveProvider({ userId: value })
   const prefix = driveProviderUserIdPrefixes[resolvedProvider]
   return prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value
+}
+
+export const buildDriveProviderDriveId = (provider: DriveProvider, accountId: string | number): string => {
+  const value = String(accountId ?? '').trim()
+  if (!value) return ''
+  if (provider === 'aliyun' || provider === 'unknown') return value
+  const prefix = `${provider}:`
+  return value.startsWith(prefix) ? value : `${prefix}${value}`
+}
+
+export const getDriveProviderDriveAccountId = (driveId: string, provider?: DriveProvider): string => {
+  const value = String(driveId || '').trim()
+  if (!value) return ''
+  const resolvedProvider = provider || resolveDriveProvider({ driveId: value })
+  const prefix = `${resolvedProvider}:`
+  return resolvedProvider !== 'aliyun' && resolvedProvider !== 'unknown' && value.startsWith(prefix) ? value.slice(prefix.length) : value
 }
 
 export const getDriveProviderCapabilities = (context: DriveProviderContext | string = {}): DriveProviderCapabilities => driveProviderCapabilities[resolveDriveProvider(context)]

@@ -152,6 +152,20 @@ window.WebOpenExternal = async function(url: string) {
     return { ok: false, error: error?.message || '无法打开系统浏览器' }
   }
 }
+window.WebOAuthBegin = async function(provider: string) {
+  return ipcRenderer.invoke('OAuth:begin', { provider })
+}
+window.WebOAuthOpen = async function(state: string, url: string) {
+  return ipcRenderer.invoke('OAuth:open', { state, url })
+}
+window.WebOAuthCancel = async function(state: string) {
+  return ipcRenderer.invoke('OAuth:cancel', { state })
+}
+window.WebOAuthOnCallback = function(callback: (payload: any) => void) {
+  const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload)
+  ipcRenderer.on('OAuth:callback', listener)
+  return () => ipcRenderer.removeListener('OAuth:callback', listener)
+}
 window.WebShutDown = function(data: any) {
   try {
     ipcRenderer.send('WebShutDown', data)
