@@ -13,13 +13,9 @@ import { Sleep } from '../../utils/format'
 import { treeSelectToExpand } from '../../utils/antdtree'
 import AliTrash from '../../aliapi/trash'
 import { fileiconfn } from '../pantreestore'
-import { GetDriveID, GetDriveType, isAliyunUser, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser } from '../../aliapi/utils'
+import { GetDriveID, GetDriveType, isAliyunUser, isPikPakUser } from '../../aliapi/utils'
 import { IAliGetDirModel } from '../../aliapi/alimodels'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
-import { apiQuarkFileList, mapQuarkFileToAliModel } from '../../quark/dirfilelist'
-import { apiCloud139FileList, mapCloud139FileToAliModel } from '../../cloud139/dirfilelist'
-import { apiCloud189FileList, mapCloud189FileToAliModel } from '../../cloud189/dirfilelist'
-import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../../guangya/dirfilelist'
 import { resolveDriveProvider } from '../../utils/driveProvider'
 import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../../onedrive/dirfilelist'
 import { apiDropboxFileList, mapDropboxFileToAliModel } from '../../dropbox/dirfilelist'
@@ -322,135 +318,6 @@ const apiLoad = (key: any) => {
         const addList: TreeNodeData[] = []
         for (let i = 0, maxi = list.length; i < maxi; i++) {
           const mapped = mapPikPakFileToAliModel(list[i], drive_id.value, parentId)
-          if (!mapped.isDir) {
-            if (onlyDirs) continue
-            if (props.category && mapped.category !== props.category) continue
-            if (props.extFilter && !props.extFilter.test(mapped.ext)) continue
-          }
-          addList.push({
-            __v_skip: true,
-            key: mapped.file_id,
-            parent_file_id: mapped.parent_file_id,
-            path: mapped.path || '',
-            title: mapped.name,
-            children: [],
-            isDir: mapped.isDir,
-            isLeaf: !mapped.isDir,
-            description: mapped.description,
-            icon: mapped.isDir ? foldericonfn : () => fileiconfn(mapped.icon)
-          } as TreeNodeData)
-        }
-        autoExpand(addList)
-        return addList
-      })
-      .catch(() => {
-        return [] as TreeNodeData[]
-      })
-  }
-  if (isQuarkUser(user_id.value)) {
-    const parentId = key.includes('root') ? '0' : key
-    return apiQuarkFileList(user_id.value, parentId, 100, 1)
-      .then((resp) => {
-        const addList: TreeNodeData[] = []
-        const list = resp.items || []
-        for (let i = 0, maxi = list.length; i < maxi; i++) {
-          const mapped = mapQuarkFileToAliModel(list[i], drive_id.value, parentId)
-          if (!mapped.isDir) {
-            if (onlyDirs) continue
-            if (props.category && mapped.category !== props.category) continue
-            if (props.extFilter && !props.extFilter.test(mapped.ext)) continue
-          }
-          addList.push({
-            __v_skip: true,
-            key: mapped.file_id,
-            parent_file_id: mapped.parent_file_id,
-            path: mapped.path || '',
-            title: mapped.name,
-            children: [],
-            isDir: mapped.isDir,
-            isLeaf: !mapped.isDir,
-            description: mapped.description,
-            icon: mapped.isDir ? foldericonfn : () => fileiconfn(mapped.icon)
-          } as TreeNodeData)
-        }
-        autoExpand(addList)
-        return addList
-      })
-      .catch(() => {
-        return [] as TreeNodeData[]
-      })
-  }
-  if (isCloud139User(user_id.value)) {
-    const parentId = key.includes('root') ? '/' : key
-    return apiCloud139FileList(user_id.value, parentId, 100)
-      .then((list) => {
-        const addList: TreeNodeData[] = []
-        for (let i = 0, maxi = list.length; i < maxi; i++) {
-          const mapped = mapCloud139FileToAliModel(list[i], drive_id.value, parentId)
-          if (!mapped.isDir) {
-            if (onlyDirs) continue
-            if (props.category && mapped.category !== props.category) continue
-            if (props.extFilter && !props.extFilter.test(mapped.ext)) continue
-          }
-          addList.push({
-            __v_skip: true,
-            key: mapped.file_id,
-            parent_file_id: mapped.parent_file_id,
-            path: mapped.path || '',
-            title: mapped.name,
-            children: [],
-            isDir: mapped.isDir,
-            isLeaf: !mapped.isDir,
-            description: mapped.description,
-            icon: mapped.isDir ? foldericonfn : () => fileiconfn(mapped.icon)
-          } as TreeNodeData)
-        }
-        autoExpand(addList)
-        return addList
-      })
-      .catch(() => {
-        return [] as TreeNodeData[]
-      })
-  }
-  if (isCloud189User(user_id.value)) {
-    const parentId = key.includes('root') ? '-11' : key
-    return apiCloud189FileList(user_id.value, parentId, 1000)
-      .then((list) => {
-        const addList: TreeNodeData[] = []
-        for (let i = 0, maxi = list.length; i < maxi; i++) {
-          const mapped = mapCloud189FileToAliModel(list[i], drive_id.value, parentId)
-          if (!mapped.isDir) {
-            if (onlyDirs) continue
-            if (props.category && mapped.category !== props.category) continue
-            if (props.extFilter && !props.extFilter.test(mapped.ext)) continue
-          }
-          addList.push({
-            __v_skip: true,
-            key: mapped.file_id,
-            parent_file_id: mapped.parent_file_id,
-            path: mapped.path || '',
-            title: mapped.name,
-            children: [],
-            isDir: mapped.isDir,
-            isLeaf: !mapped.isDir,
-            description: mapped.description,
-            icon: mapped.isDir ? foldericonfn : () => fileiconfn(mapped.icon)
-          } as TreeNodeData)
-        }
-        autoExpand(addList)
-        return addList
-      })
-      .catch(() => {
-        return [] as TreeNodeData[]
-      })
-  }
-  if (isGuangyaUser(user_id.value)) {
-    const parentId = key.includes('root') ? 'guangya_root' : key
-    return apiGuangyaFileList(user_id.value, parentId, 200)
-      .then((list) => {
-        const addList: TreeNodeData[] = []
-        for (let i = 0, maxi = list.length; i < maxi; i++) {
-          const mapped = mapGuangyaFileToAliModel(list[i], drive_id.value, parentId)
           if (!mapped.isDir) {
             if (onlyDirs) continue
             if (props.category && mapped.category !== props.category) continue
