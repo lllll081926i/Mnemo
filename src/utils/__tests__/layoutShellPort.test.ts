@@ -379,12 +379,13 @@ describe('deep layout shell port', () => {
     expect(launch).not.toContain("appendSwitch('disable-renderer-backgrounding')")
     expect(windowSource).toContain('backgroundThrottling: boolean = true')
     expect(windowSource).toContain('backgroundThrottling,')
-    expect(windowSource).toContain("createElectronWindow(10, 10, false, 'main', 'dark', false, false)")
+    expect(windowSource).toContain("createElectronWindow(10, 10, false, 'worker', 'dark', false, false)")
   })
 
   it('starts the upload worker only when a message needs it and preserves the first message', () => {
     const windowSource = read('electron/main/core/window.ts')
     const rendererEntry = read('src/main.ts')
+    const workerEntry = read('src/workerpage/main.ts')
 
     expect(windowSource).toContain("ipcMain.on('ensureUploadWorker', () => {")
     expect(windowSource).toContain("ipcMain.on('uploadWorkerReady', (event) => {")
@@ -392,10 +393,14 @@ describe('deep layout shell port', () => {
     expect(windowSource).not.toContain('createDownload')
     expect(windowSource).not.toContain('downloadWindow')
     expect(rendererEntry).not.toContain('setDownloadPort')
+    expect(rendererEntry).not.toContain("ipcRenderer.on('setPort'")
+    expect(rendererEntry).not.toContain('WinMsgToMain')
     expect(rendererEntry).toContain('const pendingUploadMessages: any[] = []')
     expect(rendererEntry).toContain("window.Electron.ipcRenderer.send('ensureUploadWorker')")
     expect(rendererEntry).toContain('flushPendingUploadMessages()')
     expect(rendererEntry).toContain("window.Electron.ipcRenderer.on('clearUploadPort'")
+    expect(workerEntry).toContain("window.Electron.ipcRenderer.on('setPort'")
+    expect(workerEntry).toContain('window.WinMsgToMain')
     expect(read('src/workerpage/workercmd.ts')).toContain("window.Electron.ipcRenderer.send('uploadWorkerReady')")
   })
 

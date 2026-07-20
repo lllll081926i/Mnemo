@@ -75,9 +75,6 @@ app.use(store)
 app.mount('#app')
 
 
-window.WinMsgToMain = function (event: any) {
-  if (window.MainPort) window.MainPort.postMessage(event)
-}
 const pendingUploadMessages: any[] = []
 
 function flushPendingUploadMessages() {
@@ -97,17 +94,6 @@ window.WinMsgToUpload = function (event: any) {
   window.Electron.ipcRenderer.send('ensureUploadWorker')
 }
 
-window.Electron.ipcRenderer.on('setPort', (_event: any, args: any) => {
-  const [port] = _event.ports
-  window.MainPort = port
-  port.onmessage = (event: any) => {
-    Promise.resolve().then(() => {
-      try {
-        if (window.WinMsg) window.WinMsg(event.data)
-      } catch {}
-    })
-  }
-})
 window.Electron.ipcRenderer.on('setUploadPort', (_event: any, args: any) => {
   const [port] = _event.ports
   window.UploadPort = port
@@ -139,14 +125,6 @@ window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {
       return
     }
     window.IsMainPage = true
-  } else if (args.page == 'PageWorker') {
-    try {
-      const { WorkerPage } = await import('./workerpage/workercmd')
-      WorkerPage(args.data?.type)
-    } catch (error) {
-      DebugLog.mSaveDanger('WorkerPageLoad', error)
-      return
-    }
   } else if (args.page == 'PageCode') {
     appStore.pageCode = args.data
   } else if (args.page == 'PageOffice') {

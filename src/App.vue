@@ -17,7 +17,6 @@ const PageSheet = defineAsyncComponent(() => import('./layout/PageSheet.vue'))
 const PageImage = defineAsyncComponent(() => import('./layout/PageImage.vue'))
 const PageVideo = defineAsyncComponent(() => import('./layout/PageVideo.vue'))
 const PageMusic = defineAsyncComponent(() => import('./layout/PageMusic.vue'))
-const PageWorker = defineAsyncComponent(() => import('./layout/PageWorker.vue'))
 
 export default {
   setup() {
@@ -34,7 +33,6 @@ export default {
       if (appStore.appPage == 'PageImage') return h(PageImage)
       if (appStore.appPage == 'PageVideo') return h(PageVideo)
       if (appStore.appPage == 'PageMusic') return h(PageMusic)
-      if (appStore.appPage == 'PageWorker') return h(PageWorker)
       return h('div', { class: 'desktop-loading-empty' })
     }
   }

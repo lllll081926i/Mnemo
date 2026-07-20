@@ -210,7 +210,7 @@ export function createElectronWindow(width: number, height: number, center: bool
   win.removeMenu()
   if (DEBUGGING) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || ''
-    win.loadURL(devUrl, { userAgent: ua, httpReferrer: Referer })
+    win.loadURL(page === 'worker' ? new URL('worker.html', devUrl).toString() : devUrl, { userAgent: ua, httpReferrer: Referer })
   } else {
     win.loadURL('file://' + getAsarPath('dist/' + page + '.html'), {
       userAgent: ua,
@@ -417,12 +417,8 @@ ipcMain.on('uploadWorkerReady', (event) => {
 
 function createUpload() {
   if (AppWindow.uploadWindow && AppWindow.uploadWindow.isDestroyed() == false) return
-  AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false, false)
-
-  AppWindow.uploadWindow.on('ready-to-show', function () {
-    AppWindow.uploadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'upload' } })
-    AppWindow.uploadWindow!.setTitle('mnemo上传进程')
-  })
+  AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'worker', 'dark', false, false)
+  AppWindow.uploadWindow.setTitle('mnemo上传进程')
 
   AppWindow.uploadWindow.webContents.on('render-process-gone', function (event, details) {
     if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed' || details.reason == 'integrity-failure') {

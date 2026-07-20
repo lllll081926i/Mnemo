@@ -88,6 +88,7 @@ electron/**/*.d.ts.map
 !docs/PROJECT_REVIEW.md
 !docs/releases/*.md
 *.html
+!worker.html
 *.mp4
 *.mov
 *.py
