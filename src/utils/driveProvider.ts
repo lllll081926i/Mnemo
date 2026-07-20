@@ -50,11 +50,6 @@ export interface DriveProviderCapabilities {
 }
 
 const driveProviderMap: Partial<Record<DriveProvider, DriveProviderMeta>> = {
-  '189': {
-    key: '189',
-    label: '天翼云盘',
-    icon: 'images/drive-icons/cloud189.svg'
-  },
   pikpak: {
     key: 'pikpak',
     label: 'PikPak',
@@ -146,7 +141,6 @@ const standardFileCapabilities: Partial<DriveProviderCapabilities> = {
 const createCapabilities = (provider: DriveProvider, overrides: Partial<DriveProviderCapabilities> = {}): DriveProviderCapabilities => ({ ...noCapabilities, ...standardFileCapabilities, ...overrides, provider })
 
 const driveProviderCapabilities: Partial<Record<DriveProvider, DriveProviderCapabilities>> = {
-  '189': createCapabilities('189'),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
   onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
   dropbox: createCapabilities('dropbox', { search: true, createShare: true }),
@@ -160,7 +154,6 @@ const driveProviderCapabilities: Partial<Record<DriveProvider, DriveProviderCapa
 const providerAliases: Array<[DriveProvider, string[], string[]]> = [
   ['webdav', ['webdav:'], []],
   ['s3', ['s3:'], []],
-  ['189', ['cloud189_'], ['cloud189', '189']],
   ['pikpak', ['pikpak_'], ['pikpak']],
   ['onedrive', ['onedrive_'], ['onedrive']],
   ['dropbox', ['dropbox_'], ['dropbox']],
@@ -169,7 +162,6 @@ const providerAliases: Array<[DriveProvider, string[], string[]]> = [
 ]
 
 const driveProviderUserIdPrefixes: Partial<Record<DriveProvider, string>> = {
-  '189': 'cloud189_',
   pikpak: 'pikpak_',
   onedrive: 'onedrive_',
   dropbox: 'dropbox_',

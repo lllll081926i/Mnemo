@@ -5,10 +5,10 @@ import { useAppStore, useFootStore, useMyShareStore, usePanFileStore, usePanTree
 import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
 import { applyPikPakQuota, refreshPikPakAccessToken } from '../pikpak/auth'
-import { GetDriveType, isPikPakUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import { isPikPakUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
-import { getDriveProviderSidebarEntries, resolveDriveProvider } from '../utils/driveProvider'
+import { resolveDriveProvider } from '../utils/driveProvider'
 import { applyOneDriveQuota, refreshOneDriveAccessToken } from '../onedrive/auth'
 import { applyDropboxQuota, refreshDropboxAccessToken } from '../dropbox/auth'
 import { applyGoogleDriveQuota, refreshGoogleDriveAccessToken } from '../gdrive/auth'
@@ -347,31 +347,7 @@ export default class UserDAL {
       await PanDAL.aReLoadOneDirToShow(token.default_drive_id, rootKey, true)
       return
     }
-    const settingStore = useSettingStore()
-    const panTreeStore = usePanTreeStore()
-    panTreeStore.mSaveUser(token.user_id, token.default_drive_id, token.resource_drive_id, token.backup_drive_id, token.pic_drive_id)
-
-    const spaces = getDriveProviderSidebarEntries('aliyun', token, {
-      hideResourceDrive: settingStore.securityHideResourceDrive,
-      hideBackupDrive: settingStore.securityHideBackupDrive,
-      hideAlbum: settingStore.securityHidePicDrive
-    }).filter((entry) => entry.kind === 'space')
-    const resourceSpace = spaces.find((entry) => entry.key === 'resource_root')
-    const backupSpace = spaces.find((entry) => entry.key === 'backup_root')
-    const preferredSpace = settingStore.uiShowPanRootFirst === 'backup' ? backupSpace || resourceSpace : resourceSpace || backupSpace
-    const initialSpace = preferredSpace || spaces[0]
-    const fallbackDriveId = initialSpace?.driveId || token.default_drive_id || token.resource_drive_id || token.backup_drive_id || token.default_sbox_drive_id || token.sbox_drive_id
-    panTreeStore.drive_id = fallbackDriveId
-
-    if (resourceSpace) {
-      await PanDAL.aReLoadResourceDrive(token)
-    }
-    if (backupSpace && backupSpace.driveId !== resourceSpace?.driveId) {
-      await PanDAL.aReLoadBackupDrive(token)
-    }
-    if (!fallbackDriveId) return
-    const rootKey = initialSpace?.key || GetDriveType(token.user_id, fallbackDriveId).key
-    await PanDAL.aReLoadOneDirToShow(fallbackDriveId, rootKey, true)
+    throw new Error(`不支持的网盘类型：${token.tokenfrom || 'unknown'}`)
   }
 
   static async UserLogOff(user_id: string): Promise<boolean> {
