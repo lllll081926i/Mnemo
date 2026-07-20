@@ -22,7 +22,7 @@ import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
 import { TestButton } from '../utils/mosehelper'
 import usePanTreeStore from './pantreestore'
-import { GetDriveID, GetDriveType, isAliyunUser, isGuangyaUser, isPikPakUser } from '../aliapi/utils'
+import { GetDriveID, GetDriveType, isAliyunUser, isPikPakUser } from '../aliapi/utils'
 import { xorWith } from 'lodash'
 import { flattenDriveToolFolders, moveDriveToolFiles, type OrganizeFileItem } from '../utils/drive-tools/organize'
 import { buildMediaOrganizePlan, executeMediaOrganizePlan, mapMediaOrganizeFiles } from '../utils/drive-tools/mediaOrganize'
@@ -49,7 +49,7 @@ const isOfflineDownloadSupported = computed(() => {
   if (panfileStore.SelectDirType !== 'pan') return false
   const user = panTreeStore.user_id || ''
   const drive = panTreeStore.drive_id || panfileStore.DriveID
-  return isPikPakUser(user) || isGuangyaUser(user) || ['pikpak', 'guangya'].includes(drive)
+  return isPikPakUser(user) || drive === 'pikpak'
 })
 
 const handleOfflineDownload = () => {

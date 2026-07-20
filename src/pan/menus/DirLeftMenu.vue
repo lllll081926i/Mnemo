@@ -5,15 +5,12 @@ import PanDAL from '../pandal'
 import { usePanTreeStore } from '../../store'
 import TreeStore from '../../store/treestore'
 import { computed } from 'vue'
-import { isAliyunUser as isAliyunAccountUser, isGuangyaUser } from '../../aliapi/utils'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 const istree = true
 const pantreeStore = usePanTreeStore()
 const { capabilities } = useCurrentDriveProvider()
-const isAliyunAccount = computed(() => isAliyunAccountUser(pantreeStore.user_id || ''))
-const isGuangya = computed(() => isGuangyaUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'guangya')
-const isShareSupported = computed(() => capabilities.value.createShare && (!isAliyunAccount.value || props.inputselectType.includes('resource') || isGuangya.value))
+const isShareSupported = computed(() => capabilities.value.createShare)
 const canDelete = computed(() => capabilities.value.recycleBin || capabilities.value.permanentDelete)
 
 const props = defineProps({
