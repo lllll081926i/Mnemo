@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component, watch } from 'vue'
-import { Cloud, FolderCog, MonitorCog, Network, ShieldCheck, SlidersHorizontal, X } from 'lucide-vue-next'
-import { useAppStore, useUserStore } from '../store'
-import { isAliyunUser } from '../aliapi/utils'
-import UserDAL from '../user/userdal'
-import SettingAliyun from './SettingAliyun.vue'
+import { FolderCog, MonitorCog, Network, ShieldCheck, SlidersHorizontal, X } from 'lucide-vue-next'
+import { useAppStore } from '../store'
 import SettingAccount from './SettingAccount.vue'
 import SettingDebug from './SettingDebug.vue'
 import SettingDown from './SettingDown.vue'
@@ -16,7 +13,7 @@ import SettingSecurity from './SettingSecurity.vue'
 import SettingUI from './SettingUI.vue'
 import SettingUpload from './SettingUpload.vue'
 
-type SettingSectionKey = 'general' | 'account-security' | 'files-playback' | 'transfer' | 'aliyun' | 'advanced'
+type SettingSectionKey = 'general' | 'account-security' | 'files-playback' | 'transfer' | 'advanced'
 
 interface SettingPanel {
   component: Component
@@ -30,12 +27,6 @@ interface SettingSection {
 }
 
 const appStore = useAppStore()
-const userStore = useUserStore()
-const hasAliyunAccount = computed(() => {
-  void userStore.user_id
-  return UserDAL.GetUserList().some((token) => isAliyunUser(token))
-})
-
 const sections: SettingSection[] = [
   {
     key: 'general',
@@ -62,19 +53,13 @@ const sections: SettingSection[] = [
     panels: [{ component: SettingDown }, { component: SettingUpload }]
   },
   {
-    key: 'aliyun',
-    label: '阿里网盘',
-    icon: Cloud,
-    panels: [{ component: SettingAliyun }]
-  },
-  {
     key: 'advanced',
     label: '网络与高级',
     icon: Network,
     panels: [{ component: SettingProxy }, { component: SettingDebug }, { component: SettingLog }]
   }
 ]
-const visibleSections = computed(() => sections.filter((section) => section.key !== 'aliyun' || hasAliyunAccount.value))
+const visibleSections = computed(() => sections)
 
 const legacySectionMap: Record<string, SettingSectionKey> = {
   SettingUI: 'general',
