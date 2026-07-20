@@ -2,23 +2,11 @@ import DebugLog from '../utils/debuglog'
 import { humanDateTime, humanDateTimeDateStr, humanExpiration, humanSize } from '../utils/format'
 import message from '../utils/message'
 import AliHttp, { IUrlRespData } from './alihttp'
-import { ApiBatch, ApiBatchMaker, ApiBatchSuccess, isGuangyaUser, isPikPakUser, isQuarkUser } from './utils'
+import { ApiBatch, ApiBatchMaker, ApiBatchSuccess, isPikPakUser } from './utils'
 import { IAliFileItem, IAliShareAnonymous, IAliShareBottleFish, IAliShareFileItem, IAliShareItem } from './alimodels'
 import getFileIcon from './fileicon'
 import { IAliBatchResult } from './models'
 import { apiPikPakShareCreate } from '../pikpak/share'
-import { apiGuangyaSaveShareFilesBatch, apiGuangyaShareAnonymous, apiGuangyaShareCreate, apiGuangyaShareDelete, apiGuangyaShareFileList, apiGuangyaShareToken, apiGuangyaShareUpdate, isGuangyaShareId } from '../guangya/share'
-import {
-  apiQuarkSaveShareFilesBatch,
-  apiQuarkShareAnonymous,
-  apiQuarkShareCancelBatch,
-  apiQuarkShareCreate,
-  apiQuarkShareFileList,
-  apiQuarkShareToken,
-  apiQuarkShareUpdateBatch,
-  decodeQuarkShareId,
-  isQuarkShareId
-} from '../quark/share'
 import { getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveShareCreate } from '../onedrive/share'
 import { apiDropboxShareCreate } from '../dropbox/share'
@@ -69,8 +57,6 @@ export default class AliShare {
   }
 
   static async ApiGetShareAnonymous(share_id: string, share_pwd = ''): Promise<IAliShareAnonymous> {
-    if (isQuarkShareId(share_id)) return apiQuarkShareAnonymous(share_id, share_pwd)
-    if (isGuangyaShareId(share_id)) return apiGuangyaShareAnonymous(share_id, share_pwd)
     const share: IAliShareAnonymous = {
       shareinfo: {
         share_id: share_id,
@@ -142,8 +128,6 @@ export default class AliShare {
 
 
   static async ApiGetShareToken(share_id: string, pwd: string): Promise<string> {
-    if (isQuarkShareId(share_id)) return apiQuarkShareToken(decodeQuarkShareId(share_id), pwd)
-    if (isGuangyaShareId(share_id)) return apiGuangyaShareToken(share_id, pwd)
     if (!share_id) return '，分享链接错误'
     const url = 'v2/share_link/get_share_token'
     const postData = { share_id: share_id, share_pwd: pwd }
@@ -165,33 +149,6 @@ export default class AliShare {
 
 
   static async ApiShareFileList(share_id: string, share_token: string, dirID: string): Promise<IAliShareFileResp> {
-    if (isQuarkShareId(share_id)) {
-      const resp = await apiQuarkShareFileList(share_id, share_token, dirID)
-      return {
-        items: resp.items,
-        itemsKey: new Set(resp.items.map(item => item.file_id)),
-        punished_file_count: 0,
-        next_marker: resp.next_marker,
-        m_user_id: '',
-        m_share_id: share_id,
-        dirID,
-        dirName: ''
-      }
-    }
-    if (isGuangyaShareId(share_id)) {
-      const resp = await apiGuangyaShareFileList(share_id, share_token, dirID)
-      if (resp.error) message.warning(resp.error, 2)
-      return {
-        items: resp.items,
-        itemsKey: new Set(resp.items.map(item => item.file_id)),
-        punished_file_count: 0,
-        next_marker: resp.next_marker,
-        m_user_id: '',
-        m_share_id: share_id,
-        dirID,
-        dirName: ''
-      }
-    }
     const dir: IAliShareFileResp = {
       items: [],
       itemsKey: new Set(),
@@ -316,14 +273,6 @@ export default class AliShare {
       }
       return item
     }
-    if (isGuangyaUser(user_id) || drive_id === 'guangya') {
-      const result = await apiGuangyaShareCreate(user_id, expiration, share_pwd, share_name, file_id_list)
-      if (result.error || !result.item) return result.error || '创建光鸭云盘分享链接失败'
-      return result.item
-    }
-    if (isQuarkUser(user_id) || drive_id === 'quark') {
-      return await apiQuarkShareCreate(user_id, expiration, share_pwd, share_name, file_id_list)
-    }
     const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
     if (provider === 'onedrive') {
       const result = await apiOneDriveShareCreate(user_id, drive_id, file_id_list, share_name)
@@ -391,8 +340,6 @@ export default class AliShare {
 
 
   static async ApiCancelShareBatch(user_id: string, share_idList: string[]): Promise<string[]> {
-    if (isQuarkUser(user_id)) return apiQuarkShareCancelBatch(user_id, share_idList)
-    if (isGuangyaUser(user_id)) return apiGuangyaShareDelete(user_id, share_idList)
     if (isPikPakUser(user_id)) {
       message.info('当前网盘类型不支持')
       return []
@@ -409,27 +356,6 @@ export default class AliShare {
     if (isPikPakUser(user_id)) {
       message.info('当前网盘类型不支持')
       return []
-    }
-    if (isGuangyaUser(user_id)) {
-      const successList: UpdateShareModel[] = []
-      for (let i = 0, maxi = share_idList.length; i < maxi; i++) {
-        const updated = await apiGuangyaShareUpdate(user_id, share_idList[i], expirationList[i] || '', share_pwdList[i] || '', share_nameList ? share_nameList[i] : '')
-        if (updated.success) {
-          successList.push({
-            share_id: share_idList[i],
-            share_pwd: share_pwdList[i] || '',
-            expiration: expirationList[i] || '',
-            share_name: share_nameList ? share_nameList[i] : ''
-          })
-        }
-      }
-      if (!successList.length) message.error('修改光鸭云盘分享链接失败')
-      return successList
-    }
-    if (isQuarkUser(user_id)) {
-      const updated = await apiQuarkShareUpdateBatch(user_id, share_idList, expirationList, share_pwdList, share_nameList)
-      if (!updated.length) message.info('当前夸克分享可能不支持编辑该字段')
-      return updated
     }
     const batchList: string[] = []
     if (share_nameList) {
@@ -479,12 +405,6 @@ export default class AliShare {
   static async ApiSaveShareFilesBatch(share_id: string, share_token: string, user_id: string, drive_id: string, parent_file_id: string, file_idList: string[]): Promise<string> {
     if (!share_id || !share_token || !user_id || !drive_id || !parent_file_id) return 'error'
     if (!file_idList || file_idList.length == 0) return 'success'
-    if (isQuarkShareId(share_id) || isQuarkUser(user_id) || drive_id === 'quark') {
-      return apiQuarkSaveShareFilesBatch(share_id, share_token, user_id, parent_file_id, file_idList)
-    }
-    if (isGuangyaShareId(share_id) || isGuangyaUser(user_id) || drive_id === 'guangya') {
-      return apiGuangyaSaveShareFilesBatch(share_id, share_token, user_id, parent_file_id, file_idList)
-    }
     if (parent_file_id.includes('root')) parent_file_id = 'root'
     const batchList: string[] = []
     for (let i = 0, maxi = file_idList.length; i < maxi; i++) {
