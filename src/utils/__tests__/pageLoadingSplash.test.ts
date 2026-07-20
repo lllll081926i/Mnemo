@@ -28,7 +28,7 @@ describe('app startup rendering', () => {
     expect(rendererEntry).toContain("import('./workerpage/workercmd')")
     expect(windowSource).not.toContain('splash')
     expect(windowSource).not.toContain('?splash=')
-    expect(windowSource).toContain('export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true)')
+    expect(windowSource).toContain('export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true, backgroundThrottling: boolean = true)')
     expect(ipcSource).not.toContain("data.page === 'PageMusic' ? 'music' : undefined")
   })
 })

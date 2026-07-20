@@ -192,7 +192,7 @@ export function createTray() {
   })
 }
 
-export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true) {
+export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true, backgroundThrottling: boolean = true) {
   const win = new BrowserWindow({
     show: false,
     width: width,
@@ -217,7 +217,7 @@ export function createElectronWindow(width: number, height: number, center: bool
       webSecurity: false,
       allowRunningInsecureContent: true,
       contextIsolation: false,
-      backgroundThrottling: false,
+      backgroundThrottling,
       enableWebSQL: true,
       disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure',
       preload: getAsarPath('dist/electron/preload/index.js')
@@ -435,7 +435,7 @@ function creatDownloadPort() {
 
 function createUpload() {
   if (AppWindow.uploadWindow && AppWindow.uploadWindow.isDestroyed() == false) return
-  AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false)
+  AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false, false)
 
   AppWindow.uploadWindow.on('ready-to-show', function () {
     creatUploadPort()
@@ -458,7 +458,7 @@ function createUpload() {
 
 function createDownload() {
   if (AppWindow.downloadWindow && AppWindow.downloadWindow.isDestroyed() == false) return
-  AppWindow.downloadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false)
+  AppWindow.downloadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false, false)
 
   AppWindow.downloadWindow.on('ready-to-show', function () {
     creatDownloadPort()
