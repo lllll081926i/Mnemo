@@ -278,25 +278,35 @@ const isAllowedLoginUrl = (value: string) => {
   if (value === 'about:blank') return true
   try {
     const url = new URL(value)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
     const hostname = url.hostname.toLowerCase()
-    const allowedDomains = [
-      'auth.aliyundrive.com',
-      'passport.aliyundrive.com',
-      'www.aliyundrive.com',
-      // PikPak / Xunlei captcha hosts (slider / image challenge)
+    // PikPak captcha (txCaptcha) loads Tencent captcha assets under many CDNs.
+    const allowedSuffixes = [
+      'aliyundrive.com',
+      'alipan.com',
       'mypikpak.com',
       'mypikpak.net',
-      'user.mypikpak.com',
-      'api-drive.mypikpak.com',
-      'access.mypikpak.com',
-      'captcha.mypikpak.com',
-      'verify.mypikpak.com',
+      'xunlei.com',
       'xbase.cloud',
-      'xluser-ssl.xunlei.com',
-      'captcha-ssl.xunlei.com',
-      'api-sec.xunlei.com'
+      'gtimg.com',
+      'qq.com',
+      'qcloud.com',
+      'tencent.com',
+      'tencentcloudapi.com',
+      'captcha.qq.com',
+      'turing.captcha.qcloud.com'
     ]
-    return url.protocol === 'https:' && allowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+    return allowedSuffixes.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+  } catch {
+    return false
+  }
+}
+
+const isPikPakCaptchaUrl = (value: string) => {
+  try {
+    const url = new URL(value)
+    const host = url.hostname.toLowerCase()
+    return host.includes('mypikpak.') || host.includes('xunlei.') || host.includes('captcha') || host.includes('gtimg.') || host.includes('qcloud.') || host.includes('qq.com')
   } catch {
     return false
   }
@@ -316,20 +326,29 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
     delete webPreferences.preload
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
-    webPreferences.sandbox = true
-    webPreferences.webSecurity = true
-    webPreferences.allowRunningInsecureContent = false
+    // Captcha pages need looser sandbox / webSecurity for third-party scripts.
+    const captcha = isPikPakCaptchaUrl(params.src || '')
+    webPreferences.sandbox = !captcha
+    webPreferences.webSecurity = !captcha
+    webPreferences.allowRunningInsecureContent = captcha
     if (!allowDevTools) webPreferences.devTools = false
   })
   // 处理webview跳转
   win.webContents.addListener('did-attach-webview', (event, webContent) => {
-    void webContent.session.setProxy({ mode: 'direct' }).then(() => webContent.session.closeAllConnections()).catch((error) => console.warn('[webview] proxy setup failed:', error?.message || error))
+    const isCaptchaGuest = (() => {
+      try {
+        return isPikPakCaptchaUrl(webContent.getURL() || '')
+      } catch {
+        return false
+      }
+    })()
+    // Only force direct proxy for captcha; never closeAllConnections — it aborts in-flight captcha assets.
+    void webContent.session.setProxy({ mode: 'direct' }).catch((error) => console.warn('[webview] proxy setup failed:', error?.message || error))
     if (allowDevTools) {
       registerDevToolsShortcut(webContent)
     } else {
       disableDevTools(webContent)
     }
-    // 不允许的网址则阻止页面跳转并拉取浏览器展示页面
     webContent.setWindowOpenHandler((details) => {
       if (isAllowedLoginUrl(details.url) && !webContent.isDestroyed()) {
         void webContent.loadURL(details.url).catch((error) => {
@@ -339,13 +358,10 @@ function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
       return { action: 'deny' }
     })
     webContent.on('will-redirect', (e, url) => {
-      if (!isAllowedLoginUrl(url)) {
-        e.preventDefault()
-      }
+      if (!isAllowedLoginUrl(url) && !isCaptchaGuest) e.preventDefault()
     })
-    // 拦截链接跳转
     webContent.on('will-navigate', (e, url) => {
-      if (!isAllowedLoginUrl(url)) e.preventDefault()
+      if (!isAllowedLoginUrl(url) && !isCaptchaGuest) e.preventDefault()
     })
   })
 }

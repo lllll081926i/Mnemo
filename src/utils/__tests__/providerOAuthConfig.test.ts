@@ -44,7 +44,9 @@ describe('provider OAuth runtime configuration', () => {
     expect(login).toContain('window.WebOAuthBegin(provider)')
     expect(login).toContain('window.WebOAuthOpen(state, authUrl)')
     expect(login).toContain('window.WebOAuthOnCallback')
-    expect(login).not.toContain('WebOpenExternal')
+    // WebOpenExternal is only a fallback for PikPak captcha pages that fail inside the embedded webview.
+    expect(login).toContain('openPikPakCaptchaInBrowser')
+    expect(login).not.toContain('window.Electron.shell.openExternal')
     expect(login).not.toContain('输入开发者账号')
     expect(login).not.toContain('uiOpenApiClientSecret')
   })

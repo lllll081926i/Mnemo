@@ -437,8 +437,11 @@ describe('deep layout shell port', () => {
     expect(launch).not.toContain('OutOfBlinkCors')
     expect(launch.indexOf('createMainWindow()')).toBeLessThan(launch.indexOf("loadCrxExtension(getStaticPath('crx')"))
     expect(launch).toContain('if (!app.isPackaged)')
-    expect(windowSource).toContain('webPreferences.webSecurity = true')
-    expect(windowSource).toContain('webPreferences.allowRunningInsecureContent = false')
+    // Default guest webviews stay locked down; PikPak captcha guests may relax webSecurity for Tencent assets.
+    expect(windowSource).toContain('webPreferences.webSecurity = !captcha')
+    expect(windowSource).toContain('webPreferences.allowRunningInsecureContent = captcha')
+    expect(windowSource).toContain('isPikPakCaptchaUrl')
+    expect(windowSource).not.toContain('closeAllConnections()')
     expect(read('electron/main/utils/mainfile.ts')).toContain("path.join(path.resolve(app.getAppPath()), 'dev-electron', 'preload', 'index.js')")
     expect(read('vite.config.ts')).toContain("outDir: isBuild ? 'dist/electron/preload' : 'dev-electron/preload'")
     expect(html).not.toContain('at.alicdn.com')

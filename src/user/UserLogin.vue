@@ -153,35 +153,107 @@ const extractCaptchaTokenFromUrl = (value: string) => {
   }
 }
 
+const injectPikPakCaptchaHooks = (webview: any) => {
+  const script = `(() => {
+    if (window.__mnemoPikPakCaptchaHooked) return
+    window.__mnemoPikPakCaptchaHooked = true
+    const report = (token) => {
+      if (!token || typeof token !== 'string') return
+      console.log('captcha_token=' + token)
+      try { window.parent && window.parent.postMessage({ type: 'pikpak-captcha', captcha_token: token }, '*') } catch (e) {}
+    }
+    window.addEventListener('message', (event) => {
+      try {
+        const data = event && event.data
+        if (!data) return
+        if (typeof data === 'string') {
+          const m = data.match(/captcha_token[=:\\"']+([A-Za-z0-9._-]+)/i)
+          if (m && m[1]) report(m[1])
+          return
+        }
+        const token = data.captcha_token || data.captchaToken || data.ticket || (data.data && (data.data.captcha_token || data.data.ticket))
+        if (token) report(String(token))
+      } catch (e) {}
+    }, true)
+    const patch = (obj, key) => {
+      if (!obj || typeof obj[key] !== 'function') return
+      const original = obj[key]
+      obj[key] = function () {
+        try {
+          for (const arg of arguments) {
+            if (typeof arg === 'string' && arg.length > 20) report(arg)
+            if (arg && typeof arg === 'object') {
+              const token = arg.captcha_token || arg.captchaToken || arg.ticket
+              if (token) report(String(token))
+            }
+          }
+        } catch (e) {}
+        return original.apply(this, arguments)
+      }
+    }
+    try { patch(window, 'captchaCallback') } catch (e) {}
+    try { patch(window, 'verifyCallback') } catch (e) {}
+  })()`
+  try {
+    if (typeof webview.executeJavaScript === 'function') {
+      void webview.executeJavaScript(script, false).catch(() => undefined)
+    }
+  } catch {
+    // ignore injection failures; navigation/console hooks remain
+  }
+}
+
 const attachPikPakCaptchaWebview = async () => {
   await nextTick()
   const webview = getPikPakCaptchaWebview()
   if (!webview || !pikpakCaptchaUrl.value) return
   cleanupPikPakCaptchaWebview()
   const handleNavigation = (event: any) => {
-    const url = String(event?.url || '')
+    const url = String(event?.url || webview.getURL?.() || '')
     const token = extractCaptchaTokenFromUrl(url)
-    if (token) markPikPakCaptchaVerified(token)
+    if (token && token !== pikpakCaptchaToken.value) markPikPakCaptchaVerified(token)
+    // Some challenge pages return to mypikpak.com with success without repeating token.
+    if (/captcha.*success|verify.*ok|signin_check.*pass/i.test(url) && pikpakCaptchaToken.value) {
+      markPikPakCaptchaVerified(pikpakCaptchaToken.value)
+    }
   }
   const handleConsole = (event: any) => {
     const msg = String(event?.message || '')
     const match = msg.match(/captcha_token[=:]\s*([A-Za-z0-9._-]+)/i)
     if (match?.[1]) markPikPakCaptchaVerified(match[1])
   }
+  const handleIpcMessage = (event: any) => {
+    try {
+      const channel = event?.channel
+      const args = event?.args || []
+      if (channel === 'console-message' || channel === 'pikpak-captcha') {
+        const token = String(args[0] || args[1] || '')
+        if (token.length > 16) markPikPakCaptchaVerified(token)
+      }
+    } catch {
+      // ignore
+    }
+  }
   const handleFinish = () => {
     pikpakCaptchaLoading.value = false
+    injectPikPakCaptchaHooks(webview)
   }
   const handleFail = (event: any) => {
     if (event?.errorCode === -3) return
+    // Ignore secondary resource failures (CDN fonts/scripts) if main document loaded.
+    const isMain = event?.isMainFrame !== false
+    if (!isMain) return
     pikpakCaptchaLoading.value = false
-    pikpakCaptchaError.value = '验证页面加载失败，请刷新验证码'
+    pikpakCaptchaError.value = '验证页面加载失败，请点「刷新验证」或用浏览器打开'
   }
   webview.addEventListener('will-navigate', handleNavigation)
   webview.addEventListener('did-navigate', handleNavigation)
   webview.addEventListener('did-redirect-navigation', handleNavigation)
   webview.addEventListener('did-navigate-in-page', handleNavigation)
   webview.addEventListener('console-message', handleConsole)
+  webview.addEventListener('ipc-message', handleIpcMessage)
   webview.addEventListener('did-finish-load', handleFinish)
+  webview.addEventListener('did-stop-loading', handleFinish)
   webview.addEventListener('did-fail-load', handleFail)
   removePikPakCaptchaListeners = () => {
     webview.removeEventListener('will-navigate', handleNavigation)
@@ -189,22 +261,36 @@ const attachPikPakCaptchaWebview = async () => {
     webview.removeEventListener('did-redirect-navigation', handleNavigation)
     webview.removeEventListener('did-navigate-in-page', handleNavigation)
     webview.removeEventListener('console-message', handleConsole)
+    webview.removeEventListener('ipc-message', handleIpcMessage)
     webview.removeEventListener('did-finish-load', handleFinish)
+    webview.removeEventListener('did-stop-loading', handleFinish)
     webview.removeEventListener('did-fail-load', handleFail)
   }
   try {
-    const load = webview.loadURL(pikpakCaptchaUrl.value)
-    if (load?.catch) {
-      load.catch((err: any) => {
-        if (!/ERR_(ABORTED|FAILED)/i.test(err?.message || '')) {
-          pikpakCaptchaError.value = '验证页面打开失败'
-          pikpakCaptchaLoading.value = false
-        }
-      })
+    // Prefer attribute src binding; only force loadURL when guest is already attached.
+    if (webview.getURL && webview.getURL() && webview.getURL() !== pikpakCaptchaUrl.value) {
+      const load = webview.loadURL(pikpakCaptchaUrl.value)
+      if (load?.catch) {
+        load.catch((err: any) => {
+          if (!/ERR_(ABORTED|FAILED)/i.test(err?.message || '')) {
+            pikpakCaptchaError.value = '验证页面打开失败'
+            pikpakCaptchaLoading.value = false
+          }
+        })
+      }
     }
   } catch {
-    pikpakCaptchaError.value = '验证页面打开失败'
-    pikpakCaptchaLoading.value = false
+    // Attribute src will still load the guest page.
+  }
+}
+
+const openPikPakCaptchaInBrowser = async () => {
+  if (!pikpakCaptchaUrl.value) return
+  try {
+    await window.WebOpenExternal?.(pikpakCaptchaUrl.value)
+    message.info('已在系统浏览器打开验证页；若验证完成后仍无法登录，请点「刷新验证」再试')
+  } catch {
+    message.error('无法打开系统浏览器')
   }
 }
 
@@ -349,13 +435,23 @@ const handleClose = () => {
           <div class="pikpak-captcha-panel">
             <div class="pikpak-captcha-panel-head">
               <span class="pikpak-captcha-title">安全验证</span>
-              <a-button type="text" size="mini" :loading="pikpakCaptchaLoading" @click.prevent="requestPikPakCaptcha">{{ pikpakCaptchaUrl || pikpakCaptchaToken ? '刷新验证' : '获取验证码' }}</a-button>
+              <div class="pikpak-captcha-actions">
+                <a-button type="text" size="mini" :loading="pikpakCaptchaLoading" @click.prevent="requestPikPakCaptcha">{{ pikpakCaptchaUrl || pikpakCaptchaToken ? '刷新验证' : '获取验证码' }}</a-button>
+                <a-button v-if="pikpakCaptchaUrl" type="text" size="mini" @click.prevent="openPikPakCaptchaInBrowser">浏览器打开</a-button>
+              </div>
             </div>
             <div class="pikpak-captcha-status" :class="{ ok: pikpakCaptchaVerified, err: !!pikpakCaptchaError }">
-              {{ pikpakCaptchaVerified ? '验证已完成，可登录' : pikpakCaptchaError || (pikpakCaptchaUrl ? '请在下方区域完成图形验证' : '点击「获取验证码」后，验证会嵌在登录窗口内显示') }}
+              {{ pikpakCaptchaVerified ? '验证已完成，可登录' : pikpakCaptchaError || (pikpakCaptchaUrl ? '请在下方完成滑块/图形验证（嵌入登录窗）' : '点击「获取验证码」后，验证会嵌在登录窗口内显示') }}
             </div>
             <div class="pikpak-captcha-frame-wrap" :class="{ empty: !pikpakCaptchaUrl }">
-              <webview v-if="pikpakCaptchaUrl" id="pikpak-captcha-webview" class="pikpak-captcha-webview" :src="pikpakCaptchaUrl" allowpopups></webview>
+              <webview
+                v-if="pikpakCaptchaUrl"
+                id="pikpak-captcha-webview"
+                class="pikpak-captcha-webview"
+                :src="pikpakCaptchaUrl"
+                allowpopups
+                webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=no, webSecurity=no"
+              ></webview>
               <div v-else class="pikpak-captcha-placeholder">验证区域（嵌入登录界面，不会单独弹窗）</div>
             </div>
           </div>
@@ -390,6 +486,7 @@ const handleClose = () => {
 .pikpak-login-form { max-width: 100%; }
 .pikpak-captcha-panel { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--color-border-2); border-radius: 8px; background: var(--color-fill-1); }
 .pikpak-captcha-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pikpak-captcha-actions { display: flex; align-items: center; gap: 2px; }
 .pikpak-captcha-title { font-size: 13px; font-weight: 600; color: var(--color-text-1); }
 .pikpak-captcha-status { font-size: 12px; color: var(--color-text-3); line-height: 1.4; }
 .pikpak-captcha-status.ok { color: rgb(var(--green-6)); }
