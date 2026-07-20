@@ -12,6 +12,10 @@ const sharedAlias = {
 }
 const sourceExtensions = ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json']
 const electronMainExternal = Object.keys('dependencies' in pkg ? pkg.dependencies : {})
+const rendererAlias = [
+  { find: /^crypto$/, replacement: path.resolve(__dirname, 'src/utils/rendererCryptoCompat.ts') },
+  ...Object.entries(sharedAlias).map(([find, replacement]) => ({ find, replacement }))
+]
 
 // https://vitejs.dev/config/
 // @ts-ignore
@@ -25,7 +29,7 @@ export default defineConfig(({ command }) => {
   const devServerUrl = new URL(pkg.debug.env.VITE_DEV_SERVER_URL)
   return {
     resolve: {
-      alias: sharedAlias,
+      alias: rendererAlias,
       extensions: sourceExtensions
     },
     build: {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const ariaCall = vi.fn().mockResolvedValue({})
 
@@ -22,6 +22,11 @@ vi.mock('electron', () => ({
 }))
 
 describe('EngineClient', () => {
+  beforeEach(() => {
+    ariaCall.mockReset()
+    ariaCall.mockResolvedValue({})
+  })
+
   it('can be instantiated', async () => {
     const { default: EngineClient } = await import('../EngineClient')
     const client = new EngineClient({ port: 16800, secret: 'test' })
@@ -41,5 +46,29 @@ describe('EngineClient', () => {
 
     await expect(client.call('getGlobalStat')).resolves.toEqual({})
     expect(ariaCall).toHaveBeenCalledWith('getGlobalStat')
+  })
+
+  it('waits for aria2 readiness before changing global options', async () => {
+    ariaCall
+      .mockRejectedValueOnce(new Error('fetch failed'))
+      .mockResolvedValueOnce({ version: '1.37.0' })
+      .mockResolvedValueOnce({})
+    const { default: EngineClient } = await import('../EngineClient')
+    const client = new EngineClient({ port: 16800, secret: 'test' })
+
+    await expect(client.changeGlobalOption({ 'all-proxy': 'http://127.0.0.1:7890' }, { attempts: 2, delayMs: 0 })).resolves.toEqual({})
+    expect(ariaCall.mock.calls).toEqual([
+      ['getVersion'],
+      ['getVersion'],
+      ['changeGlobalOption', { 'all-proxy': 'http://127.0.0.1:7890' }]
+    ])
+  })
+
+  it('propagates RPC failures so callers can retry or report them', async () => {
+    ariaCall.mockRejectedValueOnce(new Error('fetch failed'))
+    const { default: EngineClient } = await import('../EngineClient')
+    const client = new EngineClient({ port: 16800, secret: 'test' })
+
+    await expect(client.call('getGlobalStat')).rejects.toThrow('fetch failed')
   })
 })

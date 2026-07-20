@@ -28,7 +28,7 @@ export default class Engine {
     const args = this.getStartArgs()
     logger.info(`[motrix] Engine.start binPath=${binPath}`)
     this.instance = spawn(binPath, args, {
-      windowsHide: false,
+      windowsHide: true,
       stdio: is.dev() ? 'pipe' : 'ignore'
     })
     if (!this.instance || !this.instance.pid) {
