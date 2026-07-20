@@ -2,11 +2,7 @@ import { IAliGetFileModel } from '../aliapi/alimodels'
 import AliDirFileList from '../aliapi/dirfilelist'
 import {
   isAliyunUser,
-  isCloud139User,
-  isCloud189User,
-  isGuangyaUser,
-  isPikPakUser,
-  isQuarkUser
+  isPikPakUser
 } from '../aliapi/utils'
 import DebugLog from './debuglog'
 
@@ -53,50 +49,6 @@ async function fetchFolderItemsRaw(p: FolderPreviewParams): Promise<IAliGetFileM
       const items = resp?.items || []
       return items.map((item: any) => {
         const mapped = mod.mapPikPakFileToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isQuarkUser(user_id) || drive_id === 'quark') {
-      const mod = await tryDynamicImport(() => import('../quark/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'quark_root' ? '0' : file_id
-      const resp = await mod.apiQuarkFileList(user_id, parentId, MAX_PREVIEW_FILES, 1)
-      return (resp?.items || []).map((item: any) => {
-        const mapped = mod.mapQuarkFileToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isCloud139User(user_id) || drive_id === 'cloud139') {
-      const mod = await tryDynamicImport(() => import('../cloud139/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'cloud139_root' ? 'cloud139_root' : file_id
-      const list = await mod.apiCloud139FileList(user_id, parentId, MAX_PREVIEW_FILES)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapCloud139FileToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isCloud189User(user_id) || drive_id === 'cloud189') {
-      const mod = await tryDynamicImport(() => import('../cloud189/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'cloud189_root' ? 'cloud189_root' : file_id
-      const list = await mod.apiCloud189FileList(user_id, parentId, MAX_PREVIEW_FILES)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapCloud189FileToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isGuangyaUser(user_id) || drive_id === 'guangya') {
-      const mod = await tryDynamicImport(() => import('../guangya/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'guangya_root' ? 'guangya_root' : file_id
-      const list = await mod.apiGuangyaFileList(user_id, parentId, MAX_PREVIEW_FILES)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapGuangyaFileToAliModel(item, drive_id, parentId)
         ;(mapped as any).user_id = user_id
         return mapped
       })
