@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, MessageChannelMain, nativeTheme, screen, shell, Tray } from 'electron'
-import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
+import { getAsarPath, getPreloadPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import is from 'electron-is'
 import { ShowErrorAndRelaunch } from './dialog'
@@ -177,6 +177,7 @@ export function createTray() {
 }
 
 export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true, backgroundThrottling: boolean = true) {
+  const allowWebview = page === 'main'
   const win = new BrowserWindow({
     show: false,
     width: width,
@@ -194,17 +195,17 @@ export function createElectronWindow(width: number, height: number, center: bool
     webPreferences: {
       spellcheck: false,
       devTools: DEBUGGING && devTools,
-      webviewTag: true,
+      webviewTag: allowWebview,
       nodeIntegration: true,
-      nodeIntegrationInWorker: true,
+      nodeIntegrationInWorker: allowWebview,
       sandbox: false,
       webSecurity: false,
-      allowRunningInsecureContent: true,
+      allowRunningInsecureContent: false,
       contextIsolation: false,
       backgroundThrottling,
-      enableWebSQL: true,
+      enableWebSQL: false,
       disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure',
-      preload: getAsarPath('dist/electron/preload/index.js')
+      preload: getPreloadPath()
     }
   })
   win.removeMenu()

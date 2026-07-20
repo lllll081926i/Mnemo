@@ -92,7 +92,7 @@ export default defineConfig(({ command }) => {
             resolve: { alias: sharedAlias, extensions: sourceExtensions },
             build: {
               minify: isBuild,
-              outDir: 'dist/electron/preload',
+              outDir: isBuild ? 'dist/electron/preload' : 'dev-electron/preload',
               rollupOptions: {
                 // @ts-ignore
                 external: Object.keys('dependencies' in pkg ? pkg.dependencies : {})

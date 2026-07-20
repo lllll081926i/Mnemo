@@ -33,6 +33,11 @@ export function getAsarPath(fileName: string) {
   }
 }
 
+export function getPreloadPath() {
+  if (is.dev()) return path.join(path.resolve(app.getAppPath()), 'dev-electron', 'preload', 'index.js')
+  return getAsarPath('dist/electron/preload/index.js')
+}
+
 export function getResourcesPath(fileName: string) {
   let basePath = path.resolve(app.getAppPath(), '..')
   if (is.dev()) basePath = path.resolve(app.getAppPath(), '.')

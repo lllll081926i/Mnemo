@@ -3,12 +3,14 @@ node_modules
 .tools/
 .DS_Store
 dist*
+dev-electron/
 *.local
 .debug.env
 tmp
 **/.tmp
 .build-tools
 release
+release-verify/
 
 .idea
 
