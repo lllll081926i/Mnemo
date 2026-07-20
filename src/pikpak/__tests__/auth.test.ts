@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPikPakCaptchaMeta, captchaSign, createPikPakDeviceId, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
+import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, createPikPakDeviceId, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
 import { MD5 } from 'crypto-js'
 
 describe('PikPak captcha', () => {
@@ -42,5 +42,11 @@ describe('PikPak captcha', () => {
     expect(meta.timestamp).toBe('1710000000000')
     expect(meta.captcha_sign).toBe(captchaSign(deviceId, '1710000000000'))
     expect(meta.captcha_sign.startsWith('1.')).toBe(true)
+  })
+
+  it('maps login account into captcha meta fields', () => {
+    expect(buildPikPakLoginCaptchaMeta('demo@example.com')).toEqual({ email: 'demo@example.com' })
+    expect(buildPikPakLoginCaptchaMeta('+8613812345678')).toEqual({ phone_number: '+8613812345678' })
+    expect(buildPikPakLoginCaptchaMeta('demo_user')).toEqual({ username: 'demo_user' })
   })
 })

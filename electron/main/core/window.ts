@@ -279,7 +279,24 @@ const isAllowedLoginUrl = (value: string) => {
   try {
     const url = new URL(value)
     const hostname = url.hostname.toLowerCase()
-    return url.protocol === 'https:' && ['auth.aliyundrive.com', 'passport.aliyundrive.com', 'www.aliyundrive.com'].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+    const allowedDomains = [
+      'auth.aliyundrive.com',
+      'passport.aliyundrive.com',
+      'www.aliyundrive.com',
+      // PikPak / Xunlei captcha hosts (slider / image challenge)
+      'mypikpak.com',
+      'mypikpak.net',
+      'user.mypikpak.com',
+      'api-drive.mypikpak.com',
+      'access.mypikpak.com',
+      'captcha.mypikpak.com',
+      'verify.mypikpak.com',
+      'xbase.cloud',
+      'xluser-ssl.xunlei.com',
+      'captcha-ssl.xunlei.com',
+      'api-sec.xunlei.com'
+    ]
+    return url.protocol === 'https:' && allowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
   } catch {
     return false
   }

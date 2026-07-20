@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useUserStore } from '../store'
 import UserDAL from '../user/userdal'
 import message from '../utils/message'
-import { loginPikPak } from '../pikpak/auth'
+import { beginPikPakLoginCaptcha, loginPikPak, loginPikPakWithCaptcha } from '../pikpak/auth'
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
@@ -23,6 +23,13 @@ const activeLoginProviderMeta = computed(() => getDriveProviderMeta(loginProvide
 const pikpakUsername = ref('')
 const pikpakPassword = ref('')
 const pikpakLoading = ref(false)
+const pikpakCaptchaLoading = ref(false)
+const pikpakCaptchaUrl = ref('')
+const pikpakCaptchaToken = ref('')
+const pikpakCaptchaDeviceId = ref('')
+const pikpakCaptchaVerified = ref(false)
+const pikpakCaptchaError = ref('')
+let removePikPakCaptchaListeners: (() => void) | null = null
 const gofileToken = ref('')
 const gofileLoading = ref(false)
 const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
@@ -39,7 +46,15 @@ const handleModalOpen = () => {
   if (loginProviders.includes(stored as LoginProvider)) loginProvider.value = stored as LoginProvider
 }
 
-watch(loginProvider, provider => localStorage.setItem('login_provider', provider))
+watch(loginProvider, provider => {
+  localStorage.setItem('login_provider', provider)
+  if (provider !== 'pikpak') resetPikPakCaptcha()
+})
+
+watch(pikpakUsername, () => {
+  // Username changes invalidate captcha binding.
+  if (pikpakCaptchaToken.value || pikpakCaptchaUrl.value) resetPikPakCaptcha()
+})
 
 const getOAuthClientId = (provider: OAuthLoginProvider) => provider === 'onedrive' ? ONEDRIVE_CLIENT_ID.trim() : provider === 'dropbox' ? DROPBOX_APP_KEY.trim() : GOOGLE_DRIVE_CLIENT_ID.trim()
 
@@ -101,16 +116,154 @@ const removeOAuthCallback = window.WebOAuthOnCallback?.(async payload => {
 onBeforeUnmount(() => {
   removeOAuthCallback?.()
   cancelOAuthLogins()
+  resetPikPakCaptcha()
 })
+
+const getPikPakCaptchaWebview = () => document.getElementById('pikpak-captcha-webview') as any
+
+const cleanupPikPakCaptchaWebview = () => {
+  removePikPakCaptchaListeners?.()
+  removePikPakCaptchaListeners = null
+}
+
+const resetPikPakCaptcha = () => {
+  cleanupPikPakCaptchaWebview()
+  pikpakCaptchaUrl.value = ''
+  pikpakCaptchaToken.value = ''
+  pikpakCaptchaDeviceId.value = ''
+  pikpakCaptchaVerified.value = false
+  pikpakCaptchaError.value = ''
+  pikpakCaptchaLoading.value = false
+}
+
+const markPikPakCaptchaVerified = (token?: string) => {
+  if (token) pikpakCaptchaToken.value = token
+  if (!pikpakCaptchaToken.value) return
+  pikpakCaptchaVerified.value = true
+  pikpakCaptchaError.value = ''
+  message.success('验证完成，请点击登录')
+}
+
+const extractCaptchaTokenFromUrl = (value: string) => {
+  try {
+    const url = new URL(value)
+    return url.searchParams.get('captcha_token') || url.searchParams.get('captchaToken') || url.hash.match(/captcha_token=([^&]+)/)?.[1] || ''
+  } catch {
+    return ''
+  }
+}
+
+const attachPikPakCaptchaWebview = async () => {
+  await nextTick()
+  const webview = getPikPakCaptchaWebview()
+  if (!webview || !pikpakCaptchaUrl.value) return
+  cleanupPikPakCaptchaWebview()
+  const handleNavigation = (event: any) => {
+    const url = String(event?.url || '')
+    const token = extractCaptchaTokenFromUrl(url)
+    if (token) markPikPakCaptchaVerified(token)
+  }
+  const handleConsole = (event: any) => {
+    const msg = String(event?.message || '')
+    const match = msg.match(/captcha_token[=:]\s*([A-Za-z0-9._-]+)/i)
+    if (match?.[1]) markPikPakCaptchaVerified(match[1])
+  }
+  const handleFinish = () => {
+    pikpakCaptchaLoading.value = false
+  }
+  const handleFail = (event: any) => {
+    if (event?.errorCode === -3) return
+    pikpakCaptchaLoading.value = false
+    pikpakCaptchaError.value = '验证页面加载失败，请刷新验证码'
+  }
+  webview.addEventListener('will-navigate', handleNavigation)
+  webview.addEventListener('did-navigate', handleNavigation)
+  webview.addEventListener('did-redirect-navigation', handleNavigation)
+  webview.addEventListener('did-navigate-in-page', handleNavigation)
+  webview.addEventListener('console-message', handleConsole)
+  webview.addEventListener('did-finish-load', handleFinish)
+  webview.addEventListener('did-fail-load', handleFail)
+  removePikPakCaptchaListeners = () => {
+    webview.removeEventListener('will-navigate', handleNavigation)
+    webview.removeEventListener('did-navigate', handleNavigation)
+    webview.removeEventListener('did-redirect-navigation', handleNavigation)
+    webview.removeEventListener('did-navigate-in-page', handleNavigation)
+    webview.removeEventListener('console-message', handleConsole)
+    webview.removeEventListener('did-finish-load', handleFinish)
+    webview.removeEventListener('did-fail-load', handleFail)
+  }
+  try {
+    const load = webview.loadURL(pikpakCaptchaUrl.value)
+    if (load?.catch) {
+      load.catch((err: any) => {
+        if (!/ERR_(ABORTED|FAILED)/i.test(err?.message || '')) {
+          pikpakCaptchaError.value = '验证页面打开失败'
+          pikpakCaptchaLoading.value = false
+        }
+      })
+    }
+  } catch {
+    pikpakCaptchaError.value = '验证页面打开失败'
+    pikpakCaptchaLoading.value = false
+  }
+}
+
+const requestPikPakCaptcha = async () => {
+  if (!pikpakUsername.value.trim()) return message.error('请先输入 PikPak 账号')
+  pikpakCaptchaLoading.value = true
+  pikpakCaptchaVerified.value = false
+  pikpakCaptchaError.value = ''
+  try {
+    const { deviceId, captcha } = await beginPikPakLoginCaptcha(pikpakUsername.value.trim())
+    pikpakCaptchaDeviceId.value = deviceId
+    pikpakCaptchaToken.value = captcha.captchaToken
+    if (captcha.challengeUrl) {
+      pikpakCaptchaUrl.value = captcha.challengeUrl
+      await attachPikPakCaptchaWebview()
+      message.info('请完成下方图形验证')
+    } else {
+      pikpakCaptchaUrl.value = ''
+      cleanupPikPakCaptchaWebview()
+      markPikPakCaptchaVerified(captcha.captchaToken)
+      pikpakCaptchaLoading.value = false
+    }
+  } catch (error: any) {
+    resetPikPakCaptcha()
+    message.error(error?.message || '获取 PikPak 验证码失败')
+  }
+}
 
 const submitPikPakLogin = async () => {
   if (pikpakLoading.value || !pikpakUsername.value.trim() || !pikpakPassword.value) return message.error('请输入 PikPak 账号和密码')
   pikpakLoading.value = true
   try {
-    await UserDAL.UserLogin(await loginPikPak(pikpakUsername.value.trim(), pikpakPassword.value), true)
+    if (!pikpakCaptchaToken.value || (pikpakCaptchaUrl.value && !pikpakCaptchaVerified.value)) {
+      await requestPikPakCaptcha()
+      if (pikpakCaptchaUrl.value && !pikpakCaptchaVerified.value) {
+        message.warning('请先完成图形验证，再点击登录')
+        return
+      }
+    }
+    const token = pikpakCaptchaToken.value
+      ? await loginPikPakWithCaptcha(pikpakUsername.value.trim(), pikpakPassword.value, pikpakCaptchaToken.value, pikpakCaptchaDeviceId.value || undefined)
+      : await loginPikPak(pikpakUsername.value.trim(), pikpakPassword.value)
+    await UserDAL.UserLogin(token, true)
+    resetPikPakCaptcha()
     useUser.userShowLogin = false
   } catch (error: any) {
-    message.error(error?.message || 'PikPak 登录失败')
+    if (error?.code === 'PikPak_CAPTCHA_REQUIRED' || error?.challengeUrl) {
+      pikpakCaptchaDeviceId.value = error.deviceId || pikpakCaptchaDeviceId.value
+      pikpakCaptchaToken.value = error.captchaToken || pikpakCaptchaToken.value
+      pikpakCaptchaUrl.value = error.challengeUrl || ''
+      pikpakCaptchaVerified.value = false
+      await attachPikPakCaptchaWebview()
+      message.warning('请完成图形验证后再登录')
+    } else {
+      message.error(error?.message || 'PikPak 登录失败')
+      // Force a fresh captcha after failed attempt.
+      pikpakCaptchaVerified.value = false
+      pikpakCaptchaToken.value = ''
+    }
   } finally {
     pikpakLoading.value = false
   }
@@ -165,14 +318,23 @@ const submitS3Login = async () => {
 
 const handleClose = () => {
   cancelOAuthLogins()
+  resetPikPakCaptcha()
   pikpakPassword.value = ''
   gofileToken.value = ''
 }
 </script>
 
 <template>
-  <a-modal title="网盘账号登录" v-model:visible="useUser.userShowLogin" :mask-closable="false" :footer="false" class="userloginmodal" @before-open="handleModalOpen" @close="handleClose">
-    <div class="login-modal-body">
+  <a-modal
+    title="网盘账号登录"
+    v-model:visible="useUser.userShowLogin"
+    :mask-closable="false"
+    :footer="false"
+    :modal-class="loginProvider === 'pikpak' && pikpakCaptchaUrl ? 'userloginmodal userloginmodal--captcha' : 'userloginmodal'"
+    @before-open="handleModalOpen"
+    @close="handleClose"
+  >
+    <div class="login-modal-body" :class="{ 'login-modal-body--captcha': loginProvider === 'pikpak' && !!pikpakCaptchaUrl }">
       <aside class="login-provider-sidebar">
         <button v-for="provider in loginProviders" :key="provider" class="login-provider-side-item" :class="{ active: loginProvider === provider }" @click="loginProvider = provider">
           <img v-if="getDriveProviderMeta(provider).icon" class="login-provider-icon" :src="getDriveProviderMeta(provider).icon" :alt="getDriveProviderMeta(provider).label" />
@@ -181,7 +343,24 @@ const handleClose = () => {
       </aside>
       <section class="login-provider-content">
         <div class="login-provider-heading"><img v-if="activeLoginProviderMeta.icon" :src="activeLoginProviderMeta.icon" :alt="activeLoginProviderMeta.label" /><span>{{ activeLoginProviderMeta.label }}</span></div>
-        <form v-if="loginProvider === 'pikpak'" class="login-form" @submit.prevent="submitPikPakLogin"><a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear /><a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear /><a-button html-type="submit" type="primary" long :loading="pikpakLoading">添加 PikPak 账号</a-button></form>
+        <form v-if="loginProvider === 'pikpak'" class="login-form pikpak-login-form" @submit.prevent="submitPikPakLogin">
+          <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
+          <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear />
+          <div class="pikpak-captcha-panel">
+            <div class="pikpak-captcha-panel-head">
+              <span class="pikpak-captcha-title">安全验证</span>
+              <a-button type="text" size="mini" :loading="pikpakCaptchaLoading" @click.prevent="requestPikPakCaptcha">{{ pikpakCaptchaUrl || pikpakCaptchaToken ? '刷新验证' : '获取验证码' }}</a-button>
+            </div>
+            <div class="pikpak-captcha-status" :class="{ ok: pikpakCaptchaVerified, err: !!pikpakCaptchaError }">
+              {{ pikpakCaptchaVerified ? '验证已完成，可登录' : pikpakCaptchaError || (pikpakCaptchaUrl ? '请在下方区域完成图形验证' : '点击「获取验证码」后，验证会嵌在登录窗口内显示') }}
+            </div>
+            <div class="pikpak-captcha-frame-wrap" :class="{ empty: !pikpakCaptchaUrl }">
+              <webview v-if="pikpakCaptchaUrl" id="pikpak-captcha-webview" class="pikpak-captcha-webview" :src="pikpakCaptchaUrl" allowpopups></webview>
+              <div v-else class="pikpak-captcha-placeholder">验证区域（嵌入登录界面，不会单独弹窗）</div>
+            </div>
+          </div>
+          <a-button html-type="submit" type="primary" long :loading="pikpakLoading" :disabled="!pikpakCaptchaToken || (!!pikpakCaptchaUrl && !pikpakCaptchaVerified)">添加 PikPak 账号</a-button>
+        </form>
         <div v-else-if="isOAuthProvider(loginProvider)" class="login-form oauth-login"><a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">在 Mnemo 中登录</a-button></div>
         <form v-else-if="loginProvider === 'gofile'" class="login-form" @submit.prevent="submitGofileLogin"><a-input-password v-model="gofileToken" placeholder="GoFile Account API Token" allow-clear /><a-button html-type="submit" type="primary" long :loading="gofileLoading">登录 GoFile</a-button></form>
         <form v-else-if="loginProvider === 'webdav'" class="login-form" @submit.prevent="submitWebDavLogin"><a-input v-model="webDavForm.name" placeholder="连接名称" allow-clear /><a-input v-model="webDavForm.url" placeholder="WebDAV 地址" allow-clear /><a-input v-model="webDavForm.username" placeholder="用户名" allow-clear /><a-input-password v-model="webDavForm.password" placeholder="密码" allow-clear /><a-input v-model="webDavForm.rootPath" placeholder="挂载路径，默认 /" allow-clear /><a-button html-type="submit" type="primary" long :loading="webDavLoading">连接 WebDAV</a-button></form>
@@ -191,13 +370,35 @@ const handleClose = () => {
   </a-modal>
 </template>
 
-<style lang="less" scoped>
+<style lang="less">
 .userloginmodal .arco-modal-body { min-height: 440px; padding: 0 16px 16px !important; }
-.login-modal-body { display: flex; width: 540px; height: 458px; overflow: hidden; }
+.userloginmodal--captcha.arco-modal,
+.userloginmodal--captcha .arco-modal { width: 720px !important; max-width: calc(100vw - 48px); }
+</style>
+
+<style lang="less" scoped>
+.login-modal-body { display: flex; width: 540px; height: 458px; overflow: hidden; transition: width 0.2s ease, height 0.2s ease; }
+.login-modal-body--captcha { width: 680px; height: 560px; }
 .login-provider-sidebar { flex: 0 0 148px; padding: 8px 8px 8px 0; overflow-y: auto; border-right: 1px solid var(--color-border-2); }
 .login-provider-side-item { display: flex; align-items: center; width: 100%; min-height: 36px; gap: 8px; padding: 0 10px; margin-bottom: 3px; color: var(--color-text-2); background: transparent; border: 0; border-radius: 6px; cursor: pointer; text-align: left; }
 .login-provider-side-item:hover, .login-provider-side-item.active { color: rgb(var(--primary-6)); background: var(--color-fill-2); }
 .login-provider-icon { width: 16px; height: 16px; object-fit: contain; }
+.login-provider-content { flex: 1; min-width: 0; min-height: 0; padding: 8px 0 0 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.login-provider-heading { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--color-text-1); }
+.login-provider-heading img { width: 20px; height: 20px; object-fit: contain; }
+.login-form { display: grid; gap: 10px; width: 100%; max-width: 360px; }
+.pikpak-login-form { max-width: 100%; }
+.pikpak-captcha-panel { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--color-border-2); border-radius: 8px; background: var(--color-fill-1); }
+.pikpak-captcha-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pikpak-captcha-title { font-size: 13px; font-weight: 600; color: var(--color-text-1); }
+.pikpak-captcha-status { font-size: 12px; color: var(--color-text-3); line-height: 1.4; }
+.pikpak-captcha-status.ok { color: rgb(var(--green-6)); }
+.pikpak-captcha-status.err { color: rgb(var(--red-6)); }
+.pikpak-captcha-frame-wrap { width: 100%; height: 240px; border: 1px solid var(--color-border-2); border-radius: 6px; overflow: hidden; background: #fff; }
+.login-modal-body--captcha .pikpak-captcha-frame-wrap { height: 300px; }
+.pikpak-captcha-frame-wrap.empty { display: grid; place-items: center; background: var(--color-fill-2); }
+.pikpak-captcha-placeholder { padding: 16px; font-size: 12px; color: var(--color-text-3); text-align: center; }
+.pikpak-captcha-webview { width: 100%; height: 100%; border: 0; display: flex; }
 .login-provider-content { flex: 1; min-width: 0; padding: 8px 0 0 16px; }
 .login-provider-heading { display: flex; align-items: center; justify-content: center; gap: 8px; height: 28px; margin-bottom: 20px; font-weight: 600; }
 .login-provider-heading img { width: 22px; height: 22px; object-fit: contain; }

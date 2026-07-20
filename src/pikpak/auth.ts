@@ -85,6 +85,9 @@ const buildHeaders = (deviceId?: string, accessToken?: string): HeadersInit => {
   return headers
 }
 
+const isEmailUsername = (value: string) => value.includes('@')
+const isPhoneUsername = (value: string) => /^\+?\d{6,}$/.test(value.replace(/[\s-]/g, ''))
+
 const parsePikPakError = (data: any, fallback: string) => {
   if (!data) return fallback
   if (data.error === 'invalid_account_or_password') return 'PikPak 账号或密码错误'
@@ -114,15 +117,22 @@ export const buildPikPakCaptchaMeta = (deviceId: string, extra: Partial<PikPakCa
   }
 }
 
-export const initPikPakCaptchaToken = async (opts: {
+export type PikPakCaptchaInitResult = {
+  captchaToken: string
+  /** When set, open this URL for slider / image captcha before using captchaToken. */
+  challengeUrl?: string
+  expiresIn?: number
+}
+
+export const initPikPakCaptcha = async (opts: {
   deviceId: string
   action: string
   accessToken?: string
   meta?: Partial<PikPakCaptchaMeta>
-}): Promise<string> => {
+}): Promise<PikPakCaptchaInitResult> => {
   const deviceId = opts.deviceId || createPikPakDeviceId(opts.meta?.username || opts.meta?.email || opts.meta?.phone_number || 'mnemo')
   const meta = buildPikPakCaptchaMeta(deviceId, opts.meta || {})
-  const captcha = await pikpakJson<{ captcha_token?: string; url?: string }>(`${PIKPAK_USER_HOST}/v1/shield/captcha/init`, {
+  const captcha = await pikpakJson<{ captcha_token?: string; url?: string; expires_in?: number }>(`${PIKPAK_USER_HOST}/v1/shield/captcha/init`, {
     method: 'POST',
     headers: buildHeaders(deviceId, opts.accessToken),
     body: JSON.stringify({
@@ -133,9 +143,77 @@ export const initPikPakCaptchaToken = async (opts: {
       meta
     })
   }, '获取 PikPak 验证信息失败')
-  if (captcha.url) throw new Error('PikPak 需要额外图形验证，请稍后重试或在网页端完成验证后再登录')
   if (!captcha.captcha_token) throw new Error('获取 PikPak 验证信息失败')
-  return captcha.captcha_token
+  return {
+    captchaToken: captcha.captcha_token,
+    challengeUrl: captcha.url || undefined,
+    expiresIn: Number(captcha.expires_in || 0) || undefined
+  }
+}
+
+/** Resolve captcha_token only (throws if a visual challenge URL is required). */
+export const initPikPakCaptchaToken = async (opts: {
+  deviceId: string
+  action: string
+  accessToken?: string
+  meta?: Partial<PikPakCaptchaMeta>
+}): Promise<string> => {
+  const result = await initPikPakCaptcha(opts)
+  if (result.challengeUrl) throw new Error('PikPak 需要完成图形验证，请在登录页完成验证')
+  return result.captchaToken
+}
+
+export const buildPikPakLoginCaptchaMeta = (username: string): Partial<PikPakCaptchaMeta> => {
+  const normalizedUsername = username.trim()
+  if (isEmailUsername(normalizedUsername)) return { email: normalizedUsername }
+  if (isPhoneUsername(normalizedUsername)) return { phone_number: normalizedUsername.replace(/[\s-]/g, '') }
+  return { username: normalizedUsername }
+}
+
+export const beginPikPakLoginCaptcha = async (username: string): Promise<{ deviceId: string; captcha: PikPakCaptchaInitResult }> => {
+  const normalizedUsername = username.trim()
+  if (!normalizedUsername) throw new Error('请输入 PikPak 账号')
+  const deviceId = createPikPakDeviceId(normalizedUsername)
+  const captcha = await initPikPakCaptcha({
+    deviceId,
+    action: 'POST:/v1/auth/signin',
+    meta: buildPikPakLoginCaptchaMeta(normalizedUsername)
+  })
+  return { deviceId, captcha }
+}
+
+export const loginPikPakWithCaptcha = async (username: string, password: string, captchaToken: string, deviceId?: string): Promise<ITokenInfo> => {
+  const normalizedUsername = username.trim()
+  if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
+  if (!captchaToken) throw new Error('请先完成 PikPak 验证')
+  const resolvedDeviceId = deviceId || createPikPakDeviceId(normalizedUsername)
+  const auth = await pikpakJson<PikPakAuthResp>(`${PIKPAK_USER_HOST}/v1/auth/signin`, {
+    method: 'POST',
+    headers: {
+      ...buildHeaders(resolvedDeviceId),
+      'X-Captcha-Token': captchaToken
+    },
+    body: JSON.stringify({
+      client_id: PIKPAK_PROTOCOL_CLIENT_ID,
+      client_secret: PIKPAK_PROTOCOL_CLIENT_SECRET,
+      password,
+      username: normalizedUsername
+    })
+  }, 'PikPak 登录失败')
+
+  const token = emptyToken()
+  token.access_token = auth.access_token
+  token.refresh_token = auth.refresh_token
+  token.expires_in = Number(auth.expires_in || 7200)
+  token.token_type = auth.token_type || 'Bearer'
+  const accountId = auth.sub || getPikPakAccountId(auth.access_token, normalizedUsername)
+  token.user_id = `pikpak_${accountId}`
+  token.user_name = normalizedUsername
+  token.nick_name = normalizedUsername
+  token.name = normalizedUsername
+  token.device_id = resolvedDeviceId
+  token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
+  return token
 }
 
 const emptyToken = (): ITokenInfo => ({
@@ -185,52 +263,17 @@ const emptyToken = (): ITokenInfo => ({
   }
 })
 
-const isEmailUsername = (value: string) => value.includes('@')
-const isPhoneUsername = (value: string) => /^\+?\d{6,}$/.test(value.replace(/[\s-]/g, ''))
-
 export const loginPikPak = async (username: string, password: string): Promise<ITokenInfo> => {
-  const normalizedUsername = username.trim()
-  if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
-  const deviceId = createPikPakDeviceId(normalizedUsername)
-  const loginUrl = `${PIKPAK_USER_HOST}/v1/auth/signin`
-  const captchaMeta: Partial<PikPakCaptchaMeta> = {}
-  if (isEmailUsername(normalizedUsername)) captchaMeta.email = normalizedUsername
-  else if (isPhoneUsername(normalizedUsername)) captchaMeta.phone_number = normalizedUsername.replace(/[\s-]/g, '')
-  else captchaMeta.username = normalizedUsername
-
-  const captchaToken = await initPikPakCaptchaToken({
-    deviceId,
-    action: 'POST:/v1/auth/signin',
-    meta: captchaMeta
-  })
-
-  const auth = await pikpakJson<PikPakAuthResp>(loginUrl, {
-    method: 'POST',
-    headers: {
-      ...buildHeaders(deviceId),
-      'X-Captcha-Token': captchaToken
-    },
-    body: JSON.stringify({
-      client_id: PIKPAK_PROTOCOL_CLIENT_ID,
-      client_secret: PIKPAK_PROTOCOL_CLIENT_SECRET,
-      password,
-      username: normalizedUsername
-    })
-  }, 'PikPak 登录失败')
-
-  const token = emptyToken()
-  token.access_token = auth.access_token
-  token.refresh_token = auth.refresh_token
-  token.expires_in = Number(auth.expires_in || 7200)
-  token.token_type = auth.token_type || 'Bearer'
-  const accountId = auth.sub || getPikPakAccountId(auth.access_token, normalizedUsername)
-  token.user_id = `pikpak_${accountId}`
-  token.user_name = normalizedUsername
-  token.nick_name = normalizedUsername
-  token.name = normalizedUsername
-  token.device_id = deviceId
-  token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
-  return token
+  const { deviceId, captcha } = await beginPikPakLoginCaptcha(username)
+  if (captcha.challengeUrl) {
+    const err: any = new Error('PikPak_CAPTCHA_REQUIRED')
+    err.code = 'PikPak_CAPTCHA_REQUIRED'
+    err.deviceId = deviceId
+    err.captchaToken = captcha.captchaToken
+    err.challengeUrl = captcha.challengeUrl
+    throw err
+  }
+  return loginPikPakWithCaptcha(username, password, captcha.captchaToken, deviceId)
 }
 
 export const refreshPikPakAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
