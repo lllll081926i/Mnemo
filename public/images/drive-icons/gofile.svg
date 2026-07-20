@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 75.6 51">
+<!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
+  <style type="text/css">.cls-0 {fill:#283240;}
+.cls-1 {fill:url(#SVGID_1_);}
+.cls-2 {fill-rule:evenodd;clip-rule:evenodd;fill:#FFFFFF;}
+.cls-3 {fill:url(#SVGID_2_);}
+.cls-4 {fill:#FFD329;}</style>
+  <rect class="cls-0" width="75.6" height="51"/>
+  <linearGradient id="SVGID_1_" x1="18.3" x2="38.54" y1="4.35" y2="4.35" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#fff" stop-opacity="0" offset="0"/>
+    <stop stop-color="#fff" offset="1"/>
+  </linearGradient>
+  <path class="cls-1" d="m38 3.1h-19.1c-0.4 0-0.9 0.6-0.6 0.9l1.4 1c0.2 0.2 0.4 0.3 0.7 0.3h18.6l-1-2.2z"/>
+  <polygon class="cls-2" points="36.1 26.6 38.6 2.4 63.3 2.4 71.7 12.3 70.4 22.7"/>
+  <linearGradient id="SVGID_2_" x1="65.42" x2="67.91" y1="5.624" y2="10.97" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#E6E6E6" offset="0"/>
+    <stop stop-color="#DCDCDB" offset="1"/>
+  </linearGradient>
+  <path class="cls-3" d="m62.6 2.4v8l0.2 0.3h8.9l-9.1-8.3z"/>
+  <linearGradient id="SVGID_3_" x1="10.1" x2="37.57" y1="20.12" y2="20.12" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFD329" stop-opacity="0" offset="0"/>
+    <stop stop-color="#FFC92B" offset="1"/>
+  </linearGradient>
+  <path d="m34.6 18.9h-24.6v2.1l23.6 1 0.6 2.2 3-4.3 0.3-1.6c0.1-0.5-2.3-1.4-2.9 0.6z" fill="url(#SVGID_3_)"/>
+  <linearGradient id="SVGID_4_" x1="19.04" x2="30.34" y1="29.91" y2="29.91" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFD329" stop-opacity="0" offset=".01397"/>
+    <stop stop-color="#FFCD2A" offset="1"/>
+  </linearGradient>
+  <path d="m28.5 28.8-9.5 0.6 0.5 1.6h10.8l-0.2-2.1-1.6-0.1z" fill="url(#SVGID_4_)"/>
+  <linearGradient id="SVGID_5_" x1=".8926" x2="30.2" y1="38.08" y2="38.5" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFCE2B" stop-opacity="0" offset=".01397"/>
+    <stop stop-color="#FFCF2B" offset="1"/>
+  </linearGradient>
+  <path d="m29.6 36.5-28.7 1.3 1.4 1.8 27.5 0.4 0.4-1.1-0.6-2.4z" fill="url(#SVGID_5_)"/>
+  <path class="cls-4" d="m46.1 22.4-4.5 4.2h-12.1c-1.1 0-1 1-1 1l2.3 20.2c0 0.9 0.8 1 0.8 1h34.5l6.8-25.1c0.4-1.6-1-1.4-1-1.4h-25.8z"/>
+</svg>

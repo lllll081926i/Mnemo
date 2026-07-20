@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderMeta, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
 const retainedProviders = ['aliyun', 'pikpak', 'quark', '139', '189', 'guangya', 'onedrive', 'dropbox', 'gdrive', 'nextcloud', 'gofile', 'webdav', 's3'] as const
 
@@ -19,6 +21,14 @@ describe('drive provider capabilities', () => {
     expect(resolveDriveProvider({ userId: 'gofile_account-id' })).toBe('gofile')
     expect(resolveDriveProvider({ driveId: 'onedrive:drive-id' })).toBe('onedrive')
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
+  })
+
+  it('ships a real login icon for every retained provider', () => {
+    for (const provider of retainedProviders) {
+      const icon = getDriveProviderMeta(provider).icon
+      expect(icon, provider).not.toBe('')
+      expect(existsSync(resolve('public', icon)), `${provider}: ${icon}`).toBe(true)
+    }
   })
 
   it('builds account-scoped drive ids for concurrent provider accounts', () => {

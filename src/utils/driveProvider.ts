@@ -82,7 +82,7 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
   },
   onedrive: {
     key: 'onedrive',
-    label: 'Microsoft OneDrive',
+    label: 'OneDrive',
     icon: 'images/drive-icons/onedrive.svg'
   },
   dropbox: {
@@ -93,27 +93,27 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
   gdrive: {
     key: 'gdrive',
     label: 'Google Drive',
-    icon: ''
+    icon: 'images/drive-icons/gdrive.svg'
   },
   nextcloud: {
     key: 'nextcloud',
     label: 'Nextcloud',
-    icon: ''
+    icon: 'images/drive-icons/nextcloud.svg'
   },
   gofile: {
     key: 'gofile',
     label: 'GoFile',
-    icon: ''
+    icon: 'images/drive-icons/gofile.svg'
   },
   webdav: {
     key: 'webdav',
     label: 'WebDAV',
-    icon: ''
+    icon: 'images/drive-icons/webdav.svg'
   },
   s3: {
     key: 's3',
     label: 'S3',
-    icon: ''
+    icon: 'images/drive-icons/s3.svg'
   },
   unknown: {
     key: 'unknown',
