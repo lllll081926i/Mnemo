@@ -3,7 +3,7 @@ import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
 import { HanToPin } from '../utils/utils'
 import message from '../utils/message'
-import { captchaSign, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME, pikpakAuthHeaders } from './auth'
+import { initPikPakCaptchaToken, pikpakAuthHeaders } from './auth'
 
 export type PikPakFileItem = {
   id: string
@@ -114,32 +114,20 @@ export const apiPikPakDownloadInfo = async (user_id: string, fileId: string): Pr
     return result
   }
   try {
-    const timestamp = Date.now().toString()
-    const meta = {
-      captcha_sign: '',
-      client_version: PIKPAK_PROTOCOL_CLIENT_VERSION,
-      package_name: PIKPAK_PROTOCOL_PACKAGE_NAME,
-      user_id: token.user_id.replace(/^pikpak_/, ''),
-      timestamp
-    }
-    meta.captcha_sign = captchaSign(token.device_id || '', timestamp)
-    const captchaResp = await fetch('https://user.mypikpak.com/v1/shield/captcha/init', {
-      method: 'POST',
-      headers: pikpakAuthHeaders(token),
-      body: JSON.stringify({
-        client_id: PIKPAK_PROTOCOL_CLIENT_ID,
+    let captchaToken = ''
+    try {
+      captchaToken = await initPikPakCaptchaToken({
+        deviceId: token.device_id || '',
         action: `GET:/drive/v1/files/${fileId}`,
-        device_id: token.device_id || '',
-        meta
+        accessToken: token.access_token,
+        meta: { user_id: token.user_id.replace(/^pikpak_/, '') }
       })
-    })
-    const captchaData = await captchaResp.json().catch(() => undefined)
-    if (!captchaResp.ok || captchaData?.error || !captchaData?.captcha_token) {
-      result.error = parsePikPakError(captchaData, '获取 PikPak 验证信息失败')
+    } catch (err: any) {
+      result.error = err?.message || '获取 PikPak 验证信息失败'
       return result
     }
     const headers = pikpakAuthHeaders(token) as Record<string, string>
-    headers['X-Captcha-Token'] = captchaData.captcha_token
+    headers['X-Captcha-Token'] = captchaToken
     const resp = await fetch(`${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`, { headers })
     const data = await resp.json().catch(() => undefined)
     if (!resp.ok || data?.error) {

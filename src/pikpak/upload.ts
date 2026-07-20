@@ -2,7 +2,7 @@ import path from 'path'
 import mime from 'mime-types'
 import type { IUploadingUI } from '../utils/dbupload'
 import UserDAL from '../user/userdal'
-import { captchaSign, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME, pikpakAuthHeaders } from './auth'
+import { initPikPakCaptchaToken, pikpakAuthHeaders } from './auth'
 import { computeProviderGcid, fetchProviderUploadWithRetry, openProviderUploadFile, parseProviderUploadResponse } from '../utils/providerUpload'
 import { uploadOssFile } from '../utils/ossUpload'
 import { buildPikPakUploadBody, toPikPakOssCredentials, type PikPakUploadCreateResponse } from './uploadProtocol'
@@ -16,31 +16,19 @@ const createPikPakUpload = async (fileui: IUploadingUI, gcid: string): Promise<{
   const token = await UserDAL.GetUserTokenFromDB(fileui.user_id)
   if (!token?.access_token) return { error: '找不到 PikPak 上传 token，请重新登录' }
   const fileName = path.basename(fileui.File.name)
-  const timestamp = Date.now().toString()
-  const captchaResponse = await fetchProviderUploadWithRetry(() =>
-    fetch('https://user.mypikpak.com/v1/shield/captcha/init', {
-      method: 'POST',
-      headers: pikpakAuthHeaders(token),
-      body: JSON.stringify({
-        client_id: PIKPAK_PROTOCOL_CLIENT_ID,
-        action: 'POST:/drive/v1/files',
-        device_id: token.device_id || '',
-        meta: {
-          captcha_sign: captchaSign(token.device_id || '', timestamp),
-          client_version: PIKPAK_PROTOCOL_CLIENT_VERSION,
-          package_name: PIKPAK_PROTOCOL_PACKAGE_NAME,
-          user_id: token.user_id.replace(/^pikpak_/, ''),
-          timestamp
-        }
-      })
+  let captchaToken = ''
+  try {
+    captchaToken = await initPikPakCaptchaToken({
+      deviceId: token.device_id || '',
+      action: 'POST:/drive/v1/files',
+      accessToken: token.access_token,
+      meta: { user_id: token.user_id.replace(/^pikpak_/, '') }
     })
-  )
-  const captcha = await parseProviderUploadResponse(captchaResponse)
-  if (!captchaResponse.ok || captcha.data?.error || !captcha.data?.captcha_token) {
-    return { error: captcha.data?.error_description || captcha.data?.message || captcha.data?.error || '获取 PikPak 上传验证信息失败' }
+  } catch (err: any) {
+    return { error: err?.message || '获取 PikPak 上传验证信息失败' }
   }
   const headers = pikpakAuthHeaders(token) as Record<string, string>
-  headers['X-Captcha-Token'] = captcha.data.captcha_token
+  headers['X-Captcha-Token'] = captchaToken
   const response = await fetchProviderUploadWithRetry(() =>
     fetch(PIKPAK_FILES_URL, {
       method: 'POST',
