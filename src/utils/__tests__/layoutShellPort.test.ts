@@ -220,6 +220,7 @@ describe('deep layout shell port', () => {
     expect(video).toContain("import('artplayer-plugin-jassub')")
     expect(video).toContain('function hasAssSubtitle(source: ResolvedVideoSource)')
     expect(video).toContain('await installJassubPlugin(art, source, token)')
+    expect(fs.existsSync(path.join(root, 'src/module/video-plugins/artplayer-plugin-libass/src/index.js'))).toBe(false)
   })
 
   it('does not generate unused AI or legacy service configuration', () => {
