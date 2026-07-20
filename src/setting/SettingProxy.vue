@@ -2,7 +2,8 @@
 import { computed, ref } from 'vue'
 import useSettingStore from './settingstore'
 import message from '../utils/message'
-import AliHttp from '../aliapi/alihttp'
+
+const CONNECTIVITY_CHECK_URL = 'https://www.msftconnecttest.com/connecttest.txt'
 
 const settingStore = useSettingStore()
 const cb = (val: any) => settingStore.updateStore(val)
@@ -23,7 +24,7 @@ const handleProxyConn = async () => {
       message.error('请填写完整的代理服务器和端口')
       return
     }
-    await fetch(AliHttp.baseApi, { cache: 'no-store', signal: controller.signal })
+    await fetch(CONNECTIVITY_CHECK_URL, { cache: 'no-store', signal: controller.signal })
     message.success('网络连接正常')
   } catch (error: any) {
     message.error(error?.name === 'AbortError' ? '网络连接超时' : `网络连接失败：${error?.message || '未知错误'}`)
