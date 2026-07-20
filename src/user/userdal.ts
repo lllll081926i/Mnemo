@@ -1,14 +1,11 @@
 import DB from '../utils/db'
-import AliUser from '../aliapi/user'
 import message from '../utils/message'
 import useUserStore, { ITokenInfo } from './userstore'
 import { useAppStore, useFootStore, useMyShareStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
 import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
 import { applyPikPakQuota, refreshPikPakAccessToken } from '../pikpak/auth'
-import { refreshCloud189Token } from '../cloud189/auth'
-import { fetchGuangyaUserInfo, refreshGuangyaAccessToken } from '../guangya/auth'
-import { GetDriveType, isCloud139User, isCloud189User, isGuangyaUser, isNonAliyunProvider, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import { GetDriveType, isPikPakUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
 import { getDriveProviderSidebarEntries, resolveDriveProvider } from '../utils/driveProvider'
@@ -41,35 +38,6 @@ export default class UserDAL {
         }
         return token
       }
-      if (isQuarkUser(token)) {
-        token.default_drive_id = token.default_drive_id || 'quark'
-        return token.user_id && token.access_token ? token : null
-      }
-      if (isCloud139User(token)) {
-        token.default_drive_id = token.default_drive_id || 'cloud139'
-        return token.user_id && token.access_token ? token : null
-      }
-      if (isCloud189User(token)) {
-        token.default_drive_id = token.default_drive_id || 'cloud189'
-        if (!token.open_api_access_token || !token.open_api_refresh_token) {
-          const refreshed = await refreshCloud189Token(token)
-          if (!refreshed?.user_id) return null
-          this.SaveUserToken(refreshed)
-          return refreshed
-        }
-        return token.user_id && token.refresh_token ? token : null
-      }
-      if (isGuangyaUser(token)) {
-        token.default_drive_id = token.default_drive_id || 'guangya'
-        const expireTime = new Date(token.expire_time || 0).getTime()
-        if (!token.access_token || (expireTime && expireTime <= Date.now())) {
-          const refreshed = await refreshGuangyaAccessToken(token)
-          if (!refreshed?.access_token) return null
-          this.SaveUserToken(refreshed)
-          return refreshed
-        }
-        return token.user_id && token.access_token ? token : null
-      }
       if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive') {
         const expireTime = new Date(token.expire_time || 0).getTime()
         if (!token.access_token || (expireTime && expireTime <= Date.now() + 60_000)) {
@@ -81,9 +49,7 @@ export default class UserDAL {
         return token.user_id ? token : null
       }
       if (provider === 'gofile') return token.user_id && token.access_token ? token : null
-      if (isNonAliyunProvider(token)) return token.user_id ? token : null
-      const ok = !!(token.user_id && (await AliUser.ApiTokenRefreshAccount(token, false)))
-      return ok ? token : null
+      return null
     } catch (err: any) {
       DebugLog.mSaveDanger('ensureTokenReady', err)
       return null
@@ -171,30 +137,6 @@ export default class UserDAL {
           }
           continue
         }
-        if (isCloud139User(token)) {
-          continue
-        }
-        if (isCloud189User(token)) {
-          if (!token.open_api_access_token || !token.open_api_refresh_token) {
-            const refreshed = await refreshCloud189Token(token)
-            if (refreshed) {
-              UserTokenMap.set(refreshed.user_id, refreshed)
-              await DB.saveUser(refreshed)
-            }
-          }
-          continue
-        }
-        if (isGuangyaUser(token)) {
-          const expireTime = new Date(token.expire_time || 0).getTime()
-          if (expireTime && expireTime - dateNow <= 1000 * 60 * 5) {
-            const refreshed = await refreshGuangyaAccessToken(token)
-            if (refreshed) {
-              UserTokenMap.set(refreshed.user_id, refreshed)
-              await DB.saveUser(refreshed)
-            }
-          }
-          continue
-        }
         const provider = resolveDriveProvider(token)
         if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive') {
           const expireTime = new Date(token.expire_time || 0).getTime()
@@ -206,19 +148,6 @@ export default class UserDAL {
             }
           }
           continue
-        }
-        if (isNonAliyunProvider(token)) {
-          continue
-        }
-        const expire_time = new Date(token.expire_time).getTime()
-        const session_expire_time = new Date(token.session_expires_in).getTime()
-        // 自动刷新Token(过期前5分钟)
-        if (expire_time - dateNow <= 1000 * 60 * 5) {
-          await AliUser.ApiTokenRefreshAccount(token, false, true)
-          await AliUser.OpenApiTokenRefreshAccount(token, false, true)
-        }
-        if (session_expire_time - dateNow <= 1000 * 60) {
-          await AliUser.ApiSessionRefreshAccount(token, false, true)
         }
       } catch (err: any) {
         DebugLog.mSaveDanger('aRefreshAllUserToken', err)
@@ -338,28 +267,6 @@ export default class UserDAL {
     try {
       if (isPikPakUser(token)) {
         await applyPikPakQuota(token)
-      } else if (isQuarkUser(token)) {
-        token.default_drive_id = token.default_drive_id || 'quark'
-      } else if (isCloud139User(token)) {
-        token.default_drive_id = token.default_drive_id || 'cloud139'
-      } else if (isCloud189User(token)) {
-        token.default_drive_id = token.default_drive_id || 'cloud189'
-        if (!token.open_api_access_token || !token.open_api_refresh_token) {
-          const refreshed = await refreshCloud189Token(token)
-          if (refreshed) Object.assign(token, refreshed)
-        }
-      } else if (isGuangyaUser(token)) {
-        token.default_drive_id = token.default_drive_id || 'guangya'
-        const userInfo = await fetchGuangyaUserInfo(token).catch(() => null)
-        const info = userInfo?.data || userInfo || null
-        if (info) {
-          token.user_name = info.username || info.phone_number || info.phoneNumber || token.user_name
-          token.nick_name = info.nickname || info.nick_name || info.name || token.nick_name
-          token.name = info.name || token.nick_name || token.name
-          token.avatar = info.avatar || token.avatar
-          token.used_size = Number(info.used_size || info.usedSize || token.used_size || 0)
-          token.total_size = Number(info.total_size || info.totalSize || token.total_size || 0)
-        }
       } else if (isWebDavUser(token)) {
         token.default_drive_id = token.default_drive_id || token.user_id
       } else if (isS3User(token)) {
@@ -370,16 +277,6 @@ export default class UserDAL {
         await applyDropboxQuota(token)
       } else if (resolveDriveProvider(token) === 'gdrive') {
         await applyGoogleDriveQuota(token)
-      } else if (!isNonAliyunProvider(token)) {
-        await Promise.all([
-          AliUser.ApiUserInfo(token),
-          AliUser.ApiUserDriveInfo(token),
-          AliUser.ApiUserPic(token),
-          AliUser.ApiUserVip(token),
-          AliUser.ApiSessionRefreshAccount(token, false),
-          AliUser.OpenApiTokenRefreshAccount(token, false),
-          UserDAL.UserAutoSign(token)
-        ])
       }
 
       if (!token.user_id) throw new Error('账号信息缺少用户标识')
@@ -431,26 +328,6 @@ export default class UserDAL {
     if (isPikPakUser(token)) {
       await PanDAL.aReLoadPikPakDrive(token)
       await PanDAL.aReLoadOneDirToShow(token.default_drive_id || 'pikpak', 'pikpak_root', true)
-      return
-    }
-    if (isQuarkUser(token)) {
-      await PanDAL.aReLoadQuarkDrive(token)
-      await PanDAL.aReLoadOneDirToShow(token.default_drive_id || 'quark', 'quark_root', true)
-      return
-    }
-    if (isCloud139User(token)) {
-      await PanDAL.aReLoadCloud139Drive(token)
-      await PanDAL.aReLoadOneDirToShow(token.default_drive_id || 'cloud139', 'cloud139_root', true)
-      return
-    }
-    if (isCloud189User(token)) {
-      await PanDAL.aReLoadCloud189Drive(token)
-      await PanDAL.aReLoadOneDirToShow(token.default_drive_id || 'cloud189', 'cloud189_root', true)
-      return
-    }
-    if (isGuangyaUser(token)) {
-      await PanDAL.aReLoadGuangyaDrive(token)
-      await PanDAL.aReLoadOneDirToShow(token.default_drive_id || 'guangya', 'guangya_root', true)
       return
     }
     if (isWebDavUser(token)) {
@@ -576,82 +453,17 @@ export default class UserDAL {
       UserDAL.SaveUserToken(token)
       return true
     }
-    let expires_in = new Date(token.expire_time).getTime() - token.expires_in * 1000
-    let time = Date.now() - expires_in
-    if (!force || time / 1000 < 600) {
-      if (isPikPakUser(token)) {
-        await applyPikPakQuota(token)
-        UserDAL.SaveUserToken(token)
-        return true
-      } else if (isQuarkUser(token)) {
-        token.default_drive_id = token.default_drive_id || 'quark'
-        UserDAL.SaveUserToken(token)
-        return true
-      } else if (isNonAliyunProvider(token)) {
-        // 已知非阿里云盘 provider 但未在上面 if 链命中,跳过 aliyun 兜底
-        UserDAL.SaveUserToken(token)
-        return true
-      } else {
-        // 仅刷新个人信息
-        await Promise.all([AliUser.ApiUserInfo(token), AliUser.ApiUserPic(token), AliUser.ApiUserVip(token)])
-        UserDAL.SaveUserToken(token)
-        return true
-      }
-    } else {
-      // 刷新token和session
-      if (token.user_id) {
-        if (isPikPakUser(token)) {
-          const refreshed = await refreshPikPakAccessToken(token)
-          if (!refreshed?.access_token) return false
-          UserDAL.SaveUserToken(refreshed)
-        } else if (isQuarkUser(token)) {
-          token.default_drive_id = token.default_drive_id || 'quark'
-          UserDAL.SaveUserToken(token)
-        } else if (isNonAliyunProvider(token)) {
-          // 已知非阿里云盘 provider 但未在上面 if 链命中,跳过 aliyun 兜底
-          UserDAL.SaveUserToken(token)
-        } else {
-          const isToken = await AliUser.ApiTokenRefreshAccount(token, true)
-          if (!isToken) return false
-          await AliUser.ApiSessionRefreshAccount(token, true)
-          await AliUser.OpenApiTokenRefreshAccount(token, true)
-        }
-      } else {
-        return false
-      }
-      if (isPikPakUser(token)) {
-        await applyPikPakQuota(token)
-      } else if (isQuarkUser(token)) {
-        token.default_drive_id = token.default_drive_id || 'quark'
-      } else if (!isNonAliyunProvider(token)) {
-        // 刷新用户信息
-        await Promise.all([AliUser.ApiUserInfo(token), AliUser.ApiUserPic(token), AliUser.ApiUserVip(token)])
-      }
-      useUserStore().userLogin(token.user_id)
-      UserDAL.SaveUserToken(token)
-      return true
-    }
+    if (!isPikPakUser(token)) return false
+    const expiresAt = new Date(token.expire_time || 0).getTime()
+    const refreshed = force || (expiresAt && expiresAt <= Date.now() + 5 * 60_000) ? await refreshPikPakAccessToken(token) : token
+    if (!refreshed?.access_token) return false
+    await applyPikPakQuota(refreshed)
+    useUserStore().userLogin(refreshed.user_id)
+    await UserDAL.SaveUserToken(refreshed)
+    return true
   }
 
   static async UserAutoSign(token: ITokenInfo) {
-    // 自动签到
-    if (isNonAliyunProvider(token)) {
-      UserDAL.SaveUserToken(token)
-      return
-    }
-    if (token.user_id && useSettingStore().uiLaunchAutoSign) {
-      const nowMonth = new Date().getMonth() + 1
-      const nowDay = new Date().getDate()
-      if (!token.signInfo) token.signInfo = { signMon: -1, signDay: -1 }
-      const signInfo = token.signInfo
-      if (signInfo.signMon !== nowMonth || signInfo.signDay !== nowDay) {
-        const signDay = await AliUser.ApiUserSign(token)
-        if (signDay) {
-          signInfo.signMon = nowMonth
-          signInfo.signDay = signDay
-        }
-      }
-    }
-    UserDAL.SaveUserToken(token)
+    await UserDAL.SaveUserToken(token)
   }
 }

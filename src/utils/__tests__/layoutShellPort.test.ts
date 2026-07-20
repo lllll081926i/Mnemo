@@ -304,7 +304,7 @@ describe('deep layout shell port', () => {
 
   it('keeps only retained providers in the shared login flow', () => {
     const login = read('src/user/UserLogin.vue')
-    expect(login).toContain("['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3']")
+    expect(login).toContain("['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3']")
     expect(login).not.toMatch(/cloud123|baidu|drive115|boxClient/i)
   })
 
@@ -320,11 +320,9 @@ describe('deep layout shell port', () => {
     expect(login).not.toContain('v-model="pikpakClientId"')
     expect(login).not.toContain('v-model="guangyaClientId"')
     expect(login).toContain('PikPak 邮箱 / 手机号 / 用户名')
-    expect(login).toContain('手机号，例如 +86 13800138000')
-    expect(login).toContain('<a-image width="250"')
-    expect(login).toContain('AntQRCode v-if="quarkQrUrl"')
-    expect(login).toContain('class="qrcodeframe quark-qrcodeframe"')
-    expect(login).toContain('.quark-qrcodeframe')
+    expect(login).not.toContain('persist:mnemo-aliyun-login')
+    expect(login).not.toContain('quarkQrUrl')
+    expect(login).not.toContain('cloud189QrUrl')
     expect(login).toContain('align-items: center')
     expect(login).not.toContain('api.qrserver.com')
     expect(login).not.toContain('请先在 src/')
@@ -365,7 +363,7 @@ describe('deep layout shell port', () => {
     expect(down).not.toContain('activeTitle')
   })
 
-  it('keeps developer tools unavailable in packaged windows and login webviews', () => {
+  it('keeps developer tools unavailable in packaged windows without login webviews', () => {
     const windowSource = read('electron/main/core/window.ts')
     const loginSource = read('src/user/UserLogin.vue')
 
@@ -378,8 +376,8 @@ describe('deep layout shell port', () => {
     expect(windowSource).toContain('if (!allowDevTools) webPreferences.devTools = false')
     expect(windowSource).not.toContain('readerWindow')
     expect(loginSource).not.toContain('webview.openDevTools')
-    expect(loginSource).toContain('cleanupAliyunLoginWebview()')
-    expect(loginSource).not.toContain('webview.stop()')
+    expect(loginSource).not.toContain('<Webview')
+    expect(loginSource).not.toContain('aliyun')
     expect(loginSource).not.toContain('unmount-on-close')
   })
 

@@ -49,36 +49,16 @@ export interface DriveProviderCapabilities {
   photoAlbum: boolean
 }
 
-const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
-  aliyun: {
-    key: 'aliyun',
-    label: '阿里云盘',
-    icon: 'images/drive-icons/aliyun.svg'
-  },
-  '139': {
-    key: '139',
-    label: '139云盘',
-    icon: 'images/drive-icons/cloud139.svg'
-  },
+const driveProviderMap: Partial<Record<DriveProvider, DriveProviderMeta>> = {
   '189': {
     key: '189',
     label: '天翼云盘',
     icon: 'images/drive-icons/cloud189.svg'
   },
-  guangya: {
-    key: 'guangya',
-    label: '光鸭云盘',
-    icon: 'images/drive-icons/guangya.svg'
-  },
   pikpak: {
     key: 'pikpak',
     label: 'PikPak',
     icon: 'images/drive-icons/pikpak.png'
-  },
-  quark: {
-    key: 'quark',
-    label: '夸克网盘',
-    icon: 'images/drive-icons/quark.svg'
   },
   onedrive: {
     key: 'onedrive',
@@ -165,35 +145,9 @@ const standardFileCapabilities: Partial<DriveProviderCapabilities> = {
 
 const createCapabilities = (provider: DriveProvider, overrides: Partial<DriveProviderCapabilities> = {}): DriveProviderCapabilities => ({ ...noCapabilities, ...standardFileCapabilities, ...overrides, provider })
 
-const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities> = {
-  aliyun: createCapabilities('aliyun', {
-    search: true,
-    createTextFile: true,
-    permanentDelete: true,
-    trashView: true,
-    trashRestore: true,
-    trashPurge: true,
-    trashClear: true,
-    createShare: true,
-    importShare: true,
-    manageCreatedShares: true,
-    editCreatedShares: true,
-    cancelCreatedShares: true,
-    manageImportedShares: true,
-    shareHistory: true,
-    quickTransfer: true,
-    favorite: true,
-    colorTag: true,
-    encryption: true,
-    playbackHistory: true,
-    copyTree: true,
-    photoAlbum: true
-  }),
-  '139': createCapabilities('139'),
+const driveProviderCapabilities: Partial<Record<DriveProvider, DriveProviderCapabilities>> = {
   '189': createCapabilities('189'),
-  guangya: createCapabilities('guangya', { search: true, createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
-  quark: createCapabilities('quark', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
   onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
   dropbox: createCapabilities('dropbox', { search: true, createShare: true }),
   gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
@@ -206,25 +160,17 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
 const providerAliases: Array<[DriveProvider, string[], string[]]> = [
   ['webdav', ['webdav:'], []],
   ['s3', ['s3:'], []],
-  ['139', ['cloud139_'], ['cloud139', '139']],
   ['189', ['cloud189_'], ['cloud189', '189']],
-  ['guangya', ['guangya_'], ['guangya']],
   ['pikpak', ['pikpak_'], ['pikpak']],
-  ['quark', ['quark_'], ['quark']],
   ['onedrive', ['onedrive_'], ['onedrive']],
   ['dropbox', ['dropbox_'], ['dropbox']],
   ['gdrive', ['gdrive_'], ['gdrive']],
   ['gofile', ['gofile_'], ['gofile']],
-  ['aliyun', ['aliyun_'], []]
 ]
 
-const driveProviderUserIdPrefixes: Record<DriveProvider, string> = {
-  aliyun: '',
-  '139': 'cloud139_',
+const driveProviderUserIdPrefixes: Partial<Record<DriveProvider, string>> = {
   '189': 'cloud189_',
-  guangya: 'guangya_',
   pikpak: 'pikpak_',
-  quark: 'quark_',
   onedrive: 'onedrive_',
   dropbox: 'dropbox_',
   gdrive: 'gdrive_',
@@ -245,12 +191,12 @@ export const resolveDriveProvider = (context: DriveProviderContext | string = {}
   return 'unknown'
 }
 
-export const canUseAliyunPreviewApi = (context: DriveProviderContext | string = {}) => resolveDriveProvider(context) === 'aliyun'
+export const canUseAliyunPreviewApi = (_context: DriveProviderContext | string = {}) => false
 
 export const buildDriveProviderUserId = (provider: DriveProvider, accountId: string | number): string => {
   const value = String(accountId ?? '').trim()
   if (!value) return ''
-  const prefix = driveProviderUserIdPrefixes[provider]
+  const prefix = driveProviderUserIdPrefixes[provider] || ''
   if (!prefix || value.startsWith(prefix)) return value
   return `${prefix}${value}`
 }
@@ -259,14 +205,14 @@ export const getDriveProviderAccountId = (userId: string, provider?: DriveProvid
   const value = String(userId || '')
   if (!value) return ''
   const resolvedProvider = provider || resolveDriveProvider({ userId: value })
-  const prefix = driveProviderUserIdPrefixes[resolvedProvider]
+  const prefix = driveProviderUserIdPrefixes[resolvedProvider] || ''
   return prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value
 }
 
 export const buildDriveProviderDriveId = (provider: DriveProvider, accountId: string | number): string => {
   const value = String(accountId ?? '').trim()
   if (!value) return ''
-  if (provider === 'aliyun' || provider === 'unknown') return value
+  if (provider === 'unknown') return value
   const prefix = `${provider}:`
   return value.startsWith(prefix) ? value : `${prefix}${value}`
 }
@@ -279,7 +225,7 @@ export const getDriveProviderDriveAccountId = (driveId: string, provider?: Drive
   return resolvedProvider !== 'aliyun' && resolvedProvider !== 'unknown' && value.startsWith(prefix) ? value.slice(prefix.length) : value
 }
 
-export const getDriveProviderCapabilities = (context: DriveProviderContext | string = {}): DriveProviderCapabilities => driveProviderCapabilities[resolveDriveProvider(context)]
+export const getDriveProviderCapabilities = (context: DriveProviderContext | string = {}): DriveProviderCapabilities => driveProviderCapabilities[resolveDriveProvider(context)] || { ...noCapabilities, provider: 'unknown' }
 
 export type DriveSidebarEntryKind = 'space' | 'feature'
 
@@ -353,7 +299,7 @@ export const isDriveProviderSidebarEntryAvailable = (context: DriveProviderConte
 }
 
 export const getDriveProviderMeta = (tokenfrom?: string): DriveProviderMeta => {
-  return driveProviderMap[(tokenfrom || 'unknown') as DriveProvider] || driveProviderMap.unknown
+  return driveProviderMap[(tokenfrom || 'unknown') as DriveProvider] || driveProviderMap.unknown!
 }
 
 export const getDriveProviderLabel = (tokenfrom?: string): string => getDriveProviderMeta(tokenfrom).label
