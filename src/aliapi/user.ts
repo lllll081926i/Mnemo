@@ -5,12 +5,9 @@ import AliHttp from './alihttp'
 import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
 import { IAliUserDriveCapacity, IAliUserDriveDetails } from './models'
-import { GetDeviceId, GetSignature, isCloud123User } from './utils'
+import { GetDeviceId, GetSignature } from './utils'
 import { useSettingStore } from '../store'
-import { refreshCloud123AccessToken } from '../utils/cloud123'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
-import { buildDriveProviderUserId } from '../utils/driveProvider'
-import { isDrive115ApiSuccess } from '../utils/drive115'
 
 export const TokenReTimeMap = new Map<string, number>()
 export const TokenLockMap = new Map<string, number>()
@@ -62,9 +59,6 @@ export default class AliUser {
   }
 
   static async ApiTokenRefreshAccount(token: ITokenInfo, showMessage: boolean, forceRefresh: boolean = false): Promise<boolean> {
-    if (token.user_id?.startsWith('cloud123_')) {
-      return true
-    }
     if (!token.refresh_token) return false
     if (!forceRefresh && new Date(token.expire_time).getTime() >= Date.now()) return true
     if (forceRefresh) {
@@ -128,30 +122,6 @@ export default class AliUser {
   }
 
   static async OpenApiTokenRefreshAccount(token: ITokenInfo, showMessage: boolean, forceRefresh: boolean = false): Promise<boolean> {
-    if (isCloud123User(token)) {
-      if (!token.refresh_token) return false
-      if (!forceRefresh && new Date(token.expire_time).getTime() >= Date.now()) return true
-      const refreshed = await refreshCloud123AccessToken(token.refresh_token, token.device_id)
-      if (refreshed) {
-        const previousUserId = token.user_id
-        refreshed.user_id = refreshed.user_id || previousUserId
-        refreshed.user_name = refreshed.user_name || token.user_name
-        refreshed.nick_name = refreshed.nick_name || token.nick_name
-        refreshed.avatar = refreshed.avatar || token.avatar
-        refreshed.tokenfrom = 'cloud123'
-        await UserDAL.SaveUserToken(refreshed, previousUserId)
-        await AliUser.Drive123UserInfo(refreshed)
-        window.WebUserToken({
-          user_id: refreshed.user_id,
-          name: refreshed.user_name,
-          access_token: refreshed.access_token,
-          refresh: true
-        })
-        return true
-      }
-      if (showMessage) message.error('刷新账号[' + token.user_name + '] token 失败,需要重新登录')
-      return false
-    }
     if (!token.open_api_refresh_token) return false
     if (!forceRefresh && new Date(token.open_api_expires_in).getTime() >= Date.now()) return true
     // 防止重复刷新
@@ -336,139 +306,6 @@ export default class AliUser {
       DebugLog.mSaveWarning('ApiUserInfo err=' + (resp.code || ''), resp.body)
     }
     return false
-  }
-
-  static async Drive123UserInfo(token: ITokenInfo): Promise<boolean> {
-    if (!token.access_token) return false
-    const url = 'https://open-api.123pan.com/api/v1/user/info'
-    try {
-      const resp = await fetch(url, {
-        headers: {
-          'Content-Type': 'application/json',
-          Platform: 'open_platform',
-          Authorization: `Bearer ${token.access_token}`
-        }
-      })
-      if (!resp.ok) return false
-      const data = await resp.json()
-      if (Number(data?.code) !== 0 || !data?.data) return false
-      const info = data.data
-      const previousUserId = token.user_id
-      const accountId = info.uid ?? info.userId
-      if (accountId !== undefined && accountId !== null && String(accountId)) token.user_id = buildDriveProviderUserId('cloud123', accountId)
-      token.user_name = info.nickname || token.user_name
-      token.nick_name = info.nickname || token.nick_name
-      token.avatar = info.headImage || token.avatar
-      if (typeof info.spaceUsed === 'number') token.used_size = info.spaceUsed
-      if (typeof info.spacePermanent === 'number') token.total_size = info.spacePermanent
-      if (typeof info.spaceUsed === 'number' && typeof info.spacePermanent === 'number') {
-        token.spaceinfo = humanSize(info.spaceUsed) + ' / ' + humanSize(info.spacePermanent)
-      }
-      const vipInfo = Array.isArray(info.vipInfo) ? info.vipInfo : []
-      const vipCurrent = vipInfo[0]
-      if (vipCurrent?.vipLabel) token.vipname = vipCurrent.vipLabel
-      if (vipCurrent?.endTime) token.vipexpire = vipCurrent.endTime
-      if (info.vip) token.vipIcon = token.vipIcon || ''
-      await UserDAL.SaveUserToken(token, previousUserId)
-      return true
-    } catch (err: any) {
-      DebugLog.mSaveWarning('Drive123UserInfo err=' + (err?.message || ''), err)
-      return false
-    }
-  }
-
-  static async Drive115UserInfo(token: ITokenInfo): Promise<boolean> {
-    if (!token.access_token) return false
-    const url = 'https://proapi.115.com/open/user/info'
-    try {
-      const resp = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token.access_token}`
-        }
-      })
-      if (!resp.ok) return false
-      const data = await resp.json()
-      if (!isDrive115ApiSuccess(data) || !data?.data) return false
-      const info = data.data
-      const previousUserId = token.user_id
-      const accountId = info.user_id ?? info.userId ?? info.uid
-      if (accountId !== undefined && accountId !== null && String(accountId)) token.user_id = buildDriveProviderUserId('115', accountId)
-      token.user_name = info.user_name || token.user_name
-      token.nick_name = info.user_name || token.nick_name
-      token.avatar = info.user_face_m || info.user_face_l || info.user_face_s || token.avatar
-      const space = info.rt_space_info || {}
-      const totalSize = Number(space?.all_total?.size || 0)
-      const usedSize = Number(space?.all_use?.size || 0)
-      if (Number.isFinite(usedSize) && usedSize >= 0) token.used_size = usedSize
-      if (Number.isFinite(totalSize) && totalSize >= 0) token.total_size = totalSize
-      if (totalSize > 0 || usedSize > 0) {
-        token.spaceinfo = humanSize(usedSize) + ' / ' + humanSize(totalSize)
-      } else if (space?.all_use?.size_format && space?.all_total?.size_format) {
-        token.spaceinfo = `${space.all_use.size_format} / ${space.all_total.size_format}`
-      }
-      if (info?.vip_info?.level_name) token.vipname = info.vip_info.level_name
-      if (info?.vip_info?.expire) token.vipexpire = String(info.vip_info.expire)
-      await UserDAL.SaveUserToken(token, previousUserId)
-      return true
-    } catch (err: any) {
-      DebugLog.mSaveWarning('Drive115UserInfo err=' + (err?.message || ''), err)
-      return false
-    }
-  }
-
-  static async DriveBaiduUserInfo(token: ITokenInfo): Promise<boolean> {
-    if (!token.access_token) return false
-    const params = new URLSearchParams({
-      method: 'uinfo',
-      access_token: token.access_token,
-      vip_version: 'v2'
-    })
-    const url = `https://pan.baidu.com/rest/2.0/xpan/nas?${params.toString()}`
-    try {
-      const resp = await fetch(url, {
-        headers: {
-          'User-Agent': 'pan.baidu.com'
-        }
-      })
-      if (!resp.ok) return false
-      const data = await resp.json()
-      if (data?.errno !== 0) return false
-      const previousUserId = token.user_id
-      token.user_name = data.netdisk_name || data.baidu_name || token.user_name
-      token.nick_name = data.netdisk_name || data.baidu_name || token.nick_name
-      token.avatar = data.avatar_url || token.avatar
-      if (data.vip_type === 2) token.vipname = 'SVIP'
-      if (data.vip_type === 1) token.vipname = 'VIP'
-      if (data.uk !== undefined && data.uk !== null && String(data.uk)) token.user_id = buildDriveProviderUserId('baidu', data.uk)
-      const quotaParams = new URLSearchParams({
-        access_token: token.access_token,
-        checkfree: '1',
-        checkexpire: '1'
-      })
-      const quotaUrl = `https://pan.baidu.com/api/quota?${quotaParams.toString()}`
-      const quotaResp = await fetch(quotaUrl, {
-        headers: {
-          'User-Agent': 'pan.baidu.com'
-        }
-      })
-      if (quotaResp.ok) {
-        const quota = await quotaResp.json()
-        if (quota?.errno === 0) {
-          if (typeof quota.total === 'number') token.total_size = quota.total
-          if (typeof quota.used === 'number') token.used_size = quota.used
-          if (typeof quota.free === 'number') token.free_size = quota.free
-          if (typeof quota.expire === 'boolean') token.space_expire = quota.expire
-          if (typeof quota.total === 'number' && typeof quota.used === 'number') {
-            token.spaceinfo = humanSize(quota.used) + ' / ' + humanSize(quota.total)
-          }
-        }
-      }
-      await UserDAL.SaveUserToken(token, previousUserId)
-      return true
-    } catch (err: any) {
-      DebugLog.mSaveWarning('DriveBaiduUserInfo err=' + (err?.message || ''), err)
-      return false
-    }
   }
 
   static async ApiUserDriveInfo(token: ITokenInfo): Promise<boolean> {

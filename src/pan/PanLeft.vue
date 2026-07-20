@@ -17,7 +17,7 @@ import FolderPreviewPopover from './menus/FolderPreviewPopover.vue'
 import { TreeNodeData } from '../store/treestore'
 import { dropMoveSelectedFile, uploadLocalPaths } from './topbtns/topbtn'
 import message from '../utils/message'
-import { GetDriveType, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import { GetDriveType, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
 import { loadDriveAccountOptions, toDriveAccountOption, type DriveAccountOption } from '../utils/driveAccount'
 import { getWebDavConnectionId, removeWebDavConnection } from '../utils/webdavClient'
@@ -93,13 +93,7 @@ const handleTreeRightClick = (e: { event: MouseEvent; node: any }) => {
   const { parent = undefined, key } = e.node
   if (key.startsWith('search')) return
   const isSingleRootDrive =
-    isCloud123User(pantreeStore.user_id || '') ||
-    isDrive115User(pantreeStore.user_id || '') ||
-    isBaiduUser(pantreeStore.user_id || '') ||
     isPikPakUser(pantreeStore.user_id || '') ||
-    isDropboxUser(pantreeStore.user_id || '') ||
-    isOneDriveUser(pantreeStore.user_id || '') ||
-    isBoxUser(pantreeStore.user_id || '') ||
     isWebDavUser(pantreeStore.user_id || '') ||
     isS3User(pantreeStore.user_id || '')
   if (!isSingleRootDrive && key.length < 40) return
@@ -219,13 +213,7 @@ const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
   }
   const userId = pantreeStore.user_id || ''
   const isSingleRootDrive =
-    isCloud123User(userId) ||
-    isDrive115User(userId) ||
-    isBaiduUser(userId) ||
     isPikPakUser(userId) ||
-    isDropboxUser(userId) ||
-    isOneDriveUser(userId) ||
-    isBoxUser(userId) ||
     isWebDavUser(userId) ||
     isS3User(userId) ||
     isQuarkUser(userId) ||

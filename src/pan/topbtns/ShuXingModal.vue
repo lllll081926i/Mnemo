@@ -7,22 +7,11 @@ import message from '../../utils/message'
 import { modalCloseAll } from '../../utils/modal'
 import { humanDateTimeDateStr, humanSize, humanTime } from '../../utils/format'
 import { ref } from 'vue'
-import { Modal } from '@arco-design/web-vue'
 import DebugLog from '../../utils/debuglog'
-import { GetDriveID, isBaiduUser, isCloud123User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser } from '../../aliapi/utils'
+import { GetDriveID, isGuangyaUser, isPikPakUser } from '../../aliapi/utils'
 import { getEncType, getRawUrl } from '../../utils/proxyhelper'
-import { apiCloud123FileDetail } from '../../cloud123/filecmd'
-import { apiDrive115FileDetail } from '../../cloud115/filecmd'
-import { mapDrive115DetailToAliModel } from '../../cloud115/dirfilelist'
-import { mapCloud123InfoToAliModel } from '../../cloud123/dirfilelist'
 import TreeStore from '../../store/treestore'
-import { apiBaiduFileMetas, mapBaiduMetaToAliFileItem } from '../../cloudbaidu/filecmd'
 import { apiPikPakFileDetail, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
-import { apiDropboxFileDetail, mapDropboxFileToAliModel } from '../../dropbox/dirfilelist'
-import type { DropboxMetadata } from '../../dropbox/dirfilelist'
-import { apiDropboxListRevisions, apiDropboxRestoreRevision } from '../../dropbox/revisions'
-import { apiOneDriveFileDetail, mapOneDriveItemToAliModel } from '../../onedrive/dirfilelist'
-import { apiOneDriveListVersions, apiOneDriveRestoreVersion, OneDriveVersion } from '../../onedrive/revisions'
 import { apiGuangyaFileDetail, mapGuangyaFileToAliModel } from '../../guangya/dirfilelist'
 
 const props = defineProps({
@@ -44,12 +33,6 @@ const okLoading = ref(false)
 const fileInfo = ref<IAliFileItem>()
 const dirInfo = ref<IAliGetForderSizeModel>()
 const dirPath = ref('')
-const isDropboxFile = ref(false)
-const dropboxRevisions = ref<DropboxMetadata[]>([])
-const dropboxRevisionLoading = ref(false)
-const isOneDriveFile = ref(false)
-const oneDriveVersions = ref<OneDriveVersion[]>([])
-const oneDriveVersionLoading = ref(false)
 const handleOpen = async () => {
   const pantreeStore = usePanTreeStore()
   let file_id = ''
@@ -77,80 +60,9 @@ const handleOpen = async () => {
   if (!file_id) {
     message.error('没有选中任何文件')
   } else {
-    const isCloudUser = isCloud123User(pantreeStore.user_id)
-      || drive_id === 'cloud123'
-      || pantreeStore.selectDir.drive_id === 'cloud123'
-    const is115User = isDrive115User(pantreeStore.user_id) || drive_id === 'drive115'
-    const isBaidu = isBaiduUser(pantreeStore.user_id) || drive_id === 'baidu'
     const isPikPak = isPikPakUser(pantreeStore.user_id) || drive_id === 'pikpak'
-    const isDropbox = isDropboxUser(pantreeStore.user_id) || drive_id === 'dropbox'
-    const isOneDrive = isOneDriveUser(pantreeStore.user_id) || drive_id === 'onedrive'
     const isGuangya = isGuangyaUser(pantreeStore.user_id) || drive_id === 'guangya'
-    isDropboxFile.value = isDropbox
-    isOneDriveFile.value = isOneDrive
-    if (isCloudUser) {
-      const pathList = TreeStore.GetDirPath(drive_id, file_id)
-      const pathNames = pathList.map((item) => item.name).filter((name) => name)
-      dirPath.value = '/' + pathNames.join('/')
-      const detail = await apiCloud123FileDetail(pantreeStore.user_id, file_id)
-      if (detail) {
-        const mapped: any = mapCloud123InfoToAliModel(detail)
-        mapped.type = mapped.isDir ? 'folder' : 'file'
-        mapped.created_at = detail.createAt || detail.create_at || ''
-        mapped.updated_at = detail.updateAt || detail.update_at || ''
-        fileInfo.value = mapped
-      }
-    } else if (is115User) {
-      const detail = await apiDrive115FileDetail(pantreeStore.user_id, file_id)
-      if (detail) {
-        const mapped: any = mapDrive115DetailToAliModel(detail, drive_id)
-        mapped.type = mapped.isDir ? 'folder' : 'file'
-        mapped.created_at = detail.created_at || ''
-        mapped.updated_at = detail.updated_at || ''
-        mapped.content_hash = detail.sha1 || ''
-        fileInfo.value = mapped
-        if (mapped.type === 'folder') {
-          dirInfo.value = {
-            size: detail.size || 0,
-            folder_count: detail.folder_count || 0,
-            file_count: detail.file_count || 0,
-            reach_limit: undefined
-          }
-        }
-        if (detail.path && detail.path.length > 0) {
-          const pathNames = detail.path.map((item) => item.file_name).filter((name) => name)
-          dirPath.value = '/' + pathNames.join('/')
-        }
-      }
-    } else if (isBaidu) {
-      const descInfo = parseBaiduDesc(file_desc || '')
-      const fsid = descInfo.fsid
-      console.log('=== 百度网盘属性调试 ===')
-      console.log('file_desc:', file_desc)
-      console.log('descInfo:', descInfo)
-      console.log('fsid:', fsid)
-      if (fsid) {
-        const metas = await apiBaiduFileMetas(pantreeStore.user_id, [fsid], 0, 1, 1, 1, 1)
-        console.log('API metas 响应:', metas)
-        const meta = metas && metas[0]
-        if (meta) {
-          console.log('原始 meta 数据:', meta)
-          const mapped: any = mapBaiduMetaToAliFileItem(meta, drive_id, file_id)
-          console.log('映射后的数据:', mapped)
-          fileInfo.value = mapped
-          const pathValue = meta.path || descInfo.path || ''
-          if (pathValue) {
-            const pathParts = pathValue.split('/').filter(Boolean)
-            pathParts.pop()
-            dirPath.value = '/' + pathParts.join('/')
-          }
-        } else {
-          console.log('未找到 meta 数据')
-        }
-      } else {
-        console.log('未从描述中解析到 fsid')
-      }
-    } else if (isPikPak) {
+    if (isPikPak) {
       const pathList = TreeStore.GetDirPath(drive_id, file_id)
       const pathNames = pathList.map((item) => item.name).filter((name) => name)
       dirPath.value = '/' + pathNames.join('/')
@@ -160,33 +72,6 @@ const handleOpen = async () => {
         mapped.type = mapped.isDir ? 'folder' : 'file'
         mapped.created_at = detail.created_time || ''
         mapped.updated_at = detail.modified_time || detail.created_time || ''
-        fileInfo.value = mapped
-      }
-    } else if (isDropbox) {
-      const detail = await apiDropboxFileDetail(pantreeStore.user_id, file_id)
-      if (detail) {
-        const parentPath = detail.path_display?.split('/').filter(Boolean) || []
-        parentPath.pop()
-        dirPath.value = parentPath.length ? '/' + parentPath.join('/') : '/'
-        const parentId = detail.path_display ? detail.path_display.split('/').slice(0, -1).join('/') : 'dropbox_root'
-        const mapped: any = mapDropboxFileToAliModel(detail, drive_id, parentId || 'dropbox_root')
-        mapped.type = mapped.isDir ? 'folder' : 'file'
-        mapped.created_at = detail.server_modified || detail.client_modified || ''
-        mapped.updated_at = detail.server_modified || detail.client_modified || ''
-        mapped.content_hash = detail.content_hash || ''
-        fileInfo.value = mapped
-      }
-    } else if (isOneDrive) {
-      const detail = await apiOneDriveFileDetail(pantreeStore.user_id, file_id)
-      if (detail) {
-        const parentPath = (detail.parentReference?.path || '').replace(/^\/drive\/root:/, '') || '/'
-        dirPath.value = parentPath || '/'
-        const parentId = detail.parentReference?.id || 'onedrive_root'
-        const mapped: any = mapOneDriveItemToAliModel(detail, drive_id || 'onedrive', parentId)
-        mapped.type = mapped.isDir ? 'folder' : 'file'
-        mapped.created_at = detail.createdDateTime || ''
-        mapped.updated_at = detail.lastModifiedDateTime || detail.createdDateTime || ''
-        mapped.content_hash = detail.file?.hashes?.sha1Hash || detail.file?.hashes?.quickXorHash || ''
         fileInfo.value = mapped
       }
     } else if (isGuangya) {
@@ -224,7 +109,7 @@ const handleOpen = async () => {
         fileInfo.value.thumbnail = rawUrl.url
       }
     }
-    if (fileInfo.value?.type == 'folder' && !isCloudUser && !is115User && !isBaidu && !isPikPak && !isDropbox && !isOneDrive && !isGuangya) {
+    if (fileInfo.value?.type == 'folder' && !isPikPak && !isGuangya) {
       dirInfo.value = await AliFile.ApiFileGetFolderSize(pantreeStore.user_id, drive_id, file_id)
     }
   }
@@ -236,12 +121,6 @@ const handleClose = () => {
   dirInfo.value = { size: 0, folder_count: 0, file_count: 0, reach_limit: undefined }
   fileInfo.value = undefined
   dirPath.value = ''
-  isDropboxFile.value = false
-  dropboxRevisions.value = []
-  dropboxRevisionLoading.value = false
-  isOneDriveFile.value = false
-  oneDriveVersions.value = []
-  oneDriveVersionLoading.value = false
 }
 
 const makeFenBianLv = (width: number | undefined, height: number | undefined) => {
@@ -325,78 +204,6 @@ const handleCopyThumbnail = () => {
   }
 }
 
-const handleLoadDropboxRevisions = async () => {
-  const pantreeStore = usePanTreeStore()
-  const fileId = fileInfo.value?.file_id || ''
-  if (!fileId) return
-  dropboxRevisionLoading.value = true
-  try {
-    dropboxRevisions.value = await apiDropboxListRevisions(pantreeStore.user_id, fileId, 20)
-    if (dropboxRevisions.value.length === 0) message.info('没有可恢复的历史版本')
-  } finally {
-    dropboxRevisionLoading.value = false
-  }
-}
-
-const handleRestoreDropboxRevision = (revision: DropboxMetadata) => {
-  const pantreeStore = usePanTreeStore()
-  const fileId = fileInfo.value?.file_id || ''
-  if (!fileId || !revision.rev) return
-  Modal.confirm({
-    title: '恢复 Dropbox 版本',
-    content: `恢复到 ${humanDateTimeDateStr(revision.server_modified || revision.client_modified)} 的版本？`,
-    okText: '恢复',
-    cancelText: '取消',
-    onOk: async () => {
-      const restored = await apiDropboxRestoreRevision(pantreeStore.user_id, fileId, revision.rev || '')
-      if (restored) {
-        message.success('Dropbox 文件版本已恢复')
-        dropboxRevisions.value = []
-      }
-    }
-  })
-}
-
-const handleLoadOneDriveVersions = async () => {
-  const pantreeStore = usePanTreeStore()
-  const fileId = fileInfo.value?.file_id || ''
-  if (!fileId) return
-  oneDriveVersionLoading.value = true
-  try {
-    oneDriveVersions.value = await apiOneDriveListVersions(pantreeStore.user_id, fileId)
-    if (oneDriveVersions.value.length === 0) message.info('没有可恢复的历史版本')
-  } finally {
-    oneDriveVersionLoading.value = false
-  }
-}
-
-const handleRestoreOneDriveVersion = (version: OneDriveVersion) => {
-  const pantreeStore = usePanTreeStore()
-  const fileId = fileInfo.value?.file_id || ''
-  if (!fileId || !version.id) return
-  Modal.confirm({
-    title: '恢复 OneDrive 版本',
-    content: `恢复到 ${humanDateTimeDateStr(version.lastModifiedDateTime)} 的版本？`,
-    okText: '恢复',
-    cancelText: '取消',
-    onOk: async () => {
-      const restored = await apiOneDriveRestoreVersion(pantreeStore.user_id, fileId, version.id || '')
-      if (restored) {
-        message.success('OneDrive 文件版本已恢复')
-        oneDriveVersions.value = []
-      }
-    }
-  })
-}
-
-const parseBaiduDesc = (desc: string) => {
-  const fsidMatch = desc.match(/baidu_fsid:([0-9]+)/)
-  const pathMatch = desc.match(/baidu_path:([^;]+)/)
-  return {
-    fsid: fsidMatch ? Number(fsidMatch[1]) : 0,
-    path: pathMatch ? pathMatch[1] : ''
-  }
-}
 </script>
 
 <template>
@@ -558,44 +365,6 @@ const parseBaiduDesc = (desc: string) => {
         </div>
       </div>
 
-      <div v-if="isDropboxFile && fileInfo?.type == 'file'">
-        <div class='h16'></div>
-        <a-row>
-          <a-col flex='1'> Dropbox 版本：</a-col>
-          <a-col flex='120px'>
-            <a-button type='outline' size='mini' :loading='dropboxRevisionLoading' @click='handleLoadDropboxRevisions'>
-              加载版本
-            </a-button>
-          </a-col>
-        </a-row>
-        <div v-if='dropboxRevisions.length > 0' class='dropboxrevisionlist'>
-          <div v-for='revision in dropboxRevisions' :key='revision.rev || revision.server_modified' class='dropboxrevisionitem'>
-            <span>{{ humanDateTimeDateStr(revision.server_modified || revision.client_modified) }}</span>
-            <span>{{ humanSize(revision.size || 0) }}</span>
-            <a-button type='outline' size='mini' @click='() => handleRestoreDropboxRevision(revision)'>恢复</a-button>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="isOneDriveFile && fileInfo?.type == 'file'">
-        <div class='h16'></div>
-        <a-row>
-          <a-col flex='1'> OneDrive 版本：</a-col>
-          <a-col flex='120px'>
-            <a-button type='outline' size='mini' :loading='oneDriveVersionLoading' @click='handleLoadOneDriveVersions'>
-              加载版本
-            </a-button>
-          </a-col>
-        </a-row>
-        <div v-if='oneDriveVersions.length > 0' class='dropboxrevisionlist'>
-          <div v-for='version in oneDriveVersions' :key='version.id || version.lastModifiedDateTime' class='dropboxrevisionitem'>
-            <span>{{ humanDateTimeDateStr(version.lastModifiedDateTime) }}</span>
-            <span>{{ humanSize(version.size || 0) }}</span>
-            <a-button type='outline' size='mini' @click='() => handleRestoreOneDriveVersion(version)'>恢复</a-button>
-          </div>
-        </div>
-      </div>
-
       <div class='h16'></div>
     </div>
     <div class='h16'></div>
@@ -666,27 +435,6 @@ const parseBaiduDesc = (desc: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px;
-}
-
-.dropboxrevisionlist {
-  margin-top: 8px;
-  border: 1px solid var(--color-border-2);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.dropboxrevisionitem {
-  display: grid;
-  grid-template-columns: 1fr 88px 58px;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--color-border-1);
-  font-size: 12px;
-}
-
-.dropboxrevisionitem:last-child {
-  border-bottom: none;
 }
 
 .h16 {

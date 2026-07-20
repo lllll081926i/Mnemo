@@ -238,15 +238,10 @@ describe('deep layout shell port', () => {
     expect(page).toContain("event.key === 'Escape' && appStore.appTab === 'setting'")
   })
 
-  it('keeps Box in the shared login provider flow', () => {
+  it('keeps only retained providers in the shared login flow', () => {
     const login = read('src/user/UserLogin.vue')
-    expect(login).toContain("'dropbox', 'onedrive', 'box', 'webdav', 's3'")
-    expect(login).toContain("loginProvider.value === 'box'")
-    expect(login).toContain("loginProvider === 'box'")
-    expect(login).toContain('createBoxPkceVerifier')
-    expect(login).toContain('buildBoxAuthUrl')
-    expect(login).toContain('exchangeBoxCodeForToken')
-    expect(login).toContain('submitBoxCode(code)')
+    expect(login).toContain("['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'webdav', 's3']")
+    expect(login).not.toMatch(/cloud123|baidu|drive115|dropbox|onedrive|boxClient/i)
   })
 
   it('keeps provider login configuration and QR rendering inside the app', () => {
@@ -260,10 +255,9 @@ describe('deep layout shell port', () => {
     expect(login).not.toContain('v-model="boxClientId"')
     expect(login).not.toContain('v-model="pikpakClientId"')
     expect(login).not.toContain('v-model="guangyaClientId"')
-    expect(login).toContain('已在系统浏览器中打开 123 网盘授权页面')
     expect(login).toContain('PikPak 邮箱 / 手机号 / 用户名')
     expect(login).toContain('手机号，例如 +86 13800138000')
-    expect(login).toContain('AntQRCode v-if="qrCodeUrl"')
+    expect(login).toContain('<a-image width="250"')
     expect(login).toContain('AntQRCode v-if="quarkQrUrl"')
     expect(login).not.toContain('api.qrserver.com')
     expect(login).not.toContain('请先在 src/')

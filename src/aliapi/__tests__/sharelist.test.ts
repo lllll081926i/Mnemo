@@ -16,7 +16,7 @@ describe('AliShareList provider routing', () => {
   it('does not call Aliyun share list api for unsupported third-party users', async () => {
     const postSpy = vi.spyOn(AliHttp, 'Post').mockRejectedValue(new Error('should not call Aliyun'))
 
-    const resp = await AliShareList.ApiShareListAll('onedrive_user')
+    const resp = await AliShareList.ApiShareListAll('unsupported_user')
 
     expect(resp.items).toEqual([])
     expect(resp.next_marker).toBe('')
@@ -26,7 +26,7 @@ describe('AliShareList provider routing', () => {
   it('does not call Aliyun share list api when checking unsupported third-party share ids', async () => {
     const postSpy = vi.spyOn(AliHttp, 'Post').mockRejectedValue(new Error('should not call Aliyun'))
 
-    await expect(AliShareList.ApiShareListUntilShareID('box_user', 'share-id')).resolves.toBe(false)
+    await expect(AliShareList.ApiShareListUntilShareID('unsupported_user', 'share-id')).resolves.toBe(false)
     expect(postSpy).not.toHaveBeenCalled()
   })
 })

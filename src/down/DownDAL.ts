@@ -77,7 +77,7 @@ export interface IStateDownInfo {
   allProxy?: string
   sourceType?: 'url'
   split?: number
-  offlineProvider?: 'cloud123' | 'pikpak' | 'guangya' | 'drive115'
+  offlineProvider?: 'pikpak' | 'guangya'
   offlineTaskId?: string
   offlineDirId?: string
 }
@@ -460,10 +460,8 @@ export default class DownDAL {
     } else {
       useFootStore().mSaveDownTotalSpeedInfo('')
     }
-    await DownDAL.aCloud123OfflineProgress()
     await DownDAL.aPikPakOfflineProgress()
     await DownDAL.aGuangyaOfflineProgress()
-    await DownDAL.aDrive115OfflineProgress()
 
     downingStore.mRefreshListDataShow(true)
     downedStore.mRefreshListDataShow(true)
@@ -573,29 +571,18 @@ export default class DownDAL {
     await AriaStopList(gidList)
     await AriaDeleteList(gidList)
     const pikpakTaskMap = new Map<string, string[]>()
-    const drive115TaskMap = new Map<string, string[]>()
     for (const downFile of deleteList) {
       if (!downFile.Info.offlineTaskId) continue
       if (downFile.Info.offlineProvider === 'pikpak') {
         const list = pikpakTaskMap.get(downFile.Info.user_id) || []
         list.push(downFile.Info.offlineTaskId)
         pikpakTaskMap.set(downFile.Info.user_id, list)
-      } else if (downFile.Info.offlineProvider === 'drive115') {
-        const list = drive115TaskMap.get(downFile.Info.user_id) || []
-        list.push(downFile.Info.offlineTaskId)
-        drive115TaskMap.set(downFile.Info.user_id, list)
       }
     }
     if (pikpakTaskMap.size) {
       const { apiPikPakOfflineDelete } = await import('../pikpak/offline')
       for (const [userID, taskIds] of pikpakTaskMap) {
         await apiPikPakOfflineDelete(userID, taskIds)
-      }
-    }
-    if (drive115TaskMap.size) {
-      const { apiDrive115OfflineDelete } = await import('../cloud115/offline')
-      for (const [userID, taskIds] of drive115TaskMap) {
-        await apiDrive115OfflineDelete(userID, taskIds)
       }
     }
     // 删除临时文件
@@ -638,54 +625,6 @@ export default class DownDAL {
 
   static QueryIsDowning() {
     return useDowningStore().ListDataDowningCount > 0
-  }
-
-  static async aAddCloud123OfflineDownload(url: string, fileName: string, dirID: string | undefined) {
-    const userID = useUserStore().user_id
-    if (!userID) return { success: false, message: '请先登录' }
-    const { apiCloud123OfflineCreate } = await import('../cloud123/offline')
-    const resp = await apiCloud123OfflineCreate(userID, url, fileName, dirID)
-    if (!resp.taskId) return { success: false, message: resp.error || '创建离线下载失败' }
-    const downitem: IStateDownFile = {
-      DownID: `${userID}|cloud123_offline_${resp.taskId}`,
-      Info: {
-        GID: `cloud123_offline_${resp.taskId}`,
-        user_id: userID,
-        DownSavePath: '',
-        ariaRemote: false,
-        file_id: '',
-        drive_id: 'cloud123',
-        name: fileName || url,
-        size: 0,
-        sizestr: '',
-        icon: 'iconcloud-download',
-        isDir: false,
-        encType: '',
-        sha1: '',
-        crc64: '',
-        offlineProvider: 'cloud123',
-        offlineTaskId: String(resp.taskId),
-        offlineDirId: dirID || ''
-      },
-      Down: {
-        DownState: '离线下载中',
-        DownTime: Date.now(),
-        DownSize: 0,
-        DownSpeed: 0,
-        DownSpeedStr: '',
-        DownProcess: 0,
-        IsStop: false,
-        IsDowning: true,
-        IsCompleted: false,
-        IsFailed: false,
-        FailedCode: 0,
-        FailedMessage: '',
-        AutoTry: 0,
-        DownUrl: url
-      }
-    }
-    useDowningStore().mAddDownload({ downlist: [downitem] })
-    return { success: true, message: '' }
   }
 
   static async aAddPikPakOfflineDownload(url: string, fileName: string, dirID: string | undefined) {
@@ -786,103 +725,6 @@ export default class DownDAL {
     return { success: true, message: '' }
   }
 
-  static async aAddDrive115OfflineDownload(url: string, dirID: string | undefined) {
-    const userID = useUserStore().user_id
-    if (!userID) return { success: false, message: '请先登录' }
-    const { apiDrive115OfflineCreate } = await import('../cloud115/offline')
-    const resp = await apiDrive115OfflineCreate(userID, url, dirID)
-    if (!resp.taskIds.length) return { success: false, message: resp.error || '创建 115 云下载失败' }
-    const downlist: IStateDownFile[] = resp.taskIds.map(taskId => ({
-      DownID: `${userID}|drive115_offline_${taskId}`,
-      Info: {
-        GID: `drive115_offline_${taskId}`,
-        user_id: userID,
-        DownSavePath: '',
-        ariaRemote: false,
-        file_id: '',
-        drive_id: 'drive115',
-        name: url,
-        size: 0,
-        sizestr: '',
-        icon: 'iconcloud-download',
-        isDir: false,
-        encType: '',
-        sha1: '',
-        crc64: '',
-        offlineProvider: 'drive115',
-        offlineTaskId: taskId,
-        offlineDirId: dirID || ''
-      },
-      Down: {
-        DownState: '离线下载中',
-        DownTime: Date.now(),
-        DownSize: 0,
-        DownSpeed: 0,
-        DownSpeedStr: '',
-        DownProcess: 0,
-        IsStop: false,
-        IsDowning: true,
-        IsCompleted: false,
-        IsFailed: false,
-        FailedCode: 0,
-        FailedMessage: '',
-        AutoTry: 0,
-        DownUrl: url
-      }
-    }))
-    useDowningStore().mAddDownload({ downlist })
-    return { success: true, message: '' }
-  }
-
-  private static cloud123OfflineTick = 0
-
-  static async aCloud123OfflineProgress() {
-    const downingStore = useDowningStore()
-    const list = downingStore.ListDataRaw
-    if (!list.length) return
-    DownDAL.cloud123OfflineTick = (DownDAL.cloud123OfflineTick + 1) % 5
-    if (DownDAL.cloud123OfflineTick !== 0) return
-    const { apiCloud123OfflineProcess } = await import('../cloud123/offline')
-    const saveList: IStateDownFile[] = []
-    for (let i = 0; i < list.length; i++) {
-      const item = list[i]
-      if (item.Info.offlineProvider !== 'cloud123' || !item.Info.offlineTaskId) continue
-      if (item.Down.IsCompleted || item.Down.IsFailed) continue
-      const info = await apiCloud123OfflineProcess(item.Info.user_id, item.Info.offlineTaskId)
-      if (info.error) {
-        item.Down.IsFailed = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载失败'
-        item.Down.FailedMessage = info.error
-        saveList.push(item)
-        continue
-      }
-      const process = Math.max(0, Math.min(100, info.process))
-      item.Down.DownProcess = process
-      item.Down.DownSpeedStr = ''
-      if (info.status === 2) {
-        item.Down.IsCompleted = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载完成'
-        item.Down.DownProcess = 100
-      } else if (info.status === 1) {
-        item.Down.IsFailed = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载失败'
-      } else if (info.status === 3) {
-        item.Down.IsDowning = true
-        item.Down.DownState = `离线下载重试中 ${process}%`
-      } else {
-        item.Down.IsDowning = true
-        item.Down.DownState = `离线下载中 ${process}%`
-      }
-      saveList.push(item)
-    }
-    if (saveList.length) {
-      DBDown.saveDownings(JSON.parse(JSON.stringify(saveList)))
-    }
-  }
-
   private static pikpakOfflineTick = 0
 
   static async aPikPakOfflineProgress() {
@@ -981,46 +823,4 @@ export default class DownDAL {
     }
   }
 
-  private static drive115OfflineTick = 0
-
-  static async aDrive115OfflineProgress() {
-    const downingStore = useDowningStore()
-    const list = downingStore.ListDataRaw
-    if (!list.length) return
-    DownDAL.drive115OfflineTick = (DownDAL.drive115OfflineTick + 1) % 5
-    if (DownDAL.drive115OfflineTick !== 0) return
-    const { apiDrive115OfflineProcess } = await import('../cloud115/offline')
-    const saveList: IStateDownFile[] = []
-    for (const item of list) {
-      if (item.Info.offlineProvider !== 'drive115' || !item.Info.offlineTaskId) continue
-      if (item.Down.IsCompleted || item.Down.IsFailed) continue
-      const info = await apiDrive115OfflineProcess(item.Info.user_id, item.Info.offlineTaskId)
-      if (info.error) {
-        item.Down.IsFailed = true
-        item.Down.IsDowning = false
-        item.Down.DownState = '离线下载失败'
-        item.Down.FailedMessage = info.error
-      } else {
-        item.Down.DownProcess = info.process
-        item.Down.DownSize = info.size > 0 ? Math.floor(info.size * info.process / 100) : item.Down.DownSize
-        if (info.name) item.Info.name = info.name
-        if (info.size) item.Info.size = info.size
-        if (info.status === 2 || info.process >= 100) {
-          item.Down.IsCompleted = true
-          item.Down.IsDowning = false
-          item.Down.DownState = '离线下载完成'
-          item.Down.DownProcess = 100
-        } else if (info.status === -1) {
-          item.Down.IsFailed = true
-          item.Down.IsDowning = false
-          item.Down.DownState = '离线下载失败'
-        } else {
-          item.Down.IsDowning = true
-          item.Down.DownState = `离线下载中 ${info.process}%`
-        }
-      }
-      saveList.push(item)
-    }
-    if (saveList.length) DBDown.saveDownings(JSON.parse(JSON.stringify(saveList)))
-  }
 }

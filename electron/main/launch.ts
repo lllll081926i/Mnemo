@@ -12,10 +12,6 @@ import exception from './core/exception'
 import ipcEvent from './core/ipcEvent'
 import MotrixApplication from './aria/MotrixApplication'
 
-// These protocols are already registered with third-party OAuth applications.
-// Keep them until every provider callback configuration has been migrated together.
-const OAUTH_PROTOCOLS = ['xbyboxplayer-oauth', 'boxplayer-onedriveoauth']
-
 type UserToken = {
   access_token: string;
   open_api_access_token: string;
@@ -24,8 +20,6 @@ type UserToken = {
   refresh: boolean
 }
 
-const DEFAULT_DOWN_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) aDrive/4.12.0 Chrome/108.0.5359.215 Electron/22.3.24 Safari/537.36'
 const QUARK_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Safari/537.36 Core/1.94.225.400 QQBrowser/12.2.5544.400'
 const QUARK_DOWNLOAD_AGENT =
@@ -76,7 +70,6 @@ export default class launch extends EventEmitter {
     refresh: false
   }
   private quarkCookie = ''
-  private pendingOAuthUrl: string | null = null
   public motrixApp!: MotrixApplication
 
   constructor() {
@@ -94,11 +87,6 @@ export default class launch extends EventEmitter {
       app.on('second-instance', (event, commandLine, workingDirectory) => {
         if (commandLine && commandLine.join(' ').indexOf('exit') >= 0) {
           this.hasExitArgv(commandLine)
-          return
-        }
-        const oauthUrl = this.extractOAuthUrl(commandLine)
-        if (oauthUrl) {
-          this.dispatchOAuthUrl(oauthUrl)
           return
         }
         if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
@@ -173,14 +161,12 @@ export default class launch extends EventEmitter {
     this.handleAppActivate()
     this.handleAppWillQuit()
     this.handleAppWindowAllClosed()
-    this.handleProtocolCallback()
   }
 
   handleAppReady() {
     app
       .whenReady()
       .then(() => {
-        this.registerProtocol()
         try {
           const localVersion = getResourcesPath('localVersion')
           if (localVersion && existsSync(localVersion)) {
@@ -196,8 +182,6 @@ export default class launch extends EventEmitter {
         session.defaultSession.webRequest.onBeforeSendHeaders((details, cb) => {
           const { hostname, pathname } = parseRequestUrl(details.url)
           const shouldGieeReferer = isHost(hostname, 'gitee.com')
-          const shouldBaidu = ['baidu.com', 'baidupcs.com', 'bdstatic.com', 'bcebos.com'].some((domain) => isHost(hostname, domain))
-          const should115 = isHost(hostname, '115.com') || isHost(hostname, '115cdn.net')
           const shouldBiliBili = isHost(hostname, 'bilibili.com')
           const shouldQQTv = hostname === 'v.qq.com' || hostname === 'video.qq.com'
           const shouldQuark = isHost(hostname, 'quark.cn')
@@ -256,19 +240,8 @@ export default class launch extends EventEmitter {
                 Origin: 'https://m.v.qq.com',
                 'user-agent': 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36 Edg/121.0.0.0'
               }),
-              ...(shouldBaidu && {
-                Referer: 'https://pan.baidu.com/',
-                Origin: 'https://pan.baidu.com',
-                'user-agent': 'pan.baidu.com'
-              }),
               ...(forbidUrl && {
                 'user-agent': 'SenPlayer'
-              }),
-              ...(should115 && {
-                ...(!hasAuthorizationHeader && this.userToken.tokenfrom === '115' && this.userToken.access_token
-                  ? { Authorization: `Bearer ${this.userToken.access_token}` }
-                  : {}),
-                'user-agent': DEFAULT_DOWN_AGENT
               }),
               ...(shouldToken && !hasAuthorizationHeader && fallbackAccessToken && {
                 Authorization: fallbackAccessToken,
@@ -298,10 +271,6 @@ export default class launch extends EventEmitter {
             createMainWindow()
             createTray()
             registerAutoUpdate()
-            if (this.pendingOAuthUrl) {
-              this.dispatchOAuthUrl(this.pendingOAuthUrl)
-              this.pendingOAuthUrl = null
-            }
           })
       })
       .catch((err: any) => {
@@ -356,39 +325,6 @@ export default class launch extends EventEmitter {
         app.quit() // 未测试应该使用哪一个
       }
     })
-  }
-
-  private registerProtocol() {
-    for (const protocol of OAUTH_PROTOCOLS) {
-      if (is.windows() && process.defaultApp && process.argv.length >= 2) {
-        app.setAsDefaultProtocolClient(protocol, process.execPath, [process.argv[1]])
-      } else {
-        app.setAsDefaultProtocolClient(protocol)
-      }
-    }
-  }
-
-  private handleProtocolCallback() {
-    app.on('open-url', (event, url) => {
-      event.preventDefault()
-      if (url) this.dispatchOAuthUrl(url)
-    })
-  }
-
-  private extractOAuthUrl(commandLine?: string[]) {
-    if (!commandLine) return ''
-    return commandLine.find(arg => OAUTH_PROTOCOLS.some(protocol => arg.startsWith(`${protocol}://`))) || ''
-  }
-
-  private dispatchOAuthUrl(url: string) {
-    if (!url) return
-    if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() === false) {
-      AppWindow.mainWindow.webContents.send('cloud123-oauth-callback', url)
-      AppWindow.mainWindow.show()
-      AppWindow.mainWindow.focus()
-    } else {
-      this.pendingOAuthUrl = url
-    }
   }
 
 }

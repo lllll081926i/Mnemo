@@ -16,16 +16,10 @@
 
 <p align="center">
   <img src="public/images/drive-icons/aliyun.svg" width="36" height="36" alt="阿里云盘" title="阿里云盘">
-  <img src="public/images/drive-icons/baidu.svg" width="36" height="36" alt="百度网盘" title="百度网盘">
-  <img src="public/images/drive-icons/cloud123.svg" width="36" height="36" alt="123网盘" title="123网盘">
-  <img src="public/images/drive-icons/drive115.svg" width="36" height="36" alt="115网盘" title="115网盘">
   <img src="public/images/drive-icons/pikpak.svg" width="36" height="36" alt="PikPak" title="PikPak">
   <img src="public/images/drive-icons/quark.svg" width="36" height="36" alt="夸克网盘" title="夸克网盘">
   <img src="public/images/drive-icons/cloud139.svg" width="36" height="36" alt="移动云盘" title="移动云盘">
   <img src="public/images/drive-icons/cloud189.svg" width="36" height="36" alt="天翼云盘" title="天翼云盘">
-  <img src="public/images/drive-icons/onedrive.svg" width="36" height="36" alt="OneDrive" title="OneDrive">
-  <img src="public/images/drive-icons/dropbox.svg" width="36" height="36" alt="Dropbox" title="Dropbox">
-  <img src="public/images/drive-icons/box.svg" width="36" height="36" alt="Box" title="Box">
   <img src="public/images/drive-icons/guangya.svg" width="36" height="36" alt="光鸭" title="光鸭">
 </p>
 
@@ -58,17 +52,13 @@
 | 网盘 | 说明 |
 |---|---|
 | **阿里云盘** | 列表 / 上传下载 / 分享 / 预览播放等完整能力 |
-| **百度网盘** | 浏览、传输、文件操作 |
-| **123 网盘** | 浏览、上传、分享、云离线、视频等 |
-| **115 网盘** | 浏览、传输、分享、云离线、字幕与带认证播放 |
 | **PikPak** | 登录、列表、分享、云离线 |
 | **夸克网盘** | 登录、浏览、上传下载、重命名、移动、分享、搜索 |
 | **中国移动云盘（139）** | 登录、浏览、上传下载、重命名、移动 |
 | **天翼云盘（189）** | 登录、浏览、上传下载、重命名、移动 |
-| **OneDrive** | OAuth、列表、搜索、分享、上传、版本（视账号） |
-| **Dropbox** | OAuth、列表、搜索、分享、上传、缩略图等 |
-| **Box** | OAuth、列表、搜索、分享、上传、版本等 |
 | **光鸭** | 列表、上传、分享、秒传、云离线、搜索等 |
+| **WebDAV** | 连接自建或第三方 WebDAV 存储，支持基础文件管理与传输 |
+| **S3** | 连接兼容 S3 的对象存储，支持基础文件管理与传输 |
 
 > 具体菜单以账号类型与服务商 API 为准；不支持的能力会隐藏或明确提示，不会误调其它网盘接口。
 
@@ -101,7 +91,7 @@
 
 ## 🧲 网盘云离线
 
-21. **云添加磁力 / 链接**：在支持的网盘上，把磁力或下载链接提交到**网盘服务器**离线下载，文件落在网盘内（如 115、123、PikPak、光鸭等，以各盘实际能力为准）  
+21. **云添加磁力 / 链接**：在支持的网盘上，把磁力或下载链接提交到**网盘服务器**离线下载，文件落在网盘内（如 PikPak、光鸭等，以各盘实际能力为准）
 22. **与本机下载分离**：云离线走服务商 API；本机多线程下载走 Aria HTTP 直链，互不混淆  
 
 ## 🎥 在线预览与播放
@@ -113,7 +103,7 @@
 27. **清晰度与流切换**：多清晰度 / 多视频流时可选（视网盘转码或媒体源）  
 28. **播放速度**：自定义倍速  
 29. **播放列表**：同目录连续播放、进度记忆  
-30. **认证 Header 链路**：对需要 Cookie / Authorization 的源（如部分 115、代理补齐场景）通过本地代理或播放器参数传递  
+30. **认证 Header 链路**：对需要 Cookie / Authorization 的源通过本地代理或播放器参数传递
 31. **图片预览**：图库式浏览  
 32. **文档预览**：PDF、Office（Word/表格等）、文本 / 代码、EPUB 等打开即看（作为文件预览，非独立图书产品）  
 

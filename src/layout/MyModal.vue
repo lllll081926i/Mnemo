@@ -26,12 +26,12 @@ import PostModal from '../pan/topbtns/PostModal.vue'
 import UserRewardSpace from '../user/UserRewardSpace.vue'
 import PasswordModal from '../pan/topbtns/PasswordModal.vue'
 import SelectVideoQualityModal from '../pan/topbtns/SelectVideoQualityModal.vue'
-import Cloud123OfflineDownloadModal from '../down/Cloud123OfflineDownloadModal.vue'
+import CloudOfflineDownloadModal from '../down/CloudOfflineDownloadModal.vue'
 
 export default defineComponent({
   components: {
     SelectVideoQualityModal,
-    Cloud123OfflineDownloadModal,
+    CloudOfflineDownloadModal,
     PasswordModal,
     UserRewardSpace,
     UserSpaceModal,
@@ -148,7 +148,7 @@ export default defineComponent({
                            :quality-data="modalStore.modalData.qualityData || {}"
                            :callback="modalStore.modalData.callback" />
 
-  <Cloud123OfflineDownloadModal :visible="modalStore.modalName == 'cloud123offline'" />
+  <CloudOfflineDownloadModal :visible="modalStore.modalName == 'cloudoffline'" />
 
   <PostModal :visible="modalStore.modalName == 'showpostmodal'"
              :msg='modalStore.modalData.msg || ""'

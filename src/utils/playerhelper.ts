@@ -13,17 +13,9 @@ import { getEncType, getProxyUrl } from './proxyhelper'
 import { CleanStringForCmd } from './filehelper'
 import Db from './db'
 import { humanTime } from './format'
-import { isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
-import { apiDrive115FileDetailResult } from '../cloud115/filecmd'
-import { apiDrive115VideoHistory } from '../cloud115/video'
-import { apiDrive115FileList, mapDrive115DetailToAliModel, mapDrive115FileToAliModel } from '../cloud115/dirfilelist'
-import { apiCloud123FileList, mapCloud123FileToAliModel } from '../cloud123/dirfilelist'
-import { apiBaiduFileList, mapBaiduFileToAliModel } from '../cloudbaidu/dirfilelist'
+import { isAliyunUser, isGuangyaUser, isPikPakUser, isQuarkUser } from '../aliapi/utils'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
 import { apiQuarkFileList, mapQuarkFileToAliModel } from '../quark/dirfilelist'
-import { apiDropboxFileList, mapDropboxFileToAliModel } from '../dropbox/dirfilelist'
-import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
-import { apiBoxFileList, mapBoxItemToAliModel } from '../box/dirfilelist'
 import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../guangya/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from './webdavClient'
 import { buildDirectPlayerInvocation, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
@@ -39,28 +31,9 @@ const PlayerUtils = {
 
   async getPlayCursor(user_id: string, drive_id: string, file_id: string) {
     if (isWebDavDrive(drive_id)) return undefined
-    if (isCloud123User(user_id) || drive_id === 'cloud123') return undefined
-    if (isBaiduUser(user_id) || drive_id === 'baidu') return undefined
     if (isPikPakUser(user_id) || drive_id === 'pikpak') return undefined
     if (isQuarkUser(user_id) || drive_id === 'quark') return undefined
-    if (isDropboxUser(user_id) || drive_id === 'dropbox') return undefined
-    if (isOneDriveUser(user_id) || drive_id === 'onedrive') return undefined
-    if (isBoxUser(user_id) || drive_id === 'box') return undefined
     if (isGuangyaUser(user_id) || drive_id === 'guangya') return undefined
-    if (isDrive115User(user_id) || drive_id === 'drive115') {
-      const { detail, error } = await apiDrive115FileDetailResult(user_id, file_id)
-      if (!detail) {
-        if (error) message.error(error)
-        return undefined
-      }
-      const info = mapDrive115DetailToAliModel(detail, drive_id)
-      const play_duration = Number(detail.play_long || 0)
-      let play_cursor = await apiDrive115VideoHistory(user_id, detail.pick_code)
-      if (play_duration > 0 && play_cursor >= play_duration - 10) {
-        play_cursor = play_duration - 10
-      }
-      return { info, play_duration, play_cursor }
-    }
     // 获取文件信息
     const info = await AliFile.ApiFileInfo(user_id, drive_id, file_id)
     if (info && typeof info == 'string') {
@@ -95,15 +68,6 @@ const PlayerUtils = {
       if (connection) {
         items = await listWebDavDirectory(connection, parent_file_id || '/')
       }
-    } else if (isCloud123User(user_id) || drive_id === 'cloud123') {
-      const list = await apiCloud123FileList(user_id, parent_file_id, 500, false)
-      items = list.map(item => mapCloud123FileToAliModel(item))
-    } else if (isDrive115User(user_id) || drive_id === 'drive115') {
-      const list = await apiDrive115FileList(user_id, parent_file_id, 200, 0, true)
-      items = list.map(item => mapDrive115FileToAliModel(item, drive_id))
-    } else if (isBaiduUser(user_id) || drive_id === 'baidu') {
-      const list = await apiBaiduFileList(user_id, parent_file_id || '/', 'name', 0, 1000)
-      items = list.map(item => mapBaiduFileToAliModel(item, drive_id, parent_file_id || '/'))
     } else if (isPikPakUser(user_id) || drive_id === 'pikpak') {
       const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'pikpak_root'
       const list = await apiPikPakFileList(user_id, parentId, 500)
@@ -112,18 +76,6 @@ const PlayerUtils = {
       const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : '0'
       const list = await apiQuarkFileList(user_id, parentId, 500)
       items = list.items.map(item => mapQuarkFileToAliModel(item, drive_id, parentId))
-    } else if (isDropboxUser(user_id) || drive_id === 'dropbox') {
-      const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'dropbox_root'
-      const list = await apiDropboxFileList(user_id, parentId, 500)
-      items = list.map(item => mapDropboxFileToAliModel(item, drive_id, parentId))
-    } else if (isOneDriveUser(user_id) || drive_id === 'onedrive') {
-      const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'onedrive_root'
-      const list = await apiOneDriveFileList(user_id, parentId)
-      items = list.map(item => mapOneDriveItemToAliModel(item, drive_id, parentId))
-    } else if (isBoxUser(user_id) || drive_id === 'box') {
-      const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'box_root'
-      const list = await apiBoxFileList(user_id, parentId, 500)
-      items = list.map(item => mapBoxItemToAliModel(item, drive_id, parentId))
     } else if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'guangya_root'
       const list = await apiGuangyaFileList(user_id, parentId, 500)
@@ -276,7 +228,7 @@ const PlayerUtils = {
           currentFileInfo = playList[status.value]
           // 自动标记
           const { drive_id, file_id, description } = currentFileInfo
-          if (uiAutoColorVideo && !isPikPakUser(token) && !isQuarkUser(token) && !isDropboxUser(token) && !isOneDriveUser(token) && !isBoxUser(token) && !isGuangyaUser(token) && drive_id !== 'pikpak' && drive_id !== 'quark' && drive_id !== 'dropbox' && drive_id !== 'onedrive' && drive_id !== 'box' && drive_id !== 'guangya' && (!description || !description.includes('ce74c3c'))) {
+          if (uiAutoColorVideo && !isPikPakUser(token) && !isQuarkUser(token) && !isGuangyaUser(token) && drive_id !== 'pikpak' && drive_id !== 'quark' && drive_id !== 'guangya' && (!description || !description.includes('ce74c3c'))) {
             AliFileCmd.ApiFileColorBatch(token.user_id, drive_id, description, 'ce74c3c', [file_id])
           }
         }

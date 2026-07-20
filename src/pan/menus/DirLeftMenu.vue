@@ -5,17 +5,13 @@ import PanDAL from '../pandal'
 import { usePanTreeStore } from '../../store'
 import TreeStore from '../../store/treestore'
 import { computed } from 'vue'
-import { isAliyunUser as isAliyunAccountUser, isBoxUser, isCloud123User, isDropboxUser, isGuangyaUser, isOneDriveUser } from '../../aliapi/utils'
+import { isAliyunUser as isAliyunAccountUser, isGuangyaUser } from '../../aliapi/utils'
 
 const istree = true
 const pantreeStore = usePanTreeStore()
-const isCloudUser = computed(() => isCloud123User(pantreeStore.user_id || '') || pantreeStore.drive_id === 'cloud123')
 const isAliyunAccount = computed(() => isAliyunAccountUser(pantreeStore.user_id || ''))
-const isDropbox = computed(() => isDropboxUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'dropbox')
-const isOneDrive = computed(() => isOneDriveUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'onedrive')
-const isBox = computed(() => isBoxUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'box')
 const isGuangya = computed(() => isGuangyaUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'guangya')
-const isShareSupported = computed(() => props.inputselectType.includes('resource') || isDropbox.value || isOneDrive.value || isBox.value || isGuangya.value)
+const isShareSupported = computed(() => props.inputselectType.includes('resource') || isGuangya.value)
 
 const props = defineProps({
   inputselectType: {

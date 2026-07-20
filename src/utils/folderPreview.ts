@@ -2,15 +2,9 @@ import { IAliGetFileModel } from '../aliapi/alimodels'
 import AliDirFileList from '../aliapi/dirfilelist'
 import {
   isAliyunUser,
-  isBaiduUser,
-  isBoxUser,
-  isCloud123User,
   isCloud139User,
   isCloud189User,
-  isDrive115User,
-  isDropboxUser,
   isGuangyaUser,
-  isOneDriveUser,
   isPikPakUser,
   isQuarkUser
 } from '../aliapi/utils'
@@ -51,18 +45,6 @@ async function fetchFolderItemsRaw(p: FolderPreviewParams): Promise<IAliGetFileM
   if (!user_id || !drive_id || !file_id) return []
 
   try {
-    if (isBaiduUser(user_id) || drive_id === 'baidu') {
-      const mod = await tryDynamicImport(() => import('../cloudbaidu/dirfilelist'))
-      if (!mod) return []
-      // 百度网盘的目录列表 API 用路径而非 fs_id
-      const dir = path && path.length ? path : (file_id === '/' ? '/' : path || '/')
-      const list = await mod.apiBaiduFileList(user_id, dir, 'name', 0, MAX_PREVIEW_FILES, 0)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapBaiduFileToAliModel(item, drive_id, dir)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
     if (isPikPakUser(user_id) || drive_id === 'pikpak') {
       const mod = await tryDynamicImport(() => import('../pikpak/dirfilelist'))
       if (!mod) return []
@@ -71,60 +53,6 @@ async function fetchFolderItemsRaw(p: FolderPreviewParams): Promise<IAliGetFileM
       const items = resp?.items || []
       return items.map((item: any) => {
         const mapped = mod.mapPikPakFileToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isCloud123User(user_id) || drive_id === 'cloud123') {
-      const mod = await tryDynamicImport(() => import('../cloud123/dirfilelist'))
-      if (!mod) return []
-      const list = await mod.apiCloud123FileList(user_id, file_id, MAX_PREVIEW_FILES)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapCloud123FileToAliModel(item)
-        mapped.drive_id = drive_id
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isDrive115User(user_id) || drive_id === 'drive115') {
-      const mod = await tryDynamicImport(() => import('../cloud115/dirfilelist'))
-      if (!mod) return []
-      const list = await mod.apiDrive115FileList(user_id, file_id, MAX_PREVIEW_FILES, 0, true)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapDrive115FileToAliModel(item, drive_id)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isOneDriveUser(user_id) || drive_id === 'onedrive') {
-      const mod = await tryDynamicImport(() => import('../onedrive/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'onedrive_root' ? 'onedrive_root' : file_id
-      const list = await mod.apiOneDriveFileList(user_id, parentId)
-      return (list || []).slice(0, MAX_PREVIEW_FILES).map((item: any) => {
-        const mapped = mod.mapOneDriveItemToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isBoxUser(user_id) || drive_id === 'box') {
-      const mod = await tryDynamicImport(() => import('../box/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'box_root' ? 'box_root' : file_id
-      const list = await mod.apiBoxFileList(user_id, parentId, MAX_PREVIEW_FILES)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapBoxItemToAliModel(item, drive_id, parentId)
-        ;(mapped as any).user_id = user_id
-        return mapped
-      })
-    }
-    if (isDropboxUser(user_id) || drive_id === 'dropbox') {
-      const mod = await tryDynamicImport(() => import('../dropbox/dirfilelist'))
-      if (!mod) return []
-      const parentId = file_id === 'dropbox_root' ? 'dropbox_root' : file_id
-      const list = await mod.apiDropboxFileList(user_id, parentId, MAX_PREVIEW_FILES)
-      return (list || []).map((item: any) => {
-        const mapped = mod.mapDropboxFileToAliModel(item, drive_id, parentId)
         ;(mapped as any).user_id = user_id
         return mapped
       })

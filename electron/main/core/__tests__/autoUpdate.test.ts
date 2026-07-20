@@ -23,7 +23,8 @@ describe('createAutoUpdateController', () => {
 
   it('publishes a latest stable release with every required provider credential', () => {
     const workflow = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8')
-    expect(workflow).toContain('BAIDU_PCS_APP_ID')
+    expect(workflow).toContain('PIKPAK_CLIENT_ID')
+    expect(workflow).not.toMatch(/BAIDU_|CLOUD123_|DRIVE115_|DROPBOX_|ONEDRIVE_|BOX_CLIENT/)
     expect(workflow).toContain('--prerelease=false')
     expect(workflow).toContain('--latest')
   })

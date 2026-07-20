@@ -13,13 +13,7 @@ import { humanSize, Sleep } from '../utils/format'
 import { RuningList } from './uiupload'
 import path from 'path'
 import fspromises from 'fs/promises'
-import Cloud123UploadDisk from '../cloud123/uploaddisk'
-import BaiduUploadDisk from '../cloudbaidu/uploaddisk'
-import Drive115UploadDisk from '../cloud115/uploaddisk'
-import DropboxUploadDisk from '../dropbox/upload'
-import OneDriveUploadDisk from '../onedrive/upload'
 import GuangyaUploadDisk from '../guangya/uploaddisk'
-import BoxUploadDisk from '../box/upload'
 import PikPakUploadDisk from '../pikpak/upload'
 import QuarkUploadDisk from '../quark/upload'
 import Cloud139UploadDisk from '../cloud139/upload'
@@ -73,13 +67,7 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
     return creatDirAndReadChildren(fileui)
   }
 
-  if (provider === 'cloud123') return runUploadDisk(fileui, Cloud123UploadDisk.UploadOneFile)
   if (provider === 'guangya') return runUploadDisk(fileui, GuangyaUploadDisk.UploadOneFile)
-  if (provider === 'baidu') return runUploadDisk(fileui, BaiduUploadDisk.UploadOneFile)
-  if (provider === '115') return runUploadDisk(fileui, Drive115UploadDisk.UploadOneFile)
-  if (provider === 'dropbox') return runUploadDisk(fileui, DropboxUploadDisk.UploadOneFile)
-  if (provider === 'onedrive') return runUploadDisk(fileui, OneDriveUploadDisk.UploadOneFile)
-  if (provider === 'box') return runUploadDisk(fileui, BoxUploadDisk.UploadOneFile)
   if (provider === 'pikpak') return runUploadDisk(fileui, PikPakUploadDisk.UploadOneFile)
   if (provider === 'quark') return runUploadDisk(fileui, QuarkUploadDisk.UploadOneFile)
   if (provider === '139') return runUploadDisk(fileui, Cloud139UploadDisk.UploadOneFile)

@@ -10,7 +10,7 @@ import PanDAL from './pandal'
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
 
 import { dropMoveSelectedFile, handleUpload, menuCopySelectedFile, menuCreatShare, menuFavSelectFile, menuTrashSelectFile, topSearchAll, uploadLocalPaths } from './topbtns/topbtn'
-import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalPassword, modalRename, modalSelectPanDir, modalCloud123OfflineDownload } from '../utils/modal'
+import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalPassword, modalRename, modalSelectPanDir, modalCloudOfflineDownload } from '../utils/modal'
 import { PanFileState } from './panfilestore'
 import PanTopbtn from './menus/PanTopbtn.vue'
 import FileTopbtn from './menus/FileTopbtn.vue'
@@ -22,7 +22,7 @@ import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
 import { TestButton } from '../utils/mosehelper'
 import usePanTreeStore from './pantreestore'
-import { GetDriveID, GetDriveType, isAliyunUser, isCloud123User, isDrive115User, isGuangyaUser, isPikPakUser } from '../aliapi/utils'
+import { GetDriveID, GetDriveType, isAliyunUser, isGuangyaUser, isPikPakUser } from '../aliapi/utils'
 import { xorWith } from 'lodash'
 import { flattenDriveToolFolders, moveDriveToolFiles, type OrganizeFileItem } from '../utils/drive-tools/organize'
 import { buildMediaOrganizePlan, executeMediaOrganizePlan, mapMediaOrganizeFiles } from '../utils/drive-tools/mediaOrganize'
@@ -37,14 +37,6 @@ const inputsearchType = ref<string[]>([])
 const handleListScroll = (event?: Event) => {
   onHideRightMenuScroll()
   cancelFolderPreview()
-  if (panfileStore.SelectDirType !== 'trash') return
-  if (!isDrive115User(panTreeStore.user_id || '')) return
-  const target = event?.target as HTMLElement | undefined
-  if (!target) return
-  const distance = target.scrollHeight - target.scrollTop - target.clientHeight
-  if (distance < 120) {
-    // PanDAL.LoadMoreDrive115Trash(panTreeStore.user_id, panfileStore.DriveID)
-  }
 }
 
 const appStore = useAppStore()
@@ -57,16 +49,15 @@ const isOfflineDownloadSupported = computed(() => {
   if (panfileStore.SelectDirType !== 'pan') return false
   const user = panTreeStore.user_id || ''
   const drive = panTreeStore.drive_id || panfileStore.DriveID
-  return isCloud123User(user) || isPikPakUser(user) || isGuangyaUser(user) || isDrive115User(user) || ['cloud123', 'pikpak', 'guangya', 'drive115'].includes(drive)
+  return isPikPakUser(user) || isGuangyaUser(user) || ['pikpak', 'guangya'].includes(drive)
 })
 
 const handleOfflineDownload = () => {
   if (!isOfflineDownloadSupported.value) return
   const isRoot = !panfileStore.DirID || panfileStore.DirID.includes('root')
-  const isDrive115 = isDrive115User(panTreeStore.user_id || '') || (panTreeStore.drive_id || panfileStore.DriveID) === 'drive115'
-  modalCloud123OfflineDownload({
-    dirId: isRoot ? (isDrive115 ? '0' : '') : panfileStore.DirID,
-    dirName: isRoot ? (isDrive115 ? '根目录' : '默认（来自:离线下载）') : panfileStore.DirName
+  modalCloudOfflineDownload({
+    dirId: isRoot ? '' : panfileStore.DirID,
+    dirName: isRoot ? '默认（来自:离线下载）' : panfileStore.DirName
   })
 }
 

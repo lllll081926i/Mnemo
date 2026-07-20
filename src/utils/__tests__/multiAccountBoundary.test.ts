@@ -17,32 +17,21 @@ describe('multi-account provider boundaries', () => {
     expect(change).toContain('ensureTokenReady(token)')
     expect(change).not.toContain('AliUser.ApiTokenRefreshAccount')
     expect(ensure).toContain('if (isNonAliyunProvider(token))')
+    expect(ensure).toContain("resolveDriveProvider(token) === 'unknown'")
   })
 
-  it('keeps non-Aliyun accounts out of Aliyun refresh and sign-in APIs', () => {
+  it('keeps retained non-Aliyun accounts out of Aliyun refresh and sign-in APIs', () => {
     const source = read('src/user/userdal.ts')
     const login = methodSource(source, 'static async UserLogin', 'static async LoadPanData')
     const refresh = methodSource(source, 'static async UserRefreshByUserFace', 'static async UserAutoSign')
     const autoSign = source.slice(source.indexOf('static async UserAutoSign'))
-    const cloud123Login = methodSource(login, 'if (isCloud123User(token))', '} else if (isBaiduUser(token))')
-
-    expect(cloud123Login).not.toContain('OpenApiTokenRefreshAccount')
-    expect(refresh).toContain('refreshCloud123AccessToken')
+    expect(login).toContain('if (isPikPakUser(token))')
+    expect(login).toContain('else if (isGuangyaUser(token))')
+    expect(login).toContain('else if (isWebDavUser(token))')
+    expect(login).toContain('else if (isS3User(token))')
+    expect(login).toContain('else if (!isNonAliyunProvider(token))')
     expect(refresh).toContain('!isNonAliyunProvider(token)')
     expect(autoSign).toContain('isNonAliyunProvider(token)')
-  })
-
-  it('migrates Baidu and 115 fallback ids to stable remote account ids', () => {
-    const baidu = read('src/utils/baidu.ts')
-    const user = read('src/aliapi/user.ts')
-    const userDal = read('src/user/userdal.ts')
-
-    expect(baidu).toContain("buildDriveProviderUserId('baidu', uk)")
-    expect(baidu).not.toContain('if (!token.user_id && uk)')
-    expect(user).toContain("buildDriveProviderUserId('115', accountId)")
-    expect(user).toContain('SaveUserToken(token, previousUserId)')
-    expect(userDal).toContain('SaveUserToken(refreshed, previousUserId)')
-    expect(userDal).not.toContain('refreshed.user_id = token.user_id || refreshed.user_id')
   })
 
   it('persists inline-key user records without passing a conflicting Dexie key', () => {

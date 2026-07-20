@@ -1,13 +1,11 @@
 <script lang="ts">
 import AliFileCmd from '../../aliapi/filecmd'
-import { apiCloud123Mkdir } from '../../cloud123/filecmd'
 import { usePanTreeStore, useSettingStore } from '../../store'
 import message from '../../utils/message'
 import { modalCloseAll } from '../../utils/modal'
 import { CheckFileName, ClearFileName } from '../../utils/filehelper'
 import { defineComponent, PropType, reactive, ref } from 'vue'
 import PanDAL from '../pandal'
-import { isCloud123User } from '../../aliapi/utils'
 
 export default defineComponent({
   props: {
@@ -119,9 +117,7 @@ export default defineComponent({
         this.okLoading = true
         let newdirid = ''
         const parentId = this.parentdirid || pantreeStore.selectDir.file_id
-        const createRequest = isCloud123User(pantreeStore.user_id || '')
-          ? apiCloud123Mkdir(pantreeStore.user_id, parentId, newName)
-          : AliFileCmd.ApiCreatNewForder(pantreeStore.user_id, pantreeStore.drive_id, parentId, newName, this.encType)
+        const createRequest = AliFileCmd.ApiCreatNewForder(pantreeStore.user_id, pantreeStore.drive_id, parentId, newName, this.encType)
 
         createRequest
           .then((data) => {

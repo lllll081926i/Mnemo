@@ -24,20 +24,13 @@ export interface DirectLinkExportResult {
 
 export const normalizeDriveToolDriveId = (driveId: string): string => {
   const id = String(driveId || '')
-  const aliases: Record<string, string> = {
-    '123': 'cloud123',
-    '115': 'drive115',
-    '139': 'cloud139',
-    '189': 'cloud189'
-  }
+  const aliases: Record<string, string> = { '139': 'cloud139', '189': 'cloud189' }
   return aliases[id] || id
 }
 
 export const normalizeDriveToolPlatform = (platform: string): string => {
   const value = String(platform || '')
   const aliases: Record<string, string> = {
-    '123': 'cloud123',
-    drive115: '115',
     cloud139: '139',
     cloud189: '189'
   }
@@ -51,17 +44,11 @@ export const driveToolPlatformMatches = (tokenfrom: string, requested?: string):
 
 export const driveToolRootIdFor = (driveId: string): string => {
   const map: Record<string, string> = {
-    cloud123: 'cloud_root',
-    drive115: 'drive115_root',
-    baidu: 'baidu_root',
     pikpak: 'pikpak_root',
     quark: 'quark_root',
     cloud139: 'cloud139_root',
     cloud189: 'cloud189_root',
     guangya: 'guangya_root',
-    dropbox: 'dropbox_root',
-    onedrive: 'onedrive_root',
-    box: 'box_root'
   }
   return map[normalizeDriveToolDriveId(driveId)] || 'root'
 }
@@ -71,45 +58,13 @@ export const driveToolDriveIdForPlatform = (platform: string, defaultDriveId = '
   return normalizeDriveToolDriveId(defaultDriveId || platform)
 }
 
-const listAllCloud123Children = async (userId: string, parentId: string | number, driveId: string): Promise<IAliGetFileModel[]> => {
-  const { apiCloud123FileListPage, mapCloud123FileToAliModel } = await import('../../cloud123/dirfilelist')
-  const output: IAliGetFileModel[] = []
-  const limit = 100
-  let lastFileId: string | number = ''
-  for (let i = 0; i < 200; i++) {
-    const page = await apiCloud123FileListPage(userId, parentId, limit, false, '', 0, lastFileId)
-    output.push(...page.items.map(item => ({ ...mapCloud123FileToAliModel(item), drive_id: driveId })))
-    if (!page.items.length || page.items.length < limit || page.lastFileId === -1 || page.lastFileId === Number(lastFileId)) break
-    lastFileId = page.lastFileId
-  }
-  return output
-}
-
-const listAllDrive115Children = async (userId: string, parentId: string | number, driveId: string): Promise<IAliGetFileModel[]> => {
-  const { apiDrive115FileList, mapDrive115FileToAliModel } = await import('../../cloud115/dirfilelist')
-  const output: IAliGetFileModel[] = []
-  const limit = 200
-  for (let offset = 0; offset < 200000; offset += limit) {
-    const page = await apiDrive115FileList(userId, Number(parentId || 0), limit, offset, true)
-    output.push(...page.map(item => mapDrive115FileToAliModel(item, driveId)))
-    if (page.length < limit) break
-  }
-  return output
-}
-
 const providerRootParent = (driveId: string, fileId: string) => {
   const providerDriveId = normalizeDriveToolDriveId(driveId)
-  if (providerDriveId === 'cloud123') return fileId === 'cloud_root' ? '0' : fileId
-  if (providerDriveId === 'drive115') return fileId === 'drive115_root' ? '0' : fileId
-  if (providerDriveId === 'baidu') return fileId === 'baidu_root' ? '/' : fileId
   if (providerDriveId === 'pikpak') return fileId === 'pikpak_root' ? 'pikpak_root' : fileId
   if (providerDriveId === 'quark') return fileId === 'quark_root' ? '0' : fileId
   if (providerDriveId === 'cloud139') return fileId === 'cloud139_root' ? '/' : fileId
   if (providerDriveId === 'cloud189') return fileId === 'cloud189_root' ? '-11' : fileId
   if (providerDriveId === 'guangya') return fileId === 'guangya_root' ? 'guangya_root' : fileId
-  if (providerDriveId === 'dropbox') return fileId === 'dropbox_root' ? 'dropbox_root' : fileId
-  if (providerDriveId === 'onedrive') return fileId === 'onedrive_root' ? 'onedrive_root' : fileId
-  if (providerDriveId === 'box') return fileId === 'box_root' ? 'box_root' : fileId
   return fileId
 }
 
@@ -121,16 +76,6 @@ export const listDriveToolChildren = async (userId: string, driveId: string, fil
   }
   const providerDriveId = normalizeDriveToolDriveId(driveId)
   const parentId = providerRootParent(providerDriveId, fileId)
-  if (providerDriveId === 'cloud123') {
-    return listAllCloud123Children(userId, parentId, providerDriveId)
-  }
-  if (providerDriveId === 'drive115') {
-    return listAllDrive115Children(userId, parentId, providerDriveId)
-  }
-  if (providerDriveId === 'baidu') {
-    const { apiBaiduFileList, mapBaiduFileToAliModel } = await import('../../cloudbaidu/dirfilelist')
-    return (await apiBaiduFileList(userId, parentId, 'name', 0, 1000)).map(item => mapBaiduFileToAliModel(item, providerDriveId, parentId))
-  }
   if (providerDriveId === 'pikpak') {
     const { apiPikPakFileList, mapPikPakFileToAliModel } = await import('../../pikpak/dirfilelist')
     const { items } = await apiPikPakFileList(userId, parentId, 100)
@@ -152,18 +97,6 @@ export const listDriveToolChildren = async (userId: string, driveId: string, fil
   if (providerDriveId === 'guangya') {
     const { apiGuangyaFileList, mapGuangyaFileToAliModel } = await import('../../guangya/dirfilelist')
     return (await apiGuangyaFileList(userId, parentId, 200)).map(item => mapGuangyaFileToAliModel(item, providerDriveId, fileId))
-  }
-  if (providerDriveId === 'dropbox') {
-    const { apiDropboxFileList, mapDropboxFileToAliModel } = await import('../../dropbox/dirfilelist')
-    return (await apiDropboxFileList(userId, parentId, 500)).map(item => mapDropboxFileToAliModel(item, providerDriveId, parentId))
-  }
-  if (providerDriveId === 'onedrive') {
-    const { apiOneDriveFileList, mapOneDriveItemToAliModel } = await import('../../onedrive/dirfilelist')
-    return (await apiOneDriveFileList(userId, parentId)).map(item => mapOneDriveItemToAliModel(item, providerDriveId, parentId))
-  }
-  if (providerDriveId === 'box') {
-    const { apiBoxFileList, mapBoxItemToAliModel } = await import('../../box/dirfilelist')
-    return (await apiBoxFileList(userId, parentId)).map(item => mapBoxItemToAliModel(item, providerDriveId, parentId))
   }
   const { default: AliDirFileList } = await import('../../aliapi/dirfilelist')
   const dir = await AliDirFileList.ApiDirFileList(userId, driveId, fileId, '', 'name asc')

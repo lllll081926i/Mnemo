@@ -11,7 +11,7 @@ import message from './message'
 import { modalArchive, modalArchivePassword, modalSelectPanDir, modalSelectVideoQuality } from './modal'
 import PlayerUtils from './playerhelper'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from './proxyhelper'
-import { isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser } from '../aliapi/utils'
+import { isAliyunUser, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser } from '../aliapi/utils'
 
 async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo | undefined> {
   const explicitUserId = (file as any).user_id as string | undefined
@@ -23,33 +23,21 @@ async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo |
   const currentToken = await UserDAL.GetUserTokenFromDB(currentUserId)
   const driveId = file.drive_id || ''
   const matchesCurrent = currentToken && (
-    (driveId === 'cloud123' && isCloud123User(currentToken))
-    || (driveId === 'drive115' && isDrive115User(currentToken))
-    || (driveId === 'baidu' && isBaiduUser(currentToken))
-    || (driveId === 'pikpak' && isPikPakUser(currentToken))
-    || (driveId === 'dropbox' && isDropboxUser(currentToken))
-    || (driveId === 'onedrive' && isOneDriveUser(currentToken))
-    || (driveId === 'box' && isBoxUser(currentToken))
+    (driveId === 'pikpak' && isPikPakUser(currentToken))
     || (driveId === 'guangya' && isGuangyaUser(currentToken))
     || (driveId === 'cloud139' && isCloud139User(currentToken))
     || (driveId === 'cloud189' && isCloud189User(currentToken))
-    || (!['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(currentToken))
+    || (!['pikpak', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(currentToken))
   )
   if (matchesCurrent && currentToken?.access_token) return currentToken
 
   const userList = await UserDAL.GetUserListFromDB()
   const matched = userList.find((token) => (
-    (driveId === 'cloud123' && isCloud123User(token))
-    || (driveId === 'drive115' && isDrive115User(token))
-    || (driveId === 'baidu' && isBaiduUser(token))
-    || (driveId === 'pikpak' && isPikPakUser(token))
-    || (driveId === 'dropbox' && isDropboxUser(token))
-    || (driveId === 'onedrive' && isOneDriveUser(token))
-    || (driveId === 'box' && isBoxUser(token))
+    (driveId === 'pikpak' && isPikPakUser(token))
     || (driveId === 'guangya' && isGuangyaUser(token))
     || (driveId === 'cloud139' && isCloud139User(token))
     || (driveId === 'cloud189' && isCloud189User(token))
-    || (!['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(token))
+    || (!['pikpak', 'guangya', 'cloud139', 'cloud189'].includes(driveId) && isAliyunUser(token))
   ))
   if (!matched?.user_id) return currentToken || undefined
   return await UserDAL.GetUserTokenFromDB(matched.user_id) || undefined
@@ -88,7 +76,7 @@ function buildSiblingVideoPlaylist(file: IAliGetFileModel, provided?: IPageVideo
 }
 
 const TEXT_PREVIEW_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv', 'nfo', 'srt', 'vtt', 'ass', 'ssa'])
-const PDF_PREVIEW_DRIVES = new Set(['cloud123', 'drive115', 'baidu', 'pikpak', 'dropbox', 'onedrive', 'box', 'guangya', 'cloud139', 'cloud189'])
+const PDF_PREVIEW_DRIVES = new Set(['pikpak', 'guangya', 'cloud139', 'cloud189'])
 const EPUB_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const DOCX_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const OFFICE_TO_PDF_DRIVES = PDF_PREVIEW_DRIVES
@@ -283,7 +271,7 @@ async function Video(
     message.error('内置 MPV 仅支持 macOS，请在设置中选择“自定义播放软件”并指定播放器路径。')
     return
   }
-  if (uiAutoColorVideo && !isPikPakUser(token) && !isDropboxUser(token) && !isOneDriveUser(token) && !isBoxUser(token) && file.drive_id !== 'pikpak' && file.drive_id !== 'dropbox' && file.drive_id !== 'onedrive' && file.drive_id !== 'box' && (!desc || !desc.includes('ce74c3c'))) {
+  if (uiAutoColorVideo && !isPikPakUser(token) && file.drive_id !== 'pikpak' && (!desc || !desc.includes('ce74c3c'))) {
     AliFileCmd.ApiFileColorBatch(token.user_id, file.drive_id, file.description, 'ce74c3c', [file.file_id])
   }
   if (uiVideoPlayer == 'web' || (uiVideoPlayer === 'mpv' && window.platform === 'darwin')) {

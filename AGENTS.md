@@ -40,7 +40,7 @@ Real keys live in `.env.local` / GitHub Secrets → `scripts/generate-secrets.mj
 | `scripts/` | Build / secrets |
 | `static/engine/` | aria2 / mpv binaries |
 
-Providers under `src/`: `aliapi/`, `cloudbaidu/`, `cloud123/`, `cloud115/`, `pikpak/`, `onedrive/`, `box/`, `dropbox/`, `quark/`, `cloud139/`, `cloud189/`, `guangya/`.
+Providers under `src/`: `aliapi/`, `pikpak/`, `quark/`, `cloud139/`, `cloud189/`, `guangya/`; mounted-storage clients live in `utils/webdavClient.ts` and `utils/s3Client.ts`.
 
 Aliases: `@shared/*`, `@main/*`.
 

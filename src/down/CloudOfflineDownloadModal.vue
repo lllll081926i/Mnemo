@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { modalCloseAll, modalSelectPanDir } from '../utils/modal'
 import { useModalStore, useUserStore } from '../store'
-import { isCloud123User, isDrive115User, isGuangyaUser, isPikPakUser } from '../aliapi/utils'
+import { isGuangyaUser, isPikPakUser } from '../aliapi/utils'
 import message from '../utils/message'
 import DownDAL from './DownDAL'
 
@@ -19,14 +19,12 @@ const modalStore = useModalStore()
 const userStore = useUserStore()
 const provider = computed(() => {
   const user = userStore.user_id || ''
-  if (isCloud123User(user)) return 'cloud123'
   if (isPikPakUser(user)) return 'pikpak'
   if (isGuangyaUser(user)) return 'guangya'
-  if (isDrive115User(user)) return 'drive115'
   return ''
 })
-const urlPlaceholder = computed(() => provider.value === 'cloud123' ? 'http/https 链接' : 'http/https、FTP、magnet 或 ed2k 链接')
-const providerLabel = computed(() => provider.value === 'cloud123' ? '123 网盘' : provider.value === 'pikpak' ? 'PikPak' : provider.value === 'guangya' ? '光鸭云盘' : provider.value === 'drive115' ? '115 网盘' : '当前网盘')
+const urlPlaceholder = 'http/https、magnet 或 ed2k 链接'
+const providerLabel = computed(() => provider.value === 'pikpak' ? 'PikPak' : provider.value === 'guangya' ? '光鸭云盘' : '当前网盘')
 const form = reactive({
   url: '',
   fileName: '',
@@ -67,13 +65,13 @@ const handleSelectDir = () => {
   modalSelectPanDir('offline', form.dirId, (user_id: string, drive_id: string, selectFile: any) => {
     if (!selectFile || selectFile.isDir !== true) return
     if (selectFile.file_id && String(selectFile.file_id).includes('root')) {
-      snapshot.dirId = drive_id === 'drive115' ? '0' : ''
-      snapshot.dirName = drive_id === 'drive115' ? '根目录' : '默认（来自:离线下载）'
+      snapshot.dirId = ''
+      snapshot.dirName = '默认（来自:离线下载）'
     } else {
       snapshot.dirId = String(selectFile.file_id || '')
       snapshot.dirName = selectFile.name || '已选择'
     }
-    modalStore.showModal('cloud123offline', { offlineForm: snapshot })
+    modalStore.showModal('cloudoffline', { offlineForm: snapshot })
   })
 }
 
@@ -87,22 +85,20 @@ const handleCreate = async () => {
     message.error('请输入离线下载地址')
     return
   }
-  const unsupported = urls.find(url => provider.value === 'cloud123' ? !/^https?:\/\//i.test(url) : provider.value === 'drive115' ? !/^(https?:\/\/|ftp:\/\/|magnet:\?|ed2k:\/\/)/i.test(url) : !/^(https?:\/\/|magnet:\?|ed2k:\/\/)/i.test(url))
+  const unsupported = urls.find(url => !/^(https?:\/\/|magnet:\?|ed2k:\/\/)/i.test(url))
   if (unsupported) {
-    message.error(provider.value === 'cloud123' ? '123 网盘仅支持 http/https 链接' : '仅支持 http/https、FTP、magnet 或 ed2k 链接')
+    message.error('仅支持 http/https、magnet 或 ed2k 链接')
     return
   }
   okLoading.value = true
   let success = 0
   const failures: string[] = []
   for (const url of urls) {
-    const result = provider.value === 'drive115'
-      ? await DownDAL.aAddDrive115OfflineDownload(url, form.dirId)
-      : provider.value === 'pikpak'
+    const result = provider.value === 'pikpak'
       ? await DownDAL.aAddPikPakOfflineDownload(url, urls.length === 1 ? form.fileName.trim() : '', form.dirId)
       : provider.value === 'guangya'
         ? await DownDAL.aAddGuangyaOfflineDownload(url, urls.length === 1 ? form.fileName.trim() : '', form.dirId)
-        : await DownDAL.aAddCloud123OfflineDownload(url, urls.length === 1 ? form.fileName.trim() : '', form.dirId)
+        : { success: false, message: '当前账号不支持离线下载' }
     if (result.success) success++
     else failures.push(`${url.slice(0, 80)}：${result.message || '创建失败'}`)
   }
@@ -148,7 +144,7 @@ const handleCreate = async () => {
             @search="handleSelectDir"
           />
           <div style="margin-top: 6px; color: var(--color-text-3); font-size: 12px">
-            当前 provider：{{ providerLabel }}。115 网盘可选择根目录；其他网盘未选择时将保存到默认离线下载目录。
+            当前 provider：{{ providerLabel }}。未选择时将保存到默认离线下载目录。
           </div>
         </a-form-item>
         <div style="display: flex; justify-content: flex-end; gap: 8px">

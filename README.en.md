@@ -36,17 +36,13 @@
 | Drive | Notes |
 |---|---|
 | **Aliyun Drive** | Full list / upload-download / share / preview |
-| **Baidu Netdisk** | Browse, transfer, file ops |
-| **123 Pan** | Browse, upload, share, cloud offline, video |
-| **115** | Browse, transfer, share, cloud offline, auth headers for playback |
 | **PikPak** | Login, list, share, cloud offline |
 | **Quark** | Login, browse, upload/download, rename/move, share, search |
 | **China Mobile 139** | Login, browse, upload/download, rename/move |
 | **China Telecom 189** | Login, browse, upload/download, rename/move |
-| **OneDrive** | OAuth, list, search, share, upload, versions |
-| **Dropbox** | OAuth, list, search, share, upload, thumbnails |
-| **Box** | OAuth, list, search, share, upload, versions |
 | **Guangya** | List, upload, share, instant upload, cloud offline, search |
+| **WebDAV** | Connect WebDAV storage for basic file management and transfers |
+| **S3** | Connect S3-compatible object storage for basic file management and transfers |
 
 Menus follow real provider APIs; unsupported actions are hidden or reported clearly.
 
@@ -69,7 +65,7 @@ Menus follow real provider APIs; unsupported actions are hidden or reported clea
 - Completion notifications; prevent sleep while transferring (engine support)
 
 ### Cloud offline
-- Where supported (e.g. 115 / 123 / PikPak / Guangya), submit magnet/URL to **provider offline download** so files land **on the cloud**
+- Where supported (e.g. PikPak / Guangya), submit magnet/URL to **provider offline download** so files land **on the cloud**
 - Separate from local Aria HTTP downloads
 
 ### Preview & playback

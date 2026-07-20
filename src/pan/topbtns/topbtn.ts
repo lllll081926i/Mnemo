@@ -17,7 +17,7 @@ import TreeStore from '../../store/treestore'
 import { copyToClipboard } from '../../utils/electronhelper'
 import DownDAL from '../../down/DownDAL'
 import { isEmpty } from 'lodash'
-import { GetDriveID, isAliyunUser, isCloud123User } from '../../aliapi/utils'
+import { GetDriveID, isAliyunUser } from '../../aliapi/utils'
 import AliAlbum from '../../aliapi/album'
 import { getEncType } from '../../utils/proxyhelper'
 import { Modal, Option, Select } from '@arco-design/web-vue'
@@ -705,10 +705,6 @@ export async function topTrashDeleteAll() {
   const selectedData = PanDAL.GetPanSelectedData(false)
   if (selectedData.isError) {
     message.error('清空回收站操作失败 父文件夹错误')
-    return
-  }
-  if (isCloud123User(selectedData.user_id || '') || selectedData.drive_id === 'cloud123') {
-    message.error('暂不支持清空回收站，请移步至官方客户端操作')
     return
   }
 

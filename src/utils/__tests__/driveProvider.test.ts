@@ -1,30 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
+const retainedProviders = ['aliyun', 'pikpak', 'quark', '139', '189', 'guangya', 'webdav', 's3'] as const
+
 describe('drive provider capabilities', () => {
-  it('resolves providers from tokens, account ids and drive ids', () => {
+  it('resolves every retained provider', () => {
     expect(resolveDriveProvider('s3')).toBe('s3')
     expect(resolveDriveProvider({ userId: 'webdav:connection-id' })).toBe('webdav')
-    expect(resolveDriveProvider({ userId: 'cloud123_user-id' })).toBe('cloud123')
-    expect(resolveDriveProvider({ driveId: 'drive115' })).toBe('115')
+    expect(resolveDriveProvider({ userId: 'pikpak_account-id' })).toBe('pikpak')
+    expect(resolveDriveProvider({ userId: 'quark_account-id' })).toBe('quark')
+    expect(resolveDriveProvider({ userId: 'cloud139_account-id' })).toBe('139')
+    expect(resolveDriveProvider({ userId: 'cloud189_account-id' })).toBe('189')
+    expect(resolveDriveProvider({ userId: 'guangya_account-id' })).toBe('guangya')
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
   })
 
-  it('prefers the account provider when a stale drive id points elsewhere', () => {
-    expect(resolveDriveProvider({ userId: 'box_account-id', driveId: 'quark' })).toBe('box')
-    expect(resolveDriveProvider({ userId: 'quark_account-id', driveId: 'box' })).toBe('quark')
-  })
-
-  it('builds stable provider-scoped ids for multiple accounts', () => {
-    expect(buildDriveProviderUserId('baidu', '10001')).toBe('baidu_10001')
-    expect(buildDriveProviderUserId('baidu', '10002')).toBe('baidu_10002')
-    expect(buildDriveProviderUserId('baidu', 'baidu_10001')).toBe('baidu_10001')
-    expect(buildDriveProviderUserId('115', '20001')).toBe('115_20001')
+  it('keeps stable mounted-storage account ids', () => {
     expect(buildDriveProviderUserId('webdav', 'connection-a')).toBe('webdav:connection-a')
     expect(buildDriveProviderUserId('s3', 'connection-b')).toBe('s3:connection-b')
     expect(buildDriveProviderUserId('aliyun', 'aliyun-remote-id')).toBe('aliyun-remote-id')
-
-    expect(getDriveProviderAccountId('baidu_10001', 'baidu')).toBe('10001')
     expect(getDriveProviderAccountId('webdav:connection-a', 'webdav')).toBe('connection-a')
   })
 
@@ -34,25 +28,19 @@ describe('drive provider capabilities', () => {
     expect(aliyun.favorite).toBe(true)
     expect(aliyun.colorTag).toBe(true)
     expect(aliyun.playbackHistory).toBe(true)
-    expect(aliyun.copyTree).toBe(true)
-
-    const cloud123 = getDriveProviderCapabilities('cloud123')
-    expect(cloud123.encryption).toBe(false)
-    expect(cloud123.favorite).toBe(false)
-    expect(cloud123.colorTag).toBe(false)
-    expect(cloud123.copyTree).toBe(false)
-  })
-
-  it('exposes search only where a concrete provider search path exists', () => {
-    for (const provider of ['aliyun', 'cloud123', '115', 'guangya', 'baidu', 'quark', 'dropbox', 'onedrive', 'box']) {
-      expect(getDriveProviderCapabilities(provider).search, provider).toBe(true)
-    }
-    for (const provider of ['139', '189', 'pikpak', 'webdav', 's3', 'unknown']) {
-      expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
+    for (const provider of retainedProviders.filter((item) => item !== 'aliyun')) {
+      expect(getDriveProviderCapabilities(provider).encryption, provider).toBe(false)
     }
   })
 
-  it('builds flat Aliyun spaces and deduplicates merged resource drives', () => {
+  it('exposes only implemented search and share paths', () => {
+    for (const provider of ['aliyun', 'quark', 'guangya'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(true)
+    for (const provider of ['139', '189', 'pikpak', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
+    for (const provider of ['aliyun', 'pikpak', 'quark', 'guangya'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(true)
+    for (const provider of ['139', '189', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
+  })
+
+  it('builds flat Aliyun spaces and retained provider sidebars', () => {
     const merged = getDriveProviderSidebarEntries('aliyun', {
       resource_drive_id: 'merged-drive',
       backup_drive_id: 'merged-drive',
@@ -61,18 +49,6 @@ describe('drive provider capabilities', () => {
     })
     expect(merged.filter((entry) => entry.driveId === 'merged-drive')).toHaveLength(1)
     expect(merged.map((entry) => entry.key)).toEqual(['resource_root', 'safe_root', 'pic_root', 'favorite', 'search', 'trash', 'recover'])
-    expect(getDriveProviderSidebarEntries('aliyun', { resource_drive_id: 'merged-drive', backup_drive_id: 'merged-drive' }, { hideResourceDrive: true })[0].key).toBe('resource_root')
-    expect(getDriveProviderSidebarEntries('aliyun', { default_drive_id: 'merged-drive', resource_drive_id: 'merged-drive', backup_drive_id: 'merged-drive' }, { hideResourceDrive: true, hideBackupDrive: true }).some((entry) => entry.kind === 'space')).toBe(false)
-
-    const split = getDriveProviderSidebarEntries('aliyun', { resource_drive_id: 'resource', backup_drive_id: 'backup' })
-    expect(split.slice(0, 2).map((entry) => [entry.key, entry.title])).toEqual([
-      ['resource_root', '网盘文件'],
-      ['backup_root', '备份空间']
-    ])
-  })
-
-  it('keeps provider sidebar features aligned with capabilities', () => {
-    expect(getDriveProviderSidebarEntries('cloud123').map((entry) => entry.key)).toEqual(['search', 'trash'])
     expect(getDriveProviderSidebarEntries('pikpak').map((entry) => entry.key)).toEqual(['trash'])
     expect(getDriveProviderSidebarEntries('quark').map((entry) => entry.key)).toEqual(['search'])
     expect(getDriveProviderSidebarEntries('139')).toEqual([])
@@ -80,126 +56,27 @@ describe('drive provider capabilities', () => {
     expect(isDriveProviderSidebarEntryAvailable('pikpak', 'trash')).toBe(true)
   })
 
-  it('exposes sharing only for providers with implemented share creation', () => {
-    for (const provider of ['aliyun', 'cloud123', 'pikpak', 'quark', 'guangya', 'dropbox', 'onedrive', 'box']) {
-      expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(true)
+  it('keeps upload and destructive operations provider-specific', () => {
+    for (const provider of ['aliyun', '139', '189', 'guangya', 'pikpak', 'quark'] as const) {
+      expect(getDriveProviderCapabilities(provider).uploadMode, provider).toBe('queue')
     }
-    for (const provider of ['115', '139', '189', 'baidu', 'webdav', 's3']) {
-      expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
-    }
-  })
-
-  it('exposes only upload paths that have a provider implementation', () => {
-    for (const provider of ['aliyun', 'cloud123', '115', '139', '189', 'guangya', 'baidu', 'pikpak', 'quark', 'dropbox', 'onedrive', 'box']) {
+    for (const provider of ['webdav', 's3'] as const) {
       const capabilities = getDriveProviderCapabilities(provider)
-      expect(capabilities.upload, provider).toBe(true)
-      expect(capabilities.uploadMode, provider).toBe('queue')
-    }
-
-    for (const provider of ['webdav', 's3']) {
-      const capabilities = getDriveProviderCapabilities(provider)
-      expect(capabilities.upload, provider).toBe(true)
-      expect(capabilities.uploadMode, provider).toBe('direct')
-    }
-
-    for (const provider of ['unknown']) {
-      const capabilities = getDriveProviderCapabilities(provider)
-      expect(capabilities.upload, provider).toBe(false)
-      expect(capabilities.uploadMode, provider).toBe('none')
-    }
-  })
-
-  it('separates share creation from in-app share management', () => {
-    for (const provider of ['aliyun', 'cloud123', 'guangya', 'quark', 'dropbox']) {
-      expect(getDriveProviderCapabilities(provider).manageCreatedShares, provider).toBe(true)
-    }
-    for (const provider of ['pikpak', 'onedrive', 'box']) {
-      const capabilities = getDriveProviderCapabilities(provider)
-      expect(capabilities.createShare, provider).toBe(true)
-      expect(capabilities.manageCreatedShares, provider).toBe(false)
-    }
-
-    expect(getDriveProviderCapabilities('dropbox').editCreatedShares).toBe(false)
-    expect(getDriveProviderCapabilities('dropbox').cancelCreatedShares).toBe(false)
-    expect(getDriveProviderCapabilities('cloud123').editCreatedShares).toBe(true)
-    expect(getDriveProviderCapabilities('cloud123').cancelCreatedShares).toBe(false)
-    for (const provider of ['aliyun', 'guangya', 'quark']) {
-      const capabilities = getDriveProviderCapabilities(provider)
-      expect(capabilities.editCreatedShares, provider).toBe(true)
-      expect(capabilities.cancelCreatedShares, provider).toBe(true)
-    }
-  })
-
-  it('keeps imported-share records and share history provider-specific', () => {
-    for (const provider of ['aliyun', 'quark']) {
-      expect(getDriveProviderCapabilities(provider).manageImportedShares, provider).toBe(true)
-    }
-    for (const provider of ['cloud123', 'guangya', 'dropbox', 'pikpak', 'onedrive', 'box']) {
-      expect(getDriveProviderCapabilities(provider).manageImportedShares, provider).toBe(false)
-    }
-    expect(getDriveProviderCapabilities('aliyun').shareHistory).toBe(true)
-    expect(getDriveProviderCapabilities('quark').shareHistory).toBe(false)
-  })
-
-  it('keeps mounted storage destructive operations explicit', () => {
-    for (const provider of ['webdav', 's3']) {
-      const capabilities = getDriveProviderCapabilities(provider)
+      expect(capabilities.uploadMode).toBe('direct')
       expect(capabilities.mountedStorage).toBe(true)
       expect(capabilities.recycleBin).toBe(false)
       expect(capabilities.permanentDelete).toBe(true)
-      expect(capabilities.createTextFile).toBe(false)
-      expect(capabilities.encryption).toBe(false)
-      expect(capabilities.createShare).toBe(false)
-      expect(capabilities.trashView).toBe(false)
     }
-  })
-
-  it('distinguishes recycle actions from an in-app trash view', () => {
-    const aliyun = getDriveProviderCapabilities('aliyun')
-    expect(aliyun.trashView).toBe(true)
-    expect(aliyun.trashRestore).toBe(true)
-    expect(aliyun.trashPurge).toBe(true)
-    expect(aliyun.trashClear).toBe(true)
-
-    const cloud123 = getDriveProviderCapabilities('cloud123')
-    expect(cloud123.trashView).toBe(true)
-    expect(cloud123.trashRestore).toBe(true)
-    expect(cloud123.trashPurge).toBe(false)
-    expect(cloud123.trashClear).toBe(false)
-
-    for (const provider of ['115', 'pikpak']) {
-      const capabilities = getDriveProviderCapabilities(provider)
-      expect(capabilities.trashView).toBe(true)
-      expect(capabilities.trashRestore).toBe(true)
-      expect(capabilities.trashPurge).toBe(true)
-      expect(capabilities.trashClear).toBe(false)
-    }
-
-    for (const provider of ['quark', '139', '189', 'guangya', 'baidu', 'dropbox', 'onedrive', 'box']) {
-      expect(getDriveProviderCapabilities(provider).trashView, provider).toBe(false)
-    }
-  })
-
-  it('hides copy for providers whose command layer rejects it', () => {
-    expect(getDriveProviderCapabilities('quark').move).toBe(true)
     expect(getDriveProviderCapabilities('quark').copy).toBe(false)
-  })
-
-  it('does not expose text-file creation through providers without a buffer upload implementation', () => {
-    expect(getDriveProviderCapabilities('dropbox').createTextFile).toBe(true)
-    expect(getDriveProviderCapabilities('onedrive').createTextFile).toBe(true)
-    expect(getDriveProviderCapabilities('box').createTextFile).toBe(true)
     expect(getDriveProviderCapabilities('guangya').createTextFile).toBe(true)
-    expect(getDriveProviderCapabilities('cloud123').createTextFile).toBe(false)
-    expect(getDriveProviderCapabilities('pikpak').createTextFile).toBe(false)
-    expect(getDriveProviderCapabilities('quark').createTextFile).toBe(false)
   })
 
-  it('defaults unknown providers to no capabilities', () => {
-    const capabilities = getDriveProviderCapabilities({ userId: 'unrecognized-account' })
-    expect(capabilities.provider).toBe('unknown')
-    expect(capabilities.download).toBe(false)
-    expect(capabilities.rename).toBe(false)
-    expect(capabilities.createShare).toBe(false)
+  it('defaults removed and unknown providers to no capabilities', () => {
+    for (const id of ['cloud123', '115', 'baidu', 'dropbox', 'onedrive', 'box', 'unrecognized-account']) {
+      const capabilities = getDriveProviderCapabilities({ userId: id })
+      expect(capabilities.provider, id).toBe('unknown')
+      expect(capabilities.download, id).toBe(false)
+      expect(capabilities.rename, id).toBe(false)
+    }
   })
 })

@@ -6,25 +6,13 @@ import AliHttp from './alihttp'
 import { IAliFileItem, IAliGetDirModel, IAliGetFileModel, IAliGetForderSizeModel } from './alimodels'
 import AliDirFileList from './dirfilelist'
 import { ICompilationList, IDownloadUrl, IOfficePreViewUrl, IVideoPreviewUrl, IVideoXBTUrl } from './models'
-import { DecodeEncName, GetDriveType, isAliyunUser, isBaiduUser, isBoxUser, isCloud123User, isCloud139User, isCloud189User, isDrive115User, isDropboxUser, isGuangyaUser, isOneDriveUser, isPikPakUser, isQuarkUser } from './utils'
+import { DecodeEncName, GetDriveType, isAliyunUser, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser } from './utils'
 import { getProxyUrl, getRawUrl } from '../utils/proxyhelper'
-import { apiCloud123DownloadInfo, apiCloud123FileDetail } from '../cloud123/filecmd'
-import { mapCloud123InfoToAliModel } from '../cloud123/dirfilelist'
-import { apiCloud123TranscodeList } from '../cloud123/video'
-import { apiDrive115FileDetail } from '../cloud115/filecmd'
-import { apiDrive115DownUrl } from '../cloud115/download'
-import { mapDrive115DetailToAliModel } from '../cloud115/dirfilelist'
-import { apiDrive115VideoHistoryUpdate, apiDrive115VideoPlay, apiDrive115VideoSubtitle, getDrive115PickCode } from '../cloud115/video'
-import { apiBaiduFileList } from '../cloudbaidu/dirfilelist'
-import { apiBaiduFileMetas, mapBaiduMetaToAliFileItem } from '../cloudbaidu/filecmd'
 import { apiPikPakDownloadInfo, apiPikPakFileDetail, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
 import { apiQuarkDownloadUrl, apiQuarkFileDetail, mapQuarkFileToAliModel } from '../quark/dirfilelist'
 import { apiCloud139DownloadInfo, apiCloud139FileDetail, mapCloud139FileToAliModel } from '../cloud139/dirfilelist'
 import { apiCloud189DownloadInfo, apiCloud189FileDetail, mapCloud189FileToAliModel } from '../cloud189/dirfilelist'
 import { apiGuangyaDownloadInfo, apiGuangyaFileDetail, mapGuangyaFileToAliModel } from '../guangya/dirfilelist'
-import { apiDropboxFileDetail, apiDropboxTemporaryLink, mapDropboxFileToAliModel, resolveDropboxParentIdFromPath } from '../dropbox/dirfilelist'
-import { apiOneDriveFileDetail, getOneDriveDownloadUrl, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
-import { apiBoxFileDetail, buildBoxDownloadUrl, getBoxToken, mapBoxItemToAliModel } from '../box/dirfilelist'
 import TreeStore from '../store/treestore'
 import UserDAL from '../user/userdal'
 import { ITokenInfo } from '../user/userstore'
@@ -32,34 +20,6 @@ import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, isWeb
 import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive } from '../utils/s3Client'
 import { getAlipanVideoPromotionReason } from '../utils/alipanPromotionRules'
 import { canUseAliyunPreviewApi, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
-
-const parseBaiduPath = (file_path: string) => {
-  let p = file_path || '/'
-  if (!p.startsWith('/')) p = '/' + p
-  const idx = p.lastIndexOf('/')
-  const parent = idx <= 0 ? '/' : p.substring(0, idx)
-  const name = p.substring(idx + 1)
-  return { parent, name }
-}
-
-const getBaiduMetaByPath = async (user_id: string, file_id: string) => {
-  if (!file_id) return null
-  let fsid = Number(file_id)
-  // file_id 可能是路径格式，尝试从 description 或直接字符串中提取 fsid
-  if (!Number.isFinite(fsid)) {
-    const descMatch = file_id.match(/baidu_fsid:(\d+)/)
-    if (descMatch) {
-      fsid = Number(descMatch[1])
-    }
-  }
-  if (!Number.isFinite(fsid)) return null
-  const metas = await apiBaiduFileMetas(user_id, [fsid], 1)
-  if (!metas || metas.length === 0) {
-    console.warn('[baidu] filemetas returned empty for fsid:', fsid)
-    return null
-  }
-  return { meta: metas[0], fs_id: fsid, size: Number(metas[0].size || 0) }
-}
 
 const resolveFileProvider = async (user_id: string, drive_id: string) => {
   let token: ITokenInfo | undefined = UserDAL.GetUserToken(user_id)
@@ -110,40 +70,6 @@ export default class AliFile {
       }
     }
     if (!user_id || !drive_id || !file_id) return undefined
-    if (provider === 'cloud123') {
-      const detail = await apiCloud123FileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapCloud123InfoToAliModel(detail) as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === '115') {
-      const detail = await apiDrive115FileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapDrive115DetailToAliModel(detail, drive_id) as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      mapped.pick_code = detail.pick_code
-      return mapped
-    }
-    if (provider === 'baidu') {
-      if (file_id === 'baidu_root' || file_id === '/') {
-        return {
-          drive_id,
-          file_id,
-          parent_file_id: '',
-          name: '网盘文件',
-          type: 'folder',
-          isDir: true
-        }
-      }
-      const metaInfo = await getBaiduMetaByPath(user_id, file_id)
-      if (metaInfo?.meta) {
-        const mapped = mapBaiduMetaToAliFileItem(metaInfo.meta, drive_id, file_id) as any
-        mapped.type = mapped.isDir ? 'folder' : 'file'
-        return mapped
-      }
-      return undefined
-    }
     if (provider === 'pikpak') {
       if (file_id === 'pikpak_root') {
         return {
@@ -205,58 +131,6 @@ export default class AliFile {
       const detail = await apiGuangyaFileDetail(user_id, file_id)
       if (!detail) return undefined
       const mapped = mapGuangyaFileToAliModel(detail, drive_id, detail.parentId || detail.parentFileId || 'guangya_root') as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === 'dropbox') {
-      if (file_id === 'dropbox_root') {
-        return {
-          drive_id,
-          file_id,
-          parent_file_id: '',
-          name: '网盘文件',
-          type: 'folder',
-          isDir: true
-        }
-      }
-      const detail = await apiDropboxFileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const parentId = resolveDropboxParentIdFromPath(detail.path_display || detail.path_lower)
-      const mapped = mapDropboxFileToAliModel(detail, drive_id, parentId) as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === 'onedrive') {
-      if (file_id === 'onedrive_root') {
-        return {
-          drive_id,
-          file_id,
-          parent_file_id: '',
-          name: '网盘文件',
-          type: 'folder',
-          isDir: true
-        }
-      }
-      const detail = await apiOneDriveFileDetail(user_id, file_id)
-      if (!detail) return undefined
-      const mapped = mapOneDriveItemToAliModel(detail, drive_id, detail.parentReference?.id || 'onedrive_root') as any
-      mapped.type = mapped.isDir ? 'folder' : 'file'
-      return mapped
-    }
-    if (provider === 'box') {
-      if (file_id === 'box_root') {
-        return {
-          drive_id,
-          file_id,
-          parent_file_id: '',
-          name: '网盘文件',
-          type: 'folder',
-          isDir: true
-        }
-      }
-      const detail = await apiBoxFileDetail(user_id, file_id, false)
-      if (!detail) return undefined
-      const mapped = mapBoxItemToAliModel(detail, drive_id, detail.parent?.id || 'box_root') as any
       mapped.type = mapped.isDir ? 'folder' : 'file'
       return mapped
     }
@@ -357,50 +231,6 @@ export default class AliFile {
       return { drive_id, file_id, expire_time: Date.now() + Math.max(60, expire_sec || 14400) * 1000, url, size: info.size }
     }
     if (!user_id || !drive_id || !file_id) return '参数错误'
-    if (provider === 'baidu') {
-      const metaInfo = await getBaiduMetaByPath(user_id, file_id)
-      if (!metaInfo?.meta?.dlink) return '获取下载地址失败'
-      let dlink = metaInfo.meta.dlink
-      let token = UserDAL.GetUserToken(user_id)
-      if (!token?.access_token) {
-        token = (await UserDAL.GetUserTokenFromDB(user_id)) as ITokenInfo
-      }
-      if (token?.access_token && !dlink.includes('access_token=')) {
-        dlink += (dlink.includes('?') ? '&' : '?') + `access_token=${encodeURIComponent(token.access_token)}`
-      }
-      return {
-        drive_id,
-        file_id,
-        expire_time: GetExpiresTime(dlink),
-        url: dlink,
-        size: Number(metaInfo.meta.size || metaInfo.size || 0)
-      }
-    }
-    if (provider === 'cloud123') {
-      const data = await apiCloud123DownloadInfo(user_id, file_id)
-      if (typeof data === 'string') return data
-      return {
-        drive_id: drive_id,
-        file_id: file_id,
-        expire_time: 0,
-        url: data.url,
-        size: 0
-      }
-    }
-    if (provider === '115') {
-      const detail = await apiDrive115FileDetail(user_id, file_id)
-      if (!detail) return '获取文件详情失败'
-      const down = await apiDrive115DownUrl(user_id, detail.pick_code)
-      if (typeof down === 'string') return down
-      return {
-        drive_id: drive_id,
-        file_id: file_id,
-        expire_time: GetExpiresTime(down.url),
-        url: down.url,
-        size: down.size || detail.size || 0,
-        headers: down.headers
-      }
-    }
     if (provider === 'pikpak') {
       const info = await apiPikPakDownloadInfo(user_id, file_id)
       if (info.error) return info.error
@@ -440,42 +270,6 @@ export default class AliFile {
       const info = await apiGuangyaDownloadInfo(user_id, file_id)
       if (info.error) return info.error
       return { drive_id, file_id, expire_time: GetExpiresTime(info.url), url: info.url, size: Number(info.size || 0) }
-    }
-    if (provider === 'dropbox') {
-      const info = await apiDropboxTemporaryLink(user_id, file_id)
-      if (info.error) return info.error
-      return {
-        drive_id: drive_id,
-        file_id: file_id,
-        expire_time: GetExpiresTime(info.url),
-        url: info.url,
-        size: Number(info.metadata?.size || 0)
-      }
-    }
-    if (provider === 'onedrive') {
-      const info = await apiOneDriveFileDetail(user_id, file_id)
-      const url = getOneDriveDownloadUrl(info)
-      if (!url) return '获取 OneDrive 下载地址失败'
-      return {
-        drive_id: drive_id,
-        file_id: file_id,
-        expire_time: GetExpiresTime(url),
-        url,
-        size: Number(info?.size || 0)
-      }
-    }
-    if (provider === 'box') {
-      const token = await getBoxToken(user_id)
-      if (!token?.access_token) return '未登录 Box'
-      const detail = await apiBoxFileDetail(user_id, file_id, false)
-      const url = buildBoxDownloadUrl(file_id, token.access_token)
-      return {
-        drive_id: drive_id,
-        file_id: file_id,
-        expire_time: GetExpiresTime(url),
-        url,
-        size: Number(detail?.size || 0)
-      }
     }
     if (provider !== 'aliyun') return `${getDriveProviderLabel(provider)} 暂不支持下载`
     const data: IDownloadUrl = {
@@ -538,22 +332,10 @@ export default class AliFile {
       return '暂无转码信息'
     }
     if (!user_id || !drive_id || !file_id) return '参数错误'
-    if (provider === 'baidu') {
-      return '暂无转码信息'
-    }
     if (provider === 'pikpak') {
       return '暂无转码信息'
     }
     if (provider === 'quark') {
-      return '暂无转码信息'
-    }
-    if (provider === 'dropbox') {
-      return '暂无转码信息'
-    }
-    if (provider === 'onedrive') {
-      return '暂无转码信息'
-    }
-    if (provider === 'box') {
       return '暂无转码信息'
     }
     if (provider === 'guangya') {
@@ -564,123 +346,6 @@ export default class AliFile {
     }
     if (provider === '189') {
       return '暂无转码信息'
-    }
-    if (provider === 'cloud123') {
-      const transcode = await apiCloud123TranscodeList(user_id, file_id)
-      if (typeof transcode === 'string') return transcode
-      if (!transcode.list.length) {
-        if (transcode.status === 1) return '视频正在转码中，稍后重试'
-        if (transcode.status === 3) return '视频转码失败'
-        return '暂无转码信息'
-      }
-      const data: IVideoPreviewUrl = {
-        drive_id: drive_id,
-        file_id: file_id,
-        size: 0,
-        expire_time: 0,
-        width: 0,
-        height: 0,
-        duration: 0,
-        qualities: [],
-        subtitles: []
-      }
-      data.qualities = transcode.list
-        .filter((item) => item && item.url)
-        .map((item) => {
-          const label = item.resolution || (item.height ? `${item.height}p` : '清晰度')
-          return {
-            html: label,
-            quality: label,
-            height: Number(item.height || 0),
-            width: 0,
-            label,
-            value: label,
-            url: item.url,
-            type: detectVideoType(item.url, 'm3u8')
-          }
-        })
-      data.qualities = data.qualities.sort((a, b) => (b.height || 0) - (a.height || 0))
-      if (data.qualities.length > 0) {
-        const first = data.qualities[0]
-        data.height = first.height || 0
-        data.expire_time = GetExpiresTime(first.url)
-      }
-      const duration = transcode.list.find((item) => item.duration)?.duration
-      data.duration = Math.floor(Number(duration || 0))
-      return data
-    }
-    if (provider === '115') {
-      const meta = await getDrive115PickCode(user_id, file_id)
-      if (!meta?.pick_code) return meta?.error || '获取文件详情失败'
-      const playInfo = await apiDrive115VideoPlay(user_id, meta.pick_code)
-      if (typeof playInfo === 'string') return playInfo
-      const subtitles = await apiDrive115VideoSubtitle(user_id, meta.pick_code)
-      const data: IVideoPreviewUrl = {
-        drive_id: drive_id,
-        file_id: file_id,
-        size: 0,
-        expire_time: 0,
-        width: 0,
-        height: 0,
-        duration: 0,
-        qualities: [],
-        subtitles: []
-      }
-      const defLabel = (def: string) => {
-        switch (def) {
-          case '1':
-            return '标清'
-          case '2':
-            return '高清'
-          case '3':
-            return '超清'
-          case '4':
-            return '1080P'
-          case '5':
-            return '4K'
-          case '100':
-            return '原画'
-          default:
-            return def ? `清晰度${def}` : '清晰度'
-        }
-      }
-      const list = playInfo.video_url || []
-      data.qualities = list
-        .filter((item) => item && item.url)
-        .map((item) => {
-          const def = String(item.definition ?? item.definition_n ?? '')
-          const label = item.title || defLabel(def)
-          return {
-            html: label,
-            quality: def,
-            height: Number(item.height || 0),
-            width: Number(item.width || 0),
-            label,
-            value: label,
-            url: item.url,
-            type: detectVideoType(item.url, def && def !== '100' ? 'm3u8' : ''),
-            headers: item.headers
-          }
-        })
-      data.qualities = data.qualities.sort((a, b) => (b.width || 0) - (a.width || 0))
-      const userDef = playInfo.user_def ? String(playInfo.user_def) : ''
-      if (userDef) {
-        const idx = data.qualities.findIndex((q) => q.quality === userDef)
-        if (idx > 0) {
-          const [picked] = data.qualities.splice(idx, 1)
-          data.qualities.unshift(picked)
-        }
-      }
-      if (data.qualities.length > 0) {
-        const first = data.qualities[0]
-        data.width = first.width || 0
-        data.height = first.height || 0
-        data.expire_time = GetExpiresTime(first.url)
-        if (first.headers) data.headers = first.headers
-      }
-      data.duration = Math.floor(Number(playInfo.play_long || meta.play_long || 0))
-      data.subtitles = subtitles
-      return data
     }
     if (!canUseAliyunPreviewApi(provider)) return `${getDriveProviderLabel(provider)} 暂无转码信息`
     let url = ''
@@ -892,7 +557,6 @@ export default class AliFile {
       if (!detail) return undefined
       return mapGuangyaFileToAliModel(detail, drive_id, detail.parentId || detail.parentFileId || 'guangya_root')
     }
-    if (isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') return undefined
     const url = 'v2/file/get'
     const postData = {
       drive_id: drive_id,
@@ -925,13 +589,7 @@ export default class AliFile {
       isCloud189User(user_id) ||
       drive_id === 'cloud189' ||
       isGuangyaUser(user_id) ||
-      drive_id === 'guangya' ||
-      isDropboxUser(user_id) ||
-      drive_id === 'dropbox' ||
-      isOneDriveUser(user_id) ||
-      drive_id === 'onedrive' ||
-      isBoxUser(user_id) ||
-      drive_id === 'box'
+      drive_id === 'guangya'
     ) {
       return TreeStore.GetDirPath(drive_id, file_id) as IAliGetDirModel[]
     }
@@ -985,8 +643,6 @@ export default class AliFile {
   static async ApiFileGetPathString(user_id: string, drive_id: string, file_id: string, dirsplit: string): Promise<string> {
     if (!user_id || !drive_id || !file_id) return ''
     if (
-      isCloud123User(user_id) ||
-      drive_id === 'cloud123' ||
       isPikPakUser(user_id) ||
       drive_id === 'pikpak' ||
       isGuangyaUser(user_id) ||
@@ -994,13 +650,7 @@ export default class AliFile {
       isCloud139User(user_id) ||
       drive_id === 'cloud139' ||
       isCloud189User(user_id) ||
-      drive_id === 'cloud189' ||
-      isDropboxUser(user_id) ||
-      drive_id === 'dropbox' ||
-      isOneDriveUser(user_id) ||
-      drive_id === 'onedrive' ||
-      isBoxUser(user_id) ||
-      drive_id === 'box'
+      drive_id === 'cloud189'
     ) {
       const pathList = TreeStore.GetDirPath(drive_id, file_id)
       const pathNames = pathList.map((item) => item.name).filter((name) => name)
@@ -1158,18 +808,7 @@ export default class AliFile {
     if (!useSettingStore().uiAutoPlaycursorVideo) return
     if (!user_id || !drive_id || !file_id) return undefined
     if (isWebDavDrive(drive_id) || isS3Drive(drive_id)) return undefined
-    if (isCloud123User(user_id) || drive_id === 'cloud123') return undefined
-    if (isBaiduUser(user_id) || drive_id === 'baidu') return undefined
     if (isPikPakUser(user_id) || drive_id === 'pikpak') return undefined
-    if (isDropboxUser(user_id) || drive_id === 'dropbox' || isOneDriveUser(user_id) || drive_id === 'onedrive' || isBoxUser(user_id) || drive_id === 'box') return undefined
-    if (isDrive115User(user_id) || drive_id === 'drive115') {
-      const meta = await getDrive115PickCode(user_id, file_id)
-      if (!meta?.pick_code) return undefined
-      const playLong = Number(meta.play_long || 0)
-      const watch_end = playLong > 0 && play_cursor >= playLong - 10 ? 1 : 0
-      await apiDrive115VideoHistoryUpdate(user_id, meta.pick_code, play_cursor, watch_end)
-      return undefined
-    }
     if (!isAliyunUser(user_id)) return undefined
     let url = ''
     let need_open_api = true

@@ -13,7 +13,6 @@ import os from 'os'
 import DebugLog from './debuglog'
 import message from './message'
 import UserDAL, { UserTokenMap } from '../user/userdal'
-import Config from '../config'
 import { buildUpstreamProxyHeaders } from './proxyHeaders'
 import { shouldRefreshProxyUrl } from './proxyCache'
 import { isAliyunUser, isQuarkUser } from '../aliapi/utils'
@@ -250,21 +249,15 @@ export async function getRawUrl(
             data.url = selectedQuality?.url || ''
             if (selectedQuality?.headers) data.headers = selectedQuality.headers
             if (selectedQuality?.type) data.type = selectedQuality.type
-          } else if (data.qualities.length > 0 && (drive_id === 'drive115' || drive_id === 'cloud123')) {
-            data.url = data.qualities[0].url
-            if (data.qualities[0].headers) data.headers = data.qualities[0].headers
-            if (data.qualities[0].type) data.type = data.qualities[0].type
           } else if (data.qualities.length > 0 && !data.url) {
             data.url = data.qualities[0].url
             if (data.qualities[0].headers) data.headers = data.qualities[0].headers
             if (data.qualities[0].type) data.type = data.qualities[0].type
           }
-        } else if (drive_id === 'drive115') {
-          return previewData
         }
       }
     } else if (preview_type === 'audio') {
-      // 仅阿里云盘有音频转码接口，其他网盘（115/百度/123/PikPak/Dropbox/OneDrive/Box/WebDAV 等）直接走原始下载链接
+      // 仅阿里云盘有音频转码接口，其他网盘直接走原始下载链接
       if (isAliyunUser(user_id) && !isWebDavDrive(drive_id)) {
         let audioData = await AliFile.ApiAudioPreviewUrl(user_id, drive_id, file_id)
         if (typeof audioData != 'string') {
@@ -383,21 +376,6 @@ export async function createProxyServer(port: number) {
         }
       }
       const upstreamHeaders = buildUpstreamProxyHeaders(clientReq.headers, String(proxy_headers || ''))
-      if (query.drive_id === 'baidu') {
-        upstreamHeaders['user-agent'] = 'pan.baidu.com'
-        upstreamHeaders['referer'] = 'https://pan.baidu.com/'
-        const token = UserDAL.GetUserToken(String(query.user_id || ''))
-        if (token?.access_token && !upstreamHeaders['authorization']) {
-          upstreamHeaders['authorization'] = `Bearer ${token.access_token}`
-        }
-      }
-      if (query.drive_id === 'drive115') {
-        const token = UserDAL.GetUserToken(String(query.user_id || ''))
-        if (token?.access_token) {
-          upstreamHeaders.authorization = `Bearer ${token.access_token}`
-        }
-        upstreamHeaders['user-agent'] = Config.downAgent || upstreamHeaders['user-agent'] || clientReq.headers['user-agent'] || ''
-      }
       if (query.drive_id === 'quark' || isQuarkUser(String(query.user_id || ''))) {
         const token = await getQuarkProxyToken(String(query.user_id || ''))
         const sessionCookie = await readQuarkCookieStringFromElectron().catch(() => '')

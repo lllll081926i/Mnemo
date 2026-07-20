@@ -1,12 +1,6 @@
 {
   "appId": "com.mnemo.app",
   "productName": "Mnemo",
-  "protocols": [
-    {
-      "name": "mnemo OAuth",
-      "schemes": ["xbyboxplayer-oauth", "boxplayer-onedriveoauth"]
-    }
-  ],
   "copyright": "copyright ©2026 Mnemo",
   "asar": true,
   "compression": "maximum",

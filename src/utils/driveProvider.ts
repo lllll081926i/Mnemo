@@ -55,16 +55,6 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
     label: '阿里云盘',
     icon: 'images/drive-icons/aliyun.svg'
   },
-  cloud123: {
-    key: 'cloud123',
-    label: '123网盘',
-    icon: 'images/drive-icons/cloud123.svg'
-  },
-  '115': {
-    key: '115',
-    label: '115网盘',
-    icon: 'images/drive-icons/drive115.svg'
-  },
   '139': {
     key: '139',
     label: '139云盘',
@@ -80,11 +70,6 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
     label: '光鸭云盘',
     icon: 'images/drive-icons/guangya.svg'
   },
-  baidu: {
-    key: 'baidu',
-    label: '百度网盘',
-    icon: 'images/drive-icons/baidu.svg'
-  },
   pikpak: {
     key: 'pikpak',
     label: 'PikPak',
@@ -94,21 +79,6 @@ const driveProviderMap: Record<DriveProvider, DriveProviderMeta> = {
     key: 'quark',
     label: '夸克网盘',
     icon: 'images/drive-icons/quark.svg'
-  },
-  dropbox: {
-    key: 'dropbox',
-    label: 'Dropbox',
-    icon: 'images/drive-icons/dropbox.svg'
-  },
-  onedrive: {
-    key: 'onedrive',
-    label: 'OneDrive',
-    icon: 'images/drive-icons/onedrive.svg'
-  },
-  box: {
-    key: 'box',
-    label: 'Box',
-    icon: 'images/drive-icons/box.svg'
   },
   webdav: {
     key: 'webdav',
@@ -199,17 +169,11 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
     copyTree: true,
     photoAlbum: true
   }),
-  cloud123: createCapabilities('cloud123', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, trashView: true, trashRestore: true }),
-  '115': createCapabilities('115', { search: true, trashView: true, trashRestore: true, trashPurge: true }),
   '139': createCapabilities('139'),
   '189': createCapabilities('189'),
   guangya: createCapabilities('guangya', { search: true, createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
-  baidu: createCapabilities('baidu', { search: true }),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
   quark: createCapabilities('quark', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
-  dropbox: createCapabilities('dropbox', { search: true, createTextFile: true, createShare: true, manageCreatedShares: true }),
-  onedrive: createCapabilities('onedrive', { search: true, createTextFile: true, createShare: true }),
-  box: createCapabilities('box', { search: true, createTextFile: true, createShare: true }),
   webdav: createCapabilities('webdav', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   s3: createCapabilities('s3', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   unknown: { ...noCapabilities, provider: 'unknown' }
@@ -218,33 +182,21 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
 const providerAliases: Array<[DriveProvider, string[], string[]]> = [
   ['webdav', ['webdav:'], []],
   ['s3', ['s3:'], []],
-  ['cloud123', ['cloud123_'], ['cloud123']],
-  ['115', ['115_'], ['drive115', '115']],
   ['139', ['cloud139_'], ['cloud139', '139']],
   ['189', ['cloud189_'], ['cloud189', '189']],
   ['guangya', ['guangya_'], ['guangya']],
-  ['baidu', ['baidu_'], ['baidu']],
   ['pikpak', ['pikpak_'], ['pikpak']],
   ['quark', ['quark_'], ['quark']],
-  ['dropbox', ['dropbox_'], ['dropbox']],
-  ['onedrive', ['onedrive_'], ['onedrive']],
-  ['box', ['box_'], ['box']],
   ['aliyun', ['aliyun_'], []]
 ]
 
 const driveProviderUserIdPrefixes: Record<DriveProvider, string> = {
   aliyun: '',
-  cloud123: 'cloud123_',
-  '115': '115_',
   '139': 'cloud139_',
   '189': 'cloud189_',
   guangya: 'guangya_',
-  baidu: 'baidu_',
   pikpak: 'pikpak_',
   quark: 'quark_',
-  dropbox: 'dropbox_',
-  onedrive: 'onedrive_',
-  box: 'box_',
   webdav: 'webdav:',
   s3: 's3:',
   unknown: ''
