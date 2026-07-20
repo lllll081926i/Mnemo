@@ -59,13 +59,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          node scripts/generate-secrets.mjs --mode=ci --strict
+          $ErrorActionPreference = 'Stop'
+          $isTag = '${{ startsWith(github.ref, 'refs/tags/') }}' -eq 'true'
+          $isPreview = $isTag -and ('${{ github.ref_name }}' -match 'preview|beta|rc|alpha')
+          if ($isTag -and -not $isPreview) {
+            node scripts/generate-secrets.mjs --mode=ci --strict
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            # Preview / manual builds may ship with empty OAuth placeholders when repo secrets are incomplete.
+            node scripts/generate-secrets.mjs --mode=ci
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           npm run build
-          if ('${{ startsWith(github.ref, 'refs/tags/') }}' -eq 'true') {
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($isTag) {
             npx electron-builder --win --publish always
           } else {
             npx electron-builder --win --publish never
           }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
