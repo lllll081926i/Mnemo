@@ -14,6 +14,11 @@ import { apiQuarkMkdir, apiQuarkMoveBatch, apiQuarkRename, apiQuarkTrashBatch } 
 import { apiCloud139CopyBatch, apiCloud139Mkdir, apiCloud139MoveBatch, apiCloud139Rename, apiCloud139TrashBatch } from '../cloud139/filecmd'
 import { apiCloud189CopyBatch, apiCloud189Mkdir, apiCloud189MoveBatch, apiCloud189Rename, apiCloud189TrashBatch } from '../cloud189/filecmd'
 import { apiGuangyaCopyBatch, apiGuangyaMkdir, apiGuangyaMoveBatch, apiGuangyaRename, apiGuangyaTrashBatch } from '../guangya/filecmd'
+import { resolveDriveProvider } from '../utils/driveProvider'
+import { apiOneDriveCopyBatch, apiOneDriveDeleteBatch, apiOneDriveMkdir, apiOneDriveMoveBatch, apiOneDriveRename } from '../onedrive/filecmd'
+import { apiDropboxCopyBatch, apiDropboxDeleteBatch, apiDropboxMkdir, apiDropboxMoveBatch, apiDropboxRename } from '../dropbox/filecmd'
+import { apiGoogleDriveCopyBatch, apiGoogleDriveDeleteBatch, apiGoogleDriveMkdir, apiGoogleDriveMoveBatch, apiGoogleDriveRename, apiGoogleDriveTrashBatch } from '../gdrive/filecmd'
+import { apiGofileCopyBatch, apiGofileDeleteBatch, apiGofileMkdir, apiGofileMoveBatch, apiGofileRename } from '../gofile/filecmd'
 
 export default class AliFileCmd {
   static async ApiCreatNewForder(user_id: string, drive_id: string, parent_file_id: string, creatDirName: string, encType: string = '', check_name_mode: string = 'refuse'): Promise<{ file_id: string; error: string }> {
@@ -59,6 +64,11 @@ export default class AliFileCmd {
     if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       return apiGuangyaMkdir(user_id, parent_file_id.includes('root') ? 'guangya_root' : parent_file_id, creatDirName)
     }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'onedrive') return apiOneDriveMkdir(user_id, parent_file_id, creatDirName)
+    if (provider === 'dropbox') return apiDropboxMkdir(user_id, parent_file_id, creatDirName)
+    if (provider === 'gdrive') return apiGoogleDriveMkdir(user_id, parent_file_id, creatDirName)
+    if (provider === 'gofile') return apiGofileMkdir(user_id, parent_file_id, creatDirName)
     if (parent_file_id.includes('root')) parent_file_id = 'root'
     const url = 'adrive/v2/file/createWithFolders'
     const name = EncodeEncName(user_id, creatDirName, true, encType)
@@ -101,6 +111,10 @@ export default class AliFileCmd {
     if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       return apiGuangyaTrashBatch(user_id, file_idList)
     }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'onedrive') return apiOneDriveDeleteBatch(user_id, file_idList)
+    if (provider === 'gdrive') return apiGoogleDriveTrashBatch(user_id, file_idList)
+    if (provider === 'dropbox' || provider === 'gofile') return []
     const batchList = ApiBatchMaker('/recyclebin/trash', file_idList, (file_id: string) => {
       return { drive_id: drive_id, file_id: file_id }
     })
@@ -157,6 +171,11 @@ export default class AliFileCmd {
     if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       return apiGuangyaTrashBatch(user_id, file_idList)
     }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'dropbox') return apiDropboxDeleteBatch(user_id, file_idList)
+    if (provider === 'gdrive') return apiGoogleDriveDeleteBatch(user_id, file_idList)
+    if (provider === 'gofile') return apiGofileDeleteBatch(user_id, file_idList)
+    if (provider === 'onedrive') return []
     const batchList = ApiBatchMaker('/file/delete', file_idList, (file_id: string) => {
       return { drive_id: drive_id, file_id: file_id }
     })
@@ -246,6 +265,35 @@ export default class AliFileCmd {
         if (!file_id || !name) continue
         const resp = await rename(user_id, file_id, name)
         if (resp.success) successList.push({ file_id, name: resp.name, parent_file_id: resp.parent_file_id, isDir: resp.isDir })
+      }
+      return successList
+    }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
+      const successList: { file_id: string; parent_file_id: string; name: string; isDir: boolean }[] = []
+      for (let i = 0; i < file_idList.length; i++) {
+        const file_id = file_idList[i]
+        const name = names[i] || ''
+        if (!file_id || !name) continue
+        try {
+          if (provider === 'dropbox') {
+            const result = await apiDropboxRename(user_id, file_id, name)
+            if (result.success) successList.push({ file_id: result.file_id, parent_file_id: result.parent_file_id, name: result.name, isDir: result.isDir })
+            continue
+          }
+          if (provider === 'onedrive') {
+            const result = await apiOneDriveRename(user_id, file_id, name)
+            if (result.error) continue
+          } else if (provider === 'gdrive') {
+            await apiGoogleDriveRename(user_id, file_id, name)
+          } else {
+            await apiGofileRename(user_id, file_id, name)
+          }
+          const detail = await AliFile.ApiGetFile(user_id, drive_id, file_id)
+          if (detail) successList.push({ file_id: detail.file_id || file_id, parent_file_id: detail.parent_file_id || '', name: detail.name || name, isDir: !!detail.isDir })
+        } catch (error) {
+          DebugLog.mSaveWarning(`${provider} rename failed ${file_id}`, error)
+        }
       }
       return successList
     }
@@ -462,6 +510,17 @@ export default class AliFileCmd {
     if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       return apiGuangyaMoveBatch(user_id, file_idList, to_parent_file_id.includes('root') ? 'guangya_root' : to_parent_file_id)
     }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
+      if (drive_id !== to_drive_id) {
+        message.error('暂不支持跨网盘移动')
+        return []
+      }
+      if (provider === 'onedrive') return apiOneDriveMoveBatch(user_id, to_parent_file_id, file_idList)
+      if (provider === 'dropbox') return apiDropboxMoveBatch(user_id, file_idList, to_parent_file_id, to_parent_description)
+      if (provider === 'gdrive') return apiGoogleDriveMoveBatch(user_id, file_idList, to_parent_file_id)
+      return apiGofileMoveBatch(user_id, file_idList, to_parent_file_id)
+    }
     if (to_parent_file_id.includes('root')) to_parent_file_id = 'root'
     const batchList = ApiBatchMaker('/file/move', file_idList, (file_id: string) => {
       if (drive_id == to_drive_id)
@@ -538,6 +597,24 @@ export default class AliFileCmd {
     }
     if (isGuangyaUser(user_id) || drive_id === 'guangya') {
       return apiGuangyaCopyBatch(user_id, file_idList, to_parent_file_id.includes('root') ? 'guangya_root' : to_parent_file_id)
+    }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
+      if (drive_id !== to_drive_id) {
+        message.error('暂不支持跨网盘复制')
+        return []
+      }
+      if (provider === 'onedrive') {
+        const fileList: { file_id: string; name: string }[] = []
+        for (const file_id of file_idList) {
+          const detail = await AliFile.ApiGetFile(user_id, drive_id, file_id)
+          if (detail) fileList.push({ file_id, name: detail.name })
+        }
+        return apiOneDriveCopyBatch(user_id, to_parent_file_id, fileList)
+      }
+      if (provider === 'dropbox') return apiDropboxCopyBatch(user_id, file_idList, to_parent_file_id, to_parent_description)
+      if (provider === 'gdrive') return apiGoogleDriveCopyBatch(user_id, file_idList, to_parent_file_id)
+      return apiGofileCopyBatch(user_id, file_idList, to_parent_file_id)
     }
     if (to_parent_file_id.includes('root')) to_parent_file_id = 'root'
     const batchList = ApiBatchMaker('/file/copy', file_idList, (file_id: string) => {

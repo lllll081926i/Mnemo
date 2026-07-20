@@ -80,4 +80,6 @@ export const apiGoogleDriveFileList = (userId: string, parentId: string) => list
 
 export const apiGoogleDriveSearch = (userId: string, name: string) => listGoogleDriveQuery(userId, `name contains '${escapeQuery(name)}' and trashed = false`)
 
+export const apiGoogleDriveTrash = (userId: string) => listGoogleDriveQuery(userId, 'trashed = true')
+
 export const apiGoogleDriveFileDetail = (userId: string, fileId: string) => googleDriveRequest<GoogleDriveItem>(userId, `/files/${encodeURIComponent(fileId === 'gdrive_root' ? 'root' : fileId)}?fields=${encodeURIComponent(FILE_FIELDS)}&supportsAllDrives=true`)

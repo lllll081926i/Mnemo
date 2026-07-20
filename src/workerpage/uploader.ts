@@ -19,6 +19,10 @@ import QuarkUploadDisk from '../quark/upload'
 import Cloud139UploadDisk from '../cloud139/upload'
 import Cloud189UploadDisk from '../cloud189/upload'
 import { getDriveProviderCapabilities, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
+import OneDriveUploadDisk from '../onedrive/upload'
+import DropboxUploadDisk from '../dropbox/upload'
+import GoogleDriveUploadDisk from '../gdrive/upload'
+import GofileUploadDisk from '../gofile/upload'
 
 type UploadDiskHandler = (fileui: IUploadingUI) => Promise<string>
 
@@ -72,6 +76,10 @@ export async function StartUpload(fileui: IUploadingUI): Promise<void> {
   if (provider === 'quark') return runUploadDisk(fileui, QuarkUploadDisk.UploadOneFile)
   if (provider === '139') return runUploadDisk(fileui, Cloud139UploadDisk.UploadOneFile)
   if (provider === '189') return runUploadDisk(fileui, Cloud189UploadDisk.UploadOneFile)
+  if (provider === 'onedrive') return runUploadDisk(fileui, OneDriveUploadDisk.UploadOneFile)
+  if (provider === 'dropbox') return runUploadDisk(fileui, DropboxUploadDisk.UploadOneFile)
+  if (provider === 'gdrive') return runUploadDisk(fileui, GoogleDriveUploadDisk.UploadOneFile)
+  if (provider === 'gofile') return runUploadDisk(fileui, GofileUploadDisk.UploadOneFile)
   if (provider !== 'aliyun') {
     failUpload(fileui, `${getDriveProviderLabel(provider)} 暂不支持队列上传`)
     return

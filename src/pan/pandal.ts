@@ -20,8 +20,10 @@ import { OrderDir } from '../utils/filenameorder'
 import { resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
 import { apiDropboxFileList, mapDropboxFileToAliModel } from '../dropbox/dirfilelist'
-import { apiGoogleDriveFileList, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
+import { apiGoogleDriveFileList, apiGoogleDriveSearch, apiGoogleDriveTrash, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
 import { apiGofileFileList, mapGofileItemToAliModel } from '../gofile/dirfilelist'
+import { apiOneDriveSearch } from '../onedrive/search'
+import { apiDropboxSearch } from '../dropbox/search'
 
 export interface PanSelectedData {
   isError: boolean
@@ -430,10 +432,23 @@ export default class PanDAL {
 
       const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
       if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
+        const rootKey = provider === 'onedrive' ? 'onedrive_root' : provider === 'dropbox' ? 'dropbox_root' : provider === 'gdrive' ? 'gdrive_root' : 'gofile_root'
+        const isSearch = dirID.startsWith('search')
+        const keyword = isSearch ? dirID.slice('search'.length).trim() : ''
+        const isTrash = provider === 'gdrive' && dirID === 'trash'
         const loadItems = async () => {
-          if (provider === 'onedrive') return (await apiOneDriveFileList(user_id, dirID)).map((item) => mapOneDriveItemToAliModel(item, drive_id, dirID))
-          if (provider === 'dropbox') return (await apiDropboxFileList(user_id, dirID)).map((item) => mapDropboxFileToAliModel(item, drive_id, dirID))
-          if (provider === 'gdrive') return (await apiGoogleDriveFileList(user_id, dirID)).map((item) => mapGoogleDriveItemToAliModel(item, drive_id, dirID))
+          if (provider === 'onedrive') {
+            const list = isSearch ? await apiOneDriveSearch(user_id, keyword) : await apiOneDriveFileList(user_id, dirID)
+            return list.map((item) => mapOneDriveItemToAliModel(item, drive_id, isSearch ? rootKey : dirID))
+          }
+          if (provider === 'dropbox') {
+            const list = isSearch ? await apiDropboxSearch(user_id, keyword) : await apiDropboxFileList(user_id, dirID)
+            return list.map((item) => mapDropboxFileToAliModel(item, drive_id, isSearch ? rootKey : dirID))
+          }
+          if (provider === 'gdrive') {
+            const list = isSearch ? await apiGoogleDriveSearch(user_id, keyword) : isTrash ? await apiGoogleDriveTrash(user_id) : await apiGoogleDriveFileList(user_id, dirID)
+            return list.map((item) => mapGoogleDriveItemToAliModel(item, drive_id, isSearch || isTrash ? rootKey : dirID))
+          }
           return (await apiGofileFileList(user_id, dirID)).map((item) => mapGofileItemToAliModel(item, drive_id, dirID))
         }
         loadItems()

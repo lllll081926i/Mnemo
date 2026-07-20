@@ -19,6 +19,19 @@ import {
   decodeQuarkShareId,
   isQuarkShareId
 } from '../quark/share'
+import { resolveDriveProvider } from '../utils/driveProvider'
+import { apiOneDriveShareCreate } from '../onedrive/share'
+import { apiDropboxShareCreate } from '../dropbox/share'
+import { apiGoogleDriveCreateShare } from '../gdrive/share'
+import { apiGofileCreateDirectLink } from '../gofile/share'
+
+const createProviderShareItem = (drive_id: string, file_id_list: string[], share_name: string, share_url: string): IAliShareItem => ({
+  created_at: '', creator: '', description: '', display_name: '', display_label: '', download_count: 0,
+  drive_id, expiration: '', expired: false, file_id: file_id_list[0] || '', file_id_list, icon: 'iconwenjian',
+  preview_count: 0, save_count: 0, share_id: share_url, share_msg: humanExpiration(''), full_share_msg: '',
+  share_name: share_name || '分享链接', share_policy: '', share_pwd: '', share_url, status: '', updated_at: '',
+  is_share_saved: false, share_saved: ''
+})
 
 export interface IAliShareFileResp {
   items: IAliShareFileItem[]
@@ -310,6 +323,24 @@ export default class AliShare {
     }
     if (isQuarkUser(user_id) || drive_id === 'quark') {
       return await apiQuarkShareCreate(user_id, expiration, share_pwd, share_name, file_id_list)
+    }
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider === 'onedrive') {
+      const result = await apiOneDriveShareCreate(user_id, drive_id, file_id_list, share_name)
+      return result.item || result.error || '创建 OneDrive 分享链接失败'
+    }
+    if (provider === 'dropbox') {
+      const result = await apiDropboxShareCreate(user_id, drive_id, file_id_list, expiration, share_pwd, share_name)
+      return result.item || result.error || '创建 Dropbox 分享链接失败'
+    }
+    if (provider === 'gdrive' || provider === 'gofile') {
+      if (file_id_list.length !== 1) return `${provider === 'gdrive' ? 'Google Drive' : 'GoFile'} 分享链接一次只能选择一个文件或文件夹`
+      try {
+        const shareUrl = provider === 'gdrive' ? await apiGoogleDriveCreateShare(user_id, file_id_list[0]) : await apiGofileCreateDirectLink(user_id, file_id_list[0])
+        return createProviderShareItem(drive_id, file_id_list, share_name, shareUrl)
+      } catch (error: any) {
+        return error?.message || '创建分享链接失败'
+      }
     }
     const url = 'adrive/v2/share_link/create'
     const postData = { drive_id, expiration, share_pwd, share_name, file_id_list }

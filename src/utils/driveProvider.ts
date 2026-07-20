@@ -199,7 +199,7 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
   guangya: createCapabilities('guangya', { search: true, createTextFile: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true }),
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
   quark: createCapabilities('quark', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
-  onedrive: createCapabilities('onedrive', { search: true, createShare: true, trashView: true }),
+  onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
   dropbox: createCapabilities('dropbox', { search: true, createShare: true, recycleBin: false, permanentDelete: true }),
   gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true }),
   nextcloud: createCapabilities('nextcloud', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
@@ -324,6 +324,14 @@ export const getDriveProviderSidebarEntries = (context: DriveProviderContext | s
   const capabilities = getDriveProviderCapabilities(provider)
   const entries: DriveSidebarEntry[] = []
 
+  if (capabilities.favorite) entries.push({ key: 'favorite', title: '收藏夹', icon: getDriveSidebarIcon('favorite'), kind: 'feature' })
+  if (capabilities.trashView) entries.push({ key: 'trash', title: '回收站', icon: getDriveSidebarIcon('trash'), kind: 'feature' })
+  if (provider === 'aliyun') entries.push({ key: 'recover', title: '文件恢复', icon: getDriveSidebarIcon('recover'), kind: 'feature' })
+  if (capabilities.search) entries.push({ key: 'search', title: '全盘搜索', icon: getDriveSidebarIcon('search'), kind: 'feature' })
+  if (provider === 'aliyun' && token && capabilities.photoAlbum && token.pic_drive_id && !options.hideAlbum) {
+    entries.push({ key: 'pic_root', title: '相册', icon: getDriveSidebarIcon('pic_root'), kind: 'space', driveId: token.pic_drive_id })
+  }
+
   if (provider === 'aliyun' && token) {
     const spaces: DriveSidebarEntry[] = []
     const usedDriveIds = new Set<string>()
@@ -343,16 +351,7 @@ export const getDriveProviderSidebarEntries = (context: DriveProviderContext | s
     if (!token.resource_drive_id && !token.backup_drive_id) addSpace('backup_root', '网盘文件', token.default_drive_id)
     addSpace('safe_root', '安全盘', token.default_sbox_drive_id || token.sbox_drive_id)
     entries.push(...spaces)
-
-    if (capabilities.photoAlbum && token.pic_drive_id && !options.hideAlbum) {
-      entries.push({ key: 'pic_root', title: '相册', icon: getDriveSidebarIcon('pic_root'), kind: 'space', driveId: token.pic_drive_id })
-    }
   }
-
-  if (capabilities.favorite) entries.push({ key: 'favorite', title: '收藏夹', icon: getDriveSidebarIcon('favorite'), kind: 'feature' })
-  if (capabilities.search) entries.push({ key: 'search', title: '全盘搜索', icon: getDriveSidebarIcon('search'), kind: 'feature' })
-  if (capabilities.trashView) entries.push({ key: 'trash', title: '回收站', icon: getDriveSidebarIcon('trash'), kind: 'feature' })
-  if (provider === 'aliyun') entries.push({ key: 'recover', title: '文件恢复', icon: getDriveSidebarIcon('recover'), kind: 'feature' })
   return entries
 }
 

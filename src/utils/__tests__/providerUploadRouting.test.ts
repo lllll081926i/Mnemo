@@ -7,12 +7,26 @@ const read = (file: string) => readFileSync(path.resolve(process.cwd(), file), '
 describe('provider upload routing', () => {
   it('routes every queue-enabled aggregate provider to a concrete handler', () => {
     const uploader = read('src/workerpage/uploader.ts')
-    for (const provider of ['pikpak', 'quark', '139', '189']) {
+    for (const provider of ['guangya', 'pikpak', 'quark', '139', '189', 'onedrive', 'dropbox', 'gdrive', 'gofile']) {
       expect(uploader).toContain(`if (provider === '${provider}') return runUploadDisk`)
     }
-    for (const handler of ['PikPakUploadDisk', 'QuarkUploadDisk', 'Cloud139UploadDisk', 'Cloud189UploadDisk']) {
+    for (const handler of ['GuangyaUploadDisk', 'PikPakUploadDisk', 'QuarkUploadDisk', 'Cloud139UploadDisk', 'Cloud189UploadDisk', 'OneDriveUploadDisk', 'DropboxUploadDisk', 'GoogleDriveUploadDisk', 'GofileUploadDisk']) {
       expect(uploader).toContain(handler)
     }
+  })
+
+  it('routes added providers through their own file and share APIs', () => {
+    const file = read('src/aliapi/file.ts')
+    const filecmd = read('src/aliapi/filecmd.ts')
+    const share = read('src/aliapi/share.ts')
+    for (const provider of ['onedrive', 'dropbox', 'gdrive', 'gofile']) {
+      expect(file).toContain(`provider === '${provider}'`)
+      expect(filecmd).toContain(`provider === '${provider}'`)
+      expect(share).toContain(`provider === '${provider}'`)
+    }
+    expect(file).toContain('apiGoogleDriveDownloadInfo')
+    expect(filecmd).toContain('apiGoogleDriveTrashBatch')
+    expect(share).toContain('apiGofileCreateDirectLink')
   })
 
   it('hides and rejects upload actions outside real drive folders', () => {

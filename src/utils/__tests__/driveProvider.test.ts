@@ -63,9 +63,11 @@ describe('drive provider capabilities', () => {
       pic_drive_id: 'album-drive'
     })
     expect(merged.filter((entry) => entry.driveId === 'merged-drive')).toHaveLength(1)
-    expect(merged.map((entry) => entry.key)).toEqual(['resource_root', 'safe_root', 'pic_root', 'favorite', 'search', 'trash', 'recover'])
+    expect(merged.map((entry) => entry.key)).toEqual(['favorite', 'trash', 'recover', 'search', 'pic_root', 'resource_root', 'safe_root'])
     expect(getDriveProviderSidebarEntries('pikpak').map((entry) => entry.key)).toEqual(['trash'])
     expect(getDriveProviderSidebarEntries('quark').map((entry) => entry.key)).toEqual(['search'])
+    expect(getDriveProviderSidebarEntries('onedrive').map((entry) => entry.key)).toEqual(['search'])
+    expect(getDriveProviderSidebarEntries('gdrive').map((entry) => entry.key)).toEqual(['trash', 'search'])
     expect(getDriveProviderSidebarEntries('139')).toEqual([])
     expect(isDriveProviderSidebarEntryAvailable('pikpak', 'search')).toBe(false)
     expect(isDriveProviderSidebarEntryAvailable('pikpak', 'trash')).toBe(true)

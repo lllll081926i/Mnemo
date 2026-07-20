@@ -30,4 +30,12 @@ describe('provider OAuth runtime configuration', () => {
     expect(mainIpc).toContain("ipcMain.handle('WebOpenExternal'")
     expect(mainIpc).toContain("url.protocol !== 'https:' && url.protocol !== 'http:'")
   })
+
+  it('keeps provider OAuth inside Mnemo instead of opening the system browser', () => {
+    const login = read('src/user/UserLogin.vue')
+    expect(login).toContain('window.WebOAuthBegin(provider)')
+    expect(login).toContain('window.WebOAuthOpen(state, authUrl)')
+    expect(login).toContain('window.WebOAuthOnCallback')
+    expect(login).not.toContain('WebOpenExternal')
+  })
 })

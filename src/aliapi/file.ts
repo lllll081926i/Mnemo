@@ -20,6 +20,11 @@ import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, getWe
 import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive } from '../utils/s3Client'
 import { getAlipanVideoPromotionReason } from '../utils/alipanPromotionRules'
 import { canUseAliyunPreviewApi, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
+import { apiOneDriveFileDetail, getOneDriveDownloadUrl, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
+import { apiDropboxFileDetail, apiDropboxTemporaryLink, mapDropboxFileToAliModel, resolveDropboxParentIdFromPath } from '../dropbox/dirfilelist'
+import { apiGoogleDriveFileDetail, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
+import { apiGoogleDriveDownloadInfo } from '../gdrive/download'
+import { apiGofileFileDetail, mapGofileItemToAliModel } from '../gofile/dirfilelist'
 
 const resolveFileProvider = async (user_id: string, drive_id: string) => {
   let token: ITokenInfo | undefined = UserDAL.GetUserToken(user_id)
@@ -131,6 +136,37 @@ export default class AliFile {
       const detail = await apiGuangyaFileDetail(user_id, file_id)
       if (!detail) return undefined
       const mapped = mapGuangyaFileToAliModel(detail, drive_id, detail.parentId || detail.parentFileId || 'guangya_root') as any
+      mapped.type = mapped.isDir ? 'folder' : 'file'
+      return mapped
+    }
+    if (provider === 'onedrive') {
+      if (file_id === 'onedrive_root') return { drive_id, file_id, parent_file_id: '', name: 'OneDrive', type: 'folder', isDir: true }
+      const detail = await apiOneDriveFileDetail(user_id, file_id)
+      if (!detail) return undefined
+      const mapped = mapOneDriveItemToAliModel(detail, drive_id, detail.parentReference?.id || 'onedrive_root') as any
+      mapped.type = mapped.isDir ? 'folder' : 'file'
+      return mapped
+    }
+    if (provider === 'dropbox') {
+      if (file_id === 'dropbox_root') return { drive_id, file_id, parent_file_id: '', name: 'Dropbox', type: 'folder', isDir: true }
+      const detail = await apiDropboxFileDetail(user_id, file_id)
+      if (!detail) return undefined
+      const mapped = mapDropboxFileToAliModel(detail, drive_id, resolveDropboxParentIdFromPath(detail.path_lower || detail.path_display)) as any
+      mapped.type = mapped.isDir ? 'folder' : 'file'
+      return mapped
+    }
+    if (provider === 'gdrive') {
+      if (file_id === 'gdrive_root') return { drive_id, file_id, parent_file_id: '', name: 'Google Drive', type: 'folder', isDir: true }
+      const detail = await apiGoogleDriveFileDetail(user_id, file_id)
+      const mapped = mapGoogleDriveItemToAliModel(detail, drive_id, detail.parents?.[0] || 'gdrive_root') as any
+      mapped.type = mapped.isDir ? 'folder' : 'file'
+      return mapped
+    }
+    if (provider === 'gofile') {
+      if (file_id === 'gofile_root') return { drive_id, file_id, parent_file_id: '', name: 'GoFile', type: 'folder', isDir: true }
+      const detail = await apiGofileFileDetail(user_id, file_id)
+      if (!detail) return undefined
+      const mapped = mapGofileItemToAliModel(detail, drive_id, detail.parentFolder || 'gofile_root') as any
       mapped.type = mapped.isDir ? 'folder' : 'file'
       return mapped
     }
@@ -271,6 +307,29 @@ export default class AliFile {
       const info = await apiGuangyaDownloadInfo(user_id, file_id)
       if (info.error) return info.error
       return { drive_id, file_id, expire_time: GetExpiresTime(info.url), url: info.url, size: Number(info.size || 0) }
+    }
+    if (provider === 'onedrive') {
+      const item = await apiOneDriveFileDetail(user_id, file_id)
+      if (!item || item.folder) return item?.folder ? '文件夹不能直接下载' : '获取 OneDrive 文件信息失败'
+      const url = getOneDriveDownloadUrl(item)
+      if (!url) return '获取 OneDrive 下载地址失败'
+      return { drive_id, file_id, expire_time: GetExpiresTime(url), url, size: Number(item.size || 0) }
+    }
+    if (provider === 'dropbox') {
+      const info = await apiDropboxTemporaryLink(user_id, file_id)
+      if (info.error || !info.url) return info.error || '获取 Dropbox 下载地址失败'
+      return { drive_id, file_id, expire_time: GetExpiresTime(info.url), url: info.url, size: Number(info.metadata?.size || 0) }
+    }
+    if (provider === 'gdrive') {
+      const info = await apiGoogleDriveDownloadInfo(user_id, file_id)
+      if (info.error || !info.url) return info.error || '获取 Google Drive 下载地址失败'
+      return { drive_id, file_id, expire_time: 0, url: info.url, size: info.size, headers: info.headers }
+    }
+    if (provider === 'gofile') {
+      const item = await apiGofileFileDetail(user_id, file_id)
+      if (!item || item.type === 'folder') return item?.type === 'folder' ? '文件夹不能直接下载' : '获取 GoFile 文件信息失败'
+      if (!item.link) return '获取 GoFile 下载地址失败'
+      return { drive_id, file_id, expire_time: 0, url: item.link, size: Number(item.size || 0) }
     }
     if (provider !== 'aliyun') return `${getDriveProviderLabel(provider)} 暂不支持下载`
     const data: IDownloadUrl = {
@@ -466,7 +525,7 @@ export default class AliFile {
   static async ApiAudioPreviewUrl(user_id: string, drive_id: string, file_id: string): Promise<IDownloadUrl | string> {
     if (!user_id || !drive_id || !file_id) return '参数错误'
     const provider = await resolveFileProvider(user_id, drive_id)
-    if (!canUseAliyunPreviewApi(provider)) return `${getDriveProviderLabel(provider)} 暂无转码信息`
+    if (!canUseAliyunPreviewApi(provider)) return AliFile.ApiFileDownloadUrl(user_id, drive_id, file_id, 14400)
 
     const url = 'v2/file/get_audio_play_info'
 
@@ -533,6 +592,11 @@ export default class AliFile {
 
   static async ApiGetFile(user_id: string, drive_id: string, file_id: string): Promise<IAliGetFileModel | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
+    const provider = await resolveFileProvider(user_id, drive_id)
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile' || provider === 'webdav' || provider === 'nextcloud' || provider === 's3') {
+      const info = await AliFile.ApiFileInfo(user_id, drive_id, file_id)
+      return typeof info === 'object' ? info as IAliGetFileModel : undefined
+    }
     if (isPikPakUser(user_id) || drive_id === 'pikpak') {
       const detail = await apiPikPakFileDetail(user_id, file_id)
       if (!detail) return undefined
@@ -580,6 +644,8 @@ export default class AliFile {
 
   static async ApiFileGetPath(user_id: string, drive_id: string, file_id: string): Promise<IAliGetDirModel[]> {
     if (!user_id || !drive_id || !file_id) return []
+    const provider = await resolveFileProvider(user_id, drive_id)
+    if (provider !== 'aliyun') return TreeStore.GetDirPath(drive_id, file_id) as IAliGetDirModel[]
     if (
       isPikPakUser(user_id) ||
       drive_id === 'pikpak' ||
@@ -643,6 +709,11 @@ export default class AliFile {
 
   static async ApiFileGetPathString(user_id: string, drive_id: string, file_id: string, dirsplit: string): Promise<string> {
     if (!user_id || !drive_id || !file_id) return ''
+    const provider = await resolveFileProvider(user_id, drive_id)
+    if (provider !== 'aliyun') {
+      const pathList = TreeStore.GetDirPath(drive_id, file_id)
+      return pathList.map((item) => item.name).filter(Boolean).join(dirsplit)
+    }
     if (
       isPikPakUser(user_id) ||
       drive_id === 'pikpak' ||

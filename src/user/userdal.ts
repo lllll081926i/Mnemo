@@ -552,6 +552,31 @@ export default class UserDAL {
     if (!token || (!token.access_token && !isWebDavUser(token) && !isS3User(token))) {
       return false
     }
+    const provider = resolveDriveProvider(token)
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive') {
+      const expireTime = new Date(token.expire_time || 0).getTime()
+      const shouldRefreshToken = force || !token.access_token || (expireTime && expireTime <= Date.now() + 5 * 60_000)
+      const refreshed = shouldRefreshToken
+        ? provider === 'onedrive'
+          ? await refreshOneDriveAccessToken(token)
+          : provider === 'dropbox'
+            ? await refreshDropboxAccessToken(token)
+            : await refreshGoogleDriveAccessToken(token)
+        : token
+      if (!refreshed?.access_token) return false
+      if (!shouldRefreshToken) {
+        if (provider === 'onedrive') await applyOneDriveQuota(refreshed)
+        else if (provider === 'dropbox') await applyDropboxQuota(refreshed)
+        else await applyGoogleDriveQuota(refreshed)
+      }
+      useUserStore().userLogin(refreshed.user_id)
+      UserDAL.SaveUserToken(refreshed)
+      return true
+    }
+    if (provider === 'gofile') {
+      UserDAL.SaveUserToken(token)
+      return true
+    }
     let expires_in = new Date(token.expire_time).getTime() - token.expires_in * 1000
     let time = Date.now() - expires_in
     if (!force || time / 1000 < 600) {
