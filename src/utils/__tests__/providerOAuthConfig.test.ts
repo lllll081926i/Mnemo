@@ -5,8 +5,19 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 describe('provider OAuth runtime configuration', () => {
   it('keeps runtime credential resolution in retained provider modules', () => {
-    expect(read('src/pikpak/auth.ts')).toContain('resolvePikPakCredentials')
+    expect(read('src/pikpak/auth.ts')).toContain("PIKPAK_PROTOCOL_CLIENT_ID = 'YUMx5nI8ZU8Ap8pm'")
+    expect(read('src/pikpak/auth.ts')).not.toContain('secrets.generated')
     expect(read('src/guangya/auth.ts')).toContain('resolveGuangyaClientId')
+  })
+
+  it('keeps the original built-in Aliyun OAuth configuration behind the login implementation', () => {
+    const aliyunUser = read('src/aliapi/user.ts')
+    const login = read('src/user/UserLogin.vue')
+    expect(aliyunUser).toContain("const BUILTIN_ALIYUN_APP_ID = 'df43e22f022d4c04b6e29964f3b8b46d'")
+    expect(aliyunUser).toContain('export const getAliyunOpenApiCredentials')
+    expect(aliyunUser).toContain('client_id: credentials.clientId')
+    expect(login).toContain('getAliyunOpenApiCredentials')
+    expect(login).not.toContain("from '../secrets.generated'")
   })
 
   it('keeps the Aliyun device signature byte-compatible after the curve implementation update', async () => {

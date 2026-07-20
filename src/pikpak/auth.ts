@@ -1,48 +1,31 @@
 import { MD5 } from 'crypto-js'
 import type { ITokenInfo } from '../user/userstore'
 import { humanSize } from '../utils/format'
-import { PIKPAK_CLIENT_ID, PIKPAK_CLIENT_SECRET } from '../secrets.generated'
-
-export { PIKPAK_CLIENT_ID, PIKPAK_CLIENT_SECRET }
 
 const PIKPAK_API_HOST = 'https://api-drive.mypikpak.com'
 const PIKPAK_USER_HOST = 'https://user.mypikpak.com'
-const CLIENT_VERSION = '1.47.1'
-const PACKAGE_NAME = 'com.pikcloud.pikpak'
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+export const PIKPAK_PROTOCOL_CLIENT_ID = 'YUMx5nI8ZU8Ap8pm'
+export const PIKPAK_PROTOCOL_CLIENT_VERSION = '2.0.0'
+export const PIKPAK_PROTOCOL_PACKAGE_NAME = 'mypikpak.com'
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0'
 
 const CAPTCHA_SALTS = [
-  'Gez0T9ijiI9WCeTsKSg3SMlx',
-  'zQdbalsolyb1R/',
-  'ftOjr52zt51JD68C3s',
-  'yeOBMH0JkbQdEFNNwQ0RI9T3wU/v',
-  'BRJrQZiTQ65WtMvwO',
-  'je8fqxKPdQVJiy1DM6Bc9Nb1',
-  'niV',
-  '9hFCW2R1',
-  'sHKHpe2i96',
-  'p7c5E6AcXQ/IJUuAEC9W6',
+  'C9qPpZLN8ucRTaTiUMWYS9cQvWOE',
+  '+r6CQVxjzJV6LCV',
+  'F',
+  'pFJRC',
+  '9WXYIDGrwTCz2OiVlgZa90qpECPD6olt',
+  '/750aCr4lm/Sly/c',
+  'RB+DT/gZCrbV',
   '',
-  'aRv9hjc9P+Pbn+u3krN6',
-  'BzStcgE8qVdqjEH16l4',
-  'SqgeZvL5j9zoHP95xWHt',
-  'zVof5yaJkPe3VFpadPof'
+  'CyLsf7hdkIRxRm215hl',
+  '7xHvLi2tOYP0Y92b',
+  'ZGTXXxu8E/MIWaEDB+Sm/',
+  '1UI3',
+  'E7fP5Pfijd+7K+t6Tg/NhuLq0eEUVChpJSkrKxpO',
+  'ihtqpG6FMt65+Xk+tWUH2',
+  'NhXXU9rg4XXdzo7u5o'
 ]
-
-const readStoredCredential = (key: string) => {
-  try {
-    return typeof localStorage === 'undefined' ? '' : localStorage.getItem(key) || ''
-  } catch {
-    return ''
-  }
-}
-
-export const resolvePikPakCredentials = (clientId = '', clientSecret = '') => ({
-  clientId: clientId.trim() || readStoredCredential('pikpak_client_id').trim() || PIKPAK_CLIENT_ID.trim(),
-  clientSecret: clientSecret.trim() || readStoredCredential('pikpak_client_secret').trim() || PIKPAK_CLIENT_SECRET.trim()
-})
-
-export const getPikPakClientId = () => resolvePikPakCredentials().clientId
 
 type PikPakAuthResp = {
   access_token: string
@@ -52,8 +35,24 @@ type PikPakAuthResp = {
   sub?: string
 }
 
-export const captchaSign = (deviceId: string, timestamp: string, clientId = ''): string => {
-  let sign = resolvePikPakCredentials(clientId).clientId + CLIENT_VERSION + PACKAGE_NAME + deviceId + timestamp
+export const createPikPakDeviceId = (username: string): string => MD5(`mnemo-pikpak:${username.trim().toLowerCase()}`).toString()
+
+export const getPikPakAccountId = (accessToken: string, username: string): string => {
+  try {
+    const encodedPayload = accessToken.split('.')[1]
+    if (encodedPayload) {
+      const normalized = encodedPayload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(encodedPayload.length / 4) * 4, '=')
+      const payload = JSON.parse(atob(normalized))
+      if (payload?.sub) return String(payload.sub)
+    }
+  } catch {
+    // A token without a JWT payload still has a stable account fallback below.
+  }
+  return username.trim().toLowerCase()
+}
+
+export const captchaSign = (deviceId: string, timestamp: string): string => {
+  let sign = PIKPAK_PROTOCOL_CLIENT_ID + PIKPAK_PROTOCOL_CLIENT_VERSION + PIKPAK_PROTOCOL_PACKAGE_NAME + deviceId + timestamp
   for (const salt of CAPTCHA_SALTS) {
     sign = MD5(sign + salt).toString()
   }
@@ -63,7 +62,10 @@ export const captchaSign = (deviceId: string, timestamp: string, clientId = ''):
 const buildHeaders = (deviceId?: string, accessToken?: string): HeadersInit => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json; charset=utf-8',
-    'User-Agent': DEFAULT_USER_AGENT
+    'User-Agent': DEFAULT_USER_AGENT,
+    Referer: 'https://mypikpak.com/',
+    'X-Client-Id': PIKPAK_PROTOCOL_CLIENT_ID,
+    'X-Client-Version': PIKPAK_PROTOCOL_CLIENT_VERSION
   }
   if (deviceId) headers['X-Device-Id'] = deviceId
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
@@ -132,27 +134,18 @@ const emptyToken = (): ITokenInfo => ({
   }
 })
 
-export const loginPikPak = async (username: string, password: string, clientId = '', clientSecret = ''): Promise<ITokenInfo> => {
-  const credentials = resolvePikPakCredentials(clientId, clientSecret)
-  if (!credentials.clientId || !credentials.clientSecret) throw new Error('请填写 PikPak Client ID 和 Client Secret')
-  const deviceId = MD5(`${username}${password}`).toString()
+export const loginPikPak = async (username: string, password: string): Promise<ITokenInfo> => {
+  const normalizedUsername = username.trim()
+  const deviceId = createPikPakDeviceId(normalizedUsername)
   const loginUrl = `${PIKPAK_USER_HOST}/v1/auth/signin`
-  const meta: Record<string, string> = {}
-  if (/^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$/.test(username)) {
-    meta.email = username
-  } else if (/^\d{11,18}$/.test(username)) {
-    meta.phone_number = username
-  } else {
-    meta.username = username
-  }
   const captcha = await pikpakJson<{ captcha_token?: string }>(`${PIKPAK_USER_HOST}/v1/shield/captcha/init`, {
     method: 'POST',
     headers: buildHeaders(deviceId),
     body: JSON.stringify({
-      client_id: credentials.clientId,
-      action: `POST:${loginUrl}`,
+      client_id: PIKPAK_PROTOCOL_CLIENT_ID,
+      action: 'POST:/v1/auth/signin',
       device_id: deviceId,
-      meta
+      meta: { username: normalizedUsername }
     })
   }, '获取 PikPak 验证信息失败')
   if (!captcha.captcha_token) throw new Error('获取 PikPak 验证信息失败')
@@ -160,15 +153,13 @@ export const loginPikPak = async (username: string, password: string, clientId =
   const auth = await pikpakJson<PikPakAuthResp>(loginUrl, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      ...buildHeaders(deviceId),
       'X-Captcha-Token': captcha.captcha_token
     },
     body: JSON.stringify({
-      client_id: credentials.clientId,
-      client_secret: credentials.clientSecret,
+      client_id: PIKPAK_PROTOCOL_CLIENT_ID,
       password,
-      username,
-      captcha_token: captcha.captcha_token
+      username: normalizedUsername
     })
   }, 'PikPak 登录失败')
 
@@ -177,10 +168,11 @@ export const loginPikPak = async (username: string, password: string, clientId =
   token.refresh_token = auth.refresh_token
   token.expires_in = Number(auth.expires_in || 7200)
   token.token_type = auth.token_type || 'Bearer'
-  token.user_id = `pikpak_${auth.sub || username}`
-  token.user_name = username
-  token.nick_name = username
-  token.name = username
+  const accountId = auth.sub || getPikPakAccountId(auth.access_token, normalizedUsername)
+  token.user_id = `pikpak_${accountId}`
+  token.user_name = normalizedUsername
+  token.nick_name = normalizedUsername
+  token.name = normalizedUsername
   token.device_id = deviceId
   token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
   return token
@@ -188,13 +180,11 @@ export const loginPikPak = async (username: string, password: string, clientId =
 
 export const refreshPikPakAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
   if (!token.refresh_token) return null
-  const clientId = getPikPakClientId()
-  if (!clientId) return null
   const auth = await pikpakJson<PikPakAuthResp>(`${PIKPAK_USER_HOST}/v1/auth/token`, {
     method: 'POST',
     headers: buildHeaders(token.device_id),
     body: JSON.stringify({
-      client_id: clientId,
+      client_id: PIKPAK_PROTOCOL_CLIENT_ID,
       refresh_token: token.refresh_token,
       grant_type: 'refresh_token'
     })

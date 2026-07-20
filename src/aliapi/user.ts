@@ -9,6 +9,15 @@ import { GetDeviceId, GetSignature } from './utils'
 import { useSettingStore } from '../store'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
 
+// The desktop OAuth client used by the original application. Release secrets can override it.
+const BUILTIN_ALIYUN_APP_ID = 'df43e22f022d4c04b6e29964f3b8b46d'
+const BUILTIN_ALIYUN_APP_SECRET = '63f06c3c5c5d4e1196e2c13e8588ae29'
+
+export const getAliyunOpenApiCredentials = () => ({
+  clientId: ALIYUN_APP_ID.trim() || BUILTIN_ALIYUN_APP_ID,
+  clientSecret: ALIYUN_APP_SECRET.trim() || BUILTIN_ALIYUN_APP_SECRET
+})
+
 export const TokenReTimeMap = new Map<string, number>()
 export const TokenLockMap = new Map<string, number>()
 export const OpenApiTokenReTimeMap = new Map<string, number>()
@@ -142,11 +151,12 @@ export default class AliUser {
     }
     let { uiEnableOpenApiType, uiOpenApiClientId, uiOpenApiClientSecret } = useSettingStore()
     let url = 'https://openapi.alipan.com/oauth/access_token'
+    const credentials = getAliyunOpenApiCredentials()
     const postData = {
       refresh_token: token.open_api_refresh_token,
       grant_type: 'refresh_token',
-      client_id: ALIYUN_APP_ID,
-      client_secret: ALIYUN_APP_SECRET
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret
     }
     const resp = await AliHttp.Post(url, postData, '', '')
     OpenApiTokenLockMap.delete(token.user_id)

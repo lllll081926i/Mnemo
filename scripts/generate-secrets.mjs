@@ -12,8 +12,6 @@ const outputFile = path.join(repoRoot, 'src', 'secrets.generated.ts')
 const secretNames = [
   'ALIYUN_APP_ID',
   'ALIYUN_APP_SECRET',
-  'PIKPAK_CLIENT_ID',
-  'PIKPAK_CLIENT_SECRET',
   'GUANGYA_CLIENT_ID',
   'CLOUD189_APP_ID',
   'ONEDRIVE_CLIENT_ID',

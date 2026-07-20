@@ -3,7 +3,7 @@ import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
 import { HanToPin } from '../utils/utils'
 import message from '../utils/message'
-import { captchaSign, pikpakAuthHeaders } from './auth'
+import { captchaSign, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME, pikpakAuthHeaders } from './auth'
 
 export type PikPakFileItem = {
   id: string
@@ -117,8 +117,8 @@ export const apiPikPakDownloadInfo = async (user_id: string, fileId: string): Pr
     const timestamp = Date.now().toString()
     const meta = {
       captcha_sign: '',
-      client_version: '1.47.1',
-      package_name: 'com.pikcloud.pikpak',
+      client_version: PIKPAK_PROTOCOL_CLIENT_VERSION,
+      package_name: PIKPAK_PROTOCOL_PACKAGE_NAME,
       user_id: token.user_id.replace(/^pikpak_/, ''),
       timestamp
     }
@@ -127,7 +127,7 @@ export const apiPikPakDownloadInfo = async (user_id: string, fileId: string): Pr
       method: 'POST',
       headers: pikpakAuthHeaders(token),
       body: JSON.stringify({
-        client_id: 'YNxT9w7GMdWvEOKa',
+        client_id: PIKPAK_PROTOCOL_CLIENT_ID,
         action: `GET:/drive/v1/files/${fileId}`,
         device_id: token.device_id || '',
         meta

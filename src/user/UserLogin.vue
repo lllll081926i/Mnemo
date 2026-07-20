@@ -6,7 +6,7 @@ import Config from '../config'
 import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
 import { GetDeviceId, GetSignature } from '../aliapi/utils'
-import AliUser from '../aliapi/user'
+import AliUser, { getAliyunOpenApiCredentials } from '../aliapi/user'
 import AliHttp from '../aliapi/alihttp'
 import { QRCode as AntQRCode } from 'ant-design-vue'
 import { loginPikPak } from '../pikpak/auth'
@@ -21,7 +21,6 @@ import { loginGofile } from '../gofile/auth'
 import { buildOneDriveAuthUrl, createOneDrivePkceVerifier, exchangeOneDriveCodeForToken, ONEDRIVE_CLIENT_ID } from '../onedrive/auth'
 import { buildDropboxAuthUrl, createDropboxPkceVerifier, DROPBOX_APP_KEY, exchangeDropboxCodeForToken } from '../dropbox/auth'
 import { buildGoogleDriveAuthUrl, createGoogleDrivePkceVerifier, exchangeGoogleDriveCodeForToken, GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET } from '../gdrive/auth'
-import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
 
 const useUser = useUserStore()
 const settingStore = useSettingStore()
@@ -29,8 +28,8 @@ const loginCur = ref(1)
 const loginToken = ref<ITokenInfo>()
 const loginStatus = ref<'wait' | 'error' | 'finish' | 'process'>('process')
 const loginLoading = ref(true)
-const client_id = ref(ALIYUN_APP_ID)
-const client_secret = ref(ALIYUN_APP_SECRET)
+const client_id = ref(getAliyunOpenApiCredentials().clientId)
+const client_secret = ref(getAliyunOpenApiCredentials().clientSecret)
 
 const intervalId = ref()
 const qrCodeUrl = ref('')
@@ -357,8 +356,9 @@ onBeforeUnmount(() => {
 
 const handleClose = () => {
   loginLoading.value = true
-  client_id.value = ALIYUN_APP_ID
-  client_secret.value = ALIYUN_APP_SECRET
+  const credentials = getAliyunOpenApiCredentials()
+  client_id.value = credentials.clientId
+  client_secret.value = credentials.clientSecret
   clearInterval(intervalId.value)
   clearOpenTimers()
   cleanupAliyunLoginWebview()
@@ -773,8 +773,9 @@ const loginStepFirst = async (msg: string) => {
           }
         }
         loginToken.value = token
-        client_id.value = ALIYUN_APP_ID
-        client_secret.value = ALIYUN_APP_SECRET
+        const credentials = getAliyunOpenApiCredentials()
+        client_id.value = credentials.clientId
+        client_secret.value = credentials.clientSecret
         refreshStepTips('process', 2)
         loginStepSecond(token)
       } catch (err: any) {
@@ -980,7 +981,7 @@ const loginSuccess = (token: ITokenInfo) => {
               <div class="pikpak-login-form">
                 <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
                 <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear @press-enter="submitPikPakLogin" />
-                <a-button type="primary" long :loading="pikpakLoading" @click="submitPikPakLogin">登录 PikPak</a-button>
+                <a-button type="primary" long :loading="pikpakLoading" @click="submitPikPakLogin">添加 PikPak 账号</a-button>
               </div>
             </div>
           </div>

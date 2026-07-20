@@ -23,7 +23,6 @@ describe('createAutoUpdateController', () => {
 
   it('publishes a latest stable release with every required provider credential', () => {
     const workflow = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8')
-    expect(workflow).toContain('PIKPAK_CLIENT_ID')
     expect(workflow).toContain('ONEDRIVE_CLIENT_ID')
     expect(workflow).toContain('DROPBOX_APP_KEY')
     expect(workflow).toContain('GOOGLE_DRIVE_CLIENT_ID')

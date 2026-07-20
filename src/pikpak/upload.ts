@@ -2,7 +2,7 @@ import path from 'path'
 import mime from 'mime-types'
 import type { IUploadingUI } from '../utils/dbupload'
 import UserDAL from '../user/userdal'
-import { captchaSign, getPikPakClientId, pikpakAuthHeaders } from './auth'
+import { captchaSign, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME, pikpakAuthHeaders } from './auth'
 import { computeProviderGcid, fetchProviderUploadWithRetry, openProviderUploadFile, parseProviderUploadResponse } from '../utils/providerUpload'
 import { uploadOssFile } from '../utils/ossUpload'
 import { buildPikPakUploadBody, toPikPakOssCredentials, type PikPakUploadCreateResponse } from './uploadProtocol'
@@ -22,13 +22,13 @@ const createPikPakUpload = async (fileui: IUploadingUI, gcid: string): Promise<{
       method: 'POST',
       headers: pikpakAuthHeaders(token),
       body: JSON.stringify({
-        client_id: getPikPakClientId(),
+        client_id: PIKPAK_PROTOCOL_CLIENT_ID,
         action: 'POST:/drive/v1/files',
         device_id: token.device_id || '',
         meta: {
           captcha_sign: captchaSign(token.device_id || '', timestamp),
-          client_version: '1.47.1',
-          package_name: 'com.pikcloud.pikpak',
+          client_version: PIKPAK_PROTOCOL_CLIENT_VERSION,
+          package_name: PIKPAK_PROTOCOL_PACKAGE_NAME,
           user_id: token.user_id.replace(/^pikpak_/, ''),
           timestamp
         }

@@ -1,7 +1,5 @@
 export const ALIYUN_APP_ID = ''
 export const ALIYUN_APP_SECRET = ''
-export const PIKPAK_CLIENT_ID = ''
-export const PIKPAK_CLIENT_SECRET = ''
 export const GUANGYA_CLIENT_ID = ''
 export const CLOUD189_APP_ID = ''
 export const ONEDRIVE_CLIENT_ID = ''
