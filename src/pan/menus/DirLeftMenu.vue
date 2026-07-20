@@ -6,12 +6,15 @@ import { usePanTreeStore } from '../../store'
 import TreeStore from '../../store/treestore'
 import { computed } from 'vue'
 import { isAliyunUser as isAliyunAccountUser, isGuangyaUser } from '../../aliapi/utils'
+import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 const istree = true
 const pantreeStore = usePanTreeStore()
+const { capabilities } = useCurrentDriveProvider()
 const isAliyunAccount = computed(() => isAliyunAccountUser(pantreeStore.user_id || ''))
 const isGuangya = computed(() => isGuangyaUser(pantreeStore.user_id || '') || pantreeStore.drive_id === 'guangya')
-const isShareSupported = computed(() => props.inputselectType.includes('resource') || isGuangya.value)
+const isShareSupported = computed(() => capabilities.value.createShare && (!isAliyunAccount.value || props.inputselectType.includes('resource') || isGuangya.value))
+const canDelete = computed(() => capabilities.value.recycleBin || capabilities.value.permanentDelete)
 
 const props = defineProps({
   inputselectType: {
@@ -70,7 +73,7 @@ const handleExpandAll = (isExpand: boolean) => {
           </a-doption>
         </template>
       </a-dsubmenu>
-      <a-doption @click="() => menuDownload(istree)">
+      <a-doption v-if="capabilities.download" @click="() => menuDownload(istree)">
         <template #icon> <IconFont name="icondownload" /> </template>
         <template #default>下载</template>
       </a-doption>
@@ -79,34 +82,34 @@ const handleExpandAll = (isExpand: boolean) => {
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>
       </a-doption>
-      <a-doption v-if="isAliyunAccount" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
+      <a-doption v-if="capabilities.quickTransfer" @click="() => menuCreatShare(istree, 'pan', 'backup_root')">
         <template #icon><IconFont name="iconrss" /></template>
         <template #default>快传</template>
       </a-doption>
 
-      <a-dsubmenu id="leftpansubmove" class="rightmenu" trigger="hover">
+      <a-dsubmenu v-if="capabilities.move || capabilities.copy || canDelete" id="leftpansubmove" class="rightmenu" trigger="hover">
         <template #default>
           <div @click.stop="() => {}">
             <span class="arco-dropdown-option-icon"><IconFont name="iconmoveto" style="opacity: 0.8" /></span>移动
           </div>
         </template>
         <template #content>
-          <a-doption @click="() => menuCopySelectedFile(istree, 'cut')">
+          <a-doption v-if="capabilities.move" @click="() => menuCopySelectedFile(istree, 'cut')">
             <template #icon> <IconFont name="iconscissor" /> </template>
             <template #default>移动到...</template>
           </a-doption>
-          <a-doption @click="() => menuCopySelectedFile(istree, 'copy')">
+          <a-doption v-if="capabilities.copy" @click="() => menuCopySelectedFile(istree, 'copy')">
             <template #icon> <IconFont name="iconcopy" /> </template>
             <template #default>复制到...</template>
           </a-doption>
-          <a-doption class="danger" @click="() => menuTrashSelectFile(istree, false)">
+          <a-doption v-if="canDelete" class="danger" @click="() => menuTrashSelectFile(istree, capabilities.permanentDelete && !capabilities.recycleBin)">
             <template #icon> <IconFont name="icondelete" /> </template>
-            <template #default>回收站</template>
+            <template #default>{{ capabilities.recycleBin ? '放回收站' : '彻底删除' }}</template>
           </a-doption>
         </template>
       </a-dsubmenu>
 
-      <a-doption @click='() => modalRename(istree, false, false)'>
+      <a-doption v-if="capabilities.rename" @click='() => modalRename(istree, false, false)'>
         <template #icon><IconFont name="iconedit-square" /></template>
         <template #default>重命名</template>
       </a-doption>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ITokenInfo, useSettingStore, useUserStore } from '../store'
 import UserDAL from '../user/userdal'
 import Config from '../config'
@@ -8,7 +8,6 @@ import DebugLog from '../utils/debuglog'
 import { GetDeviceId, GetSignature } from '../aliapi/utils'
 import AliUser from '../aliapi/user'
 import AliHttp from '../aliapi/alihttp'
-import { Input, Modal, Space } from '@arco-design/web-vue'
 import { QRCode as AntQRCode } from 'ant-design-vue'
 import { loginPikPak } from '../pikpak/auth'
 import { completeQuarkQrLogin, pollQuarkQrStatus, requestQuarkQrCode } from '../quark/auth'
@@ -153,10 +152,6 @@ watch(loginProvider, () => {
     handleOpen()
   }
 })
-
-const cb = (val: any) => {
-  settingStore.updateStore(val)
-}
 
 function b64decode(e: string) {
   const t = atob(e)
@@ -803,13 +798,8 @@ const loginStepFirst = async (msg: string) => {
           }
         }
         loginToken.value = token
-        if (settingStore.uiEnableOpenApiType === 'custom') {
-          client_id.value = settingStore.uiOpenApiClientId.trim()
-          client_secret.value = settingStore.uiOpenApiClientSecret.trim()
-        } else {
-          client_id.value = ALIYUN_APP_ID
-          client_secret.value = ALIYUN_APP_SECRET
-        }
+        client_id.value = ALIYUN_APP_ID
+        client_secret.value = ALIYUN_APP_SECRET
         refreshStepTips('process', 2)
         loginStepSecond(token)
       } catch (err: any) {
@@ -832,9 +822,8 @@ const loginStepSecond = async (token: ITokenInfo) => {
     return
   }
   if (!client_id.value.trim() || !client_secret.value.trim()) {
-    await settingStore.updateStore({ uiEnableOpenApiType: 'custom' })
     refreshStepTips('error', 2)
-    handlerChangeType()
+    refreshQrCodeStatus('', 'error', '内置授权配置缺失，请安装正式版本')
     return
   }
   loginLoading.value = false
@@ -851,7 +840,6 @@ const loginStepSecond = async (token: ITokenInfo) => {
   if (!codeUrl) {
     refreshQrCodeStatus('', 'error', '获取二维码失败')
     refreshStepTips('error', 2)
-    handlerChangeType()
     return
   }
   refreshQrCodeStatus(codeUrl, 'info', '状态：等待扫码登录')
@@ -885,55 +873,6 @@ const loginStepSecond = async (token: ITokenInfo) => {
       DebugLog.mSaveWarning('Aliyun second QR code status failed', err)
     }
   }, 1500)
-}
-
-const handlerChangeType = () => {
-  clearInterval(intervalId.value)
-  refreshQrCodeStatus()
-  if (settingStore.uiEnableOpenApiType === 'custom') {
-    Modal.open({
-      title: '输入开发者账号',
-      bodyStyle: { minWidth: '340px' },
-      content: () =>
-        h(Space, { direction: 'vertical' }, () => [
-          h(Input, {
-            type: 'text',
-            tabindex: '-1',
-            allowClear: true,
-            modelValue: settingStore.uiOpenApiClientId.trim(),
-            style: { width: '340px' },
-            placeholder: '客户端ID',
-            'onUpdate:modelValue': (e) => cb({ uiOpenApiClientId: e.trim() })
-          }),
-          h(Input, {
-            type: 'text',
-            tabindex: '-1',
-            allowClear: true,
-            modelValue: settingStore.uiOpenApiClientSecret.trim(),
-            style: { width: '340px' },
-            placeholder: '客户端密钥',
-            'onUpdate:modelValue': (e) => cb({ uiOpenApiClientSecret: e.trim() })
-          })
-        ]),
-      okText: '确认',
-      cancelText: '取消',
-      onBeforeOk: async (e: any) => {
-        if (settingStore.uiOpenApiClientId && settingStore.uiOpenApiClientSecret) {
-          client_id.value = settingStore.uiOpenApiClientId
-          client_secret.value = settingStore.uiOpenApiClientSecret
-          handleRefreshQrCodeUrl()
-          return true
-        } else {
-          message.error('请输入开发者账号')
-          return false
-        }
-      }
-    })
-  } else {
-    client_id.value = ALIYUN_APP_ID
-    client_secret.value = ALIYUN_APP_SECRET
-    handleRefreshQrCodeUrl()
-  }
 }
 
 const handleRefreshQrCodeUrl = () => {

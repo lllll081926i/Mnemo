@@ -37,5 +37,13 @@ describe('provider OAuth runtime configuration', () => {
     expect(login).toContain('window.WebOAuthOpen(state, authUrl)')
     expect(login).toContain('window.WebOAuthOnCallback')
     expect(login).not.toContain('WebOpenExternal')
+    expect(login).not.toContain('输入开发者账号')
+    expect(login).not.toContain('uiOpenApiClientSecret')
+  })
+
+  it('keeps the current drive id when a single-root provider node is selected', () => {
+    const selector = read('src/pan/topbtns/SelectPanDirModal.vue')
+    expect(selector).toContain('const selectedDriveId = GetDriveID(user_id.value, parentNode.key || key) || drive_id.value')
+    expect(selector).toContain('drive_id: selectedDriveId')
   })
 })

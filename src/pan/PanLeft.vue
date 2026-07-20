@@ -17,7 +17,7 @@ import FolderPreviewPopover from './menus/FolderPreviewPopover.vue'
 import { TreeNodeData } from '../store/treestore'
 import { dropMoveSelectedFile, uploadLocalPaths } from './topbtns/topbtn'
 import message from '../utils/message'
-import { GetDriveType, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser, isS3User, isWebDavUser } from '../aliapi/utils'
+import { GetDriveType, isS3User, isWebDavUser } from '../aliapi/utils'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
 import { loadDriveAccountOptions, toDriveAccountOption, type DriveAccountOption } from '../utils/driveAccount'
 import { getWebDavConnectionId, removeWebDavConnection } from '../utils/webdavClient'
@@ -92,10 +92,7 @@ watchEffect(() => {
 const handleTreeRightClick = (e: { event: MouseEvent; node: any }) => {
   const { parent = undefined, key } = e.node
   if (key.startsWith('search')) return
-  const isSingleRootDrive =
-    isPikPakUser(pantreeStore.user_id || '') ||
-    isWebDavUser(pantreeStore.user_id || '') ||
-    isS3User(pantreeStore.user_id || '')
+  const isSingleRootDrive = provider.value !== 'aliyun'
   if (!isSingleRootDrive && key.length < 40) return
   pantreeStore.mTreeSelected(e)
   onShowRightMenu('leftpanmenu', e.event.clientX, e.event.clientY)
@@ -212,14 +209,7 @@ const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
     // leaf placeholder, but still might be a real folder; only block if no drive_id
   }
   const userId = pantreeStore.user_id || ''
-  const isSingleRootDrive =
-    isPikPakUser(userId) ||
-    isWebDavUser(userId) ||
-    isS3User(userId) ||
-    isQuarkUser(userId) ||
-    isCloud139User(userId) ||
-    isCloud189User(userId) ||
-    isGuangyaUser(userId)
+  const isSingleRootDrive = provider.value !== 'aliyun'
   if (!isSingleRootDrive && key.length < 40) return false
   return true
 }
@@ -446,7 +436,7 @@ const handleOpenDriveLogin = () => {
             </template>
             <template #title="{ dataRef }">
               <span
-                v-if="String(dataRef.key).length == 40 || String(dataRef.key).includes('root') || String(dataRef.drive_id || '').startsWith('webdav:') || String(dataRef.drive_id || '').startsWith('s3:')"
+                v-if="provider !== 'aliyun' || String(dataRef.key).length == 40 || String(dataRef.key).includes('root') || String(dataRef.drive_id || '').startsWith('webdav:') || String(dataRef.drive_id || '').startsWith('s3:')"
                 class="dirtitle treedragnode"
                 @drop="onRowItemDrop($event, dataRef)"
                 @dragover="onRowItemDragOver"

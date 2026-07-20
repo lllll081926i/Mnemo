@@ -200,7 +200,7 @@ const driveProviderCapabilities: Record<DriveProvider, DriveProviderCapabilities
   pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
   quark: createCapabilities('quark', { search: true, createShare: true, importShare: true, manageCreatedShares: true, editCreatedShares: true, cancelCreatedShares: true, manageImportedShares: true, copy: false }),
   onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
-  dropbox: createCapabilities('dropbox', { search: true, createShare: true, recycleBin: false, permanentDelete: true }),
+  dropbox: createCapabilities('dropbox', { search: true, createShare: true }),
   gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true }),
   nextcloud: createCapabilities('nextcloud', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   gofile: createCapabilities('gofile', { createShare: true, recycleBin: false, permanentDelete: true }),

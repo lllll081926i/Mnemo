@@ -13,23 +13,26 @@ import { Sleep } from '../../utils/format'
 import { treeSelectToExpand } from '../../utils/antdtree'
 import AliTrash from '../../aliapi/trash'
 import { fileiconfn } from '../pantreestore'
-import { GetDriveID, GetDriveType, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser } from '../../aliapi/utils'
+import { GetDriveID, GetDriveType, isAliyunUser, isCloud139User, isCloud189User, isGuangyaUser, isPikPakUser, isQuarkUser } from '../../aliapi/utils'
 import { IAliGetDirModel } from '../../aliapi/alimodels'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
 import { apiQuarkFileList, mapQuarkFileToAliModel } from '../../quark/dirfilelist'
 import { apiCloud139FileList, mapCloud139FileToAliModel } from '../../cloud139/dirfilelist'
 import { apiCloud189FileList, mapCloud189FileToAliModel } from '../../cloud189/dirfilelist'
 import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../../guangya/dirfilelist'
+import { resolveDriveProvider } from '../../utils/driveProvider'
+import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../../onedrive/dirfilelist'
+import { apiDropboxFileList, mapDropboxFileToAliModel } from '../../dropbox/dirfilelist'
+import { apiGoogleDriveFileList, mapGoogleDriveItemToAliModel } from '../../gdrive/dirfilelist'
+import { apiGofileFileList, mapGofileItemToAliModel } from '../../gofile/dirfilelist'
+import { getWebDavConnection, getWebDavConnectionId, listWebDavDirectory } from '../../utils/webdavClient'
+import { getS3Connection, getS3ConnectionId, listS3Directory } from '../../utils/s3Client'
 
 const iconfolder = h(IconFont, { name: 'iconfile-folder' })
 const foldericonfn = () => iconfolder
 
 const isSingleRootDriveUser = (userId: string) => {
-  return isPikPakUser(userId) ||
-    isQuarkUser(userId) ||
-    isCloud139User(userId) ||
-    isCloud189User(userId) ||
-    isGuangyaUser(userId)
+  return !!userId && !isAliyunUser(userId)
 }
 
 const props = defineProps({
@@ -97,7 +100,7 @@ const handleOpen = async () => {
       const cloudDriveId = GetDriveID(user_id.value, driveType.key) || drive_id.value
       data = TreeStore.GetDirPath(cloudDriveId, selectid)
     } else {
-      if (!useSettingStore().securityHideResourceDrive) {
+      if (!useSettingStore().securityHideBackupDrive) {
         backup_data = TreeStore.GetDirPath(pantreeStore.backup_drive_id, selectid)
       }
       if (!useSettingStore().securityHideResourceDrive) {
@@ -257,10 +260,10 @@ const handleTreeSelect = (keys: any[], info: {
     return node.parent ? getParentNode(node.parent) : node
   }
   const parentNode = getParentNode(info.node)
-  const drive_id = GetDriveID(user_id.value, parentNode.key || key)
-  localStorage.setItem('selectpandir-' + drive_id, key)
+  const selectedDriveId = GetDriveID(user_id.value, parentNode.key || key) || drive_id.value
+  localStorage.setItem('selectpandir-' + selectedDriveId, key)
   selectFile.value = {
-    drive_id: drive_id,
+    drive_id: selectedDriveId,
     name: title,
     file_id: key,
     parent_file_id: parent_file_id,
@@ -274,6 +277,44 @@ const handleTreeSelect = (keys: any[], info: {
 
 const apiLoad = (key: any) => {
   const onlyDirs = props.selecttype !== 'select'
+  const provider = resolveDriveProvider({ userId: user_id.value, driveId: drive_id.value })
+  if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile' || provider === 'webdav' || provider === 'nextcloud' || provider === 's3') {
+    const loadItems = async () => {
+      if (provider === 'onedrive') return (await apiOneDriveFileList(user_id.value, key)).map((item) => mapOneDriveItemToAliModel(item, drive_id.value, key))
+      if (provider === 'dropbox') return (await apiDropboxFileList(user_id.value, key)).map((item) => mapDropboxFileToAliModel(item, drive_id.value, key))
+      if (provider === 'gdrive') return (await apiGoogleDriveFileList(user_id.value, key)).map((item) => mapGoogleDriveItemToAliModel(item, drive_id.value, key))
+      if (provider === 'gofile') return (await apiGofileFileList(user_id.value, key)).map((item) => mapGofileItemToAliModel(item, drive_id.value, key))
+      if (provider === 's3') {
+        const connection = getS3Connection(getS3ConnectionId(drive_id.value))
+        return connection ? await listS3Directory(connection, key === GetDriveType(user_id.value, drive_id.value).key ? '/' : key) : []
+      }
+      const connection = getWebDavConnection(getWebDavConnectionId(drive_id.value))
+      return connection ? await listWebDavDirectory(connection, key === GetDriveType(user_id.value, drive_id.value).key ? '/' : key) : []
+    }
+    return loadItems()
+      .then((items) => {
+        const addList = items
+          .filter((item) => !onlyDirs || item.isDir)
+          .filter((item) => !props.category || item.isDir || item.category === props.category)
+          .filter((item) => !props.extFilter || item.isDir || props.extFilter.test(item.ext))
+          .map((item) => ({
+            __v_skip: true,
+            key: item.file_id,
+            drive_id: drive_id.value,
+            parent_file_id: item.parent_file_id,
+            path: item.path || '',
+            title: item.name,
+            children: [],
+            isDir: item.isDir,
+            isLeaf: !item.isDir,
+            description: item.description,
+            icon: item.isDir ? foldericonfn : () => fileiconfn(item.icon)
+          } as TreeNodeData))
+        autoExpand(addList)
+        return addList
+      })
+      .catch(() => [] as TreeNodeData[])
+  }
   if (isPikPakUser(user_id.value)) {
     const parentId = key.includes('root') ? 'pikpak_root' : key
     return apiPikPakFileList(user_id.value, parentId, 100)
@@ -510,20 +551,20 @@ const handleTreeExpand = (keys: any[], info: {
 }) => {
   const arr = treeExpandedKeys.value
   let { key } = info.node
-    if (arr.includes(key)) {
-      treeExpandedKeys.value = arr.filter((t) => t != key)
-    } else {
-      treeExpandedKeys.value = arr.concat([key])
-      if (props.selecttype !== 'select' && props.selecttype !== 'offline' && !isSingleRootDriveUser(user_id.value)) { // 仅显示文件夹
+  if (arr.includes(key)) {
+    treeExpandedKeys.value = arr.filter((t) => t != key)
+  } else {
+    treeExpandedKeys.value = arr.concat([key])
+    if (props.selecttype !== 'select' && props.selecttype !== 'offline') { // 仅显示文件夹
+      if (isSingleRootDriveUser(user_id.value)) {
+        treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, drive_id.value, treeExpandedKeys.value)
+      } else {
         let backupPan: TreeNodeData[] = []
         let resourcePan: TreeNodeData[] = []
-        if (!useSettingStore().securityHideBackupDrive) {
-          backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value)
-        }
-        if (!useSettingStore().securityHideResourceDrive) {
-          resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value)
-        }
+        if (!useSettingStore().securityHideBackupDrive) backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value)
+        if (!useSettingStore().securityHideResourceDrive) resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value)
         treeData.value = [...backupPan, ...resourcePan]
+      }
     }
   }
 }
@@ -566,7 +607,7 @@ const handleHideNewDir = () => {
   showCreatNewDir.value = false
 }
 const handleOKNewDir = () => {
-  formRef.value.validate((data: any) => {
+  formRef.value.validate(async (data: any) => {
     if (data) return
 
     const newName = ClearFileName(form.dirName)
@@ -576,48 +617,51 @@ const handleOKNewDir = () => {
     }
 
     okLoading.value = true
-    let newdirid = ''
-    let selectFileId = selectFile.value.file_id
-    AliFileCmd.ApiCreatNewForder(user_id.value, drive_id.value, selectFileId, newName)
-      .then((data) => {
-        if (data.error) message.error('新建文件夹 失败' + data.error)
-        else {
-          newdirid = data.file_id
-          message.success('新建文件夹 成功')
-          return PanDAL.GetDirFileList(user_id.value, drive_id.value, selectFileId, '', '', false)
-        }
-      })
-      .catch((err: any) => {
-        message.error('新建文件夹 失败', err)
-      })
-      .then(async () => {
+    const selectFileId = selectFile.value.file_id
+    const targetDriveId = selectFile.value.drive_id || drive_id.value
+    try {
+      const result = await AliFileCmd.ApiCreatNewForder(user_id.value, targetDriveId, selectFileId, newName)
+      if (result.error || !result.file_id) {
+        message.error('新建文件夹失败 ' + (result.error || '未返回文件夹 ID'))
+        return
+      }
+      const newdirid = result.file_id
+      message.success('新建文件夹成功')
+      try {
+        await PanDAL.GetDirFileList(user_id.value, targetDriveId, selectFileId, '', '', false)
+      } catch (error) {
+        console.error('刷新新建文件夹失败:', error)
+      }
         if (selectFileId == pantreeStore.selectDir.file_id) {
           await PanDAL.aReLoadOneDirToShow('', 'refresh', false)
         }
         await Sleep(200)
         selectFile.value = {
-          drive_id: drive_id.value,
+          drive_id: targetDriveId,
           name: newName,
           file_id: newdirid,
-          parent_file_id: selectFile.value.parent_file_id,
+          parent_file_id: selectFileId,
           path: '',
           description: '',
           isDir: true
         }
-        treeExpandedKeys.value = treeExpandedKeys.value.concat([selectFile.value.file_id, newdirid])
-        let backupPan: TreeNodeData[] = []
-        let resourcePan: TreeNodeData[] = []
-        if (!useSettingStore().securityHideBackupDrive) {
-          backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value)
+        treeExpandedKeys.value = treeExpandedKeys.value.concat([selectFileId, newdirid])
+        if (isSingleRootDriveUser(user_id.value)) {
+          treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, drive_id.value, treeExpandedKeys.value)
+        } else {
+          let backupPan: TreeNodeData[] = []
+          let resourcePan: TreeNodeData[] = []
+          if (!useSettingStore().securityHideBackupDrive) backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value)
+          if (!useSettingStore().securityHideResourceDrive) resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value)
+          treeData.value = [...backupPan, ...resourcePan]
         }
-        if (!useSettingStore().securityHideResourceDrive) {
-          resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value)
-        }
-        treeData.value = [...backupPan, ...resourcePan]
         treeSelectedKeys.value = [newdirid]
-        okLoading.value = false
         showCreatNewDir.value = false
-      })
+    } catch (err: any) {
+      message.error(err?.message || '新建文件夹失败')
+    } finally {
+      okLoading.value = false
+    }
   })
 }
 const handleOK = () => {
@@ -631,7 +675,6 @@ const handleOK = () => {
   }
   modalCloseAll()
   if (props.callback) {
-    console.warn('SelectPanDirModal.selectFile', selectFile.value)
     props.callback(user_id.value, drive_id.value, selectFile.value)
   }
 }

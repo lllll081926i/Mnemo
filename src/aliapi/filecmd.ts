@@ -113,8 +113,9 @@ export default class AliFileCmd {
     }
     const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
     if (provider === 'onedrive') return apiOneDriveDeleteBatch(user_id, file_idList)
+    if (provider === 'dropbox') return apiDropboxDeleteBatch(user_id, file_idList)
     if (provider === 'gdrive') return apiGoogleDriveTrashBatch(user_id, file_idList)
-    if (provider === 'dropbox' || provider === 'gofile') return []
+    if (provider === 'gofile') return []
     const batchList = ApiBatchMaker('/recyclebin/trash', file_idList, (file_id: string) => {
       return { drive_id: drive_id, file_id: file_id }
     })
@@ -172,10 +173,9 @@ export default class AliFileCmd {
       return apiGuangyaTrashBatch(user_id, file_idList)
     }
     const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
-    if (provider === 'dropbox') return apiDropboxDeleteBatch(user_id, file_idList)
     if (provider === 'gdrive') return apiGoogleDriveDeleteBatch(user_id, file_idList)
     if (provider === 'gofile') return apiGofileDeleteBatch(user_id, file_idList)
-    if (provider === 'onedrive') return []
+    if (provider === 'onedrive' || provider === 'dropbox') return []
     const batchList = ApiBatchMaker('/file/delete', file_idList, (file_id: string) => {
       return { drive_id: drive_id, file_id: file_id }
     })
