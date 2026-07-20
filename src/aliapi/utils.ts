@@ -16,7 +16,7 @@ import mime from 'mime-types'
 import { getEncPassword, getEncType } from '../utils/proxyhelper'
 
 export function GetDriveID(user_id: string, drive: string): string {
-  if (/^(webdav|nextcloud|s3|onedrive|dropbox|gdrive|gofile):/.test(drive || '')) return drive
+  if (/^(webdav|s3|onedrive|dropbox|gdrive|gofile):/.test(drive || '')) return drive
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
     if (isCloud139User(user_id)) {
@@ -48,10 +48,7 @@ export function GetDriveID(user_id: string, drive: string): string {
 }
 
 export function GetDriveType(user_id: string, drive_id: string): any {
-  if (/^(webdav|nextcloud):/.test(drive_id || '')) {
-    const nextcloud = (drive_id || '').startsWith('nextcloud:')
-    return { title: nextcloud ? 'Nextcloud' : 'WebDAV', name: nextcloud ? 'nextcloud' : 'webdav', key: '/' }
-  }
+  if ((drive_id || '').startsWith('webdav:')) return { title: 'WebDAV', name: 'webdav', key: '/' }
   if ((drive_id || '').startsWith('s3:')) {
     return { title: 'S3', name: 's3', key: '/' }
   }
@@ -143,8 +140,8 @@ export function isQuarkUser(user: string | { user_id?: string; tokenfrom?: strin
 
 export function isWebDavUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === 'webdav' || tokenfrom === 'nextcloud') return true
-  return user_id.startsWith('webdav:') || user_id.startsWith('nextcloud:')
+  if (tokenfrom === 'webdav') return true
+  return user_id.startsWith('webdav:')
 }
 
 export function isS3User(user: string | { user_id?: string; tokenfrom?: string }): boolean {

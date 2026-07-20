@@ -32,8 +32,7 @@ export default defineConfig({
       'src/onedrive/__tests__/**/*.test.ts',
       'src/dropbox/__tests__/**/*.test.ts',
       'src/gdrive/__tests__/**/*.test.ts',
-      'src/gofile/__tests__/**/*.test.ts',
-      'src/nextcloud/__tests__/**/*.test.ts'
+      'src/gofile/__tests__/**/*.test.ts'
     ]
   }
 })

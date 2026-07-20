@@ -17,7 +17,7 @@ describe('drive provider capabilities', () => {
     expect(resolveDriveProvider({ userId: 'onedrive_account-id' })).toBe('onedrive')
     expect(resolveDriveProvider({ userId: 'dropbox_account-id' })).toBe('dropbox')
     expect(resolveDriveProvider({ userId: 'gdrive_account-id' })).toBe('gdrive')
-    expect(resolveDriveProvider({ userId: 'nextcloud:connection-id' })).toBe('unknown')
+    expect(resolveDriveProvider({ userId: 'unsupported:connection-id' })).toBe('unknown')
     expect(resolveDriveProvider({ userId: 'gofile_account-id' })).toBe('gofile')
     expect(resolveDriveProvider({ driveId: 'onedrive:drive-id' })).toBe('onedrive')
     expect(resolveDriveProvider({ userId: 'aliyun_user-id', driveId: 'resource-drive-id' })).toBe('aliyun')
@@ -102,7 +102,7 @@ describe('drive provider capabilities', () => {
   })
 
   it('defaults removed and unknown providers to no capabilities', () => {
-    for (const id of ['cloud123', '115', 'baidu', 'box', 'nextcloud:connection-id', 'unrecognized-account']) {
+    for (const id of ['cloud123', '115', 'baidu', 'box', 'unrecognized-account']) {
       const capabilities = getDriveProviderCapabilities({ userId: id })
       expect(capabilities.provider, id).toBe('unknown')
       expect(capabilities.download, id).toBe(false)

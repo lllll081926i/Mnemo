@@ -1,6 +1,6 @@
 import type { ITokenInfo } from '../user/userstore'
 
-export type DriveProvider = Exclude<ITokenInfo['tokenfrom'], 'nextcloud'>
+export type DriveProvider = ITokenInfo['tokenfrom']
 
 export interface DriveProviderMeta {
   key: DriveProvider
