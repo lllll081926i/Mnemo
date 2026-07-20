@@ -82,23 +82,47 @@ export class OAuthCallbackServer {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 
+  private listenOnce(options: { port: number; host: string; ipv6Only?: boolean }) {
+    const server = this.server!
+    return new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off('listening', onListening)
+        reject(error)
+      }
+      const onListening = () => {
+        server.off('error', onError)
+        resolve()
+      }
+      server.once('error', onError)
+      server.once('listening', onListening)
+      server.listen(options)
+    })
+  }
+
   private async ensureListening() {
     if (this.server?.listening) return
     if (this.listenPromise) return this.listenPromise
     this.server = createServer((request, response) => this.handleRequest(request, response))
-    this.listenPromise = new Promise<void>((resolve, reject) => {
-      const server = this.server!
-      const onError = (error: Error) => {
-        this.server = null
-        this.listenPromise = null
-        reject(new Error(`OAuth 回调服务启动失败: ${error.message}`))
+    this.listenPromise = (async () => {
+      try {
+        // Dual-stack when possible so browser redirects to localhost (::1) still hit the callback.
+        await this.listenOnce({ port: this.port, host: '::', ipv6Only: false })
+      } catch (error: any) {
+        const code = error?.code || ''
+        if (code !== 'EADDRNOTAVAIL' && code !== 'EAFNOSUPPORT' && code !== 'EINVAL' && code !== 'EADDRINUSE') {
+          this.server = null
+          this.listenPromise = null
+          throw new Error(`OAuth 回调服务启动失败: ${error.message}`)
+        }
+        try {
+          await this.listenOnce({ port: this.port, host: this.host })
+        } catch (fallbackError: any) {
+          this.server = null
+          this.listenPromise = null
+          throw new Error(`OAuth 回调服务启动失败: ${fallbackError.message}`)
+        }
       }
-      server.once('error', onError)
-      server.listen(this.port, this.host, () => {
-        server.off('error', onError)
-        resolve()
-      })
-    })
+    })()
     return this.listenPromise
   }
 

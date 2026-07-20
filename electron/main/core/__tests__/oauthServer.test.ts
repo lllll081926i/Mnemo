@@ -3,6 +3,14 @@ import { isOAuthAuthorizationUrl, OAuthCallbackServer } from '../oauthServer'
 
 const servers: OAuthCallbackServer[] = []
 
+/** OAuth redirect may advertise localhost while the server binds loopback IPv4; avoid ::1-only failures in CI. */
+const loopbackFetch = (redirectUri: string, searchParams: Record<string, string>) => {
+  const url = new URL(redirectUri)
+  if (url.hostname === 'localhost') url.hostname = '127.0.0.1'
+  for (const [key, value] of Object.entries(searchParams)) url.searchParams.set(key, value)
+  return fetch(url)
+}
+
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
 })
@@ -21,8 +29,8 @@ describe('OAuthCallbackServer', () => {
     expect(new URL(second.redirectUri).hostname).toBe('127.0.0.1')
     expect(new URL(second.redirectUri).pathname).toBe('/')
 
-    const secondResponse = await fetch(`${second.redirectUri}?state=${second.state}&code=google-code`)
-    const firstResponse = await fetch(`${first.redirectUri}?state=${first.state}&code=microsoft-code`)
+    const secondResponse = await loopbackFetch(second.redirectUri, { state: second.state, code: 'google-code' })
+    const firstResponse = await loopbackFetch(first.redirectUri, { state: first.state, code: 'microsoft-code' })
 
     expect(secondResponse.status).toBe(200)
     expect(firstResponse.status).toBe(200)
@@ -36,7 +44,7 @@ describe('OAuthCallbackServer', () => {
     const target = { send: vi.fn(), isDestroyed: () => false }
     const session = await server.begin('dropbox', target)
 
-    const response = await fetch(`${session.redirectUri}?state=wrong-state&code=code`)
+    const response = await loopbackFetch(session.redirectUri, { state: 'wrong-state', code: 'code' })
 
     expect(response.status).toBe(400)
     expect(target.send).not.toHaveBeenCalled()
