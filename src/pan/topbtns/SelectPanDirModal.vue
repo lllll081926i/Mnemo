@@ -13,7 +13,7 @@ import { Sleep } from '../../utils/format'
 import { treeSelectToExpand } from '../../utils/antdtree'
 import AliTrash from '../../aliapi/trash'
 import { fileiconfn } from '../pantreestore'
-import { GetDriveID, GetDriveType, isAliyunUser, isPikPakUser } from '../../aliapi/utils'
+import { GetDriveID, GetDriveType, isPikPakUser } from '../../aliapi/utils'
 import { IAliGetDirModel } from '../../aliapi/alimodels'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
 import { resolveDriveProvider } from '../../utils/driveProvider'
@@ -27,9 +27,7 @@ import { getS3Connection, getS3ConnectionId, listS3Directory } from '../../utils
 const iconfolder = h(IconFont, { name: 'iconfile-folder' })
 const foldericonfn = () => iconfolder
 
-const isSingleRootDriveUser = (userId: string) => {
-  return !!userId && !isAliyunUser(userId)
-}
+const isSingleRootDriveUser = (userId: string) => !!userId
 
 const props = defineProps({
   visible: {

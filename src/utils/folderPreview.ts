@@ -1,7 +1,5 @@
 import { IAliGetFileModel } from '../aliapi/alimodels'
-import AliDirFileList from '../aliapi/dirfilelist'
 import {
-  isAliyunUser,
   isPikPakUser
 } from '../aliapi/utils'
 import DebugLog from './debuglog'
@@ -52,19 +50,6 @@ async function fetchFolderItemsRaw(p: FolderPreviewParams): Promise<IAliGetFileM
         ;(mapped as any).user_id = user_id
         return mapped
       })
-    }
-    if (isAliyunUser(user_id)) {
-      const result = await AliDirFileList.ApiDirFileList(
-        user_id,
-        drive_id,
-        file_id,
-        name || '',
-        'name asc',
-        '',
-        undefined,
-        false
-      )
-      return (result?.items || []).slice(0, MAX_PREVIEW_FILES)
     }
   } catch (e) {
     DebugLog.mSaveWarning('folderPreview fetch failed: ' + (e as Error).message)

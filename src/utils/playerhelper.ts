@@ -5,7 +5,6 @@ import { spawn, SpawnOptions } from 'child_process'
 import mpvAPI from '../module/node-mpv'
 import AliFile from '../aliapi/file'
 import AliFileCmd from '../aliapi/filecmd'
-import AliDirFileList from '../aliapi/dirfilelist'
 import { ITokenInfo, usePanFileStore, useSettingStore } from '../store'
 import { createTmpFile, delTmpFile, GetExpiresTime } from './utils'
 import { IAliGetFileModel } from '../aliapi/alimodels'
@@ -13,13 +12,12 @@ import { getEncType, getProxyUrl } from './proxyhelper'
 import { CleanStringForCmd } from './filehelper'
 import Db from './db'
 import { humanTime } from './format'
-import { isAliyunUser, isPikPakUser } from '../aliapi/utils'
+import { isPikPakUser } from '../aliapi/utils'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from './webdavClient'
 import { buildDirectPlayerInvocation, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
 import { findBestSubtitleMatch } from './subtitleMatching'
 
-const canUseAliyunFileList = (userId: string) => isAliyunUser(userId)
 const currentPlayerPlatform = () => (is.windows() ? 'win32' : is.macOS() ? 'darwin' : is.linux() ? 'linux' : process.platform)
 
 const PlayerUtils = {
@@ -68,15 +66,6 @@ const PlayerUtils = {
       const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'pikpak_root'
       const list = await apiPikPakFileList(user_id, parentId, 500)
       items = list.items.map(item => mapPikPakFileToAliModel(item, drive_id, parentId))
-    } else if (canUseAliyunFileList(user_id)) {
-      const dir = await AliDirFileList.ApiDirFileList(user_id, drive_id, parent_file_id, '', 'name asc', '')
-      items = dir.items
-    } else {
-      console.warn('[PlayerUtils] skip Aliyun file list for non-Aliyun source', {
-        user_id,
-        drive_id,
-        parent_file_id
-      })
     }
     const curDirFileList: IAliGetFileModel[] = []
     for (let item of items) {

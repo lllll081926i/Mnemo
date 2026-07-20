@@ -22,7 +22,7 @@ import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
 import { TestButton } from '../utils/mosehelper'
 import usePanTreeStore from './pantreestore'
-import { GetDriveID, GetDriveType, isAliyunUser, isPikPakUser } from '../aliapi/utils'
+import { GetDriveID, GetDriveType, isPikPakUser } from '../aliapi/utils'
 import { xorWith } from 'lodash'
 import { flattenDriveToolFolders, moveDriveToolFiles, type OrganizeFileItem } from '../utils/drive-tools/organize'
 import { buildMediaOrganizePlan, executeMediaOrganizePlan, mapMediaOrganizeFiles } from '../utils/drive-tools/mediaOrganize'
@@ -725,18 +725,6 @@ const onPanDragEnd = (ev: any) => {
         </template>
       </a-dropdown>
     </div>
-    <div v-if="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected && isAliyunUser(panTreeStore.user_id || '')" class="toppanbtn">
-      <a-dropdown style="width: 100px" @popup-visible-change="handleSearchCheck">
-        <a-button :disabled="panfileStore.ListLoading">范围</a-button>
-        <template #content>
-          <a-checkbox-group v-model="inputsearchType" direction="vertical">
-            <a-checkbox value="backup" :disabled="useSettingStore().securityHideBackupDrive">备份盘</a-checkbox>
-            <a-checkbox value="resource" :disabled="useSettingStore().securityHideResourceDrive">资源盘</a-checkbox>
-            <a-checkbox value="pic" :disabled="useSettingStore().securityHidePicDrive">相册</a-checkbox>
-          </a-checkbox-group>
-        </template>
-      </a-dropdown>
-    </div>
     <div v-if="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected" class="toppanbtn">
       <a-input-search
         class="searchpan"
@@ -750,7 +738,6 @@ const onPanDragEnd = (ev: any) => {
         @search="(val: string) => topSearchAll(val, inputsearchType)"
         @press-enter="($event: any) => topSearchAll($event.srcElement.value as string, inputsearchType)"
         @keydown.esc=";($event.target as any).blur()" />
-      <a-button v-if="isAliyunUser(panTreeStore.user_id || '')" type="text" size="small" tabindex="-1" style="border: none" @click="() => topSearchAll('topSearchAll高级搜索', inputsearchType)">高级</a-button>
     </div>
 
     <PanTopbtn :dirtype="panfileStore.SelectDirType" :inputpicType="inputpicType" :inputselectType="inputselectType" :isselected="panfileStore.IsListSelected" />

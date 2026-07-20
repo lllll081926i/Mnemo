@@ -15,7 +15,6 @@ import message from './message'
 import UserDAL from '../user/userdal'
 import { buildUpstreamProxyHeaders } from './proxyHeaders'
 import { shouldRefreshProxyUrl } from './proxyCache'
-import { isAliyunUser } from '../aliapi/utils'
 import { isWebDavDrive } from './webdavClient'
 
 // 默认maxFreeSockets=256
@@ -188,13 +187,7 @@ export async function getRawUrl(
         }
       }
     } else if (preview_type === 'audio') {
-      // 仅阿里云盘有音频转码接口，其他网盘直接走原始下载链接
-      if (isAliyunUser(user_id) && !isWebDavDrive(drive_id)) {
-        let audioData = await AliFile.ApiAudioPreviewUrl(user_id, drive_id, file_id)
-        if (typeof audioData != 'string') {
-          data.url = audioData.url
-        }
-      }
+      // Retained providers use original download / stream URLs (no Aliyun audio transcoding).
     }
   }
   // 违规文件无法获取地址

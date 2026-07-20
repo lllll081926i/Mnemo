@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { menuTrashSelectFile, topRecoverSelectedFile, topRestoreSelectedFile, topTrashDeleteAll } from '../topbtns/topbtn'
+import { menuTrashSelectFile, topRestoreSelectedFile, topTrashDeleteAll } from '../topbtns/topbtn'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 defineProps({
@@ -13,7 +13,7 @@ defineProps({
   }
 })
 
-const { provider, capabilities } = useCurrentDriveProvider()
+const { capabilities } = useCurrentDriveProvider()
 </script>
 
 <template>
@@ -34,10 +34,4 @@ const { provider, capabilities } = useCurrentDriveProvider()
     </a-button>
   </div>
 
-  <div v-if="dirtype === 'recover' && isselected && provider === 'aliyun'" class="toppanbtn">
-    <a-button type="text" size="small" tabindex="-1" @click="topRecoverSelectedFile">
-      <IconFont name="iconrecover" />
-      恢复选中
-    </a-button>
-  </div>
 </template>

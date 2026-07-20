@@ -74,7 +74,7 @@ function buildSiblingVideoPlaylist(file: IAliGetFileModel, provided?: IPageVideo
 }
 
 const TEXT_PREVIEW_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv', 'nfo', 'srt', 'vtt', 'ass', 'ssa'])
-const PDF_PREVIEW_DRIVES = new Set(['pikpak', 'guangya', 'cloud139', 'cloud189'])
+const PDF_PREVIEW_DRIVES = new Set(['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'])
 const EPUB_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const DOCX_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const OFFICE_TO_PDF_DRIVES = PDF_PREVIEW_DRIVES

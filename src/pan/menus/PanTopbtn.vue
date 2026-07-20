@@ -86,10 +86,6 @@ const handleClickBottleFish = async () => {
     </a-space>
   </div>
   <div v-if="!isselected && ['pan', 'pic', 'mypic'].includes(dirtype)" class="toppanbtn">
-    <a-button v-if="inputselectType.includes('resource') && provider === 'aliyun'" type="text" size="small" tabindex="-1" @click="handleClickBottleFish">
-      <IconFont name="iconnotification" />
-      好运瓶
-    </a-button>
     <a-dropdown v-if="dirtype !== 'pic' && (capabilities.createTextFile || capabilities.createFolder)" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconplus" />

@@ -17,7 +17,7 @@ import TreeStore from '../../store/treestore'
 import { copyToClipboard } from '../../utils/electronhelper'
 import DownDAL from '../../down/DownDAL'
 import { isEmpty } from 'lodash'
-import { GetDriveID, isAliyunUser } from '../../aliapi/utils'
+import { GetDriveID } from '../../aliapi/utils'
 import AliAlbum from '../../aliapi/album'
 import { getEncType } from '../../utils/proxyhelper'
 import { Modal, Option, Select } from '@arco-design/web-vue'
@@ -814,41 +814,21 @@ export async function topRecoverSelectedFile() {
 export async function topSearchAll(word: string, inputsearchType: string[]) {
   if (!word) return
   if (word == 'topSearchAll高级搜索') {
-    modalSearchPan(inputsearchType)
+    // Advanced search UI was Aliyun-only; retained providers use keyword search.
+    message.info('当前网盘不支持高级搜索，请直接输入关键字搜索')
     return
   }
   const pantreeStore = usePanTreeStore()
-  if (!pantreeStore.user_id || !inputsearchType || !pantreeStore.selectDir.file_id) {
+  if (!pantreeStore.user_id || !pantreeStore.selectDir.file_id) {
     message.error('搜索失败 父文件夹错误')
     return
   }
-  if (!isAliyunUser(pantreeStore.user_id)) {
-    const keyword = word.trim()
-    if (!keyword) {
-      message.error('搜索失败 搜索关键字不能为空')
-      return
-    }
-    const searchid = 'search' + keyword
-    await PanDAL.aReLoadOneDirToShow('', searchid, false)
+  const keyword = word.trim()
+  if (!keyword) {
+    message.error('搜索失败 搜索关键字不能为空')
     return
   }
-  if (inputsearchType.length > 0) {
-    if (useSettingStore().securityHideBackupDrive) {
-      inputsearchType = inputsearchType.filter((t) => t != 'backup')
-    }
-    if (useSettingStore().securityHideResourceDrive) {
-      inputsearchType = inputsearchType.filter((t) => t != 'resource')
-    }
-    if (useSettingStore().securityHidePicDrive) {
-      inputsearchType = inputsearchType.filter((t) => t != 'pic')
-    }
-    word += ' range:' + inputsearchType.join(',') + ' '
-  } else {
-    message.error('搜索失败 搜索范围不能为空')
-    return
-  }
-  const searchid = 'search' + word
-  await PanDAL.aReLoadOneDirToShow('', searchid, false)
+  await PanDAL.aReLoadOneDirToShow('', 'search' + keyword, false)
 }
 
 export async function menuJumpToDir() {
