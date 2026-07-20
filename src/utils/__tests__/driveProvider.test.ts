@@ -95,6 +95,9 @@ describe('drive provider capabilities', () => {
       expect(capabilities.permanentDelete).toBe(true)
     }
     expect(getDriveProviderCapabilities('quark').copy).toBe(false)
+    expect(getDriveProviderCapabilities('gdrive').trashRestore).toBe(true)
+    expect(getDriveProviderCapabilities('gdrive').trashPurge).toBe(true)
+    expect(getDriveProviderCapabilities('gdrive').trashClear).toBe(false)
     expect(getDriveProviderCapabilities('guangya').createTextFile).toBe(true)
   })
 

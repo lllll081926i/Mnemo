@@ -26,6 +26,8 @@ describe('provider upload routing', () => {
     }
     expect(file).toContain('apiGoogleDriveDownloadInfo')
     expect(filecmd).toContain('apiGoogleDriveTrashBatch')
+    expect(filecmd).toContain('apiGoogleDriveRestoreBatch')
+    expect(filecmd).toContain("resolveDriveProvider({ userId: user_id, driveId: drive_id }) === 'gdrive'")
     expect(filecmd).toContain("isDir: t.type === 'folder'")
     expect(filecmd).not.toContain("isDir: t.type !== 'folder'")
     expect(filecmd).toContain("isDir: info.type === 'directory'")

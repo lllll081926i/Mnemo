@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as GoogleClient from '../client'
 import { GOOGLE_FOLDER_MIME, mapGoogleDriveItemToAliModel } from '../dirfilelist'
+import { apiGoogleDriveCopyBatch, apiGoogleDriveDeleteBatch, apiGoogleDriveRestoreBatch } from '../filecmd'
 
 describe('Google Drive file mapping', () => {
   it('maps folders and media without losing the account-scoped drive id', () => {
@@ -10,5 +12,30 @@ describe('Google Drive file mapping', () => {
     expect(folder.drive_id).toBe('gdrive:account-a')
     expect(file.category).toBe('image')
     expect((file as any).content_hash).toBe('hash')
+  })
+
+  it('restores and permanently deletes selected trash items through Google Drive APIs', async () => {
+    const request = vi.spyOn(GoogleClient, 'googleDriveRequest').mockResolvedValue({} as any)
+
+    await expect(apiGoogleDriveRestoreBatch('gdrive_account-a', ['file one'])).resolves.toEqual(['file one'])
+    await expect(apiGoogleDriveDeleteBatch('gdrive_account-a', ['file two'])).resolves.toEqual(['file two'])
+
+    expect(request).toHaveBeenNthCalledWith(1, 'gdrive_account-a', '/files/file%20one?supportsAllDrives=true', { method: 'PATCH', body: JSON.stringify({ trashed: false }) })
+    expect(request).toHaveBeenNthCalledWith(2, 'gdrive_account-a', '/files/file%20two?supportsAllDrives=true', { method: 'DELETE' })
+    request.mockRestore()
+  })
+
+  it('copies folders recursively instead of sending a folder to the file-only copy endpoint', async () => {
+    const request = vi.spyOn(GoogleClient, 'googleDriveRequest')
+      .mockResolvedValueOnce({ id: 'folder', name: 'Folder', mimeType: GOOGLE_FOLDER_MIME })
+      .mockResolvedValueOnce({ id: 'new-folder' })
+      .mockResolvedValueOnce({ files: [{ id: 'child', name: 'child.txt', mimeType: 'text/plain' }] })
+      .mockResolvedValueOnce({ id: 'new-child' })
+
+    await expect(apiGoogleDriveCopyBatch('gdrive_account-a', ['folder'], 'gdrive_root')).resolves.toEqual(['folder'])
+
+    expect(request).toHaveBeenNthCalledWith(2, 'gdrive_account-a', '/files?supportsAllDrives=true', { method: 'POST', body: JSON.stringify({ name: 'Folder', mimeType: GOOGLE_FOLDER_MIME, parents: ['root'] }) })
+    expect(request).toHaveBeenNthCalledWith(4, 'gdrive_account-a', '/files/child/copy?supportsAllDrives=true', { method: 'POST', body: JSON.stringify({ parents: ['new-folder'] }) })
+    request.mockRestore()
   })
 })

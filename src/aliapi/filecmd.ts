@@ -17,7 +17,7 @@ import { apiGuangyaCopyBatch, apiGuangyaMkdir, apiGuangyaMoveBatch, apiGuangyaRe
 import { resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveCopyBatch, apiOneDriveDeleteBatch, apiOneDriveMkdir, apiOneDriveMoveBatch, apiOneDriveRename } from '../onedrive/filecmd'
 import { apiDropboxCopyBatch, apiDropboxDeleteBatch, apiDropboxMkdir, apiDropboxMoveBatch, apiDropboxRename } from '../dropbox/filecmd'
-import { apiGoogleDriveCopyBatch, apiGoogleDriveDeleteBatch, apiGoogleDriveMkdir, apiGoogleDriveMoveBatch, apiGoogleDriveRename, apiGoogleDriveTrashBatch } from '../gdrive/filecmd'
+import { apiGoogleDriveCopyBatch, apiGoogleDriveDeleteBatch, apiGoogleDriveMkdir, apiGoogleDriveMoveBatch, apiGoogleDriveRename, apiGoogleDriveRestoreBatch, apiGoogleDriveTrashBatch } from '../gdrive/filecmd'
 import { apiGofileCopyBatch, apiGofileDeleteBatch, apiGofileMkdir, apiGofileMoveBatch, apiGofileRename } from '../gofile/filecmd'
 
 export default class AliFileCmd {
@@ -335,6 +335,7 @@ export default class AliFileCmd {
       message.info('光鸭云盘请在官方客户端彻底删除回收站文件')
       return []
     }
+    if (resolveDriveProvider({ userId: user_id, driveId: drive_id }) === 'gdrive') return apiGoogleDriveDeleteBatch(user_id, file_idList)
     const batchList = ApiBatchMaker('/file/delete', file_idList, (file_id: string) => {
       return { drive_id: drive_id, file_id: file_id }
     })
@@ -353,6 +354,7 @@ export default class AliFileCmd {
       message.info('请在官方客户端恢复回收站文件')
       return []
     }
+    if (resolveDriveProvider({ userId: user_id, driveId: drive_id }) === 'gdrive') return apiGoogleDriveRestoreBatch(user_id, file_idList)
     const batchList = ApiBatchMaker('/recyclebin/restore', file_idList, (file_id: string) => {
       return { drive_id: drive_id, file_id: file_id }
     })
