@@ -8,6 +8,7 @@ import axios from 'axios'
 import message from '../utils/message'
 import { getEncType, getProxyUrl } from '../utils/proxyhelper'
 import { TestAlt, TestKey } from '../utils/keyboardhelper'
+import { resolveDriveProvider } from '../utils/driveProvider'
 
 const appStore = useAppStore()
 const pageImage = appStore.pageImage!
@@ -51,7 +52,7 @@ const isPlaying = ref(false)
 const drive_id = pageImage.drive_id || ''
 const file_id = pageImage.file_id || ''
 const imageList = pageImage.imageList || []
-const thirdPartyImageDrives = new Set(['pikpak', 'quark', 'cloud139', 'cloud189', 'guangya'])
+const needsImageProxy = (item: OneImageModel) => item.encType || resolveDriveProvider({ userId: pageImage.user_id, driveId: item.drive_id }) !== 'aliyun'
 
 const rawList: OneImageModel[] = []
 for (let i = 0, maxi = imageList.length; i < maxi; i++) {
@@ -277,7 +278,7 @@ function preload(img: OneImageModel) {
 }
 
 function _imageUrlSmall(item: OneImageModel) {
-  if (item.encType || thirdPartyImageDrives.has(item.drive_id) || item.drive_id.startsWith('webdav:')) {
+  if (needsImageProxy(item)) {
     return getProxyUrl({
       user_id: pageImage.user_id,
       drive_id: item.drive_id,
@@ -291,7 +292,7 @@ function _imageUrlSmall(item: OneImageModel) {
 }
 
 function _imageUrlBig(item: OneImageModel) {
-  if (item.encType || thirdPartyImageDrives.has(item.drive_id) || item.drive_id.startsWith('webdav:')) {
+  if (needsImageProxy(item)) {
     return getProxyUrl({
       user_id: pageImage.user_id,
       drive_id: item.drive_id,
@@ -305,7 +306,7 @@ function _imageUrlBig(item: OneImageModel) {
 }
 
 function _imageUrlRaw(item: OneImageModel) {
-  if (item.encType || thirdPartyImageDrives.has(item.drive_id) || item.drive_id.startsWith('webdav:')) {
+  if (needsImageProxy(item)) {
     return getProxyUrl({
       user_id: pageImage.user_id,
       drive_id: item.drive_id,

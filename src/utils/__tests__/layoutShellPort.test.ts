@@ -173,8 +173,12 @@ describe('deep layout shell port', () => {
   it('routes built-in media and subtitle requests through provider-aware proxy paths', () => {
     const video = read('src/layout/PageVideo.vue')
     const music = read('src/layout/PageMusic.vue')
+    const image = read('src/layout/PageImage.vue')
     const fileApi = read('src/aliapi/file.ts')
+    const openFile = read('src/utils/openfile.ts')
     const player = read('src/utils/playerhelper.ts')
+    const proxy = read('src/utils/proxyhelper.ts')
+    const properties = read('src/pan/topbtns/ShuXingModal.vue')
 
     expect(video).toContain('proxy_headers: JSON.stringify(item.headers)')
     expect(video).toContain("proxy_kind: 'subtitle'")
@@ -182,6 +186,15 @@ describe('deep layout shell port', () => {
     expect(fileApi).toContain("proxy_kind: 'subtitle'")
     expect(player).toContain('findBestSubtitleMatch')
     expect(player).toContain("proxy_kind: 'subtitle'")
+    expect(image).toContain("resolveDriveProvider({ userId: pageImage.user_id, driveId: item.drive_id }) !== 'aliyun'")
+    expect(image).not.toContain('thirdPartyImageDrives')
+    expect(openFile.match(/proxy_headers: rawData\.headers \? JSON\.stringify\(rawData\.headers\) : undefined/g)).toHaveLength(5)
+    expect(proxy).toContain("resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''")
+    expect(proxy).toContain('proxy_headers: resolvedProxyHeaders')
+    expect(proxy).toContain('buildUpstreamProxyHeaders(clientReq.headers, resolvedProxyHeaders)')
+    expect(proxy).not.toContain("console.info('proxy query:")
+    expect(properties).toContain('fileInfo.value.drive_id || pantreeStore.drive_id')
+    expect(properties).toContain('proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined')
   })
 
   it('keeps active workspace toolbars free of fixed spacer nodes', () => {

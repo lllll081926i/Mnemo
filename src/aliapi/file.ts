@@ -249,7 +249,6 @@ export default class AliFile {
       const connection = getWebDavConnection(connectionId)
       if (!connection) return 'WebDAV 连接不存在，请重新连接'
       const url = await getWebDavDownloadUrl(connection, file_id)
-      console.log(`WebDAV download url ${url}`)
       return {
         drive_id,
         file_id,

@@ -4,6 +4,7 @@ export interface ProxyRefreshState {
   proxyUrl: string
   selectQuality: string
   proxyInfo?: {
+    drive_id?: string
     file_id?: string
     expires_time?: number
     videoQuality?: string
@@ -11,7 +12,7 @@ export interface ProxyRefreshState {
 }
 
 export const shouldRefreshProxyUrl = (state: ProxyRefreshState): boolean => {
-  const needRefreshUrl = state.proxyInfo && (state.fileId !== state.proxyInfo.file_id || (state.proxyInfo.expires_time || 0) <= Date.now())
+  const needRefreshUrl = state.proxyInfo && (state.driveId !== state.proxyInfo.drive_id || state.fileId !== state.proxyInfo.file_id || (state.proxyInfo.expires_time || 0) <= Date.now())
   const changeVideoQuality = state.proxyInfo && state.proxyInfo.videoQuality && state.selectQuality !== state.proxyInfo.videoQuality
   return !state.proxyUrl || !!needRefreshUrl || !!changeVideoQuality
 }

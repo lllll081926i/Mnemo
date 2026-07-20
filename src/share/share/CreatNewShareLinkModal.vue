@@ -1,7 +1,7 @@
 <script setup lang='ts'>
 import { IAliGetFileModel } from '../../aliapi/alimodels'
 import { modalCloseAll } from '../../utils/modal'
-import { PropType, reactive, ref } from 'vue'
+import { computed, PropType, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
 import { usePanTreeStore, useSettingStore } from '../../store'
 import { humanDateTime, randomSharePassword } from '../../utils/format'
@@ -12,13 +12,16 @@ import { ArrayKeyList } from '../../utils/utils'
 import { copyToClipboard } from '../../utils/electronhelper'
 import { GetShareUrlFormate } from '../../utils/shareurl'
 import AliTransferShare from '../../aliapi/transfershare'
-import { resolveDriveProvider } from '../../utils/driveProvider'
+import { getDriveProviderCapabilities, resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'
 
 const formRef = ref()
 const okLoading = ref(false)
 const okBatchLoading = ref(false)
 const settingStore = useSettingStore()
 const shareType = ref()
+const activeProvider = ref<DriveProvider>('unknown')
+const supportsShareSettings = computed(() => ['aliyun', 'pikpak', 'quark', 'guangya', 'dropbox'].includes(activeProvider.value))
+const supportsCombinedShare = computed(() => !['onedrive', 'dropbox', 'gdrive', 'gofile'].includes(activeProvider.value))
 
 const form = reactive({
   expiration: '',
@@ -50,19 +53,21 @@ const getShareType = (): any => {
 }
 
 const handleOpen = async () => {
+  const pantreeStore = usePanTreeStore()
+  activeProvider.value = resolveDriveProvider({ userId: pantreeStore.user_id, driveId: pantreeStore.drive_id })
   form.share_name = props.filelist[0].name
   shareType.value = getShareType()
   let share_pwd = ''
   if (settingStore.uiSharePassword == 'random') share_pwd = randomSharePassword()
   else if (settingStore.uiSharePassword == 'last') share_pwd = localStorage.getItem('share_pwd') || ''
-  form.share_pwd = share_pwd
+  form.share_pwd = supportsShareSettings.value ? share_pwd : ''
 
   let expiration = Date.now()
   if (settingStore.uiShareDays == 'always') expiration = 0
   else if (settingStore.uiShareDays == 'week') expiration += 7 * 24 * 60 * 60 * 1000
   else expiration += 30 * 24 * 60 * 60 * 1000
 
-  form.expiration = expiration > 0 ? humanDateTime(expiration) : ''
+  form.expiration = supportsShareSettings.value && expiration > 0 ? humanDateTime(expiration) : ''
 }
 
 const handleClose = () => {
@@ -97,9 +102,14 @@ const handleOK = async (multi: boolean) => {
   const user_id = pantreeStore.user_id
   const drive_id = pantreeStore.drive_id
   const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
-  const hasManagedShareList = !['onedrive', 'dropbox', 'gdrive', 'gofile'].includes(provider)
+  const shareCapabilities = getDriveProviderCapabilities(provider)
+  const hasManagedShareList = shareCapabilities.manageCreatedShares
   const file_id_list = ArrayKeyList<string>('file_id', props.filelist)
-  localStorage.setItem('share_pwd', share_pwd)
+  if (!multi && file_id_list.length > 1 && !supportsCombinedShare.value) {
+    message.error('当前网盘仅支持为每个文件单独创建分享链接')
+    return
+  }
+  if (supportsShareSettings.value) localStorage.setItem('share_pwd', share_pwd)
   if (!multi) {
     okLoading.value = true
     let result = undefined
@@ -175,7 +185,7 @@ const handleOK = async (multi: boolean) => {
     <template #title>
       <span class='modaltitle'>
         创建{{ shareType.title }}链接
-        <a-popover position="bottom">
+        <a-popover v-if="activeProvider === 'aliyun'" position="bottom">
           <IconFont name="iconbulb" />
           <template #content>
             <div v-if="shareType.type === 's'">
@@ -218,7 +228,7 @@ const handleOK = async (multi: boolean) => {
           <a-input v-model.trim='form.share_name' :placeholder='form.share_name' />
         </a-form-item>
 
-        <template v-if='shareType.type === "s"'>
+        <template v-if='shareType.type === "s" && supportsShareSettings'>
           <a-row>
             <a-col flex='200px'> 有效期：</a-col>
             <a-col flex='12px'></a-col>
@@ -256,12 +266,12 @@ const handleOK = async (multi: boolean) => {
       </a-form>
     </div>
     <div class='modalfoot'>
-      <a-button type='outline' size='small' :loading='okBatchLoading' @click='handleOK(true)'>
+      <a-button v-if='filelist.length > 1' type='outline' size='small' :loading='okBatchLoading' @click='handleOK(true)'>
         为每个文件单独创建
       </a-button>
       <div style='flex-grow: 1'></div>
       <a-button v-if='!okLoading' type='outline' size='small' @click='handleHide'>取消</a-button>
-      <a-button type='primary' size='small' :loading='okLoading' @click='handleOK(false)'>
+      <a-button v-if="supportsCombinedShare || filelist.length === 1 || shareType.type === 't'" type='primary' size='small' :loading='okLoading' @click='handleOK(false)'>
         创建{{ shareType.title }}链接
       </a-button>
     </div>

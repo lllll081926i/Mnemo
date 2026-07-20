@@ -26,7 +26,21 @@ describe('provider upload routing', () => {
     }
     expect(file).toContain('apiGoogleDriveDownloadInfo')
     expect(filecmd).toContain('apiGoogleDriveTrashBatch')
+    expect(filecmd).toContain("isDir: t.type === 'folder'")
+    expect(filecmd).not.toContain("isDir: t.type !== 'folder'")
+    expect(filecmd).toContain("isDir: info.type === 'directory'")
+    expect(filecmd).toContain("if (provider !== 'aliyun')")
+    expect(filecmd).toContain('AliFile.ApiGetFile(user_id, drive_id, file_id)')
     expect(share).toContain('apiGofileCreateDirectLink')
+    expect(share).toContain("if (provider !== 'aliyun') return `${getDriveProviderLabel(provider)} 暂不支持创建分享链接`")
+  })
+
+  it('only exposes share settings and combined sharing where the provider supports them', () => {
+    const modal = read('src/share/share/CreatNewShareLinkModal.vue')
+    expect(modal).toContain('getDriveProviderCapabilities(provider)')
+    expect(modal).toContain('supportsShareSettings')
+    expect(modal).toContain('supportsCombinedShare')
+    expect(modal).toContain('shareCapabilities.manageCreatedShares')
   })
 
   it('hides and rejects upload actions outside real drive folders', () => {

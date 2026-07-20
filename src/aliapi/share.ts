@@ -19,7 +19,7 @@ import {
   decodeQuarkShareId,
   isQuarkShareId
 } from '../quark/share'
-import { resolveDriveProvider } from '../utils/driveProvider'
+import { getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveShareCreate } from '../onedrive/share'
 import { apiDropboxShareCreate } from '../dropbox/share'
 import { apiGoogleDriveCreateShare } from '../gdrive/share'
@@ -342,6 +342,7 @@ export default class AliShare {
         return error?.message || '创建分享链接失败'
       }
     }
+    if (provider !== 'aliyun') return `${getDriveProviderLabel(provider)} 暂不支持创建分享链接`
     const url = 'adrive/v2/share_link/create'
     const postData = { drive_id, expiration, share_pwd, share_name, file_id_list }
     const resp = await AliHttp.Post(url, postData, user_id, '')

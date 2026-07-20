@@ -402,6 +402,7 @@ async function Pdf(file: IAliGetFileModel, password: string = ''): Promise<void>
       file_id: file.file_id,
       file_size: rawData.size || file.size,
       proxy_url: rawData.url,
+      proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
       content_disposition: 'inline',
       file_name: file.name
     })
@@ -438,6 +439,7 @@ async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void
       file_id: file.file_id,
       file_size: rawData.size || file.size,
       proxy_url: rawData.url,
+      proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
       content_disposition: 'inline',
       file_name: file.name
     })
@@ -463,6 +465,7 @@ async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise
     file_id: file.file_id,
     file_size: rawData.size || file.size,
     proxy_url: rawData.url,
+    proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
     content_disposition: 'inline',
     file_name: file.name
   })
@@ -507,6 +510,7 @@ async function Sheet(file: IAliGetFileModel, password: string = ''): Promise<voi
       file_id: file.file_id,
       file_size: rawData.size || file.size,
       proxy_url: rawData.url,
+      proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
       content_disposition: 'inline',
       file_name: file.name
     })
@@ -528,7 +532,16 @@ async function Office(file: IAliGetFileModel): Promise<void> {
       data = {
         drive_id: file.drive_id,
         file_id: file.file_id,
-        preview_url: rawData.url,
+        preview_url: getProxyUrl({
+          user_id: token.user_id,
+          drive_id: file.drive_id,
+          file_id: file.file_id,
+          file_size: rawData.size || file.size,
+          proxy_url: rawData.url,
+          proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
+          content_disposition: 'inline',
+          file_name: file.name
+        }),
         access_token: ''
       }
     }

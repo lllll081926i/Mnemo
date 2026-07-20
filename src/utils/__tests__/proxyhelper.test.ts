@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildUpstreamProxyHeaders } from '../proxyHeaders'
+import { shouldRefreshProxyUrl } from '../proxyCache'
 
 describe('buildUpstreamProxyHeaders', () => {
   it('keeps range and media auth headers while dropping conditional and hop-by-hop headers', () => {
@@ -26,5 +27,22 @@ describe('buildUpstreamProxyHeaders', () => {
     expect(headers['if-none-match']).toBeUndefined()
     expect(headers.referer).toBeUndefined()
     expect(headers.authorization).toBeUndefined()
+  })
+})
+
+describe('shouldRefreshProxyUrl', () => {
+  it('does not reuse a cached URL from another drive when file ids collide', () => {
+    expect(shouldRefreshProxyUrl({
+      driveId: 'gdrive:account-a',
+      fileId: 'same-file-id',
+      proxyUrl: 'https://cached.example/file',
+      selectQuality: 'Origin',
+      proxyInfo: {
+        drive_id: 'onedrive:account-b',
+        file_id: 'same-file-id',
+        expires_time: Date.now() + 60_000,
+        videoQuality: 'Origin'
+      }
+    })).toBe(true)
   })
 })

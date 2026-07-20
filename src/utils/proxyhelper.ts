@@ -238,7 +238,7 @@ export async function getRawUrl(
   if (!encType && preview_type) {
     if (weifa || preview_type === 'video' || (preview_type === 'other' && quality != 'Origin')) {
       let proxyInfo = await Db.getValueObject('ProxyInfo') as any
-      if (proxyInfo && proxyInfo.encType && proxyInfo.file_id === file_id) {
+      if (proxyInfo && proxyInfo.encType && proxyInfo.drive_id === drive_id && proxyInfo.file_id === file_id) {
         // 加密视频通过下载链接播放
       } else {
         let previewData = await AliFile.ApiVideoPreviewUrl(user_id, drive_id, file_id, promotionSkuCode)
@@ -313,12 +313,13 @@ export async function createProxyServer(port: number) {
   const proxyServer: Server = http.createServer(async (clientReq: IncomingMessage, clientRes: ServerResponse) => {
     const { pathname, query } = url.parse(clientReq.url, true)
     const { user_id, drive_id, file_id, file_size, encType, password, weifa, quality, proxy_url, proxy_headers, proxy_kind, content_disposition, file_name } = query
-    console.info('proxy query: ', query)
     if (pathname === '/proxy') {
       const driveId = String(drive_id || '')
       const fileId = String(file_id || '')
       let proxyInfo: any = await Db.getValueObject('ProxyInfo')
       let proxyUrl = proxy_url || (proxyInfo && proxyInfo.proxy_url || '') || ''
+      const isMatchingCache = proxyInfo && driveId === String(proxyInfo.drive_id || '') && fileId === String(proxyInfo.file_id || '')
+      let resolvedProxyHeaders = String(proxy_headers || (isMatchingCache ? proxyInfo.proxy_headers : '') || '')
       let { uiVideoQuality, securityEncType, securityFileNameAutoDecrypt } = useSettingStore()
       let selectQuality = quality || uiVideoQuality
       let subtitle_url = ''
@@ -332,15 +333,14 @@ export async function createProxyServer(port: number) {
         // 获取地址
         const refreshQuality = content_disposition === 'inline' ? 'Origin' : selectQuality
         let data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', refreshQuality)
-        console.error('proxy getRawUrl', data)
         if (typeof data != 'string' && data.url) {
           let subtitleData = data.subtitles.find((sub: any) => sub.language === 'chi') || data.subtitles[0]
           subtitle_url = subtitleData && subtitleData.url || ''
           proxyUrl = data.url
+          resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''
           proxyInfo = undefined
         }
       }
-      console.warn('proxyUrl', proxyUrl)
       if (!proxyUrl) {
         clientRes.writeHead(404, { 'Content-Type': 'text/plain' })
         clientRes.end()
@@ -352,17 +352,17 @@ export async function createProxyServer(port: number) {
           videoQuality: selectQuality,
           expires_time: GetExpiresTime(proxyUrl),
           proxy_url: proxyUrl,
+          proxy_headers: resolvedProxyHeaders,
           subtitle_url: subtitle_url
         }
         await Db.saveValueObject('ProxyInfo', info)
       }
       // 转码文件302重定向
-      if (proxyUrl.includes('.aliyuncs.com')) {
+      if (proxyUrl.includes('.aliyuncs.com') && !resolvedProxyHeaders && !encType) {
         clientRes.writeHead(302, { 'Location': proxyUrl })
         clientRes.end()
         return
       }
-      console.warn('proxy.range', clientReq.headers.range)
       // 是否需要解密
       let decryptTransform: any = null
       if (encType) {
@@ -375,7 +375,7 @@ export async function createProxyServer(port: number) {
           await flowEnc.setPosition(start)
         }
       }
-      const upstreamHeaders = buildUpstreamProxyHeaders(clientReq.headers, String(proxy_headers || ''))
+      const upstreamHeaders = buildUpstreamProxyHeaders(clientReq.headers, resolvedProxyHeaders)
       if (query.drive_id === 'quark' || isQuarkUser(String(query.user_id || ''))) {
         const token = await getQuarkProxyToken(String(query.user_id || ''))
         const sessionCookie = await readQuarkCookieStringFromElectron().catch(() => '')
@@ -402,15 +402,6 @@ export async function createProxyServer(port: number) {
         clientRes.setHeader('x-quark-proxy-cookie-keys', cookieKeys.join(','))
         clientRes.setHeader('x-quark-proxy-referer', String(upstreamHeaders.referer || ''))
         clientRes.setHeader('x-quark-proxy-x-urlp', String(upstreamHeaders['x-urlp'] || ''))
-        console.warn('proxy.quark.upstreamHeaders', {
-          hasCookie: !!quarkCookie,
-          hasSessionCookie: !!sessionCookie,
-          cookieKeys,
-          origin: upstreamHeaders.origin,
-          referer: upstreamHeaders.referer,
-          userAgent: upstreamHeaders['user-agent'],
-          xUrlp: upstreamHeaders['x-urlp'] || ''
-        })
       }
       await new Promise((resolve, reject) => {
         // 处理请求，让下载的流量经过代理服务器
@@ -420,7 +411,6 @@ export async function createProxyServer(port: number) {
           headers: upstreamHeaders,
           agent: ~proxyUrl.indexOf('https') ? httpsAgent : httpAgent
         }, (httpResp: any) => {
-          console.error('httpResp.headers', httpResp.statusCode, httpResp.headers)
           clientRes.statusCode = httpResp.statusCode
           for (const key in httpResp.headers) {
             clientRes.setHeader(key, httpResp.headers[key])
@@ -429,17 +419,14 @@ export async function createProxyServer(port: number) {
             const inlineFileName = String(file_name || getUrlFileName(proxyUrl) || 'preview')
             clientRes.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(inlineFileName)};`)
           }
-          if (clientRes.statusCode % 300 < 5) {
-            // 可能出现304，redirectUrl = undefined
-            const redirectUrl = httpResp.headers.location || '-'
-            if (decryptTransform) {
-              // Referer
-              httpResp.headers.location = getProxyUrl({
-                user_id, drive_id, file_id, password, weifa,
-                file_size, encType, quality, proxy_url
-              })
-            }
-            console.log('302 redirectUrl:', redirectUrl)
+          if (clientRes.statusCode >= 300 && clientRes.statusCode < 400 && httpResp.headers.location) {
+            const redirectUrl = new URL(httpResp.headers.location, proxyUrl).toString()
+            clientRes.setHeader('location', getProxyUrl({
+              user_id, drive_id, file_id, password, weifa,
+              file_size, encType, quality, proxy_url: redirectUrl,
+              proxy_headers: resolvedProxyHeaders,
+              proxy_kind, content_disposition, file_name
+            }))
           } else if (httpResp.headers['content-range'] && httpResp.statusCode === 200) {
             // 文件断点续传下载
             clientRes.statusCode = 206

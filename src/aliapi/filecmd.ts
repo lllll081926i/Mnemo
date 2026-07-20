@@ -7,7 +7,7 @@ import { IDownloadUrl } from './models'
 import AliFile from './file'
 import message from '../utils/message'
 import usePanFileStore from '../pan/panfilestore'
-import { copyWebDavPath, createWebDavDirectory, deleteWebDavPath, getWebDavConnection, getWebDavConnectionId, isWebDavDrive, moveWebDavPath, normalizeWebDavPath, renameWebDavPath } from '../utils/webdavClient'
+import { copyWebDavPath, createWebDavDirectory, deleteWebDavPath, getWebDavConnection, getWebDavConnectionId, isWebDavDrive, moveWebDavPath, normalizeWebDavPath, renameWebDavPath, statWebDavPath } from '../utils/webdavClient'
 import { copyS3Path, createS3Directory, deleteS3Path, getS3Connection, getS3ConnectionId, getS3ObjectInfo, isS3Drive, moveS3Path, normalizeS3RelativePath, renameS3Path } from '../utils/s3Client'
 import { apiPikPakCopyBatch, apiPikPakMkdir, apiPikPakMoveBatch, apiPikPakRename, apiPikPakTrashBatch, apiPikPakTrashDelete, apiPikPakTrashRestore } from '../pikpak/filecmd'
 import { apiQuarkMkdir, apiQuarkMoveBatch, apiQuarkRename, apiQuarkTrashBatch } from '../quark/filecmd'
@@ -204,8 +204,9 @@ export default class AliFileCmd {
         const name = names[i] || ''
         if (!file_id || !name) continue
         try {
+          const info = await statWebDavPath(connection, file_id)
           const targetPath = await renameWebDavPath(connection, file_id, name)
-          successList.push({ file_id: targetPath, parent_file_id: normalizeWebDavPath(targetPath.split('/').slice(0, -1).join('/')), name, isDir: true })
+          successList.push({ file_id: targetPath, parent_file_id: normalizeWebDavPath(targetPath.split('/').slice(0, -1).join('/')), name, isDir: info.type === 'directory' })
         } catch (error) {
           console.error('WebDAV 重命名失败:', error)
         }
@@ -309,7 +310,7 @@ export default class AliFileCmd {
         file_id: t.file_id!,
         name: t.name!,
         parent_file_id: t.parent_file_id!,
-        isDir: t.type !== 'folder'
+        isDir: t.type === 'folder'
       })
     )
     return successList
@@ -638,6 +639,11 @@ export default class AliFileCmd {
   }
 
   static async ApiGetFileBatch(user_id: string, drive_id: string, file_idList: string[]): Promise<IAliGetFileModel[]> {
+    const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+    if (provider !== 'aliyun') {
+      const files = await Promise.all(file_idList.map((file_id) => AliFile.ApiGetFile(user_id, drive_id, file_id)))
+      return files.filter((file): file is IAliGetFileModel => !!file)
+    }
     const batchList = ApiBatchMaker('/file/get', file_idList, (file_id: string) => {
       return {
         drive_id: drive_id,

@@ -9,7 +9,7 @@ import { humanDateTimeDateStr, humanSize, humanTime } from '../../utils/format'
 import { ref } from 'vue'
 import DebugLog from '../../utils/debuglog'
 import { GetDriveID, isGuangyaUser, isPikPakUser } from '../../aliapi/utils'
-import { getEncType, getRawUrl } from '../../utils/proxyhelper'
+import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from '../../utils/proxyhelper'
 import TreeStore from '../../store/treestore'
 import { apiPikPakFileDetail, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
 import { apiGuangyaFileDetail, mapGuangyaFileToAliModel } from '../../guangya/dirfilelist'
@@ -106,7 +106,15 @@ const handleOpen = async () => {
       if (typeof rawUrl == 'string') {
         message.error(rawUrl)
       } else if (rawUrl && rawUrl.url) {
-        fileInfo.value.thumbnail = rawUrl.url
+        fileInfo.value.thumbnail = isLocalProxyUrl(rawUrl.url) ? rawUrl.url : getProxyUrl({
+          user_id: pantreeStore.user_id,
+          drive_id,
+          file_id,
+          file_size: rawUrl.size || fileInfo.value.size,
+          proxy_url: rawUrl.url,
+          proxy_headers: rawUrl.headers ? JSON.stringify(rawUrl.headers) : undefined,
+          proxy_kind: 'audio'
+        })
       }
     }
     if (fileInfo.value?.type == 'folder' && !isPikPak && !isGuangya) {
@@ -185,9 +193,20 @@ const handleCopyJson = () => {
 const handleCopyDownload = () => {
   const pantreeStore = usePanTreeStore()
   if (fileInfo.value) {
-    getRawUrl(pantreeStore.user_id, pantreeStore.drive_id, fileInfo.value.file_id || '', getEncType(fileInfo.value)).then(data => {
+    const selectedDriveId = fileInfo.value.drive_id || pantreeStore.drive_id
+    getRawUrl(pantreeStore.user_id, selectedDriveId, fileInfo.value.file_id || '', getEncType(fileInfo.value)).then(data => {
       if (data && typeof data !== 'string' && data.url) {
-        copyToClipboard(data.url)
+        const copyUrl = data.headers && Object.keys(data.headers).length > 0
+          ? getProxyUrl({
+              user_id: pantreeStore.user_id,
+              drive_id: selectedDriveId,
+              file_id: fileInfo.value?.file_id || '',
+              file_size: data.size || fileInfo.value?.size,
+              proxy_url: data.url,
+              proxy_headers: data.headers ? JSON.stringify(data.headers) : undefined
+            })
+          : data.url
+        copyToClipboard(copyUrl)
         message.success('下载链接已复制到剪切板，4小时内有效')
       } else {
         message.error('下载链接获取失败，请稍后重试')

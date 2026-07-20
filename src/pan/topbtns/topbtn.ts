@@ -375,7 +375,6 @@ export async function topRestoreSelectedFile() {
     }
     await Sleep(2000)
     const dirList = await AliFileCmd.ApiGetFileBatch(selectedData.user_id, selectedData.drive_id, diridList)
-    console.log(diridList, dirList)
 
     const pset = new Set<string>()
     for (let i = 0, maxi = dirList.length; i < maxi; i++) {
