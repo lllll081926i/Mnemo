@@ -17,6 +17,11 @@ import { apiGuangyaFileList, mapGuangyaFileToAliModel } from '../guangya/dirfile
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, isS3Drive, listS3Directory } from '../utils/s3Client'
 import { OrderDir } from '../utils/filenameorder'
+import { resolveDriveProvider } from '../utils/driveProvider'
+import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
+import { apiDropboxFileList, mapDropboxFileToAliModel } from '../dropbox/dirfilelist'
+import { apiGoogleDriveFileList, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
+import { apiGofileFileList, mapGofileItemToAliModel } from '../gofile/dirfilelist'
 
 export interface PanSelectedData {
   isError: boolean
@@ -34,6 +39,33 @@ export interface PanSelectedData {
 
 const RefreshLock = new Set<string>()
 export default class PanDAL {
+  static async aReLoadProviderDrive(token: ITokenInfo): Promise<void> {
+    const provider = resolveDriveProvider(token)
+    if (provider !== 'onedrive' && provider !== 'dropbox' && provider !== 'gdrive' && provider !== 'gofile') return
+    const { user_id } = token
+    const drive_id = token.default_drive_id
+    if (!user_id || !drive_id) return
+    const rootKey = provider === 'onedrive' ? 'onedrive_root' : provider === 'dropbox' ? 'dropbox_root' : provider === 'gdrive' ? 'gdrive_root' : 'gofile_root'
+    const pantreeStore = usePanTreeStore()
+    pantreeStore.mSaveUser(user_id, drive_id, '', '', '')
+    pantreeStore.drive_id = drive_id
+    useFootStore().mSaveLoading(`加载 ${GetDriveType(user_id, drive_id).title} 文件夹...`)
+    try {
+      const items = provider === 'onedrive'
+        ? (await apiOneDriveFileList(user_id, rootKey)).map((item) => mapOneDriveItemToAliModel(item, drive_id, rootKey))
+        : provider === 'dropbox'
+          ? (await apiDropboxFileList(user_id, rootKey)).map((item) => mapDropboxFileToAliModel(item, drive_id, rootKey))
+          : provider === 'gdrive'
+            ? (await apiGoogleDriveFileList(user_id, rootKey)).map((item) => mapGoogleDriveItemToAliModel(item, drive_id, rootKey))
+            : (await apiGofileFileList(user_id, rootKey)).map((item) => mapGofileItemToAliModel(item, drive_id, rootKey))
+      const dirs = items.filter((item) => item.isDir).map((item) => ({ file_id: item.file_id, drive_id, parent_file_id: rootKey, name: item.name, description: item.description || '', time: item.time, size: 0 }))
+      await TreeStore.ConvertToOneDriver(user_id, drive_id, dirs, false, true)
+      PanDAL.RefreshPanTreeAllNode(drive_id)
+    } finally {
+      useFootStore().mSaveLoading('')
+    }
+  }
+
   static async aReLoadPikPakDrive(token: ITokenInfo): Promise<void> {
     const { user_id } = token
     const drive_id = token.default_drive_id || 'pikpak'
@@ -393,6 +425,38 @@ export default class PanDAL {
           usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
         }
         resolve(true)
+        return
+      }
+
+      const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+      if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
+        const loadItems = async () => {
+          if (provider === 'onedrive') return (await apiOneDriveFileList(user_id, dirID)).map((item) => mapOneDriveItemToAliModel(item, drive_id, dirID))
+          if (provider === 'dropbox') return (await apiDropboxFileList(user_id, dirID)).map((item) => mapDropboxFileToAliModel(item, drive_id, dirID))
+          if (provider === 'gdrive') return (await apiGoogleDriveFileList(user_id, dirID)).map((item) => mapGoogleDriveItemToAliModel(item, drive_id, dirID))
+          return (await apiGofileFileList(user_id, dirID)).map((item) => mapGofileItemToAliModel(item, drive_id, dirID))
+        }
+        loadItems()
+          .then(async (allItems) => {
+            const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
+            const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName || GetDriveType(user_id, drive_id).title)
+            dir.items = items
+            dir.itemsKey = new Set(items.map((item) => item.file_id))
+            dir.next_marker = ''
+            dir.itemsTotal = items.length
+            const panfileStore = usePanFileStore()
+            panfileStore.mSaveDirFileLoadingPart(0, dir, dir.itemsTotal)
+            if (!TreeStore.GetDriver(drive_id)) await TreeStore.ConvertToOneDriver(user_id, drive_id, [], false, true)
+            await TreeStore.SaveOneDirFileList(dir, hasFiles)
+            if (hasFiles) panfileStore.mSaveDirFileLoadingFinish(drive_id, dirID, dir.items, dir.itemsTotal)
+            PanDAL.RefreshPanTreeAllNode(drive_id)
+            resolve(true)
+          })
+          .catch((err: any) => {
+            if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
+            message.warning(`列出 ${GetDriveType(user_id, drive_id).title} 文件夹失败 ${err?.message || ''}`)
+            resolve(false)
+          })
         return
       }
 

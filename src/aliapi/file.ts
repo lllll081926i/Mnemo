@@ -16,7 +16,7 @@ import { apiGuangyaDownloadInfo, apiGuangyaFileDetail, mapGuangyaFileToAliModel 
 import TreeStore from '../store/treestore'
 import UserDAL from '../user/userdal'
 import { ITokenInfo } from '../user/userstore'
-import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, isWebDavDrive } from '../utils/webdavClient'
+import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, getWebDavRequestHeaders, isWebDavDrive } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive } from '../utils/s3Client'
 import { getAlipanVideoPromotionReason } from '../utils/alipanPromotionRules'
 import { canUseAliyunPreviewApi, getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
@@ -31,7 +31,7 @@ export default class AliFile {
   static async ApiFileInfo(user_id: string, drive_id: string, file_id: string, ispic: boolean = false): Promise<any | undefined> {
     if (!drive_id || !file_id) return undefined
     const provider = await resolveFileProvider(user_id, drive_id)
-    if (provider === 'webdav') {
+    if (provider === 'webdav' || provider === 'nextcloud') {
       const connection = getWebDavConnection(getWebDavConnectionId(drive_id))
       const normalizedPath = file_id === 'root' ? '/' : file_id
       if (normalizedPath === '/') {
@@ -208,7 +208,7 @@ export default class AliFile {
   static async ApiFileDownloadUrl(user_id: string, drive_id: string, file_id: string, expire_sec: number): Promise<IDownloadUrl | string> {
     if (!drive_id || !file_id) return '参数错误'
     const provider = await resolveFileProvider(user_id, drive_id)
-    if (provider === 'webdav') {
+    if (provider === 'webdav' || provider === 'nextcloud') {
       const connectionId = getWebDavConnectionId(drive_id)
       const connection = getWebDavConnection(connectionId)
       if (!connection) return 'WebDAV 连接不存在，请重新连接'
@@ -219,7 +219,8 @@ export default class AliFile {
         file_id,
         expire_time: 0,
         url,
-        size: 0
+        size: 0,
+        headers: getWebDavRequestHeaders(connection)
       }
     }
     if (provider === 's3') {
@@ -328,7 +329,7 @@ export default class AliFile {
       if (lower.endsWith('.ts')) return 'ts'
       return fallback
     }
-    if (provider === 'webdav' || provider === 's3') {
+    if (provider === 'webdav' || provider === 'nextcloud' || provider === 's3') {
       return '暂无转码信息'
     }
     if (!user_id || !drive_id || !file_id) return '参数错误'

@@ -16,8 +16,7 @@ import mime from 'mime-types'
 import { getEncPassword, getEncType } from '../utils/proxyhelper'
 
 export function GetDriveID(user_id: string, drive: string): string {
-  if ((drive || '').startsWith('webdav:')) return drive
-  if ((drive || '').startsWith('s3:')) return drive
+  if (/^(webdav|nextcloud|s3|onedrive|dropbox|gdrive|gofile):/.test(drive || '')) return drive
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
     if (isCloud139User(user_id)) {
@@ -49,12 +48,17 @@ export function GetDriveID(user_id: string, drive: string): string {
 }
 
 export function GetDriveType(user_id: string, drive_id: string): any {
-  if ((drive_id || '').startsWith('webdav:')) {
-    return { title: 'WebDAV', name: 'webdav', key: '/' }
+  if (/^(webdav|nextcloud):/.test(drive_id || '')) {
+    const nextcloud = (drive_id || '').startsWith('nextcloud:')
+    return { title: nextcloud ? 'Nextcloud' : 'WebDAV', name: nextcloud ? 'nextcloud' : 'webdav', key: '/' }
   }
   if ((drive_id || '').startsWith('s3:')) {
     return { title: 'S3', name: 's3', key: '/' }
   }
+  if ((drive_id || '').startsWith('onedrive:')) return { title: 'OneDrive', name: 'onedrive', key: 'onedrive_root' }
+  if ((drive_id || '').startsWith('dropbox:')) return { title: 'Dropbox', name: 'dropbox', key: 'dropbox_root' }
+  if ((drive_id || '').startsWith('gdrive:')) return { title: 'Google Drive', name: 'gdrive', key: 'gdrive_root' }
+  if ((drive_id || '').startsWith('gofile:')) return { title: 'GoFile', name: 'gofile', key: 'gofile_root' }
   const token = UserDAL.GetUserToken(user_id)
   if (token) {
     if (isCloud139User(user_id)) {
@@ -139,14 +143,34 @@ export function isQuarkUser(user: string | { user_id?: string; tokenfrom?: strin
 
 export function isWebDavUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   const { user_id, tokenfrom } = resolveUserTokenInfo(user)
-  if (tokenfrom === 'webdav') return true
-  return user_id.startsWith('webdav:')
+  if (tokenfrom === 'webdav' || tokenfrom === 'nextcloud') return true
+  return user_id.startsWith('webdav:') || user_id.startsWith('nextcloud:')
 }
 
 export function isS3User(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   const { user_id, tokenfrom } = resolveUserTokenInfo(user)
   if (tokenfrom === 's3') return true
   return user_id.startsWith('s3:')
+}
+
+export function isOneDriveUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
+  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
+  return tokenfrom === 'onedrive' || user_id.startsWith('onedrive_')
+}
+
+export function isDropboxUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
+  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
+  return tokenfrom === 'dropbox' || user_id.startsWith('dropbox_')
+}
+
+export function isGoogleDriveUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
+  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
+  return tokenfrom === 'gdrive' || user_id.startsWith('gdrive_')
+}
+
+export function isGofileUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
+  const { user_id, tokenfrom } = resolveUserTokenInfo(user)
+  return tokenfrom === 'gofile' || user_id.startsWith('gofile_')
 }
 
 export function isNonAliyunProvider(user: string | { user_id?: string; tokenfrom?: string }): boolean {
@@ -156,6 +180,10 @@ export function isNonAliyunProvider(user: string | { user_id?: string; tokenfrom
     isGuangyaUser(user) ||
     isPikPakUser(user) ||
     isQuarkUser(user) ||
+    isOneDriveUser(user) ||
+    isDropboxUser(user) ||
+    isGoogleDriveUser(user) ||
+    isGofileUser(user) ||
     isWebDavUser(user) ||
     isS3User(user)
   )

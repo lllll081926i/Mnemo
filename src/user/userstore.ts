@@ -49,6 +49,9 @@ export interface ITokenInfo {
 
   pic_drive_id: string
 
+  provider_account_id?: string
+  provider_root_id?: string
+
   signInfo: {
     signMon: number
     signDay: number

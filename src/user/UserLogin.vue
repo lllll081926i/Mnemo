@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
 import { ITokenInfo, useSettingStore, useUserStore } from '../store'
 import UserDAL from '../user/userdal'
 import Config from '../config'
@@ -18,6 +18,11 @@ import { GuangyaSmsState, generateGuangyaDid, requestGuangyaSmsCode, submitGuang
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
+import { createNextcloudConnection, createNextcloudUserToken } from '../nextcloud/auth'
+import { loginGofile } from '../gofile/auth'
+import { buildOneDriveAuthUrl, createOneDrivePkceVerifier, exchangeOneDriveCodeForToken, ONEDRIVE_CLIENT_ID } from '../onedrive/auth'
+import { buildDropboxAuthUrl, createDropboxPkceVerifier, DROPBOX_APP_KEY, exchangeDropboxCodeForToken } from '../dropbox/auth'
+import { buildGoogleDriveAuthUrl, createGoogleDrivePkceVerifier, exchangeGoogleDriveCodeForToken, GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET } from '../gdrive/auth'
 import { ALIYUN_APP_ID, ALIYUN_APP_SECRET } from '../secrets.generated'
 
 const useUser = useUserStore()
@@ -34,10 +39,12 @@ const qrCodeUrl = ref('')
 const qrCodeStatusType = ref()
 const qrCodeStatusTips = ref()
 
-type LoginProvider = 'aliyun' | '139' | '189' | 'guangya' | 'pikpak' | 'quark' | 'webdav' | 's3'
+type LoginProvider = 'aliyun' | '139' | '189' | 'guangya' | 'pikpak' | 'quark' | 'onedrive' | 'dropbox' | 'gdrive' | 'nextcloud' | 'gofile' | 'webdav' | 's3'
+type OAuthLoginProvider = 'onedrive' | 'dropbox' | 'gdrive'
+type OAuthLoginContext = { provider: OAuthLoginProvider; verifier: string; redirectUri: string }
 
 const loginProvider = ref<LoginProvider>('aliyun')
-const loginProviders: LoginProvider[] = ['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'webdav', 's3']
+const loginProviders: LoginProvider[] = ['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'onedrive', 'dropbox', 'gdrive', 'nextcloud', 'gofile', 'webdav', 's3']
 const getLoginProviderMeta = (provider: LoginProvider) => getDriveProviderMeta(provider)
 const activeLoginProviderMeta = computed(() => getLoginProviderMeta(loginProvider.value))
 const pikpakUsername = ref('')
@@ -62,6 +69,12 @@ const guangyaSmsState = ref<GuangyaSmsState | null>(null)
 const guangyaLoading = ref(false)
 const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
 const webDavLoading = ref(false)
+const nextcloudForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
+const nextcloudLoading = ref(false)
+const gofileToken = ref('')
+const gofileLoading = ref(false)
+const oauthLoading = ref<OAuthLoginProvider | ''>('')
+const oauthLoginContexts = new Map<string, OAuthLoginContext>()
 const s3Form = ref({ name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true })
 const s3Loading = ref(false)
 let quarkTimer: any = null
@@ -92,18 +105,7 @@ const clearOpenTimers = () => {
 
 const handleModalOpen = () => {
   const stored = localStorage.getItem('login_provider')
-  if (
-    stored === 'aliyun' ||
-    stored === '139' ||
-    stored === '189' ||
-    stored === 'guangya' ||
-    stored === 'pikpak' ||
-    stored === 'quark' ||
-    stored === 'webdav' ||
-    stored === 's3'
-  ) {
-    loginProvider.value = stored
-  }
+  if (loginProviders.includes(stored as LoginProvider)) loginProvider.value = stored as LoginProvider
   if (loginProvider.value === 'pikpak') {
     loginLoading.value = false
   } else if (loginProvider.value === 'quark') {
@@ -117,6 +119,8 @@ const handleModalOpen = () => {
   } else if (loginProvider.value === 'webdav') {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
+    loginLoading.value = false
+  } else if (loginProvider.value === 'onedrive' || loginProvider.value === 'dropbox' || loginProvider.value === 'gdrive' || loginProvider.value === 'nextcloud' || loginProvider.value === 'gofile') {
     loginLoading.value = false
   } else {
     handleOpen()
@@ -142,6 +146,8 @@ watch(loginProvider, () => {
   } else if (loginProvider.value === 'webdav') {
     loginLoading.value = false
   } else if (loginProvider.value === 's3') {
+    loginLoading.value = false
+  } else if (loginProvider.value === 'onedrive' || loginProvider.value === 'dropbox' || loginProvider.value === 'gdrive' || loginProvider.value === 'nextcloud' || loginProvider.value === 'gofile') {
     loginLoading.value = false
   } else {
     handleOpen()
@@ -282,6 +288,81 @@ const handleOpen = () => {
   }, 1000)
 }
 
+const getOAuthClientId = (provider: OAuthLoginProvider) => {
+  if (provider === 'onedrive') return ONEDRIVE_CLIENT_ID.trim()
+  if (provider === 'dropbox') return DROPBOX_APP_KEY.trim()
+  return GOOGLE_DRIVE_CLIENT_ID.trim()
+}
+
+const cancelOAuthLogins = () => {
+  for (const state of oauthLoginContexts.keys()) window.WebOAuthCancel?.(state)
+  oauthLoginContexts.clear()
+  oauthLoading.value = ''
+}
+
+const startOAuthLogin = async (provider: OAuthLoginProvider) => {
+  if (oauthLoading.value) return
+  const clientId = getOAuthClientId(provider)
+  if (!clientId) {
+    message.error(`${getDriveProviderMeta(provider).label} 授权配置缺失，请检查正式构建配置`)
+    return
+  }
+  oauthLoading.value = provider
+  let state = ''
+  try {
+    const session = await window.WebOAuthBegin(provider)
+    state = session.state || ''
+    const redirectUri = session.redirectUri || ''
+    if (!session.ok || !state || !redirectUri) throw new Error(session.error || '无法创建应用内授权会话')
+    const verifier = provider === 'onedrive' ? createOneDrivePkceVerifier() : provider === 'dropbox' ? createDropboxPkceVerifier() : createGoogleDrivePkceVerifier()
+    oauthLoginContexts.set(state, { provider, verifier, redirectUri })
+    const authUrl = provider === 'onedrive'
+      ? await buildOneDriveAuthUrl(clientId, verifier, state, redirectUri)
+      : provider === 'dropbox'
+        ? await buildDropboxAuthUrl(clientId, verifier, state, redirectUri)
+        : await buildGoogleDriveAuthUrl(clientId, verifier, state, redirectUri)
+    const opened = await window.WebOAuthOpen(state, authUrl)
+    if (!opened.ok) throw new Error(opened.error || '应用内登录窗口打开失败')
+  } catch (error: any) {
+    if (state) {
+      oauthLoginContexts.delete(state)
+      await window.WebOAuthCancel?.(state)
+    }
+    oauthLoading.value = ''
+    message.error(error?.message || `${getDriveProviderMeta(provider).label} 登录失败`)
+  }
+}
+
+const removeOAuthCallback = window.WebOAuthOnCallback?.(async (payload) => {
+  const context = oauthLoginContexts.get(payload.state)
+  if (!context || context.provider !== payload.provider) return
+  oauthLoginContexts.delete(payload.state)
+  try {
+    if (payload.error || !payload.code) {
+      const detail = payload.errorDescription || payload.error || '授权未完成'
+      throw new Error(context.provider === 'gdrive' && /disallowed_useragent/i.test(`${payload.error} ${detail}`) ? 'Google 禁止当前应用内嵌授权环境，请在 Google Cloud 控制台确认桌面应用 OAuth 配置' : detail)
+    }
+    const clientId = getOAuthClientId(context.provider)
+    const token = context.provider === 'onedrive'
+      ? await exchangeOneDriveCodeForToken(payload.code, clientId, context.verifier, context.redirectUri)
+      : context.provider === 'dropbox'
+        ? await exchangeDropboxCodeForToken(payload.code, clientId, context.verifier, context.redirectUri)
+        : await exchangeGoogleDriveCodeForToken(payload.code, clientId, GOOGLE_DRIVE_CLIENT_SECRET, context.verifier, context.redirectUri)
+    if (!token) throw new Error('授权成功，但账号信息获取失败')
+    await UserDAL.UserLogin(token, true)
+    useUserStore().userShowLogin = false
+  } catch (error: any) {
+    message.error(error?.message || `${getDriveProviderMeta(context.provider).label} 登录失败`)
+  } finally {
+    oauthLoading.value = ''
+  }
+})
+
+onBeforeUnmount(() => {
+  removeOAuthCallback?.()
+  cancelOAuthLogins()
+})
+
 const handleClose = () => {
   loginLoading.value = true
   client_id.value = ALIYUN_APP_ID
@@ -291,6 +372,7 @@ const handleClose = () => {
   stopAliyunLoginWebview()
   clearQuarkTimer()
   clearCloud189Timer()
+  cancelOAuthLogins()
   refreshStepTips('process', 1)
   refreshQrCodeStatus()
   pikpakPassword.value = ''
@@ -312,8 +394,51 @@ const handleClose = () => {
   guangyaLoading.value = false
   webDavForm.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
   webDavLoading.value = false
+  nextcloudForm.value = { name: '', url: '', username: '', password: '', rootPath: '/' }
+  nextcloudLoading.value = false
+  gofileToken.value = ''
+  gofileLoading.value = false
   s3Form.value = { name: '', endpoint: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', sessionToken: '', bucket: '', rootPrefix: '', forcePathStyle: true }
   s3Loading.value = false
+}
+
+const submitNextcloudLogin = async () => {
+  if (nextcloudLoading.value) return
+  const form = nextcloudForm.value
+  if (!form.name.trim() || !form.url.trim() || !form.username.trim() || !form.password.trim()) {
+    message.error('请填写 Nextcloud 名称、服务器地址、用户名和应用密码')
+    return
+  }
+  nextcloudLoading.value = true
+  try {
+    const connection = createNextcloudConnection(form)
+    await testWebDavConnection(connection)
+    saveWebDavConnection(connection)
+    await UserDAL.UserLogin(createNextcloudUserToken(connection), true)
+    useUserStore().userShowLogin = false
+  } catch (error: any) {
+    message.error(`添加 Nextcloud 失败: ${error?.message || '未知错误'}`)
+  } finally {
+    nextcloudLoading.value = false
+  }
+}
+
+const submitGofileLogin = async () => {
+  if (gofileLoading.value) return
+  if (!gofileToken.value.trim()) {
+    message.error('请输入 GoFile Account API Token')
+    return
+  }
+  gofileLoading.value = true
+  try {
+    const token = await loginGofile(gofileToken.value)
+    await UserDAL.UserLogin(token, true)
+    useUserStore().userShowLogin = false
+  } catch (error: any) {
+    message.error(error?.message || 'GoFile 登录失败')
+  } finally {
+    gofileLoading.value = false
+  }
 }
 
 const submitWebDavLogin = async () => {
@@ -964,6 +1089,46 @@ const loginSuccess = (token: ITokenInfo) => {
           </div>
         </div>
 
+        <div v-else-if="loginProvider === 'onedrive' || loginProvider === 'dropbox' || loginProvider === 'gdrive'">
+          <div id="logindiv">
+            <div class="logincontent oauth-login-content">
+              <div class="oauth-login-panel">
+                <span v-if="activeLoginProviderMeta.icon" class="oauth-provider-icon">
+                  <img :src="activeLoginProviderMeta.icon" :alt="activeLoginProviderMeta.label" />
+                </span>
+                <div class="oauth-provider-name">{{ activeLoginProviderMeta.label }}</div>
+                <a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">在 Mnemo 中登录</a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 'nextcloud'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <form class="webdav-login-form" @submit.prevent="submitNextcloudLogin">
+                <a-input v-model="nextcloudForm.name" placeholder="连接名称（必填）" allow-clear />
+                <a-input v-model="nextcloudForm.url" placeholder="Nextcloud 服务器地址" allow-clear />
+                <a-input v-model="nextcloudForm.username" placeholder="用户名" allow-clear />
+                <a-input-password v-model="nextcloudForm.password" placeholder="应用密码" allow-clear />
+                <a-input v-model="nextcloudForm.rootPath" placeholder="挂载路径，默认 /" allow-clear />
+                <a-button html-type="submit" type="primary" long :loading="nextcloudLoading">连接 Nextcloud</a-button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="loginProvider === 'gofile'">
+          <div id="logindiv">
+            <div class="logincontent">
+              <form class="pikpak-login-form" @submit.prevent="submitGofileLogin">
+                <a-input-password v-model="gofileToken" placeholder="GoFile Account API Token" allow-clear />
+                <a-button html-type="submit" type="primary" long :loading="gofileLoading">登录 GoFile</a-button>
+              </form>
+            </div>
+          </div>
+        </div>
+
         <div v-else-if="loginProvider === 'webdav'">
           <div id="logindiv">
             <div class="logincontent">
@@ -1190,6 +1355,38 @@ const loginSuccess = (token: ITokenInfo) => {
   gap: 10px;
   width: 300px;
   margin: 34px auto 0;
+}
+
+.oauth-login-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.oauth-login-panel {
+  display: flex;
+  width: 100%;
+  max-width: 300px;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.oauth-provider-icon {
+  width: 56px;
+  height: 56px;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+.oauth-provider-name {
+  color: var(--color-text-1);
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .s3-login-form {

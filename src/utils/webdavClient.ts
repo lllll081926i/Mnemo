@@ -10,6 +10,7 @@ const LEGACY_STORAGE_KEY = 'MediaLibrary_WebDavConnections'
 
 export interface WebDavConnectionConfig {
   id: string
+  provider?: 'webdav' | 'nextcloud'
   name: string
   url: string
   username: string
@@ -49,6 +50,9 @@ const createWebDavClient = (config: WebDavConnectionConfig) => {
   })
 }
 
+const getWebDavProvider = (config: WebDavConnectionConfig) => config.provider === 'nextcloud' ? 'nextcloud' : 'webdav'
+const getWebDavDriveId = (config: WebDavConnectionConfig) => `${getWebDavProvider(config)}:${config.id}`
+
 const getDavBasePath = (config: WebDavConnectionConfig) => {
   const currentUrl = new URL(config.url.endsWith('/') ? config.url : `${config.url}/`)
   return normalizeWebDavPath(currentUrl.pathname || '/')
@@ -79,7 +83,7 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
   const mimeType = stat.mime || ''
   const updatedAt = stat.lastmod
   const time = updatedAt ? new Date(updatedAt).getTime() : Date.now()
-  const driveId = `webdav:${config.id}`
+  const driveId = getWebDavDriveId(config)
   const iconInfo = isDir ? ['folder', 'iconfile-folder'] : getFileIcon(isDir ? 'folder' : VIDEO_EXTENSIONS.has(`.${ext}`) ? 'video' : 'others', ext, ext, mimeType, size)
 
   return {
@@ -109,12 +113,12 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
 }
 
 export const isWebDavDrive = (driveId?: string, driveServerId?: string) => {
-  return (driveId || '').startsWith('webdav:') || driveServerId === 'webdav'
+  return /^(webdav|nextcloud):/.test(driveId || '') || driveServerId === 'webdav' || driveServerId === 'nextcloud'
 }
 
 export const getWebDavConnectionId = (driveId?: string) => {
-  if (!driveId || !driveId.startsWith('webdav:')) return ''
-  return driveId.slice('webdav:'.length)
+  const match = /^(?:webdav|nextcloud):(.*)$/.exec(driveId || '')
+  return match?.[1] || ''
 }
 
 const protectWebDavConnection = (connection: WebDavConnectionConfig): PersistedWebDavConnection => {
@@ -180,17 +184,17 @@ export const getWebDavConnection = (id: string) => {
   return getWebDavConnections().find((item) => item.id === id)
 }
 
-export const createWebDavConnection = (input: { name: string; url: string; username: string; password: string; rootPath?: string }): WebDavConnectionConfig => {
+export const createWebDavConnection = (input: { provider?: 'webdav' | 'nextcloud'; name: string; url: string; username: string; password: string; rootPath?: string }): WebDavConnectionConfig => {
   if (!input.name.trim()) throw new Error('请填写 WebDAV 连接名称')
   const normalizedUrl = normalizeUrl(input.url)
   const normalizedRoot = normalizeWebDavPath(input.rootPath || '/')
   const timestamp = Date.now().toString()
   const idSeed = `${normalizedUrl}|${input.username}|${normalizedRoot}|${timestamp}`
-  const id = btoa(unescape(encodeURIComponent(idSeed)))
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .slice(0, 24)
+  const randomId = globalThis.crypto?.randomUUID?.().replace(/-/g, '')
+  const id = randomId || btoa(unescape(encodeURIComponent(idSeed))).replace(/[^a-zA-Z0-9]/g, '').slice(-24)
   return {
     id,
+    provider: input.provider === 'nextcloud' ? 'nextcloud' : 'webdav',
     name: input.name.trim(),
     url: normalizedUrl,
     username: input.username.trim(),
@@ -201,7 +205,7 @@ export const createWebDavConnection = (input: { name: string; url: string; usern
 }
 
 export const createWebDavUserToken = (connection: WebDavConnectionConfig): ITokenInfo => ({
-  tokenfrom: 'webdav',
+  tokenfrom: getWebDavProvider(connection),
   access_token: '',
   refresh_token: '',
   session_expires_in: 0,
@@ -213,11 +217,11 @@ export const createWebDavUserToken = (connection: WebDavConnectionConfig): IToke
   device_id: '',
   expires_in: 0,
   token_type: '',
-  user_id: `webdav:${connection.id}`,
+  user_id: getWebDavDriveId(connection),
   user_name: connection.username || connection.name,
   avatar: '',
   nick_name: connection.name,
-  default_drive_id: `webdav:${connection.id}`,
+  default_drive_id: getWebDavDriveId(connection),
   default_sbox_drive_id: '',
   resource_drive_id: '',
   backup_drive_id: '',
@@ -247,85 +251,35 @@ export const createWebDavUserToken = (connection: WebDavConnectionConfig): IToke
 export const buildWebDavDownloadUrl = (config: WebDavConnectionConfig, relativePath: string): string => {
   const requestPath = joinDavPath(config.rootPath, relativePath)
   const baseUrl = new URL(config.url.endsWith('/') ? config.url : `${config.url}/`)
-  const encodedPath = requestPath
+  const baseSegments = baseUrl.pathname
     .split('/')
     .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
-  baseUrl.pathname = `/${encodedPath}`
-  if (config.username) baseUrl.username = config.username
-  if (config.password) baseUrl.password = config.password
-  const urlString = baseUrl.toString()
-  return urlString
-}
-
-const getApiBaseUrl = (config: WebDavConnectionConfig): string => {
-  const currentUrl = new URL(config.url.endsWith('/') ? config.url : `${config.url}/`)
-  const pathSegments = currentUrl.pathname.split('/').filter(Boolean)
-  if (pathSegments.length > 0) {
-    currentUrl.pathname = '/' + pathSegments.slice(0, -1).join('/')
-  } else {
-    currentUrl.pathname = '/'
+  const requestSegments = requestPath.split('/').filter(Boolean)
+  const encodeSegment = (segment: string) => {
+    try {
+      return encodeURIComponent(decodeURIComponent(segment))
+    } catch {
+      return encodeURIComponent(segment)
+    }
   }
-  if (!currentUrl.pathname.endsWith('/')) currentUrl.pathname += '/'
-  currentUrl.search = ''
-  currentUrl.hash = ''
-  return currentUrl.toString()
-}
-
-const fetchWebDavApiToken = async (config: WebDavConnectionConfig): Promise<string> => {
-  const loginUrl = new URL('api/auth/login', getApiBaseUrl(config)).toString()
-  const response = await fetch(loginUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      username: config.username,
-      password: config.password || ''
-    })
-  })
-  if (!response.ok) throw new Error(`WebDAV 登录失败 (${response.status})`)
-  const payload = (await response.json().catch(() => null)) as any
-  const token = payload?.data?.token
-  if (!token) throw new Error(payload?.message || '获取 WebDAV token 失败')
-  return token
-}
-
-const getWebDavStoragePath = (config: WebDavConnectionConfig, relativePath: string) => {
-  const requestPath = joinDavPath(config.rootPath, relativePath)
-  return stripPathPrefix(requestPath, getDavBasePath(config))
-}
-
-export const getWebDavPlayUrl = async (config: WebDavConnectionConfig, relativePath: string): Promise<string> => {
-  const token = await fetchWebDavApiToken(config)
-  const apiUrl = new URL('api/fs/get', getApiBaseUrl(config)).toString()
-  const requestPath = getWebDavStoragePath(config, relativePath)
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: token
-    },
-    body: JSON.stringify({ path: relativePath })
-  })
-  if (!response.ok) throw new Error(`获取 WebDAV 播放地址失败 (${response.status})`)
-  const payload = (await response.json().catch(() => null)) as any
-  const rawUrl = payload?.data?.raw_url
-  if (!rawUrl || typeof rawUrl !== 'string') {
-    throw new Error(payload?.message || '获取 WebDAV 播放地址失败')
-  }
-  return rawUrl
+  baseUrl.pathname = `/${[...baseSegments, ...requestSegments].map(encodeSegment).join('/')}`
+  baseUrl.username = ''
+  baseUrl.password = ''
+  return baseUrl.toString()
 }
 
 export const getWebDavDownloadUrl = async (config: WebDavConnectionConfig, relativePath: string): Promise<string> => {
-  try {
-    return await getWebDavPlayUrl(config, relativePath)
-  } catch (error) {
-    console.warn('获取 WebDAV 播放地址失败，回退直链:', error)
-    const client = createWebDavClient(config)
-    return buildWebDavDownloadUrl(config, relativePath)
-  }
+  return buildWebDavDownloadUrl(config, relativePath)
+}
+
+export const getWebDavRequestHeaders = (config: WebDavConnectionConfig): Record<string, string> => {
+  if (!config.username) return {}
+  const bytes = new TextEncoder().encode(`${config.username}:${config.password || ''}`)
+  let binary = ''
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return { Authorization: `Basic ${btoa(binary)}` }
 }
 
 export const listWebDavDirectory = async (config: WebDavConnectionConfig, relativePath = '/'): Promise<IAliGetFileModel[]> => {

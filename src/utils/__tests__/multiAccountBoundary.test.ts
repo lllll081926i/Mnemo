@@ -17,7 +17,8 @@ describe('multi-account provider boundaries', () => {
     expect(change).toContain('ensureTokenReady(token)')
     expect(change).not.toContain('AliUser.ApiTokenRefreshAccount')
     expect(ensure).toContain('if (isNonAliyunProvider(token))')
-    expect(ensure).toContain("resolveDriveProvider(token) === 'unknown'")
+    expect(ensure).toContain('const provider = resolveDriveProvider(token)')
+    expect(ensure).toContain("if (provider === 'unknown') return null")
   })
 
   it('keeps retained non-Aliyun accounts out of Aliyun refresh and sign-in APIs', () => {

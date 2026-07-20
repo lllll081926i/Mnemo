@@ -12,13 +12,17 @@ import { GetDriveType, isCloud139User, isCloud189User, isGuangyaUser, isNonAliyu
 import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
 import { getDriveProviderSidebarEntries, resolveDriveProvider } from '../utils/driveProvider'
+import { applyOneDriveQuota, refreshOneDriveAccessToken } from '../onedrive/auth'
+import { applyDropboxQuota, refreshDropboxAccessToken } from '../dropbox/auth'
+import { applyGoogleDriveQuota, refreshGoogleDriveAccessToken } from '../gdrive/auth'
 
 export const UserTokenMap = new Map<string, ITokenInfo>()
 
 export default class UserDAL {
   private static async ensureTokenReady(token: ITokenInfo): Promise<ITokenInfo | null> {
     try {
-      if (resolveDriveProvider(token) === 'unknown') return null
+      const provider = resolveDriveProvider(token)
+      if (provider === 'unknown') return null
       if (isWebDavUser(token)) {
         const connection = getWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
         return connection ? token : null
@@ -66,6 +70,17 @@ export default class UserDAL {
         }
         return token.user_id && token.access_token ? token : null
       }
+      if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive') {
+        const expireTime = new Date(token.expire_time || 0).getTime()
+        if (!token.access_token || (expireTime && expireTime <= Date.now() + 60_000)) {
+          const refreshed = provider === 'onedrive' ? await refreshOneDriveAccessToken(token) : provider === 'dropbox' ? await refreshDropboxAccessToken(token) : await refreshGoogleDriveAccessToken(token)
+          if (!refreshed?.access_token) return null
+          this.SaveUserToken(refreshed)
+          return refreshed
+        }
+        return token.user_id ? token : null
+      }
+      if (provider === 'gofile') return token.user_id && token.access_token ? token : null
       if (isNonAliyunProvider(token)) return token.user_id ? token : null
       const ok = !!(token.user_id && (await AliUser.ApiTokenRefreshAccount(token, false)))
       return ok ? token : null
@@ -173,6 +188,18 @@ export default class UserDAL {
           const expireTime = new Date(token.expire_time || 0).getTime()
           if (expireTime && expireTime - dateNow <= 1000 * 60 * 5) {
             const refreshed = await refreshGuangyaAccessToken(token)
+            if (refreshed) {
+              UserTokenMap.set(refreshed.user_id, refreshed)
+              await DB.saveUser(refreshed)
+            }
+          }
+          continue
+        }
+        const provider = resolveDriveProvider(token)
+        if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive') {
+          const expireTime = new Date(token.expire_time || 0).getTime()
+          if (!token.access_token || (expireTime && expireTime - dateNow <= 1000 * 60 * 5)) {
+            const refreshed = provider === 'onedrive' ? await refreshOneDriveAccessToken(token) : provider === 'dropbox' ? await refreshDropboxAccessToken(token) : await refreshGoogleDriveAccessToken(token)
             if (refreshed) {
               UserTokenMap.set(refreshed.user_id, refreshed)
               await DB.saveUser(refreshed)
@@ -338,6 +365,12 @@ export default class UserDAL {
         token.default_drive_id = token.default_drive_id || token.user_id
       } else if (isS3User(token)) {
         token.default_drive_id = token.default_drive_id || token.user_id
+      } else if (resolveDriveProvider(token) === 'onedrive') {
+        await applyOneDriveQuota(token)
+      } else if (resolveDriveProvider(token) === 'dropbox') {
+        await applyDropboxQuota(token)
+      } else if (resolveDriveProvider(token) === 'gdrive') {
+        await applyGoogleDriveQuota(token)
       } else if (!isNonAliyunProvider(token)) {
         await Promise.all([
           AliUser.ApiUserInfo(token),
@@ -429,6 +462,13 @@ export default class UserDAL {
     if (isS3User(token)) {
       await PanDAL.aReLoadS3Drive(token)
       await PanDAL.aReLoadOneDirToShow(token.default_drive_id || token.user_id, '/', true)
+      return
+    }
+    const provider = resolveDriveProvider(token)
+    if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
+      await PanDAL.aReLoadProviderDrive(token)
+      const rootKey = provider === 'onedrive' ? 'onedrive_root' : provider === 'dropbox' ? 'dropbox_root' : provider === 'gdrive' ? 'gdrive_root' : 'gofile_root'
+      await PanDAL.aReLoadOneDirToShow(token.default_drive_id, rootKey, true)
       return
     }
     const settingStore = useSettingStore()

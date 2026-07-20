@@ -240,8 +240,8 @@ describe('deep layout shell port', () => {
 
   it('keeps only retained providers in the shared login flow', () => {
     const login = read('src/user/UserLogin.vue')
-    expect(login).toContain("['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'webdav', 's3']")
-    expect(login).not.toMatch(/cloud123|baidu|drive115|dropbox|onedrive|boxClient/i)
+    expect(login).toContain("['aliyun', '139', '189', 'guangya', 'pikpak', 'quark', 'onedrive', 'dropbox', 'gdrive', 'nextcloud', 'gofile', 'webdav', 's3']")
+    expect(login).not.toMatch(/cloud123|baidu|drive115|boxClient/i)
   })
 
   it('keeps provider login configuration and QR rendering inside the app', () => {
