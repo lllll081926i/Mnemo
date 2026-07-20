@@ -10,7 +10,6 @@ export const Referer = 'https://www.aliyundrive.com/'
 export const AppWindow: {
   mainWindow: BrowserWindow | undefined
   uploadWindow: BrowserWindow | undefined
-  downloadWindow: BrowserWindow | undefined
   appTray: Tray | undefined
   winWidth: number
   winHeight: number
@@ -18,7 +17,6 @@ export const AppWindow: {
 } = {
   mainWindow: undefined,
   uploadWindow: undefined,
-  downloadWindow: undefined,
   appTray: undefined,
   winWidth: 0,
   winHeight: 0,
@@ -33,16 +31,6 @@ const debounceUpload = (fn: any, wait: number) => {
   timerUpload = setTimeout(() => {
     fn()
     timerUpload = undefined
-  }, wait)
-}
-let timerDownload: NodeJS.Timeout | undefined
-const debounceDownload = (fn: any, wait: number) => {
-  if (timerDownload) {
-    clearTimeout(timerDownload)
-  }
-  timerDownload = setTimeout(() => {
-    fn()
-    timerDownload = undefined
   }, wait)
 }
 let timerResize: NodeJS.Timeout | undefined
@@ -136,7 +124,6 @@ export function createMainWindow() {
     if (is.linux()) {
       AppWindow.mainWindow!.show()
     }
-    creatDownloadPort()
   })
 
   AppWindow.mainWindow.webContents.on('render-process-gone', function (event, details) {
@@ -145,7 +132,6 @@ export function createMainWindow() {
     }
   })
 
-  createDownload()
 }
 
 export function createTray() {
@@ -429,16 +415,6 @@ ipcMain.on('uploadWorkerReady', (event) => {
   if (event.sender === AppWindow.uploadWindow?.webContents) creatUploadPort()
 })
 
-function creatDownloadPort() {
-  debounceDownload(function () {
-    if (AppWindow.mainWindow && AppWindow.downloadWindow && AppWindow.downloadWindow.isDestroyed() == false) {
-      const { port1, port2 } = new MessageChannelMain()
-      AppWindow.mainWindow.webContents.postMessage('setDownloadPort', undefined, [port1])
-      AppWindow.downloadWindow.webContents.postMessage('setPort', undefined, [port2])
-    }
-  }, 1000)
-}
-
 function createUpload() {
   if (AppWindow.uploadWindow && AppWindow.uploadWindow.isDestroyed() == false) return
   AppWindow.uploadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false, false)
@@ -460,28 +436,4 @@ function createUpload() {
   })
   // AppWindow.uploadWindow.webContents.openDevTools({ mode: 'undocked' })
   AppWindow.uploadWindow.hide()
-}
-
-function createDownload() {
-  if (AppWindow.downloadWindow && AppWindow.downloadWindow.isDestroyed() == false) return
-  AppWindow.downloadWindow = createElectronWindow(10, 10, false, 'main', 'dark', false, false)
-
-  AppWindow.downloadWindow.on('ready-to-show', function () {
-    creatDownloadPort()
-    AppWindow.downloadWindow!.webContents.send('setPage', { page: 'PageWorker', data: { type: 'download' } })
-    AppWindow.downloadWindow!.setTitle('mnemo下载进程')
-  })
-
-  AppWindow.downloadWindow.webContents.on('render-process-gone', function (event, details) {
-    if (details.reason == 'crashed' || details.reason == 'oom' || details.reason == 'killed' || details.reason == 'integrity-failure') {
-      try {
-        AppWindow.downloadWindow?.destroy()
-      } catch {}
-      AppWindow.downloadWindow = undefined
-      createDownload()
-    }
-  })
-
-  AppWindow.downloadWindow.webContents.closeDevTools()
-  AppWindow.downloadWindow.hide()
 }

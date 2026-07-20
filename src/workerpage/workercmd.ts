@@ -3,7 +3,6 @@ import { useSettingStore } from '../store'
 import TreeStore from '../store/treestore'
 import UserDAL from '../user/userdal'
 import DebugLog from '../utils/debuglog'
-import { DownloadTrigger } from './uidownload'
 import { UploadAdd, UploadCmd, UploadReport } from './uiupload'
 
 // eslint-disable-next-line no-unused-vars
@@ -28,22 +27,6 @@ export function WorkerPage(type: string) {
     element.append(title)
     document.body.append(element)
   }
-  if (type == 'download') {
-    window.WinMsg = WinMsgDownload
-    const func = () => {
-      try {
-        DownloadTrigger()
-      } catch {}
-      workerTimer = setTimeout(func, 1000)
-    }
-    workerTimer = setTimeout(func, 6000) 
-    const element = document.createElement('div')
-    const title = document.createElement('h3')
-    title.className = 'workertitle'
-    title.textContent = '下载进程'
-    element.append(title)
-    document.body.append(element)
-  }
 }
 const AllDirLock = new Map<string, number>()
 export const WinMsgUpload = function (arg: any) {
@@ -62,7 +45,6 @@ export const WinMsgUpload = function (arg: any) {
     }
   } catch {}
 }
-
 function LoadAllDirList(user_id: string, drive_id: string, drive_root: string): void {
   console.time('AllDirList')
   const lock = AllDirLock.get(drive_id) || 0
@@ -93,15 +75,4 @@ function LoadAllDirList(user_id: string, drive_id: string, drive_root: string): 
       DebugLog.mSaveWarning('列出文件夹失败file_id=all', err)
       window.WinMsgToMain({ cmd: 'MainSaveAllDir', OneDriver: undefined, ErrorMessage: err.message || '未知错误' })
     })
-}
-
-export const WinMsgDownload = function (arg: any) {
-  // console.log(arg)
-  try {
-    if (arg.cmd == 'SettingRefresh') {
-      useSettingStore().$reset()
-    } else if (arg.cmd == 'ClearUserToken') {
-      UserDAL.ClearUserTokenMap()
-    }
-  } catch {}
 }

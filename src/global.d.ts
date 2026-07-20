@@ -37,13 +37,11 @@ declare global {
     WebShowItemInFolder: any
     WebPlatformSync: any
     UploadPort: any
-    DownloadPort: any
     MainPort: any
     MainProxyServer: any
     MainProxyHost: any
     MainProxyPort: any
     WinMsgToUpload: any
-    WinMsgToDownload: any
     WinMsgToMain: any
     IsMainPage: boolean
     WebSetProxy: any

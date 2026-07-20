@@ -321,7 +321,6 @@ export default class UserDAL {
       UserTokenMap.set(token.user_id, token)
       await DB.saveUser(token)
       window.WinMsgToUpload?.({ cmd: 'ClearUserToken' })
-      window.WinMsgToDownload?.({ cmd: 'ClearUserToken' })
       return true
     } catch (err: any) {
       DebugLog.mSaveDanger('SaveUserToken ' + token.user_id, err)

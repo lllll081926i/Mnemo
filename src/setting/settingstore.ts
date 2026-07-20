@@ -499,7 +499,6 @@ const useSettingStore = defineStore('setting', {
       window.MainProxyHost = setting.debugProxyHost
       window.MainProxyPort = setting.debugProxyPort
       window.WinMsgToUpload({ cmd: 'SettingRefresh' })
-      window.WinMsgToDownload({ cmd: 'SettingRefresh' })
     },
     updateFileColor(key: string, title: string) {
       if (!key) return

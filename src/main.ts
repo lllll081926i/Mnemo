@@ -96,9 +96,6 @@ window.WinMsgToUpload = function (event: any) {
   pendingUploadMessages.push(event)
   window.Electron.ipcRenderer.send('ensureUploadWorker')
 }
-window.WinMsgToDownload = function (event: any) {
-  if (window.DownloadPort) window.DownloadPort.postMessage(event)
-}
 
 window.Electron.ipcRenderer.on('setPort', (_event: any, args: any) => {
   const [port] = _event.ports
@@ -125,17 +122,6 @@ window.Electron.ipcRenderer.on('setUploadPort', (_event: any, args: any) => {
 })
 window.Electron.ipcRenderer.on('clearUploadPort', () => {
   window.UploadPort = undefined
-})
-window.Electron.ipcRenderer.on('setDownloadPort', (_event: any, args: any) => {
-  const [port] = _event.ports
-  window.DownloadPort = port
-  port.onmessage = (event: any) => {
-    Promise.resolve().then(() => {
-      try {
-        if (window.WinMsg) window.WinMsg(event.data)
-      } catch {}
-    })
-  }
 })
 
 window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {

@@ -55,7 +55,6 @@ const handlerAccountImport = () => {
             Db.saveUserBatch(userList)
               .then(() => {
                 window.WinMsgToUpload({ cmd: 'ClearUserToken' })
-                window.WinMsgToDownload({ cmd: 'ClearUserToken' })
               })
               .catch()
             await UserDAL.UserLogin(userList[0])
