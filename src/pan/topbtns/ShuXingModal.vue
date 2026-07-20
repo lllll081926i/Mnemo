@@ -8,11 +8,10 @@ import { modalCloseAll } from '../../utils/modal'
 import { humanDateTimeDateStr, humanSize, humanTime } from '../../utils/format'
 import { ref } from 'vue'
 import DebugLog from '../../utils/debuglog'
-import { GetDriveID, isGuangyaUser, isPikPakUser } from '../../aliapi/utils'
+import { GetDriveID, isPikPakUser } from '../../aliapi/utils'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from '../../utils/proxyhelper'
 import TreeStore from '../../store/treestore'
 import { apiPikPakFileDetail, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
-import { apiGuangyaFileDetail, mapGuangyaFileToAliModel } from '../../guangya/dirfilelist'
 
 const props = defineProps({
   visible: {
@@ -61,7 +60,6 @@ const handleOpen = async () => {
     message.error('没有选中任何文件')
   } else {
     const isPikPak = isPikPakUser(pantreeStore.user_id) || drive_id === 'pikpak'
-    const isGuangya = isGuangyaUser(pantreeStore.user_id) || drive_id === 'guangya'
     if (isPikPak) {
       const pathList = TreeStore.GetDirPath(drive_id, file_id)
       const pathNames = pathList.map((item) => item.name).filter((name) => name)
@@ -72,19 +70,6 @@ const handleOpen = async () => {
         mapped.type = mapped.isDir ? 'folder' : 'file'
         mapped.created_at = detail.created_time || ''
         mapped.updated_at = detail.modified_time || detail.created_time || ''
-        fileInfo.value = mapped
-      }
-    } else if (isGuangya) {
-      const pathList = TreeStore.GetDirPath(drive_id, file_id)
-      const pathNames = pathList.map((item) => item.name).filter((name) => name)
-      dirPath.value = '/' + pathNames.join('/')
-      const detail = await apiGuangyaFileDetail(pantreeStore.user_id, file_id)
-      if (detail) {
-        const mapped: any = mapGuangyaFileToAliModel(detail, drive_id || 'guangya', detail.parentId || detail.parentFileId || 'guangya_root')
-        mapped.type = mapped.isDir ? 'folder' : 'file'
-        mapped.created_at = detail.createAt || detail.createdAt || detail.created_at || detail.createTime || ''
-        mapped.updated_at = detail.updateAt || detail.updatedAt || detail.updated_at || detail.updateTime || mapped.created_at
-        mapped.content_hash = detail.contentHash || detail.content_hash || detail.md5 || detail.sha1 || detail.gcid || ''
         fileInfo.value = mapped
       }
     } else {
@@ -117,7 +102,7 @@ const handleOpen = async () => {
         })
       }
     }
-    if (fileInfo.value?.type == 'folder' && !isPikPak && !isGuangya) {
+    if (fileInfo.value?.type == 'folder' && !isPikPak) {
       dirInfo.value = await AliFile.ApiFileGetFolderSize(pantreeStore.user_id, drive_id, file_id)
     }
   }
