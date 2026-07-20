@@ -329,52 +329,6 @@ export default class AliFileCmd {
     usePanFileStore().mColorFiles(color, successList)
   }
 
-  static async ApiRecoverBatch(
-    user_id: string,
-    resumeList: {
-      drive_id: string
-      file_id: string
-      content_hash: string
-      size: number
-      name: string
-    }[]
-  ): Promise<string[] | string> {
-    const successList: string[] = []
-    if (!resumeList || resumeList.length == 0) return Promise.resolve(successList)
-
-    const url = 'adrive/v1/file/resumeDeleted'
-    const postData = JSON.stringify({ resume_file_list: resumeList })
-    const resp = await AliHttp.Post(url, postData, user_id, '')
-    if (AliHttp.IsSuccess(resp.code)) {
-      const task_id = resp.body.task_id as string
-      if (!user_id || !task_id) return []
-      for (let j = 0; j < 100; j++) {
-        const url2 = 'adrive/v1/file/checkResumeTask'
-        const resp2 = await AliHttp.Post(url2, { task_id }, user_id, '')
-        if (AliHttp.IsSuccess(resp2.code)) {
-          if (resp2.body.state == 'running') continue
-          if (resp2.body.state == 'done') {
-            const results = resp2.body.results as any[]
-            if (results) {
-              results.map((t: any) => {
-                if (t.status && t.status == 200) successList.push(t.file_id)
-                return true
-              })
-            }
-            return successList
-          }
-        }
-      }
-    } else if (resp.code && resp.code == 403) {
-      if (resp.body?.code == 'UserNotVip') return '文件恢复功能需要开通阿里云盘会员'
-      else return resp.body?.code || '拒绝访问'
-    } else if (!AliHttp.HttpCodeBreak(resp.code)) {
-      DebugLog.mSaveWarning('ApiRecoverBatch err=' + (resp.code || ''), resp.body)
-      return '操作失败'
-    }
-    return successList
-  }
-
   static async ApiMoveBatch(user_id: string, drive_id: string, file_idList: string[], to_drive_id: string, to_parent_file_id: string, to_parent_description: string = ''): Promise<string[]> {
     if (isWebDavDrive(drive_id)) {
       if (drive_id !== to_drive_id) {

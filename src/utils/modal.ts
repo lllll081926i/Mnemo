@@ -7,14 +7,6 @@ export function modalCloseAll() {
   useModalStore().showModal('', {})
 }
 
-export function modalUserSpace() {
-  useModalStore().showModal('userspace', {})
-}
-
-export function modalUserRewardSpace(user_id: string) {
-  useModalStore().showModal('userrewardspace', { user_id })
-}
-
 export function modalCreatNewFile(encType: string = '') {
   useModalStore().showModal('creatfile', { encType })
 }

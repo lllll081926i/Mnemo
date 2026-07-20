@@ -188,7 +188,7 @@ export function RefreshScrollTo(element: any, top: number) {
 const menulist = [
   'leftpansubmove', 'leftpansubzhankai', 'leftpanmenu',
   'rightpansubmove', 'rightpansubbiaoji', 'rightpansubmore', 'rightpanmenu', 'rightpantrashmenu',
-  'rightmysharemenu', 'rightmytransfersharemenu', 'rightothersharemenu', 'rightsharehistorymenu', 'rightsharebottlefishmenu',
+  'rightmysharemenu', 'rightmytransfersharemenu', 'rightothersharemenu', 'rightsharehistorymenu',
   'uploadingrightmenu', 'uploadedrightmenu',
   'downingrightmenu', 'downedrightmenu',
   'rightuploadedmenu', 'rightuploadingmenu'

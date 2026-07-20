@@ -3,7 +3,7 @@ import { humanDateTime, humanDateTimeDateStr, humanExpiration, humanSize } from 
 import message from '../utils/message'
 import AliHttp, { IUrlRespData } from './alihttp'
 import { ApiBatch, ApiBatchMaker, ApiBatchSuccess, isPikPakUser } from './utils'
-import { IAliFileItem, IAliShareAnonymous, IAliShareBottleFish, IAliShareFileItem, IAliShareItem } from './alimodels'
+import { IAliFileItem, IAliShareAnonymous, IAliShareFileItem, IAliShareItem } from './alimodels'
 import getFileIcon from './fileicon'
 import { IAliBatchResult } from './models'
 import { apiPikPakShareCreate } from '../pikpak/share'
@@ -437,16 +437,4 @@ export default class AliShare {
     }
   }
 
-  static async ApiShareBottleFish(user_id: string) {
-    if (!user_id) return '获取好运瓶失败'
-    const url = 'adrive/v1/bottle/fish'
-    const postData = {}
-    const resp = await AliHttp.Post(url, postData, user_id, '')
-    if (AliHttp.IsSuccess(resp.code)) {
-      return resp.body as IAliShareBottleFish
-    } else if (!AliHttp.HttpCodeBreak(resp.code)) {
-      return resp.body.display_message || '获取好运瓶失败'
-    }
-    return '获取好运瓶失败'
-  }
 }

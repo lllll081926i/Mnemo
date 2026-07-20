@@ -1,7 +1,6 @@
 <script lang='ts'>
 import { defineComponent } from 'vue'
 import { useModalStore } from '../store'
-import UserSpaceModal from '../user/UserSpaceModal.vue'
 import CreatNewFileModal from '../pan/topbtns/CreatNewFileModal.vue'
 import CreatNewAlbumModal from '../pan/topbtns/CreatNewAlbumModal.vue'
 import RenameModal from '../pan/topbtns/RenameModal.vue'
@@ -23,7 +22,6 @@ import UploadModal from '../pan/topbtns/UploadModal.vue'
 import DownloadModal from '../pan/topbtns/DownloadModal.vue'
 import MoveToAlbumModal from '../pan/topbtns/MoveToAlbumModal.vue'
 import PostModal from '../pan/topbtns/PostModal.vue'
-import UserRewardSpace from '../user/UserRewardSpace.vue'
 import PasswordModal from '../pan/topbtns/PasswordModal.vue'
 import SelectVideoQualityModal from '../pan/topbtns/SelectVideoQualityModal.vue'
 import CloudOfflineDownloadModal from '../down/CloudOfflineDownloadModal.vue'
@@ -33,8 +31,6 @@ export default defineComponent({
     SelectVideoQualityModal,
     CloudOfflineDownloadModal,
     PasswordModal,
-    UserRewardSpace,
-    UserSpaceModal,
     RenameModal,
     RenameMultiModal,
     MoveToAlbumModal,
@@ -65,8 +61,6 @@ export default defineComponent({
 </script>
 
 <template>
-  <UserSpaceModal :visible="modalStore.modalName == 'userspace'" />
-  <UserRewardSpace :visible="modalStore.modalName == 'userrewardspace'" :user_id="modalStore.modalData.user_id || ''" />
   <CreatNewFileModal :visible="modalStore.modalName == 'creatfile'" :encType="modalStore.modalData.encType || ''" />
   <CreatNewAlbumModal :visible="modalStore.modalName == 'creatalbum'" />
   <MoveToAlbumModal :visible="modalStore.modalName == 'movetoalbum'" :istree='modalStore.modalData.istree || false' />

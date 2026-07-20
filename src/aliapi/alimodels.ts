@@ -102,12 +102,6 @@ export interface IAliFileItem {
 }
 
 
-export interface IAliShareBottleFish {
-  bottleId: string;
-  bottleName: string;
-  shareId: string;
-}
-
 export interface IAliShareItem {
   account_id?: string
   account_name?: string
@@ -183,19 +177,6 @@ export interface IAliShareRecentItem {
   popularity_emoji: string;
   full_share_msg: string;
   share_title: string;
-  display_name: string;
-}
-
-export interface IAliShareBottleFishItem {
-  bottleId: string;
-  gmtCreate: number;
-  id: number;
-  name: string;
-  saved: boolean;
-  shareId: string;
-  gmt_created: string;
-  saved_msg: string;
-  share_name: string;
   display_name: string;
 }
 

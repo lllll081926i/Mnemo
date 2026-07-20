@@ -11,7 +11,6 @@ import { IAliShareAnonymous } from '../../aliapi/alimodels'
 import useMyTransferShareStore from './MyShareTransferStore'
 import AliTransferShareList from '../../aliapi/transfersharelist'
 import useShareHistoryStore from './ShareHistoryStore'
-import useShareBottleFishStore from './ShareBottleFishStore'
 import UserDAL from '../../user/userdal'
 import type { ITokenInfo } from '../../user/userstore'
 import { getDriveProviderCapabilities, getDriveProviderIcon, getDriveProviderLabel, type DriveProvider, type DriveProviderCapabilities } from '../../utils/driveProvider'
@@ -107,17 +106,6 @@ export default class ShareDAL {
     const resp = await AliShareList.ApiShareRecentListAll(user_id)
     shareHistoryStore.aLoadListData(resp.items, user_id)
     shareHistoryStore.ListLoading = false
-  }
-
-  static async aReloadShareBottleFish(user_id: string, force: boolean): Promise<void> {
-    if (!user_id) return
-    const shareBottleFishStore = useShareBottleFishStore()
-    if (!force && shareBottleFishStore.ListDataRaw.length > 0) return
-    if (shareBottleFishStore.ListLoading == true) return
-    shareBottleFishStore.ListLoading = true
-    const resp = await AliShareList.ApiShareBottleFishListAll(user_id)
-    shareBottleFishStore.aLoadListData(resp.items)
-    shareBottleFishStore.ListLoading = false
   }
 
   static async aReloadMyTransferShare(user_id: string, force: boolean): Promise<void> {

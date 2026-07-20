@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { handleUpload, topFavorDeleteAll } from '../topbtns/topbtn'
-import { modalCreatNewAlbum, modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalShowShareLink } from '../../utils/modal'
-import AliShare from '../../aliapi/share'
-import { usePanTreeStore } from '../../store'
-import message from '../../utils/message'
+import { modalCreatNewAlbum, modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink } from '../../utils/modal'
 import PanDAL from '../pandal'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
@@ -28,8 +25,7 @@ const props = defineProps({
 })
 
 const videoSelectType = ref('recent')
-const panTreeStore = usePanTreeStore()
-const { provider, capabilities } = useCurrentDriveProvider()
+const { capabilities } = useCurrentDriveProvider()
 
 const isShowBtn = computed(() => {
   return (props.dirtype === 'pic' && props.inputpicType != 'mypic') || props.dirtype === 'mypic' || props.dirtype === 'pan'
@@ -42,27 +38,6 @@ const handleSelectAllCompilation = () => {
 const handleSelectRecentPlay = () => {
   videoSelectType.value = 'recent'
   PanDAL.aReLoadOneDirToShow('', 'video.recentplay', false)
-}
-
-const handleClickBottleFish = async () => {
-  let resp = await AliShare.ApiShareBottleFish(panTreeStore.user_id)
-  if (typeof resp !== 'string') {
-    // 打开分享
-    let share_id = resp.shareId
-    AliShare.ApiGetShareToken(share_id, '')
-      .then((share_token) => {
-        if (!share_token || share_token.startsWith('，')) {
-          message.error('解析链接出错' + share_token)
-        } else {
-          modalShowShareLink(share_id, '', share_token, true, [], false)
-        }
-      })
-      .catch((err: any) => {
-        message.error('解析链接出错', err)
-      })
-  } else {
-    message.info(resp)
-  }
 }
 </script>
 
