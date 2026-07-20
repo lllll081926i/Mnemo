@@ -9,9 +9,13 @@ const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8').repl
 describe('deep layout shell port', () => {
   it('loads the Aliyun Office SDK only inside the Office preview window', () => {
     const html = read('index.html')
+    const previewHtml = read('public/main2.html')
     const office = read('src/layout/PageOffice.vue')
 
     expect(html).not.toContain('aliyun-web-office-sdk.min.js')
+    expect(previewHtml).not.toContain('aliyun-web-office-sdk.min.js')
+    expect(previewHtml).toContain('Content-Security-Policy')
+    expect(previewHtml).toContain("script-src 'self' https://g.alicdn.com")
     expect(office).toContain("const ALIYUN_OFFICE_SDK_URL = 'https://g.alicdn.com/IMM/office-js/1.1.5/aliyun-web-office-sdk.min.js'")
     expect(office).toContain('loadAliyunOfficeSdk')
     expect(office).toContain('office-preview-state')
@@ -19,10 +23,13 @@ describe('deep layout shell port', () => {
 
   it('loads Prism only for formatted code previews', () => {
     const html = read('index.html')
+    const previewHtml = read('public/main2.html')
     const code = read('src/layout/PageCode.vue')
 
     expect(html).not.toContain("src='/prism.js'")
     expect(html).not.toContain("href='/prism-vsc-dark-plus.css'")
+    expect(previewHtml).not.toContain('prism.js')
+    expect(previewHtml).not.toContain('prism-vsc-dark-plus.css')
     expect(code).toContain("const PRISM_SCRIPT_URL = './prism.js'")
     expect(code).toContain('loadPrism')
     expect(code).toContain('format.value = !noformat')
@@ -31,10 +38,14 @@ describe('deep layout shell port', () => {
 
   it('loads pinyin search support only for the main drive window', () => {
     const html = read('index.html')
+    const mainHtml = read('public/main.html')
+    const previewHtml = read('public/main2.html')
     const mainRuntime = read('src/layout/PageMain.ts')
     const utils = read('src/utils/utils.ts')
 
     expect(html).not.toContain("src='/pinyinlite_full.min.js'")
+    expect(mainHtml).not.toContain('pinyinlite_full.min.js')
+    expect(previewHtml).not.toContain('pinyinlite_full.min.js')
     expect(mainRuntime).toContain('await LoadPinyinLite()')
     expect(utils).toContain("const PINYIN_LITE_URL = './pinyinlite_full.min.js'")
     expect(utils).toContain("if (typeof pinyinlite !== 'function') return input.toLowerCase()")
