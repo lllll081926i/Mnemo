@@ -49,9 +49,9 @@ const handleRefreshUserInfo = async () => {
   try {
     const success = await UserDAL.UserRefreshByUserFace(userStore.user_id, false)
     if (success) message.info('账号信息已刷新')
-    else message.error('刷新账号信息失败')
+    else message.error('无法刷新账号信息，请检查网络连接和账号设置后重试')
   } catch {
-    message.error('刷新账号信息失败')
+    message.error('无法刷新账号信息，请检查网络连接和账号设置后重试')
   } finally {
     refreshing.value = false
   }

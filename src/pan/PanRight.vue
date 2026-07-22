@@ -4,7 +4,7 @@ import { IAliGetFileModel } from '../aliapi/alimodels'
 import { KeyboardState, MouseState, useAppStore, useFootStore, useKeyboardStore, useMouseStore, usePanFileStore, useSettingStore } from '../store'
 import useWinStore from '../store/winstore'
 import { onHideRightMenuScroll, onShowRightMenu, TestCtrl, TestCtrlShift, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
-import { computed, onMounted, ref, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import PanDAL from './pandal'
 
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
@@ -22,7 +22,7 @@ import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
 import { TestButton } from '../utils/mosehelper'
 import usePanTreeStore from './pantreestore'
-import { GetDriveID, GetDriveType, isPikPakUser } from '../aliapi/utils'
+import { GetDriveID, GetDriveType } from '../aliapi/utils'
 import { xorWith } from 'lodash'
 import { isDriveProviderRootId } from '../utils/driveProvider'
 import useCurrentDriveProvider from './useCurrentDriveProvider'
@@ -47,9 +47,7 @@ const { capabilities: currentProviderCapabilities } = useCurrentDriveProvider()
 
 const isOfflineDownloadSupported = computed(() => {
   if (panfileStore.SelectDirType !== 'pan') return false
-  const user = panTreeStore.user_id || ''
-  const drive = panTreeStore.drive_id || panfileStore.DriveID
-  return isPikPakUser(user) || drive === 'pikpak'
+  return currentProviderCapabilities.value.offlineDownload
 })
 
 const handleOfflineDownload = () => {
@@ -299,15 +297,21 @@ const handleRightClick = (e: { event: MouseEvent; node: any }) => {
 const handleFileListOrder = (order: string) => {
   panfileStore.mOrderListData(order)
 }
+const panFileListRef = ref<HTMLElement | null>(null)
+const panFileListHeight = ref(0)
+const panListHeight = computed(() => Math.max(1, Math.floor(panFileListHeight.value || winStore.GetListHeightNumber || 1)))
 let listGridWidth = 0
 const resizeObserver = new ResizeObserver((entries) => {
   let newWidth = 0
+  let newHeight = 0
   entries.map((t) => {
     newWidth = t.contentRect?.width || 0
+    newHeight = t.contentRect?.height || 0
     return true
   })
+  if (newHeight > 0) panFileListHeight.value = Math.floor(newHeight)
 
-  if (listGridWidth != newWidth && newWidth > 400) {
+  if (listGridWidth != newWidth && newWidth > 0) {
     listGridWidth = newWidth
     onGridResize()
   }
@@ -318,9 +322,8 @@ const onGridResize = throttle(() => {
 }, 100)
 
 onMounted(() => {
-  const panFileList = document.getElementById('panfilelist')
-  if (panFileList instanceof Element) {
-    resizeObserver.observe(panFileList)
+  if (panFileListRef.value) {
+    resizeObserver.observe(panFileListRef.value)
   }
   let searchDrive = ['backup', 'resource', 'pic']
   if (useSettingStore().securityHideBackupDrive) {
@@ -335,6 +338,8 @@ onMounted(() => {
   inputsearchType.value = searchDrive
 })
 
+onBeforeUnmount(() => resizeObserver.disconnect())
+
 const listGridColumn = ref(1)
 const listGridItemHeight = ref(50)
 const handleListGridMode = (mode: string) => {
@@ -344,17 +349,19 @@ const handleListGridMode = (mode: string) => {
       listGridColumn.value = 1
     }
   } else if (mode == 'image') {
-    const count = Math.max(3, Math.floor(listGridWidth / 150))
+    const count = Math.max(1, Math.floor(Math.max(0, listGridWidth - 6) / 150))
     if (listGridItemHeight.value != 180) listGridItemHeight.value = 180
     if (listGridColumn.value != count) listGridColumn.value = count
   } else {
-    const count = Math.max(2, Math.floor(listGridWidth / 200))
-    if (listGridItemHeight.value != 180) listGridItemHeight.value = 240
+    const count = Math.max(1, Math.floor(Math.max(0, listGridWidth - 6) / 200))
+    if (listGridItemHeight.value != 240) listGridItemHeight.value = 240
     if (listGridColumn.value != count) listGridColumn.value = count
   }
   settingStore.updateStore({ uiFileListMode: mode })
   panfileStore.mGridListData(mode, listGridColumn.value)
 }
+
+const gridRowHeight = computed(() => listGridItemHeight.value + 20)
 
 const rangIsSelecting = ref(false)
 const rangSelectID = ref('')
@@ -507,23 +514,23 @@ const onPanDrop = (e: any) => {
   showDragUpload.value = false
 
   if (panfileStore.DirID.startsWith('color')) {
-    message.error('不能把文件上传到颜色标记里！请先选择一个网盘里的文件夹')
+    message.error('标签页不能上传文件，请先打开网盘中的文件夹')
     return
   }
   if (panfileStore.DirID.startsWith('search')) {
-    message.error('不能把文件上传到搜索结果里！请先选择一个网盘里的文件夹')
+    message.error('搜索结果页不能上传文件，请先打开网盘中的文件夹')
     return
   }
   if (panfileStore.DirID == 'favorite') {
-    message.error('不能把文件上传到收藏里！请先选择一个网盘里的文件夹')
+    message.error('快捷方式页不能上传文件，请先打开网盘中的文件夹')
     return
   }
   if (panfileStore.DirID == 'recover') {
-    message.error('不能把文件上传到文件恢复里！请先选择一个网盘里的文件夹')
+    message.error('文件恢复页不能上传文件，请先打开网盘中的文件夹')
     return
   }
   if (panfileStore.DirID == 'trash') {
-    message.error('不能把文件上传到回收站里！请先选择一个网盘里的文件夹')
+    message.error('回收站不能上传文件，请先打开网盘中的文件夹')
     return
   }
 
@@ -565,6 +572,7 @@ const onPanDragEnd = (ev: any) => {
 </script>
 
 <template>
+  <div class="mnemoright ui-workspace-content pan-right-shell">
   <div class="toppanbtns" tabindex="-1">
     <div class="toppanbtn">
       <a-button type="text" size="small" tabindex="-1" :disabled="panfileStore.ListLoading" title="后退 Back Space" @click="handleBack">
@@ -713,9 +721,9 @@ const onPanDragEnd = (ev: any) => {
   </div>
   <div
     id="panfilelist"
+    ref="panFileListRef"
     :class="'toppanlist' + (showDragUpload ? ' pandraging' : '') + (dragingRowItem ? ' draging' : '') + (rangIsSelecting ? ' ranging' : '')"
     tabindex="-1"
-    :style="{ height: winStore.GetListHeight }"
     @keydown.space.prevent="() => true"
     @drop="onPanDrop"
     @dragenter="onPanDragEnter">
@@ -727,9 +735,9 @@ const onPanDragEnd = (ev: any) => {
       ref="viewlist"
       :bordered="false"
       :split="false"
-      :max-height="winStore.GetListHeightNumber"
+      :max-height="panListHeight"
       :virtual-list-props="{
-        height: winStore.GetListHeightNumber,
+        height: panListHeight,
         fixedSize: true,
         estimatedSize: 50,
         threshold: 1,
@@ -884,11 +892,11 @@ const onPanDragEnd = (ev: any) => {
       ref="viewlist"
       :bordered="false"
       :split="false"
-      :max-height="winStore.GetListHeightNumber"
+      :max-height="panListHeight"
       :virtual-list-props="{
-        height: winStore.GetListHeightNumber,
+        height: panListHeight,
         fixedSize: true,
-        estimatedSize: 200,
+        estimatedSize: gridRowHeight,
         threshold: 1,
         itemKey: 'file_id',
         buffer: 5
@@ -1045,11 +1053,11 @@ const onPanDragEnd = (ev: any) => {
       ref="viewlist"
       :bordered="false"
       :split="false"
-      :max-height="winStore.GetListHeightNumber"
+      :max-height="panListHeight"
       :virtual-list-props="{
-        height: winStore.GetListHeightNumber,
+        height: panListHeight,
         fixedSize: true,
-        estimatedSize: 260,
+        estimatedSize: gridRowHeight,
         threshold: 1,
         itemKey: 'file_id',
         buffer: 5
@@ -1218,6 +1226,7 @@ const onPanDragEnd = (ev: any) => {
         <span class="link">上传到：{{ panfileStore.DirName }}</span>
       </div>
     </div>
+  </div>
   </div>
 </template>
 

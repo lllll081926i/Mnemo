@@ -18,6 +18,7 @@ export interface DriveProviderCapabilities {
   provider: DriveProvider
   mountedStorage: boolean
   download: boolean
+  offlineDownload: boolean
   search: boolean
   upload: boolean
   uploadMode: 'queue' | 'direct' | 'none'
@@ -95,6 +96,7 @@ const driveProviderMap: Partial<Record<DriveProvider, DriveProviderMeta>> = {
 const noCapabilities: Omit<DriveProviderCapabilities, 'provider'> = {
   mountedStorage: false,
   download: false,
+  offlineDownload: false,
   search: false,
   upload: false,
   uploadMode: 'none',
@@ -141,7 +143,7 @@ const standardFileCapabilities: Partial<DriveProviderCapabilities> = {
 const createCapabilities = (provider: DriveProvider, overrides: Partial<DriveProviderCapabilities> = {}): DriveProviderCapabilities => ({ ...noCapabilities, ...standardFileCapabilities, ...overrides, provider })
 
 const driveProviderCapabilities: Partial<Record<DriveProvider, DriveProviderCapabilities>> = {
-  pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true, trashClear: true }),
+  pikpak: createCapabilities('pikpak', { offlineDownload: true, createShare: true, trashView: true, trashRestore: true, trashPurge: true, trashClear: true }),
   onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
   dropbox: createCapabilities('dropbox', { search: true, createShare: true }),
   gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true, trashRestore: true, trashPurge: true, trashClear: true }),
@@ -254,7 +256,7 @@ export const isDriveSidebarKey = (key: string) => driveSidebarKeys.has(key)
 export const getDriveSidebarIcon = (key: string) => {
   if (key === 'favorite') return 'iconcrown'
   if (key === 'search') return 'iconsearch'
-  if (key === 'trash') return 'icondelete'
+  if (key === 'trash') return 'icontrash'
   if (key === 'recover') return 'iconrecover'
   if (key === 'pic_root') return 'iconjietu'
   if (key === 'safe_root') return 'iconsafebox'

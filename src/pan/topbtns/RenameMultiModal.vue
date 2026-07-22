@@ -323,7 +323,7 @@ const handleOK = (type: string) => {
     return true
   })
   if (idList.length == 0) {
-    message.error('没有需要重命名的文件!')
+    message.error('没有需要重命名的文件')
     return
   }
   okLoading.value = true
@@ -356,14 +356,14 @@ const handleOK = (type: string) => {
           })
           treeCheckedKeys.value = { checked: [], halfChecked: [] }
         }
-        message.success('批量重命名 成功')
+        message.success('批量重命名完成')
       } else {
-        message.error('批量重命名 失败')
+        message.error('部分或全部文件未能重命名，请检查是否存在同名文件')
       }
     })
     .catch((err: any) => {
       console.log(err)
-      message.error('批量重命名 失败', err.message || '')
+      message.error(`批量重命名未完成：${err.message || '请稍后重试'}`)
       DebugLog.mSaveDanger('批量重命名失败 ', err)
     })
     .then(() => {

@@ -308,7 +308,7 @@ export default class UserDAL {
       PanDAL.aReLoadQuickFile(token.user_id)
       useAppStore().resetTab(useSettingStore().uiDefaultTab || 'pan')
       useFootStore().mSaveUserInfo(token)
-      message.success('加载用户成功!', 2, loadingKey)
+      message.success('网盘账号已连接', 2, loadingKey)
     } catch (err: any) {
       useFootStore().mSaveLoading('')
       await DB.saveValueString('uiDefaultUser', previousDefaultUserId)
@@ -325,7 +325,7 @@ export default class UserDAL {
           login: true
         })
       }
-      message.error('加载账号失败：' + (err?.message || '网盘数据解析失败'), 5, loadingKey)
+      message.error('无法连接网盘账号：' + (err?.message || '请检查网络连接后重试'), 5, loadingKey)
       throw err
     }
   }
@@ -393,7 +393,7 @@ export default class UserDAL {
     const token = UserTokenMap.get(user_id)!
     const prepared = await this.ensureTokenReady(token)
     if (!prepared?.user_id) {
-      message.warning('该账号需要重新登陆[' + token.name + ']')
+      message.warning(`账号“${token.name || token.user_name || token.user_id}”已失效，请重新登录`)
       return false
     }
     try {
@@ -401,7 +401,7 @@ export default class UserDAL {
       return true
     } catch (err: any) {
       DebugLog.mSaveDanger('UserChange ' + user_id, err)
-      message.warning('切换账号失败[' + (token.nick_name || token.user_name || token.name) + ']')
+      message.warning(`无法切换到账号“${token.nick_name || token.user_name || token.name}”，请重新登录`)
       return false
     }
   }
@@ -418,8 +418,17 @@ export default class UserDAL {
         await testWebDavConnection(connection)
         await applyWebDavQuota(token, connection)
         const saved = await UserDAL.SaveUserToken(token)
-        if (saved) useUserStore().userLogin(token.user_id)
-        return saved
+        if (!saved) return false
+        useUserStore().userLogin(token.user_id)
+        useFootStore().mSaveUserInfo(token)
+        try {
+          await UserDAL.LoadPanData(token)
+          PanDAL.aReLoadQuickFile(token.user_id)
+        } catch (err: any) {
+          DebugLog.mSaveDanger('UserRefreshByUserFace WebDAV directory reload ' + user_id, err)
+          message.warning('账号信息已刷新，但暂时无法读取文件列表，请稍后刷新当前文件夹')
+        }
+        return true
       } catch (err: any) {
         DebugLog.mSaveDanger('UserRefreshByUserFace WebDAV ' + user_id, err)
         return false
@@ -431,8 +440,17 @@ export default class UserDAL {
       try {
         await testS3Connection(connection)
         const saved = await UserDAL.SaveUserToken(token)
-        if (saved) useUserStore().userLogin(token.user_id)
-        return saved
+        if (!saved) return false
+        useUserStore().userLogin(token.user_id)
+        useFootStore().mSaveUserInfo(token)
+        try {
+          await UserDAL.LoadPanData(token)
+          PanDAL.aReLoadQuickFile(token.user_id)
+        } catch (err: any) {
+          DebugLog.mSaveDanger('UserRefreshByUserFace S3 directory reload ' + user_id, err)
+          message.warning('账号信息已刷新，但暂时无法读取文件列表，请稍后刷新当前文件夹')
+        }
+        return true
       } catch (err: any) {
         DebugLog.mSaveDanger('UserRefreshByUserFace S3 ' + user_id, err)
         return false

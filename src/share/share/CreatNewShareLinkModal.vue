@@ -79,7 +79,7 @@ const handleHide = () => {
 const handleOK = async (multi: boolean) => {
   const pantreeStore = usePanTreeStore()
   if (!pantreeStore.user_id || !pantreeStore.drive_id || !pantreeStore.selectDir.file_id) {
-    message.error('新建文件失败 父文件夹错误')
+    message.error('无法创建分享：当前文件位置无效，请重新选择文件')
     return
   }
   const mindate = new Date()

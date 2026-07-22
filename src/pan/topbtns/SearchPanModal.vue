@@ -73,7 +73,7 @@ const handleOK = () => {
     }
     const pantreeStore = usePanTreeStore()
     if (!pantreeStore.user_id || !props.inputsearchType || !pantreeStore.selectDir.file_id) {
-      message.error('搜索失败 父文件夹错误')
+      message.error('无法搜索：当前网盘文件夹无效，请先打开一个网盘')
       return
     }
     let searchid = ''
@@ -105,7 +105,7 @@ const handleOK = () => {
     }
     searchid = searchid.trim()
     if (!searchid) {
-      message.error('搜索失败 搜索条件错误')
+      message.error('请至少填写一个搜索条件')
     } else {
       PanDAL.aReLoadOneDirToShow('', 'search' + searchid, false)
       modalCloseAll()

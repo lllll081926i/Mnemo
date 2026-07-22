@@ -74,12 +74,33 @@ function buildSiblingVideoPlaylist(file: IAliGetFileModel, provided?: IPageVideo
 
 const TEXT_PREVIEW_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv', 'nfo', 'srt', 'vtt', 'ass', 'ssa'])
 const PDF_PREVIEW_DRIVES = new Set(['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'])
-const EPUB_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const DOCX_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const OFFICE_TO_PDF_DRIVES = PDF_PREVIEW_DRIVES
 const SHEET_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
 const SHEET_PREVIEW_EXTS = new Set(['xls', 'xlsx', 'xlsm', 'xlsb', 'csv', 'tsv'])
 const OFFICE_TO_PDF_EXTS = new Set(['doc', 'docm', 'dot', 'dotm', 'dotx', 'rtf', 'odt', 'ott', 'wps', 'wpt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ots', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'pot', 'potx', 'odp', 'dps', 'dpt'])
+const IMAGE_PREVIEW_EXTS = new Set(['bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'webp'])
+const AUDIO_PREVIEW_EXTS = new Set(['aac', 'ape', 'flac', 'm4a', 'mp3', 'ogg', 'wav', 'wma'])
+const VIDEO_PREVIEW_EXTS = new Set([...videoPlaylistExtensions, 'asf', 'm3u8', 'mpd', 'mts', 'ogv', 'rmvb', 'vob'])
+const CODE_PREVIEW_EXTS = new Set([
+  'bash', 'c', 'cc', 'conf', 'cpp', 'cs', 'css', 'csv', 'go', 'h', 'hpp', 'html', 'ini', 'java', 'js', 'json', 'jsx', 'kt',
+  'less', 'log', 'lua', 'md', 'markdown', 'php', 'py', 'rb', 'rs', 'sass', 'scss', 'sh', 'sql', 'swift', 'toml', 'ts', 'tsx',
+  'txt', 'text', 'vue', 'xml', 'yaml', 'yml'
+])
+
+export function isSupportedPreviewExtension(fileExt: string): boolean {
+  const ext = (fileExt || '').toLowerCase().replace(/^\./, '').trim()
+  if (!ext) return false
+  return IMAGE_PREVIEW_EXTS.has(ext)
+    || AUDIO_PREVIEW_EXTS.has(ext)
+    || VIDEO_PREVIEW_EXTS.has(ext)
+    || TEXT_PREVIEW_EXTS.has(ext)
+    || ext === 'pdf'
+    || ext === 'docx'
+    || SHEET_PREVIEW_EXTS.has(ext)
+    || OFFICE_TO_PDF_EXTS.has(ext)
+    || (CODE_PREVIEW_EXTS.has(ext) && Boolean(PrismExt(ext)))
+}
 
 function TextPreviewExt(fileExt: string): string {
   return TEXT_PREVIEW_EXTS.has((fileExt || '').toLowerCase().replace('.', '').trim()) ? 'plain' : ''
@@ -99,65 +120,46 @@ export async function menuOpenFile(
   if (isDriveProviderRootId({ driveId: file.drive_id }, parent_file_id)) parent_file_id = 'root'
   const drive_id = file.drive_id
   const fileProvider = resolveDriveProvider({ driveId: file.drive_id })
-  if (file.ext == 'zip' || file.ext == 'rar' || file.ext == '7z') {
-    message.info('当前网盘不支持在线预览压缩包，请下载后查看')
-    return
-  }
-  if ((file.ext || '').toLowerCase() === 'epub' && EPUB_PREVIEW_DRIVES.has(fileProvider)) {
-    await Epub(file, password)
-    return
-  }
-  if (file.ext == 'djvu' || file.ext == 'azw3' || file.ext == 'mobi' || file.ext == 'cbr' || file.ext == 'cbz' || file.ext == 'cbt' || file.ext == 'fb2') {
-  }
-
-  if (file.category.startsWith('doc')) {
-    const textExt = TextPreviewExt(file.ext)
-    if (textExt) {
-      await Code(file, textExt, password)
-      return
-    }
-    if ((file.ext || '').toLowerCase() === 'pdf' && PDF_PREVIEW_DRIVES.has(fileProvider)) {
-      await Pdf(file, password)
-      return
-    }
-    if ((file.ext || '').toLowerCase() === 'docx' && DOCX_PREVIEW_DRIVES.has(fileProvider)) {
-      await Docx(file, password)
-      return
-    }
-    if (SHEET_PREVIEW_EXTS.has((file.ext || '').toLowerCase()) && SHEET_PREVIEW_DRIVES.has(fileProvider)) {
-      await Sheet(file, password)
-      return
-    }
-    if (OFFICE_TO_PDF_EXTS.has((file.ext || '').toLowerCase()) && OFFICE_TO_PDF_DRIVES.has(fileProvider)) {
-      await OfficePdf(file, password)
-      return
-    }
-    if (file.description && file.description.includes('mnemoEncrypt')) {
-      const codeExt = PrismExt(file.ext) || TextPreviewExt(file.ext)
-      if (file.size < 512 * 1024 || (file.size < 5 * 1024 * 1024 && codeExt)) {
-        await Code(file, codeExt, password)
-        return
-      } else {
-        message.error('不支持在线预览该格式的加密文件')
-        return
-      }
-    }
-    await Office(file)
+  const normalizedExt = (file.ext || '').toLowerCase().replace(/^\./, '').trim()
+  if (!isSupportedPreviewExtension(normalizedExt)) {
+    message.info('暂不支持打开此格式，请下载后使用其他应用查看')
     return
   }
 
-  if (file.category == 'image' || file.category == 'image2') {
+  const codeExt = PrismExt(normalizedExt) || TextPreviewExt(normalizedExt)
+  if (CODE_PREVIEW_EXTS.has(normalizedExt) && codeExt) {
+    if (file.size >= 5 * 1024 * 1024) {
+      message.info('文件较大，暂不支持在线打开，请下载后查看')
+      return
+    }
+    await Code(file, codeExt, password)
+    return
+  }
+
+  if (normalizedExt === 'pdf' && PDF_PREVIEW_DRIVES.has(fileProvider)) {
+    await Pdf(file, password)
+    return
+  }
+  if (normalizedExt === 'docx' && DOCX_PREVIEW_DRIVES.has(fileProvider)) {
+    await Docx(file, password)
+    return
+  }
+  if (SHEET_PREVIEW_EXTS.has(normalizedExt) && SHEET_PREVIEW_DRIVES.has(fileProvider)) {
+    await Sheet(file, password)
+    return
+  }
+  if (OFFICE_TO_PDF_EXTS.has(normalizedExt) && OFFICE_TO_PDF_DRIVES.has(fileProvider)) {
+    await OfficePdf(file, password)
+    return
+  }
+  if (IMAGE_PREVIEW_EXTS.has(normalizedExt)) {
     await Image(file, password)
     return
   }
-  if (file.category == 'image3') {
-    message.info('此格式暂不支持预览')
-    return
-  }
-  if (file.category.startsWith('video')) {
+  if (VIDEO_PREVIEW_EXTS.has(normalizedExt)) {
     const token = await resolveTokenForFile(file)
     if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-      message.error('在线预览失败 账号失效，操作取消')
+      message.error('无法预览：网盘登录已失效，请重新登录后再试')
       return
     }
     // 选择字幕
@@ -185,16 +187,11 @@ export async function menuOpenFile(
     await Video(token, file, subTitleFile, password, options)
     return
   }
-  if (file.category.startsWith('audio')) {
+  if (AUDIO_PREVIEW_EXTS.has(normalizedExt)) {
     await Audio(file, password)
     return
   }
-  const codeExt = PrismExt(file.ext) || TextPreviewExt(file.ext)
-  if (file.size < 512 * 1024 || (file.size < 5 * 1024 * 1024 && codeExt)) {
-    await Code(file, codeExt, password)
-    return
-  }
-  message.info('此格式暂不支持预览')
+  message.info('暂不支持打开此格式，请下载后使用其他应用查看')
 }
 
 async function Video(
@@ -208,7 +205,7 @@ async function Video(
   }
 ): Promise<void> {
   if (file.icon == 'iconweifa') {
-    message.error('在线预览失败 无法预览违规文件')
+    message.error('无法预览：网盘已限制此文件')
     return
   }
   let desc = file.description
@@ -264,7 +261,7 @@ async function Video(
   const isWindows = window.platform === 'win32'
   const isMacOrLinux = ['darwin', 'linux'].includes(window.platform)
   if (!isWindows && !isMacOrLinux) {
-    message.error('不支持的系统，操作取消')
+    message.error('当前系统不支持这种播放方式，请在设置中更换播放器')
     return
   }
   if (uiVideoPlayer === 'other' && !uiVideoPlayerPath.trim()) {
@@ -276,11 +273,11 @@ async function Video(
   if (uiVideoQualityTips || !uiVideoEnablePlayerList) {
     rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, encType, password, file.icon == 'iconweifa', 'video')
     if (typeof rawData == 'string') {
-      message.error('视频地址解析失败，操作取消')
+      message.error('无法获取视频地址，请检查网络连接后重试')
       return
     }
     if (rawData.url.indexOf('x-oss-additional-headers=referer') > 0) {
-      message.error('用户token已过期，请点击头像里退出按钮后重新登录账号')
+      message.error('网盘登录已过期，请退出当前账号后重新登录')
       return
     }
   }
@@ -300,7 +297,7 @@ async function Video(
         await PlayerUtils.startPlayer(token, uiVideoPlayerPath, otherArgs)
       })
     } else {
-      message.error('视频地址解析失败，操作取消')
+      message.error('无法获取视频地址，请检查网络连接后重试')
     }
   } else {
     await PlayerUtils.startPlayer(token, uiVideoPlayerPath, otherArgs)
@@ -310,14 +307,14 @@ async function Video(
 async function Image(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('加载中...', 2)
   const fileList = usePanFileStore().ListDataRaw
-  const imageList = fileList.filter((v) => v.category == 'image' || v.category == 'image2')
+  const imageList = fileList.filter((v) => IMAGE_PREVIEW_EXTS.has((v.ext || '').toLowerCase().replace(/^\./, '')))
   if (imageList.length == 0) {
-    message.error('获取文件预览链接失败，操作取消')
+    message.error('无法打开文件：没有获取到预览地址，请稍后重试')
     return
   }
 
@@ -336,13 +333,13 @@ async function Image(file: IAliGetFileModel, password: string = ''): Promise<voi
 async function Pdf(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('加载中...', 2)
   const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
   if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '获取 PDF 预览链接失败，操作取消')
+    message.error(typeof rawData === 'string' ? rawData : '无法打开 PDF：没有获取到预览地址，请稍后重试')
     return
   }
   const pagePdf: IPagePdf = {
@@ -364,22 +361,16 @@ async function Pdf(file: IAliGetFileModel, password: string = ''): Promise<void>
   window.WebOpenWindow({ page: 'PagePdf', data: pagePdf, theme: 'dark' })
 }
 
-async function Epub(file: IAliGetFileModel, password: string = ''): Promise<void> {
-  void file
-  void password
-  message.info('当前不支持 EPUB 预览，请使用本地应用打开该文件')
-}
-
 async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('加载中...', 2)
   const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
   if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '获取 Word 预览链接失败，操作取消')
+    message.error(typeof rawData === 'string' ? rawData : '无法打开 Word 文档：没有获取到预览地址，请稍后重试')
     return
   }
   const pageDocx: IPageDocx = {
@@ -404,13 +395,13 @@ async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void
 async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('正在转换文档...', 2)
   const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
   if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '获取文档预览链接失败，操作取消')
+    message.error(typeof rawData === 'string' ? rawData : '无法打开文档：没有获取到预览地址，请稍后重试')
     return
   }
   const sourceUrl = getProxyUrl({
@@ -428,7 +419,7 @@ async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise
     fileName: file.name
   }) as { ok: boolean; pdfUrl?: string; error?: string }
   if (!converted?.ok || !converted.pdfUrl) {
-    message.error(converted?.error || '文档转换 PDF 失败，操作取消')
+    message.error(converted?.error || '文档转换失败，请稍后重试')
     return
   }
   const pagePdf: IPagePdf = {
@@ -444,13 +435,13 @@ async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise
 async function Sheet(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('加载中...', 2)
   const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
   if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '获取表格预览链接失败，操作取消')
+    message.error(typeof rawData === 'string' ? rawData : '无法打开表格：没有获取到预览地址，请稍后重试')
     return
   }
   const pageSheet: IPageSheet = {
@@ -475,7 +466,7 @@ async function Sheet(file: IAliGetFileModel, password: string = ''): Promise<voi
 async function Office(file: IAliGetFileModel): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('加载中...', 2)
@@ -501,7 +492,7 @@ async function Office(file: IAliGetFileModel): Promise<void> {
     }
   }
   if (!data?.preview_url) {
-    message.error('获取文件预览链接失败，操作取消')
+    message.error('无法打开文件：没有获取到预览地址，请稍后重试')
     return
   }
   const pageOffice: IPageOffice = {
@@ -518,19 +509,19 @@ async function Office(file: IAliGetFileModel): Promise<void> {
 async function Audio(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const weifa = file.icon == 'iconweifa'
   if (weifa) {
-    message.error('在线预览失败 无法预览违规文件')
+    message.error('无法预览：网盘已限制此文件')
     return
   }
 
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
 
   const ext = file.ext || (file.name?.split('.')?.pop() || '')
   const listRaw = usePanFileStore().ListDataRaw || []
-  const audioList = listRaw.filter((v) => !v.isDir && (v.category === 'audio' || v.category === 'audio2'))
+  const audioList = listRaw.filter((v) => !v.isDir && AUDIO_PREVIEW_EXTS.has((v.ext || '').toLowerCase().replace(/^\./, '')))
   const sourceList = audioList.length > 0 ? audioList : [file]
 
   const playlist: IPageMusicTrack[] = sourceList.map((item) => ({
@@ -615,7 +606,7 @@ async function Audio(file: IAliGetFileModel, password: string = ''): Promise<voi
 async function Code(file: IAliGetFileModel, codeExt: string, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
   if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('在线预览失败 账号失效，操作取消')
+    message.error('无法预览：网盘登录已失效，请重新登录后再试')
     return
   }
   message.loading('加载中...', 2)

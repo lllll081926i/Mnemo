@@ -1,11 +1,10 @@
-import { useAppStore, useFootStore, usePanTreeStore, useSettingStore } from '../store'
+import { useAppStore, useFootStore, useSettingStore } from '../store'
 import AppCache from '../utils/appcache'
 import DownDAL from '../down/DownDAL'
 import UploadDAL from '../transfer/uploaddal'
 
 import UserDAL from '../user/userdal'
 import DebugLog from '../utils/debuglog'
-import PanDAL from '../pan/pandal'
 import UploadingDAL from '../transfer/uploadingdal'
 import { Sleep } from '../utils/format'
 import { createProxyServer } from '../utils/proxyhelper'
@@ -83,10 +82,6 @@ export const WinMsg = async (arg: any) => {
 }
 
 let runTime = Math.floor(Date.now() / 1000)
-let chkBackupDirSizeTime = 0
-let chkResourceDirSizeTime = 0
-let lockBackupDirSizeTime = false
-let lockResourceDirSizeTime = false
 let chkClearDownLogTime = 0
 let chkTokenTime = 0
 let chkTaskTime = 0
@@ -103,41 +98,7 @@ function timeEvent() {
   // 24小时重置
   if (nowTime - runTime > 60 * 60 * 24) {
     runTime = nowTime
-    chkBackupDirSizeTime = 0
-    chkResourceDirSizeTime = 0
   }
-
-  // 自动刷新文件夹大小，10s检查一次
-  if (settingStore.uiFolderSize
-    && !lockBackupDirSizeTime
-    && nowTime - runTime > 50
-    && chkBackupDirSizeTime >= 10) {
-    lockBackupDirSizeTime = true
-    PanDAL.aUpdateDirFileSize(usePanTreeStore().backup_drive_id)
-      .catch((err: any) => {
-        DebugLog.mSaveDanger('aUpdateBackupDirFileSize', err)
-      })
-      .then(() => {
-        chkBackupDirSizeTime = 0
-        lockBackupDirSizeTime = false
-      })
-  } else chkBackupDirSizeTime++
-  // 自动刷新文件夹大小，15s检查一次
-  if (settingStore.uiFolderSize
-    && !lockResourceDirSizeTime
-    && nowTime - runTime > 50
-    && chkResourceDirSizeTime >= 15) {
-    lockResourceDirSizeTime = true
-
-    PanDAL.aUpdateDirFileSize(usePanTreeStore().resource_drive_id)
-      .catch((err: any) => {
-        DebugLog.mSaveDanger('aUpdateResourceDirFileSize', err)
-      })
-      .then(() => {
-        chkResourceDirSizeTime = 0
-        lockResourceDirSizeTime = false
-      })
-  } else chkResourceDirSizeTime++
 
   // 自动清除上传下载日志，540s检查一次
   chkClearDownLogTime++

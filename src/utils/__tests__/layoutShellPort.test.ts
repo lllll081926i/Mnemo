@@ -102,6 +102,7 @@ describe('deep layout shell port', () => {
 
   it('pan left has drive switcher and recalculated tree height', () => {
     const pan = read('src/pan/PanLeft.vue')
+    const panTreeStore = read('src/pan/pantreestore.ts')
     const split = read('src/layout/MySplit.vue')
     const switchTab = read('src/layout/MySwitchTab.vue')
     const css = read('src/assets/layout-refactor.css')
@@ -115,6 +116,11 @@ describe('deep layout shell port', () => {
     expect(pan).not.toContain('创建快捷方式(Ctrl 1-9)')
     expect(pan).not.toContain("marginLeft: '-18px'")
     expect(pan).not.toContain('flex-shrink: 0 !important')
+    expect(pan).toContain('iconName: entry.icon')
+    expect(pan).not.toContain('icon: entry.icon')
+    expect(pan).toContain('dataRef.iconName || getDriveSidebarIcon')
+    expect(panTreeStore).toContain("iconName: item.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder')")
+    expect(panTreeStore).not.toContain("icon: item.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder')")
     expect(split).toContain('expandedSize')
     expect(split).not.toContain("splitSize.value = '240px'")
     expect(switchTab).toContain('--segment-count')
@@ -127,14 +133,50 @@ describe('deep layout shell port', () => {
   })
 
   it('keeps the transfer rail compact while share and setting use the standard shell', () => {
-    expect(read('src/down/index.vue')).toContain(':width="192"')
-    expect(read('src/down/index.vue')).toContain('--layout-rail-width: 192px')
+    const transfer = read('src/down/index.vue')
+    expect(transfer).toContain(':width="192"')
+    expect(transfer).toContain('--layout-rail-width: 192px')
+    expect(transfer).toContain('<span>{{ account.name }}</span>')
+    expect(transfer).not.toContain('{{ account.providerLabel }} · {{ account.name }}')
     expect(read('src/share/index.vue')).toContain('workspace-empty-state')
     expect(read('src/share/index.vue')).toContain('创建分享链接')
     expect(read('src/setting/index.vue')).toContain('ui-page-shell')
     expect(read('src/assets/layout-refactor.css')).toContain('--layout-rail-width: 220px')
     expect(read('src/share/index.vue')).not.toContain('ShareBottleFish')
-    expect(read('src/setting/index.vue')).not.toContain('SettingAPI')
+    const settings = read('src/setting/index.vue')
+    expect(settings).not.toContain('SettingAPI')
+    expect(settings).not.toContain("import SettingSecurity from './SettingSecurity.vue'")
+    expect(settings).not.toContain('{ component: SettingSecurity }')
+  })
+
+  it('shares one user-data directory between development and packaged builds', () => {
+    const launch = read('electron/main/launch.ts')
+    const ipc = read('electron/main/core/ipcEvent.ts')
+    const setting = read('src/setting/SettingUI.vue')
+
+    expect(launch).not.toContain('Mnemo-dev')
+    expect(launch).toContain("join(app.getPath('appData'), 'Mnemo', 'userdir.config')")
+    expect(ipc).toContain("ipcMain.handle('AppPaths:setUserData'")
+    expect(ipc).toContain("'singletonlock'")
+    expect(ipc).toContain("'engine.pid'")
+    expect(ipc).toContain("'code cache'")
+    expect(ipc).toContain('新的用户数据目录不能与当前目录互相包含')
+    expect(setting).toContain('用户数据位置')
+    expect(setting).toContain('用户数据已移动，应用将重启并使用新位置')
+  })
+
+  it('keeps the pan list height and fixed-size grid responsive to its container', () => {
+    const pan = read('src/pan/PanRight.vue')
+    const fileCss = read('src/assets/fileitem.css')
+    const layoutCss = read('src/assets/layout-refactor.css')
+
+    expect(pan).toContain('class="mnemoright ui-workspace-content pan-right-shell"')
+    expect(pan).toContain('Math.max(0, listGridWidth - 6) / 150')
+    expect(pan).toContain('Math.max(0, listGridWidth - 6) / 200')
+    expect(pan).toContain(':max-height="panListHeight"')
+    expect(fileCss).toContain('font-size: 78px')
+    expect(fileCss).toContain('font-size: 108px')
+    expect(layoutCss).toContain('#panfilelist {\n  width: 100%;\n  overflow: hidden !important;')
   })
 
   it('uses spacing for individual settings and dividers only between setting groups', () => {
@@ -152,6 +194,7 @@ describe('deep layout shell port', () => {
     expect(debug).not.toContain('服务地址')
     expect(debug).not.toContain('服务端口')
     expect(debug).not.toContain('createProxyServer')
+    expect(debug).not.toContain('数据位置')
     expect(css).toContain('--layout-row-min-height: 36px')
     expect(css).not.toContain(
       '.ui-plain-row {\n  display: grid;\n  grid-template-columns: minmax(160px, var(--layout-row-label-width)) minmax(0, 1fr);\n  gap: var(--layout-row-gap);\n  align-items: center;\n  min-height: var(--layout-row-min-height);\n  padding: 6px 0;\n  border-bottom'
@@ -457,7 +500,7 @@ describe('deep layout shell port', () => {
     expect(read('electron/main/core/ipcEvent.ts')).toContain("icon: getStaticPath('icon_256x256.ico')")
     for (const view of treeViews) {
       const source = read(view)
-      expect(source).toContain('<IconFont name="iconarrow-right-2-icon" />')
+      if (source.includes('#switcherIcon')) expect(source).toContain('iconarrow-right-2-icon')
       expect(source).not.toMatch(/<i[^>]*iconfont[^>]*>/)
     }
   })

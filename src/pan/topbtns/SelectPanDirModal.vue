@@ -444,7 +444,7 @@ const handleOKNewDir = () => {
 
     const newName = ClearFileName(form.dirName)
     if (!newName) {
-      message.error('新建文件夹失败 文件夹名不能为空')
+      message.error('请输入文件夹名称')
       return
     }
 
@@ -454,11 +454,11 @@ const handleOKNewDir = () => {
     try {
       const result = await AliFileCmd.ApiCreatNewForder(user_id.value, targetDriveId, selectFileId, newName)
       if (result.error || !result.file_id) {
-        message.error('新建文件夹失败 ' + (result.error || '未返回文件夹 ID'))
+        message.error(`无法新建文件夹：${result.error || '服务器没有返回文件夹信息'}`)
         return
       }
       const newdirid = result.file_id
-      message.success('新建文件夹成功')
+      message.success('文件夹已创建')
       try {
         await PanDAL.GetDirFileList(user_id.value, targetDriveId, selectFileId, '', '', false)
       } catch (error) {

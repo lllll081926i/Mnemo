@@ -41,10 +41,6 @@ const cb = (val: any) => settingStore.updateStore(val)
       </div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">统计文件夹大小</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.uiFolderSize" @update:value="cb({ uiFolderSize: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">日期文件夹模板</span>
       <div class="ui-plain-control">
         <a-input class="ui-control-md" size="small" :model-value="settingStore.uiTimeFolderFormate" @update:model-value="cb({ uiTimeFolderFormate: $event })" />

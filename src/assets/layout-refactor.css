@@ -1061,6 +1061,23 @@ body,
   flex: 1 1 auto;
 }
 
+.quickitem .quicktag {
+  flex: 0 0 auto;
+  max-width: 84px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-tag-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
 .quickitem .quickbtn {
   flex: 0 0 auto;
   opacity: 0;
@@ -1443,6 +1460,16 @@ body[arco-theme='dark'] .toppanbtn .arco-btn:hover {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   overflow: auto !important;
+}
+
+#panfilelist {
+  width: 100%;
+  overflow: hidden !important;
+}
+
+.pan-right-shell {
+  position: relative;
+  min-width: 0;
 }
 
 .fileitem {

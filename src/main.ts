@@ -17,14 +17,11 @@ window.onerror = function (errorMessage, scriptURI, lineNo, columnNo, error) {
       }
     }
     // DebugLog.mSaveDanger('onerror')
-    if (typeof errorMessage === 'string') {
-      DebugLog.mSaveDanger(errorMessage)
-      message.error('onerror ' + errorMessage)
-    }
+    if (typeof errorMessage === 'string') DebugLog.mSaveDanger(errorMessage)
     if (error) {
       DebugLog.mSaveDanger('onerror', error)
-      message.error('onerror ' + error.message)
     }
+    message.error('当前操作没有完成，请重试；如果问题持续出现，请在设置中打开日志查看原因')
   } catch {}
   return true
 }
@@ -47,7 +44,7 @@ window.addEventListener('unhandledrejection', function (event) {
         return
       }
       DebugLog.mSaveDanger('unhandledrejection', reason)
-      message.error('rejection ' + reason.message, 1)
+      message.error('当前操作没有完成，请重试；如果问题持续出现，请在设置中打开日志查看原因', 1)
     }
     if (!reason) DebugLog.mSaveDanger('unhandledrejection', JSON.stringify(event))
   } catch {}
@@ -62,11 +59,10 @@ app.config.errorHandler = function (err: any, vm, info) {
   try {
     if (typeof err === 'string') {
       DebugLog.mSaveDanger('errorHandler', err)
-      message.error('errorHandler ' + err, 1)
     } else {
       DebugLog.mSaveDanger('errorHandler', err)
-      if (err && err.message) message.error('errorHandler ' + err.message, 1)
     }
+    message.error('页面运行出现问题，请重试；如果问题持续出现，请重启应用', 1)
   } catch {}
   return true
 }

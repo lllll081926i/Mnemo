@@ -12,7 +12,7 @@ import usePanFileStore from '../panfilestore'
 import { useDowningStore, useSettingStore } from '../../store'
 import { Sleep } from '../../utils/format'
 import TreeStore from '../../store/treestore'
-import { copyToClipboard } from '../../utils/electronhelper'
+import { copyToClipboard, getSystemDownloadsPath } from '../../utils/electronhelper'
 import DownDAL from '../../down/DownDAL'
 import { isEmpty } from 'lodash'
 import { GetDriveID } from '../../aliapi/utils'
@@ -46,7 +46,7 @@ export async function uploadLocalPaths(files: string[] | undefined, parentFileId
   if (!files?.length) return
   const { pantreeStore, currentDirId, provider, capabilities } = getCurrentUploadContext(parentFileId)
   if (!pantreeStore.user_id || !pantreeStore.drive_id || !currentDirId) {
-    message.error('上传操作失败 父文件夹错误')
+    message.error('无法上传：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (!isUploadTargetDirectory(currentDirId)) {
@@ -97,7 +97,7 @@ export async function uploadLocalPaths(files: string[] | undefined, parentFileId
 export function handleUpload(uploadType: string, encType: string = '') {
   const { pantreeStore, currentDirId, provider, capabilities } = getCurrentUploadContext()
   if (!pantreeStore.user_id || !pantreeStore.drive_id || !currentDirId) {
-    message.error('上传操作失败 父文件夹错误')
+    message.error('无法上传：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (!isUploadTargetDirectory(currentDirId)) {
@@ -148,7 +148,7 @@ export function handleUpload(uploadType: string, encType: string = '') {
 export function menuDownload(istree: boolean, tips: boolean = true) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
-    message.error('下载操作失败 父文件夹错误')
+    message.error('无法下载：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
@@ -162,11 +162,11 @@ export function menuDownload(istree: boolean, tips: boolean = true) {
   }
   const settingStore = useSettingStore()
   const panTreeStore = usePanTreeStore()
-  const savePath = settingStore.AriaIsLocal ? settingStore.downSavePath : settingStore.ariaSavePath
+  const savePath = settingStore.AriaIsLocal ? (settingStore.downSavePath || getSystemDownloadsPath()) : settingStore.ariaSavePath
   const savePathFull = settingStore.downSavePathFull
   const downSavePathDefault = settingStore.downSavePathDefault
   if (isEmpty(savePath)) {
-    message.error('未设置保存路径')
+    message.error('无法确定下载位置，请先选择下载文件夹')
     modalDownload(istree)
     return
   }
@@ -211,11 +211,48 @@ export function menuDownload(istree: boolean, tips: boolean = true) {
 export async function menuFavSelectFile(istree: boolean, isFavor: boolean) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
-    message.error('收藏操作失败 父文件夹错误')
+    message.error('无法收藏：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.isErrorSelected) {
     message.error('没有可以收藏的文件')
+    return
+  }
+
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  if (!capabilities.favorite) {
+    const dir = usePanTreeStore().selectDir
+    const selectedFiles: IAliGetFileModel[] = istree
+      ? [{
+          __v_skip: true,
+          drive_id: selectedData.drive_id,
+          file_id: selectedData.dirID,
+          parent_file_id: selectedData.parentDirID,
+          name: dir.name,
+          namesearch: dir.namesearch,
+          path: dir.path,
+          ext: '',
+          mime_type: '',
+          mime_extension: '',
+          category: 'folder',
+          icon: 'iconfile-folder',
+          size: 0,
+          sizeStr: '',
+          time: dir.time,
+          timeStr: '',
+          starred: false,
+          isDir: true,
+          thumbnail: '',
+          description: dir.description
+        }]
+      : usePanFileStore().GetSelected()
+    if (isFavor) {
+      PanDAL.addLocalQuickFiles(selectedFiles)
+      message.success('已添加到快捷方式')
+    } else {
+      PanDAL.removeLocalQuickFiles(selectedFiles)
+      message.success('已从快捷方式移除')
+    }
     return
   }
 
@@ -246,7 +283,7 @@ export async function menuFavSelectFile(istree: boolean, isFavor: boolean) {
 export async function menuTrashSelectFile(istree: boolean, isDelete: boolean, ispic: boolean = false) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
-    message.error('删除操作失败 父文件夹错误')
+    message.error('无法删除：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.isErrorSelected) {
@@ -254,7 +291,7 @@ export async function menuTrashSelectFile(istree: boolean, isDelete: boolean, is
     return
   }
   if (selectedData.dirID.startsWith('video')) {
-    message.error('请不要在放映室里删除文件')
+    message.error('视频播放列表中不能删除文件，请回到文件所在目录操作')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
@@ -292,7 +329,7 @@ export async function menuTrashSelectFile(istree: boolean, isDelete: boolean, is
 export async function topRestoreSelectedFile() {
   const selectedData = PanDAL.GetPanSelectedData(false)
   if (selectedData.isError) {
-    message.error('还原文件操作失败 父文件夹错误')
+    message.error('无法还原：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.isErrorSelected) {
@@ -338,11 +375,11 @@ export async function topRestoreSelectedFile() {
 export function menuCopySelectedFile(istree: boolean, copyby: string) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
-    message.error('复制移动操作失败 父文件夹错误')
+    message.error('无法复制或移动：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.dirID.startsWith('video')) {
-    message.error('请不要在放映室里移动文件文件')
+    message.error('视频播放列表中不能复制或移动文件，请回到文件所在目录操作')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
@@ -371,7 +408,7 @@ export function menuCopySelectedFile(istree: boolean, copyby: string) {
     files = usePanFileStore().GetSelected()
   }
   if (files.length == 0) {
-    message.error('没有选择要复制移动的文件！')
+    message.error(`请先选择要${isCopy ? '复制' : '移动'}的文件`)
     return
   }
   const parent_file_id = files[0].parent_file_id
@@ -384,13 +421,13 @@ export function menuCopySelectedFile(istree: boolean, copyby: string) {
   }
 
   if (file_idList.length == 0) {
-    message.error('没有可以复制移动的文件')
+    message.error(`没有可以${isCopy ? '复制' : '移动'}的文件`)
     return
   }
   modalSelectPanDir(copyby, parent_file_id, async function (user_id: string, drive_id: string, selectFile: any) {
     if (!drive_id || !selectFile.drive_id || !selectFile.file_id) return
     if (parent_file_id == selectFile.file_id) {
-      message.error('不能移动复制到原位置！')
+      message.error(`不能${isCopy ? '复制' : '移动'}到原文件夹`)
       return
     }
     let successList: string[]
@@ -415,7 +452,7 @@ export function dropMoveSelectedFile(drive_id: string, movetodirid: string, istr
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isErrorSelected) return
   if (selectedData.isError) {
-    message.error('复制移动操作失败 父文件夹错误！')
+    message.error('无法移动：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
@@ -425,15 +462,15 @@ export function dropMoveSelectedFile(drive_id: string, movetodirid: string, istr
   }
 
   if (selectedData.dirID == 'trash') {
-    message.error('回收站内文件不支持移动！')
+    message.error('回收站中的文件不能直接移动，请先还原文件')
     return
   }
   if (!movetodirid) {
-    message.error('没有选择要移动到的位置！')
+    message.error('请选择目标文件夹')
     return
   }
   if (movetodirid == selectedData.dirID) {
-    message.error('不能移动到原位置！')
+    message.error('不能移动到原文件夹')
     return
   }
 
@@ -441,7 +478,7 @@ export function dropMoveSelectedFile(drive_id: string, movetodirid: string, istr
   const filenameList: string[] = []
   const selectedFile = usePanFileStore().GetSelected()
   if (selectedFile.length == 0) {
-    message.error('没有选择要拖放移动的文件！')
+    message.error('请先选择要移动的文件')
     return
   }
   for (let i = 0, maxi = selectedFile.length; i < maxi; i++) {
@@ -451,7 +488,7 @@ export function dropMoveSelectedFile(drive_id: string, movetodirid: string, istr
 
   if (file_idList.includes(movetodirid)) {
     if (file_idList.length == 1) message.info('取消移动')
-    else message.error('不能移动到原位置！')
+    else message.error('不能把文件夹移动到自身或原文件夹')
     return
   }
 
@@ -476,7 +513,7 @@ export async function menuFileEncTypeChange(istree: boolean) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   const description = selectedData.fileDescription || selectedData.parentDirDescription || ''
   if (selectedData.isError) {
-    message.error('标记加密文件操作失败 父文件夹错误')
+    message.error('无法标记加密：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.isErrorSelected) {
@@ -518,7 +555,7 @@ export async function menuFileEncTypeChange(istree: boolean) {
 export async function menuFileClearHistory(istree: boolean) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
-    message.error('清除历史操作失败 父文件夹错误')
+    message.error('无法清除播放记录：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.isErrorSelected) {
@@ -535,14 +572,47 @@ export async function menuFileClearHistory(istree: boolean) {
 
 export async function menuFileColorChange(istree: boolean, color: string) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
-  const description = selectedData.fileDescription || selectedData.parentDirDescription
+  const description = selectedData.fileDescription || selectedData.parentDirDescription || ''
+  const rawColor = color
   color = color.toLowerCase().replace('#', 'c')
   if (selectedData.isError) {
-    message.error('标记文件操作失败 父文件夹错误')
+    message.error('无法添加标签：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   if (selectedData.isErrorSelected) {
     message.error('没有可以标记的文件')
+    return
+  }
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  if (!capabilities.colorTag) {
+    const dir = usePanTreeStore().selectDir
+    const selectedFiles: IAliGetFileModel[] = istree
+      ? [{
+          __v_skip: true,
+          drive_id: selectedData.drive_id,
+          file_id: selectedData.dirID,
+          parent_file_id: selectedData.parentDirID,
+          name: dir.name,
+          namesearch: dir.namesearch,
+          path: dir.path,
+          ext: '',
+          mime_type: '',
+          mime_extension: '',
+          category: 'folder',
+          icon: 'iconfile-folder',
+          size: 0,
+          sizeStr: '',
+          time: dir.time,
+          timeStr: '',
+          starred: false,
+          isDir: true,
+          thumbnail: '',
+          description: dir.description
+        }]
+      : usePanFileStore().GetSelected()
+    const colorInfo = useSettingStore().uiFileColorArray.find((item) => item.key.toLowerCase().replace('#', 'c') === color)
+    PanDAL.updateLocalQuickTag(selectedFiles, rawColor ? (colorInfo?.title || rawColor) : '', colorInfo?.key || rawColor)
+    message.success(rawColor ? `已添加本地标签“${colorInfo?.title || rawColor}”` : '已清除本地标签')
     return
   }
   if (color && description.includes(color)) {
@@ -563,7 +633,7 @@ export async function menuFileColorChange(istree: boolean, color: string) {
 export function menuCreatShare(istree: boolean, shareby: string, driveType: string) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
-    message.error('创建分享操作失败 父文件夹错误')
+    message.error('无法创建分享：当前文件夹无效，请先打开网盘中的文件夹')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
@@ -629,7 +699,7 @@ export function menuCreatShare(istree: boolean, shareby: string, driveType: stri
 export async function topTrashDeleteAll() {
   const selectedData = PanDAL.GetPanSelectedData(false)
   if (selectedData.isError) {
-    message.error('清空回收站操作失败 父文件夹错误')
+    message.error('无法清空回收站：当前文件夹无效，请先打开回收站')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
@@ -642,7 +712,7 @@ export async function topTrashDeleteAll() {
   topbtnLock.add('topTrashDeleteAll')
   const loadingKey = 'cleartrash_' + Date.now().toString()
   try {
-    message.loading('清空回收站执行中...', 60, loadingKey)
+    message.loading('正在清空回收站...', 60, loadingKey)
     let count = 0
     let failed = false
     while (true) {
@@ -656,9 +726,9 @@ export async function topTrashDeleteAll() {
         break
       }
       count += successList.length
-      message.loading('清空回收站执行中...(' + count.toString() + ')', 0, loadingKey)
+      message.loading('正在清空回收站，已删除 ' + count.toString() + ' 项', 0, loadingKey)
     }
-    if (!failed) message.success(count > 0 ? '清空回收站 成功!' : '回收站已为空', 3, loadingKey)
+    if (!failed) message.success(count > 0 ? `回收站已清空，共删除 ${count} 项` : '回收站已经是空的', 3, loadingKey)
     if (usePanTreeStore().selectDir.file_id == 'trash') PanDAL.aReLoadOneDirToShow('', 'refresh', false)
   } catch (err: any) {
     message.error(err.message, 3, loadingKey)
@@ -676,7 +746,7 @@ export async function topSearchAll(word: string, inputsearchType: string[]) {
   }
   const pantreeStore = usePanTreeStore()
   if (!pantreeStore.user_id || !pantreeStore.selectDir.file_id) {
-    message.error('搜索失败 父文件夹错误')
+    message.error('无法搜索：当前网盘文件夹无效，请先打开一个网盘')
     return
   }
   const capabilities = getDriveProviderCapabilities({ userId: pantreeStore.user_id, driveId: pantreeStore.drive_id })
@@ -686,7 +756,7 @@ export async function topSearchAll(word: string, inputsearchType: string[]) {
   }
   const keyword = word.trim()
   if (!keyword) {
-    message.error('搜索失败 搜索关键字不能为空')
+    message.error('请输入搜索关键字')
     return
   }
   await PanDAL.aReLoadOneDirToShow('', 'search' + keyword, false)
@@ -711,7 +781,7 @@ export async function menuJumpToDir() {
 export function menuCopyFileName() {
   const list: IAliGetFileModel[] = usePanFileStore().GetSelected()
   if (list.length == 0) {
-    message.error('没有选择要复制文件名的文件！')
+    message.error('请先选择要复制名称的文件')
     return
   }
 

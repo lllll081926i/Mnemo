@@ -9,7 +9,6 @@ import SettingLog from './SettingLog.vue'
 import SettingPan from './SettingPan.vue'
 import SettingPlay from './SettingPlay.vue'
 import SettingProxy from './SettingProxy.vue'
-import SettingSecurity from './SettingSecurity.vue'
 import SettingUI from './SettingUI.vue'
 import SettingUpload from './SettingUpload.vue'
 
@@ -38,7 +37,7 @@ const sections: SettingSection[] = [
     key: 'account-security',
     label: '账号与安全',
     icon: ShieldCheck,
-    panels: [{ component: SettingAccount }, { component: SettingSecurity }]
+    panels: [{ component: SettingAccount }]
   },
   {
     key: 'files-playback',

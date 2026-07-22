@@ -4,7 +4,7 @@ import { createClient, type FileStat } from 'webdav'
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
-import { humanSize } from './format'
+import { humanDateTimeDateStr, humanSize } from './format'
 
 const STORAGE_KEY = 'mnemo.webdav.connections'
 
@@ -88,7 +88,8 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
   const size = Number(stat.size || 0)
   const mimeType = stat.mime || ''
   const updatedAt = stat.lastmod
-  const time = updatedAt ? new Date(updatedAt).getTime() : Date.now()
+  const parsedTime = updatedAt ? new Date(updatedAt).getTime() : 0
+  const time = Number.isFinite(parsedTime) ? parsedTime : 0
   const driveId = getWebDavDriveId(config)
   const iconInfo = isDir ? ['folder', 'iconfile-folder'] : getFileIcon(isDir ? 'folder' : VIDEO_EXTENSIONS.has(`.${ext}`) ? 'video' : 'others', ext, ext, mimeType, size)
 
@@ -106,9 +107,9 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
     category: iconInfo[0],
     icon: iconInfo[1],
     size,
-    sizeStr: '',
+    sizeStr: isDir ? '' : humanSize(size),
     time,
-    timeStr: '',
+    timeStr: time ? humanDateTimeDateStr(new Date(time).toISOString()) : '',
     starred: false,
     isDir,
     thumbnail: '',
@@ -287,10 +288,29 @@ export const getWebDavQuota = async (config: WebDavConnectionConfig): Promise<We
   const client = createWebDavClient(config)
   if (typeof client.getQuota !== 'function') return null
   try {
-    const quota = await client.getQuota({ path: normalizeWebDavPath(config.rootPath) }) as { used?: number; available?: number | 'unknown' | 'unlimited' } | null
+    type QuotaPayload = { used?: number | string; available?: number | string | 'unknown' | 'unlimited' }
+    type QuotaResult = QuotaPayload & { body?: QuotaPayload; data?: QuotaPayload }
+    const result = await client.getQuota({ path: normalizeWebDavPath(config.rootPath) }) as QuotaResult | null
+    const quota = result?.data && typeof result.data === 'object'
+      ? result.data
+      : result?.body && typeof result.body === 'object'
+        ? result.body
+        : result
     const used = Number(quota?.used)
     const rawAvailable = quota?.available
-    const available = rawAvailable === -3 ? 'unlimited' : rawAvailable === -2 || rawAvailable === -1 ? 'unknown' : rawAvailable
+    const available = (() => {
+      if (typeof rawAvailable === 'string') {
+        const marker = rawAvailable.trim().toLowerCase()
+        if (marker === 'unlimited') return 'unlimited' as const
+        if (marker === 'unknown') return 'unknown' as const
+      }
+      if (rawAvailable === undefined || rawAvailable === null || rawAvailable === '') return null
+      const numeric = Number(rawAvailable)
+      if (!Number.isFinite(numeric)) return null
+      if (numeric === -3) return 'unlimited' as const
+      if (numeric === -2 || numeric === -1) return 'unknown' as const
+      return numeric >= 0 ? numeric : null
+    })()
     if (!Number.isFinite(used) || used < 0 || (typeof available !== 'number' && available !== 'unknown' && available !== 'unlimited')) return null
     if (typeof available === 'number') {
       if (!Number.isFinite(available) || available < 0) return null

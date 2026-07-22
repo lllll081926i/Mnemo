@@ -132,7 +132,7 @@ const handleOK = () => {
     if (data) return
     let newName = ClearFileName(form.fileName)
     if (!newName) {
-      message.error(`重命名失败 ${props.ispic ? '相册名' : '文件名'}不能为空`)
+      message.error(`请输入${props.ispic ? '相册' : '文件'}名称`)
       return
     }
     if (newName == form.bakName) {
@@ -141,7 +141,7 @@ const handleOK = () => {
     }
     const pantreeStore = usePanTreeStore()
     if (!pantreeStore.user_id || !pantreeStore.drive_id || !pantreeStore.selectDir.file_id) {
-      message.error(`重命名失败 ${props.ispic ? '相册文件夹' : '父文件夹'} 错误`)
+      message.error(`无法重命名：${props.ispic ? '相册文件夹' : '当前文件夹'}无效，请重新打开后再试`)
       return
     }
     okLoading.value = true
@@ -184,13 +184,13 @@ const handleRename = (newName: string, encType: string = '', inputpassword: stri
           usePanTreeStore().mRenameFiles(data)
           if (!props.istree) usePanFileStore().mRenameFiles(data)
           PanDAL.RefreshPanTreeAllNode(pantreeStore.drive_id)
-          message.success('重命名 成功')
+          message.success('重命名完成')
         } else {
-          message.error('重命名 失败')
+          message.error('无法重命名，请检查是否存在同名文件')
         }
       })
       .catch((err: any) => {
-        message.error('重命名 失败', err)
+        message.error(`无法重命名：${err?.message || err || '请稍后重试'}`)
       })
       .then(() => {
         modalCloseAll()

@@ -103,7 +103,14 @@ describe('S3 connection model', () => {
 
     expect(normalizeWebDavPath('/projects//archive/')).toBe('/projects/archive')
     expect(getDirectoryContents).toHaveBeenCalledWith('/home/projects')
-    expect(items).toMatchObject([{ file_id: '/projects/movie.mp4', parent_file_id: '/projects', category: 'video' }])
+    expect(items).toMatchObject([{
+      file_id: '/projects/movie.mp4',
+      parent_file_id: '/projects',
+      category: 'video',
+      size: 12,
+      sizeStr: '12.00B',
+      timeStr: expect.stringMatching(/^2026-01-01 /)
+    }])
     expect(getWebDavRequestHeaders(connection)).toEqual({ Authorization: 'Basic ZGF2LXVzZXI6c2VjcmV0' })
     expect(buildWebDavDownloadUrl(connection, '/projects/movie.mp4')).toBe('https://dav.example.com/dav/home/projects/movie.mp4')
   })
@@ -137,6 +144,23 @@ describe('S3 connection model', () => {
     await expect(getWebDavQuota(connection)).resolves.toEqual({ used: 2048, available: 'unlimited', total: 0 })
   })
 
+  it('normalizes wrapped and string WebDAV quota responses', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV string quota', url: 'https://dav.example.com', username: 'dav-user', password: 'secret', rootPath: '/' })
+    vi.mocked(createClient).mockReturnValue({ getQuota: vi.fn().mockResolvedValue({ body: { used: '1024', available: '4096' } }) } as any)
+
+    await expect(getWebDavQuota(connection)).resolves.toEqual({ used: 1024, available: 4096, total: 5120 })
+
+    vi.mocked(createClient).mockReturnValue({ getQuota: vi.fn().mockResolvedValue({ data: { used: '2048', available: '6144' } }) } as any)
+    await expect(getWebDavQuota(connection)).resolves.toEqual({ used: 2048, available: 6144, total: 8192 })
+  })
+
+  it('treats both numeric and string unknown quota markers as unknown', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV unknown quota', url: 'https://dav.example.com', username: 'dav-user', password: 'secret', rootPath: '/' })
+    vi.mocked(createClient).mockReturnValue({ getQuota: vi.fn().mockResolvedValue({ used: '2048', available: '-1' }) } as any)
+
+    await expect(getWebDavQuota(connection)).resolves.toEqual({ used: 2048, available: 'unknown', total: 0 })
+  })
+
   it('creates isolated account and drive ids for every connection', () => {
     const first = createS3Connection(createInput('S3 A'))
     const second = createS3Connection(createInput('S3 B'))
@@ -167,6 +191,11 @@ describe('S3 connection model', () => {
       ['/folder', true],
       ['/file.txt', false]
     ])
+    expect(items.find((item) => item.file_id === '/file.txt')).toMatchObject({
+      size: 12,
+      sizeStr: '12.00B',
+      timeStr: expect.stringMatching(/^2026-01-01 /)
+    })
     expect(items[1].size).toBe(12)
   })
 

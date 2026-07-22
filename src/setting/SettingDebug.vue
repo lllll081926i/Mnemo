@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import useSettingStore from './settingstore'
 import AppCache from '../utils/appcache'
-import { getUserData } from '../utils/electronhelper'
 
 const settingStore = useSettingStore()
 const cb = (val: any) => settingStore.updateStore(val)
-const userData = getUserData()
-const handleJumpPath = () => window.WebShowItemInFolder(userData)
 </script>
 
 <template>
@@ -16,19 +13,8 @@ const handleJumpPath = () => window.WebShowItemInFolder(userData)
       <div class="ui-plain-control"><a-input-number class="ui-control-sm" size="small" :min="3000" :max="10000" :step="100" :model-value="settingStore.debugFileListMax" @update:model-value="cb({ debugFileListMax: $event })" /></div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">收藏列表上限</span>
-      <div class="ui-plain-control"><a-input-number class="ui-control-sm" size="small" :min="100" :max="3000" :step="100" :model-value="settingStore.debugFavorListMax" @update:model-value="cb({ debugFavorListMax: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">传输记录保留</span>
       <div class="ui-plain-control"><a-input-number class="ui-control-sm" size="small" :min="1000" :max="50000" :step="1000" :model-value="settingStore.debugDownedListMax" @update:model-value="cb({ debugDownedListMax: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
-      <span class="ui-plain-label">数据位置</span>
-      <div class="ui-plain-control">
-        <a-input class="ui-control-lg" size="small" :model-value="userData" :readonly="true" />
-        <a-button type="outline" size="small" @click="handleJumpPath">打开</a-button>
-      </div>
     </div>
     <div class="ui-plain-row">
       <span class="ui-plain-label">本地数据</span>

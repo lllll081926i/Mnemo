@@ -273,12 +273,12 @@ export default class UploadingDAL {
             const pathName = baseName
             if (!baseName && basePath.endsWith(':\\')) baseName = basePath.substring(0, basePath.length - 2)
             if (!baseName) {
-              message.error('跳过上传任务，无法识别路径：' + filePath)
+              message.error('无法添加上传任务：无法识别文件路径 ' + filePath)
               DebugLog.mSaveDanger('上传文件出错 无法识别路径 ' + filePath)
               return
             }
             if (UniqueMap.has(parent_file_id + '|' + basePath + '|' + baseName)) {
-              message.warning('跳过上传任务，已存在相同的任务：' + filePath)
+              message.warning('相同的上传任务已经存在：' + filePath)
               return
             }
             const TaskID = tasktime
@@ -320,7 +320,7 @@ export default class UploadingDAL {
           })
           .catch((err: any) => {
             err = FileSystemErrorMessage(err.code, err.message)
-            message.error('上传文件出错 ' + err + ' ' + filePath, 3, loadingKey)
+            message.error(`无法添加上传任务：${err}（${filePath}）`, 3, loadingKey)
             DebugLog.mSaveDanger('上传文件出错 ' + err + ' ' + filePath)
           })
       )
@@ -340,7 +340,7 @@ export default class UploadingDAL {
     addList = []
     UploadingDAL.mUploadingRefresh()
     if (tip) {
-      message.success('成功创建 ' + addall.toString() + '个上传任务', 3, loadingKey)
+      message.success(`已创建 ${addall} 个上传任务`, 3, loadingKey)
     }
     return addall
   }

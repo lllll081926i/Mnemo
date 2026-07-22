@@ -370,7 +370,7 @@ export async function createProxyServer(port: number) {
       proxyServer.close()
       proxyServer.removeAllListeners('error')
       DebugLog.mSaveDanger(`端口：${port}已被占用，请前往【高级选项->刷新端口】`)
-      message.error(`端口：${port}已被占用，请前往【高级选项->刷新端口】`, 5)
+      message.error(`本地预览服务无法启动：端口 ${port} 已被占用。请关闭占用该端口的程序后重启应用`, 5)
     }
   })
   return proxyServer

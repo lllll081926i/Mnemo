@@ -4,12 +4,16 @@ import {
   menuCopySelectedFile,
   menuCreatShare,
   menuDownload,
+  menuFavSelectFile,
+  menuFileColorChange,
   menuJumpToDir,
   menuTrashSelectFile,
 } from '../topbtns/topbtn'
 import { modalRename, modalShuXing } from '../../utils/modal'
 import { computed } from 'vue'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
+import { usePanFileStore, usePanTreeStore, useSettingStore } from '../../store'
+import PanDAL from '../pandal'
 
 let istree = false
 
@@ -47,6 +51,18 @@ const isPic = computed(() => {
   return props.dirtype === 'pic' && props.inputpicType == 'mypic'
 })
 const { provider, capabilities } = useCurrentDriveProvider()
+const panFileStore = usePanFileStore()
+const panTreeStore = usePanTreeStore()
+const settingStore = useSettingStore()
+const selectedItems = computed(() => panFileStore.GetSelected())
+const allInLocalShortcut = computed(() => {
+  void panTreeStore.quickData
+  return selectedItems.value.length > 0 && selectedItems.value.every((item) => PanDAL.hasQuickFile(item, true))
+})
+const localShortcutMode = computed(() => !capabilities.value.favorite)
+const localTagMode = computed(() => !capabilities.value.colorTag)
+const tagMenuTitle = computed(() => localTagMode.value ? '本地标签' : '标签')
+const clearTagTitle = computed(() => localTagMode.value ? '清除本地标签' : '清除标签')
 const canCreateShare = computed(() => capabilities.value.createShare)
 </script>
 
@@ -61,6 +77,38 @@ const canCreateShare = computed(() => capabilities.value.createShare)
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>
       </a-doption>
+      <a-doption v-if="!isPic && capabilities.favorite && !isallfavored" @click="() => menuFavSelectFile(istree, true)">
+        <template #icon><IconFont name="iconcrown" /></template>
+        <template #default>收藏</template>
+      </a-doption>
+      <a-doption v-if="!isPic && capabilities.favorite && isallfavored" @click="() => menuFavSelectFile(istree, false)">
+        <template #icon><IconFont name="iconcrown2" /></template>
+        <template #default>取消收藏</template>
+      </a-doption>
+      <a-doption v-if="!isPic && localShortcutMode && !allInLocalShortcut" @click="() => menuFavSelectFile(istree, true)">
+        <template #icon><IconFont name="iconcrown" /></template>
+        <template #default>加入快捷方式</template>
+      </a-doption>
+      <a-doption v-if="!isPic && localShortcutMode && allInLocalShortcut" @click="() => menuFavSelectFile(istree, false)">
+        <template #icon><IconFont name="iconcrown2" /></template>
+        <template #default>移出快捷方式</template>
+      </a-doption>
+      <a-dsubmenu v-if="!isPic" class="rightmenu" trigger="hover">
+        <template #default>
+          <span class="arco-dropdown-option-icon"><IconFont name="iconwbiaoqian" /></span>
+          {{ tagMenuTitle }}
+        </template>
+        <template #content>
+          <a-doption v-for="color in settingStore.uiFileColorArray" :key="color.key" @click="() => menuFileColorChange(istree, color.key)">
+            <template #icon><span class="local-tag-swatch" :style="{ backgroundColor: color.key }"></span></template>
+            <template #default>{{ color.title || color.key }}</template>
+          </a-doption>
+          <a-doption @click="() => menuFileColorChange(istree, '')">
+            <template #icon><IconFont name="iconclose" /></template>
+            <template #default>{{ clearTagTitle }}</template>
+          </a-doption>
+        </template>
+      </a-dsubmenu>
 
       <a-dsubmenu v-if="dirtype != 'video'" id="rightpansubmove" class="rightmenu" trigger="hover">
         <template #default>

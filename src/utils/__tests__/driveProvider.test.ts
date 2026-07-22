@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderMeta, getDriveProviderSidebarEntries, isDriveProviderRootId, isDriveProviderSessionUsable, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
+import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderMeta, getDriveProviderSidebarEntries, getDriveSidebarIcon, isDriveProviderRootId, isDriveProviderSessionUsable, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
 const retainedProviders = ['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'] as const
 
@@ -78,6 +78,8 @@ describe('drive provider capabilities', () => {
     for (const provider of ['pikpak', 'gofile', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).search, provider).toBe(false)
     for (const provider of ['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(true)
     for (const provider of ['webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).createShare, provider).toBe(false)
+    expect(getDriveProviderCapabilities('pikpak').offlineDownload).toBe(true)
+    for (const provider of ['onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).offlineDownload, provider).toBe(false)
   })
 
   it('builds only retained provider sidebars', () => {
@@ -87,6 +89,7 @@ describe('drive provider capabilities', () => {
     expect(getDriveProviderSidebarEntries('aliyun')).toEqual([])
     expect(isDriveProviderSidebarEntryAvailable('pikpak', 'search')).toBe(false)
     expect(isDriveProviderSidebarEntryAvailable('pikpak', 'trash')).toBe(true)
+    expect(getDriveSidebarIcon('trash')).toBe('icontrash')
   })
 
   it('keeps upload and destructive operations provider-specific', () => {

@@ -241,7 +241,7 @@ export default class AliFileCmd {
     if (allTask.length > 0) {
       await Promise.all(allTask).catch()
     }
-    message.success('成功执行 清除历史', 1, loadingKey)
+    message.success('播放记录已清除', 1, loadingKey)
   }
 
   static async ApiFileColorBatch(_user_id: string, drive_id: string, _description: string, _color: string, _file_idList: string[]) {

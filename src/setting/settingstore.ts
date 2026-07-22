@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
-import { normalizeAria2cEnabled } from '../utils/aria2EnginePolicy'
 import DebugLog from '../utils/debuglog'
-import { getUserDataPath } from '../utils/electronhelper'
+import { getSystemDownloadsPath, getUserDataPath } from '../utils/electronhelper'
 import { useAppStore } from '../store'
 import PanDAL from '../pan/pandal'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -14,7 +13,6 @@ export interface SettingState {
   uiDefaultTab: string
   uiImageMode: string
   uiExitOnClose: boolean
-  uiLaunchAutoSign: boolean
   uiLaunchStart: boolean
   uiLaunchStartShow: boolean
 
@@ -44,15 +42,12 @@ export interface SettingState {
   uiVideoPlayerPath: string
 
   uiAutoColorVideo: boolean
-  uiAutoPlaycursorVideo: boolean
 
   uiXBTNumber: number
   uiXBTWidth: number
 
   // 网盘设置
   uiShowPanPath: boolean
-  uiShowPanRootFirst: string
-  uiFolderSize: boolean
   uiFolderPreviewEnabled: boolean
   uiFolderPreviewAutoHide: number
   uiFileOrderDuli: string
@@ -69,22 +64,14 @@ export interface SettingState {
   downSavePath: string
   downSavePathDefault: boolean
   downSavePathFull: boolean
-  downSaveBreakWeiGui: boolean
   downFileMax: number
   downThreadMax: number
   downGlobalSpeed: number
   downGlobalSpeedM: string
-  downUseAria2c: boolean
-
   ariaMaxConnectionPerServer: number
-  ariaContinueDownload: boolean
   ariaUserAgent: string
-  ariaRpcListenPort: number
-  ariaRpcSecret: string
 
   // 任务通知
-  ariaTaskNotification: boolean         // 下载完成声音通知
-
   // 上传文件
   uploadFileMax: number
   uploadGlobalSpeed: number
@@ -94,7 +81,6 @@ export interface SettingState {
   downAutoShutDown: number
   downSaveShowPro: boolean
   downSmallFileFirst: boolean
-  downUploadBreakFile: boolean
   downUploadWhatExist: string
   downIngoredList: string[]
   downFinishAudio: boolean
@@ -104,10 +90,7 @@ export interface SettingState {
   debugDirSize: string
   debugCacheSize: string
   debugFileListMax: number
-  debugFavorListMax: number
-  debugDowningListMax: number
   debugDownedListMax: number
-  debugFolderSizeCacheHour: number
   debugProxyHost: string
   debugProxyPort: string
   debugLogEnabled: boolean
@@ -126,9 +109,6 @@ export interface SettingState {
   ariaPwd: string
   ariaHttps: boolean
   ariaState: string
-  ariaLoading: boolean
-
-  ariaResumeAllWhenLaunched: boolean
 
 }
 
@@ -138,7 +118,6 @@ const setting: SettingState = {
   uiDefaultTab: 'pan',
   uiImageMode: 'fill',
   uiExitOnClose: false,
-  uiLaunchAutoSign: false,
   uiLaunchStart: false,
   uiLaunchStartShow: false,
 
@@ -167,7 +146,6 @@ const setting: SettingState = {
   uiVideoSubtitleMode: 'auto',
   uiVideoPlayerPath: '',
 
-  uiAutoPlaycursorVideo: true,
   uiAutoColorVideo: true,
 
   uiXBTNumber: 36,
@@ -175,8 +153,6 @@ const setting: SettingState = {
 
   // 网盘设置
   uiShowPanPath: true,
-  uiShowPanRootFirst: 'all',
-  uiFolderSize: true,
   uiFolderPreviewEnabled: true,
   uiFolderPreviewAutoHide: 6,
   uiFileOrderDuli: 'null',
@@ -200,19 +176,12 @@ const setting: SettingState = {
   downSavePath: '',
   downSavePathDefault: true,
   downSavePathFull: true,
-  downSaveBreakWeiGui: true,
   downFileMax: 5,
   downThreadMax: 4,
   downGlobalSpeed: 0,
   downGlobalSpeedM: 'MB',
-  downUseAria2c: true,
-
   ariaMaxConnectionPerServer: 16,
-  ariaContinueDownload: true,
   ariaUserAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4577.63 Safari/537.36',
-  ariaRpcListenPort: 16800,
-  ariaRpcSecret: 'S4znWTaZYQi3cpRNb',
-  ariaTaskNotification: true,
 
   // 上传文件
   uploadFileMax: 5,
@@ -223,7 +192,6 @@ const setting: SettingState = {
   downAutoShutDown: 0,
   downSaveShowPro: true,
   downSmallFileFirst: false,
-  downUploadBreakFile: false,
   downUploadWhatExist: 'refuse',
   downIngoredList: ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading'],
   downFinishAudio: true,
@@ -233,10 +201,7 @@ const setting: SettingState = {
   debugCacheSize: '',
   debugDirSize: '',
   debugFileListMax: 3000,
-  debugFavorListMax: 500,
-  debugDowningListMax: 1000,
   debugDownedListMax: 5000,
-  debugFolderSizeCacheHour: 72,
   debugProxyHost: '127.0.0.1',
   debugProxyPort: '6666',
   debugLogEnabled: true,
@@ -255,9 +220,7 @@ const setting: SettingState = {
   ariaPwd: '',
   ariaHttps: false,
   ariaState: 'local',
-  ariaLoading: false,
 
-  ariaResumeAllWhenLaunched: false
 }
 
 function _loadSetting(val: any) {
@@ -267,7 +230,6 @@ function _loadSetting(val: any) {
   setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'down', 'share', 'setting'])
   setting.uiImageMode = defaultValue(val.uiImageMode, ['fill', 'width', 'web'])
   setting.uiExitOnClose = defaultBool(val.uiExitOnClose, false)
-  setting.uiLaunchAutoSign = defaultBool(val.uiLaunchAutoSign, false)
   setting.uiLaunchStart = defaultBool(val.uiLaunchStart, false)
   setting.uiLaunchStartShow = defaultBool(val.uiLaunchStartShow, false)
 
@@ -294,7 +256,6 @@ function _loadSetting(val: any) {
   setting.uiVideoPlayerParams = defaultString(val.uiVideoPlayerParams, '')
   setting.uiVideoSubtitleMode = defaultValue(val.uiVideoSubtitleMode, ['close', 'auto', 'select'])
   setting.uiVideoPlayerPath = defaultString(val.uiVideoPlayerPath, '')
-  setting.uiAutoPlaycursorVideo = defaultBool(val.uiAutoPlaycursorVideo, true)
   setting.uiAutoColorVideo = defaultBool(val.uiAutoColorVideo, true)
 
   setting.uiXBTNumber = defaultValue(val.uiXBTNumber, [36, 24, 36, 48, 60, 72])
@@ -302,8 +263,6 @@ function _loadSetting(val: any) {
 
   // 网盘设置
   setting.uiShowPanPath = defaultBool(val.uiShowPanPath, true)
-  setting.uiShowPanRootFirst = defaultValue(val.uiShowPanRootFirst, ['all', 'backup', 'resource'])
-  setting.uiFolderSize = defaultBool(val.uiFolderSize, true)
   setting.uiFolderPreviewEnabled = defaultBool(val.uiFolderPreviewEnabled, true)
   setting.uiFolderPreviewAutoHide = defaultNumber(val.uiFolderPreviewAutoHide, 6)
   setting.uiFileOrderDuli = defaultString(val.uiFileOrderDuli, 'null')
@@ -317,15 +276,13 @@ function _loadSetting(val: any) {
   if (val.uiFileColorArray && val.uiFileColorArray.length >= 6) setting.uiFileColorArray = val.uiFileColorArray
 
   // 下载文件
-  setting.downSavePath = defaultString(val.downSavePath, '')
+  setting.downSavePath = defaultString(val.downSavePath, getSystemDownloadsPath())
   setting.downSavePathDefault = defaultBool(val.downSavePathDefault, true)
   setting.downSavePathFull = defaultBool(val.downSavePathFull, true)
-  setting.downSaveBreakWeiGui = defaultBool(val.downSaveBreakWeiGui, true)
   setting.downFileMax = defaultValue(val.downFileMax, [5, 1, 2, 3, 4, 5])
   setting.downThreadMax = defaultValue(val.downThreadMax, [4, 1, 2, 4, 8, 16, 24, 32])
   setting.downGlobalSpeed = defaultNumberSub(val.downGlobalSpeed, 0, 0, 999)
   setting.downGlobalSpeedM = defaultValue(val.downGlobalSpeedM, ['MB', 'KB'])
-  setting.downUseAria2c = normalizeAria2cEnabled(defaultBool(val.downUseAria2c, true))
 
   // 上传文件
   setting.uploadFileMax = defaultValue(val.uploadFileMax, [5, 1, 3, 5, 10, 20, 30, 50])
@@ -336,7 +293,6 @@ function _loadSetting(val: any) {
   setting.downAutoShutDown = 0
   setting.downSaveShowPro = defaultBool(val.downSaveShowPro, true)
   setting.downSmallFileFirst = defaultBool(val.downSmallFileFirst, false)
-  setting.downUploadBreakFile = defaultBool(val.downUploadBreakFile, false)
   setting.downUploadWhatExist = defaultValue(val.downUploadWhatExist, ['ignore', 'overwrite', 'auto_rename', 'refuse'])
   setting.downIngoredList = val.downIngoredList && val.downIngoredList.length > 0 ? val.downIngoredList : ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading']
   setting.downFinishAudio = defaultBool(val.downFinishAudio, true)
@@ -346,10 +302,7 @@ function _loadSetting(val: any) {
   setting.debugDirSize = defaultString(val.debugDirSize, '')
   setting.debugCacheSize = defaultString(val.debugCacheSize, '')
   setting.debugFileListMax = defaultNumberSub(val.debugFileListMax, 3000, 3000, 10000)
-  setting.debugFavorListMax = defaultNumberSub(val.debugFavorListMax, 500, 100, 3000)
-  setting.debugDowningListMax = 1000
   setting.debugDownedListMax = defaultNumberSub(val.debugDownedListMax, 5000, 1000, 50000)
-  setting.debugFolderSizeCacheHour = defaultValue(val.debugFolderSizeCacheHour, [72, 2, 8, 24, 48, 72])
   setting.debugProxyHost = defaultString(val.debugProxyHost, '127.0.0.1')
   // Chromium blocks a number of ports, including 6666 (ERR_UNSAFE_PORT).
   // Migrate the historical default so media playback can reach the local proxy.
@@ -378,9 +331,6 @@ function _loadSetting(val: any) {
   setting.ariaPwd = defaultString(val.ariaPwd, '')
   setting.ariaHttps = defaultBool(val.ariaHttps, false)
   setting.ariaState = defaultValue(val.ariaState, ['local', 'remote'])
-  setting.ariaLoading = false
-
-  setting.ariaResumeAllWhenLaunched = defaultBool(val.ariaResumeAllWhenLaunched, false)
 
 }
 
@@ -458,9 +408,6 @@ const useSettingStore = defineStore('setting', {
   },
   actions: {
     async updateStore(partial: Partial<SettingState>) {
-      if (Object.hasOwn(partial, 'downUseAria2c')) {
-        partial.downUseAria2c = normalizeAria2cEnabled(partial.downUseAria2c)
-      }
       if (partial.uiTimeFolderFormate) {
         partial.uiTimeFolderFormate = partial.uiTimeFolderFormate
           .replace('mm-dd', 'MM-dd').replace('HH-MM', 'HH-mm')
@@ -472,12 +419,14 @@ const useSettingStore = defineStore('setting', {
       if (Object.hasOwn(partial, 'uiLaunchStart')) {
         window.WebToElectron({ cmd: { launchStart: this.uiLaunchStart, launchStartShow: this.uiLaunchStartShow } })
       }
-      if (Object.hasOwn(partial, 'uiFolderSize')
-        || Object.hasOwn(partial, 'uiFileOrderDuli')) {
+      if (Object.hasOwn(partial, 'uiFileOrderDuli')) {
         await PanDAL.aReLoadOneDirToShow('', 'refresh', false)
       }
       if (Object.hasOwn(partial, 'proxyType')) {
         await this.WebSetProxy()
+      }
+      if (Object.hasOwn(partial, 'downSaveShowPro') && !this.downSaveShowPro) {
+        window.WebToElectron?.({ cmd: 'downloadProgress', progress: -1, activeCount: 0, totalCount: 0 })
       }
       SaveSetting()
       useAppStore().toggleTheme(setting.uiTheme)

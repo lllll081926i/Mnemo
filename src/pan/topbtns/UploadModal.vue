@@ -47,7 +47,7 @@ const handleOpen = () => {
     file_id.value = pantreeStore.selectDir.file_id
   }
   if (!file_id.value) {
-    message.error('错误的网盘位置')
+    message.error('无法上传：当前文件夹无效，请重新打开目标文件夹')
     nextTick(() => {
       modalCloseAll()
     })

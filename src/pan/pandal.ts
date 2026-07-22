@@ -1,4 +1,4 @@
-import { IAliGetDirModel } from '../aliapi/alimodels'
+import { IAliGetDirModel, IAliGetFileModel } from '../aliapi/alimodels'
 import AliFile from '../aliapi/file'
 import { NewIAliFileResp } from '../aliapi/dirfilelist'
 import { ITokenInfo, useFootStore, usePanFileStore } from '../store'
@@ -33,6 +33,24 @@ export interface PanSelectedData {
   selectedKeys: string[]
   selectedParentKeys: string[]
 }
+
+export interface QuickFileEntry {
+  key: string
+  drive_id: string
+  drive_name: string
+  title: string
+  file_id?: string
+  parent_file_id?: string
+  kind?: 'folder' | 'file'
+  icon?: string
+  tag?: string
+  tagColor?: string
+  favorite?: boolean
+}
+
+const quickEntryKey = (kind: 'folder' | 'file', driveId: string, fileId: string) => `quick:${kind}:${encodeURIComponent(driveId)}:${encodeURIComponent(fileId)}`
+
+const quickEntryIdentity = (entry: Pick<QuickFileEntry, 'drive_id' | 'file_id' | 'key' | 'kind'>) => `${entry.kind || 'folder'}|${entry.drive_id || ''}|${entry.file_id || entry.key || ''}`
 
 const RefreshLock = new Set<string>()
 export default class PanDAL {
@@ -329,7 +347,7 @@ export default class PanDAL {
           })
           .catch((err: any) => {
             if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-            message.warning(`列出 ${GetDriveType(user_id, drive_id).title} 文件夹失败 ${err?.message || ''}`)
+            message.warning(`无法读取 ${GetDriveType(user_id, drive_id).title} 文件夹，请检查网络连接后重试`)
             resolve(false)
           })
         return
@@ -367,7 +385,7 @@ export default class PanDAL {
           })
           .catch((err: any) => {
             if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-            message.warning('列出 WebDAV 文件夹失败 ' + (err?.message || ''))
+            message.warning('无法读取 WebDAV 文件夹，请检查服务器连接后重试')
             resolve(false)
           })
         return
@@ -400,7 +418,7 @@ export default class PanDAL {
           })
           .catch((err: any) => {
             if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-            message.warning('列出 S3 文件夹失败 ' + (err?.message || ''))
+            message.warning('无法读取 S3 文件夹，请检查存储连接后重试')
             resolve(false)
           })
         return
@@ -411,7 +429,7 @@ export default class PanDAL {
         const isSearch = dirID.startsWith('search')
         if (isSearch) {
           if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-          message.warning('PikPak 暂不支持搜索')
+          message.warning('PikPak 暂不支持全盘搜索，请在当前文件夹使用快速筛选')
           resolve(true)
           return
         }
@@ -446,7 +464,7 @@ export default class PanDAL {
       }
 
       if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-      message.warning('当前网盘不支持列出该目录')
+      message.warning('当前网盘无法打开这个目录')
       resolve(false)
     })
   }
@@ -511,51 +529,156 @@ export default class PanDAL {
     return data
   }
 
-  static updateQuickFile(list: { key: string; drive_id: string; drive_name: string; title: string }[]) {
+  private static readQuickFileList(userId: string): QuickFileEntry[] {
+    if (!userId || typeof localStorage === 'undefined') return []
+    try {
+      const jsonstr = localStorage.getItem('FileQuick-' + userId)
+      const raw = jsonstr ? JSON.parse(jsonstr) : []
+      if (!Array.isArray(raw)) return []
+      return raw
+        .filter((item) => item && item.drive_id && (item.file_id || item.key))
+        .map((item): QuickFileEntry => {
+          const kind: 'folder' | 'file' = item.kind === 'file' ? 'file' : 'folder'
+          const fileId = String(item.file_id || item.key)
+          return {
+            key: String(item.key || quickEntryKey(kind, String(item.drive_id), fileId)),
+            drive_id: String(item.drive_id),
+            drive_name: String(item.drive_name || ''),
+            title: String(item.title || item.name || fileId),
+            file_id: fileId,
+            parent_file_id: String(item.parent_file_id || ''),
+            kind,
+            icon: String(item.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder')),
+            tag: String(item.tag || ''),
+            tagColor: String(item.tagColor || ''),
+            favorite: item.favorite !== false
+          }
+        })
+    } catch {
+      return []
+    }
+  }
+
+  private static saveQuickFileList(userId: string, list: QuickFileEntry[]) {
+    if (!userId || typeof localStorage === 'undefined') return
+    localStorage.setItem('FileQuick-' + userId, JSON.stringify(list))
+    usePanTreeStore().mSaveQuick(list)
+  }
+
+  static updateQuickFile(list: QuickFileEntry[]) {
     if (list.length == 0) return
     const pantreeStore = usePanTreeStore()
-    const jsonstr = localStorage.getItem('FileQuick-' + pantreeStore.user_id)
-    const arr = jsonstr ? JSON.parse(jsonstr) : []
-    list.map((t) => {
-      let find = false
-      for (let i = 0; i < arr.length; i++) {
-        if (arr[i].key == t.key) {
-          arr[i].title = t.title
-          arr[i].drive_id = t.drive_id
-          arr[i].drive_name = t.drive_name
-          find = true
-        }
+    const arr = this.readQuickFileList(pantreeStore.user_id)
+    const indexMap = new Map(arr.map((item, index) => [quickEntryIdentity(item), index]))
+    for (const input of list) {
+      const kind: 'folder' | 'file' = input.kind === 'file' ? 'file' : 'folder'
+      const fileId = String(input.file_id || input.key || '')
+      if (!fileId || !input.drive_id) continue
+      const normalized: QuickFileEntry = {
+        key: input.key || quickEntryKey(kind, input.drive_id, fileId),
+        drive_id: input.drive_id,
+        drive_name: input.drive_name || '',
+        title: input.title || fileId,
+        file_id: fileId,
+        parent_file_id: input.parent_file_id || '',
+        kind,
+        icon: input.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder'),
+        tag: input.tag || '',
+        tagColor: input.tagColor || '',
+        favorite: input.favorite !== false
       }
-      if (!find) arr.push({ key: t.key, drive_id: t.drive_id, drive_name: t.drive_name, title: t.title })
-      return true
-    })
-    localStorage.setItem('FileQuick-' + pantreeStore.user_id, JSON.stringify(arr))
-    pantreeStore.mSaveQuick(arr)
+      const identity = quickEntryIdentity(normalized)
+      const existingIndex = indexMap.get(identity)
+      if (existingIndex === undefined) {
+        indexMap.set(identity, arr.length)
+        arr.push(normalized)
+      } else {
+        arr[existingIndex] = { ...arr[existingIndex], ...normalized, favorite: normalized.favorite || arr[existingIndex].favorite }
+      }
+    }
+    this.saveQuickFileList(pantreeStore.user_id, arr)
+  }
+
+  static addLocalQuickFiles(files: IAliGetFileModel[], tag = '', tagColor = '') {
+    const pantreeStore = usePanTreeStore()
+    const driveName = (driveId: string) => GetDriveType(pantreeStore.user_id, driveId).title
+    this.updateQuickFile(files.map((file): QuickFileEntry => ({
+      key: quickEntryKey(file.isDir ? 'folder' : 'file', file.drive_id, file.file_id),
+      drive_id: file.drive_id,
+      drive_name: driveName(file.drive_id),
+      title: file.name,
+      file_id: file.file_id,
+      parent_file_id: file.parent_file_id,
+      kind: file.isDir ? 'folder' : 'file',
+      icon: file.icon,
+      tag,
+      tagColor,
+      favorite: true
+    })))
+  }
+
+  static removeLocalQuickFiles(files: IAliGetFileModel[]) {
+    const pantreeStore = usePanTreeStore()
+    const list = this.readQuickFileList(pantreeStore.user_id)
+    const identities = new Set(files.map((file) => `${file.isDir ? 'folder' : 'file'}|${file.drive_id}|${file.file_id}`))
+    const next = list
+      .map((item) => identities.has(quickEntryIdentity(item)) ? { ...item, favorite: false } : item)
+      .filter((item) => item.favorite || item.tag)
+    this.saveQuickFileList(pantreeStore.user_id, next)
+  }
+
+  static updateLocalQuickTag(files: IAliGetFileModel[], tag: string, tagColor = '') {
+    const pantreeStore = usePanTreeStore()
+    const existing = this.readQuickFileList(pantreeStore.user_id)
+    const byIdentity = new Map(existing.map((item, index) => [quickEntryIdentity(item), index]))
+    const driveName = (driveId: string) => GetDriveType(pantreeStore.user_id, driveId).title
+    for (const file of files) {
+      const kind: 'folder' | 'file' = file.isDir ? 'folder' : 'file'
+      const identity = `${kind}|${file.drive_id}|${file.file_id}`
+      const index = byIdentity.get(identity)
+      if (index === undefined) {
+        if (!tag) continue
+        byIdentity.set(identity, existing.length)
+        existing.push({
+          key: quickEntryKey(kind, file.drive_id, file.file_id),
+          drive_id: file.drive_id,
+          drive_name: driveName(file.drive_id),
+          title: file.name,
+          file_id: file.file_id,
+          parent_file_id: file.parent_file_id,
+          kind,
+          icon: file.icon,
+          tag,
+          tagColor,
+          favorite: false
+        })
+      } else {
+        existing[index] = { ...existing[index], tag, tagColor, title: file.name, icon: file.icon || existing[index].icon }
+      }
+    }
+    this.saveQuickFileList(pantreeStore.user_id, existing.filter((item) => item.favorite || item.tag))
+  }
+
+  static hasQuickFile(file: IAliGetFileModel, favoriteOnly = false) {
+    const list = this.readQuickFileList(usePanTreeStore().user_id)
+    const identity = `${file.isDir ? 'folder' : 'file'}|${file.drive_id}|${file.file_id}`
+    const item = list.find((entry) => quickEntryIdentity(entry) === identity)
+    return !!item && (!favoriteOnly || item.favorite === true)
   }
 
   static deleteQuickFile(key: string) {
     if (!key) return
     const pantreeStore = usePanTreeStore()
-    const jsonstr = localStorage.getItem('FileQuick-' + pantreeStore.user_id)
-    const arr = jsonstr ? JSON.parse(jsonstr) : []
-    const newArray: { key: string; drive_id: string; drive_name: string; title: string }[] = []
-    for (let i = 0; i < arr.length; i++) {
-      if (arr[i].key != key) newArray.push(arr[i])
-    }
-    localStorage.setItem('FileQuick-' + pantreeStore.user_id, JSON.stringify(newArray))
-    pantreeStore.mSaveQuick(newArray)
+    const arr = this.readQuickFileList(pantreeStore.user_id).filter((item) => item.key != key)
+    this.saveQuickFileList(pantreeStore.user_id, arr)
   }
 
-  static getQuickFileList() {
-    const pantreeStore = usePanTreeStore()
-    const jsonstr = localStorage.getItem('FileQuick-' + pantreeStore.user_id)
-    return jsonstr ? JSON.parse(jsonstr) : []
+  static getQuickFileList(): QuickFileEntry[] {
+    return this.readQuickFileList(usePanTreeStore().user_id)
   }
 
   static aReLoadQuickFile(user_id: string) {
-    const jsonstr = localStorage.getItem('FileQuick-' + user_id)
-    const arr = jsonstr ? JSON.parse(jsonstr) : []
-    usePanTreeStore().mSaveQuick(arr)
+    usePanTreeStore().mSaveQuick(this.readQuickFileList(user_id))
   }
 
   static async aUpdateDirFileSize(_drive_id: string): Promise<void> {

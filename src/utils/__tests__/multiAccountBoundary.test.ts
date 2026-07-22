@@ -60,7 +60,7 @@ describe('multi-account provider boundaries', () => {
     expect(login.indexOf('await UserDAL.LoadPanData(token)')).toBeLessThan(login.indexOf("await DB.saveValueString('uiDefaultUser', token.user_id)"))
     expect(login.indexOf('await UserDAL.LoadPanData(token)')).toBeLessThan(login.indexOf('useUserStore().userLogin(token.user_id)'))
     expect(login).toContain('previousActiveUserId')
-    expect(login).toContain("message.error('加载账号失败")
+    expect(login).toContain("message.error('无法连接网盘账号：")
   })
 
   it('disambiguates same-provider accounts and rejects duplicate mounted-storage names', () => {
@@ -70,7 +70,7 @@ describe('multi-account provider boundaries', () => {
 
     expect(account).toContain('detail:')
     expect(account).toContain('getDriveProviderAccountId')
-    expect(pan).toContain('account.detail')
+    expect(pan).toContain('{{ account.name }}')
     expect(pan).toContain('handleRemoveDriveAccount')
     expect(pan).toContain('UserDAL.UserClearFromDB(account.user_id)')
     expect(pan).toContain('removeWebDavConnection')

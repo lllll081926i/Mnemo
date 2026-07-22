@@ -72,7 +72,7 @@ export default class AppCache {
     const userData = getUserData()
     if (!userData) return
     const dirSize = await AppCache.LoadDirSize(userData)
-    if (dirSize > 800 * 1024 * 1024) message.warning('缓存文件夹体积较大，该去 设置 里清理了')
+    if (dirSize > 800 * 1024 * 1024) message.warning('本地数据已超过 800MB，可在设置的“高级”页面清理')
     useSettingStore().debugDirSize = humanSize(dirSize)
   }
 
@@ -80,7 +80,7 @@ export default class AppCache {
     const userData = getUserData()
     if (!userData) return
     const cacheSize = await AppCache.LoadCacheDirSize(path.join(userData, 'Cache'))
-    if (cacheSize > 800 * 1024 * 1024) message.warning('缓存文件夹体积较大，该去 设置 里清理了')
+    if (cacheSize > 800 * 1024 * 1024) message.warning('缓存已超过 800MB，可在设置的“高级”页面清理')
     useSettingStore().debugCacheSize = humanSize(cacheSize)
   }
   
@@ -116,17 +116,17 @@ export default class AppCache {
 
 
     if (delby == 'all') {
-      message.success('删除全部数据成功，自动重启Mnemo')
+      message.success('全部本地数据已删除，应用将自动重启')
       Sleep(3000).then(() => {
         window.WebRelaunch()
       })
     } else if (delby == 'db') {
-      message.success('删除数据库成功，自动重启Mnemo')
+      message.success('本地数据库已删除，应用将自动重启')
       Sleep(3000).then(() => {
         window.WebRelaunch()
       })
     } else {
-      message.success('清理缓存成功，自动重启Mnemo')
+      message.success('缓存已清理，应用将自动重启')
       Sleep(3000).then(() => {
         // window.WebReload()
         window.WebRelaunch()
@@ -137,7 +137,7 @@ export default class AppCache {
   static async aClearCache(): Promise<void> {
     const dir = getUserData()
     await AppCache.DeleteDir(path.join(dir, 'Cache')).catch(() => {})
-    message.success('删除全部缓存数据成功，自动重启Mnemo')
+    message.success('全部缓存已删除，应用将自动重启')
     Sleep(1500).then(() => {
       window.WebRelaunch()
     })

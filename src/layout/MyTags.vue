@@ -21,7 +21,7 @@ export default defineComponent({
     }
     const add = (val: string) => {
       if (props.maxlen && val.length > props.maxlen) {
-        message.error('输入的字符太长了，最长' + props.maxlen + '个')
+        message.error(`标签内容不能超过 ${props.maxlen} 个字符`)
         return
       }
       const value = props.value

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import useSettingStore from './settingstore'
 import MySwitch from '../layout/MySwitch.vue'
 import { openExternal } from '../utils/electronhelper'
@@ -9,6 +9,9 @@ import message from '../utils/message'
 const platform = window.platform
 const settingStore = useSettingStore()
 const verLoading = ref(false)
+const userDataPath = ref('')
+const defaultUserDataPath = ref('')
+const userDataLoading = ref(false)
 const getAppVersion = computed(() => {
   try {
     return getPkgVersion()
@@ -33,6 +36,56 @@ const handleCheckVer = async () => {
 }
 
 const openProject = () => openExternal('https://github.com/lllll081926i/Mnemo')
+
+onMounted(async () => {
+  const paths = await window.WebGetAppPaths?.()
+  userDataPath.value = paths?.userDataPath || ''
+  defaultUserDataPath.value = paths?.defaultUserDataPath || ''
+})
+
+const restartAfterUserDataChange = (value: string) => {
+  if (!window.WebSetUserDataPath) {
+    message.error('当前环境无法更改用户数据位置')
+    return
+  }
+  userDataLoading.value = true
+  window.WebSetUserDataPath(value).then((result) => {
+    if (!result?.ok) {
+      message.error(result?.error || '无法保存用户数据位置')
+      userDataLoading.value = false
+      return
+    }
+    if (!result.requiresRestart) {
+      userDataPath.value = result.path || userDataPath.value
+      userDataLoading.value = false
+      message.info('当前已经使用这个用户数据位置')
+      return
+    }
+    message.success('用户数据已移动，应用将重启并使用新位置')
+    window.setTimeout(() => window.WebRelaunch?.({}), 450)
+  }).catch((error: any) => {
+    userDataLoading.value = false
+    message.error(error?.message || '无法保存用户数据位置')
+  })
+}
+
+const handleSelectUserDataPath = () => {
+  window.WebShowOpenDialogSync?.({
+    title: '选择用户数据目录',
+    buttonLabel: '选择',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: userDataPath.value || defaultUserDataPath.value
+  }, (result: string[] | undefined) => {
+    const selected = result?.[0]
+    if (selected) restartAfterUserDataChange(selected)
+  })
+}
+
+const handleResetUserDataPath = () => restartAfterUserDataChange('')
+const handleOpenUserDataPath = () => {
+  const target = userDataPath.value || defaultUserDataPath.value
+  if (target) window.WebShowItemInFolder?.(target)
+}
 </script>
 
 <template>
@@ -43,6 +96,15 @@ const openProject = () => openExternal('https://github.com/lllll081926i/Mnemo')
         <span>Mnemo {{ getAppVersion }}</span>
         <a-button type="outline" size="small" :loading="verLoading" @click="handleCheckVer">检查更新</a-button>
         <a-button type="text" size="small" @click="openProject">项目地址</a-button>
+      </div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">用户数据位置</span>
+      <div class="ui-plain-control user-data-control">
+        <a-input class="ui-control-lg" size="small" :model-value="userDataPath || defaultUserDataPath" readonly />
+        <a-button type="outline" size="small" :disabled="!userDataPath && !defaultUserDataPath" @click="handleOpenUserDataPath">打开</a-button>
+        <a-button type="outline" size="small" :loading="userDataLoading" @click="handleSelectUserDataPath">更改</a-button>
+        <a-button v-if="userDataPath && defaultUserDataPath && userDataPath !== defaultUserDataPath" type="text" size="small" :disabled="userDataLoading" @click="handleResetUserDataPath">恢复默认</a-button>
       </div>
     </div>
     <div class="ui-plain-row">
@@ -75,12 +137,22 @@ const openProject = () => openExternal('https://github.com/lllll081926i/Mnemo')
       <div class="ui-plain-control"><MySwitch :value="settingStore.uiLaunchStartShow" @update:value="cb({ uiLaunchStartShow: $event })" /></div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">启动时自动签到</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.uiLaunchAutoSign" @update:value="cb({ uiLaunchAutoSign: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">关闭即退出</span>
       <div class="ui-plain-control"><MySwitch :value="settingStore.uiExitOnClose" @update:value="cb({ uiExitOnClose: $event })" /></div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.user-data-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.user-data-control .ui-control-lg {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+</style>

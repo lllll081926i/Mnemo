@@ -7,6 +7,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
+import { humanDateTimeDateStr, humanSize } from './format'
 
 const STORAGE_KEY = 'Mnemo_S3Connections'
 const S3_PREFIX = 's3:'
@@ -228,9 +229,9 @@ const toAliModel = (config: S3ConnectionConfig, key: string, object?: S3Object, 
     category: iconInfo[0],
     icon: iconInfo[1],
     size,
-    sizeStr: '',
+    sizeStr: directory ? '' : humanSize(size),
     time: object?.LastModified?.getTime() || 0,
-    timeStr: '',
+    timeStr: object?.LastModified ? humanDateTimeDateStr(object.LastModified.toISOString()) : '',
     starred: false,
     isDir: directory,
     thumbnail: '',

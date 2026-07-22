@@ -27,10 +27,6 @@ const cb = (val: any) => settingStore.updateStore(val)
       </div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">仅使用秒传</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.downUploadBreakFile" @update:value="cb({ downUploadBreakFile: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">完成后自动关机</span>
       <div class="ui-plain-control"><MySwitch :value="settingStore.downAutoShutDown > 0" @update:value="cb({ downAutoShutDown: $event ? 1 : 0 })" /></div>
     </div>

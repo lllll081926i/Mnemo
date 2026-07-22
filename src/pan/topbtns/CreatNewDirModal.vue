@@ -104,13 +104,13 @@ export default defineComponent({
 
         const pantreeStore = usePanTreeStore()
         if (!pantreeStore.user_id || !pantreeStore.drive_id || !pantreeStore.selectDir.file_id) {
-          message.error('新建文件夹失败 父文件夹错误')
+          message.error('无法新建文件夹：当前目录无效，请先打开网盘中的文件夹')
           return
         }
 
         const newName = ClearFileName(this.form.dirName)
         if (!newName) {
-          message.error('新建文件夹失败 文件夹名不能为空')
+          message.error('请输入文件夹名称')
           return
         }
 
@@ -121,10 +121,10 @@ export default defineComponent({
 
         createRequest
           .then((data) => {
-            if (data.error) message.error('新建文件夹 失败' + data.error)
+            if (data.error) message.error(`无法新建文件夹：${data.error}`)
             else {
               newdirid = data.file_id
-              message.success('新建文件夹 成功')
+              message.success('文件夹已创建')
               if (this.form.dirIndex) useSettingStore().updateStore({ uiTimeFolderIndex: this.form.dirIndex + 1 })
               if (!this.parentdirid || pantreeStore.selectDir.file_id == this.parentdirid) {
                 
@@ -136,7 +136,7 @@ export default defineComponent({
             }
           })
           .catch((err: any) => {
-            message.error('新建文件夹 失败 ' + (err.message || ''))
+            message.error(`无法新建文件夹：${err.message || '请检查网络连接后重试'}`)
           })
           .then(() => {
             modalCloseAll()
