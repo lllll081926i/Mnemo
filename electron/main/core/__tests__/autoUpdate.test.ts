@@ -27,8 +27,8 @@ describe('createAutoUpdateController', () => {
     expect(workflow).toContain('DROPBOX_APP_KEY')
     expect(workflow).toContain('GOOGLE_DRIVE_CLIENT_ID')
     expect(workflow).not.toMatch(/BAIDU_|CLOUD123_|DRIVE115_|BOX_CLIENT/)
-    expect(workflow).toContain('--prerelease=false')
-    expect(workflow).toContain('--latest')
+    expect(workflow).toContain('-f prerelease=false')
+    expect(workflow).toContain('-f make_latest=true')
   })
 
   it('asks before downloading an available update', async () => {
