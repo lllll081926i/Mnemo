@@ -129,6 +129,43 @@ const parsePikPakError = (data: any, fallback: string) => {
   return data.error_description || data.message || data.error || fallback
 }
 
+export const PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS = 30
+
+const parseRetryAfterSeconds = (value: string | null): number => {
+  if (!value) return 0
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds)
+  const retryAt = Date.parse(value)
+  if (!Number.isFinite(retryAt)) return 0
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000))
+}
+
+const getPikPakRateLimitSeconds = (data: any, retryAfter: string | null): number => {
+  const serverSeconds = Number(data?.retry_after ?? data?.retry_after_seconds ?? data?.retryAfter ?? 0)
+  return Math.max(PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, Number.isFinite(serverSeconds) ? Math.ceil(serverSeconds) : 0, parseRetryAfterSeconds(retryAfter))
+}
+
+const isPikPakRateLimitedResponse = (data: any, status: number): boolean => {
+  if (status === 429 || Number(data?.error_code ?? data?.code) === 429) return true
+  const detail = [data?.error, data?.reason, data?.error_description, data?.message].filter((value) => typeof value === 'string').join(' ')
+  return /too[ _-]*(many|frequent)|request[ _-]*frequency|rate[ _-]*limit|请求.{0,8}频繁|操作.{0,8}频繁/i.test(detail)
+}
+
+export class PikPakRateLimitError extends Error {
+  readonly code = 'PikPak_RATE_LIMITED'
+
+  constructor(readonly retryAfterSeconds: number) {
+    super(`PikPak 暂时限制了请求，请等待 ${retryAfterSeconds} 秒后再试`)
+    this.name = 'PikPakRateLimitError'
+  }
+}
+
+export const getPikPakRateLimitRetrySeconds = (error: unknown): number => {
+  if (error instanceof PikPakRateLimitError) return Math.max(PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, error.retryAfterSeconds)
+  if (!error || typeof error !== 'object' || (error as { code?: unknown }).code !== 'PikPak_RATE_LIMITED') return 0
+  return Math.max(PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, Number((error as { retryAfterSeconds?: unknown }).retryAfterSeconds) || 0)
+}
+
 class PikPakApiError extends Error {
   reason: string
   code: number
@@ -167,6 +204,7 @@ const pikpakJson = async <T>(url: string, init: RequestInit, fallback: string): 
   const resp = await fetch(url, init)
   const data = await resp.json().catch(() => undefined)
   if (!resp.ok || data?.error) {
+    if (isPikPakRateLimitedResponse(data, resp.status)) throw new PikPakRateLimitError(getPikPakRateLimitSeconds(data, resp.headers.get('Retry-After')))
     throw new PikPakApiError(data, fallback, resp.status)
   }
   return data as T
@@ -200,7 +238,14 @@ export const initPikPakCaptcha = async (opts: {
   previousToken?: string
 }): Promise<PikPakCaptchaInitResult> => {
   const deviceId = /^[a-f0-9]{32}$/i.test(opts.deviceId) ? opts.deviceId.toLowerCase() : createPikPakDeviceId()
-  const meta = opts.action === 'POST:/v1/auth/signin' ? { username: String(opts.meta?.username || '').trim() } : buildPikPakCaptchaMeta(deviceId, opts.meta || {})
+  let meta: Partial<PikPakCaptchaMeta>
+  if (opts.action === 'POST:/v1/auth/signin') {
+    if (opts.meta?.email) meta = { email: String(opts.meta.email).trim() }
+    else if (opts.meta?.phone_number) meta = { phone_number: String(opts.meta.phone_number).trim() }
+    else meta = { username: String(opts.meta?.username || '').trim() }
+  } else {
+    meta = buildPikPakCaptchaMeta(deviceId, opts.meta || {})
+  }
   const body: Record<string, unknown> = {
     client_id: PIKPAK_PROTOCOL_CLIENT_ID,
     action: opts.action,
@@ -234,7 +279,11 @@ export const initPikPakCaptchaToken = async (opts: {
 }
 
 export const buildPikPakLoginCaptchaMeta = (username: string): Partial<PikPakCaptchaMeta> => {
-  return { username: username.trim() }
+  const normalizedUsername = username.trim()
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedUsername)) return { email: normalizedUsername }
+  const normalizedPhone = normalizedUsername.replace(/[\s-]/g, '')
+  if (/^\+?\d{6,18}$/.test(normalizedPhone)) return { phone_number: normalizedPhone }
+  return { username: normalizedUsername }
 }
 
 export const beginPikPakLoginCaptcha = async (username: string, deviceId?: string): Promise<{ deviceId: string; captcha: PikPakCaptchaInitResult }> => {
@@ -281,6 +330,14 @@ const signInPikPak = async (username: string, password: string, captchaToken: st
   return token
 }
 
+export const loginPikPakWithVerifiedCaptcha = async (username: string, password: string, captchaToken: string, deviceId?: string): Promise<ITokenInfo> => {
+  const normalizedUsername = username.trim()
+  if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
+  if (!captchaToken) throw new Error('请先完成 PikPak 验证')
+  const resolvedDeviceId = /^[a-f0-9]{32}$/i.test(deviceId || '') ? String(deviceId).toLowerCase() : getOrCreatePikPakDeviceId(normalizedUsername)
+  return signInPikPak(normalizedUsername, password, captchaToken, resolvedDeviceId)
+}
+
 export const loginPikPakWithCaptcha = async (username: string, password: string, captchaToken: string, deviceId?: string): Promise<ITokenInfo> => {
   const normalizedUsername = username.trim()
   if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
@@ -293,7 +350,7 @@ export const loginPikPakWithCaptcha = async (username: string, password: string,
     previousToken: captchaToken
   })
   if (captcha.challengeUrl) throw new PikPakCaptchaRequiredError(resolvedDeviceId, captcha.captchaToken, captcha.challengeUrl, captcha.expiresIn)
-  return signInPikPak(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
+  return loginPikPakWithVerifiedCaptcha(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
 }
 
 const emptyToken = (): ITokenInfo => ({

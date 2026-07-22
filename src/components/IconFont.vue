@@ -37,6 +37,7 @@ const ICON_MAP: Record<string, Component> = {
   iconadd: Plus,
   iconplus: Plus,
   icondelete: Trash2,
+  icontrash: Trash2,
   iconcopy: Copy,
   'iconedit-square': SquarePen,
   iconclose: X,

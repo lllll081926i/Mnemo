@@ -197,16 +197,24 @@ const usePanTreeStore = defineStore('pantree', {
 
       TreeStore.RenameDirs(this.drive_id, fileList)
     },
-    mSaveQuick(list: { key: string; drive_id: string; drive_name: string; title: string }[]) {
+    mSaveQuick(list: { key: string; drive_id: string; drive_name: string; title: string; file_id?: string; parent_file_id?: string; kind?: 'folder' | 'file'; icon?: string; tag?: string; tagColor?: string }[]) {
       const nodeList: TreeNodeData[] = []
       for (let i = 0; i < list.length; i++) {
+        const item = list[i]
+        const kind = item.kind || 'folder'
         nodeList.push({
           __v_skip: true,
-          key: list[i].key,
-          drive_id: list[i].drive_id,
-          drive_name: list[i].drive_name,
-          title: list[i].title || list[i].key,
-          namesearch: i < 9 ? '快捷键 Ctrl+' + (i + 1) : '',
+          key: item.key,
+          file_id: item.file_id || item.key,
+          drive_id: item.drive_id,
+          parent_file_id: item.parent_file_id || '',
+          drive_name: item.drive_name,
+          title: item.title || item.key,
+          tag: item.tag || '',
+          tagColor: item.tagColor || '',
+          iconName: item.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder'),
+          kind,
+          namesearch: [item.tag ? `标签：${item.tag}` : '', i < 9 ? '快捷键 Ctrl+' + (i + 1) : ''].filter(Boolean).join(' · '),
           children: [],
           isLeaf: true
         } as TreeNodeData)

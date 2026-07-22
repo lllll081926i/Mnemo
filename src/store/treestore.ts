@@ -12,6 +12,7 @@ export interface TreeNodeData {
   __v_skip: true
   key: string
   drive_id?: string
+  file_id?: string
   parent_file_id?: string
   path?: string
   title: string
@@ -19,7 +20,11 @@ export interface TreeNodeData {
   description?: string
   children: TreeNodeData[]
   icon?: any
+  iconName?: string
   isLeaf?: boolean
+  kind?: 'folder' | 'file'
+  tag?: string
+  tagColor?: string
 }
 
 export interface DirData {

@@ -59,6 +59,27 @@ const isPikPakCaptchaCallback = (value: string) => {
   }
 }
 
+const isPikPakCaptchaReportUrl = (value: string) => {
+  if (!isPikPakCaptchaUrl(value)) return false
+  try {
+    const url = new URL(value)
+    return url.pathname === '/credit/v1/report'
+  } catch {
+    return false
+  }
+}
+
+const findCaptchaToken = (value: unknown, depth = 0): string => {
+  if (!value || depth > 4 || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  if (typeof record.captcha_token === 'string' && record.captcha_token.length > 20) return record.captcha_token
+  for (const child of Object.values(record)) {
+    const token = findCaptchaToken(child, depth + 1)
+    if (token) return token
+  }
+  return ''
+}
+
 function pathToFileUrl(filePath: string): string {
   const normalized = path.resolve(filePath).replace(/\\/g, '/')
   return 'file://' + (normalized.startsWith('/') ? normalized : '/' + normalized)
@@ -209,7 +230,7 @@ export default class ipcEvent {
       const captchaWindow = new BrowserWindow({
         parent: AppWindow.mainWindow,
         modal: true,
-        show: false,
+        show: true,
         width: 520,
         height: 720,
         minWidth: 420,
@@ -227,17 +248,26 @@ export default class ipcEvent {
         }
       })
       pikpakCaptchaWindow = captchaWindow
+      captchaWindow.focus()
+      captchaWindow.moveTop()
       let completed = false
-      const completeCaptcha = () => {
+      let callbackTimer: NodeJS.Timeout | undefined
+      const reportRequests = new Set<string>()
+      const completeCaptcha = (captchaToken = '') => {
         if (completed) return
         completed = true
-        if (!event.sender.isDestroyed()) event.sender.send('PikPakCaptcha:completed')
+        if (callbackTimer) clearTimeout(callbackTimer)
+        if (!event.sender.isDestroyed()) event.sender.send('PikPakCaptcha:completed', { captchaToken })
         closePikPakCaptchaWindow()
+      }
+      const completeFromCallback = () => {
+        if (callbackTimer || completed) return
+        callbackTimer = setTimeout(() => completeCaptcha(), 500)
       }
       const guardNavigation = (navigationEvent: Electron.Event, url: string) => {
         if (isPikPakCaptchaCallback(url)) {
           navigationEvent.preventDefault()
-          completeCaptcha()
+          completeFromCallback()
         } else if (!isPikPakCaptchaUrl(url)) {
           navigationEvent.preventDefault()
         }
@@ -245,16 +275,45 @@ export default class ipcEvent {
       captchaWindow.webContents.on('will-navigate', guardNavigation)
       captchaWindow.webContents.on('will-redirect', guardNavigation)
       captchaWindow.webContents.setWindowOpenHandler(({ url }) => {
-        if (isPikPakCaptchaCallback(url)) completeCaptcha()
+        if (isPikPakCaptchaCallback(url)) completeFromCallback()
         else if (isPikPakCaptchaUrl(url)) void captchaWindow.loadURL(url)
         return { action: 'deny' }
       })
-      captchaWindow.once('ready-to-show', () => captchaWindow.show())
+      const debuggerClient = captchaWindow.webContents.debugger
+      try {
+        debuggerClient.attach('1.3')
+        debuggerClient.on('message', (_debuggerEvent, method, params) => {
+          if (method === 'Network.responseReceived' && isPikPakCaptchaReportUrl(String(params?.response?.url || ''))) {
+            reportRequests.add(String(params.requestId || ''))
+            return
+          }
+          if (method !== 'Network.loadingFinished' || !reportRequests.delete(String(params?.requestId || ''))) return
+          void debuggerClient.sendCommand('Network.getResponseBody', { requestId: params.requestId }).then((result: { body?: string; base64Encoded?: boolean }) => {
+            const responseText = result.base64Encoded ? Buffer.from(result.body || '', 'base64').toString('utf8') : String(result.body || '')
+            const captchaToken = findCaptchaToken(JSON.parse(responseText))
+            if (captchaToken) completeCaptcha(captchaToken)
+          }).catch(() => {})
+        })
+        await Promise.race([
+          debuggerClient.sendCommand('Network.enable').catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 300))
+        ])
+      } catch {}
+      captchaWindow.once('ready-to-show', () => {
+        captchaWindow.show()
+        captchaWindow.focus()
+        captchaWindow.moveTop()
+      })
       captchaWindow.once('closed', () => {
+        if (callbackTimer) clearTimeout(callbackTimer)
+        if (debuggerClient.isAttached()) debuggerClient.detach()
         if (pikpakCaptchaWindow === captchaWindow) pikpakCaptchaWindow = undefined
       })
       try {
         await captchaWindow.loadURL(challengeUrl)
+        if (!captchaWindow.isVisible()) captchaWindow.show()
+        captchaWindow.focus()
+        captchaWindow.moveTop()
         return { ok: true }
       } catch (error: any) {
         closePikPakCaptchaWindow()

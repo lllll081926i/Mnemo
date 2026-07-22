@@ -137,23 +137,28 @@ const onQuickDrop = (ev: any) => {
   ev.target.style.outline = 'none'
   ev.target.style.background = ''
 
-  const list: { key: string; drive_id: string; drive_name: string; title: string }[] = []
+  const list: { key: string; drive_id: string; drive_name: string; title: string; file_id: string; parent_file_id: string; kind: 'folder' | 'file'; icon: string; favorite: boolean }[] = []
   const selectedFile = usePanFileStore().GetSelected()
   for (let i = 0, maxi = selectedFile.length; i < maxi; i++) {
-    if (selectedFile[i].isDir) {
-      list.push({
-        key: selectedFile[i].file_id,
-        drive_id: selectedFile[i].drive_id,
-        drive_name: GetDriveType(pantreeStore.user_id, selectedFile[i].drive_id).title,
-        title: selectedFile[i].name
-      })
-    }
+    const file = selectedFile[i]
+    list.push({
+      key: `${file.isDir ? 'quick:folder:' : 'quick:file:'}${encodeURIComponent(file.drive_id)}:${encodeURIComponent(file.file_id)}`,
+      drive_id: file.drive_id,
+      drive_name: GetDriveType(pantreeStore.user_id, file.drive_id).title,
+      title: file.name,
+      file_id: file.file_id,
+      parent_file_id: file.parent_file_id,
+      kind: file.isDir ? 'folder' : 'file',
+      icon: file.icon,
+      favorite: true
+    })
   }
   if (list.length == 0) {
-    message.error('没有选择任何文件夹！')
+    message.info('请先选择要加入快捷方式的文件或文件夹')
     return
   }
   PanDAL.updateQuickFile(list)
+  message.success(`已添加 ${list.length} 个快捷方式`)
 }
 const handleQuickDelete = (key: string) => {
   PanDAL.deleteQuickFile(key)
@@ -161,11 +166,27 @@ const handleQuickDelete = (key: string) => {
 const handleQuickSelect = (index: number) => {
   const array = PanDAL.getQuickFileList()
   if (array.length >= index) {
-    const key = array[index - 1].key
-    const drive_id = array[index - 1].drive_id
-    console.log('handleQuickSelect', array)
-    PanDAL.aReLoadOneDirToShow(drive_id, key, true)
+    void handleQuickNodeSelect({ node: array[index - 1] })
   }
+}
+const handleQuickNodeSelect = async (event: any) => {
+  const entry = event?.node || event
+  if (!entry?.drive_id) return
+  const fileId = entry.file_id || entry.key
+  if (entry.kind === 'file') {
+    const parentId = entry.parent_file_id || GetDriveType(pantreeStore.user_id, entry.drive_id).key
+    const loaded = await PanDAL.aReLoadOneDirToShow(entry.drive_id, parentId, false)
+    if (!loaded) return
+    const fileStore = usePanFileStore()
+    if (fileStore.ListDataShow.some((item) => item.file_id === fileId)) {
+      fileStore.mMouseSelect(fileId, false, false)
+      fileStore.mSaveFileScrollTo(fileId)
+    } else {
+      message.info('文件已移动或删除，请重新添加快捷方式')
+    }
+    return
+  }
+  await PanDAL.aReLoadOneDirToShow(entry.drive_id, fileId, true)
 }
 const filterTreeData = computed(() => {
   const token = UserDAL.GetUserToken(pantreeStore.user_id || '')
@@ -178,15 +199,17 @@ const filterTreeData = computed(() => {
   const roots = pantreeStore.treeData.filter((item) => !isDriveSidebarKey(String(item.key)))
   const sidebarNodes = entries.map((entry) => {
     const source = nodeMap.get(entry.key)
+    const sourceNode: Partial<TreeNodeData> = source ? { ...source } : {}
+    delete sourceNode.icon
     return {
-      ...(source || {}),
+      ...sourceNode,
       __v_skip: true,
       key: entry.key,
       drive_id: entry.driveId || source?.drive_id,
       parent_file_id: '',
       title: entry.title,
       namesearch: '',
-      icon: entry.icon,
+      iconName: entry.icon,
       children: source?.children || [],
       isLeaf: entry.kind === 'feature' || entry.key === 'pic_root'
     } as TreeNodeData
@@ -203,6 +226,7 @@ const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
   if (!key) return false
   if (isDriveSidebarKey(key)) return false
   if (key.startsWith('search') || key.startsWith('color')) return false
+  if (data.kind === 'file') return false
   if (data.isLeaf === true) {
     // leaf placeholder, but still might be a real folder; only block if no drive_id
   }
@@ -240,7 +264,7 @@ const driveSwitcherLabel = computed(() => {
   try {
     const token = UserDAL.GetUserToken(userId)
     const account = toDriveAccountOption(token)
-    return `${account.providerLabel} · ${account.name}`
+    return account.name
   } catch {
     return '网盘账号'
   }
@@ -371,7 +395,6 @@ const handleOpenDriveLogin = () => {
                   <span v-else>{{ account.providerLabel.slice(0, 1) }}</span>
                 </span>
                 <span>{{ account.name }}</span>
-                <small :title="account.detail">{{ account.detail }}</small>
                 <IconFont v-if="account.user_id === userStore.user_id" name="iconrsuccess" class="current" />
               </button>
               <button type="button" class="pan-drive-menu-remove" :disabled="isSwitchingDrive" :title="`移除 ${account.name}`" :aria-label="`移除 ${account.name}`" @click="handleRemoveDriveAccount(account)">
@@ -424,10 +447,10 @@ const handleOpenDriveLogin = () => {
             @right-click="handleTreeRightClick"
             @scroll="onTreeScroll">
             <template #switcherIcon>
-              <IconFont name="iconarrow-right-2-icon" />
+              <IconFont name="iconarrow-right-2-icon" class="tree-switcher-icon" />
             </template>
             <template #icon="{ dataRef }">
-              <IconFont :name="typeof dataRef.icon === 'string' ? dataRef.icon : getDriveSidebarIcon(String(dataRef.key || ''))" />
+              <IconFont :name="dataRef.iconName || getDriveSidebarIcon(String(dataRef.key || ''))" />
             </template>
             <template #title="{ dataRef }">
               <span
@@ -483,15 +506,16 @@ const handleOpenDriveLogin = () => {
                 :motion="treeMotion"
                 :selected-keys="pantreeStore.treeSelectedKeys"
                 :tree-data="pantreeStore.quickData"
-                @select="(_: any[], e: any) => pantreeStore.mTreeSelected(e, true)">
-                <template #icon>
-                  <IconFont name="iconfile-folder" />
+                @select="(_: any[], e: any) => handleQuickNodeSelect(e)">
+                <template #icon="{ dataRef }">
+                  <IconFont :name="dataRef.iconName || (dataRef.kind === 'file' ? 'iconwenjian' : 'iconfile-folder')" />
                 </template>
                 <template #title="{ dataRef }">
                   <div class="quickitem" @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)" @mouseleave="onTreeNodeLeave">
-                    <span class="quicktitle" :title="dataRef.namesearch">
+                    <span class="quicktitle" :title="dataRef.namesearch || dataRef.title">
                       {{ dataRef.title }}
                     </span>
+                    <span v-if="dataRef.tag" class="quicktag" :style="{ color: dataRef.tagColor || 'var(--text-tertiary)' }">{{ dataRef.tag }}</span>
                     <span class="quickbtn">
                       <a-button type="text" size="mini" title="删除快捷方式" aria-label="删除快捷方式" @click.stop="handleQuickDelete(dataRef.key)">
                         <IconFont name="icondelete" />
@@ -525,6 +549,29 @@ const handleOpenDriveLogin = () => {
 .pan-left .quicktree .iconfont {
   font-size: 17px;
   color: var(--text-secondary);
+}
+
+.pan-left .dirtree .iconfont-svg,
+.pan-left .quicktree .iconfont-svg,
+.pan-left .colortree .iconfont-svg {
+  width: 17px;
+  height: 17px;
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.pan-left .colortree .iconfont-svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pan-left .ant-tree-switcher_open .tree-switcher-icon {
+  transform: rotate(90deg);
+}
+
+.pan-left .tree-switcher-icon {
+  transition: transform 160ms ease;
+  transform-origin: center;
 }
 
 .pan-left .colortree .iconfont {

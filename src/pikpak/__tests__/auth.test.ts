@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, createPikPakDeviceId, getOrCreatePikPakDeviceId, loginPikPak, loginPikPakWithCaptcha, PIKPAK_CAPTCHA_REDIRECT_URI, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
+import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, createPikPakDeviceId, getOrCreatePikPakDeviceId, loginPikPak, loginPikPakWithCaptcha, loginPikPakWithVerifiedCaptcha, PIKPAK_CAPTCHA_REDIRECT_URI, PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
 import { MD5 } from 'crypto-js'
 
 describe('PikPak captcha', () => {
@@ -56,9 +56,9 @@ describe('PikPak captcha', () => {
     expect(meta.captcha_sign.startsWith('1.')).toBe(true)
   })
 
-  it('uses username for login captcha meta exactly like rclone', () => {
-    expect(buildPikPakLoginCaptchaMeta('demo@example.com')).toEqual({ username: 'demo@example.com' })
-    expect(buildPikPakLoginCaptchaMeta('+8613812345678')).toEqual({ username: '+8613812345678' })
+  it('uses the account-specific captcha meta required by PikPak', () => {
+    expect(buildPikPakLoginCaptchaMeta('demo@example.com')).toEqual({ email: 'demo@example.com' })
+    expect(buildPikPakLoginCaptchaMeta('+8613812345678')).toEqual({ phone_number: '+8613812345678' })
     expect(buildPikPakLoginCaptchaMeta(' demo_user ')).toEqual({ username: 'demo_user' })
   })
 
@@ -75,7 +75,7 @@ describe('PikPak captcha', () => {
       action: 'POST:/v1/auth/signin',
       client_id: PIKPAK_PROTOCOL_CLIENT_ID,
       device_id: '0123456789abcdef0123456789abcdef',
-      meta: { username: 'demo@example.com' },
+      meta: { email: 'demo@example.com' },
       redirect_uri: PIKPAK_CAPTCHA_REDIRECT_URI
     })
     const loginRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
@@ -117,6 +117,17 @@ describe('PikPak captcha', () => {
     expect((signInRequest.headers as Record<string, string>)['X-Captcha-Token']).toBe('captcha-verified')
   })
 
+  it('uses the final captcha token captured from the verification response directly', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access', refresh_token: 'refresh', sub: 'account' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loginPikPakWithVerifiedCaptcha('demo@example.com', 'secret', 'captcha-final', '0123456789abcdef0123456789abcdef')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const request = fetchMock.mock.calls[0][1] as RequestInit
+    expect((request.headers as Record<string, string>)['X-Captcha-Token']).toBe('captcha-final')
+  })
+
   it('invalidates captcha_invalid code 4002 and retries login once', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'captcha-1', expires_in: 300 }), { status: 200 }))
@@ -145,5 +156,28 @@ describe('PikPak captcha', () => {
       challengeUrl: 'https://captcha.example/challenge-2'
     })
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('turns rate limiting into a human-readable cooldown without retrying', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: 'request_too_frequent', message: '请求过于频繁' }), { status: 429, headers: { 'Retry-After': '12' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(loginPikPak('demo@example.com', 'secret', '0123456789abcdef0123456789abcdef')).rejects.toMatchObject({
+      code: 'PikPak_RATE_LIMITED',
+      retryAfterSeconds: PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS,
+      message: `PikPak 暂时限制了请求，请等待 ${PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS} 秒后再试`
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('recognizes rate-limit messages on non-429 responses and honors a longer retry delay', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: 'request_too_frequent' }), { status: 400, headers: { 'Retry-After': '45' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(loginPikPak('demo@example.com', 'secret', '0123456789abcdef0123456789abcdef')).rejects.toMatchObject({
+      code: 'PikPak_RATE_LIMITED',
+      retryAfterSeconds: 45
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

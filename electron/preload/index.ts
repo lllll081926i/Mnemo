@@ -168,8 +168,8 @@ window.WebPikPakCaptchaClose = async function() {
     return { ok: false }
   }
 }
-window.WebPikPakCaptchaOnCompleted = function(callback: () => void) {
-  const listener = () => callback()
+window.WebPikPakCaptchaOnCompleted = function(callback: (payload: { captchaToken?: string }) => void) {
+  const listener = (_event: Electron.IpcRendererEvent, payload: { captchaToken?: string }) => callback(payload || {})
   ipcRenderer.on('PikPakCaptcha:completed', listener)
   return () => ipcRenderer.removeListener('PikPakCaptcha:completed', listener)
 }

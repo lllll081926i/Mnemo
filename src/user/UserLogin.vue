@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useUserStore } from '../store'
 import UserDAL from '../user/userdal'
 import message from '../utils/message'
-import { isPikPakCaptchaInvalidError, isPikPakCaptchaRequiredResponse, loginPikPak, loginPikPakWithCaptcha, PikPakCaptchaRequiredError } from '../pikpak/auth'
+import { getPikPakRateLimitRetrySeconds, isPikPakCaptchaInvalidError, isPikPakCaptchaRequiredResponse, loginPikPak, loginPikPakWithCaptcha, loginPikPakWithVerifiedCaptcha, PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, PikPakCaptchaRequiredError } from '../pikpak/auth'
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
@@ -30,6 +30,11 @@ const pikpakCaptchaDeviceId = ref('')
 const pikpakCaptchaExpiresAt = ref(0)
 const pikpakCaptchaOpened = ref(false)
 const pikpakCaptchaCompleted = ref(false)
+const pikpakCaptchaHasVerifiedToken = ref(false)
+const pikpakCooldownUntil = ref(0)
+const pikpakCooldownSeconds = ref(0)
+let pikpakCooldownTimer: number | undefined
+let pikpakAutoLoginQueued = false
 const gofileToken = ref('')
 const gofileLoading = ref(false)
 const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
@@ -44,6 +49,7 @@ const isOAuthProvider = (provider: LoginProvider): provider is OAuthLoginProvide
 const handleModalOpen = () => {
   const stored = localStorage.getItem('login_provider')
   if (loginProviders.includes(stored as LoginProvider)) loginProvider.value = stored as LoginProvider
+  restorePikPakCooldown()
 }
 
 watch(loginProvider, provider => {
@@ -112,10 +118,16 @@ const removeOAuthCallback = window.WebOAuthOnCallback?.(async payload => {
   }
 })
 
-const removePikPakCaptchaCallback = window.WebPikPakCaptchaOnCompleted?.(() => {
+const removePikPakCaptchaCallback = window.WebPikPakCaptchaOnCompleted?.((payload) => {
+  const captchaToken = String(payload?.captchaToken || '')
+  if (captchaToken) {
+    pikpakCaptchaToken.value = captchaToken
+    pikpakCaptchaHasVerifiedToken.value = true
+  }
   pikpakCaptchaOpened.value = true
   pikpakCaptchaCompleted.value = true
-  message.success('PikPak 安全验证已完成，请继续登录')
+  message.success('PikPak 安全验证已完成，正在登录')
+  queuePikPakCaptchaLogin()
 })
 
 onBeforeUnmount(() => {
@@ -124,7 +136,45 @@ onBeforeUnmount(() => {
   void window.WebPikPakCaptchaClose?.()
   cancelOAuthLogins()
   resetPikPakCaptcha()
+  stopPikPakCooldownTimer()
 })
+
+const stopPikPakCooldownTimer = () => {
+  if (pikpakCooldownTimer !== undefined) window.clearInterval(pikpakCooldownTimer)
+  pikpakCooldownTimer = undefined
+}
+
+const updatePikPakCooldown = () => {
+  pikpakCooldownSeconds.value = Math.max(0, Math.ceil((pikpakCooldownUntil.value - Date.now()) / 1000))
+  if (pikpakCooldownSeconds.value > 0) return
+  pikpakCooldownUntil.value = 0
+  localStorage.removeItem('pikpak_login_cooldown_until')
+  stopPikPakCooldownTimer()
+}
+
+const startPikPakCooldown = (seconds: number) => {
+  const cooldownSeconds = Math.max(PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, Math.ceil(seconds || 0))
+  pikpakCooldownUntil.value = Date.now() + cooldownSeconds * 1000
+  localStorage.setItem('pikpak_login_cooldown_until', String(pikpakCooldownUntil.value))
+  stopPikPakCooldownTimer()
+  updatePikPakCooldown()
+  pikpakCooldownTimer = window.setInterval(updatePikPakCooldown, 1000)
+}
+
+const restorePikPakCooldown = () => {
+  const storedUntil = Number(localStorage.getItem('pikpak_login_cooldown_until') || 0)
+  pikpakCooldownUntil.value = Number.isFinite(storedUntil) ? storedUntil : 0
+  stopPikPakCooldownTimer()
+  updatePikPakCooldown()
+  if (pikpakCooldownSeconds.value > 0) pikpakCooldownTimer = window.setInterval(updatePikPakCooldown, 1000)
+}
+
+const clearPikPakCooldown = () => {
+  pikpakCooldownUntil.value = 0
+  pikpakCooldownSeconds.value = 0
+  localStorage.removeItem('pikpak_login_cooldown_until')
+  stopPikPakCooldownTimer()
+}
 
 const resetPikPakCaptcha = () => {
   pikpakCaptchaUrl.value = ''
@@ -133,8 +183,28 @@ const resetPikPakCaptcha = () => {
   pikpakCaptchaExpiresAt.value = 0
   pikpakCaptchaOpened.value = false
   pikpakCaptchaCompleted.value = false
+  pikpakCaptchaHasVerifiedToken.value = false
   pikpakCaptchaOpening.value = false
+  pikpakAutoLoginQueued = false
   void window.WebPikPakCaptchaClose?.()
+}
+
+const queuePikPakCaptchaLogin = () => {
+  if (pikpakAutoLoginQueued || pikpakLoading.value || pikpakCooldownSeconds.value > 0) return
+  pikpakAutoLoginQueued = true
+  window.setTimeout(() => {
+    pikpakAutoLoginQueued = false
+    void submitPikPakCaptchaLogin()
+  }, 0)
+}
+
+const handlePikPakRateLimit = (error: unknown): boolean => {
+  const retryAfterSeconds = getPikPakRateLimitRetrySeconds(error)
+  if (retryAfterSeconds <= 0) return false
+  resetPikPakCaptcha()
+  startPikPakCooldown(retryAfterSeconds)
+  message.error(`PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`)
+  return true
 }
 
 const setPikPakCaptchaChallenge = (error: PikPakCaptchaRequiredError) => {
@@ -144,6 +214,7 @@ const setPikPakCaptchaChallenge = (error: PikPakCaptchaRequiredError) => {
   pikpakCaptchaExpiresAt.value = Date.now() + Math.max(1, error.expiresIn || 300) * 1000
   pikpakCaptchaOpened.value = false
   pikpakCaptchaCompleted.value = false
+  pikpakCaptchaHasVerifiedToken.value = false
 }
 
 const isPikPakCaptchaExpired = () => pikpakCaptchaExpiresAt.value > 0 && Date.now() >= pikpakCaptchaExpiresAt.value
@@ -169,17 +240,21 @@ const openPikPakChallenge = async () => {
 
 const completePikPakLogin = async (token: Awaited<ReturnType<typeof loginPikPak>>) => {
   await UserDAL.UserLogin(token, true)
+  clearPikPakCooldown()
   resetPikPakCaptcha()
   useUser.userShowLogin = false
 }
 
 const submitPikPakLogin = async () => {
-  if (pikpakLoading.value || !pikpakUsername.value.trim() || !pikpakPassword.value) return message.error('请输入 PikPak 账号和密码')
+  if (pikpakLoading.value) return
+  if (pikpakCooldownSeconds.value > 0) return message.warning(`PikPak 暂时不能继续登录，请等待 ${pikpakCooldownSeconds.value} 秒后再试`)
+  if (!pikpakUsername.value.trim() || !pikpakPassword.value) return message.error('请输入 PikPak 账号和密码')
   if (pikpakCaptchaUrl.value) return message.warning('请先完成 PikPak 安全验证')
   pikpakLoading.value = true
   try {
     await completePikPakLogin(await loginPikPak(pikpakUsername.value.trim(), pikpakPassword.value))
   } catch (error: any) {
+    if (handlePikPakRateLimit(error)) return
     if (error instanceof PikPakCaptchaRequiredError || error?.code === 'PikPak_CAPTCHA_REQUIRED') {
       setPikPakCaptchaChallenge(error as PikPakCaptchaRequiredError)
       await openPikPakChallenge()
@@ -192,16 +267,20 @@ const submitPikPakLogin = async () => {
 }
 
 const submitPikPakCaptchaLogin = async () => {
-  if (pikpakLoading.value || !pikpakCaptchaToken.value || !pikpakCaptchaDeviceId.value) return
+  if (pikpakLoading.value) return
+  if (pikpakCooldownSeconds.value > 0) return message.warning(`PikPak 暂时不能继续登录，请等待 ${pikpakCooldownSeconds.value} 秒后再试`)
+  if (!pikpakCaptchaToken.value || !pikpakCaptchaDeviceId.value) return message.error('安全验证信息不完整，请重新登录')
   if (isPikPakCaptchaExpired()) {
     resetPikPakCaptcha()
     return message.error('PikPak 验证已过期，请重新登录')
   }
   pikpakLoading.value = true
   try {
-    const token = await loginPikPakWithCaptcha(pikpakUsername.value.trim(), pikpakPassword.value, pikpakCaptchaToken.value, pikpakCaptchaDeviceId.value)
+    const loginWithCaptcha = pikpakCaptchaHasVerifiedToken.value ? loginPikPakWithVerifiedCaptcha : loginPikPakWithCaptcha
+    const token = await loginWithCaptcha(pikpakUsername.value.trim(), pikpakPassword.value, pikpakCaptchaToken.value, pikpakCaptchaDeviceId.value)
     await completePikPakLogin(token)
   } catch (error: any) {
+    if (handlePikPakRateLimit(error)) return
     if (error instanceof PikPakCaptchaRequiredError || error?.code === 'PikPak_CAPTCHA_REQUIRED') {
       setPikPakCaptchaChallenge(error as PikPakCaptchaRequiredError)
       message.warning('安全验证尚未完成，请在验证窗口完成滑块后再登录')
@@ -294,14 +373,15 @@ const handleClose = () => {
         <form v-if="loginProvider === 'pikpak'" class="login-form pikpak-login-form" @submit.prevent="submitPikPakLogin">
           <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
           <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear />
+          <div v-if="pikpakCooldownSeconds > 0" class="pikpak-login-status">PikPak 暂时限制了登录请求，请等待 {{ pikpakCooldownSeconds }} 秒后再试</div>
           <div v-if="pikpakCaptchaUrl" class="pikpak-captcha-panel">
-            <div class="pikpak-captcha-status">{{ pikpakCaptchaCompleted ? '安全验证已完成，请继续登录' : pikpakCaptchaOpened ? '验证窗口已打开，请完成滑块' : '需要完成安全验证' }}</div>
+            <div class="pikpak-captcha-status">{{ pikpakCaptchaCompleted ? '安全验证已完成，正在登录' : pikpakCaptchaOpened ? '验证窗口已打开，完成后将自动登录' : '需要完成安全验证' }}</div>
             <div class="pikpak-captcha-actions">
-              <a-button type="secondary" long :loading="pikpakCaptchaOpening" @click.prevent="openPikPakChallenge">重新打开验证</a-button>
-              <a-button type="primary" long :loading="pikpakLoading" @click.prevent="submitPikPakCaptchaLogin">已完成验证并登录</a-button>
+              <a-button type="secondary" long :loading="pikpakCaptchaOpening" :disabled="pikpakLoading || pikpakCooldownSeconds > 0" @click.prevent="openPikPakChallenge">重新打开验证</a-button>
+              <a-button type="primary" long :loading="pikpakLoading" :disabled="pikpakCooldownSeconds > 0" @click.prevent="submitPikPakCaptchaLogin">重新尝试登录</a-button>
             </div>
           </div>
-          <a-button v-else html-type="submit" type="primary" long :loading="pikpakLoading">添加 PikPak 账号</a-button>
+          <a-button v-else html-type="submit" type="primary" long :loading="pikpakLoading" :disabled="pikpakCooldownSeconds > 0">{{ pikpakCooldownSeconds > 0 ? `${pikpakCooldownSeconds} 秒后可重试` : '添加 PikPak 账号' }}</a-button>
         </form>
         <div v-else-if="isOAuthProvider(loginProvider)" class="login-form oauth-login"><a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">在 Mnemo 中登录</a-button></div>
         <form v-else-if="loginProvider === 'gofile'" class="login-form" @submit.prevent="submitGofileLogin"><a-input-password v-model="gofileToken" placeholder="GoFile Account API Token" allow-clear /><a-button html-type="submit" type="primary" long :loading="gofileLoading">登录 GoFile</a-button></form>
@@ -333,6 +413,7 @@ const handleClose = () => {
 .pikpak-captcha-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--color-border-2); border-radius: 6px; background: var(--color-fill-1); }
 .pikpak-captcha-status { color: var(--color-text-2); font-size: 13px; line-height: 20px; text-align: center; }
 .pikpak-captcha-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.pikpak-login-status { padding: 9px 10px; color: rgb(var(--warning-6)); background: var(--color-warning-light-1); border: 1px solid var(--color-warning-light-3); border-radius: 6px; font-size: 13px; line-height: 20px; }
 .oauth-login { align-items: stretch; }
 .s3-login-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; width: 330px; margin: 28px auto 0; }
 .wide { grid-column: 1 / -1; }
