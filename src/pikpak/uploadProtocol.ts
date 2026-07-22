@@ -25,7 +25,7 @@ export interface PikPakUploadCreateResponse {
 
 export const normalizePikPakOssEndpoint = (endpoint: string) => {
   const normalized = endpoint.replace(/^https?:\/\//, '').replace(/\/$/, '')
-  return normalized.endsWith('.mypikpak.net') ? 'mypikpak.net' : normalized
+  return normalized.endsWith('.mypikpak.net') || normalized.endsWith('.mypikpak.com') ? 'mypikpak.com' : normalized
 }
 
 export const buildPikPakUploadBody = (parentId: string, name: string, size: number, gcid: string) => ({
@@ -34,8 +34,8 @@ export const buildPikPakUploadBody = (parentId: string, name: string, size: numb
   size,
   hash: gcid,
   upload_type: 'UPLOAD_TYPE_RESUMABLE',
-  objProvider: { provider: 'UPLOAD_TYPE_UNKNOWN' },
-  parent_id: parentId === 'pikpak_root' || parentId.includes('root') ? undefined : parentId,
+  resumable: { provider: 'PROVIDER_ALIYUN' },
+  parent_id: parentId === 'pikpak_root' || parentId === 'root' ? undefined : parentId,
   folder_type: 'NORMAL'
 })
 

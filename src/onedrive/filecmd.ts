@@ -15,21 +15,27 @@ const getOneDriveToken = async (user_id: string) => {
 const graphJson = async <T>(user_id: string, path: string, method: string, body: any, fallback: string): Promise<{ data?: T; error: string }> => {
   const token = await getOneDriveToken(user_id)
   if (!token?.access_token) return { error: '未登录 OneDrive' }
-  const resp = await fetch(`${GRAPH_API_HOST}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token.access_token}`,
-      'Content-Type': 'application/json'
-    },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  })
-  const data = await resp.json().catch(() => undefined)
-  if (!resp.ok || data?.error) {
-    const error = data?.error?.message || fallback
-    message.error(error)
-    return { error }
+  try {
+    const resp = await fetch(`${GRAPH_API_HOST}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    })
+    const data = await resp.json().catch(() => undefined)
+    if (!resp.ok || data?.error) {
+      const error = data?.error?.message || fallback
+      message.error(error)
+      return { error }
+    }
+    return { data: data as T, error: '' }
+  } catch (error: any) {
+    const errorMessage = error?.message || fallback
+    message.error(errorMessage)
+    return { error: errorMessage }
   }
-  return { data: data as T, error: '' }
 }
 
 export const buildOneDriveMkdirBody = (name: string) => ({

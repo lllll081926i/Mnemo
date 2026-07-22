@@ -1,6 +1,6 @@
 import { IAliGetDirModel } from '../aliapi/alimodels'
 import AliFile from '../aliapi/file'
-import AliDirFileList, { NewIAliFileResp } from '../aliapi/dirfilelist'
+import { NewIAliFileResp } from '../aliapi/dirfilelist'
 import { ITokenInfo, useFootStore, usePanFileStore } from '../store'
 import TreeStore, { IDriverModel, TreeNodeData } from '../store/treestore'
 import DB from '../utils/db'
@@ -12,9 +12,9 @@ import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelis
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, isS3Drive, listS3Directory } from '../utils/s3Client'
 import { OrderDir } from '../utils/filenameorder'
-import { resolveDriveProvider } from '../utils/driveProvider'
+import { isDriveProviderRootId, resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
-import { apiDropboxFileList, mapDropboxFileToAliModel } from '../dropbox/dirfilelist'
+import { apiDropboxFileList, mapDropboxFileToAliModel, resolveDropboxParentIdFromPath } from '../dropbox/dirfilelist'
 import { apiGoogleDriveFileList, apiGoogleDriveSearch, apiGoogleDriveTrash, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
 import { apiGofileFileList, mapGofileItemToAliModel } from '../gofile/dirfilelist'
 import { apiOneDriveSearch } from '../onedrive/search'
@@ -142,53 +142,6 @@ export default class PanDAL {
     }
   }
 
-  static async aReLoadBackupDrive(token: ITokenInfo): Promise<void> {
-    const { user_id, backup_drive_id: drive_id } = token
-    if (!user_id || !drive_id) return
-    const backupCache = await DB.getValueObject('AllDir_' + drive_id)
-    if (backupCache) {
-      console.log('aReLoadDrive backupCache')
-      await TreeStore.ConvertToOneDriver(user_id, drive_id, backupCache as IAliGetDirModel[], false, true)
-    }
-    if (backupCache) {
-      const dt = await DB.getValueNumber('AllDir_' + drive_id)
-      if (Date.now() - dt < 1000 * 60 * 60) {
-        return
-      }
-    }
-    useFootStore().mSaveLoading('加载全部文件夹...')
-    window.WinMsgToUpload({ cmd: 'AllDirList', user_id, drive_id: drive_id, drive_root: 'backup_root' })
-  }
-
-  static async aReLoadResourceDrive(token: ITokenInfo): Promise<void> {
-    const { user_id, resource_drive_id } = token
-    if (!user_id || !resource_drive_id) return
-    const resourceCache = await DB.getValueObject('AllDir_' + resource_drive_id)
-    if (resourceCache) {
-      console.log('aReLoadDrive resourceCache')
-      await TreeStore.ConvertToOneDriver(user_id, resource_drive_id, resourceCache as IAliGetDirModel[], false, true)
-    }
-    if (resourceCache) {
-      const dt = await DB.getValueNumber('AllDir_' + resource_drive_id)
-      if (Date.now() - dt < 1000 * 60 * 60) {
-        return
-      }
-    }
-    useFootStore().mSaveLoading('加载全部文件夹...')
-    window.WinMsgToUpload({ cmd: 'AllDirList', user_id, drive_id: resource_drive_id, drive_root: 'resource_root' })
-  }
-
-  static async aReLoadDriveSave(OneDriver: IDriverModel, error: string): Promise<void> {
-    if (error == 'time') return
-    if (!error) {
-      await TreeStore.SaveOneDriver(OneDriver)
-      PanDAL.RefreshPanTreeAllNode(OneDriver.drive_id)
-    } else {
-      message.error('列出全盘文件夹失败' + error)
-    }
-    useFootStore().mSaveLoading('')
-  }
-
   static RefreshPanTreeAllNode(drive_id: string) {
     const OneDriver = TreeStore.GetDriver(drive_id)
     if (!OneDriver) return
@@ -238,11 +191,11 @@ export default class PanDAL {
   static async aReLoadOneDirToShow(drive_id: string, file_id: string, selfExpand: boolean, album_id: string = ''): Promise<boolean> {
     const panTreeStore = usePanTreeStore()
     const user_id = panTreeStore.user_id
-    const driveType = GetDriveType(user_id, drive_id)
     const isBack = file_id == 'back'
     if (!drive_id) {
       drive_id = GetDriveID(user_id, file_id) || panTreeStore.drive_id
     }
+    const driveType = GetDriveType(user_id, drive_id)
     panTreeStore.drive_id = drive_id
     if (file_id == 'refresh') {
       file_id = panTreeStore.selectDir.file_id
@@ -268,8 +221,9 @@ export default class PanDAL {
     }
     let dir = TreeStore.GetDir(drive_id, file_id)
     let dirPath = TreeStore.GetDirPath(drive_id, file_id)
-    if (!dir || (dirPath.length == 0 && !file_id.includes('root'))) {
-      if (file_id.includes('root')) {
+    const isRoot = isDriveProviderRootId({ userId: user_id, driveId: drive_id }, file_id) || file_id === driveType.key
+    if (!dir || (dirPath.length == 0 && !isRoot)) {
+      if (isRoot) {
         const driveType = GetDriveType(user_id, drive_id)
         dir = {
           __v_skip: true,
@@ -284,11 +238,9 @@ export default class PanDAL {
         } as IAliGetDirModel
         dirPath = [dir]
       } else {
-        let findPath = []
+        let findPath: IAliGetDirModel[] = []
         if (!album_id) {
           findPath = await AliFile.ApiFileGetPath(panTreeStore.user_id, drive_id, file_id)
-        } else {
-          findPath = []
         }
         if (findPath.length > 0) {
           dirPath = findPath
@@ -296,7 +248,7 @@ export default class PanDAL {
         }
       }
     }
-    if (!dir || (dirPath.length == 0 && !file_id.includes('root'))) {
+    if (!dir || (dirPath.length == 0 && !isRoot)) {
       message.error('出错，找不到指定的文件夹 ' + file_id)
       return false
     }
@@ -347,15 +299,15 @@ export default class PanDAL {
         const loadItems = async () => {
           if (provider === 'onedrive') {
             const list = isSearch ? await apiOneDriveSearch(user_id, keyword) : await apiOneDriveFileList(user_id, dirID)
-            return list.map((item) => mapOneDriveItemToAliModel(item, drive_id, isSearch ? rootKey : dirID))
+            return list.map((item) => mapOneDriveItemToAliModel(item, drive_id, isSearch ? item.parentReference?.id || rootKey : dirID))
           }
           if (provider === 'dropbox') {
             const list = isSearch ? await apiDropboxSearch(user_id, keyword) : await apiDropboxFileList(user_id, dirID)
-            return list.map((item) => mapDropboxFileToAliModel(item, drive_id, isSearch ? rootKey : dirID))
+            return list.map((item) => mapDropboxFileToAliModel(item, drive_id, isSearch ? resolveDropboxParentIdFromPath(item.path_lower || item.path_display) : dirID))
           }
           if (provider === 'gdrive') {
             const list = isSearch ? await apiGoogleDriveSearch(user_id, keyword) : isTrash ? await apiGoogleDriveTrash(user_id) : await apiGoogleDriveFileList(user_id, dirID)
-            return list.map((item) => mapGoogleDriveItemToAliModel(item, drive_id, isSearch || isTrash ? rootKey : dirID))
+            return list.map((item) => mapGoogleDriveItemToAliModel(item, drive_id, isSearch || isTrash ? item.parents?.[0] || rootKey : dirID))
           }
           return (await apiGofileFileList(user_id, dirID)).map((item) => mapGofileItemToAliModel(item, drive_id, dirID))
         }
@@ -493,32 +445,9 @@ export default class PanDAL {
         return
       }
 
-      const order = TreeStore.GetDirOrder(drive_id, dirID).replace('ext ', 'updated_at ')
-      AliDirFileList.ApiDirFileList(user_id, drive_id, dirID, dirName, order, hasFiles ? '' : 'folder', albumID)
-        .then((dir) => {
-          if (!dir.next_marker) {
-            dir.dirID = dirID // 修复root
-            TreeStore.SaveOneDirFileList(dir, hasFiles).then(() => {
-              if (hasFiles) {
-                usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, dir.items, dir.itemsTotal || 0)
-              }
-              PanDAL.RefreshPanTreeAllNode(drive_id)
-              resolve(true)
-            })
-          } else if (dir.next_marker == 'cancel') {
-            resolve(false)
-          } else {
-            message.warning('列出文件夹失败 ' + dir.next_marker)
-            if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-            resolve(false)
-          }
-        })
-        .catch((err: any) => {
-          if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
-          message.warning('列出文件夹失败 ' + (err.message || ''))
-          DebugLog.mSaveWarning('列出文件夹失败file_id=' + dirID, err)
-          resolve(false)
-        })
+      if (hasFiles) usePanFileStore().mSaveDirFileLoadingFinish(drive_id, dirID, [])
+      message.warning('当前网盘不支持列出该目录')
+      resolve(false)
     })
   }
 
@@ -629,25 +558,7 @@ export default class PanDAL {
     usePanTreeStore().mSaveQuick(arr)
   }
 
-  static async aUpdateDirFileSize(drive_id: string): Promise<void> {
-    const pantreeStore = usePanTreeStore()
-    const user_id = pantreeStore.user_id
-
-    const diridList = TreeStore.GetDirSizeNeedRefresh(drive_id, 604800)
-    const partList: string[] = []
-    for (let i = 0, maxi = diridList.length; i < maxi; i++) {
-      partList.push(diridList[i])
-      if (partList.length >= 30) {
-        const partResult = await AliDirFileList.ApiDirFileSize(user_id, drive_id, partList)
-        if (!partResult) return
-        if (partResult) TreeStore.SaveDirSizeNeedRefresh(drive_id, partResult)
-        partList.length = 0
-      }
-    }
-    if (partList.length > 0) {
-      const partResult = await AliDirFileList.ApiDirFileSize(user_id, drive_id, partList)
-      if (partResult) TreeStore.SaveDirSizeNeedRefresh(drive_id, partResult)
-      partList.length = 0
-    }
+  static async aUpdateDirFileSize(_drive_id: string): Promise<void> {
+    // Folder size batch APIs were Aliyun-only; active providers skip size refresh.
   }
 }

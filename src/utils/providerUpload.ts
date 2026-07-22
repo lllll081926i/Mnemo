@@ -37,8 +37,26 @@ export const readProviderUploadSlice = async (handle: FileHandle, start: number,
 }
 
 export const recordProviderUploadProgress = async (fileui: IUploadingUI, delta: number, position: number) => {
-  const { default: AliUploadDisk } = await import('../aliapi/uploaddisk')
-  AliUploadDisk.RecordUploadProgress(fileui.UploadID, delta, position)
+  const { recordUploadProgress } = await import('./uploadProgress')
+  recordUploadProgress(fileui.UploadID, delta, position)
+}
+
+export const fetchCancellableProviderUpload = async (fileui: IUploadingUI, input: string | URL, init: RequestInit = {}): Promise<Response> => {
+  if (!fileui.IsRunning) throw new DOMException('已暂停', 'AbortError')
+  const controller = new AbortController()
+  const sourceSignal = init.signal
+  const abortFromSource = () => controller.abort(sourceSignal?.reason)
+  if (sourceSignal?.aborted) abortFromSource()
+  else sourceSignal?.addEventListener('abort', abortFromSource, { once: true })
+  const monitor = setInterval(() => {
+    if (!fileui.IsRunning) controller.abort('已暂停')
+  }, 100)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearInterval(monitor)
+    sourceSignal?.removeEventListener('abort', abortFromSource)
+  }
 }
 
 export const computeProviderFileHashes = async (fileui: IUploadingUI, algorithms: ProviderHashAlgorithm[]): Promise<{ hashes: Partial<Record<ProviderHashAlgorithm, string>>; error: string }> => {

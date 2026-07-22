@@ -9,6 +9,15 @@ describe('OneDrive share helpers', () => {
     })
   })
 
+  it('adds password and expiration fields supported by OneDrive createLink', () => {
+    expect(buildOneDriveCreateLinkBody('2026-08-01T00:00:00.000Z', '1234')).toEqual({
+      type: 'view',
+      scope: 'anonymous',
+      password: '1234',
+      expirationDateTime: '2026-08-01T00:00:00.000Z'
+    })
+  })
+
   it('maps Graph permission into app share item', () => {
     const item = mapOneDrivePermissionToAliShareItem({
       id: 'perm-id',

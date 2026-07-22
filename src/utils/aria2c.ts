@@ -1,5 +1,3 @@
-import { IAliFileResp } from '../aliapi/dirfilelist'
-
 import Aria2 from 'aria2-lib'
 import axios from 'axios'
 import DownDAL, { IAriaDownProgress, IStateDownFile } from '../down/DownDAL'
@@ -8,13 +6,14 @@ import UserDAL from '../user/userdal'
 import { useFootStore, useSettingStore } from '../store'
 import DebugLog from './debuglog'
 import Config from '../config'
-import AliTrash from '../aliapi/trash'
+import { listProviderDirChildren } from './providerDirList'
 
 import path from 'path'
 import fs from 'fs'
 import { getRawUrl } from './proxyhelper'
 import { callAriaClient, getAriaAddUriGid, isAriaDuplicateGidError } from './aria2Rpc'
 import { buildAriaAddOptions } from '../down/integration/aria2AddOptions'
+import { isDriveProviderSessionUsable } from './driveProvider'
 
 export const localPwd = 'S4znWTaZYQi3cpRNb'
 
@@ -373,7 +372,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
     const token = UserDAL.GetUserToken(info.user_id)
     const sourceType = info.sourceType || ''
     const isExternalSource = sourceType === 'url'
-    if ((!token || !token.access_token) && !isExternalSource) return '账号失效，操作取消'
+    if (!isExternalSource && !isDriveProviderSessionUsable(token, { userId: info.user_id, driveId: info.drive_id })) return '账号失效，操作取消'
     if (info.isDir) {
       const dirFull = path.join(info.DownSavePath, info.name)
       if (!info.ariaRemote) {
@@ -390,28 +389,15 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
           return errorMessage
         }
       }
-      const dirInfo: IAliFileResp = {
-        items: [],
-        itemsKey: new Set(),
-        punished_file_count: 0,
-        next_marker: '',
-        m_user_id: info.user_id,
-        m_drive_id: info.drive_id,
-        dirID: info.file_id,
-        dirName: info.name
+      if (file.Down.IsStop) return '已暂停'
+      try {
+        const children = await listProviderDirChildren(info.user_id, info.drive_id, info.file_id)
+        if (file.Down.IsStop) return '已暂停'
+        if (children.length > 0) DownDAL.aAddDownload(children, dirFull, false, info.user_id)
+      } catch (error: any) {
+        DebugLog.mSaveLog('danger', 'AriaAddUrl 列出子文件失败：' + (error?.message || ''), error)
+        return '解析子文件列表失败，稍后重试'
       }
-      do {
-        const isGet = await AliTrash.ApiFileListOnePageAria('name', 'ASC', dirInfo)
-        if (!isGet) return '解析子文件列表失败，稍后重试'
-        if (file.Down.IsStop) {
-          dirInfo.items.length = 0
-          return '已暂停'
-        }
-        if (dirInfo.items.length > 0) {
-          DownDAL.aAddDownload(dirInfo.items, dirFull, false)
-          dirInfo.items.length = 0
-        }
-      } while (dirInfo.next_marker)
       return 'downed'
     } else {
       const dirPath = info.DownSavePath

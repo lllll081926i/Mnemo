@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildDropboxCreateSharedLinkBody,
+  buildDropboxModifySharedLinkBody,
   mapDropboxSharedLinkToAliShareItem,
   normalizeDropboxSharedLinkUrl,
   toDropboxShareExpiration
@@ -22,6 +23,18 @@ describe('Dropbox share helpers', () => {
         expires: '2026-06-01T08:00:00Z'
       }
     })
+  })
+
+  it('builds a settings update for an existing shared link', () => {
+    expect(buildDropboxModifySharedLinkBody('https://dropbox/link', '2026-06-01T08:00:00.000Z', '1234')).toEqual({
+      url: 'https://dropbox/link',
+      settings: {
+        requested_visibility: 'password',
+        link_password: '1234',
+        expires: '2026-06-01T08:00:00Z'
+      }
+    })
+    expect(buildDropboxModifySharedLinkBody('https://dropbox/link', '', '')).toBeUndefined()
   })
 
   it('normalizes the app expiration value to Dropbox seconds precision', () => {

@@ -1,12 +1,10 @@
 import { IAliGetFileModel } from '../../aliapi/alimodels'
 import AliFile from '../../aliapi/file'
 import AliFileCmd from '../../aliapi/filecmd'
-import { IAliFileResp, NewIAliFileResp } from '../../aliapi/dirfilelist'
-import AliTrash from '../../aliapi/trash'
-import { IPageVideoXBT } from '../../store/appstore'
+
 import DebugLog from '../../utils/debuglog'
 import message from '../../utils/message'
-import { modalCopyFileTree, modalCreatNewShareLink, modalDownload, modalM3U8Download, modalPassword, modalSearchPan, modalSelectPanDir, modalUpload } from '../../utils/modal'
+import { modalCreatNewShareLink, modalDownload, modalPassword, modalSearchPan, modalSelectPanDir, modalUpload } from '../../utils/modal'
 import { ArrayKeyList } from '../../utils/utils'
 import PanDAL from '../pandal'
 import usePanTreeStore from '../pantreestore'
@@ -24,7 +22,8 @@ import { h } from 'vue'
 import { getWebDavConnection, getWebDavConnectionId, uploadWebDavLocalPaths } from '../../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, uploadS3LocalPaths } from '../../utils/s3Client'
 import UserDAL from '../../user/userdal'
-import { getDriveProviderCapabilities, getDriveProviderLabel, resolveDriveProvider } from '../../utils/driveProvider'
+import { getDriveProviderCapabilities, getDriveProviderLabel, isDriveProviderRootId, resolveDriveProvider } from '../../utils/driveProvider'
+import { listProviderTrashItems } from '../../utils/providerDirList'
 
 const topbtnLock = new Set()
 
@@ -152,6 +151,11 @@ export function menuDownload(istree: boolean, tips: boolean = true) {
     message.error('下载操作失败 父文件夹错误')
     return
   }
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  if (!capabilities.download) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持下载`)
+    return
+  }
   if (selectedData.isErrorSelected) {
     message.error('没有可以下载的文件')
     return
@@ -253,7 +257,12 @@ export async function menuTrashSelectFile(istree: boolean, isDelete: boolean, is
     message.error('请不要在放映室里删除文件')
     return
   }
-  console.log('selectedData', selectedData)
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  const canPermanentlyDelete = capabilities.permanentDelete || (selectedData.dirID === 'trash' && capabilities.trashPurge)
+  if ((isDelete && !canPermanentlyDelete) || (!isDelete && !capabilities.recycleBin)) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持${isDelete ? '彻底删除' : '放入回收站'}`)
+    return
+  }
   if (topbtnLock.has('menuTrashSelectFile')) return
   topbtnLock.add('menuTrashSelectFile')
   try {
@@ -313,7 +322,7 @@ export async function topRestoreSelectedFile() {
     const pset = new Set<string>()
     for (let i = 0, maxi = dirList.length; i < maxi; i++) {
       let parent_file_id = dirList[i].parent_file_id
-      if (parent_file_id.includes('root')) parent_file_id = 'root'
+      if (isDriveProviderRootId({ userId: selectedData.user_id, driveId: selectedData.drive_id }, parent_file_id)) parent_file_id = 'root'
       if (pset.has(parent_file_id)) continue
       pset.add(parent_file_id)
       await PanDAL.aReLoadOneDirToRefreshTree(selectedData.user_id, selectedData.drive_id, parent_file_id)
@@ -334,6 +343,12 @@ export function menuCopySelectedFile(istree: boolean, copyby: string) {
   }
   if (selectedData.dirID.startsWith('video')) {
     message.error('请不要在放映室里移动文件文件')
+    return
+  }
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  const isCopy = copyby === 'copy'
+  if ((isCopy && !capabilities.copy) || (!isCopy && !capabilities.move)) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持${isCopy ? '复制' : '移动'}`)
     return
   }
 
@@ -403,6 +418,11 @@ export function dropMoveSelectedFile(drive_id: string, movetodirid: string, istr
     message.error('复制移动操作失败 父文件夹错误！')
     return
   }
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  if (!capabilities.move) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持移动`)
+    return
+  }
 
   if (selectedData.dirID == 'trash') {
     message.error('回收站内文件不支持移动！')
@@ -437,7 +457,7 @@ export function dropMoveSelectedFile(drive_id: string, movetodirid: string, istr
 
   let to_drive_id = drive_id || selectedData.drive_id
   // 获取父节点
-  if (movetodirid.includes('root')) {
+  if (isDriveProviderRootId({ userId: selectedData.user_id, driveId: drive_id }, movetodirid)) {
     to_drive_id = GetDriveID(selectedData.user_id, movetodirid)
     movetodirid = 'root'
   }
@@ -546,6 +566,11 @@ export function menuCreatShare(istree: boolean, shareby: string, driveType: stri
     message.error('创建分享操作失败 父文件夹错误')
     return
   }
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  if (!capabilities.createShare) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持创建分享链接`)
+    return
+  }
 
   let list: IAliGetFileModel[] = []
   if (istree) {
@@ -601,43 +626,15 @@ export function menuCreatShare(istree: boolean, shareby: string, driveType: stri
   }
 }
 
-export async function topFavorDeleteAll() {
-  const selectedData = PanDAL.GetPanSelectedData(false)
-  if (selectedData.isError) {
-    message.error('清空收藏夹操作失败 父文件夹错误')
-    return
-  }
-  if (topbtnLock.has('topFavorDeleteAll')) return
-  topbtnLock.add('topFavorDeleteAll')
-  try {
-    const loadingKey = 'cleartrash_' + Date.now().toString()
-    message.loading('清空收藏夹执行中...', 60, loadingKey)
-    let count = 0
-    while (true) {
-      const resp: IAliFileResp = NewIAliFileResp(selectedData.user_id, selectedData.drive_id, 'favorite', '收藏夹')
-      await AliTrash.ApiFavorFileListOnePageForClean('updated_at', 'DESC', resp)
-      if (resp.items.length > 0) {
-        const selectkeys = ArrayKeyList<string>('file_id', resp.items)
-        const successList = await AliFileCmd.ApiFavorBatch(selectedData.user_id, selectedData.drive_id, false, false, selectkeys)
-        count += successList.length
-        message.loading('清空收藏夹执行中...(' + count.toString() + ')', 60, loadingKey)
-      } else {
-        break
-      }
-    }
-    message.success('清空收藏夹 成功!', 3, loadingKey)
-    if (usePanTreeStore().selectDir.file_id == 'favorite') PanDAL.aReLoadOneDirToShow('', 'refresh', false)
-  } catch (err: any) {
-    message.error(err.message)
-    DebugLog.mSaveDanger('topFavorDeleteAll', err)
-  }
-  topbtnLock.delete('topFavorDeleteAll')
-}
-
 export async function topTrashDeleteAll() {
   const selectedData = PanDAL.GetPanSelectedData(false)
   if (selectedData.isError) {
     message.error('清空回收站操作失败 父文件夹错误')
+    return
+  }
+  const capabilities = getDriveProviderCapabilities({ userId: selectedData.user_id, driveId: selectedData.drive_id })
+  if (!capabilities.trashPurge) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持清空回收站`)
     return
   }
 
@@ -647,20 +644,21 @@ export async function topTrashDeleteAll() {
   try {
     message.loading('清空回收站执行中...', 60, loadingKey)
     let count = 0
+    let failed = false
     while (true) {
-      const resp: IAliFileResp = NewIAliFileResp(selectedData.user_id, selectedData.drive_id, 'trash', '回收站')
-      await AliTrash.ApiTrashFileListOnePageForClean('updated_at', 'DESC', resp)
-      if (resp.items.length > 0) {
-        const selectkeys = ArrayKeyList<string>('file_id', resp.items)
-        const successList = await AliFileCmd.ApiTrashCleanBatch(selectedData.user_id, selectedData.drive_id, false, selectkeys)
-        count += successList.length
-
-        message.loading('清空回收站执行中...(' + count.toString() + ')', 0, loadingKey)
-      } else {
+      const items = await listProviderTrashItems(selectedData.user_id, selectedData.drive_id)
+      if (items.length === 0) break
+      const selectkeys = ArrayKeyList<string>('file_id', items)
+      const successList = await AliFileCmd.ApiTrashCleanBatch(selectedData.user_id, selectedData.drive_id, false, selectkeys)
+      if (successList.length === 0) {
+        message.error('清空回收站失败，请稍后重试', 3, loadingKey)
+        failed = true
         break
       }
+      count += successList.length
+      message.loading('清空回收站执行中...(' + count.toString() + ')', 0, loadingKey)
     }
-    message.success('清空回收站 成功!', 3, loadingKey)
+    if (!failed) message.success(count > 0 ? '清空回收站 成功!' : '回收站已为空', 3, loadingKey)
     if (usePanTreeStore().selectDir.file_id == 'trash') PanDAL.aReLoadOneDirToShow('', 'refresh', false)
   } catch (err: any) {
     message.error(err.message, 3, loadingKey)
@@ -679,6 +677,11 @@ export async function topSearchAll(word: string, inputsearchType: string[]) {
   const pantreeStore = usePanTreeStore()
   if (!pantreeStore.user_id || !pantreeStore.selectDir.file_id) {
     message.error('搜索失败 父文件夹错误')
+    return
+  }
+  const capabilities = getDriveProviderCapabilities({ userId: pantreeStore.user_id, driveId: pantreeStore.drive_id })
+  if (!capabilities.search) {
+    message.error(`${getDriveProviderLabel(capabilities.provider)} 不支持全盘搜索`)
     return
   }
   const keyword = word.trim()
@@ -705,38 +708,6 @@ export async function menuJumpToDir() {
   })
 }
 
-export function menuVideoXBT() {
-  const first = usePanFileStore().GetSelectedFirst()
-  if (!first) {
-    message.error('没有选中任何文件')
-    return
-  }
-  if (first.description && first.description.includes('mnemoEncrypt')) {
-    message.error('加密视频无法获取雪碧图')
-    return
-  }
-  if (first.icon == 'iconweifa') {
-    message.error('违规视频无法预览')
-    return
-  }
-  const pageVideoXBT: IPageVideoXBT = {
-    user_id: usePanTreeStore().user_id,
-    drive_id: first.drive_id,
-    file_id: first.file_id,
-    file_name: first.name
-  }
-  window.WebOpenWindow({ page: 'PageVideoXBT', data: pageVideoXBT, theme: 'dark' })
-}
-
-export function menuM3U8Download() {
-  const first = usePanFileStore().GetSelectedFirst()
-  if (!first) {
-    message.error('没有选中任何文件')
-    return
-  }
-  modalM3U8Download()
-}
-
 export function menuCopyFileName() {
   const list: IAliGetFileModel[] = usePanFileStore().GetSelected()
   if (list.length == 0) {
@@ -759,13 +730,4 @@ export function menuCopyFileName() {
     DebugLog.mSaveDanger('menuCopyFileName', err)
   }
   topbtnLock.delete('menuCopyFileName')
-}
-
-export function menuCopyFileTree() {
-  const list: IAliGetFileModel[] = usePanFileStore().GetSelected()
-  if (list.length == 0) {
-    message.error('没有选中任何文件！')
-    return
-  }
-  modalCopyFileTree(list)
 }

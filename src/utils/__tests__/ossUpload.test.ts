@@ -1,6 +1,6 @@
 import type { FileHandle } from 'fs/promises'
 import { describe, expect, it, vi } from 'vitest'
-import { buildOssAuthorization, buildOssCanonicalResource, buildOssObjectUrl, type OssUploadCredentials } from '../ossUpload'
+import { buildPikPakS3ClientConfig, type OssUploadCredentials } from '../ossUpload'
 import { readProviderUploadSlice } from '../providerUpload'
 
 const credentials: OssUploadCredentials = {
@@ -12,15 +12,13 @@ const credentials: OssUploadCredentials = {
   securityToken: 'token'
 }
 
-describe('shared OSS upload protocol', () => {
-  it('builds bucket-hosted URLs and canonical resources', () => {
-    expect(buildOssCanonicalResource(credentials, 'uploads')).toBe('/b/folder/a.txt?uploads')
-    expect(buildOssObjectUrl(credentials, 'uploads')).toBe('https://b.oss.example.com/folder/a.txt?uploads')
-  })
-
-  it('produces a stable OSS v1 signature', () => {
-    const simple = { ...credentials, objectPath: 'a.txt' }
-    expect(buildOssAuthorization('PUT', simple, 'Mon, 01 Jan 2024 00:00:00 GMT', 'application/octet-stream')).toBe('OSS id:Ncmb4iP+/emsuhju/1tNpLjUF1k=')
+describe('PikPak S3 upload protocol', () => {
+  it('uses the SigV4 endpoint and region from the bundled rclone backend', () => {
+    expect(buildPikPakS3ClientConfig(credentials)).toEqual({
+      endpoint: 'https://mypikpak.com',
+      region: 'pikpak',
+      credentials: { accessKeyId: 'id', secretAccessKey: 'secret', sessionToken: 'token' }
+    })
   })
 
   it('fills a requested upload slice across partial filesystem reads', async () => {

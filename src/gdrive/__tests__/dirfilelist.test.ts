@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as GoogleClient from '../client'
 import { GOOGLE_FOLDER_MIME, apiGoogleDriveFileList, apiGoogleDriveSearch, mapGoogleDriveItemToAliModel } from '../dirfilelist'
 import { apiGoogleDriveCopyBatch, apiGoogleDriveDeleteBatch, apiGoogleDriveRestoreBatch } from '../filecmd'
+import { buildGoogleDriveUploadContentHeaders } from '../upload'
 
 describe('Google Drive file mapping', () => {
   it('maps folders and media without losing the account-scoped drive id', () => {
@@ -22,6 +23,16 @@ describe('Google Drive file mapping', () => {
 
     expect(request).toHaveBeenNthCalledWith(1, 'gdrive_account-a', '/files/file%20one?supportsAllDrives=true', { method: 'PATCH', body: JSON.stringify({ trashed: false }) })
     expect(request).toHaveBeenNthCalledWith(2, 'gdrive_account-a', '/files/file%20two?supportsAllDrives=true', { method: 'DELETE' })
+    request.mockRestore()
+  })
+
+  it('preserves successful ids when a Google Drive batch item fails', async () => {
+    const request = vi.spyOn(GoogleClient, 'googleDriveRequest')
+      .mockResolvedValueOnce({} as any)
+      .mockRejectedValueOnce(new Error('rate limited'))
+      .mockResolvedValueOnce({} as any)
+
+    await expect(apiGoogleDriveDeleteBatch('gdrive_account-a', ['first', 'failed', 'last'])).resolves.toEqual(['first', 'last'])
     request.mockRestore()
   })
 
@@ -55,5 +66,11 @@ describe('Google Drive file mapping', () => {
     const searchPath = request.mock.calls[0][1] as string
     expect(new URLSearchParams(searchPath.split('?')[1]).get('q')).toBe("name contains 'owner\\'s file' and trashed = false")
     request.mockRestore()
+  })
+
+  it('builds valid resumable upload range headers', () => {
+    expect(buildGoogleDriveUploadContentHeaders(12)).toEqual({ 'Content-Length': '12', 'Content-Range': 'bytes 0-11/12' })
+    expect(buildGoogleDriveUploadContentHeaders(8, 8, 20)).toEqual({ 'Content-Length': '8', 'Content-Range': 'bytes 8-15/20' })
+    expect(buildGoogleDriveUploadContentHeaders(0)).toEqual({ 'Content-Length': '0', 'Content-Range': 'bytes */0' })
   })
 })

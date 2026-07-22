@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderMeta, getDriveProviderSidebarEntries, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
+import { buildDriveProviderDriveId, buildDriveProviderUserId, getDriveProviderAccountId, getDriveProviderCapabilities, getDriveProviderDriveAccountId, getDriveProviderMeta, getDriveProviderSidebarEntries, isDriveProviderRootId, isDriveProviderSessionUsable, isDriveProviderSidebarEntryAvailable, resolveDriveProvider } from '../driveProvider'
 
 const retainedProviders = ['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'] as const
 
@@ -45,6 +45,22 @@ describe('drive provider capabilities', () => {
     expect(getDriveProviderAccountId('webdav:connection-a', 'webdav')).toBe('connection-a')
   })
 
+  it('recognizes only exact provider root ids', () => {
+    expect(isDriveProviderRootId({ driveId: 'webdav:connection-a' }, '/')).toBe(true)
+    expect(isDriveProviderRootId({ driveId: 's3:connection-a' }, 'root')).toBe(true)
+    expect(isDriveProviderRootId('pikpak', 'pikpak_root')).toBe(true)
+    expect(isDriveProviderRootId('gdrive', 'gdrive_root')).toBe(true)
+    expect(isDriveProviderRootId({ driveId: 'webdav:connection-a' }, '/folder/rooted')).toBe(false)
+    expect(isDriveProviderRootId('pikpak', 'folder_rooted')).toBe(false)
+  })
+
+  it('accepts mounted-storage sessions without OAuth access tokens', () => {
+    expect(isDriveProviderSessionUsable({ tokenfrom: 'webdav', access_token: '' }, { driveId: 'webdav:connection-a' })).toBe(true)
+    expect(isDriveProviderSessionUsable({ tokenfrom: 's3', access_token: '' }, { driveId: 's3:connection-a' })).toBe(true)
+    expect(isDriveProviderSessionUsable({ tokenfrom: 'gdrive', access_token: '' }, { driveId: 'gdrive:account-a' })).toBe(false)
+    expect(isDriveProviderSessionUsable({ tokenfrom: 'gdrive', access_token: 'token' }, { driveId: 'gdrive:account-a' })).toBe(true)
+  })
+
   it('does not expose removed-provider operations', () => {
     for (const provider of retainedProviders) {
       expect(getDriveProviderCapabilities(provider).encryption, provider).toBe(false)
@@ -86,7 +102,7 @@ describe('drive provider capabilities', () => {
     }
     expect(getDriveProviderCapabilities('gdrive').trashRestore).toBe(true)
     expect(getDriveProviderCapabilities('gdrive').trashPurge).toBe(true)
-    expect(getDriveProviderCapabilities('gdrive').trashClear).toBe(false)
+    expect(getDriveProviderCapabilities('gdrive').trashClear).toBe(true)
   })
 
   it('defaults removed and unknown providers to no capabilities', () => {

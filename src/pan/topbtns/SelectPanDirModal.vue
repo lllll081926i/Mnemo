@@ -11,12 +11,12 @@ import AliFileCmd from '../../aliapi/filecmd'
 import PanDAL from '../pandal'
 import { Sleep } from '../../utils/format'
 import { treeSelectToExpand } from '../../utils/antdtree'
-import AliTrash from '../../aliapi/trash'
+
 import { fileiconfn } from '../pantreestore'
 import { GetDriveID, GetDriveType, isPikPakUser } from '../../aliapi/utils'
 import { IAliGetDirModel } from '../../aliapi/alimodels'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
-import { resolveDriveProvider } from '../../utils/driveProvider'
+import { isDriveProviderRootId, resolveDriveProvider } from '../../utils/driveProvider'
 import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../../onedrive/dirfilelist'
 import { apiDropboxFileList, mapDropboxFileToAliModel } from '../../dropbox/dirfilelist'
 import { apiGoogleDriveFileList, mapGoogleDriveItemToAliModel } from '../../gdrive/dirfilelist'
@@ -310,7 +310,7 @@ const apiLoad = (key: any) => {
       .catch(() => [] as TreeNodeData[])
   }
   if (isPikPakUser(user_id.value)) {
-    const parentId = key.includes('root') ? 'pikpak_root' : key
+    const parentId = isDriveProviderRootId('pikpak', key) ? 'pikpak_root' : key
     return apiPikPakFileList(user_id.value, parentId, 100)
       .then(({ items: list }) => {
         const addList: TreeNodeData[] = []
@@ -341,40 +341,7 @@ const apiLoad = (key: any) => {
         return [] as TreeNodeData[]
       })
   }
-  const aliKey = key.includes('root') ? 'root' : key
-  return AliTrash.ApiDirFileListNoLock(user_id.value, selectFile.value.drive_id, aliKey, '', 'name ASC')
-    .then((resp) => {
-      const addList: TreeNodeData[] = []
-      if (resp.next_marker == '') {
-        for (let i = 0, maxi = resp.items.length; i < maxi; i++) {
-          const item = resp.items[i]
-          if (!item.isDir) {
-            if (onlyDirs) continue
-            if (props.category && item.category !== props.category) continue
-            if (props.extFilter && !props.extFilter.test(item.ext)) continue
-          }
-          addList.push({
-            __v_skip: true,
-            key: item.file_id,
-            parent_file_id: item.parent_file_id,
-            path: item.path || '',
-            title: item.name,
-            children: [],
-            isDir: item.isDir,
-            isLeaf: !item.isDir,
-            description: item.description,
-            icon: item.isDir ? foldericonfn : () => fileiconfn(item.icon)
-          } as TreeNodeData)
-        }
-        autoExpand(addList)
-      } else {
-        message.error('列出文件失败：' + resp.next_marker)
-      }
-      return addList
-    })
-    .catch(() => {
-      return [] as TreeNodeData[]
-    })
+  return Promise.resolve([] as TreeNodeData[])
 }
 
 const autoExpand = (list: TreeNodeData[]) => {

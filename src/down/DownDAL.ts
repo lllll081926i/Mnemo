@@ -21,6 +21,7 @@ import { getEncType } from '../utils/proxyhelper'
 import { SHA256 } from 'crypto-js'
 import { shouldRemoveAriaStoppedResult } from '../utils/aria2Rpc'
 import { resolveAriaProgressErrorState } from './integration/downloadProgressState'
+import { isDriveProviderRootId } from '../utils/driveProvider'
 
 export interface IStateDownFile {
   DownID: string
@@ -171,8 +172,8 @@ export default class DownDAL {
    * @param savePath
    * @param needPanPath
    */
-  static aAddDownload(fileList: IAliGetFileModel[], savePath: string, needPanPath: boolean) {
-    const userID = useUserStore().user_id
+  static aAddDownload(fileList: IAliGetFileModel[], savePath: string, needPanPath: boolean, sourceUserId = '') {
+    const userID = sourceUserId || useUserStore().user_id
     const settingStore = useSettingStore()
 
     if (savePath.endsWith('/') || savePath.endsWith('\\')) {
@@ -197,7 +198,7 @@ export default class DownDAL {
           const plist = TreeStore.GetDirPath(file.drive_id, file.parent_file_id)
           for (let p = 0; p < plist.length; p++) {
             const pName = ClearFileName(plist[p].name)
-            if (plist[p].file_id.includes('root')) continue
+            if (isDriveProviderRootId({ userId: userID, driveId: file.drive_id }, plist[p].file_id)) continue
             if (path.join(cPath2, pName, name).length > 250) break
             cPath2 = path.join(cPath2, pName)
           }
@@ -217,7 +218,7 @@ export default class DownDAL {
       let downloadurl = ''
       let crc64 = ''
       const downitem: IStateDownFile = {
-        DownID: userID + '|' + file.file_id,
+        DownID: `${userID}|${file.drive_id}|${file.file_id}`,
         Info: {
           GID: gid,
           user_id: userID,

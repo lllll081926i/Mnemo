@@ -17,18 +17,30 @@ export const apiGofileRename = async (userId: string, fileId: string, name: stri
 }
 
 export const apiGofileDeleteBatch = async (userId: string, fileIds: string[]) => {
-  await gofileRequest(userId, '/contents', { method: 'DELETE', body: JSON.stringify({ contentsId: fileIds.join(',') }) })
-  return fileIds
+  try {
+    await gofileRequest(userId, '/contents', { method: 'DELETE', body: JSON.stringify({ contentsId: fileIds.join(',') }) })
+    return fileIds
+  } catch {
+    return []
+  }
 }
 
 export const apiGofileMoveBatch = async (userId: string, fileIds: string[], targetFolderId: string) => {
-  const folderId = await resolveGofileFolderId(userId, targetFolderId)
-  await gofileRequest(userId, '/contents/move', { method: 'PUT', body: JSON.stringify({ folderId, contentsId: fileIds.join(',') }) })
-  return fileIds
+  try {
+    const folderId = await resolveGofileFolderId(userId, targetFolderId)
+    await gofileRequest(userId, '/contents/move', { method: 'PUT', body: JSON.stringify({ folderId, contentsId: fileIds.join(',') }) })
+    return fileIds
+  } catch {
+    return []
+  }
 }
 
 export const apiGofileCopyBatch = async (userId: string, fileIds: string[], targetFolderId: string) => {
-  const folderId = await resolveGofileFolderId(userId, targetFolderId)
-  await gofileRequest(userId, '/contents/copy', { method: 'POST', body: JSON.stringify({ folderId, contentsId: fileIds.join(',') }) })
-  return fileIds
+  try {
+    const folderId = await resolveGofileFolderId(userId, targetFolderId)
+    await gofileRequest(userId, '/contents/copy', { method: 'POST', body: JSON.stringify({ folderId, contentsId: fileIds.join(',') }) })
+    return fileIds
+  } catch {
+    return []
+  }
 }

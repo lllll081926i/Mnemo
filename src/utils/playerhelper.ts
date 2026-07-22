@@ -15,8 +15,9 @@ import { humanTime } from './format'
 import { isPikPakUser } from '../aliapi/utils'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from './webdavClient'
-import { buildDirectPlayerInvocation, isMpvCommand, redactMpvArgs } from './mpvPlayerPolicy'
+import { buildDirectPlayerInvocation, isMpvCommand, normalizePlaylistStartIndex, redactMpvArgs, resolvePlayerMediaSource } from './mpvPlayerPolicy'
 import { findBestSubtitleMatch } from './subtitleMatching'
+import { isDriveProviderRootId } from './driveProvider'
 
 const currentPlayerPlatform = () => (is.windows() ? 'win32' : is.macOS() ? 'darwin' : is.linux() ? 'linux' : process.platform)
 
@@ -63,7 +64,7 @@ const PlayerUtils = {
         items = await listWebDavDirectory(connection, parent_file_id || '/')
       }
     } else if (isPikPakUser(user_id) || drive_id === 'pikpak') {
-      const parentId = parent_file_id && !parent_file_id.includes('root') ? parent_file_id : 'pikpak_root'
+      const parentId = parent_file_id && !isDriveProviderRootId('pikpak', parent_file_id) ? parent_file_id : 'pikpak_root'
       const list = await apiPikPakFileList(user_id, parentId, 500)
       items = list.items.map(item => mapPikPakFileToAliModel(item, drive_id, parentId))
     }
@@ -278,7 +279,7 @@ const PlayerUtils = {
     let { file, subTitleFile, rawData, quality } = otherArgs
     let encType = getEncType(file)
     let play_url = ''
-    let play_referer = token.open_api_access_token ? 'https://openapi.alipan.com/' : 'https://www.aliyundrive.com/'
+    let play_referer = ''
     let {
       uiVideoEnablePlayerList,
       uiVideoPlayerExit,
@@ -293,6 +294,9 @@ const PlayerUtils = {
       .filter(([key, value]) => !!key && !!value)
       .map(([key, value]) => `${key}: ${value}`)
     if (rawData) {
+      const mediaSource = resolvePlayerMediaSource(rawData, quality)
+      play_url = mediaSource.url
+      rawHeaders = mediaSource.headers
       // 加载转码的内嵌字幕
       if (rawData.subtitles && quality != 'Origin') {
         let subTitleData = rawData.subtitles.find((sub: any) => sub.language === 'chi') || rawData.subtitles[0]
@@ -307,11 +311,6 @@ const PlayerUtils = {
             proxy_headers: subtitleHeaders ? JSON.stringify(subtitleHeaders) : undefined
           })
         }
-      }
-      if (rawData.qualities) {
-        const selectedQuality = rawData.qualities.find((q: any) => q.quality === quality) || rawData.qualities[0]
-        play_url = selectedQuality?.url || ''
-        rawHeaders = selectedQuality?.headers || rawData.headers || {}
       }
     }
     // 优先加载网盘内字幕文件
@@ -406,7 +405,7 @@ const PlayerUtils = {
       )
       // console.log('tmpFile', tmpFile)
       if (isMPV) {
-        otherArgs.currentPlayIndex = otherArgs.playList.findIndex((v: any) => v.file_id == file.file_id) || 0
+        otherArgs.currentPlayIndex = normalizePlaylistStartIndex(otherArgs.playList.findIndex((v: any) => v.file_id == file.file_id))
         playArgs.unshift('--playlist-start=' + otherArgs.currentPlayIndex)
         playArgs.unshift('--playlist=' + otherArgs.playFileListPath)
       } else {

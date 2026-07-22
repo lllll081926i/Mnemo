@@ -80,6 +80,11 @@ export const buildDropboxCreateSharedLinkBody = (path: string, expiration: strin
   return { path, settings }
 }
 
+export const buildDropboxModifySharedLinkBody = (url: string, expiration: string, sharePwd: string) => {
+  const createBody = buildDropboxCreateSharedLinkBody('', expiration, sharePwd) as { settings?: Record<string, string> }
+  return createBody.settings ? { url, settings: createBody.settings } : undefined
+}
+
 export const normalizeDropboxSharedLinkUrl = (url: string): string => {
   return url || ''
 }
@@ -149,6 +154,13 @@ export const apiDropboxShareCreate = async (
   const path = file_id_list[0]
   const existing = await apiDropboxListSharedLinks(user_id, path)
   if (existing[0]?.url) {
+    const modifyBody = buildDropboxModifySharedLinkBody(existing[0].url, expiration, share_pwd)
+    if (modifyBody) {
+      const modified = await dropboxShareRpc<DropboxSharedLinkMetadata>(user_id, '/sharing/modify_shared_link_settings', modifyBody, '修改 Dropbox 分享链接设置失败')
+      if (modified.data?.url) return { item: mapDropboxSharedLinkToAliShareItem(modified.data, drive_id, file_id_list, share_name, share_pwd), error: '' }
+      if (modified.error.includes('settings_error/not_authorized')) return { error: '当前 Dropbox 账号或团队策略不允许设置分享密码/过期时间，请清空提取码和有效期后重试' }
+      return { error: modified.error || '修改 Dropbox 分享链接设置失败' }
+    }
     return { item: mapDropboxSharedLinkToAliShareItem(existing[0], drive_id, file_id_list, share_name, share_pwd), error: '' }
   }
 

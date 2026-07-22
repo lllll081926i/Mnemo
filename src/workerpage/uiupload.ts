@@ -1,10 +1,9 @@
-import AliUploadDisk from '../aliapi/uploaddisk'
 import DBUpload, { IStateUploadInfo, IStateUploadTaskFile, IUploadingUI } from '../utils/dbupload'
 import { humanSizeSpeed } from '../utils/format'
+import { delFileUploadSpeed, getFileUploadSpeed, getFileUploadSpeedTotal } from '../utils/uploadProgress'
 import { ArrayKeyList } from '../utils/utils'
 import { StartUpload } from './uploader'
 import { useSettingStore } from '../store'
-import AliUploadHashPool from '../aliapi/uploadhashpool'
 
 
 export const RuningList: Map<number, IUploadingUI> = new Map()
@@ -100,7 +99,7 @@ export async function UploadReport(): Promise<void> {
     if (!item.IsRunning || uploadState == '已暂停') {
 
       stopList.push(item.Info)
-      AliUploadDisk.DelFileUploadSpeed(item.UploadID)
+      delFileUploadSpeed(item.UploadID)
     } else if (uploadState == 'success') {
 
       successList.push(item.File)
@@ -108,19 +107,12 @@ export async function UploadReport(): Promise<void> {
 
       errorList.push(item.Info)
     } else if (uploadState == 'hashing') {
-      
-      const posNow = AliUploadHashPool.GetFileHashProofSpeed(item.UploadID)
-      let speed = posNow - item.Info.uploadSize
-      item.Info.uploadSize = posNow
-      item.Info.Progress = Math.floor((posNow * 100) / (item.File.size + 1)) % 100
-      if (speed < 0) speed = 0
-      item.Info.Speed = speed
-      item.Info.speedStr = humanSizeSpeed(speed)
+      item.Info.Speed = 0
+      item.Info.speedStr = humanSizeSpeed(0)
       reportList.push(item.Info)
       runingList.push(item.Info)
     } else if (uploadState == 'running') {
-      
-      const posNow = AliUploadDisk.GetFileUploadSpeed(item.UploadID)
+      const posNow = getFileUploadSpeed(item.UploadID)
       let speed = posNow - item.Info.uploadSize
       item.Info.uploadSize = posNow
       item.Info.Progress = Math.floor((posNow * 100) / (item.File.size + 1)) % 100
@@ -153,7 +145,7 @@ export async function UploadReport(): Promise<void> {
     if (saveList.length > 0) await DBUpload.saveUploadInfoBatch(saveList)
   }
 
-  const uploadSpeedTotal = AliUploadDisk.GetFileUploadSpeedTotal()
+  const uploadSpeedTotal = getFileUploadSpeedTotal()
   
   window.WinMsgToMain({
     cmd: 'MainUploadEvent',

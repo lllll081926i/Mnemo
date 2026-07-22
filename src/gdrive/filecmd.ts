@@ -14,8 +14,10 @@ export const apiGoogleDriveRename = async (userId: string, fileId: string, name:
 export const apiGoogleDriveTrashBatch = async (userId: string, fileIds: string[]) => {
   const success: string[] = []
   for (const fileId of fileIds) {
-    await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'PATCH', body: JSON.stringify({ trashed: true }) })
-    success.push(fileId)
+    try {
+      await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'PATCH', body: JSON.stringify({ trashed: true }) })
+      success.push(fileId)
+    } catch {}
   }
   return success
 }
@@ -23,8 +25,10 @@ export const apiGoogleDriveTrashBatch = async (userId: string, fileIds: string[]
 export const apiGoogleDriveRestoreBatch = async (userId: string, fileIds: string[]) => {
   const success: string[] = []
   for (const fileId of fileIds) {
-    await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'PATCH', body: JSON.stringify({ trashed: false }) })
-    success.push(fileId)
+    try {
+      await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'PATCH', body: JSON.stringify({ trashed: false }) })
+      success.push(fileId)
+    } catch {}
   }
   return success
 }
@@ -32,8 +36,10 @@ export const apiGoogleDriveRestoreBatch = async (userId: string, fileIds: string
 export const apiGoogleDriveDeleteBatch = async (userId: string, fileIds: string[]) => {
   const success: string[] = []
   for (const fileId of fileIds) {
-    await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'DELETE' })
-    success.push(fileId)
+    try {
+      await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'DELETE' })
+      success.push(fileId)
+    } catch {}
   }
   return success
 }
@@ -41,11 +47,13 @@ export const apiGoogleDriveDeleteBatch = async (userId: string, fileIds: string[
 export const apiGoogleDriveMoveBatch = async (userId: string, fileIds: string[], targetParentId: string) => {
   const success: string[] = []
   for (const fileId of fileIds) {
-    const item = await apiGoogleDriveFileDetail(userId, fileId)
-    const params = new URLSearchParams({ addParents: targetParentId === 'gdrive_root' ? 'root' : targetParentId, supportsAllDrives: 'true' })
-    if (item.parents?.length) params.set('removeParents', item.parents.join(','))
-    await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?${params.toString()}`, { method: 'PATCH' })
-    success.push(fileId)
+    try {
+      const item = await apiGoogleDriveFileDetail(userId, fileId)
+      const params = new URLSearchParams({ addParents: targetParentId === 'gdrive_root' ? 'root' : targetParentId, supportsAllDrives: 'true' })
+      if (item.parents?.length) params.set('removeParents', item.parents.join(','))
+      await googleDriveRequest(userId, `/files/${encodeURIComponent(fileId)}?${params.toString()}`, { method: 'PATCH' })
+      success.push(fileId)
+    } catch {}
   }
   return success
 }
@@ -69,8 +77,10 @@ const copyGoogleDriveItem = async (userId: string, item: GoogleDriveItem, target
 export const apiGoogleDriveCopyBatch = async (userId: string, fileIds: string[], targetParentId: string) => {
   const success: string[] = []
   for (const fileId of fileIds) {
-    const item = await apiGoogleDriveFileDetail(userId, fileId)
-    if (await copyGoogleDriveItem(userId, item, targetParentId)) success.push(fileId)
+    try {
+      const item = await apiGoogleDriveFileDetail(userId, fileId)
+      if (await copyGoogleDriveItem(userId, item, targetParentId)) success.push(fileId)
+    } catch {}
   }
   return success
 }

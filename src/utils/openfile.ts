@@ -1,5 +1,4 @@
 import { IAliGetFileModel } from '../aliapi/alimodels'
-import AliArchive from '../aliapi/archive'
 import AliFile from '../aliapi/file'
 import AliFileCmd from '../aliapi/filecmd'
 import { ITokenInfo, useAppStore, useFootStore, usePanFileStore, useSettingStore, useUserStore } from '../store'
@@ -8,17 +7,17 @@ import UserDAL from '../user/userdal'
 import { clickWait } from './debounce'
 import DebugLog from './debuglog'
 import message from './message'
-import { modalArchive, modalArchivePassword, modalSelectPanDir, modalSelectVideoQuality } from './modal'
+import { modalSelectPanDir, modalSelectVideoQuality } from './modal'
 import PlayerUtils from './playerhelper'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from './proxyhelper'
 import { isPikPakUser } from '../aliapi/utils'
-import { resolveDriveProvider } from './driveProvider'
+import { isDriveProviderRootId, isDriveProviderSessionUsable, resolveDriveProvider } from './driveProvider'
 
 async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo | undefined> {
   const explicitUserId = (file as any).user_id as string | undefined
   if (explicitUserId) {
     const token = await UserDAL.GetUserTokenFromDB(explicitUserId)
-    if (token?.access_token) return token
+    if (isDriveProviderSessionUsable(token, { driveId: file.drive_id })) return token
   }
   const currentUserId = useUserStore().user_id
   const currentToken = await UserDAL.GetUserTokenFromDB(currentUserId)
@@ -29,7 +28,7 @@ async function resolveTokenForFile(file: IAliGetFileModel): Promise<ITokenInfo |
     || (driveProvider !== 'unknown' && currentToken.tokenfrom === driveProvider)
     || (driveId.startsWith(`${currentToken.tokenfrom}:`))
   )
-  if (matchesCurrent && currentToken?.access_token) return currentToken
+  if (matchesCurrent && isDriveProviderSessionUsable(currentToken, { driveId })) return currentToken
 
   const userList = await UserDAL.GetUserListFromDB()
   const matched = userList.find((token) => {
@@ -97,17 +96,14 @@ export async function menuOpenFile(
   if (clickWait('menuOpenFile', 500)) return
   const file_id = file.file_id
   let parent_file_id = file.parent_file_id
-  if (parent_file_id.includes('root')) parent_file_id = 'root'
+  if (isDriveProviderRootId({ driveId: file.drive_id }, parent_file_id)) parent_file_id = 'root'
   const drive_id = file.drive_id
+  const fileProvider = resolveDriveProvider({ driveId: file.drive_id })
   if (file.ext == 'zip' || file.ext == 'rar' || file.ext == '7z') {
-    if (file.description && file.description.includes('mnemoEncrypt')) {
-      message.error('不支持在线预览该格式的加密文件')
-      return
-    }
-    Archive(file.drive_id, file.file_id, file.name, file.parent_file_id, file.icon == 'iconweifa')
+    message.info('当前网盘不支持在线预览压缩包，请下载后查看')
     return
   }
-  if ((file.ext || '').toLowerCase() === 'epub' && EPUB_PREVIEW_DRIVES.has(file.drive_id || '')) {
+  if ((file.ext || '').toLowerCase() === 'epub' && EPUB_PREVIEW_DRIVES.has(fileProvider)) {
     await Epub(file, password)
     return
   }
@@ -120,19 +116,19 @@ export async function menuOpenFile(
       await Code(file, textExt, password)
       return
     }
-    if ((file.ext || '').toLowerCase() === 'pdf' && PDF_PREVIEW_DRIVES.has(file.drive_id || '')) {
+    if ((file.ext || '').toLowerCase() === 'pdf' && PDF_PREVIEW_DRIVES.has(fileProvider)) {
       await Pdf(file, password)
       return
     }
-    if ((file.ext || '').toLowerCase() === 'docx' && DOCX_PREVIEW_DRIVES.has(file.drive_id || '')) {
+    if ((file.ext || '').toLowerCase() === 'docx' && DOCX_PREVIEW_DRIVES.has(fileProvider)) {
       await Docx(file, password)
       return
     }
-    if (SHEET_PREVIEW_EXTS.has((file.ext || '').toLowerCase()) && SHEET_PREVIEW_DRIVES.has(file.drive_id || '')) {
+    if (SHEET_PREVIEW_EXTS.has((file.ext || '').toLowerCase()) && SHEET_PREVIEW_DRIVES.has(fileProvider)) {
       await Sheet(file, password)
       return
     }
-    if (OFFICE_TO_PDF_EXTS.has((file.ext || '').toLowerCase()) && OFFICE_TO_PDF_DRIVES.has(file.drive_id || '')) {
+    if (OFFICE_TO_PDF_EXTS.has((file.ext || '').toLowerCase()) && OFFICE_TO_PDF_DRIVES.has(fileProvider)) {
       await OfficePdf(file, password)
       return
     }
@@ -160,7 +156,7 @@ export async function menuOpenFile(
   }
   if (file.category.startsWith('video')) {
     const token = await resolveTokenForFile(file)
-    if (!token || !token.access_token) {
+    if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
       message.error('在线预览失败 账号失效，操作取消')
       return
     }
@@ -199,46 +195,6 @@ export async function menuOpenFile(
     return
   }
   message.info('此格式暂不支持预览')
-}
-
-async function Archive(drive_id: string, file_id: string, file_name: string, parent_file_id: string, weifa: boolean): Promise<void> {
-  if (weifa) {
-    message.error('违规文件，操作取消')
-    return
-  }
-  const user_id = useUserStore().user_id
-  const token = await UserDAL.GetUserTokenFromDB(user_id)
-  if (!token || !token.access_token) {
-    message.error('在线预览失败 账号失效，操作取消')
-    return
-  }
-  message.loading('加载中...', 2)
-  const info = await AliFile.ApiFileInfo(user_id, drive_id, file_id)
-  if (info && typeof info == 'string') {
-    message.error('在线预览失败 获取文件信息出错：' + info)
-    return
-  }
-  let password = ''
-  let resp = await AliArchive.ApiArchiveList(user_id, drive_id, file_id, info.domain_id, info.file_extension || '', password)
-
-  if (!resp) {
-    message.error('在线预览失败 获取解压信息出错，操作取消')
-    return
-  }
-
-  if (!resp) {
-    message.error('在线预览失败 获取解压信息出错，操作取消')
-    return
-  }
-
-  if (resp.state == '密码错误') {
-    modalArchivePassword(user_id, drive_id, file_id, file_name, parent_file_id, info.domain_id, info.file_extension || '')
-  } else if (resp.state == 'Succeed' || resp.state == 'Running') {
-    modalArchive(user_id, drive_id, file_id, file_name, parent_file_id, password)
-  } else {
-    message.error('在线解压失败 ' + resp.state + '，操作取消')
-    DebugLog.mSaveDanger('在线解压失败 ' + resp.state, drive_id + ' ' + file_id)
-  }
 }
 
 async function Video(
@@ -353,7 +309,7 @@ async function Video(
 
 async function Image(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -379,7 +335,7 @@ async function Image(file: IAliGetFileModel, password: string = ''): Promise<voi
 
 async function Pdf(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -416,7 +372,7 @@ async function Epub(file: IAliGetFileModel, password: string = ''): Promise<void
 
 async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -447,7 +403,7 @@ async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void
 
 async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -487,7 +443,7 @@ async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise
 
 async function Sheet(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -518,7 +474,7 @@ async function Sheet(file: IAliGetFileModel, password: string = ''): Promise<voi
 
 async function Office(file: IAliGetFileModel): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -567,7 +523,7 @@ async function Audio(file: IAliGetFileModel, password: string = ''): Promise<voi
   }
 
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }
@@ -658,7 +614,7 @@ async function Audio(file: IAliGetFileModel, password: string = ''): Promise<voi
 
 async function Code(file: IAliGetFileModel, codeExt: string, password: string = ''): Promise<void> {
   const token = await resolveTokenForFile(file)
-  if (!token || !token.access_token) {
+  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
     message.error('在线预览失败 账号失效，操作取消')
     return
   }

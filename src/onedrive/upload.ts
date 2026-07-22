@@ -1,5 +1,9 @@
+import { fetchCancellableProviderUpload } from '../utils/providerUpload'
+
 const GRAPH_API_HOST = 'https://graph.microsoft.com/v1.0'
-const SMALL_UPLOAD_LIMIT = 250 * 1024 * 1024
+// Align with Graph simple-upload guidance and rclone's cautious single-part policy for business drives.
+const SMALL_UPLOAD_LIMIT = 4 * 1024 * 1024
+// Must be a multiple of 320 KiB per Microsoft Graph upload session rules.
 const SESSION_CHUNK_SIZE = 10 * 1024 * 1024
 
 const getOneDriveToken = async (user_id: string) => {
@@ -46,7 +50,7 @@ export const apiOneDriveUploadBuffer = async (
 ): Promise<{ file_id: string; error: string }> => {
   const token = await getOneDriveToken(user_id)
   if (!token?.access_token) return { file_id: '', error: '未登录 OneDrive' }
-  if (buff.length > SMALL_UPLOAD_LIMIT) return { file_id: '', error: 'OneDrive 新建文本文件超过 250MB 限制' }
+  if (buff.length > SMALL_UPLOAD_LIMIT) return { file_id: '', error: 'OneDrive 简单上传超过 4MB 限制，请使用会话分片上传' }
   const resp = await fetch(`${GRAPH_API_HOST}${buildOneDriveSmallUploadPath(parentId, fileName)}`, {
     method: 'PUT',
     headers: {
@@ -67,12 +71,12 @@ const readSlice = async (fileHandle: import('fs/promises').FileHandle, start: nu
 }
 
 const recordUploadProgress = async (uploadId: number, delta: number, pos: number) => {
-  const { default: AliUploadDisk } = await import('../aliapi/uploaddisk')
-  AliUploadDisk.RecordUploadProgress(uploadId, delta, pos)
+  const { recordUploadProgress: record } = await import('../utils/uploadProgress')
+  record(uploadId, delta, pos)
 }
 
-const graphPost = async (accessToken: string, path: string, body: any): Promise<{ data?: any; error: string }> => {
-  const resp = await fetch(`${GRAPH_API_HOST}${path}`, {
+const graphPost = async (accessToken: string, path: string, body: any, fileui: import('../utils/dbupload').IUploadingUI): Promise<{ data?: any; error: string }> => {
+  const resp = await fetchCancellableProviderUpload(fileui, `${GRAPH_API_HOST}${path}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -85,9 +89,9 @@ const graphPost = async (accessToken: string, path: string, body: any): Promise<
   return { data, error: '' }
 }
 
-const uploadChunk = async (uploadUrl: string, buff: Buffer, start: number, total: number): Promise<{ data?: any; error: string }> => {
+const uploadChunk = async (uploadUrl: string, buff: Buffer, start: number, total: number, fileui: import('../utils/dbupload').IUploadingUI): Promise<{ data?: any; error: string }> => {
   const end = start + buff.length - 1
-  const resp = await fetch(uploadUrl, {
+  const resp = await fetchCancellableProviderUpload(fileui, uploadUrl, {
     method: 'PUT',
     headers: {
       'Content-Length': String(buff.length),
@@ -102,7 +106,7 @@ const uploadChunk = async (uploadUrl: string, buff: Buffer, start: number, total
 
 const uploadSmallFile = async (accessToken: string, fileHandle: import('fs/promises').FileHandle, fileui: import('../utils/dbupload').IUploadingUI): Promise<string> => {
   const buff = await readSlice(fileHandle, 0, fileui.File.size)
-  const resp = await fetch(`${GRAPH_API_HOST}${buildOneDriveSmallUploadPath(fileui.parent_file_id || 'onedrive_root', fileui.File.name)}`, {
+  const resp = await fetchCancellableProviderUpload(fileui, `${GRAPH_API_HOST}${buildOneDriveSmallUploadPath(fileui.parent_file_id || 'onedrive_root', fileui.File.name)}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -122,7 +126,8 @@ const uploadSessionFile = async (accessToken: string, fileHandle: import('fs/pro
   const created = await graphPost(
     accessToken,
     buildOneDriveUploadSessionPath(fileui.parent_file_id || 'onedrive_root', fileui.File.name),
-    buildOneDriveUploadSessionBody(fileui.check_name_mode)
+    buildOneDriveUploadSessionBody(fileui.check_name_mode),
+    fileui
   )
   const uploadUrl = created.data?.uploadUrl || ''
   if (created.error || !uploadUrl) return created.error || '创建 OneDrive 上传会话失败'
@@ -133,7 +138,7 @@ const uploadSessionFile = async (accessToken: string, fileHandle: import('fs/pro
     if (!fileui.IsRunning) return '已暂停'
     const size = Math.min(SESSION_CHUNK_SIZE, total - offset)
     const buff = await readSlice(fileHandle, offset, size)
-    const uploaded = await uploadChunk(uploadUrl, buff, offset, total)
+    const uploaded = await uploadChunk(uploadUrl, buff, offset, total, fileui)
     if (uploaded.error) return uploaded.error
     offset += buff.length
     await recordUploadProgress(fileui.UploadID, buff.length, offset)

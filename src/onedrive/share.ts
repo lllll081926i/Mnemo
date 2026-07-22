@@ -6,6 +6,7 @@ const GRAPH_API_HOST = 'https://graph.microsoft.com/v1.0'
 
 export type OneDrivePermission = {
   id?: string
+  expirationDateTime?: string
   link?: {
     type?: string
     scope?: string
@@ -43,16 +44,20 @@ const graphPost = async <T>(user_id: string, path: string, body: any, fallback: 
   return { data: data as T, error: '' }
 }
 
-export const buildOneDriveCreateLinkBody = () => ({
+export const buildOneDriveCreateLinkBody = (expiration = '', password = '') => ({
   type: 'view',
-  scope: 'anonymous'
+  scope: 'anonymous',
+  ...(password ? { password } : {}),
+  ...(expiration ? { expirationDateTime: expiration } : {})
 })
 
 export const mapOneDrivePermissionToAliShareItem = (
   permission: OneDrivePermission,
   drive_id: string,
   file_id_list: string[],
-  share_name: string
+  share_name: string,
+  share_pwd = '',
+  expiration = ''
 ): IAliShareItem => ({
   created_at: '',
   creator: '',
@@ -61,7 +66,7 @@ export const mapOneDrivePermissionToAliShareItem = (
   display_label: '',
   download_count: 0,
   drive_id: drive_id || 'onedrive',
-  expiration: '',
+  expiration: permission.expirationDateTime || expiration,
   expired: false,
   file_id: file_id_list[0] || '',
   file_id_list,
@@ -69,11 +74,11 @@ export const mapOneDrivePermissionToAliShareItem = (
   preview_count: 0,
   save_count: 0,
   share_id: permission.id || permission.link?.webUrl || '',
-  share_msg: humanExpiration(''),
+  share_msg: humanExpiration(permission.expirationDateTime || expiration),
   full_share_msg: '',
   share_name: share_name || 'OneDrive 分享链接',
   share_policy: permission.link?.scope || '',
-  share_pwd: '',
+  share_pwd,
   share_url: permission.link?.webUrl || '',
   status: '',
   updated_at: '',
@@ -85,15 +90,17 @@ export const apiOneDriveShareCreate = async (
   user_id: string,
   drive_id: string,
   file_id_list: string[],
-  share_name: string
+  share_name: string,
+  expiration = '',
+  share_pwd = ''
 ): Promise<{ item?: IAliShareItem; error: string }> => {
   if (file_id_list.length !== 1) return { error: 'OneDrive 分享链接一次只能选择一个文件或文件夹' }
   const resp = await graphPost<OneDrivePermission>(
     user_id,
     `/me/drive/items/${encodeURIComponent(file_id_list[0])}/createLink`,
-    buildOneDriveCreateLinkBody(),
+    buildOneDriveCreateLinkBody(expiration, share_pwd),
     '创建 OneDrive 分享链接失败'
   )
   if (resp.error || !resp.data?.link?.webUrl) return { error: resp.error || '创建 OneDrive 分享链接失败' }
-  return { item: mapOneDrivePermissionToAliShareItem(resp.data, drive_id, file_id_list, share_name), error: '' }
+  return { item: mapOneDrivePermissionToAliShareItem(resp.data, drive_id, file_id_list, share_name, share_pwd, expiration), error: '' }
 }

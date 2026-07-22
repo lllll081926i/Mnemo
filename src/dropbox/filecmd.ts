@@ -57,7 +57,7 @@ export const extractDropboxPathFromDescription = (description = ''): string => {
 }
 
 export const resolveDropboxCommandPath = (fileId: string, description = '', path = ''): string => {
-  if (!fileId || fileId.includes('root')) return ''
+  if (!fileId || fileId === 'root' || fileId === 'dropbox_root') return ''
   if (path) return path
   if (fileId.startsWith('/')) return fileId
   return extractDropboxPathFromDescription(description) || fileId

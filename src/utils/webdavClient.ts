@@ -31,7 +31,8 @@ export const normalizeWebDavPath = (value: string) => {
   const trimmed = (value || '/').trim()
   if (!trimmed || trimmed === '/') return '/'
   const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-  return withLeadingSlash.replace(/\/+/g, '/').replace(/\/$/, '') || '/'
+  const normalized = path.posix.normalize(withLeadingSlash.replace(/\/+/g, '/'))
+  return normalized.replace(/\/$/, '') || '/'
 }
 
 const joinDavPath = (basePath: string, nextPath: string) => {
@@ -289,19 +290,32 @@ export const statWebDavPath = async (config: WebDavConnectionConfig, relativePat
   return (await client.stat(requestPath)) as FileStat
 }
 
+const normalizeWebDavTransferPaths = (sourcePath: string, targetPath: string) => {
+  const source = normalizeWebDavPath(sourcePath)
+  const target = normalizeWebDavPath(targetPath)
+  if (source === '/' || target === '/') throw new Error('WebDAV 根目录不能作为文件操作对象')
+  if (source === target) throw new Error('WebDAV 源路径与目标路径不能相同')
+  if (target.startsWith(`${source}/`)) throw new Error('WebDAV 目录不能复制或移动到自身的子目录')
+  return { source, target }
+}
+
 export const copyWebDavPath = async (config: WebDavConnectionConfig, sourcePath: string, targetPath: string) => {
+  const { source, target } = normalizeWebDavTransferPaths(sourcePath, targetPath)
   const client = createWebDavClient(config)
-  await client.copyFile(joinDavPath(config.rootPath, sourcePath), joinDavPath(config.rootPath, targetPath))
+  await client.copyFile(joinDavPath(config.rootPath, source), joinDavPath(config.rootPath, target))
 }
 
 export const moveWebDavPath = async (config: WebDavConnectionConfig, sourcePath: string, targetPath: string) => {
+  const { source, target } = normalizeWebDavTransferPaths(sourcePath, targetPath)
   const client = createWebDavClient(config)
-  await client.moveFile(joinDavPath(config.rootPath, sourcePath), joinDavPath(config.rootPath, targetPath))
+  await client.moveFile(joinDavPath(config.rootPath, source), joinDavPath(config.rootPath, target))
 }
 
 export const renameWebDavPath = async (config: WebDavConnectionConfig, sourcePath: string, newName: string) => {
+  const normalizedName = newName.trim()
+  if (!normalizedName || normalizedName === '.' || normalizedName === '..' || /[\\/]/.test(normalizedName)) throw new Error('WebDAV 名称不能为空或包含路径分隔符')
   const normalizedSource = normalizeWebDavPath(sourcePath)
-  const targetPath = normalizeWebDavPath(`${path.posix.dirname(normalizedSource)}/${newName}`)
+  const targetPath = normalizeWebDavPath(`${path.posix.dirname(normalizedSource)}/${normalizedName}`)
   await moveWebDavPath(config, normalizedSource, targetPath)
   return targetPath
 }

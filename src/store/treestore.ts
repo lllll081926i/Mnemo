@@ -6,6 +6,7 @@ import { usePanTreeStore, useSettingStore } from '../store'
 import { throttle } from '../utils/debounce'
 import { OrderNode } from '../utils/filenameorder'
 import { GetDriveType } from '../aliapi/utils'
+import { isDriveProviderRootId } from '../utils/driveProvider'
 
 export interface TreeNodeData {
   __v_skip: true
@@ -209,11 +210,11 @@ export default class TreeStore {
     while (true) {
       driverData.DirTotalSizeMap[dirID] = TotalSize(dirID, driverData.DirTotalSizeMap, driverData.DirFileSizeMap, driverData.DirChildrenMap)
       const tdir = driverData.DirMap.get(dirID)
-      if (tdir && !tdir.parent_file_id.includes('root') && tdir.parent_file_id != '') {
+      if (tdir && !isDriveProviderRootId({ userId: oneDir.m_user_id, driveId: oneDir.m_drive_id }, tdir.parent_file_id) && tdir.parent_file_id != '') {
         dirID = tdir.parent_file_id
       } else break
     }
-    if (!oneDir.dirID.includes('_root')) _SaveDirSize()
+    if (!isDriveProviderRootId({ userId: oneDir.m_user_id, driveId: oneDir.m_drive_id }, oneDir.dirID)) _SaveDirSize()
   }
 
 

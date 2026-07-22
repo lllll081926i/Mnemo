@@ -1,5 +1,11 @@
 export type PlayerPlatform = 'win32' | 'darwin' | 'linux' | string
 
+export interface PlayerMediaSource {
+  url?: string
+  headers?: Record<string, string>
+  qualities?: Array<{ quality?: string; url?: string; headers?: Record<string, string> }>
+}
+
 export function isMpvCommand(command: string): boolean {
   return (command || '').toLowerCase().includes('mpv')
 }
@@ -47,6 +53,16 @@ export function buildDirectPlayerInvocation(platform: PlayerPlatform, command: s
     args: parts.slice(1)
   }
 }
+
+export function resolvePlayerMediaSource(rawData: PlayerMediaSource | null | undefined, quality: string): { url: string; headers: Record<string, string> } {
+  const selectedQuality = rawData?.qualities?.find((item) => item.quality === quality) || rawData?.qualities?.[0]
+  return {
+    url: selectedQuality?.url || rawData?.url || '',
+    headers: selectedQuality?.headers || rawData?.headers || {}
+  }
+}
+
+export const normalizePlaylistStartIndex = (index: number): number => Math.max(0, index)
 
 export function redactMpvArgs(args: any[]): any[] {
   return args.map((arg) => {

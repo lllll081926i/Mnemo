@@ -141,10 +141,10 @@ const standardFileCapabilities: Partial<DriveProviderCapabilities> = {
 const createCapabilities = (provider: DriveProvider, overrides: Partial<DriveProviderCapabilities> = {}): DriveProviderCapabilities => ({ ...noCapabilities, ...standardFileCapabilities, ...overrides, provider })
 
 const driveProviderCapabilities: Partial<Record<DriveProvider, DriveProviderCapabilities>> = {
-  pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
+  pikpak: createCapabilities('pikpak', { createShare: true, trashView: true, trashRestore: true, trashPurge: true, trashClear: true }),
   onedrive: createCapabilities('onedrive', { search: true, createShare: true }),
   dropbox: createCapabilities('dropbox', { search: true, createShare: true }),
-  gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true, trashRestore: true, trashPurge: true }),
+  gdrive: createCapabilities('gdrive', { search: true, createShare: true, trashView: true, trashRestore: true, trashPurge: true, trashClear: true }),
   gofile: createCapabilities('gofile', { createShare: true, recycleBin: false, permanentDelete: true }),
   webdav: createCapabilities('webdav', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
   s3: createCapabilities('s3', { uploadMode: 'direct', mountedStorage: true, recycleBin: false, permanentDelete: true }),
@@ -183,7 +183,19 @@ export const resolveDriveProvider = (context: DriveProviderContext | string = {}
   return 'unknown'
 }
 
-export const canUseAliyunPreviewApi = (_context: DriveProviderContext | string = {}) => false
+export const isDriveProviderRootId = (context: DriveProviderContext | string, fileId: string): boolean => {
+  const value = String(fileId || '')
+  if (value === '/' || value === 'root') return true
+  const provider = resolveDriveProvider(context)
+  return provider !== 'unknown' && value === `${provider}_root`
+}
+
+export const isDriveProviderSessionUsable = (token: Partial<ITokenInfo> | null | undefined, context: DriveProviderContext | string = {}): token is ITokenInfo => {
+  if (!token) return false
+  const resolvedContext = typeof context === 'string' ? { tokenfrom: context } : context
+  const provider = resolveDriveProvider({ tokenfrom: token.tokenfrom || resolvedContext.tokenfrom, userId: token.user_id || resolvedContext.userId, driveId: resolvedContext.driveId })
+  return getDriveProviderCapabilities(provider).mountedStorage || Boolean(token.access_token)
+}
 
 export const buildDriveProviderUserId = (provider: DriveProvider, accountId: string | number): string => {
   const value = String(accountId ?? '').trim()
@@ -214,7 +226,7 @@ export const getDriveProviderDriveAccountId = (driveId: string, provider?: Drive
   if (!value) return ''
   const resolvedProvider = provider || resolveDriveProvider({ driveId: value })
   const prefix = `${resolvedProvider}:`
-  return resolvedProvider !== 'aliyun' && resolvedProvider !== 'unknown' && value.startsWith(prefix) ? value.slice(prefix.length) : value
+  return resolvedProvider !== 'unknown' && value.startsWith(prefix) ? value.slice(prefix.length) : value
 }
 
 export const getDriveProviderCapabilities = (context: DriveProviderContext | string = {}): DriveProviderCapabilities => driveProviderCapabilities[resolveDriveProvider(context)] || { ...noCapabilities, provider: 'unknown' }

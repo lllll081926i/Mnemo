@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildDirectPlayerInvocation, redactMpvArgs, shellSplit } from '../mpvPlayerPolicy'
+import { buildDirectPlayerInvocation, normalizePlaylistStartIndex, redactMpvArgs, resolvePlayerMediaSource, shellSplit } from '../mpvPlayerPolicy'
 
 describe('mpvPlayerPolicy', () => {
   it('builds direct-spawn invocations without a system shell', () => {
@@ -20,6 +20,22 @@ describe('mpvPlayerPolicy', () => {
       '--http-header-fields=Authorization: [REDACTED]',
       '[REDACTED_URL]'
     ])
+  })
+
+  it('uses direct media URLs when no transcoded qualities exist', () => {
+    expect(resolvePlayerMediaSource({ url: 'https://media.test/direct', headers: { Authorization: 'Bearer token' } }, 'Origin')).toEqual({
+      url: 'https://media.test/direct',
+      headers: { Authorization: 'Bearer token' }
+    })
+  })
+
+  it('selects a requested quality and keeps playlist indexes non-negative', () => {
+    expect(resolvePlayerMediaSource({ url: 'https://media.test/direct', qualities: [{ quality: '720p', url: 'https://media.test/720p', headers: { Referer: 'https://media.test' } }] }, '720p')).toEqual({
+      url: 'https://media.test/720p',
+      headers: { Referer: 'https://media.test' }
+    })
+    expect(normalizePlaylistStartIndex(-1)).toBe(0)
+    expect(normalizePlaylistStartIndex(2)).toBe(2)
   })
 
   it('starts and probes the bundled MPV process without a command shell', () => {

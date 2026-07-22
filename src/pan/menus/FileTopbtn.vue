@@ -5,28 +5,17 @@ import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 import {
   menuCopyFileName,
-  menuCopyFileTree,
   menuCopySelectedFile,
   menuCreatShare,
   menuDownload,
-  menuFavSelectFile,
-  menuFileClearHistory,
-  menuFileColorChange,
-  menuFileEncTypeChange,
   menuJumpToDir,
-  menuM3U8Download,
   menuTrashSelectFile,
-  menuVideoXBT
 } from '../topbtns/topbtn'
 import { modalRename, modalShuXing } from '../../utils/modal'
 
 const props = defineProps({
   dirtype: {
     type: String,
-    required: true
-  },
-  isvideo: {
-    type: Boolean,
     required: true
   },
   isselected: {
@@ -76,7 +65,7 @@ const canMutateSelection = computed(() => canRenameSelection.value || canMoveSel
 const canSendToTrash = computed(() => capabilities.value.recycleBin && (canMutateSelection.value || props.dirtype === 'search'))
 const canPermanentlyDelete = computed(() => capabilities.value.permanentDelete)
 const canShowDelete = computed(() => canSendToTrash.value || canPermanentlyDelete.value)
-const canShowMore = computed(() => hasSelection.value && (canMutateSelection.value || !isPic.value || props.isvideo || props.dirtype === 'mypic'))
+const canShowMore = computed(() => hasSelection.value && (canMutateSelection.value || !isPic.value || props.dirtype === 'mypic'))
 const canCreateShare = computed(() => hasSelection.value && !isPic.value && props.dirtype !== 'video' && props.dirtype !== 'search' && capabilities.value.createShare)
 </script>
 
@@ -89,14 +78,6 @@ const canCreateShare = computed(() => hasSelection.value && !isPic.value && prop
     <a-button v-if="canCreateShare" type="text" size="small" tabindex="-1" title="Ctrl+S" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
       <IconFont name="iconfenxiang" />
       分享
-    </a-button>
-    <a-button v-if="!isPic && !isallfavored && capabilities.favorite" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, true)">
-      <IconFont name="iconcrown" />
-      收藏
-    </a-button>
-    <a-button v-if="!isPic && isallfavored && capabilities.favorite" type="text" size="small" tabindex="-1" title="Ctrl+G" @click="() => menuFavSelectFile(istree, false)">
-      <IconFont name="iconcrown2" />
-      取消收藏
     </a-button>
     <a-button v-if="canRenameSelection" title="F2 / Ctrl+E" type="text" size="small" tabindex="-1" @click="() => modalRename(istree, isselectedmulti, isPic)">
       <IconFont name="iconedit-square" />
@@ -149,33 +130,9 @@ const canCreateShare = computed(() => hasSelection.value && !isPic.value && prop
           <template #icon><IconFont name="iconshuxing" /></template>
           <template #default>属性</template>
         </a-doption>
-        <a-doption v-if="isvideo" @click="() => menuVideoXBT()">
-          <template #icon><IconFont name="iconjietu" /></template>
-          <template #default>雪碧图</template>
-        </a-doption>
-        <a-doption v-if="canMutateSelection && capabilities.encryption" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
-          <template #icon><IconFont name="iconsafebox" /></template>
-          <template #default>标记加密</template>
-        </a-doption>
-        <a-doption v-if="canMutateSelection && isallcolored && capabilities.playbackHistory" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
-          <template #icon><IconFont name="iconshipin" /></template>
-          <template #default>清除历史</template>
-        </a-doption>
-        <a-doption v-if="canMutateSelection && isallcolored && capabilities.colorTag" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileColorChange(istree, '')">
-          <template #icon><IconFont name="iconfangkuang" /></template>
-          <template #default>清除标记</template>
-        </a-doption>
-        <a-doption v-if="isvideo" @click="() => menuM3U8Download()">
-          <template #icon><IconFont name="iconluxiang" /></template>
-          <template #default>转码链接</template>
-        </a-doption>
         <a-doption v-if="hasSelection" @click="() => menuCopyFileName()">
           <template #icon><IconFont name="iconlist" /></template>
           <template #default>复制文件名</template>
-        </a-doption>
-        <a-doption v-if="!dirtype.includes('pic') && selectedOneDirectory && !isselectedmulti && capabilities.copyTree" @click="() => menuCopyFileTree()">
-          <template #icon><IconFont name="iconnode-tree1" /></template>
-          <template #default>复制目录树</template>
         </a-doption>
       </template>
     </a-dropdown>

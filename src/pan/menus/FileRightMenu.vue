@@ -1,33 +1,21 @@
 <script setup lang="ts">
 import {
   menuCopyFileName,
-  menuCopyFileTree,
   menuCopySelectedFile,
   menuCreatShare,
   menuDownload,
-  menuFileClearHistory,
-  menuFileColorChange,
-  menuFileEncTypeChange,
   menuJumpToDir,
-  menuM3U8Download,
   menuTrashSelectFile,
-  menuVideoXBT
 } from '../topbtns/topbtn'
 import { modalRename, modalShuXing } from '../../utils/modal'
-import { useSettingStore } from '../../store'
 import { computed } from 'vue'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
 let istree = false
-const settingStore = useSettingStore()
 
 const props = defineProps({
   dirtype: {
     type: String,
-    required: true
-  },
-  isvideo: {
-    type: Boolean,
     required: true
   },
   isselected: {
@@ -74,31 +62,6 @@ const canCreateShare = computed(() => capabilities.value.createShare)
         <template #default>分享</template>
       </a-doption>
 
-      <a-dsubmenu v-if="dirtype !== 'pic' && capabilities.colorTag" id="rightpansubbiaoji" class="rightmenu" trigger="hover">
-        <template #default>
-          <div @click.stop="() => {}">
-            <span class="arco-dropdown-option-icon">
-              <IconFont name="iconwbiaoqian" style="opacity: 0.8" />
-            </span>
-            标记
-          </div>
-        </template>
-        <template #content>
-          <a-doption v-for="item in settingStore.uiFileColorArray" :key="item.key" @click="() => menuFileColorChange(istree, item.key)">
-            <template #icon><IconFont name="iconcheckbox-full" :style="{ color: item.key }" /></template>
-            <template #default>{{ item.title || item.key }}</template>
-          </a-doption>
-
-          <a-doption @click="() => menuFileColorChange(istree, '#e74c3c')">
-            <template #icon><IconFont name="iconcheckbox-full" style="color: #e74c3c" /></template>
-            <template #default>视频红</template>
-          </a-doption>
-          <a-doption @click="() => menuFileColorChange(istree, '')">
-            <template #icon><IconFont name="iconfangkuang" /></template>
-            <template #default>清除标记</template>
-          </a-doption>
-        </template>
-      </a-dsubmenu>
       <a-dsubmenu v-if="dirtype != 'video'" id="rightpansubmove" class="rightmenu" trigger="hover">
         <template #default>
           <div @click.stop="() => {}">
@@ -116,10 +79,6 @@ const canCreateShare = computed(() => capabilities.value.createShare)
           <a-doption v-if="isShowBtn && capabilities.copy" @click="() => menuCopySelectedFile(istree, 'copy')">
             <template #icon><IconFont name="iconcopy" /></template>
             <template #default>复制到...</template>
-          </a-doption>
-          <a-doption v-if="isShowBtn && capabilities.encryption" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
-            <template #icon><IconFont name="iconsafebox" /></template>
-            <template #default>标记加密</template>
           </a-doption>
           <a-doption v-if="capabilities.recycleBin && ((isShowBtn && dirtype !== 'mypic') || dirtype === 'search')" class="danger" @click="() => menuTrashSelectFile(istree, false, isPic)">
             <template #icon><IconFont name="icondelete" /></template>
@@ -162,29 +121,9 @@ const canCreateShare = computed(() => capabilities.value.createShare)
             <template #icon><IconFont name="icondakaiwenjianjia1" /></template>
             <template #default>打开位置</template>
           </a-doption>
-          <a-doption v-if="isvideo" @click="() => menuVideoXBT()">
-            <template #icon><IconFont name="iconjietu" /></template>
-            <template #default>雪碧图</template>
-          </a-doption>
-          <a-doption v-if="isShowBtn && capabilities.encryption" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileEncTypeChange(istree)">
-            <template #icon><IconFont name="iconsafebox" /></template>
-            <template #default>标记加密</template>
-          </a-doption>
-          <a-doption v-if="isShowBtn && capabilities.playbackHistory" type="text" size="small" tabindex="-1" title="Ctrl+M" @click="() => menuFileClearHistory(istree)">
-            <template #icon><IconFont name="iconshipin" /></template>
-            <template #default>清除历史</template>
-          </a-doption>
-          <a-doption v-if="isvideo" @click="() => menuM3U8Download()">
-            <template #icon><IconFont name="iconluxiang" /></template>
-            <template #default>转码链接</template>
-          </a-doption>
           <a-doption v-if="isselected" @click="() => menuCopyFileName()">
             <template #icon><IconFont name="iconlist" /></template>
             <template #default>复制文件名</template>
-          </a-doption>
-          <a-doption v-if="isselected && !isselectedmulti && capabilities.copyTree" @click="() => menuCopyFileTree()">
-            <template #icon><IconFont name="iconnode-tree1" /></template>
-            <template #default>复制目录树</template>
           </a-doption>
         </template>
       </a-dsubmenu>

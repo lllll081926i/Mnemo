@@ -15,6 +15,7 @@ describe('Dropbox file command helpers', () => {
 
   it('resolves root and path-like ids for command endpoints', () => {
     expect(resolveDropboxCommandPath('dropbox_root')).toBe('')
+    expect(resolveDropboxCommandPath('id:rooted-file')).toBe('id:rooted-file')
     expect(resolveDropboxCommandPath('/Movies/demo.mkv')).toBe('/Movies/demo.mkv')
     expect(resolveDropboxCommandPath('id:abc', 'dropbox_path:%2FMovies%2Fdemo.mkv')).toBe('/Movies/demo.mkv')
     expect(resolveDropboxCommandPath('id:abc')).toBe('id:abc')

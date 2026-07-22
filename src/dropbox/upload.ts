@@ -61,8 +61,20 @@ const parseDropboxContentError = (data: string, fallback: string): string => {
   }
 }
 
-const dropboxContentRequest = <T>(accessToken: string, endpoint: string, apiArg: any, body: Buffer, fallback: string): Promise<{ data?: T; error: string }> => {
+const dropboxContentRequest = <T>(accessToken: string, endpoint: string, apiArg: any, body: Buffer, fallback: string, fileui?: IUploadingUI): Promise<{ data?: T; error: string }> => {
   return new Promise((resolve) => {
+    if (fileui && !fileui.IsRunning) {
+      resolve({ error: '已暂停' })
+      return
+    }
+    let settled = false
+    let monitor: ReturnType<typeof setInterval> | undefined
+    const finish = (value: { data?: T; error: string }) => {
+      if (settled) return
+      settled = true
+      if (monitor) clearInterval(monitor)
+      resolve(value)
+    }
     const req: ClientRequest = nodehttps.request({
       method: 'POST',
       hostname: DROPBOX_CONTENT_HOST,
@@ -80,16 +92,24 @@ const dropboxContentRequest = <T>(accessToken: string, endpoint: string, apiArg:
       })
       res.on('end', () => {
         if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-          const data = raw ? JSON.parse(raw) : {}
-          resolve({ data: data as T, error: '' })
+          try {
+            const data = raw ? JSON.parse(raw) : {}
+            finish({ data: data as T, error: '' })
+          } catch {
+            finish({ error: fallback })
+          }
         } else {
-          resolve({ error: parseDropboxContentError(raw, fallback) })
+          finish({ error: parseDropboxContentError(raw, fallback) })
         }
       })
     })
-    req.on('error', (err: any) => resolve({ error: err?.message || fallback }))
-    req.write(body)
-    req.end()
+    req.on('error', (err: any) => finish({ error: fileui && !fileui.IsRunning ? '已暂停' : err?.message || fallback }))
+    if (fileui) {
+      monitor = setInterval(() => {
+        if (!fileui.IsRunning) req.destroy(new Error('已暂停'))
+      }, 100)
+    }
+    req.end(body)
   })
 }
 
@@ -100,16 +120,18 @@ const readSlice = async (fileHandle: FileHandle, start: number, size: number): P
 }
 
 const recordUploadProgress = async (uploadId: number, delta: number, pos: number) => {
-  const { default: AliUploadDisk } = await import('../aliapi/uploaddisk')
-  AliUploadDisk.RecordUploadProgress(uploadId, delta, pos)
+  const { recordUploadProgress: record } = await import('../utils/uploadProgress')
+  record(uploadId, delta, pos)
 }
 
-const uploadBufferWithRetry = async <T>(accessToken: string, endpoint: string, arg: any, body: Buffer, fallback: string): Promise<{ data?: T; error: string }> => {
+const uploadBufferWithRetry = async <T>(accessToken: string, endpoint: string, arg: any, body: Buffer, fallback: string, fileui?: IUploadingUI): Promise<{ data?: T; error: string }> => {
   let last = ''
   for (let i = 0; i < 3; i++) {
-    const resp = await dropboxContentRequest<T>(accessToken, endpoint, arg, body, fallback)
+    if (fileui && !fileui.IsRunning) return { error: '已暂停' }
+    const resp = await dropboxContentRequest<T>(accessToken, endpoint, arg, body, fallback, fileui)
     if (!resp.error) return resp
     last = resp.error
+    if (fileui && !fileui.IsRunning) return { error: '已暂停' }
     await Sleep(800 * (i + 1))
   }
   return { error: last || fallback }
@@ -142,7 +164,8 @@ const uploadSmallFile = async (accessToken: string, fileHandle: FileHandle, file
     '/files/upload',
     buildDropboxCommitInfo(uploadPath, fileui.check_name_mode),
     buff,
-    '上传 Dropbox 文件失败'
+    '上传 Dropbox 文件失败',
+    fileui
   )
   if (resp.error) return resp.error
   fileui.File.uploaded_file_id = resp.data?.id || resp.data?.path_display || uploadPath
@@ -161,7 +184,8 @@ const uploadSessionFile = async (accessToken: string, fileHandle: FileHandle, fi
     '/files/upload_session/start',
     { close: false },
     first,
-    '创建 Dropbox 上传会话失败'
+    '创建 Dropbox 上传会话失败',
+    fileui
   )
   if (started.error || !started.data?.session_id) return started.error || '创建 Dropbox 上传会话失败'
   offset += first.length
@@ -175,7 +199,7 @@ const uploadSessionFile = async (accessToken: string, fileHandle: FileHandle, fi
     const cursor = buildDropboxUploadSessionCursor(started.data.session_id, offset)
     const endpoint = isLast ? '/files/upload_session/finish' : '/files/upload_session/append_v2'
     const arg = isLast ? { cursor, commit: buildDropboxCommitInfo(uploadPath, fileui.check_name_mode) } : { cursor, close: false }
-    const resp = await uploadBufferWithRetry<DropboxUploadResponse>(accessToken, endpoint, arg, buff, '上传 Dropbox 分片失败')
+    const resp = await uploadBufferWithRetry<DropboxUploadResponse>(accessToken, endpoint, arg, buff, '上传 Dropbox 分片失败', fileui)
     if (resp.error) return resp.error
     offset += buff.length
     await recordUploadProgress(fileui.UploadID, buff.length, offset)

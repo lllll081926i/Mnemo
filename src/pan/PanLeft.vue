@@ -92,8 +92,6 @@ watchEffect(() => {
 const handleTreeRightClick = (e: { event: MouseEvent; node: any }) => {
   const { parent = undefined, key } = e.node
   if (key.startsWith('search')) return
-  const isSingleRootDrive = provider.value !== 'aliyun'
-  if (!isSingleRootDrive && key.length < 40) return
   pantreeStore.mTreeSelected(e)
   onShowRightMenu('leftpanmenu', e.event.clientX, e.event.clientY)
 }
@@ -208,9 +206,6 @@ const isPreviewableNode = (data: TreeNodeData | undefined): boolean => {
   if (data.isLeaf === true) {
     // leaf placeholder, but still might be a real folder; only block if no drive_id
   }
-  const userId = pantreeStore.user_id || ''
-  const isSingleRootDrive = provider.value !== 'aliyun'
-  if (!isSingleRootDrive && key.length < 40) return false
   return true
 }
 
@@ -436,7 +431,6 @@ const handleOpenDriveLogin = () => {
             </template>
             <template #title="{ dataRef }">
               <span
-                v-if="provider !== 'aliyun' || String(dataRef.key).length == 40 || String(dataRef.key).includes('root') || String(dataRef.drive_id || '').startsWith('webdav:') || String(dataRef.drive_id || '').startsWith('s3:')"
                 class="dirtitle treedragnode"
                 @drop="onRowItemDrop($event, dataRef)"
                 @dragover="onRowItemDragOver"
@@ -444,9 +438,6 @@ const handleOpenDriveLogin = () => {
                 @dragleave="onRowItemDragLeave"
                 @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)"
                 @mouseleave="onTreeNodeLeave">
-                {{ dataRef.title }}
-              </span>
-              <span v-else class="dirtitle" @mouseenter="(ev: MouseEvent) => onTreeNodeEnter(ev, dataRef)" @mouseleave="onTreeNodeLeave">
                 {{ dataRef.title }}
               </span>
             </template>

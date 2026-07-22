@@ -49,7 +49,7 @@ export const apiPikPakOfflineCreate = async (user_id: string, url: string, fileN
     upload_type: 'UPLOAD_TYPE_URL',
     url: { url }
   }
-  if (parentId && !parentId.includes('root')) {
+  if (parentId && parentId !== 'root' && parentId !== 'pikpak_root') {
     body.parent_id = parentId
     body.folder_type = ''
   } else {

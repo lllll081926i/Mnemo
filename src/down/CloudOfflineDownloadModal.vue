@@ -5,6 +5,7 @@ import { useModalStore, useUserStore } from '../store'
 import { isPikPakUser } from '../aliapi/utils'
 import message from '../utils/message'
 import DownDAL from './DownDAL'
+import { isDriveProviderRootId } from '../utils/driveProvider'
 
 const props = defineProps({
   visible: {
@@ -63,7 +64,7 @@ const handleSelectDir = () => {
   }
   modalSelectPanDir('offline', form.dirId, (user_id: string, drive_id: string, selectFile: any) => {
     if (!selectFile || selectFile.isDir !== true) return
-    if (selectFile.file_id && String(selectFile.file_id).includes('root')) {
+    if (selectFile.file_id && isDriveProviderRootId('pikpak', String(selectFile.file_id))) {
       snapshot.dirId = ''
       snapshot.dirName = '默认（来自:离线下载）'
     } else {

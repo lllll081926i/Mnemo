@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { copyS3Path, createS3Connection, createS3Directory, createS3UserToken, getS3Connections, isS3Drive, listS3Directory, moveS3Path, normalizeS3Prefix, normalizeS3RelativePath, renameS3Path, saveS3Connection, type S3ConnectionInput } from '../s3Client'
 import { createClient } from 'webdav'
-import { buildWebDavDownloadUrl, createWebDavConnection, getWebDavConnections, getWebDavRequestHeaders, listWebDavDirectory, normalizeWebDavPath, saveWebDavConnection } from '../webdavClient'
+import { buildWebDavDownloadUrl, copyWebDavPath, createWebDavConnection, getWebDavConnections, getWebDavRequestHeaders, listWebDavDirectory, moveWebDavPath, normalizeWebDavPath, renameWebDavPath, saveWebDavConnection } from '../webdavClient'
 
 vi.mock('webdav', () => ({ createClient: vi.fn() }))
 
@@ -164,5 +164,16 @@ describe('S3 connection model', () => {
     await expect(copyS3Path(connection, '/folder', '/folder/child/folder')).rejects.toThrow('自身的子目录')
     await expect(renameS3Path(connection, '/folder/file.txt', '../other.txt')).rejects.toThrow('路径分隔符')
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('rejects destructive WebDAV self moves and path traversal before sending requests', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV 边界', url: 'https://dav.example.com', username: '', password: '', rootPath: '/home' })
+    const client = { copyFile: vi.fn(), moveFile: vi.fn() }
+    vi.mocked(createClient).mockReturnValue(client as any)
+    await expect(moveWebDavPath(connection, '/folder', '/folder')).rejects.toThrow('源路径与目标路径不能相同')
+    await expect(copyWebDavPath(connection, '/folder', '/folder/child/folder')).rejects.toThrow('自身的子目录')
+    await expect(renameWebDavPath(connection, '/folder/file.txt', '../other.txt')).rejects.toThrow('路径分隔符')
+    expect(client.copyFile).not.toHaveBeenCalled()
+    expect(client.moveFile).not.toHaveBeenCalled()
   })
 })

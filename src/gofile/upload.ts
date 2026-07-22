@@ -1,5 +1,6 @@
 import type { IUploadingUI } from '../utils/dbupload'
 import { getGofileRootId, getGofileUserToken } from './client'
+import { fetchCancellableProviderUpload } from '../utils/providerUpload'
 
 const UPLOAD_URL = 'https://upload.gofile.io/uploadfile'
 
@@ -17,13 +18,13 @@ export default class GofileUploadDisk {
     form.set('modTime', String(Math.floor(Date.now() / 1000)))
     form.set('file', blob, fileui.File.name)
     fileui.Info.uploadState = 'running'
-    const response = await fetch(UPLOAD_URL, { method: 'POST', headers: { Authorization: `Bearer ${token.access_token}` }, body: form })
+    const response = await fetchCancellableProviderUpload(fileui, UPLOAD_URL, { method: 'POST', headers: { Authorization: `Bearer ${token.access_token}` }, body: form })
     const payload = await response.json().catch(() => ({}))
     if (!response.ok || payload?.status !== 'ok' || !payload?.data?.id) return payload?.status || `GoFile 上传失败 (${response.status})`
     fileui.File.uploaded_file_id = payload.data.id
     fileui.File.uploaded_is_rapid = false
-    const { default: AliUploadDisk } = await import('../aliapi/uploaddisk')
-    AliUploadDisk.RecordUploadProgress(fileui.UploadID, fileui.File.size, fileui.File.size)
+    const { recordUploadProgress } = await import('../utils/uploadProgress')
+    recordUploadProgress(fileui.UploadID, fileui.File.size, fileui.File.size)
     return 'success'
   }
 }

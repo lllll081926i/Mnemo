@@ -7,7 +7,6 @@ import { usePanTreeStore, useSettingStore } from '../../store'
 import { humanDateTime, randomSharePassword } from '../../utils/format'
 import message from '../../utils/message'
 import AliShare from '../../aliapi/share'
-import ShareDAL from './ShareDAL'
 import { ArrayKeyList } from '../../utils/utils'
 import { copyToClipboard } from '../../utils/electronhelper'
 import { GetShareUrlFormate } from '../../utils/shareurl'
@@ -19,7 +18,9 @@ const okBatchLoading = ref(false)
 const settingStore = useSettingStore()
 const shareType = ref()
 const activeProvider = ref<DriveProvider>('unknown')
-const supportsShareSettings = computed(() => ['pikpak', 'dropbox'].includes(activeProvider.value))
+const supportsShareExpiration = computed(() => ['pikpak', 'onedrive', 'dropbox', 'gofile'].includes(activeProvider.value))
+const supportsSharePassword = computed(() => ['pikpak', 'onedrive', 'dropbox'].includes(activeProvider.value))
+const supportsShareSettings = computed(() => supportsShareExpiration.value || supportsSharePassword.value)
 const supportsCombinedShare = computed(() => !['onedrive', 'dropbox', 'gdrive', 'gofile'].includes(activeProvider.value))
 
 const form = reactive({
@@ -56,14 +57,14 @@ const handleOpen = async () => {
   let share_pwd = ''
   if (settingStore.uiSharePassword == 'random') share_pwd = randomSharePassword()
   else if (settingStore.uiSharePassword == 'last') share_pwd = localStorage.getItem('share_pwd') || ''
-  form.share_pwd = supportsShareSettings.value ? share_pwd : ''
+  form.share_pwd = supportsSharePassword.value ? share_pwd : ''
 
   let expiration = Date.now()
   if (settingStore.uiShareDays == 'always') expiration = 0
   else if (settingStore.uiShareDays == 'week') expiration += 7 * 24 * 60 * 60 * 1000
   else expiration += 30 * 24 * 60 * 60 * 1000
 
-  form.expiration = supportsShareSettings.value && expiration > 0 ? humanDateTime(expiration) : ''
+  form.expiration = supportsShareExpiration.value && expiration > 0 ? humanDateTime(expiration) : ''
 }
 
 const handleClose = () => {
@@ -98,14 +99,12 @@ const handleOK = async (multi: boolean) => {
   const user_id = pantreeStore.user_id
   const drive_id = pantreeStore.drive_id
   const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
-  const shareCapabilities = getDriveProviderCapabilities(provider)
-  const hasManagedShareList = shareCapabilities.manageCreatedShares
   const file_id_list = ArrayKeyList<string>('file_id', props.filelist)
   if (!multi && file_id_list.length > 1 && !supportsCombinedShare.value) {
     message.error('当前网盘仅支持为每个文件单独创建分享链接')
     return
   }
-  if (supportsShareSettings.value) localStorage.setItem('share_pwd', share_pwd)
+  if (supportsSharePassword.value) localStorage.setItem('share_pwd', share_pwd)
   if (!multi) {
     okLoading.value = true
     let result = undefined
@@ -116,11 +115,6 @@ const handleOK = async (multi: boolean) => {
       message.error(result)
       return
     }
-    if (hasManagedShareList && result.share_name != share_name) {
-      await AliShare.ApiUpdateShareBatch(user_id, [result.share_id],
-        [result.expiration], [result.share_pwd], [share_name])
-    }
-    if (hasManagedShareList) await ShareDAL.aReloadMyShareUntilShareID(user_id, result.share_id)
     url = GetShareUrlFormate(result.share_name, result.share_url, result.share_pwd || '')
     message.success('创建分享链接成功，分享链接已复制到剪切板')
     copyToClipboard(url)
@@ -139,9 +133,6 @@ const handleOK = async (multi: boolean) => {
         continue
       }
       sharedCount += 1
-      if (hasManagedShareList && result.share_id) {
-        await ShareDAL.aReloadMyShareUntilShareID(user_id, result.share_id)
-      }
       url += GetShareUrlFormate(result.share_name, result.share_url, result.share_pwd) + '\n'
     }
     message.success('创建 ' + sharedCount + '条 分享链接成功，分享链接已复制到剪切板')
@@ -159,34 +150,6 @@ const handleOK = async (multi: boolean) => {
     <template #title>
       <span class='modaltitle'>
         创建{{ shareType.title }}链接
-        <a-popover v-if="activeProvider === 'aliyun'" position="bottom">
-          <IconFont name="iconbulb" />
-          <template #content>
-            <div v-if="shareType.type === 's'">
-              <span class="opred">普通用户</span>每天只能使用分享功能<span class="opred">5次</span><br />
-              <span class="opred">会员用户和Lv.1及以上的达人用户</span>，每天可使用分享次数<span class="opred">1000次</span><br />
-              <div class="hrspace"></div>
-              <span class="oporg">超过上限后，将提示「今日分享次数已达上限」。</span>
-              <div class="hrspace"></div>
-              <span class="oporg">目前支持分享的文件类型有 image、video、doc、other</span> <br />
-              1、image支持以下格式：JPG、JPEG、PNG、HEIC、GIF、<br />
-              WEBP、 BMP <br />
-              2、video 支持以下格式：ASF、AVI、FLASH、FLV、LIVP、M3U8、<br />
-              MOV、MP4、MPG、RM、RMVB、TS、WMA、WMV、MKV <br />
-              3、doc 支持以下格式：WORD、EXCEL、OUTLOOK、PDF、PPT、RTF、<br />
-              TXT、VISIO<br />
-              4、other支持以下格式：MODE、FONT、APPLICATION <br />
-              <div class="hrspace"></div>
-              文件夹已支持分享，<span class="oporg">压缩包暂不支持（可以洗码分享）</span>
-            </div>
-            <div v-else>
-              <span class="opred">普通用户</span>每天的快传次数为<span class="opred">5次</span><br />
-              <span class="opred">会员用户</span>每天的快传次数为<span class="opred">100次</span><br />
-              <div class="hrspace"></div>
-              普通用户请前往会员中心，购买会员开通权益<br />
-            </div>
-          </template>
-        </a-popover>
         <span class='titletips'> (已选择{{ filelist.length }}个文件) </span>
       </span>
     </template>
@@ -204,13 +167,13 @@ const handleOK = async (multi: boolean) => {
 
         <template v-if='shareType.type === "s" && supportsShareSettings'>
           <a-row>
-            <a-col flex='200px'> 有效期：</a-col>
-            <a-col flex='12px'></a-col>
-            <a-col flex='100px'> 提取码：</a-col>
+            <a-col v-if='supportsShareExpiration' flex='200px'> 有效期：</a-col>
+            <a-col v-if='supportsShareExpiration && supportsSharePassword' flex='12px'></a-col>
+            <a-col v-if='supportsSharePassword' flex='100px'> 提取码：</a-col>
             <a-col flex='auto'></a-col>
           </a-row>
           <a-row>
-            <a-col flex='200px'>
+            <a-col v-if='supportsShareExpiration' flex='200px'>
               <a-form-item field='expiration'>
                 <a-date-picker
                   v-model='form.expiration'
@@ -228,8 +191,8 @@ const handleOK = async (multi: boolean) => {
                   ]" />
               </a-form-item>
             </a-col>
-            <a-col flex='12px'></a-col>
-            <a-col flex='120px'>
+            <a-col v-if='supportsShareExpiration && supportsSharePassword' flex='12px'></a-col>
+            <a-col v-if='supportsSharePassword' flex='120px'>
               <a-form-item field='share_pwd' :rules="[{ length: 4, message: '提取码必须是4个字符' }]">
                 <a-input v-model='form.share_pwd' tabindex='-1' placeholder='没有不填' />
               </a-form-item>

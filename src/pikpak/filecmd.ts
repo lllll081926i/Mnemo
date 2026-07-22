@@ -8,9 +8,24 @@ type PikPakCommandResp = {
   file?: { id?: string; name?: string; parent_id?: string; kind?: string }
   files?: Array<{ id?: string }>
   task?: unknown
+  task_id?: string
+  phase?: string
   error?: string
   error_description?: string
   message?: string
+}
+
+type PikPakTaskState = Pick<PikPakCommandResp, 'phase' | 'message' | 'error' | 'error_description'> | null
+
+export const waitForPikPakTask = async (getTask: () => Promise<PikPakTaskState>, attempts = 20, delayMs = 500): Promise<{ success: boolean; error: string }> => {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const task = await getTask()
+    if (!task) return { success: false, error: '无法获取 PikPak 操作状态' }
+    if (task.phase === 'PHASE_TYPE_COMPLETE') return { success: true, error: '' }
+    if (task.phase === 'PHASE_TYPE_ERROR') return { success: false, error: task.error_description || task.message || task.error || 'PikPak 操作失败' }
+    if (attempt < attempts - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+  }
+  return { success: false, error: 'PikPak 操作等待超时' }
 }
 
 const getToken = async (user_id: string) => {
@@ -88,6 +103,16 @@ const batchCommand = async (user_id: string, url: string, ids: string[], title: 
     body: JSON.stringify({ ids, ...bodyExtra })
   }, title)
   if (!data) return []
+  const taskId = data.task_id || (data.task as { id?: string } | undefined)?.id || ''
+  if (!taskId) {
+    message.error(`${title}失败 未返回任务 ID`)
+    return []
+  }
+  const taskResult = await waitForPikPakTask(() => requestPikPak<PikPakCommandResp>(user_id, `${API_URL}/tasks/${encodeURIComponent(taskId)}`, { method: 'GET' }, `查询${title}状态`))
+  if (!taskResult.success) {
+    message.error(`${title}失败 ${taskResult.error}`)
+    return []
+  }
   return ids
 }
 

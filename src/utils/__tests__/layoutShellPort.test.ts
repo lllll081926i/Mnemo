@@ -129,7 +129,8 @@ describe('deep layout shell port', () => {
   it('keeps the transfer rail compact while share and setting use the standard shell', () => {
     expect(read('src/down/index.vue')).toContain(':width="192"')
     expect(read('src/down/index.vue')).toContain('--layout-rail-width: 192px')
-    expect(read('src/share/index.vue')).toContain(':width="220"')
+    expect(read('src/share/index.vue')).toContain('workspace-empty-state')
+    expect(read('src/share/index.vue')).toContain('创建分享链接')
     expect(read('src/setting/index.vue')).toContain('ui-page-shell')
     expect(read('src/assets/layout-refactor.css')).toContain('--layout-rail-width: 220px')
     expect(read('src/share/index.vue')).not.toContain('ShareBottleFish')
@@ -209,8 +210,9 @@ describe('deep layout shell port', () => {
     expect(fileApi).toContain("proxy_kind: 'subtitle'")
     expect(player).toContain('findBestSubtitleMatch')
     expect(player).toContain("proxy_kind: 'subtitle'")
-    expect(image).toContain("resolveDriveProvider({ userId: pageImage.user_id, driveId: item.drive_id }) !== 'aliyun'")
+    expect(image).toContain('getProxyUrl')
     expect(image).not.toContain('thirdPartyImageDrives')
+    expect(image).not.toContain('api.aliyundrive.com/v2/file/download')
     expect(openFile.match(/proxy_headers: rawData\.headers \? JSON\.stringify\(rawData\.headers\) : undefined/g)).toHaveLength(5)
     expect(proxy).toContain("resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''")
     expect(proxy).toContain('proxy_headers: resolvedProxyHeaders')
@@ -255,9 +257,7 @@ describe('deep layout shell port', () => {
       'src/down/DownDowned.vue',
       'src/down/DownUploading.vue',
       'src/down/DownUploaded.vue',
-      'src/share/share/MyShareRight.vue',
-      'src/share/share/OtherShareRight.vue',
-      'src/share/share/ShareHistoryRight.vue'
+      'src/share/index.vue'
     ]
     for (const page of pages) {
       const source = read(page)
@@ -282,6 +282,14 @@ describe('deep layout shell port', () => {
     expect(rightMenu).not.toContain('BookScanner')
     expect(rightMenu).not.toContain('扫描数据')
     expect(rightMenu).not.toContain('AI 重刮削')
+    expect(rightMenu).not.toContain('menuVideoXBT')
+    expect(rightMenu).not.toContain('menuM3U8Download')
+    const topMenu = read('src/pan/menus/FileTopbtn.vue')
+    expect(topMenu).not.toContain('menuVideoXBT')
+    expect(topMenu).not.toContain('menuM3U8Download')
+    const openFile = read('src/utils/openfile.ts')
+    expect(openFile).toContain('PDF_PREVIEW_DRIVES.has(fileProvider)')
+    expect(openFile).toContain('isDriveProviderSessionUsable(token')
   })
 
   it('appstore only keeps four main tabs', () => {
@@ -368,11 +376,10 @@ describe('deep layout shell port', () => {
 
     expect(windowSource).toContain('devTools: DEBUGGING && devTools')
     expect(windowSource).toContain('devTools: DEBUGGING')
-    expect(windowSource).toContain('handleWebView(win, allowDevTools)')
-    expect(windowSource).toContain('if (allowDevTools) {\n    registerDevToolsShortcut(win.webContents)')
+    expect(windowSource).toContain('if (allowDevTools) registerDevToolsShortcut(win.webContents)')
     expect(windowSource).toContain('disableDevTools(win.webContents)')
-    expect(windowSource).toContain('disableDevTools(webContent)')
-    expect(windowSource).toContain('if (!allowDevTools) webPreferences.devTools = false')
+    expect(windowSource).not.toContain('will-attach-webview')
+    expect(windowSource).not.toContain('did-attach-webview')
     expect(windowSource).not.toContain('readerWindow')
     expect(loginSource).not.toContain('webview.openDevTools')
     expect(loginSource).not.toContain('<Webview')
@@ -387,9 +394,9 @@ describe('deep layout shell port', () => {
     expect(launch).not.toContain("appendSwitch('disable-renderer-backgrounding')")
     expect(windowSource).toContain('backgroundThrottling: boolean = true')
     expect(windowSource).toContain('backgroundThrottling,')
-    expect(windowSource).toContain("const allowWebview = page === 'main'")
-    expect(windowSource).toContain('webviewTag: allowWebview')
-    expect(windowSource).toContain('nodeIntegrationInWorker: allowWebview')
+    expect(windowSource).toContain("const allowWorkerNodeIntegration = page === 'main'")
+    expect(windowSource).toContain('webviewTag: false')
+    expect(windowSource).toContain('nodeIntegrationInWorker: allowWorkerNodeIntegration')
     expect(windowSource).toContain('enableWebSQL: false')
     expect(windowSource).toContain('allowRunningInsecureContent: false')
     expect(windowSource).toContain('preload: getPreloadPath()')
@@ -424,10 +431,8 @@ describe('deep layout shell port', () => {
     const html = read('index.html')
     const treeViews = [
       'src/pan/PanLeft.vue',
-      'src/pan/topbtns/ArchiveModal.vue',
       'src/pan/topbtns/RenameMultiModal.vue',
-      'src/pan/topbtns/SelectPanDirModal.vue',
-      'src/share/share/ShowShareLinkModal.vue'
+      'src/pan/topbtns/SelectPanDirModal.vue'
     ]
 
     expect(launch).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED')
@@ -437,10 +442,9 @@ describe('deep layout shell port', () => {
     expect(launch).not.toContain('OutOfBlinkCors')
     expect(launch.indexOf('createMainWindow()')).toBeLessThan(launch.indexOf("loadCrxExtension(getStaticPath('crx')"))
     expect(launch).toContain('if (!app.isPackaged)')
-    // Default guest webviews stay locked down; PikPak captcha guests may relax webSecurity for Tencent assets.
-    expect(windowSource).toContain('webPreferences.webSecurity = !captcha')
-    expect(windowSource).toContain('webPreferences.allowRunningInsecureContent = captcha')
-    expect(windowSource).toContain('isPikPakCaptchaUrl')
+    expect(windowSource).toContain('webviewTag: false')
+    expect(windowSource).not.toContain('isPikPakCaptchaUrl')
+    expect(windowSource).not.toContain('allowRunningInsecureContent =')
     expect(windowSource).not.toContain('closeAllConnections()')
     expect(read('electron/main/utils/mainfile.ts')).toContain("path.join(path.resolve(app.getAppPath()), 'dev-electron', 'preload', 'index.js')")
     expect(read('vite.config.ts')).toContain("outDir: isBuild ? 'dist/electron/preload' : 'dev-electron/preload'")

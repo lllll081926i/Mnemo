@@ -4,6 +4,7 @@ import * as GoFileClient from '../client'
 import { gofileRequestWithToken } from '../client'
 import { apiGofileFileList, mapGofileItemToAliModel } from '../dirfilelist'
 import { apiGofileCopyBatch, apiGofileMkdir, apiGofileMoveBatch } from '../filecmd'
+import { buildGofileDirectLinkBody } from '../share'
 
 describe('GoFile client', () => {
   it('authenticates API calls with a bearer token', async () => {
@@ -56,5 +57,10 @@ describe('GoFile client', () => {
     expect(request).toHaveBeenNthCalledWith(2, 'gofile_account-a', '/contents/move', { method: 'PUT', body: JSON.stringify({ folderId: 'target-a', contentsId: 'file-a,file-b' }) })
     expect(request).toHaveBeenNthCalledWith(3, 'gofile_account-a', '/contents/copy', { method: 'POST', body: JSON.stringify({ folderId: 'target-a', contentsId: 'file-a' }) })
     request.mockRestore()
+  })
+
+  it('converts share expiration to GoFile native seconds', () => {
+    expect(buildGofileDirectLinkBody('2026-08-01T00:00:00.000Z')).toEqual({ expireTime: 1785542400 })
+    expect(buildGofileDirectLinkBody('')).toEqual({})
   })
 })

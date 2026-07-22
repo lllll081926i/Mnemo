@@ -16,6 +16,22 @@ describe('provider upload routing', () => {
     for (const handler of ['GuangyaUploadDisk', 'QuarkUploadDisk', 'Cloud139UploadDisk', 'Cloud189UploadDisk', 'AliUploadDisk', 'AliUploadHashPool']) expect(uploader).not.toContain(handler)
   })
 
+  it('keeps provider uploads cancellable and chunks Google Drive resumable uploads', () => {
+    const helper = read('src/utils/providerUpload.ts')
+    const google = read('src/gdrive/upload.ts')
+    const gofile = read('src/gofile/upload.ts')
+    const oneDrive = read('src/onedrive/upload.ts')
+    const dropbox = read('src/dropbox/upload.ts')
+    expect(helper).toContain('fetchCancellableProviderUpload')
+    expect(helper).toContain("if (!fileui.IsRunning) controller.abort('已暂停')")
+    expect(google).toContain('const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024')
+    expect(google).toContain('response.status !== 308')
+    expect(gofile).toContain('fetchCancellableProviderUpload(fileui')
+    expect(oneDrive).toContain('fetchCancellableProviderUpload(fileui')
+    expect(dropbox).toContain("req.destroy(new Error('已暂停'))")
+    expect(dropbox).toContain("if (fileui && !fileui.IsRunning) return { error: '已暂停' }")
+  })
+
   it('routes added providers through their own file and share APIs', () => {
     const file = read('src/aliapi/file.ts')
     const filecmd = read('src/aliapi/filecmd.ts')
@@ -29,21 +45,21 @@ describe('provider upload routing', () => {
     expect(filecmd).toContain('apiGoogleDriveTrashBatch')
     expect(filecmd).toContain('apiGoogleDriveRestoreBatch')
     expect(filecmd).toContain("resolveDriveProvider({ userId: user_id, driveId: drive_id }) === 'gdrive'")
-    expect(filecmd).toContain("isDir: t.type === 'folder'")
-    expect(filecmd).not.toContain("isDir: t.type !== 'folder'")
     expect(filecmd).toContain("isDir: info.type === 'directory'")
-    expect(filecmd).toContain("if (provider !== 'aliyun')")
+    expect(filecmd).toContain('isDir: !!detail.isDir')
+    expect(filecmd).not.toContain('ApiBatchMaker')
     expect(filecmd).toContain('AliFile.ApiGetFile(user_id, drive_id, file_id)')
     expect(share).toContain('apiGofileCreateDirectLink')
-    expect(share).toContain("if (provider !== 'aliyun') return `${getDriveProviderLabel(provider)} 暂不支持创建分享链接`")
+    expect(share).toContain('暂不支持创建分享链接')
   })
 
   it('only exposes share settings and combined sharing where the provider supports them', () => {
     const modal = read('src/share/share/CreatNewShareLinkModal.vue')
-    expect(modal).toContain('getDriveProviderCapabilities(provider)')
+    expect(modal).toContain("import { getDriveProviderCapabilities, resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'")
     expect(modal).toContain('supportsShareSettings')
     expect(modal).toContain('supportsCombinedShare')
-    expect(modal).toContain('shareCapabilities.manageCreatedShares')
+    expect(modal).not.toContain('manageCreatedShares')
+    expect(modal).not.toContain('ShareDAL')
   })
 
   it('hides and rejects upload actions outside real drive folders', () => {
