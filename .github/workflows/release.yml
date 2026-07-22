@@ -107,24 +107,24 @@ jobs:
           if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
             is_prerelease=true
           fi
-          # Use gh release edit by tag name (works with draft releases created by electron-builder).
-          # Do NOT pass --draft=false here to avoid 422 tag_name conflicts; patch separately via API list.
-          if [[ "${is_prerelease}" == "true" ]]; then
-            gh release edit "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "Mnemo ${GITHUB_REF_NAME}" \
-              --notes-file release-notes.md \
-              --prerelease
-          else
-            gh release edit "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "Mnemo ${GITHUB_REF_NAME}" \
-              --notes-file release-notes.md \
-              --latest
-          fi
-          # Promote from draft to published. Find release by list (drafts invisible by tag).
-          release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq ".[] | select(.tag_name==\"${GITHUB_REF_NAME}\") | .id" | head -1)
-          if [[ -n "${release_id}" ]]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-              -f draft=false >/dev/null
+          # electron-builder --publish always creates a draft release. Update it via API only (gh release edit fails on drafts with 422).
+          # Fetch all releases and find the one matching our tag (drafts are visible in the list).
+          release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq "[.[] | select(.tag_name == \"${GITHUB_REF_NAME}\")][0].id")
+          if [[ -n "${release_id}" && "${release_id}" != "null" ]]; then
+            if [[ "${is_prerelease}" == "true" ]]; then
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+                -f name="Mnemo ${GITHUB_REF_NAME}" \
+                -F body=@release-notes.md \
+                -f draft=false \
+                -f prerelease=true \
+                -f make_latest=false >/dev/null
+            else
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+                -f name="Mnemo ${GITHUB_REF_NAME}" \
+                -F body=@release-notes.md \
+                -f draft=false \
+                -f prerelease=false \
+                -f make_latest=true >/dev/null
+            fi
           fi
