@@ -140,6 +140,28 @@ class PikPakApiError extends Error {
   }
 }
 
+export class PikPakCaptchaRequiredError extends Error {
+  readonly code = 'PikPak_CAPTCHA_REQUIRED'
+
+  constructor(
+    readonly deviceId: string,
+    readonly captchaToken: string,
+    readonly challengeUrl: string,
+    readonly expiresIn?: number
+  ) {
+    super('请先完成 PikPak 图形验证')
+    this.name = 'PikPakCaptchaRequiredError'
+  }
+}
+
+export const isPikPakCaptchaInvalidError = (error: unknown): boolean => {
+  return error instanceof PikPakApiError && error.reason === 'captcha_invalid' && error.code === 4002
+}
+
+export const isPikPakCaptchaRequiredResponse = (error: unknown): boolean => {
+  return error instanceof PikPakApiError && error.reason === 'captcha_required'
+}
+
 const pikpakJson = async <T>(url: string, init: RequestInit, fallback: string): Promise<T> => {
   const resp = await fetch(url, init)
   const data = await resp.json().catch(() => undefined)
@@ -213,6 +235,18 @@ export const buildPikPakLoginCaptchaMeta = (username: string): Partial<PikPakCap
   return { username: username.trim() }
 }
 
+export const beginPikPakLoginCaptcha = async (username: string, deviceId?: string): Promise<{ deviceId: string; captcha: PikPakCaptchaInitResult }> => {
+  const normalizedUsername = username.trim()
+  if (!normalizedUsername) throw new Error('请输入 PikPak 账号')
+  const resolvedDeviceId = /^[a-f0-9]{32}$/i.test(deviceId || '') ? String(deviceId).toLowerCase() : getOrCreatePikPakDeviceId(normalizedUsername)
+  const captcha = await initPikPakCaptcha({
+    deviceId: resolvedDeviceId,
+    action: 'POST:/v1/auth/signin',
+    meta: buildPikPakLoginCaptchaMeta(normalizedUsername)
+  })
+  return { deviceId: resolvedDeviceId, captcha }
+}
+
 const signInPikPak = async (username: string, password: string, captchaToken: string, deviceId: string): Promise<ITokenInfo> => {
   const normalizedUsername = username.trim()
   if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
@@ -243,6 +277,14 @@ const signInPikPak = async (username: string, password: string, captchaToken: st
   token.device_id = deviceId
   token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
   return token
+}
+
+export const loginPikPakWithCaptcha = async (username: string, password: string, captchaToken: string, deviceId?: string): Promise<ITokenInfo> => {
+  const normalizedUsername = username.trim()
+  if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
+  if (!captchaToken) throw new Error('请先完成 PikPak 验证')
+  const resolvedDeviceId = /^[a-f0-9]{32}$/i.test(deviceId || '') ? String(deviceId).toLowerCase() : getOrCreatePikPakDeviceId(normalizedUsername)
+  return signInPikPak(normalizedUsername, password, captchaToken, resolvedDeviceId)
 }
 
 const emptyToken = (): ITokenInfo => ({
@@ -296,18 +338,20 @@ export const loginPikPak = async (username: string, password: string, deviceId?:
   const normalizedUsername = username.trim()
   if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
   const resolvedDeviceId = /^[a-f0-9]{32}$/i.test(deviceId || '') ? String(deviceId).toLowerCase() : getOrCreatePikPakDeviceId(normalizedUsername)
-  const requestCaptcha = () => initPikPakCaptcha({
-    deviceId: resolvedDeviceId,
-    action: 'POST:/v1/auth/signin',
-    meta: buildPikPakLoginCaptchaMeta(normalizedUsername)
-  })
-  let captcha = await requestCaptcha()
+  let captcha = (await beginPikPakLoginCaptcha(normalizedUsername, resolvedDeviceId)).captcha
+  if (captcha.challengeUrl) throw new PikPakCaptchaRequiredError(resolvedDeviceId, captcha.captchaToken, captcha.challengeUrl, captcha.expiresIn)
   try {
     return await signInPikPak(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
   } catch (error) {
-    if (!(error instanceof PikPakApiError) || error.reason !== 'captcha_invalid' || error.code !== 4002) throw error
+    if (!isPikPakCaptchaInvalidError(error) && !isPikPakCaptchaRequiredResponse(error)) throw error
   }
-  captcha = await requestCaptcha()
+  captcha = (await initPikPakCaptcha({
+    deviceId: resolvedDeviceId,
+    action: 'POST:/v1/auth/signin',
+    meta: buildPikPakLoginCaptchaMeta(normalizedUsername),
+    previousToken: captcha.captchaToken
+  }))
+  if (captcha.challengeUrl) throw new PikPakCaptchaRequiredError(resolvedDeviceId, captcha.captchaToken, captcha.challengeUrl, captcha.expiresIn)
   return signInPikPak(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
 }
 

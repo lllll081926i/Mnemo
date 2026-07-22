@@ -4,6 +4,7 @@ import { createClient, type FileStat } from 'webdav'
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
+import { humanSize } from './format'
 
 const STORAGE_KEY = 'mnemo.webdav.connections'
 
@@ -16,6 +17,12 @@ export interface WebDavConnectionConfig {
   password: string
   rootPath: string
   createdAt: string
+}
+
+export interface WebDavQuotaInfo {
+  used: number
+  available: number | 'unknown' | 'unlimited'
+  total: number
 }
 
 type PersistedWebDavConnection = Omit<WebDavConnectionConfig, 'username' | 'password'> & Partial<Pick<WebDavConnectionConfig, 'username' | 'password'>> & {
@@ -274,6 +281,47 @@ export const getWebDavRequestHeaders = (config: WebDavConnectionConfig): Record<
     binary += String.fromCharCode(byte)
   })
   return { Authorization: `Basic ${btoa(binary)}` }
+}
+
+export const getWebDavQuota = async (config: WebDavConnectionConfig): Promise<WebDavQuotaInfo | null> => {
+  const client = createWebDavClient(config)
+  if (typeof client.getQuota !== 'function') return null
+  try {
+    const quota = await client.getQuota({ path: normalizeWebDavPath(config.rootPath) }) as { used?: number; available?: number | 'unknown' | 'unlimited' } | null
+    const used = Number(quota?.used)
+    const rawAvailable = quota?.available
+    const available = rawAvailable === -3 ? 'unlimited' : rawAvailable === -2 || rawAvailable === -1 ? 'unknown' : rawAvailable
+    if (!Number.isFinite(used) || used < 0 || (typeof available !== 'number' && available !== 'unknown' && available !== 'unlimited')) return null
+    if (typeof available === 'number') {
+      if (!Number.isFinite(available) || available < 0) return null
+      const total = used + available
+      if (!Number.isFinite(total)) return null
+      return { used, available, total }
+    }
+    return { used, available, total: 0 }
+  } catch {
+    return null
+  }
+}
+
+export const applyWebDavQuota = async (token: ITokenInfo, config: WebDavConnectionConfig): Promise<boolean> => {
+  const quota = await getWebDavQuota(config)
+  if (!quota) {
+    token.used_size = 0
+    token.free_size = 0
+    token.total_size = 0
+    token.spaceinfo = '服务器未提供容量信息'
+    return false
+  }
+  token.used_size = quota.used
+  token.free_size = typeof quota.available === 'number' ? quota.available : 0
+  token.total_size = quota.total
+  token.spaceinfo = quota.total > 0
+    ? `${humanSize(quota.used)} / ${humanSize(quota.total)}`
+    : quota.available === 'unlimited'
+      ? `已用 ${humanSize(quota.used)}，容量无限制`
+      : `已用 ${humanSize(quota.used)}，服务器未提供总容量`
+  return true
 }
 
 export const listWebDavDirectory = async (config: WebDavConnectionConfig, relativePath = '/'): Promise<IAliGetFileModel[]> => {

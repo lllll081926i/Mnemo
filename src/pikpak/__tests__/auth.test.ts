@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, createPikPakDeviceId, getOrCreatePikPakDeviceId, loginPikPak, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
+import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, createPikPakDeviceId, getOrCreatePikPakDeviceId, loginPikPak, loginPikPakWithCaptcha, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
 import { MD5 } from 'crypto-js'
 
 describe('PikPak captcha', () => {
@@ -83,6 +83,30 @@ describe('PikPak captcha', () => {
     expect(token.device_id).toBe('0123456789abcdef0123456789abcdef')
   })
 
+  it('does not submit signin before a visual challenge is completed', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'captcha-visual', url: 'https://captcha.example/challenge', expires_in: 300 }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(loginPikPak('demo@example.com', 'secret', '0123456789abcdef0123456789abcdef')).rejects.toMatchObject({
+      code: 'PikPak_CAPTCHA_REQUIRED',
+      deviceId: '0123456789abcdef0123456789abcdef',
+      captchaToken: 'captcha-visual',
+      challengeUrl: 'https://captcha.example/challenge'
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the same device id and captcha token after the challenge is completed', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access', refresh_token: 'refresh', sub: 'account' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loginPikPakWithCaptcha('demo@example.com', 'secret', 'captcha-visual', '0123456789abcdef0123456789abcdef')
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit
+    expect((request.headers as Record<string, string>)['X-Device-Id']).toBe('0123456789abcdef0123456789abcdef')
+    expect((request.headers as Record<string, string>)['X-Captcha-Token']).toBe('captcha-visual')
+  })
+
   it('invalidates captcha_invalid code 4002 and retries login once', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'captcha-1', expires_in: 300 }), { status: 200 }))
@@ -94,5 +118,20 @@ describe('PikPak captcha', () => {
     await expect(loginPikPak('demo', 'secret', '0123456789abcdef0123456789abcdef')).resolves.toMatchObject({ access_token: 'access' })
     expect(fetchMock).toHaveBeenCalledTimes(4)
     expect((fetchMock.mock.calls[3][1]?.headers as Record<string, string>)['X-Captcha-Token']).toBe('captcha-2')
+  })
+
+  it('stops after a captcha_required response and exposes the fresh challenge', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'captcha-1', expires_in: 300 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'captcha_required', error_code: 4001 }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'captcha-2', url: 'https://captcha.example/challenge-2', expires_in: 300 }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(loginPikPak('demo', 'secret', '0123456789abcdef0123456789abcdef')).rejects.toMatchObject({
+      code: 'PikPak_CAPTCHA_REQUIRED',
+      captchaToken: 'captcha-2',
+      challengeUrl: 'https://captcha.example/challenge-2'
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 })

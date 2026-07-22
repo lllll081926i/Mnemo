@@ -39,6 +39,15 @@ describe('provider OAuth runtime configuration', () => {
     expect(login).not.toContain('uiOpenApiClientSecret')
   })
 
+  it('routes PikPak visual challenges through the validated external URL bridge', () => {
+    const login = read('src/user/UserLogin.vue')
+    const auth = read('src/pikpak/auth.ts')
+    expect(login).toContain('window.WebOpenExternal(challengeUrl)')
+    expect(login).toContain('loginPikPakWithCaptcha')
+    expect(auth).toContain('PikPakCaptchaRequiredError')
+    expect(auth).toContain('if (captcha.challengeUrl) throw new PikPakCaptchaRequiredError')
+  })
+
   it('injects complete confidential OAuth credentials into Windows release builds', () => {
     const workflow = read('.github/workflows/release.yml')
     const envExample = read('.env.example')

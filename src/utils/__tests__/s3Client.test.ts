@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { copyS3Path, createS3Connection, createS3Directory, createS3UserToken, getS3Connections, isS3Drive, listS3Directory, moveS3Path, normalizeS3Prefix, normalizeS3RelativePath, renameS3Path, saveS3Connection, type S3ConnectionInput } from '../s3Client'
 import { createClient } from 'webdav'
-import { buildWebDavDownloadUrl, copyWebDavPath, createWebDavConnection, getWebDavConnections, getWebDavRequestHeaders, listWebDavDirectory, moveWebDavPath, normalizeWebDavPath, renameWebDavPath, saveWebDavConnection } from '../webdavClient'
+import { applyWebDavQuota, buildWebDavDownloadUrl, copyWebDavPath, createWebDavConnection, createWebDavUserToken, getWebDavConnections, getWebDavQuota, getWebDavRequestHeaders, listWebDavDirectory, moveWebDavPath, normalizeWebDavPath, renameWebDavPath, saveWebDavConnection, testWebDavConnection } from '../webdavClient'
 
 vi.mock('webdav', () => ({ createClient: vi.fn() }))
 
@@ -106,6 +106,35 @@ describe('S3 connection model', () => {
     expect(items).toMatchObject([{ file_id: '/projects/movie.mp4', parent_file_id: '/projects', category: 'video' }])
     expect(getWebDavRequestHeaders(connection)).toEqual({ Authorization: 'Basic ZGF2LXVzZXI6c2VjcmV0' })
     expect(buildWebDavDownloadUrl(connection, '/projects/movie.mp4')).toBe('https://dav.example.com/dav/home/projects/movie.mp4')
+  })
+
+  it('reads RFC 4331 quota and writes it to the WebDAV user token', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV quota', url: 'https://dav.example.com/dav', username: 'dav-user', password: 'secret', rootPath: '/home' })
+    const getQuota = vi.fn().mockResolvedValue({ used: 1024, available: 4096 })
+    vi.mocked(createClient).mockReturnValue({ getQuota } as any)
+
+    await expect(getWebDavQuota(connection)).resolves.toEqual({ used: 1024, available: 4096, total: 5120 })
+    const token = createWebDavUserToken(connection)
+    await applyWebDavQuota(token, connection)
+    expect(token).toMatchObject({ used_size: 1024, free_size: 4096, total_size: 5120, spaceinfo: '1.00KB / 5.00KB' })
+    expect(getQuota).toHaveBeenCalledWith({ path: '/home' })
+  })
+
+  it('keeps a WebDAV connection refreshable when the server has no quota endpoint', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV no quota', url: 'https://dav.example.com', username: 'dav-user', password: 'secret', rootPath: '/' })
+    const getDirectoryContents = vi.fn().mockResolvedValue([])
+    const getQuota = vi.fn().mockRejectedValue(new Error('405 Method Not Allowed'))
+    vi.mocked(createClient).mockReturnValue({ getDirectoryContents, getQuota } as any)
+
+    await expect(testWebDavConnection(connection)).resolves.toBeUndefined()
+    await expect(getWebDavQuota(connection)).resolves.toBeNull()
+  })
+
+  it('supports WebDAV unlimited quota markers without inventing a total size', async () => {
+    const connection = createWebDavConnection({ name: 'WebDAV unlimited', url: 'https://dav.example.com', username: 'dav-user', password: 'secret', rootPath: '/' })
+    vi.mocked(createClient).mockReturnValue({ getQuota: vi.fn().mockResolvedValue({ used: 2048, available: -3 }) } as any)
+
+    await expect(getWebDavQuota(connection)).resolves.toEqual({ used: 2048, available: 'unlimited', total: 0 })
   })
 
   it('creates isolated account and drive ids for every connection', () => {

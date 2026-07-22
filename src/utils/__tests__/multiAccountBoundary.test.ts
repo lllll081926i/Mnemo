@@ -18,6 +18,8 @@ describe('multi-account provider boundaries', () => {
     expect(change).not.toContain('AliUser.ApiTokenRefreshAccount')
     expect(ensure).toContain('const provider = resolveDriveProvider(token)')
     expect(ensure).toContain("if (provider === 'unknown') return null")
+    expect(ensure).toContain('await testWebDavConnection(connection)')
+    expect(ensure).toContain('await testS3Connection(connection)')
   })
 
   it('keeps retained accounts on their own refresh and sign-in paths', () => {
@@ -32,6 +34,10 @@ describe('multi-account provider boundaries', () => {
     expect(login).not.toContain('AliUser.')
     expect(login).not.toContain('isGuangyaUser')
     expect(refresh).not.toContain('AliUser.')
+    expect(refresh).toContain('if (isWebDavUser(token))')
+    expect(refresh).toContain('await testWebDavConnection(connection)')
+    expect(refresh).toContain('await applyWebDavQuota(token, connection)')
+    expect(refresh).toContain('if (isS3User(token))')
     expect(autoSign).not.toContain('AliUser.')
   })
 

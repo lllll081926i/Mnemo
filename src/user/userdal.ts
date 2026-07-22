@@ -6,8 +6,8 @@ import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
 import { applyPikPakQuota, refreshPikPakAccessToken } from '../pikpak/auth'
 import { isPikPakUser, isS3User, isWebDavUser } from '../aliapi/utils'
-import { getWebDavConnection, getWebDavConnectionId } from '../utils/webdavClient'
-import { getS3Connection, getS3ConnectionId } from '../utils/s3Client'
+import { applyWebDavQuota, getWebDavConnection, getWebDavConnectionId, testWebDavConnection } from '../utils/webdavClient'
+import { getS3Connection, getS3ConnectionId, testS3Connection } from '../utils/s3Client'
 import { resolveDriveProvider } from '../utils/driveProvider'
 import { applyOneDriveQuota, refreshOneDriveAccessToken } from '../onedrive/auth'
 import { applyDropboxQuota, refreshDropboxAccessToken } from '../dropbox/auth'
@@ -22,11 +22,16 @@ export default class UserDAL {
       if (provider === 'unknown') return null
       if (isWebDavUser(token)) {
         const connection = getWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
-        return connection ? token : null
+        if (!connection) return null
+        await testWebDavConnection(connection)
+        await applyWebDavQuota(token, connection)
+        return token
       }
       if (isS3User(token)) {
         const connection = getS3Connection(getS3ConnectionId(token.default_drive_id || token.user_id))
-        return connection ? token : null
+        if (!connection) return null
+        await testS3Connection(connection)
+        return token
       }
       if (isPikPakUser(token)) {
         const expireTime = new Date(token.expire_time || 0).getTime()
@@ -269,6 +274,9 @@ export default class UserDAL {
         await applyPikPakQuota(token)
       } else if (isWebDavUser(token)) {
         token.default_drive_id = token.default_drive_id || token.user_id
+        const connection = getWebDavConnection(getWebDavConnectionId(token.default_drive_id))
+        if (!connection) throw new Error('WebDAV 连接配置不存在')
+        await applyWebDavQuota(token, connection)
       } else if (isS3User(token)) {
         token.default_drive_id = token.default_drive_id || token.user_id
       } else if (resolveDriveProvider(token) === 'onedrive') {
@@ -403,6 +411,33 @@ export default class UserDAL {
     if (!token || (!token.access_token && !isWebDavUser(token) && !isS3User(token))) {
       return false
     }
+    if (isWebDavUser(token)) {
+      const connection = getWebDavConnection(getWebDavConnectionId(token.default_drive_id || token.user_id))
+      if (!connection) return false
+      try {
+        await testWebDavConnection(connection)
+        await applyWebDavQuota(token, connection)
+        const saved = await UserDAL.SaveUserToken(token)
+        if (saved) useUserStore().userLogin(token.user_id)
+        return saved
+      } catch (err: any) {
+        DebugLog.mSaveDanger('UserRefreshByUserFace WebDAV ' + user_id, err)
+        return false
+      }
+    }
+    if (isS3User(token)) {
+      const connection = getS3Connection(getS3ConnectionId(token.default_drive_id || token.user_id))
+      if (!connection) return false
+      try {
+        await testS3Connection(connection)
+        const saved = await UserDAL.SaveUserToken(token)
+        if (saved) useUserStore().userLogin(token.user_id)
+        return saved
+      } catch (err: any) {
+        DebugLog.mSaveDanger('UserRefreshByUserFace S3 ' + user_id, err)
+        return false
+      }
+    }
     const provider = resolveDriveProvider(token)
     if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive') {
       const expireTime = new Date(token.expire_time || 0).getTime()
@@ -420,13 +455,14 @@ export default class UserDAL {
         else if (provider === 'dropbox') await applyDropboxQuota(refreshed)
         else await applyGoogleDriveQuota(refreshed)
       }
-      useUserStore().userLogin(refreshed.user_id)
-      UserDAL.SaveUserToken(refreshed)
-      return true
+      const saved = await UserDAL.SaveUserToken(refreshed)
+      if (saved) useUserStore().userLogin(refreshed.user_id)
+      return saved
     }
     if (provider === 'gofile') {
-      UserDAL.SaveUserToken(token)
-      return true
+      const saved = await UserDAL.SaveUserToken(token)
+      if (saved) useUserStore().userLogin(token.user_id)
+      return saved
     }
     if (!isPikPakUser(token)) return false
     const expiresAt = new Date(token.expire_time || 0).getTime()
