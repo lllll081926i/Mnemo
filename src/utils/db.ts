@@ -1,6 +1,20 @@
 import Dexie from 'dexie'
 import { ITokenInfo } from '../user/userstore'
-import { IOtherShareLinkModel } from '../share/share/OtherShareStore'
+
+/** Legacy table shape retained for local DB migration compatibility. */
+type IOtherShareLinkModel = {
+  share_id: string
+  share_name: string
+  description: string
+  share_pwd: string
+  expiration: string
+  expired: boolean
+  share_msg: string
+  created_at: string
+  updated_at: string
+  saved_at: string
+  saved_time: number
+}
 
 const TOKEN_SECRET_FIELDS: Array<keyof ITokenInfo> = [
   'access_token',

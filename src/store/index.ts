@@ -14,10 +14,6 @@ import useUserStore from '../user/userstore'
 import usePanTreeStore from '../pan/pantreestore'
 import usePanFileStore from '../pan/panfilestore'
 
-import type { IOtherShareLinkModel } from '../share/share/OtherShareStore'
-import useOtherShareStore from '../share/share/OtherShareStore'
-import useMyShareStore from '../share/share/MyShareStore'
-
 import useUploadingStore from '../down/UploadingStore'
 import useUploadedStore from '../down/UploadedStore'
 import useDownedStore from '../down/DownedStore'
@@ -42,9 +38,6 @@ export {
   ITokenInfo,
   usePanTreeStore,
   usePanFileStore,
-  IOtherShareLinkModel,
-  useMyShareStore,
-  useOtherShareStore,
   useFootStore,
   AsyncModel,
   useUploadingStore,

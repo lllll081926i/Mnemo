@@ -114,6 +114,4 @@ const handleExpandAll = (isExpand: boolean) => {
     </template>
   </a-dropdown>
 </template>
-<style>
-.ai-pro-badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: linear-gradient(135deg, #f59e0b, #f97316); color: #fff; font-weight: 700; line-height: 1; height: 14px; padding: 0 5px; font-size: 9px; vertical-align: middle; margin-left: 4px; }
-</style>
+

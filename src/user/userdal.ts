@@ -1,7 +1,7 @@
 import DB from '../utils/db'
 import message from '../utils/message'
 import useUserStore, { ITokenInfo } from './userstore'
-import { useAppStore, useFootStore, useMyShareStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
+import { useAppStore, useFootStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
 import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
 import { applyPikPakQuota, refreshPikPakAccessToken } from '../pikpak/auth'
@@ -299,7 +299,6 @@ export default class UserDAL {
       useUserStore().userLogin(token.user_id)
       PanDAL.aReLoadQuickFile(token.user_id)
       useAppStore().resetTab(useSettingStore().uiDefaultTab || 'pan')
-      useMyShareStore().$reset()
       useFootStore().mSaveUserInfo(token)
       message.success('加载用户成功!', 2, loadingKey)
     } catch (err: any) {

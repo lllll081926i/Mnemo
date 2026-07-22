@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { handleUpload, topFavorDeleteAll } from '../topbtns/topbtn'
-import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink } from '../../utils/modal'
+import { handleUpload } from '../topbtns/topbtn'
+import { modalCreatNewDir } from '../../utils/modal'
 import PanDAL from '../pandal'
 import useCurrentDriveProvider from '../useCurrentDriveProvider'
 
@@ -42,12 +42,6 @@ const handleSelectRecentPlay = () => {
 </script>
 
 <template>
-  <div v-if="!isselected && dirtype === 'favorite'" class="toppanbtn">
-    <a-button type="text" size="small" tabindex="-1" class="danger" @click="topFavorDeleteAll">
-      <IconFont name="iconcrown2" />
-      清空收藏夹
-    </a-button>
-  </div>
   <div v-if="!isselected && dirtype == 'video'" class="toppanbtn" tabindex="-1">
     <a-space direction="horizontal">
       <a-button size="small" tabindex="-1" :type="videoSelectType === 'recent' ? 'secondary' : 'dashed'" @click="handleSelectRecentPlay">
@@ -61,7 +55,7 @@ const handleSelectRecentPlay = () => {
     </a-space>
   </div>
   <div v-if="!isselected && ['pan', 'pic', 'mypic'].includes(dirtype)" class="toppanbtn">
-    <a-dropdown v-if="dirtype !== 'pic' && (capabilities.createTextFile || capabilities.createFolder)" trigger="hover" class="rightmenu" position="bl">
+    <a-dropdown v-if="dirtype !== 'pic' && capabilities.createFolder" trigger="hover" class="rightmenu" position="bl">
       <a-button type="text" size="small" tabindex="-1">
         <IconFont name="iconplus" />
         新建
@@ -69,10 +63,6 @@ const handleSelectRecentPlay = () => {
       </a-button>
       <template #content>
         <a-dgroup title="普通新建">
-          <a-doption v-if="capabilities.createTextFile" value="newfile" title="Ctrl+N" @click="() => modalCreatNewFile()">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>新建文件</template>
-          </a-doption>
           <a-doption v-if="capabilities.createFolder" value="newfolder" title="Ctrl+Shift+N" @click="() => modalCreatNewDir('folder')">
             <template #icon><IconFont name="iconfile-folder" /></template>
             <template #default>新建文件夹</template>
@@ -80,34 +70,6 @@ const handleSelectRecentPlay = () => {
           <a-doption v-if="capabilities.createDateFolder" value="newdatefolder" @click="() => modalCreatNewDir('datefolder')">
             <template #icon><IconFont name="iconfolderadd" /></template>
             <template #default>日期+序号</template>
-          </a-doption>
-        </a-dgroup>
-        <a-dgroup v-if="capabilities.encryption" title="加密新建">
-          <a-doption value="newfile" @click="() => modalCreatNewFile('mnemoEncrypt1')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>新建文件（加密）</template>
-          </a-doption>
-          <a-doption value="newfolder" @click="() => modalCreatNewDir('folder', 'mnemoEncrypt1')">
-            <template #icon><IconFont name="iconfile-folder" /></template>
-            <template #default>新建文件夹（加密）</template>
-          </a-doption>
-          <a-doption value="newdatefolder" @click="() => modalCreatNewDir('datefolder', 'mnemoEncrypt1')">
-            <template #icon><IconFont name="iconfolderadd" /></template>
-            <template #default>日期+序号（加密）</template>
-          </a-doption>
-        </a-dgroup>
-        <a-dgroup v-if="capabilities.encryption" title="私密新建">
-          <a-doption value="newfile" @click="() => modalCreatNewFile('mnemoEncrypt2')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>新建文件（私密）</template>
-          </a-doption>
-          <a-doption value="newfolder" @click="() => modalCreatNewDir('folder', 'mnemoEncrypt2')">
-            <template #icon><IconFont name="iconfile-folder" /></template>
-            <template #default>新建文件夹（私密）</template>
-          </a-doption>
-          <a-doption value="newdatefolder" @click="() => modalCreatNewDir('datefolder', 'mnemoEncrypt2')">
-            <template #icon><IconFont name="iconfolderadd" /></template>
-            <template #default>日期+序号（私密）</template>
           </a-doption>
         </a-dgroup>
       </template>
@@ -129,36 +91,7 @@ const handleSelectRecentPlay = () => {
             <template #default>上传文件夹</template>
           </a-doption>
         </a-dgroup>
-        <a-dgroup v-if="capabilities.encryption" title="加密上传">
-          <a-doption value="uploadfile" title="Ctrl+J" @click="() => handleUpload('file', 'mnemoEncrypt1')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>上传文件（加密）</template>
-          </a-doption>
-          <a-doption value="uploaddir" title="Ctrl+Shift+J" @click="() => handleUpload('folder', 'mnemoEncrypt1')">
-            <template #icon><IconFont name="iconfile-folder" /></template>
-            <template #default>上传文件夹（加密）</template>
-          </a-doption>
-        </a-dgroup>
-        <a-dgroup v-if="capabilities.encryption" title="私密上传">
-          <a-doption value="uploadfile" title="Ctrl+M" @click="() => handleUpload('file', 'mnemoEncrypt2')">
-            <template #icon><IconFont name="iconwenjian" /></template>
-            <template #default>上传文件（私密）</template>
-          </a-doption>
-          <a-doption value="uploaddir" title="Ctrl+Shift+M" @click="() => handleUpload('folder', 'mnemoEncrypt2')">
-            <template #icon><IconFont name="iconfile-folder" /></template>
-            <template #default>上传文件夹（私密）</template>
-          </a-doption>
-        </a-dgroup>
       </template>
     </a-dropdown>
-    <a-button v-if="!dirtype.includes('pic') && capabilities.importShare" type="text" size="small" tabindex="-1" title="Ctrl+L" @click="modalDaoRuShareLink()">
-      <IconFont name="iconlink2" />
-      导入分享
-    </a-button>
-    <!-- AI 整理暂时隐藏 -->
-    <!-- <a-button v-if="!isselected && ['pan', 'pic', 'mypic'].includes(dirtype)" type='text' size='small' tabindex='-1'
-              @click='handleAiOrganizeCurrentDir'>
-      <IconFont name="iconscan" />AI 整理
-    </a-button> -->
   </div>
 </template>

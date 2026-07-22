@@ -177,7 +177,7 @@ export function createTray() {
 }
 
 export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true, backgroundThrottling: boolean = true) {
-  const allowWebview = page === 'main'
+  const allowWorkerNodeIntegration = page === 'main'
   const win = new BrowserWindow({
     show: false,
     width: width,
@@ -195,9 +195,9 @@ export function createElectronWindow(width: number, height: number, center: bool
     webPreferences: {
       spellcheck: false,
       devTools: DEBUGGING && devTools,
-      webviewTag: allowWebview,
+      webviewTag: false,
       nodeIntegration: true,
-      nodeIntegrationInWorker: allowWebview,
+      nodeIntegrationInWorker: allowWorkerNodeIntegration,
       sandbox: false,
       webSecurity: false,
       allowRunningInsecureContent: false,
@@ -230,7 +230,8 @@ export function createElectronWindow(width: number, height: number, center: bool
   if (page == 'main2') {
     handleWinCmd(win)
   }
-  handleWebView(win, allowDevTools)
+  if (allowDevTools) registerDevToolsShortcut(win.webContents)
+  else disableDevTools(win.webContents)
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -272,98 +273,6 @@ function registerDevToolsShortcut(webContent: Electron.WebContents) {
 function disableDevTools(webContent: Electron.WebContents) {
   webContent.on('devtools-opened', () => webContent.closeDevTools())
   if (webContent.isDevToolsOpened()) webContent.closeDevTools()
-}
-
-const isAllowedLoginUrl = (value: string) => {
-  if (value === 'about:blank') return true
-  try {
-    const url = new URL(value)
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
-    const hostname = url.hostname.toLowerCase()
-    // PikPak captcha (txCaptcha) loads Tencent captcha assets under many CDNs.
-    const allowedSuffixes = [
-      'aliyundrive.com',
-      'alipan.com',
-      'mypikpak.com',
-      'mypikpak.net',
-      'xunlei.com',
-      'xbase.cloud',
-      'gtimg.com',
-      'qq.com',
-      'qcloud.com',
-      'tencent.com',
-      'tencentcloudapi.com',
-      'captcha.qq.com',
-      'turing.captcha.qcloud.com'
-    ]
-    return allowedSuffixes.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
-  } catch {
-    return false
-  }
-}
-
-const isPikPakCaptchaUrl = (value: string) => {
-  try {
-    const url = new URL(value)
-    const host = url.hostname.toLowerCase()
-    return host.includes('mypikpak.') || host.includes('xunlei.') || host.includes('captcha') || host.includes('gtimg.') || host.includes('qcloud.') || host.includes('qq.com')
-  } catch {
-    return false
-  }
-}
-
-function handleWebView(win: BrowserWindow, allowDevTools: boolean) {
-  if (allowDevTools) {
-    registerDevToolsShortcut(win.webContents)
-  } else {
-    disableDevTools(win.webContents)
-  }
-  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
-    if (!isAllowedLoginUrl(params.src)) {
-      event.preventDefault()
-      return
-    }
-    delete webPreferences.preload
-    webPreferences.nodeIntegration = false
-    webPreferences.contextIsolation = true
-    // Captcha pages need looser sandbox / webSecurity for third-party scripts.
-    const captcha = isPikPakCaptchaUrl(params.src || '')
-    webPreferences.sandbox = !captcha
-    webPreferences.webSecurity = !captcha
-    webPreferences.allowRunningInsecureContent = captcha
-    if (!allowDevTools) webPreferences.devTools = false
-  })
-  // 处理webview跳转
-  win.webContents.addListener('did-attach-webview', (event, webContent) => {
-    const isCaptchaGuest = (() => {
-      try {
-        return isPikPakCaptchaUrl(webContent.getURL() || '')
-      } catch {
-        return false
-      }
-    })()
-    // Only force direct proxy for captcha; never closeAllConnections — it aborts in-flight captcha assets.
-    void webContent.session.setProxy({ mode: 'direct' }).catch((error) => console.warn('[webview] proxy setup failed:', error?.message || error))
-    if (allowDevTools) {
-      registerDevToolsShortcut(webContent)
-    } else {
-      disableDevTools(webContent)
-    }
-    webContent.setWindowOpenHandler((details) => {
-      if (isAllowedLoginUrl(details.url) && !webContent.isDestroyed()) {
-        void webContent.loadURL(details.url).catch((error) => {
-          if (!/ERR_(ABORTED|FAILED)/i.test(error?.message || '')) console.warn('[webview] redirect load failed:', error?.message || error)
-        })
-      }
-      return { action: 'deny' }
-    })
-    webContent.on('will-redirect', (e, url) => {
-      if (!isAllowedLoginUrl(url) && !isCaptchaGuest) e.preventDefault()
-    })
-    webContent.on('will-navigate', (e, url) => {
-      if (!isAllowedLoginUrl(url) && !isCaptchaGuest) e.preventDefault()
-    })
-  })
 }
 
 let hasWindowCommandHandler = false

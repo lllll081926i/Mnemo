@@ -5,8 +5,6 @@ import { humanSize } from '../utils/format'
 const PIKPAK_API_HOST = 'https://api-drive.mypikpak.com'
 const PIKPAK_USER_HOST = 'https://user.mypikpak.com'
 export const PIKPAK_PROTOCOL_CLIENT_ID = 'YUMx5nI8ZU8Ap8pm'
-/** Web client secret used by official web / open protocol reverse-engineering (AList/OpenList). */
-export const PIKPAK_PROTOCOL_CLIENT_SECRET = 'dbw2OtmVEeuUvIptb1Coyg'
 export const PIKPAK_PROTOCOL_CLIENT_VERSION = '2.0.0'
 export const PIKPAK_PROTOCOL_PACKAGE_NAME = 'mypikpak.com'
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0'
@@ -37,7 +35,45 @@ type PikPakAuthResp = {
   sub?: string
 }
 
-export const createPikPakDeviceId = (username: string): string => MD5(`mnemo-pikpak:${username.trim().toLowerCase()}`).toString()
+const PIKPAK_DEVICE_STORAGE_PREFIX = 'mnemo:pikpak:device:'
+const volatileDeviceIds = new Map<string, string>()
+
+export const createPikPakDeviceId = (): string => {
+  const bytes = new Uint8Array(16)
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+}
+
+const getDeviceStorage = (): Pick<Storage, 'getItem' | 'setItem'> | undefined => {
+  try {
+    if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function' || typeof localStorage.setItem !== 'function') return undefined
+    return localStorage
+  } catch {
+    return undefined
+  }
+}
+
+export const getOrCreatePikPakDeviceId = (username: string): string => {
+  const accountKey = MD5(username.trim().toLowerCase()).toString()
+  const storageKey = `${PIKPAK_DEVICE_STORAGE_PREFIX}${accountKey}`
+  const storage = getDeviceStorage()
+  const stored = storage?.getItem(storageKey) || volatileDeviceIds.get(accountKey) || ''
+  if (/^[a-f0-9]{32}$/i.test(stored)) return stored.toLowerCase()
+  const deviceId = createPikPakDeviceId()
+  volatileDeviceIds.set(accountKey, deviceId)
+  try {
+    storage?.setItem(storageKey, deviceId)
+  } catch {
+    // In-memory identity remains stable when storage is unavailable.
+  }
+  return deviceId
+}
 
 export const getPikPakAccountId = (accessToken: string, username: string): string => {
   try {
@@ -85,9 +121,6 @@ const buildHeaders = (deviceId?: string, accessToken?: string): HeadersInit => {
   return headers
 }
 
-const isEmailUsername = (value: string) => value.includes('@')
-const isPhoneUsername = (value: string) => /^\+?\d{6,}$/.test(value.replace(/[\s-]/g, ''))
-
 const parsePikPakError = (data: any, fallback: string) => {
   if (!data) return fallback
   if (data.error === 'invalid_account_or_password') return 'PikPak 账号或密码错误'
@@ -95,11 +128,23 @@ const parsePikPakError = (data: any, fallback: string) => {
   return data.error_description || data.message || data.error || fallback
 }
 
+class PikPakApiError extends Error {
+  reason: string
+  code: number
+
+  constructor(data: any, fallback: string, status: number) {
+    super(parsePikPakError(data, fallback))
+    this.name = 'PikPakApiError'
+    this.reason = String(data?.error || data?.reason || '')
+    this.code = Number(data?.error_code ?? data?.code ?? status)
+  }
+}
+
 const pikpakJson = async <T>(url: string, init: RequestInit, fallback: string): Promise<T> => {
   const resp = await fetch(url, init)
   const data = await resp.json().catch(() => undefined)
   if (!resp.ok || data?.error) {
-    throw new Error(parsePikPakError(data, fallback))
+    throw new PikPakApiError(data, fallback, resp.status)
   }
   return data as T
 }
@@ -129,19 +174,21 @@ export const initPikPakCaptcha = async (opts: {
   action: string
   accessToken?: string
   meta?: Partial<PikPakCaptchaMeta>
+  previousToken?: string
 }): Promise<PikPakCaptchaInitResult> => {
-  const deviceId = opts.deviceId || createPikPakDeviceId(opts.meta?.username || opts.meta?.email || opts.meta?.phone_number || 'mnemo')
-  const meta = buildPikPakCaptchaMeta(deviceId, opts.meta || {})
+  const deviceId = /^[a-f0-9]{32}$/i.test(opts.deviceId) ? opts.deviceId.toLowerCase() : createPikPakDeviceId()
+  const meta = opts.action === 'POST:/v1/auth/signin' ? { username: String(opts.meta?.username || '').trim() } : buildPikPakCaptchaMeta(deviceId, opts.meta || {})
+  const body: Record<string, unknown> = {
+    client_id: PIKPAK_PROTOCOL_CLIENT_ID,
+    action: opts.action,
+    device_id: deviceId,
+    meta
+  }
+  if (opts.previousToken) body.captcha_token = opts.previousToken
   const captcha = await pikpakJson<{ captcha_token?: string; url?: string; expires_in?: number }>(`${PIKPAK_USER_HOST}/v1/shield/captcha/init`, {
     method: 'POST',
     headers: buildHeaders(deviceId, opts.accessToken),
-    body: JSON.stringify({
-      client_id: PIKPAK_PROTOCOL_CLIENT_ID,
-      action: opts.action,
-      device_id: deviceId,
-      captcha_token: '',
-      meta
-    })
+    body: JSON.stringify(body)
   }, '获取 PikPak 验证信息失败')
   if (!captcha.captcha_token) throw new Error('获取 PikPak 验证信息失败')
   return {
@@ -151,7 +198,7 @@ export const initPikPakCaptcha = async (opts: {
   }
 }
 
-/** Resolve captcha_token only (throws if a visual challenge URL is required). */
+/** Resolve captcha_token only. PikPak's URL is informational; rclone uses the token directly. */
 export const initPikPakCaptchaToken = async (opts: {
   deviceId: string
   action: string
@@ -159,43 +206,25 @@ export const initPikPakCaptchaToken = async (opts: {
   meta?: Partial<PikPakCaptchaMeta>
 }): Promise<string> => {
   const result = await initPikPakCaptcha(opts)
-  if (result.challengeUrl) throw new Error('PikPak 需要完成图形验证，请在登录页完成验证')
   return result.captchaToken
 }
 
 export const buildPikPakLoginCaptchaMeta = (username: string): Partial<PikPakCaptchaMeta> => {
-  const normalizedUsername = username.trim()
-  if (isEmailUsername(normalizedUsername)) return { email: normalizedUsername }
-  if (isPhoneUsername(normalizedUsername)) return { phone_number: normalizedUsername.replace(/[\s-]/g, '') }
-  return { username: normalizedUsername }
+  return { username: username.trim() }
 }
 
-export const beginPikPakLoginCaptcha = async (username: string): Promise<{ deviceId: string; captcha: PikPakCaptchaInitResult }> => {
-  const normalizedUsername = username.trim()
-  if (!normalizedUsername) throw new Error('请输入 PikPak 账号')
-  const deviceId = createPikPakDeviceId(normalizedUsername)
-  const captcha = await initPikPakCaptcha({
-    deviceId,
-    action: 'POST:/v1/auth/signin',
-    meta: buildPikPakLoginCaptchaMeta(normalizedUsername)
-  })
-  return { deviceId, captcha }
-}
-
-export const loginPikPakWithCaptcha = async (username: string, password: string, captchaToken: string, deviceId?: string): Promise<ITokenInfo> => {
+const signInPikPak = async (username: string, password: string, captchaToken: string, deviceId: string): Promise<ITokenInfo> => {
   const normalizedUsername = username.trim()
   if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
   if (!captchaToken) throw new Error('请先完成 PikPak 验证')
-  const resolvedDeviceId = deviceId || createPikPakDeviceId(normalizedUsername)
   const auth = await pikpakJson<PikPakAuthResp>(`${PIKPAK_USER_HOST}/v1/auth/signin`, {
     method: 'POST',
     headers: {
-      ...buildHeaders(resolvedDeviceId),
+      ...buildHeaders(deviceId),
       'X-Captcha-Token': captchaToken
     },
     body: JSON.stringify({
       client_id: PIKPAK_PROTOCOL_CLIENT_ID,
-      client_secret: PIKPAK_PROTOCOL_CLIENT_SECRET,
       password,
       username: normalizedUsername
     })
@@ -211,7 +240,7 @@ export const loginPikPakWithCaptcha = async (username: string, password: string,
   token.user_name = normalizedUsername
   token.nick_name = normalizedUsername
   token.name = normalizedUsername
-  token.device_id = resolvedDeviceId
+  token.device_id = deviceId
   token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
   return token
 }
@@ -263,17 +292,23 @@ const emptyToken = (): ITokenInfo => ({
   }
 })
 
-export const loginPikPak = async (username: string, password: string): Promise<ITokenInfo> => {
-  const { deviceId, captcha } = await beginPikPakLoginCaptcha(username)
-  if (captcha.challengeUrl) {
-    const err: any = new Error('PikPak_CAPTCHA_REQUIRED')
-    err.code = 'PikPak_CAPTCHA_REQUIRED'
-    err.deviceId = deviceId
-    err.captchaToken = captcha.captchaToken
-    err.challengeUrl = captcha.challengeUrl
-    throw err
+export const loginPikPak = async (username: string, password: string, deviceId?: string): Promise<ITokenInfo> => {
+  const normalizedUsername = username.trim()
+  if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
+  const resolvedDeviceId = /^[a-f0-9]{32}$/i.test(deviceId || '') ? String(deviceId).toLowerCase() : getOrCreatePikPakDeviceId(normalizedUsername)
+  const requestCaptcha = () => initPikPakCaptcha({
+    deviceId: resolvedDeviceId,
+    action: 'POST:/v1/auth/signin',
+    meta: buildPikPakLoginCaptchaMeta(normalizedUsername)
+  })
+  let captcha = await requestCaptcha()
+  try {
+    return await signInPikPak(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
+  } catch (error) {
+    if (!(error instanceof PikPakApiError) || error.reason !== 'captcha_invalid' || error.code !== 4002) throw error
   }
-  return loginPikPakWithCaptcha(username, password, captcha.captchaToken, deviceId)
+  captcha = await requestCaptcha()
+  return signInPikPak(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
 }
 
 export const refreshPikPakAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
@@ -283,7 +318,6 @@ export const refreshPikPakAccessToken = async (token: ITokenInfo): Promise<IToke
     headers: buildHeaders(token.device_id),
     body: JSON.stringify({
       client_id: PIKPAK_PROTOCOL_CLIENT_ID,
-      client_secret: PIKPAK_PROTOCOL_CLIENT_SECRET,
       refresh_token: token.refresh_token,
       grant_type: 'refresh_token'
     })

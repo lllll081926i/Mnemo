@@ -2,7 +2,6 @@ import { useAppStore, useFootStore, usePanTreeStore, useSettingStore } from '../
 import AppCache from '../utils/appcache'
 import DownDAL from '../down/DownDAL'
 import UploadDAL from '../transfer/uploaddal'
-import ShareDAL from '../share/share/ShareDAL'
 
 import UserDAL from '../user/userdal'
 import DebugLog from '../utils/debuglog'
@@ -30,9 +29,6 @@ export function PageMain() {
         })
       }
       // DebugLog.mSaveSuccess('Mnemo启动')
-      await ShareDAL.aLoadFromDB().catch((err: any) => {
-        DebugLog.mSaveDanger('ShareDALLDB', err)
-      })
       // 加载数据库用户
       await UserDAL.aLoadFromDB().catch((err: any) => {
         DebugLog.mSaveDanger('UserDALLDB', err)
@@ -83,10 +79,6 @@ export const WinMsg = async (arg: any) => {
     UploadingDAL.aUploadingEvent(arg.ReportList, arg.ErrorList, arg.SuccessList, arg.RunningKeys, arg.StopKeys, arg.LoadingKeys, arg.SpeedTotal)
   } else if (arg.cmd == 'MainUploadAppendFiles') {
     UploadingDAL.aUploadingAppendFiles(arg.TaskID, arg.UploadID, arg.CreatedDirID, arg.AppendList)
-  } else if (arg.cmd == 'MainSaveAllDir') {
-    PanDAL.aReLoadDriveSave(arg.OneDriver, arg.ErrorMessage)
-  } else if (arg.cmd == 'MainShowAllDirProgress') {
-    useFootStore().mSaveLoading('加载全部文件夹(' + Math.floor((arg.index * 100) / (arg.total + 1)) + '%)')
   }
 }
 

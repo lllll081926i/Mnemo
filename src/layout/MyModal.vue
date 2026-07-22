@@ -1,22 +1,14 @@
 <script lang='ts'>
 import { defineComponent } from 'vue'
 import { useModalStore } from '../store'
-import CreatNewFileModal from '../pan/topbtns/CreatNewFileModal.vue'
 import RenameModal from '../pan/topbtns/RenameModal.vue'
 import RenameMultiModal from '../pan/topbtns/RenameMultiModal.vue'
 import CreatNewDirModal from '../pan/topbtns/CreatNewDirModal.vue'
-import DaoRuShareLinkModal from '../share/share/DaoRuShareLinkModal.vue'
-import EditShareLinkModal from '../share/share/EditShareLinkModal.vue'
-import DaoRuShareLinkMultiModal from '../share/share/DaoRuShareLinkMultiModal.vue'
-import ShowShareLinkModal from '../share/share/ShowShareLinkModal.vue'
 import SelectPanDirModal from '../pan/topbtns/SelectPanDirModal.vue'
 import CreatNewShareLinkModal from '../share/share/CreatNewShareLinkModal.vue'
 import ShuXingModal from '../pan/topbtns/ShuXingModal.vue'
 import SearchPanModal from '../pan/topbtns/SearchPanModal.vue'
 import M3U8DownloadModal from '../pan/topbtns/M3U8DownloadModal.vue'
-import CopyFileTreeModal from '../pan/topbtns/CopyFileTreeModal.vue'
-import ArchiveModal from '../pan/topbtns/ArchiveModal.vue'
-import ArchivePasswordModal from '../pan/topbtns/ArchivePasswordModal.vue'
 import UploadModal from '../pan/topbtns/UploadModal.vue'
 import DownloadModal from '../pan/topbtns/DownloadModal.vue'
 import PostModal from '../pan/topbtns/PostModal.vue'
@@ -31,20 +23,12 @@ export default defineComponent({
     PasswordModal,
     RenameModal,
     RenameMultiModal,
-    CreatNewFileModal,
     CreatNewDirModal,
     CreatNewShareLinkModal,
-    DaoRuShareLinkModal,
-    EditShareLinkModal,
-    DaoRuShareLinkMultiModal,
-    ShowShareLinkModal,
     SelectPanDirModal,
     ShuXingModal,
     SearchPanModal,
     M3U8DownloadModal,
-    CopyFileTreeModal,
-    ArchiveModal,
-    ArchivePasswordModal,
     UploadModal,
     DownloadModal,
     PostModal
@@ -57,7 +41,6 @@ export default defineComponent({
 </script>
 
 <template>
-  <CreatNewFileModal :visible="modalStore.modalName == 'creatfile'" :encType="modalStore.modalData.encType || ''" />
   <CreatNewDirModal :visible="modalStore.modalName == 'creatdir'"
                     :dirtype="modalStore.modalData.dirtype || ''"
                     :encType="modalStore.modalData.encType || ''"
@@ -67,11 +50,6 @@ export default defineComponent({
                           :sharetype="modalStore.modalData.sharetype || ''"
                           :driveType="modalStore.modalData.driveType || ''"
                           :filelist='modalStore.modalData.filelist || []' />
-
-  <DaoRuShareLinkModal :visible="modalStore.modalName == 'daorushare'"
-                       :shareUrl="modalStore.modalData.shareUrl || ''"
-                       :sharePwd="modalStore.modalData.sharePwd || ''" />
-  <DaoRuShareLinkMultiModal :visible="modalStore.modalName == 'daorusharemulti'" />
 
   <RenameModal :visible="modalStore.modalName == 'rename'"
                :istree='modalStore.modalData.istree || false'
@@ -85,37 +63,6 @@ export default defineComponent({
                   :inputsearchType="modalStore.modalData.inputsearchType || []" />
 
   <M3U8DownloadModal :visible="modalStore.modalName == 'm3u8download'" />
-  <CopyFileTreeModal :visible="modalStore.modalName == 'copyfiletree'"
-                     :filelist='modalStore.modalData.filelist || []' />
-  <ArchiveModal
-    :visible="modalStore.modalName == 'archive'"
-    :user_id="modalStore.modalData.user_id || ''"
-    :drive_id="modalStore.modalData.drive_id || ''"
-    :file_id="modalStore.modalData.file_id || ''"
-    :file_name="modalStore.modalData.file_name || ''"
-    :parent_file_id="modalStore.modalData.parent_file_id || ''"
-    :password="modalStore.modalData.password || ''" />
-  <ArchivePasswordModal
-    :visible="modalStore.modalName == 'archivepassword'"
-    :user_id="modalStore.modalData.user_id || ''"
-    :drive_id="modalStore.modalData.drive_id || ''"
-    :file_id="modalStore.modalData.file_id || ''"
-    :file_name="modalStore.modalData.file_name || ''"
-    :parent_file_id="modalStore.modalData.parent_file_id || ''"
-    :password="modalStore.modalData.password || ''"
-    :domain_id="modalStore.modalData.domain_id || ''"
-    :ext="modalStore.modalData.ext || ''" />
-
-  <EditShareLinkModal :visible="modalStore.modalName == 'editshare'"
-                      :sharelist='modalStore.modalData.sharelist || []' />
-  <ShowShareLinkModal
-    :visible="modalStore.modalName == 'showshare'"
-    :share_id="modalStore.modalData.share_id || ''"
-    :share_pwd="modalStore.modalData.share_pwd || ''"
-    :share_token="modalStore.modalData.share_token || ''"
-    :withsave='modalStore.modalData.withsave || false'
-    :save_db='modalStore.modalData.save_db || false'
-    :file_id_list='modalStore.modalData.file_id_list || []' />
 
   <UploadModal :visible="modalStore.modalName == 'upload'"
                :file_id="modalStore.modalData.file_id || ''"
@@ -136,56 +83,12 @@ export default defineComponent({
                            :quality-data="modalStore.modalData.qualityData || {}"
                            :callback="modalStore.modalData.callback" />
 
-  <CloudOfflineDownloadModal :visible="modalStore.modalName == 'cloudoffline'" />
-
-  <PostModal :visible="modalStore.modalName == 'showpostmodal'"
-             :msg='modalStore.modalData.msg || ""'
-             :msgid='modalStore.modalData.msgid || ""' />
-
+  <CloudOfflineDownloadModal :visible="modalStore.modalName == 'cloudoffline'"
+                             :offline-form="modalStore.modalData.offlineForm" />
   <PasswordModal :visible="modalStore.modalName == 'showpassword'"
-                 :optType="modalStore.modalData.optType || 'new'"
+                 :opt-type="modalStore.modalData.optType || ''"
                  :callback="modalStore.modalData.callback" />
-
+  <PostModal :visible="modalStore.modalName == 'showpostmodal'"
+             :msg="modalStore.modalData.msg || ''"
+             :msgid="modalStore.modalData.msgid || ''" />
 </template>
-<style>
-.modalclass .arco-modal-body {
-  padding: 24px 16px 16px 16px;
-}
-
-.modaltitle .titletips {
-  padding: 0 4px;
-  font-size: 14px;
-  line-height: 25px;
-  color: rgb(var(--primary-6));
-}
-
-.modaltitle .onerowtitle {
-  font-size: 16px;
-  line-height: 25px;
-  flex-grow: 1;
-  white-space: nowrap;
-  word-break: keep-all;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-right: 32px;
-}
-
-.modalfoot {
-  display: flex;
-  align-items: center;
-}
-
-.modalfoot .tips {
-  font-size: 14px;
-  line-height: 25px;
-  color: var(--color-text-2);
-}
-
-.modalfoot button:not(:last-of-type) {
-  margin-right: 12px;
-}
-
-.modalbody .arco-form-item-label-col {
-  padding-right: 4px;
-}
-</style>

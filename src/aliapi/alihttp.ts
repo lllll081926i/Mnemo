@@ -3,11 +3,9 @@ import UserDAL from '../user/userdal'
 import { AxiosResponse } from 'axios'
 import axios from '../axios'
 import jschardet from 'jschardet'
-import AliUser from './user'
 import message from '../utils/message'
 import DebugLog from '../utils/debuglog'
 import { v4 } from 'uuid'
-import { isNonAliyunProvider } from './utils'
 
 export interface IUrlRespData {
   code: number
@@ -97,58 +95,14 @@ export default class AliHttp {
             'AccessTokenExpired'
           ]
           if (errCode.includes(data.code)) isNeedLog = false
-          // 自动刷新Token
-          if (data.code == 'AccessTokenInvalid' || data.code == 'AccessTokenExpired') {
-            if (token) {
-              if (isNonAliyunProvider(token)) {
-                return {
-                  code: error.response.status || 403,
-                  header: JSON.stringify(error.response.headers || {}),
-                  body: error.response.data || 'NetError 当前网盘接口请求错误'
-                } as IUrlRespData
-              }
-              const isOpenApi = config.url.includes('openapi.alipan.com') || config.url.includes('adrive/v1.0') || config.url.includes('adrive/v1.1')
-              if (!isOpenApi) {
-                return await AliUser.ApiTokenRefreshAccount(token, true, true).then((isLogin: boolean) => {
-                  if (isLogin) {
-                    return { code: 401, header: '', body: '' } as IUrlRespData
-                  }
-                  return { code: 403, header: '', body: 'NetError 账号需要重新登录' } as IUrlRespData
-                })
-              } else {
-                return await AliUser.OpenApiTokenRefreshAccount(token, true, true).then((flag: boolean) => {
-                  if (flag) {
-                    return { code: 401, header: '', body: '' } as IUrlRespData
-                  }
-                  return { code: 403, header: '', body: 'NetError 账号需要重新登录' } as IUrlRespData
-                })
-              }
-            } else {
-              return { code: 402, header: '', body: 'NetError 账号需要重新登录' } as IUrlRespData
-            }
-          }
-
-          // 自动刷新Session
-          if (data.code == 'UserDeviceIllegality'
-            || data.code == 'UserDeviceOffline'
-            || data.code == 'DeviceSessionSignatureInvalid') {
-            if (token) {
-              if (isNonAliyunProvider(token)) {
-                return {
-                  code: error.response.status || 403,
-                  header: JSON.stringify(error.response.headers || {}),
-                  body: error.response.data || 'NetError 当前网盘接口请求错误'
-                } as IUrlRespData
-              }
-              return await AliUser.ApiSessionRefreshAccount(token, true, true).then((flag: boolean) => {
-                if (flag) {
-                  return { code: 401, header: '', body: '' } as IUrlRespData
-                }
-                return { code: 403, header: '', body: '刷新Session失败' } as IUrlRespData
-              })
-            } else {
-              return { code: 402, header: '', body: 'NetError 账号需要重新登录' } as IUrlRespData
-            }
+          // Active providers refresh tokens outside AliHttp; never attempt legacy Aliyun auto-refresh.
+          if (data.code == 'AccessTokenInvalid' || data.code == 'AccessTokenExpired'
+            || data.code == 'UserDeviceIllegality' || data.code == 'UserDeviceOffline' || data.code == 'DeviceSessionSignatureInvalid') {
+            return {
+              code: error.response.status || 403,
+              header: JSON.stringify(error.response.headers || {}),
+              body: error.response.data || 'NetError 账号需要重新登录'
+            } as IUrlRespData
           }
         }
         if (isNeedLog) {

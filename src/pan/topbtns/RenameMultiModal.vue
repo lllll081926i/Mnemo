@@ -7,7 +7,7 @@ import usePanFileStore from '../panfilestore'
 import { AntTreeNodeDropEvent, EventDataNode } from 'ant-design-vue/es/tree'
 import { Tree as AntdTree } from 'ant-design-vue'
 import { usePanTreeStore, useWinStore } from '../../store'
-import AliTrash from '../../aliapi/trash'
+
 import message from '../../utils/message'
 import AliFileCmd from '../../aliapi/filecmd'
 import DebugLog from '../../utils/debuglog'
@@ -129,41 +129,7 @@ const autoExpand = (list: TreeNodeData[]) => {
   }
 }
 
-const apiLoad = (key: any) => {
-  const pantreeStore = usePanTreeStore()
-  return AliTrash.ApiDirFileListNoLock(pantreeStore.user_id, pantreeStore.drive_id, key as string, '', 'name ASC')
-    .then((resp) => {
-      const addList: TreeNodeData[] = []
-      if (resp.next_marker == '') {
-        for (let i = 0, maxi = resp.items.length; i < maxi; i++) {
-          const item = resp.items[i]
-          addList.push({
-            key: item.file_id,
-            title: item.name,
-            rawtitle: item.name,
-            newtitle: item.name,
-            children: [],
-            isDir: item.isDir,
-            isLeaf: !item.isDir,
-            isMatch: false,
-            icon: item.isDir ? foldericonfn : () => fileiconfn(item.icon)
-          } as TreeNodeData)
-        }
-        autoExpand(addList)
-      } else {
-        message.error('列出文件失败：' + resp.next_marker)
-      }
-      if (addList.length > 0) {
-        setTimeout(() => {
-          onRunReplaceName()
-        }, 300)
-      }
-      return addList
-    })
-    .catch(() => {
-      return [] as TreeNodeData[]
-    })
-}
+const apiLoad = (_key: any) => Promise.resolve([] as TreeNodeData[])
 
 const handleOpen = () => {
   const cacheReg = localStorage.getItem('renamemulti')

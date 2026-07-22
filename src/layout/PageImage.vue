@@ -8,7 +8,6 @@ import axios from 'axios'
 import message from '../utils/message'
 import { getEncType, getProxyUrl } from '../utils/proxyhelper'
 import { TestAlt, TestKey } from '../utils/keyboardhelper'
-import { resolveDriveProvider } from '../utils/driveProvider'
 
 const appStore = useAppStore()
 const pageImage = appStore.pageImage!
@@ -52,7 +51,14 @@ const isPlaying = ref(false)
 const drive_id = pageImage.drive_id || ''
 const file_id = pageImage.file_id || ''
 const imageList = pageImage.imageList || []
-const needsImageProxy = (item: OneImageModel) => item.encType || resolveDriveProvider({ userId: pageImage.user_id, driveId: item.drive_id }) !== 'aliyun'
+const imageProxyUrl = (item: OneImageModel) => getProxyUrl({
+  user_id: pageImage.user_id,
+  drive_id: item.drive_id,
+  file_id: item.file_id,
+  file_size: item.size,
+  encType: item.encType,
+  password: pageImage.password
+})
 
 const rawList: OneImageModel[] = []
 for (let i = 0, maxi = imageList.length; i < maxi; i++) {
@@ -259,7 +265,7 @@ function preload(img: OneImageModel) {
     })
     .catch(function(err: any) {
       if (err.response && err.response.status == 400) {
-        img.bigUrl = _imageUrlRaw(img)
+        img.bigUrl = imageProxyUrl(img)
         img.smallUrl = img.bigUrl
         axios
           .get(img.smallUrl, {
@@ -277,52 +283,11 @@ function preload(img: OneImageModel) {
     })
 }
 
-function _imageUrlSmall(item: OneImageModel) {
-  if (needsImageProxy(item)) {
-    return getProxyUrl({
-      user_id: pageImage.user_id,
-      drive_id: item.drive_id,
-      file_id: item.file_id,
-      file_size: item.size,
-      encType: item.encType,
-      password: pageImage.password
-    })
-  }
-  return 'https://api.aliyundrive.com/v2/file/download?t=' + Date.now().toString() + '&drive_id=' + item.drive_id + '&file_id=' + item.file_id + '&image_thumbnail_process=image%2Fresize%2Cl_60%2Fformat%2Cjpg%2Fauto-orient%2C1'
-}
-
-function _imageUrlBig(item: OneImageModel) {
-  if (needsImageProxy(item)) {
-    return getProxyUrl({
-      user_id: pageImage.user_id,
-      drive_id: item.drive_id,
-      file_id: item.file_id,
-      file_size: item.size,
-      encType: item.encType,
-      password: pageImage.password
-    })
-  }
-  return 'https://api.aliyundrive.com/v2/file/download?t=' + Date.now().toString() + '&drive_id=' + item.drive_id + '&file_id=' + item.file_id + '&image_thumbnail_process=image%2Fresize%2Cl_1920%2Fformat%2Cwebp%2Fauto-orient%2C1'
-}
-
-function _imageUrlRaw(item: OneImageModel) {
-  if (needsImageProxy(item)) {
-    return getProxyUrl({
-      user_id: pageImage.user_id,
-      drive_id: item.drive_id,
-      file_id: item.file_id,
-      file_size: item.size,
-      encType: item.encType,
-      password: pageImage.password
-    })
-  }
-  return 'https://api.aliyundrive.com/v2/file/download?t=' + Date.now().toString() + '&drive_id=' + item.drive_id + '&file_id=' + item.file_id
-}
-
 function getImageUrl(item: OneImageModel) {
   if (!item.bigUrl) {
-    item.smallUrl = _imageUrlSmall(item)
-    item.bigUrl = _imageUrlBig(item)
+    const url = imageProxyUrl(item)
+    item.smallUrl = url
+    item.bigUrl = url
   }
 }
 </script>
