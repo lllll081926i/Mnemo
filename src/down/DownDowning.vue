@@ -20,6 +20,7 @@ const appStore = useAppStore()
 const winStore = useWinStore()
 const downingStore = useDowningStore()
 const isDowning = computed(() => downingStore.ListDataDowningCount > 0)
+const hasFailedSelection = computed(() => [...downingStore.ListSelected].some((id) => downingStore.ListDataRaw.find((item) => item.DownID === id)?.Down.IsFailed))
 watch(isDowning, (value, oldValue) => {
   if (value !== oldValue && window.WebToElectron) {
     if (value) {
@@ -172,6 +173,7 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
 })
 
 const handleStart = () => downingStore.mStartDowning()
+const handleRetry = () => downingStore.mStartDowning()
 
 const handleStartAll = () => downingStore.mStartAllDowning()
 
@@ -226,6 +228,10 @@ const handleTaskDetail = () => {
   <DragDropZone style="display: contents" @drop-url="handleDropUrl">
     <div class="toppanbtns">
       <div class="toppanbtn" v-if="downingStore.IsListSelected">
+        <a-button v-if="hasFailedSelection" type="text" size="small" tabindex="-1" title="只会重试选中的失败任务" @click="handleRetry">
+          <IconFont name="iconreload-1-icon" />
+          重试失败任务
+        </a-button>
         <a-button type="text" size="small" tabindex="-1" @click="handleStart">
           <IconFont name="iconstart" />
           开始
@@ -377,6 +383,10 @@ const handleTaskDetail = () => {
           <a-doption @click="handleStart">
             <template #icon><IconFont name="iconstart" /></template>
             <template #default>开始</template>
+          </a-doption>
+          <a-doption v-if="hasFailedSelection" @click="handleRetry">
+            <template #icon><IconFont name="iconreload-1-icon" /></template>
+            <template #default>重试失败任务</template>
           </a-doption>
           <a-doption @click="handleStop">
             <template #icon><IconFont name="iconpause" /></template>

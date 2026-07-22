@@ -65,10 +65,10 @@ watch(
           <IconFont name="iconcloud" />
           <span>全部账号</span>
         </button>
-        <button v-for="account in accounts" :key="account.user_id" type="button" class="rail-filter-item" :class="{ active: activeAccountId == account.user_id }" :title="`${account.providerLabel} · ${account.name}`" @click="applyAccountFilter(account.user_id)">
+        <button v-for="account in accounts" :key="account.user_id" type="button" class="rail-filter-item" :class="{ active: activeAccountId == account.user_id }" :title="account.name" @click="applyAccountFilter(account.user_id)">
           <img v-if="account.icon" :src="account.icon" alt="" />
           <IconFont v-else name="iconcloud" />
-          <span>{{ account.providerLabel }} · {{ account.name }}</span>
+          <span>{{ account.name }}</span>
         </button>
         <button v-if="hasExternalTasks" type="button" class="rail-filter-item" :class="{ active: activeAccountId == 'external' }" @click="applyAccountFilter('external')">
           <IconFont name="iconlink2" />

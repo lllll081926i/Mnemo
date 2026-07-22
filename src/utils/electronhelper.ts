@@ -66,6 +66,18 @@ export function getUserDataPath(fileName: string): string {
   }
 }
 
+export function getSystemDownloadsPath(): string {
+  let downloadsPath = ''
+  try {
+    if (window.WebPlatformSync) {
+      window.WebPlatformSync((data: { downloadsPath?: string }) => {
+        downloadsPath = data?.downloadsPath || ''
+      })
+    }
+  } catch {}
+  return downloadsPath
+}
+
 export function getResourcesPath(fileName: string): string {
   try {
     LoadElectronPath()

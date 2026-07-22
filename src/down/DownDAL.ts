@@ -20,8 +20,9 @@ import { DecodeEncName } from '../aliapi/utils'
 import { getEncType } from '../utils/proxyhelper'
 import { SHA256 } from 'crypto-js'
 import { shouldRemoveAriaStoppedResult } from '../utils/aria2Rpc'
-import { resolveAriaProgressErrorState } from './integration/downloadProgressState'
+import { resolveAriaProgressErrorState, resolveDownloadTaskbarProgress, resolveRestoredDownloadState } from './integration/downloadProgressState'
 import { isDriveProviderRootId } from '../utils/driveProvider'
+import { getSystemDownloadsPath } from '../utils/electronhelper'
 
 export interface IStateDownFile {
   DownID: string
@@ -42,6 +43,7 @@ export interface IStateDownFile {
     FailedMessage: string
 
     AutoTry: number
+    ManualRetryRequired?: boolean
 
     DownUrl: string
   }
@@ -128,26 +130,14 @@ export default class DownDAL {
     downingStore.ListLoading = true
     await DBDown.deleteRemovedLocalBtTasks()
     const stateDownFiles = await DBDown.getDowningAll()
-    // 首次从DB中加载数据，如果上次意外停止则重新开始，如果手动暂停则保持
+    // 意外中断的任务恢复排队；失败任务保留错误状态，等待用户手动重试。
     for (const stateDownFile of stateDownFiles) {
-      if (!stateDownFile.Down.IsStop && stateDownFile.Down.DownState != '队列中') {
-        const down = stateDownFile.Down
-        down.IsDowning = false
-        down.IsCompleted = false
-        down.IsStop = false
-        down.DownState = '队列中'
-        down.DownSpeed = 0
-        down.DownSpeedStr = ''
-        down.IsFailed = false
-        down.FailedCode = 0
-        down.FailedMessage = ''
-        down.AutoTry = 0
-        down.IsDowning = false
-      }
+      stateDownFile.Down = resolveRestoredDownloadState(stateDownFile.Down)
     }
     downingStore.ListDataRaw = stateDownFiles
     downingStore.ListLoading = false
     downingStore.mRefreshListDataShow(true)
+    DownDAL.syncTaskbarProgress()
   }
 
   static async aReloadDowned() {
@@ -175,6 +165,8 @@ export default class DownDAL {
   static aAddDownload(fileList: IAliGetFileModel[], savePath: string, needPanPath: boolean, sourceUserId = '') {
     const userID = sourceUserId || useUserStore().user_id
     const settingStore = useSettingStore()
+    savePath ||= settingStore.ariaState === 'remote' ? settingStore.ariaSavePath : getSystemDownloadsPath()
+    if (!savePath) throw new Error('无法确定下载位置，请在设置中选择下载文件夹')
 
     if (savePath.endsWith('/') || savePath.endsWith('\\')) {
       savePath = savePath.substr(0, savePath.length - 1)
@@ -332,7 +324,7 @@ export default class DownDAL {
     const settingStore = useSettingStore()
     const userID = useUserStore().user_id || 'external'
     const ariaRemote = settingStore.ariaState == 'remote'
-    let fullPath = params.savePath || (ariaRemote ? settingStore.ariaSavePath : settingStore.downSavePath)
+    let fullPath = params.savePath || (ariaRemote ? settingStore.ariaSavePath : (settingStore.downSavePath || getSystemDownloadsPath()))
     if (!fullPath) return { success: false, message: '请先选择保存目录' }
     if (fullPath.endsWith('/') || fullPath.endsWith('\\')) fullPath = fullPath.substr(0, fullPath.length - 1)
 
@@ -426,6 +418,7 @@ export default class DownDAL {
           Down.IsCompleted ||
           Down.IsStop ||
           Down.IsDowning ||
+          Down.ManualRetryRequired ||
           (Down.IsFailed && timeThreshold <= Down.AutoTry)
         )
       }
@@ -514,7 +507,7 @@ export default class DownDAL {
             downingStore.mUpdateDownState(downingItem, 'downed')
             window.WebToElectron?.({ cmd: 'downloadCompleted', fileName: Info.name })
           } else {
-            downingStore.mUpdateDownState(downingItem, 'error', '移动文件失败，请重新下载')
+            downingStore.mUpdateDownState(downingItem, 'error', '下载已完成，但文件未能保存到下载目录。请检查文件是否被占用或下载目录是否可写，然后重试')
           }
         } else if (isStop && Down.DownState !== '队列中') {
           downingStore.mUpdateDownState(downingItem, 'stop')
@@ -552,13 +545,12 @@ export default class DownDAL {
 
     const totalCount = DowningList.filter((d) => !d.Down.IsCompleted).length
     const activeCount = DowningList.filter((d) => d.Down.IsDowning && !d.Down.IsCompleted).length
-    const totalBytes = DowningList.reduce((s, d) => s + (parseInt(String(d.Info.size)) || 0), 0)
-    const doneBytes = DowningList.reduce((s, d) => s + (d.Down.DownSize || 0), 0)
-    const overallProgress = totalBytes > 0 ? doneBytes / totalBytes : -1
+    const overallProgress = resolveDownloadTaskbarProgress(DowningList, settingStore.downSaveShowPro)
     window.WebToElectron?.({ cmd: 'downloadProgress', progress: overallProgress, activeCount, totalCount })
   }
 
   static async deleteDowning(isAll: boolean, deleteList: IStateDownFile[], gidList: string[]) {
+    DownDAL.syncTaskbarProgress()
     // 处理待删除文件
     if (!isAll) {
       const downIDList = deleteList.map(item => item.DownID)
@@ -603,6 +595,7 @@ export default class DownDAL {
       } catch (e) {
       }
     }
+    DownDAL.syncTaskbarProgress()
   }
 
   static async deleteDowned(isAll: boolean, deleteList: IStateDownFile[]) {
@@ -619,8 +612,18 @@ export default class DownDAL {
   }
 
   static async stopDowning(downList: IStateDownFile[], gidList: string[]) {
+    DownDAL.syncTaskbarProgress()
     await DBDown.saveDownings(JSON.parse(JSON.stringify(downList)))
     await AriaStopList(gidList)
+    DownDAL.syncTaskbarProgress()
+  }
+
+  static syncTaskbarProgress() {
+    const list = useDowningStore().ListDataRaw
+    const activeCount = list.filter((item) => item.Down.IsDowning && !item.Down.IsCompleted).length
+    const totalCount = list.filter((item) => !item.Down.IsCompleted).length
+    const progress = resolveDownloadTaskbarProgress(list, useSettingStore().downSaveShowPro)
+    window.WebToElectron?.({ cmd: 'downloadProgress', progress, activeCount, totalCount })
   }
 
   static QueryIsDowning() {

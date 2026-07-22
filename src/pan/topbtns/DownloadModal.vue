@@ -1,9 +1,10 @@
 <script lang="ts">
 import { modalCloseAll, modalDownload } from '../../utils/modal'
-import { defineComponent, ref } from 'vue'
+import { computed, defineComponent, ref } from 'vue'
 import useSettingStore from "../../setting/settingstore";
 import { menuDownload } from './topbtn'
 import { isEmpty } from 'lodash'
+import { getSystemDownloadsPath } from '../../utils/electronhelper'
 import message from '../../utils/message'
 
 
@@ -21,6 +22,7 @@ export default defineComponent({
   setup(props) {
     const okLoading = ref(false)
     const settingStore = useSettingStore()
+    const displayDownSavePath = computed(() => settingStore.downSavePath || getSystemDownloadsPath() || '系统默认下载文件夹')
 
     const handleOpen = () => {}
 
@@ -33,9 +35,9 @@ export default defineComponent({
     }
 
     const handleOK = () => {
-      const savePath = settingStore.AriaIsLocal ? settingStore.downSavePath : settingStore.ariaSavePath
+      const savePath = settingStore.AriaIsLocal ? (settingStore.downSavePath || getSystemDownloadsPath()) : settingStore.ariaSavePath
       if (isEmpty(savePath)) {
-        message.error('未设置保存路径')
+        message.error('无法确定下载位置，请先选择下载文件夹')
         return
       }
       menuDownload(props.istree, false)
@@ -49,7 +51,7 @@ export default defineComponent({
               title: '选择一个文件夹，把所有文件下载到此文件夹内',
               buttonLabel: '选择',
               properties: ['openDirectory', 'createDirectory'],
-              defaultPath: settingStore.downSavePath
+              defaultPath: displayDownSavePath.value
             },
             (result: string[] | undefined) => {
               if (result && result[0]) {
@@ -59,7 +61,7 @@ export default defineComponent({
         )
       }
     }
-    return { okLoading, settingStore, handleOpen, handleClose, handleOK, handleHide, handleSelectDownSavePath }
+    return { okLoading, settingStore, displayDownSavePath, handleOpen, handleClose, handleOK, handleHide, handleSelectDownSavePath }
   }
 })
 </script>
@@ -82,7 +84,7 @@ export default defineComponent({
                       :readonly="true"
                       button-text="更改"
                       search-button
-                      :model-value="settingStore.downSavePath"
+                      :model-value="displayDownSavePath"
                       @search="handleSelectDownSavePath" />
     </div>
     <div class="modalfoot">

@@ -38,11 +38,11 @@ function SetAriaOnline(isOnline: boolean, ariaState: string = '') {
   if (!ariaState) ariaState = useSettingStore().ariaState
   if (ariaState == 'local') {
     IsAria2cOnlineLocal = isOnline
-    let ariaInfo = isOnline ? 'Aria ⚯ Local' : 'Aria 已断开'
+    let ariaInfo = isOnline ? '本地下载服务已连接' : '本地下载服务已断开'
     useFootStore().mSaveAriaInfo(ariaInfo)
   } else {
     IsAria2cOnlineRemote = isOnline
-    let ariaInfo = isOnline ? 'Aria ⚯ ' + (Aria2EngineRemote?.host || '') : 'Aria 已断开'
+    let ariaInfo = isOnline ? '远程下载服务已连接' : '远程下载服务已断开'
     useFootStore().mSaveAriaInfo(ariaInfo)
   }
 }
@@ -86,15 +86,15 @@ export async function AriaTest(https: boolean, host: string, port: number, secre
     .catch(function(error) {
       if (error.response && error.response.data && error.response.data.error) {
         if (error.response.data.error.message == 'Unauthorized') {
-          message.error('连接失败 密码错误 ' + url + ' secret=' + secret)
+          message.error('无法连接下载服务：密码不正确')
           return false
         }
       }
       if (error.message && error.message.indexOf('timeout of') >= 0) {
-        message.error('连接失败 网络连接超时 ' + url)
+        message.error('无法连接下载服务：连接超时，请检查服务器地址和网络')
         return false
       }
-      message.error('连接失败 ' + (error.message ? error.message : '') + ' ' + url + ' secret=' + secret)
+      message.error('无法连接下载服务，请检查服务器地址、端口和网络')
       return false
     })
 }
@@ -130,7 +130,7 @@ export async function AriaChangeToRemote() {
       if (IsAria2cOnlineRemote && !Aria2cChangeing) {
         Aria2cRemoteRetryTime = 0 // 重置远程重试计数
         if (!settingStore.AriaIsLocal) {
-          message.error('Aria2远程连接已断开')
+          message.error('远程下载服务连接已断开，正在尝试重新连接')
           SetAriaOnline(false, 'remote')
           // 延迟 3 秒后自动重连
           setTimeout(() => {
@@ -159,8 +159,7 @@ export async function AriaChangeToRemote() {
       })
 
     if (!IsAria2cOnlineRemote) {
-      const url = host + ':' + port + ' secret=' + secret
-      if (!settingStore.AriaIsLocal && Aria2cRemoteRetryTime % 10 == 1) message.error('无法连接到远程Aria2 ' + url)
+      if (!settingStore.AriaIsLocal && Aria2cRemoteRetryTime % 10 == 1) message.error('无法连接远程下载服务，请检查服务器地址、端口和密码')
     } else {
       await AriaGlobalSpeed(); await AriaApplyAdvancedOptions()
     }
@@ -186,7 +185,7 @@ export async function AriaChangeToLocal() {
           if (useSettingStore().AriaIsLocal) {
             Aria2cLocalRelaunchTime = 0 // 重置重试计数，允许重新连接
             if (Aria2cLocalRelaunchTime < 2) {
-              message.error('Aria2本地连接已断开')
+              message.error('本地下载服务连接已断开，正在尝试重新启动')
             }
             SetAriaOnline(false, 'local')
             // 延迟 2 秒后自动重连，避免频繁重试
@@ -215,12 +214,11 @@ export async function AriaChangeToLocal() {
           SetAriaOnline(false, 'local')
           Aria2cLocalRelaunchTime++
           if (Aria2cLocalRelaunchTime < 2) {
-            message.info('正在尝试重启Aria进程中。。。')
+            message.info('正在重新启动本地下载服务')
           }
         })
       if (!IsAria2cOnlineLocal) {
-        const url = `127.0.0.1:${port} secret=${localPwd}`
-        if (Aria2cLocalRelaunchTime < 2) message.error('无法连接到本地Aria2 ' + url)
+        if (Aria2cLocalRelaunchTime < 2) message.error('无法启动本地下载服务，请稍后重试')
       } else {
         await AriaGlobalSpeed(); await AriaApplyAdvancedOptions()
       }
@@ -239,7 +237,7 @@ export async function AriaGlobalSpeed() {
     const settingStore = useSettingStore()
     const limit = settingStore.downGlobalSpeed.toString() + (settingStore.downGlobalSpeedM == 'MB' ? 'M' : 'K')
     await GetAria()?.call('aria2.changeGlobalOption', { 'max-overall-download-limit': limit }).catch((e: any) => {
-      if (e && e.message == 'Unauthorized') message.error('Aria2密码错误(密码不要有 ^ 或特殊字符)')
+      if (e && e.message == 'Unauthorized') message.error('下载服务密码不正确，请检查远程下载设置')
       IsAria2cOnlineLocal = false
     })
   } catch {
@@ -254,7 +252,7 @@ export async function AriaApplyAdvancedOptions(): Promise<boolean> {
     const settingStore = useSettingStore()
     const options: Record<string, string> = {
       'max-connection-per-server': String(settingStore.ariaMaxConnectionPerServer || 16),
-      'continue': settingStore.ariaContinueDownload ? 'true' : 'false'
+      'continue': 'true'
     }
     if (settingStore.ariaUserAgent) {
       options['user-agent'] = settingStore.ariaUserAgent
@@ -362,9 +360,9 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
       if (useSettingStore().AriaIsLocal) {
         // 尝试重新连接本地 Aria2
         await AriaChangeToLocal()
-        if (!IsAria2cOnlineLocal) return 'Aria2未连接，请检查本地Aria连接状态'
+        if (!IsAria2cOnlineLocal) return '本地下载服务未连接，请稍后重试'
       } else {
-        return 'Aria2未连接，请检查远程Aria连接状态'
+        return '远程下载服务未连接，请检查服务器设置'
       }
     }
 
@@ -372,7 +370,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
     const token = UserDAL.GetUserToken(info.user_id)
     const sourceType = info.sourceType || ''
     const isExternalSource = sourceType === 'url'
-    if (!isExternalSource && !isDriveProviderSessionUsable(token, { userId: info.user_id, driveId: info.drive_id })) return '账号失效，操作取消'
+    if (!isExternalSource && !isDriveProviderSessionUsable(token, { userId: info.user_id, driveId: info.drive_id })) return '网盘登录已失效，请重新登录后再下载'
     if (info.isDir) {
       const dirFull = path.join(info.DownSavePath, info.name)
       if (!info.ariaRemote) {
@@ -448,11 +446,11 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         const durl = await getRawUrl(info.user_id, info.drive_id, info.file_id, info.encType)
         if (typeof durl == 'string') {
           console.warn('[aria2] getRawUrl failed', info.drive_id, info.file_id, durl)
-          return `生成下载链接失败, ${durl}`
+          return `无法获取下载地址：${durl}`
         } else if (!durl.url && !durl.qualities?.length) {
           console.warn('[aria2] getRawUrl empty url', info.drive_id, info.file_id, durl)
           DebugLog.mSaveLog('danger', `${info.file_id} 生成下载链接失败, ${JSON.stringify(durl)}`, null)
-          return `生成下载链接失败,${JSON.stringify(durl)}`
+          return '无法获取下载地址，请刷新文件列表后重试'
         }
         downloadUrl = durl.url || durl.qualities?.[0]?.url || ''
         if (durl.headers) {
@@ -462,7 +460,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
       }
       if (!downloadUrl) {
         console.warn('[aria2] no downloadUrl before addUri', info.drive_id, info.file_id)
-        return '生成下载链接失败, 下载地址为空'
+        return '无法获取下载地址，请刷新文件列表后重试'
       }
       const safeUrl = downloadUrl.replace(/\\u0026/g, '&')
       if (safeUrl !== downloadUrl) {
@@ -471,7 +469,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
       }
       if (!/^https?:\/\//i.test(downloadUrl) || /\.torrent(?:[?#].*)?$/i.test(downloadUrl)) {
         console.warn('[aria2] invalid downloadUrl', info.drive_id, info.file_id, downloadUrl)
-        return '生成下载链接失败, 下载地址无效'
+        return '下载地址无效，请刷新文件列表后重试'
       }
       console.log('[aria2] addUri', info.drive_id, info.file_id, { url: downloadUrl, sourceType })
       if (file.Down.IsStop) return '已暂停'
@@ -501,7 +499,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         allProxy: info.allProxy
       })
       const client = GetAria()
-      if (!client) return 'Aria2未连接，请检查本地或远程Aria连接状态'
+      if (!client) return '下载服务未连接，请稍后重试'
       const multicall = [
         ['aria2.forceRemove', info.GID],
         ['aria2.removeDownloadResult', info.GID],
@@ -542,7 +540,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         if (isAriaDuplicateGidError(singleResult) || isAriaDuplicateGidError(singleError)) {
           return 'success'
         }
-        return '创建aria任务失败，稍后自动重试' + ((singleResult && singleResult.message) || (singleError && singleError.message) || '')
+        return '创建下载任务失败，稍后会自动重试' + ((singleResult && singleResult.message) || (singleError && singleError.message) || '')
       }
       if (!singleResult || singleResult.code) {
         delete addOptions.gid
@@ -555,16 +553,16 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
           info.GID = fallbackGid
           return 'success'
         }
-        return '创建aria任务失败，稍后自动重试' + ((singleResult && singleResult.message) || (singleError && singleError.message) || (addResult && addResult.message) || '')
+        return '创建下载任务失败，稍后会自动重试' + ((singleResult && singleResult.message) || (singleError && singleError.message) || (addResult && addResult.message) || '')
       }
     }
   } catch (e: any) {
     SetAriaOnline(false)
     DebugLog.mSaveLog('danger', 'AriaAddUrl' + (e.message || ''), e)
     SetAriaOnline(false)
-    return Promise.resolve('创建Aria任务失败连接断开：' + (e.message || '未知错误'))
+    return Promise.resolve('创建下载任务失败，下载服务连接已断开：' + (e.message || '未知原因'))
   }
-  return Promise.resolve('创建Aria任务失败1')
+  return Promise.resolve('创建下载任务失败，请稍后重试')
 }
 
 
@@ -582,20 +580,25 @@ export function AriaHashFile(downitem: IStateDownFile): { DownID: string; Check:
     hash: crc64 ? 'crc64' : sha1 ? 'sha1' : '',
     check: crc64 || sha1 || ''
   }
+  const expectedSize = Number(downitem.Info.size) || 0
+  const isCompletedFile = (filePath: string) => {
+    try {
+      const stat = fs.statSync(filePath)
+      return stat.isFile() && (expectedSize <= 0 || stat.size === expectedSize)
+    } catch {
+      return false
+    }
+  }
   let success = false
-  if (data.inputfile == data.movetofile) {
+  if (data.inputfile == data.movetofile || isCompletedFile(data.movetofile)) {
     success = true
   } else {
     try {
       fs.renameSync(data.inputfile, data.movetofile)
-      success = true
-    } catch {
-      try {
-        fs.renameSync(data.inputfile, data.movetofile)
-        success = true
-      } catch (e: any) {
-        DebugLog.mSaveLog('danger', 'AriaRename file=' + data.inputfile + ' error=' + (e.message || ''), e)
-      }
+      success = isCompletedFile(data.movetofile)
+    } catch (e: any) {
+      success = isCompletedFile(data.movetofile)
+      if (!success) DebugLog.mSaveLog('danger', 'AriaRename file=' + data.inputfile + ' error=' + (e.message || ''), e)
     }
   }
   return { DownID, Check: success }
@@ -607,72 +610,72 @@ export function FormatAriaError(code: string, message: string): string {
     case '0':
       return ''
     case '1':
-      return 'aria2c未知错误'
+      return '下载失败，原因不明，请重试'
     case '2':
-      return 'aria2c网络超时'
+      return '连接下载地址超时，请稍后重试'
     case '3':
-      return 'aria2c网络文件404'
+      return '下载地址不存在（404）'
     case '4':
-      return 'aria2c网络文件404'
+      return '下载地址不存在（404）'
     case '5':
-      return 'aria2c下载缓慢自动退出'
+      return '下载速度过慢，任务已停止，请稍后重试'
     case '6':
-      return 'aria2c发生网络中断'
+      return '网络连接中断，请重试'
     case '7':
-      return 'aria2c被强制退出错误'
+      return '下载任务被停止，请重新开始'
     case '8':
-      return 'aria2c服务器不支持断点续传'
+      return '服务器不支持断点续传，正在重新下载'
     case '9':
-      return 'aria2c本地硬盘空间不足'
+      return '保存位置的磁盘空间不足，请清理空间后重试'
     case '10':
-      return 'aria2c分片大小更改'
+      return '下载文件信息发生变化，请重新开始下载'
     case '11':
-      return 'aria2c重复任务'
+      return '相同的下载任务已经存在'
     case '12':
-      return 'aria2c重复BT任务'
+      return '相同的种子任务已经存在'
     case '13':
-      return 'aria2c文件已存在且不能覆盖'
+      return '同名文件已经存在，无法覆盖'
     case '14':
-      return 'aria2c文件重命名失败'
+      return '无法保存下载文件，请检查同名文件或文件是否被占用'
     case '15':
-      return 'aria2c打开文件失败'
+      return '无法打开保存位置，请检查目录权限'
     case '16':
-      return 'aria2c创建文件时失败'
+      return '无法创建下载文件，请检查目录权限和剩余空间'
     case '17':
-      return 'aria2c文件写入失败'
+      return '写入下载文件失败，请检查磁盘空间或文件权限'
     case '18':
-      return 'aria2c创建文件夹失败, 请设置保存路径'
+      return '无法创建下载文件夹，请检查保存路径是否可用'
     case '19':
-      return 'aria2cDNS解析失败'
+      return '无法找到服务器，请检查网络连接'
     case '20':
-      return 'aria2c解析磁力失败'
+      return '无法解析磁力链接，请检查链接是否完整'
     case '21':
-      return 'aria2cFTP不支持的命令'
+      return 'FTP 服务器不支持该操作'
     case '22':
-      if (message.includes('403')) return '服务器拒绝访问403'
-      if (message.includes('503')) return '服务器返回错误503'
-      return message
+      if (message.includes('403')) return '服务器拒绝访问（403），请检查链接权限'
+      if (message.includes('503')) return '服务器暂时不可用（503），请稍后重试'
+      return message || '服务器返回错误，请稍后重试'
     case '23':
-      return 'aria2cHTTP重定向失败'
+      return '下载地址跳转失败，请检查链接是否有效'
     case '24':
-      return 'aria2cHTTP认证失败'
+      return '下载地址需要身份验证，请检查链接权限'
     case '25':
-      return 'aria2c格式化种子失败'
+      return '种子文件格式无法识别'
     case '26':
-      return 'aria2c读取种子信息失败'
+      return '无法读取种子文件，请重新获取文件'
     case '27':
-      return 'aria2c磁力链接错误'
+      return '磁力链接格式错误'
     case '28':
-      return 'aria2c提供了错误的参数'
+      return '下载参数无效，请重新创建任务'
     case '29':
-      return 'aria2c服务器超载暂时无法处理请求'
+      return '服务器繁忙，请稍后重试'
     case '30':
-      return 'aria2cRPC传输参数错误'
+      return '下载服务通信参数错误，请重试'
     case '31':
-      return 'aria2c多余的响应数据'
+      return '下载服务返回了无法识别的数据，请重试'
     case '32':
-      return 'aria2c文件sha1校验失败'
+      return '文件校验失败，下载内容可能已损坏，请重试'
     default:
-      return message
+      return message || '下载失败，请重试'
   }
 }

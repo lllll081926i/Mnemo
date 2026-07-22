@@ -382,6 +382,7 @@ const useDowningStore = defineStore('downing', {
       else this.ListDataRaw.splice(0, this.ListDataRaw.length)
       this.ListSelected = new Set<string>()
       this.mRefreshListDataShow(true)
+      DownDAL.syncTaskbarProgress()
     },
 
     /**
@@ -424,7 +425,8 @@ const useDowningStore = defineStore('downing', {
         IsFailed: false,
         IsStop: false,
         FailedCode: 0,
-        FailedMessage: ''
+        FailedMessage: '',
+        ManualRetryRequired: false
       }
       switch (state) {
         case 'start':
@@ -487,6 +489,7 @@ const useDowningStore = defineStore('downing', {
           this.mUpdateDownState(item, 'stop')
         }
       }
+      DownDAL.syncTaskbarProgress()
       if (gids.length) await batchPauseTasks(gids)
       this.mRefreshListDataShow(true)
     },

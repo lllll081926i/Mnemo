@@ -1,15 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import useSettingStore from './settingstore'
 import MySwitch from '../layout/MySwitch.vue'
 import { AriaGlobalSpeed } from '../utils/aria2c'
+import { getSystemDownloadsPath } from '../utils/electronhelper'
 
 const settingStore = useSettingStore()
+const displayDownSavePath = computed(() => settingStore.downSavePath || getSystemDownloadsPath() || '系统默认下载文件夹')
 const cb = async (val: any) => {
   await settingStore.updateStore(val)
   if (Object.hasOwn(val, 'downGlobalSpeed') || Object.hasOwn(val, 'downGlobalSpeedM')) await AriaGlobalSpeed()
 }
 const handleSelectDownSavePath = () => {
-  window.WebShowOpenDialogSync?.({ title: '选择下载文件夹', buttonLabel: '选择', properties: ['openDirectory', 'createDirectory'], defaultPath: settingStore.downSavePath }, (result: string[] | undefined) => {
+  window.WebShowOpenDialogSync?.({ title: '选择下载文件夹', buttonLabel: '选择', properties: ['openDirectory', 'createDirectory'], defaultPath: displayDownSavePath.value }, (result: string[] | undefined) => {
     if (result?.[0]) settingStore.updateStore({ downSavePath: result[0] })
   })
 }
@@ -19,7 +22,7 @@ const handleSelectDownSavePath = () => {
   <div class="ui-plain-list">
     <div class="ui-plain-row">
       <span class="ui-plain-label">下载位置</span>
-      <div class="ui-plain-control"><a-input-search class="ui-control-lg" size="small" :readonly="true" button-text="更改" search-button :model-value="settingStore.downSavePath" @search="handleSelectDownSavePath" /></div>
+      <div class="ui-plain-control"><a-input-search class="ui-control-lg" size="small" :readonly="true" button-text="更改" search-button :model-value="displayDownSavePath" @search="handleSelectDownSavePath" /></div>
     </div>
     <div class="ui-plain-row">
       <span class="ui-plain-label">默认使用此路径</span>
@@ -28,10 +31,6 @@ const handleSelectDownSavePath = () => {
     <div class="ui-plain-row">
       <span class="ui-plain-label">按网盘路径保存</span>
       <div class="ui-plain-control"><MySwitch :value="settingStore.downSavePathFull" @update:value="cb({ downSavePathFull: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
-      <span class="ui-plain-label">跳过违规文件</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.downSaveBreakWeiGui" @update:value="cb({ downSaveBreakWeiGui: $event })" /></div>
     </div>
     <div class="ui-plain-row">
       <span class="ui-plain-label">最大并行任务</span>
