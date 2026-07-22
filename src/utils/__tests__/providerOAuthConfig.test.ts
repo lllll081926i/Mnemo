@@ -39,10 +39,18 @@ describe('provider OAuth runtime configuration', () => {
     expect(login).not.toContain('uiOpenApiClientSecret')
   })
 
-  it('routes PikPak visual challenges through the validated external URL bridge', () => {
+  it('routes PikPak visual challenges through a sandboxed Mnemo window', () => {
     const login = read('src/user/UserLogin.vue')
     const auth = read('src/pikpak/auth.ts')
-    expect(login).toContain('window.WebOpenExternal(challengeUrl)')
+    const preload = read('electron/preload/index.ts')
+    const mainIpc = read('electron/main/core/ipcEvent.ts')
+    expect(login).toContain('window.WebPikPakCaptchaOpen(challengeUrl)')
+    expect(login).not.toContain('window.WebOpenExternal(challengeUrl)')
+    expect(preload).toContain("ipcRenderer.invoke('PikPakCaptcha:open', url)")
+    expect(mainIpc).toContain("ipcMain.handle('PikPakCaptcha:open'")
+    expect(mainIpc).toContain("title: 'PikPak 安全验证'")
+    expect(mainIpc).toContain('sandbox: true')
+    expect(mainIpc).toContain('devTools: false')
     expect(login).toContain('loginPikPakWithCaptcha')
     expect(auth).toContain('PikPakCaptchaRequiredError')
     expect(auth).toContain('if (captcha.challengeUrl) throw new PikPakCaptchaRequiredError')

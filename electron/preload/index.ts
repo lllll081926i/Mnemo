@@ -63,6 +63,20 @@ window.WebPlatformSync = function(callback: any) {
   } catch {
   }
 }
+window.WebGetAppPaths = async function() {
+  try {
+    return await ipcRenderer.invoke('AppPaths:get')
+  } catch {
+    return undefined
+  }
+}
+window.WebSetUserDataPath = async function(value: string) {
+  try {
+    return await ipcRenderer.invoke('AppPaths:setUserData', value)
+  } catch (error: any) {
+    return { ok: false, error: error?.message || '保存用户数据目录失败' }
+  }
+}
 
 window.WebClearCookies = function(data: any) {
   try {
@@ -139,6 +153,25 @@ window.WebOpenExternal = async function(url: string) {
   } catch (error: any) {
     return { ok: false, error: error?.message || '无法打开系统浏览器' }
   }
+}
+window.WebPikPakCaptchaOpen = async function(url: string) {
+  try {
+    return await ipcRenderer.invoke('PikPakCaptcha:open', url)
+  } catch (error: any) {
+    return { ok: false, error: error?.message || '无法打开 PikPak 验证窗口' }
+  }
+}
+window.WebPikPakCaptchaClose = async function() {
+  try {
+    return await ipcRenderer.invoke('PikPakCaptcha:close')
+  } catch {
+    return { ok: false }
+  }
+}
+window.WebPikPakCaptchaOnCompleted = function(callback: () => void) {
+  const listener = () => callback()
+  ipcRenderer.on('PikPakCaptcha:completed', listener)
+  return () => ipcRenderer.removeListener('PikPakCaptcha:completed', listener)
 }
 window.WebOAuthBegin = async function(provider: string) {
   return ipcRenderer.invoke('OAuth:begin', { provider })

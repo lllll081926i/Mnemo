@@ -2,7 +2,7 @@ import { AppWindow, createElectronWindow } from './window'
 import path from 'path'
 import is from 'electron-is'
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, safeStorage, session, shell } from 'electron'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { execFile } from 'child_process'
 import { ShowError } from './dialog'
 import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
@@ -24,12 +24,39 @@ interface OAuthSessionOwner {
 
 const oauthSessionOwners = new Map<string, OAuthSessionOwner>()
 const oauthWindows = new Map<string, BrowserWindow>()
+let pikpakCaptchaWindow: BrowserWindow | undefined
 const ipcEventsRegisteredKey = Symbol.for('mnemo.ipc-events-registered')
 
 const closeOAuthWindow = (state: string) => {
   const window = oauthWindows.get(state)
   oauthWindows.delete(state)
   if (window && !window.isDestroyed()) window.close()
+}
+
+const closePikPakCaptchaWindow = () => {
+  const window = pikpakCaptchaWindow
+  pikpakCaptchaWindow = undefined
+  if (window && !window.isDestroyed()) window.close()
+}
+
+const isPikPakCaptchaUrl = (value: string) => {
+  try {
+    const url = new URL(value)
+    const hostname = url.hostname.toLowerCase()
+    const trustedHost = hostname === 'mypikpak.com' || hostname.endsWith('.mypikpak.com') || hostname === 'mypikpak.net' || hostname.endsWith('.mypikpak.net')
+    return url.protocol === 'https:' && trustedHost
+  } catch {
+    return false
+  }
+}
+
+const isPikPakCaptchaCallback = (value: string) => {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'xlaccsdk01:' && url.hostname === 'xbase.cloud' && url.pathname === '/callback'
+  } catch {
+    return false
+  }
 }
 
 function pathToFileUrl(filePath: string): string {
@@ -132,6 +159,7 @@ export default class ipcEvent {
     this.handleWebShowSaveDialogSync()
     this.handleWebShowItemInFolder()
     this.handleWebPlatformSync()
+    this.handleAppPaths()
     this.handleWebSaveTheme()
     this.handleWebClearCookies()
     this.handleWebGetCookies()
@@ -144,6 +172,7 @@ export default class ipcEvent {
     this.handleWebShutDown()
     this.handleWebSetProxy()
     this.handleWebOpenExternal()
+    this.handlePikPakCaptcha()
     this.handleOAuthCallback()
     this.handleAutoUpdate()
     this.handleSafeStorage()
@@ -169,6 +198,72 @@ export default class ipcEvent {
       } catch (error: any) {
         return { ok: false, error: error?.message || '无法打开系统浏览器' }
       }
+    })
+  }
+
+  private static handlePikPakCaptcha() {
+    ipcMain.handle('PikPakCaptcha:open', async (event, value: unknown) => {
+      const challengeUrl = String(value || '').trim()
+      if (!isPikPakCaptchaUrl(challengeUrl)) return { ok: false, error: 'PikPak 验证地址无效' }
+      closePikPakCaptchaWindow()
+      const captchaWindow = new BrowserWindow({
+        parent: AppWindow.mainWindow,
+        modal: true,
+        show: false,
+        width: 520,
+        height: 720,
+        minWidth: 420,
+        minHeight: 560,
+        title: 'PikPak 安全验证',
+        icon: getStaticPath('icon_256x256.ico'),
+        autoHideMenuBar: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          devTools: false,
+          webSecurity: true,
+          partition: 'persist:pikpak-captcha'
+        }
+      })
+      pikpakCaptchaWindow = captchaWindow
+      let completed = false
+      const completeCaptcha = () => {
+        if (completed) return
+        completed = true
+        if (!event.sender.isDestroyed()) event.sender.send('PikPakCaptcha:completed')
+        closePikPakCaptchaWindow()
+      }
+      const guardNavigation = (navigationEvent: Electron.Event, url: string) => {
+        if (isPikPakCaptchaCallback(url)) {
+          navigationEvent.preventDefault()
+          completeCaptcha()
+        } else if (!isPikPakCaptchaUrl(url)) {
+          navigationEvent.preventDefault()
+        }
+      }
+      captchaWindow.webContents.on('will-navigate', guardNavigation)
+      captchaWindow.webContents.on('will-redirect', guardNavigation)
+      captchaWindow.webContents.setWindowOpenHandler(({ url }) => {
+        if (isPikPakCaptchaCallback(url)) completeCaptcha()
+        else if (isPikPakCaptchaUrl(url)) void captchaWindow.loadURL(url)
+        return { action: 'deny' }
+      })
+      captchaWindow.once('ready-to-show', () => captchaWindow.show())
+      captchaWindow.once('closed', () => {
+        if (pikpakCaptchaWindow === captchaWindow) pikpakCaptchaWindow = undefined
+      })
+      try {
+        await captchaWindow.loadURL(challengeUrl)
+        return { ok: true }
+      } catch (error: any) {
+        closePikPakCaptchaWindow()
+        return { ok: false, error: error?.message || 'PikPak 验证页面加载失败' }
+      }
+    })
+    ipcMain.handle('PikPakCaptcha:close', () => {
+      closePikPakCaptchaWindow()
+      return { ok: true }
     })
   }
 
@@ -442,8 +537,65 @@ export default class ipcEvent {
         version: process.version,
         execPath: process.execPath,
         appPath: appPath,
+        userDataPath: appPath,
+        downloadsPath: app.getPath('downloads'),
+        defaultUserDataPath: path.join(app.getPath('appData'), 'Mnemo'),
         asarPath: asarPath,
         argv0: process.argv0
+      }
+    })
+  }
+
+  private static handleAppPaths() {
+    ipcMain.handle('AppPaths:get', () => ({
+      userDataPath: app.getPath('userData'),
+      downloadsPath: app.getPath('downloads'),
+      defaultUserDataPath: path.join(app.getPath('appData'), 'Mnemo')
+    }))
+    ipcMain.handle('AppPaths:setUserData', (_event, value: unknown) => {
+      const target = String(value || '').trim()
+      const defaultUserDataPath = path.resolve(path.join(app.getPath('appData'), 'Mnemo'))
+      const configPath = path.join(defaultUserDataPath, 'userdir.config')
+      const currentUserDataPath = path.resolve(app.getPath('userData'))
+      if (target && !path.isAbsolute(target)) return { ok: false, error: '请选择完整的用户数据目录路径' }
+      const normalizeForCompare = (value: string) => {
+        const resolvedValue = path.resolve(value)
+        return process.platform === 'win32' ? resolvedValue.toLowerCase() : resolvedValue
+      }
+      const samePath = (left: string, right: string) => normalizeForCompare(left) === normalizeForCompare(right)
+      const selectedPath = target ? path.resolve(target) : defaultUserDataPath
+      const resolved = samePath(selectedPath, defaultUserDataPath) ? defaultUserDataPath : selectedPath
+      const isNestedPath = (candidate: string, parent: string) => {
+        const relative = path.relative(normalizeForCompare(parent), normalizeForCompare(candidate))
+        return !!relative && !relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative)
+      }
+      if (path.parse(resolved).root === resolved) return { ok: false, error: '请选择具体文件夹，不能把磁盘根目录作为用户数据目录' }
+      if (!samePath(resolved, currentUserDataPath) && (isNestedPath(resolved, currentUserDataPath) || isNestedPath(currentUserDataPath, resolved))) {
+        return { ok: false, error: '新的用户数据目录不能与当前目录互相包含，请选择其他文件夹' }
+      }
+      try {
+        mkdirSync(resolved, { recursive: true })
+        if (!samePath(resolved, currentUserDataPath) && existsSync(currentUserDataPath)) {
+          const skippedNames = new Set(['singletoncookie', 'singletonlock', 'singletonsocket', 'lock', 'lockfile', 'engine.pid'])
+          const skippedDirectories = new Set(['cache', 'code cache', 'gpucache', 'dawncache', 'shadercache', 'grshadercache', 'crashpad'])
+          cpSync(currentUserDataPath, resolved, {
+            recursive: true,
+            force: true,
+            errorOnExist: false,
+            filter: (source) => {
+              if (samePath(source, configPath)) return false
+              const relative = path.relative(currentUserDataPath, source)
+              if (!relative) return true
+              const parts = relative.split(path.sep).map((part) => part.toLowerCase())
+              return !parts.some((part) => skippedDirectories.has(part)) && !skippedNames.has(path.basename(source).toLowerCase())
+            }
+          })
+        }
+        mkdirSync(path.dirname(configPath), { recursive: true })
+        writeFileSync(configPath, resolved, 'utf-8')
+        return { ok: true, path: resolved, requiresRestart: !samePath(resolved, app.getPath('userData')) }
+      } catch (error: any) {
+        return { ok: false, error: error?.message ? `无法移动用户数据：${error.message}` : '无法移动用户数据，请检查文件夹权限和磁盘剩余空间' }
       }
     })
   }

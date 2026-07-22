@@ -29,6 +29,7 @@ const pikpakCaptchaToken = ref('')
 const pikpakCaptchaDeviceId = ref('')
 const pikpakCaptchaExpiresAt = ref(0)
 const pikpakCaptchaOpened = ref(false)
+const pikpakCaptchaCompleted = ref(false)
 const gofileToken = ref('')
 const gofileLoading = ref(false)
 const webDavForm = ref({ name: '', url: '', username: '', password: '', rootPath: '/' })
@@ -111,8 +112,16 @@ const removeOAuthCallback = window.WebOAuthOnCallback?.(async payload => {
   }
 })
 
+const removePikPakCaptchaCallback = window.WebPikPakCaptchaOnCompleted?.(() => {
+  pikpakCaptchaOpened.value = true
+  pikpakCaptchaCompleted.value = true
+  message.success('PikPak 安全验证已完成，请继续登录')
+})
+
 onBeforeUnmount(() => {
   removeOAuthCallback?.()
+  removePikPakCaptchaCallback?.()
+  void window.WebPikPakCaptchaClose?.()
   cancelOAuthLogins()
   resetPikPakCaptcha()
 })
@@ -123,7 +132,9 @@ const resetPikPakCaptcha = () => {
   pikpakCaptchaDeviceId.value = ''
   pikpakCaptchaExpiresAt.value = 0
   pikpakCaptchaOpened.value = false
+  pikpakCaptchaCompleted.value = false
   pikpakCaptchaOpening.value = false
+  void window.WebPikPakCaptchaClose?.()
 }
 
 const setPikPakCaptchaChallenge = (error: PikPakCaptchaRequiredError) => {
@@ -132,6 +143,7 @@ const setPikPakCaptchaChallenge = (error: PikPakCaptchaRequiredError) => {
   pikpakCaptchaDeviceId.value = error.deviceId
   pikpakCaptchaExpiresAt.value = Date.now() + Math.max(1, error.expiresIn || 300) * 1000
   pikpakCaptchaOpened.value = false
+  pikpakCaptchaCompleted.value = false
 }
 
 const isPikPakCaptchaExpired = () => pikpakCaptchaExpiresAt.value > 0 && Date.now() >= pikpakCaptchaExpiresAt.value
@@ -141,12 +153,15 @@ const openPikPakChallenge = async () => {
   if (!challengeUrl || pikpakCaptchaOpening.value) return
   pikpakCaptchaOpening.value = true
   try {
-    const opened = await window.WebOpenExternal(challengeUrl)
-    if (!opened?.ok) throw new Error(opened?.error || '无法打开系统浏览器')
-    if (pikpakCaptchaUrl.value === challengeUrl) pikpakCaptchaOpened.value = true
-    message.info('PikPak 验证页已打开')
+    const opened = await window.WebPikPakCaptchaOpen(challengeUrl)
+    if (!opened?.ok) throw new Error(opened?.error || '无法打开 PikPak 验证窗口')
+    if (pikpakCaptchaUrl.value === challengeUrl) {
+      pikpakCaptchaOpened.value = true
+      pikpakCaptchaCompleted.value = false
+    }
+    message.info('PikPak 验证窗口已打开，请完成滑块验证')
   } catch (error: any) {
-    message.error(error?.message || '无法打开 PikPak 验证页')
+    message.error(error?.message || '无法打开 PikPak 验证窗口')
   } finally {
     pikpakCaptchaOpening.value = false
   }
@@ -187,7 +202,11 @@ const submitPikPakCaptchaLogin = async () => {
     const token = await loginPikPakWithCaptcha(pikpakUsername.value.trim(), pikpakPassword.value, pikpakCaptchaToken.value, pikpakCaptchaDeviceId.value)
     await completePikPakLogin(token)
   } catch (error: any) {
-    if (isPikPakCaptchaInvalidError(error) || isPikPakCaptchaRequiredResponse(error) || error?.reason === 'captcha_required') {
+    if (error instanceof PikPakCaptchaRequiredError || error?.code === 'PikPak_CAPTCHA_REQUIRED') {
+      setPikPakCaptchaChallenge(error as PikPakCaptchaRequiredError)
+      message.warning('安全验证尚未完成，请在验证窗口完成滑块后再登录')
+      await openPikPakChallenge()
+    } else if (isPikPakCaptchaInvalidError(error) || isPikPakCaptchaRequiredResponse(error) || error?.reason === 'captcha_required') {
       resetPikPakCaptcha()
       message.error('PikPak 验证无效或已过期，请重新登录并完成新的验证')
     } else {
@@ -222,7 +241,7 @@ const submitWebDavLogin = async () => {
     await UserDAL.UserLogin(createWebDavUserToken(connection), true)
     useUser.userShowLogin = false
   } catch (error: any) {
-    message.error(`添加 WebDAV 失败: ${error?.message || '未知错误'}`)
+    message.error(`无法添加 WebDAV：${error?.message || '请检查服务器地址和账号信息'}`)
   } finally {
     webDavLoading.value = false
   }
@@ -239,7 +258,7 @@ const submitS3Login = async () => {
     await UserDAL.UserLogin(createS3UserToken(connection), true)
     useUser.userShowLogin = false
   } catch (error: any) {
-    message.error(`添加 S3 失败: ${error?.message || '未知错误'}`)
+    message.error(`无法添加 S3：${error?.message || '请检查存储地址和访问密钥'}`)
   } finally {
     s3Loading.value = false
   }
@@ -276,7 +295,7 @@ const handleClose = () => {
           <a-input v-model="pikpakUsername" placeholder="PikPak 邮箱 / 手机号 / 用户名" allow-clear />
           <a-input-password v-model="pikpakPassword" placeholder="PikPak 密码" allow-clear />
           <div v-if="pikpakCaptchaUrl" class="pikpak-captcha-panel">
-            <div class="pikpak-captcha-status">{{ pikpakCaptchaOpened ? '验证页已打开' : '需要完成安全验证' }}</div>
+            <div class="pikpak-captcha-status">{{ pikpakCaptchaCompleted ? '安全验证已完成，请继续登录' : pikpakCaptchaOpened ? '验证窗口已打开，请完成滑块' : '需要完成安全验证' }}</div>
             <div class="pikpak-captcha-actions">
               <a-button type="secondary" long :loading="pikpakCaptchaOpening" @click.prevent="openPikPakChallenge">重新打开验证</a-button>
               <a-button type="primary" long :loading="pikpakLoading" @click.prevent="submitPikPakCaptchaLogin">已完成验证并登录</a-button>

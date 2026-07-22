@@ -10,6 +10,8 @@ declare interface Window {
   WebShowSaveDialogSync: any
   WebShowItemInFolder: any
   WebPlatformSync: any
+  WebGetAppPaths: () => Promise<{ userDataPath?: string; downloadsPath?: string; defaultUserDataPath?: string } | undefined>
+  WebSetUserDataPath: (value: string) => Promise<{ ok: boolean; path?: string; requiresRestart?: boolean; error?: string }>
   WebClearCookies: any
   WebClearCache: any
   WebUserToken: any
@@ -22,6 +24,9 @@ declare interface Window {
   WebSetCookies: any
   WebOpenWindow: any
   WebOpenExternal: (url: string) => Promise<{ ok: boolean; error?: string }>
+  WebPikPakCaptchaOpen: (url: string) => Promise<{ ok: boolean; error?: string }>
+  WebPikPakCaptchaClose: () => Promise<{ ok: boolean }>
+  WebPikPakCaptchaOnCompleted: (callback: () => void) => () => void
   WebOAuthBegin: (provider: 'onedrive' | 'dropbox' | 'gdrive') => Promise<{ ok: boolean; state?: string; redirectUri?: string; error?: string }>
   WebOAuthOpen: (state: string, url: string) => Promise<{ ok: boolean; error?: string }>
   WebOAuthCancel: (state: string) => Promise<{ ok: boolean }>
