@@ -23,16 +23,8 @@ interface OAuthSessionOwner {
 }
 
 const oauthSessionOwners = new Map<string, OAuthSessionOwner>()
-const oauthWindows = new Map<string, BrowserWindow>()
 let pikpakCaptchaWindow: BrowserWindow | undefined
 const ipcEventsRegisteredKey = Symbol.for('mnemo.ipc-events-registered')
-
-const closeOAuthWindow = (state: string) => {
-  const window = oauthWindows.get(state)
-  oauthWindows.delete(state)
-  if (window && !window.isDestroyed()) window.close()
-}
-
 const closePikPakCaptchaWindow = () => {
   const window = pikpakCaptchaWindow
   pikpakCaptchaWindow = undefined
@@ -314,7 +306,6 @@ export default class ipcEvent {
           isDestroyed: () => event.sender.isDestroyed(),
           send: (channel, payload) => {
             oauthSessionOwners.delete(payload.state)
-            closeOAuthWindow(payload.state)
             if (!event.sender.isDestroyed()) event.sender.send(channel, payload)
           }
         }
@@ -331,46 +322,15 @@ export default class ipcEvent {
       if (!owner || owner.senderId !== event.sender.id) return { ok: false, error: 'OAuth 会话不存在或已过期' }
       const authUrl = String(value?.url || '')
       if (!isOAuthAuthorizationUrl(owner.provider, authUrl, state, owner.redirectUri)) return { ok: false, error: 'OAuth 授权地址校验失败' }
-      closeOAuthWindow(state)
-      const authWindow = new BrowserWindow({
-        parent: AppWindow.mainWindow,
-        modal: true,
-        show: false,
-        width: 520,
-        height: 720,
-        minWidth: 420,
-        minHeight: 560,
-        title: `${owner.provider} 登录`,
-        icon: getStaticPath('icon_256x256.ico'),
-        autoHideMenuBar: true,
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-          sandbox: true,
-          devTools: false,
-          webSecurity: true
-        }
-      })
-      oauthWindows.set(state, authWindow)
-      authWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      authWindow.once('ready-to-show', () => authWindow.show())
-      authWindow.once('closed', () => {
-        if (oauthWindows.get(state) !== authWindow) return
-        oauthWindows.delete(state)
-        oauthSessionOwners.delete(state)
-        oauthCallbackServer.cancel(state, owner.target)
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('OAuth:callback', { provider: owner.provider, state, code: '', error: 'window_closed', errorDescription: '登录窗口已关闭' })
-        }
-      })
       try {
-        await authWindow.loadURL(authUrl)
+        // 与 rclone 一致：用系统默认浏览器完成授权。Google 禁止内嵌 WebView 登录（disallowed_useragent），
+        // 内嵌窗口会被直接拦截；授权完成后浏览器会跳回本地 127.0.0.1:53682 回调服务。
+        await shell.openExternal(authUrl)
         return { ok: true }
       } catch (error: any) {
-        closeOAuthWindow(state)
         oauthSessionOwners.delete(state)
         oauthCallbackServer.cancel(state, owner.target)
-        return { ok: false, error: error?.message || '加载 OAuth 登录页面失败' }
+        return { ok: false, error: error?.message || '无法打开系统浏览器' }
       }
     })
     ipcMain.handle('OAuth:cancel', (event, value: { state?: string }) => {
@@ -378,7 +338,6 @@ export default class ipcEvent {
       const owner = oauthSessionOwners.get(state)
       if (!owner || owner.senderId !== event.sender.id) return { ok: false }
       oauthSessionOwners.delete(state)
-      closeOAuthWindow(state)
       return { ok: oauthCallbackServer.cancel(state, owner.target) }
     })
   }

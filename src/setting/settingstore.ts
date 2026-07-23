@@ -257,7 +257,7 @@ function defaultNumberSub(val: any, check: number, min: number, max: number) {
 function applyStoredConfig(setting: SettingState, val: any) {
   // 应用设置
   setting.uiTheme = defaultValue(val.uiTheme, ['system', 'light', 'dark'])
-  setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'down', 'share', 'setting'])
+  setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'down', 'sync', 'share', 'setting'])
   setting.uiImageMode = defaultValue(val.uiImageMode, ['fill', 'width', 'web'])
   setting.uiExitOnClose = defaultBool(val.uiExitOnClose, false)
   setting.uiLaunchStart = defaultBool(val.uiLaunchStart, false)

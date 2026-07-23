@@ -393,7 +393,10 @@ const handleClose = () => {
           <a-button v-else html-type="submit" type="primary" long :loading="pikpakLoading" :disabled="pikpakCooldownSeconds > 0">{{ pikpakCooldownSeconds > 0 ? `${pikpakCooldownSeconds} 秒后可重试` : '添加 PikPak 账号' }}</a-button>
           <div class="pikpak-device-reset"><a-button type="text" size="small" :disabled="pikpakLoading" @click.prevent="resetPikPakDevice">设备被限制登录？重置设备 ID</a-button></div>
         </form>
-        <div v-else-if="isOAuthProvider(loginProvider)" class="login-form oauth-login"><a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">在 Mnemo 中登录</a-button></div>
+        <div v-else-if="isOAuthProvider(loginProvider)" class="login-form oauth-login">
+          <a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">{{ oauthLoading === loginProvider ? '等待浏览器完成授权...' : '在浏览器中登录' }}</a-button>
+          <p class="oauth-tip">将在系统浏览器中完成授权，成功后回到 Mnemo 会自动完成登录</p>
+        </div>
         <form v-else-if="loginProvider === 'gofile'" class="login-form" @submit.prevent="submitGofileLogin"><a-input-password v-model="gofileToken" placeholder="GoFile Account API Token" allow-clear /><a-button html-type="submit" type="primary" long :loading="gofileLoading">登录 GoFile</a-button></form>
         <form v-else-if="loginProvider === 'webdav'" class="login-form" @submit.prevent="submitWebDavLogin"><a-input v-model="webDavForm.name" placeholder="连接名称" allow-clear /><a-input v-model="webDavForm.url" placeholder="WebDAV 地址" allow-clear /><a-input v-model="webDavForm.username" placeholder="用户名" allow-clear /><a-input-password v-model="webDavForm.password" placeholder="密码" allow-clear /><a-input v-model="webDavForm.rootPath" placeholder="挂载路径，默认 /" allow-clear /><a-button html-type="submit" type="primary" long :loading="webDavLoading">连接 WebDAV</a-button></form>
         <form v-else class="s3-login-form" @submit.prevent="submitS3Login"><a-input v-model="s3Form.name" class="wide" placeholder="连接名称" allow-clear /><a-input v-model="s3Form.endpoint" class="wide" placeholder="Endpoint（可选）" allow-clear /><a-input v-model="s3Form.region" placeholder="Region" allow-clear /><a-input v-model="s3Form.bucket" placeholder="Bucket" allow-clear /><a-input v-model="s3Form.accessKeyId" placeholder="Access Key ID" allow-clear /><a-input-password v-model="s3Form.secretAccessKey" placeholder="Secret Access Key" allow-clear /><a-input-password v-model="s3Form.sessionToken" class="wide" placeholder="Session Token（可选）" allow-clear /><a-input v-model="s3Form.rootPrefix" placeholder="根前缀（可选）" allow-clear /><label><a-switch v-model="s3Form.forcePathStyle" size="small" /> 路径样式</label><a-button class="wide" html-type="submit" type="primary" long :loading="s3Loading">连接 S3</a-button></form>
@@ -428,6 +431,7 @@ const handleClose = () => {
 .pikpak-device-reset .arco-btn { color: var(--color-text-3); font-size: 12px; }
 .pikpak-device-reset .arco-btn:hover { color: rgb(var(--primary-6)); }
 .oauth-login { align-items: stretch; }
+.oauth-tip { margin: 0; color: var(--color-text-3); font-size: 12px; line-height: 18px; text-align: center; }
 .s3-login-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; width: 330px; margin: 28px auto 0; }
 .wide { grid-column: 1 / -1; }
 </style>

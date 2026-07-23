@@ -129,4 +129,18 @@ describe('quick tag entries', () => {
     expect(ok).toBe(true)
     expect(panfileStore.ListDataShow.map((item) => item.file_id)).toContain('file-c1')
   })
+
+  it('keeps the real file type in the color filter view so tagged videos can play', async () => {
+    PanDAL.updateLocalQuickTag([makeFile('file-v1', '标签里的长视频.mp4')], '鹅冠红', '#df5659')
+    const panfileStore = usePanFileStore()
+    panfileStore.$patch({ DriveID: 'pikpak', DirID: 'colorcdf5659 鹅冠红' })
+
+    await PanDAL.GetDirFileList('user-1', 'pikpak', 'colorcdf5659 鹅冠红', '标记 · 鹅冠红', '', true)
+
+    const item = panfileStore.ListDataShow.find((entry) => entry.file_id === 'file-v1')
+    expect(item).toBeTruthy()
+    expect(item!.ext).toBe('mp4')
+    expect(item!.category).toMatch(/^video/)
+    expect(item!.icon).toBe('iconfile-video')
+  })
 })

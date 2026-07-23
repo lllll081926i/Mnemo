@@ -121,6 +121,7 @@ const useAppStore = defineStore('app', {
     appTabMenuMap: new Map<string, string>([
       ['pan', 'wangpan'],
       ['down', 'DowningRight'],
+      ['sync', 'syncmain'],
       ['share', 'ShareUnsupported'],
       ['setting', 'general']
     ]),
@@ -169,14 +170,15 @@ const useAppStore = defineStore('app', {
       this.appPage = page
     },
     resetTab(defaultTab = 'pan') {
-      const safeDefaultTab = ['pan', 'down', 'share', 'setting'].includes(defaultTab) ? defaultTab : 'pan'
-      const mainTab = ['pan', 'down', 'share'].includes(defaultTab) ? defaultTab : 'pan'
+      const safeDefaultTab = ['pan', 'down', 'sync', 'share', 'setting'].includes(defaultTab) ? defaultTab : 'pan'
+      const mainTab = ['pan', 'down', 'sync', 'share'].includes(defaultTab) ? defaultTab : 'pan'
       this.$patch({
         appTab: safeDefaultTab,
         lastMainTab: mainTab,
         appTabMenuMap: new Map<string, string>([
           ['pan', 'wangpan'],
           ['down', 'DowningRight'],
+          ['sync', 'syncmain'],
           ['share', 'ShareUnsupported'],
           ['setting', 'general']
         ])
@@ -185,13 +187,13 @@ const useAppStore = defineStore('app', {
 
     openSettings() {
       if (this.appTab === 'setting') return
-      if (['pan', 'down', 'share'].includes(this.appTab)) this.lastMainTab = this.appTab
+      if (['pan', 'down', 'sync', 'share'].includes(this.appTab)) this.lastMainTab = this.appTab
       this.appTab = 'setting'
       onHideRightMenu()
     },
 
     closeSettings() {
-      this.appTab = ['pan', 'down', 'share'].includes(this.lastMainTab) ? this.lastMainTab : 'pan'
+      this.appTab = ['pan', 'down', 'sync', 'share'].includes(this.lastMainTab) ? this.lastMainTab : 'pan'
       onHideRightMenu()
     },
 
@@ -208,7 +210,7 @@ const useAppStore = defineStore('app', {
 
       if (this.appTab != tab) {
         this.appTab = tab
-        if (['pan', 'down', 'share'].includes(tab)) this.lastMainTab = tab
+        if (['pan', 'down', 'sync', 'share'].includes(tab)) this.lastMainTab = tab
         onHideRightMenu()
       }
     },
@@ -218,7 +220,7 @@ const useAppStore = defineStore('app', {
         if (tab === 'setting') this.openSettings()
         else {
           this.appTab = tab
-          if (['pan', 'down', 'share'].includes(tab)) this.lastMainTab = tab
+          if (['pan', 'down', 'sync', 'share'].includes(tab)) this.lastMainTab = tab
         }
       }
       // Map.set 不会触发 Pinia 响应式，必须替换引用
@@ -234,7 +236,7 @@ const useAppStore = defineStore('app', {
         if (tab === 'setting') this.openSettings()
         else {
           this.appTab = tab
-          if (['pan', 'down', 'share'].includes(tab)) this.lastMainTab = tab
+          if (['pan', 'down', 'sync', 'share'].includes(tab)) this.lastMainTab = tab
         }
       }
       if (menu) {
@@ -250,6 +252,9 @@ const useAppStore = defineStore('app', {
           this.appTab = 'down'
           break
         case 'down':
+          this.appTab = 'sync'
+          break
+        case 'sync':
           this.appTab = 'share'
           break
         case 'share':

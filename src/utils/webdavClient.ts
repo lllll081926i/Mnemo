@@ -1,10 +1,12 @@
 import path from 'path'
+import { createReadStream } from 'fs'
 import fsPromises from 'fs/promises'
 import { createClient, type FileStat } from 'webdav'
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
 import { humanDateTimeDateStr, humanSize } from './format'
+import { resolveFileExt } from './filetype'
 
 const STORAGE_KEY = 'mnemo.webdav.connections'
 
@@ -84,7 +86,7 @@ const toAliModel = (config: WebDavConnectionConfig, stat: FileStat): IAliGetFile
   const relativePath = getRelativeDavPath(stat.filename, config)
   const name = stat.basename || path.posix.basename(relativePath) || config.name
   const isDir = stat.type === 'directory'
-  const ext = isDir ? '' : path.extname(name).replace('.', '').toLowerCase()
+  const ext = isDir ? '' : resolveFileExt(name, '', stat.mime || '')
   const size = Number(stat.size || 0)
   const mimeType = stat.mime || ''
   const updatedAt = stat.lastmod
@@ -428,4 +430,36 @@ export const uploadWebDavLocalPaths = async (config: WebDavConnectionConfig, par
 
 export const testWebDavConnection = async (config: WebDavConnectionConfig) => {
   await listWebDavDirectory(config, '/')
+}
+
+/** 递归列出某目录下的全部文件（同步引擎用），file_id 为相对路径 */
+export const listWebDavRecursive = async (config: WebDavConnectionConfig, relativePath = '/'): Promise<IAliGetFileModel[]> => {
+  const result: IAliGetFileModel[] = []
+  const walk = async (dir: string): Promise<void> => {
+    const items = await listWebDavDirectory(config, dir)
+    for (const item of items) {
+      if (item.isDir) await walk(item.file_id)
+      else result.push(item)
+    }
+  }
+  await walk(relativePath)
+  return result
+}
+
+/** 以流的方式上传单个文件（避免大文件整体读入内存） */
+export const uploadWebDavFile = async (config: WebDavConnectionConfig, relativePath: string, localPath: string, onProgress?: (transferred: number) => void) => {
+  const client = createWebDavClient(config)
+  const remotePath = joinDavPath(config.rootPath, relativePath)
+  const stat = await fsPromises.stat(localPath)
+  const stream = createReadStream(localPath)
+  if (onProgress) {
+    let transferred = 0
+    stream.on('data', (chunk: string | Buffer) => {
+      transferred += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+      onProgress(transferred)
+    })
+  }
+  await client.putFileContents(remotePath, stream, { overwrite: true, contentLength: stat.size })
+  const remote = await statWebDavPath(config, relativePath).catch(() => null)
+  return { size: stat.size, time: remote?.lastmod ? new Date(remote.lastmod).getTime() || 0 : Date.now() }
 }

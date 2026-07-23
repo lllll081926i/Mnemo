@@ -44,6 +44,8 @@ export interface DriveProviderCapabilities {
   quickTransfer: boolean
   favorite: boolean
   colorTag: boolean
+  /** 本地标签/快捷方式（存在本地 localStorage，不依赖网盘服务端能力，所有文件网盘都可用） */
+  localTag: boolean
   encryption: boolean
   playbackHistory: boolean
   copyTree: boolean
@@ -122,6 +124,7 @@ const noCapabilities: Omit<DriveProviderCapabilities, 'provider'> = {
   quickTransfer: false,
   favorite: false,
   colorTag: false,
+  localTag: false,
   encryption: false,
   playbackHistory: false,
   copyTree: false,
@@ -137,7 +140,8 @@ const standardFileCapabilities: Partial<DriveProviderCapabilities> = {
   rename: true,
   move: true,
   copy: true,
-  recycleBin: true
+  recycleBin: true,
+  localTag: true
 }
 
 const createCapabilities = (provider: DriveProvider, overrides: Partial<DriveProviderCapabilities> = {}): DriveProviderCapabilities => ({ ...noCapabilities, ...standardFileCapabilities, ...overrides, provider })

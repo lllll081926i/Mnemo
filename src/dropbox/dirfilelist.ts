@@ -1,6 +1,7 @@
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
+import { resolveFileExt } from '../utils/filetype'
 import { HanToPin } from '../utils/utils'
 import message from '../utils/message'
 
@@ -132,7 +133,7 @@ const encodeDescription = (item: DropboxMetadata) => {
 export const mapDropboxFileToAliModel = (item: DropboxMetadata, drive_id: string, parentId: string): IAliGetFileModel => {
   const isDir = item['.tag'] === 'folder'
   const name = item.name || ''
-  const ext = isDir ? '' : (name.split('.').pop() || '')
+  const ext = isDir ? '' : resolveFileExt(name)
   const time = new Date(item.server_modified || item.client_modified || '').getTime() || 0
   const timeStr = time ? humanDateTimeDateStr(new Date(time).toISOString()) : ''
   const size = Number(item.size || 0)

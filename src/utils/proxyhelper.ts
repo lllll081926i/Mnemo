@@ -15,6 +15,7 @@ import message from './message'
 import UserDAL from '../user/userdal'
 import { buildUpstreamProxyHeaders } from './proxyHeaders'
 import { shouldRefreshProxyUrl } from './proxyCache'
+import { resolveDriveProvider } from './driveProvider'
 import { isWebDavDrive } from './webdavClient'
 
 // 默认maxFreeSockets=256
@@ -200,8 +201,10 @@ export async function getRawUrl(
       if (getUrlFileName(downUrl.url).includes('wma')) {
         return '不支持预览的加密音频格式'
       }
+      // PikPak 的临时直链必须走本地 Range 代理（长视频没有转码流时只能播原画，直连 CDN 会失败）
+      const forceProxy = resolveDriveProvider({ userId: user_id, driveId: drive_id }) === 'pikpak' ? true : undefined
       if (!encType && preview_type && !blockOriginFallback && !data.qualities.some((q: any) => q.quality === 'Origin')) {
-        data.qualities.unshift({ quality: 'Origin', html: '原画', label: '原画', value: '', url: downUrl.url, type: detectProxyVideoType(downUrl.url) })
+        data.qualities.unshift({ quality: 'Origin', html: '原画', label: '原画', value: '', url: downUrl.url, type: detectProxyVideoType(downUrl.url), forceProxy })
       }
       if (!data.url || quality === 'Origin' || (uiVideoQuality === 'Origin' && !blockOriginFallback)) {
         data.url = downUrl.url

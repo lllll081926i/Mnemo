@@ -12,6 +12,8 @@ import { apiPikPakFileList, mapPikPakFileToAliModel } from '../pikpak/dirfilelis
 import { getWebDavConnection, getWebDavConnectionId, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
 import { getS3Connection, getS3ConnectionId, isS3Drive, listS3Directory } from '../utils/s3Client'
 import { OrderDir } from '../utils/filenameorder'
+import { extFromFileName } from '../utils/filetype'
+import getFileIcon from '../aliapi/fileicon'
 import { isDriveProviderRootId, resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
 import { apiDropboxFileList, mapDropboxFileToAliModel, resolveDropboxParentIdFromPath } from '../dropbox/dirfilelist'
@@ -43,6 +45,8 @@ export interface QuickFileEntry {
   parent_file_id?: string
   kind?: 'folder' | 'file'
   icon?: string
+  /** 文件扩展名（标签筛选视图里要能识别视频/音频直接播放） */
+  ext?: string
   tag?: string
   tagColor?: string
   favorite?: boolean
@@ -320,28 +324,34 @@ export default class PanDAL {
         const colorKey = dirID.slice('color'.length).trim().split(' ')[0].toLowerCase()
         const hexColor = colorKey.startsWith('c') ? `#${colorKey.slice(1)}` : colorKey
         const tagged = this.readQuickFileList(user_id).filter((entry) => entry.tag && (entry.tagColor || '').toLowerCase() === hexColor)
-        const items: IAliGetFileModel[] = tagged.map((entry) => ({
-          __v_skip: true,
-          drive_id: entry.drive_id,
-          file_id: entry.file_id || entry.key,
-          parent_file_id: entry.parent_file_id || '',
-          name: entry.title,
-          namesearch: entry.title,
-          path: '',
-          ext: '',
-          mime_type: '',
-          mime_extension: '',
-          category: entry.kind === 'file' ? 'file' : 'folder',
-          icon: entry.icon || (entry.kind === 'file' ? 'iconwenjian' : 'iconfile-folder'),
-          size: 0,
-          sizeStr: '',
-          time: 0,
-          timeStr: '',
-          starred: false,
-          isDir: entry.kind !== 'file',
-          thumbnail: '',
-          description: hexColor.replace('#', 'c')
-        }))
+        const items: IAliGetFileModel[] = tagged.map((entry) => {
+          const isFile = entry.kind === 'file'
+          // 标签视图里的文件要保留真实类型信息，否则视频/音频在筛选视图里无法直接播放
+          const ext = isFile ? entry.ext || extFromFileName(entry.title) : ''
+          const iconInfo = isFile ? getFileIcon('', ext, ext, '', 0) : ['folder', entry.icon || 'iconfile-folder']
+          return {
+            __v_skip: true,
+            drive_id: entry.drive_id,
+            file_id: entry.file_id || entry.key,
+            parent_file_id: entry.parent_file_id || '',
+            name: entry.title,
+            namesearch: entry.title,
+            path: '',
+            ext,
+            mime_type: '',
+            mime_extension: ext,
+            category: isFile ? iconInfo[0] : 'folder',
+            icon: entry.icon || iconInfo[1] || (isFile ? 'iconwenjian' : 'iconfile-folder'),
+            size: 0,
+            sizeStr: '',
+            time: 0,
+            timeStr: '',
+            starred: false,
+            isDir: !isFile,
+            thumbnail: '',
+            description: hexColor.replace('#', 'c')
+          }
+        })
         const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName)
         dir.items = hasFiles ? items : items.filter((item) => item.isDir)
         dir.itemsKey = new Set(dir.items.map((item) => item.file_id))
@@ -600,6 +610,7 @@ export default class PanDAL {
             parent_file_id: String(item.parent_file_id || ''),
             kind,
             icon: String(item.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder')),
+            ext: String(item.ext || ''),
             tag: String(item.tag || ''),
             tagColor: String(item.tagColor || ''),
             favorite: item.favorite !== false
@@ -634,6 +645,7 @@ export default class PanDAL {
         parent_file_id: input.parent_file_id || '',
         kind,
         icon: input.icon || (kind === 'file' ? 'iconwenjian' : 'iconfile-folder'),
+        ext: input.ext || '',
         tag: input.tag || '',
         tagColor: input.tagColor || '',
         favorite: input.favorite !== false
@@ -649,6 +661,7 @@ export default class PanDAL {
           ...normalized,
           tag: normalized.tag || arr[existingIndex].tag,
           tagColor: normalized.tagColor || arr[existingIndex].tagColor,
+          ext: normalized.ext || arr[existingIndex].ext || '',
           favorite: normalized.favorite || arr[existingIndex].favorite
         }
       }
@@ -668,6 +681,7 @@ export default class PanDAL {
       parent_file_id: file.parent_file_id,
       kind: file.isDir ? 'folder' : 'file',
       icon: file.icon,
+      ext: file.ext || '',
       tag,
       tagColor,
       favorite: true
@@ -706,12 +720,13 @@ export default class PanDAL {
             parent_file_id: file.parent_file_id,
             kind,
             icon: file.icon,
+            ext: file.ext || '',
             tag,
             tagColor,
             favorite: false
           })
         } else {
-          existing[index] = { ...existing[index], tag, tagColor, title: file.name, icon: file.icon || existing[index].icon }
+          existing[index] = { ...existing[index], tag, tagColor, title: file.name, icon: file.icon || existing[index].icon, ext: file.ext || existing[index].ext || '' }
         }
       }
       this.saveQuickFileList(pantreeStore.user_id, existing.filter((item) => item.favorite || item.tag))

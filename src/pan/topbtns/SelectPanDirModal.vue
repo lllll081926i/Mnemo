@@ -91,6 +91,7 @@ const handleOpen = async () => {
   if (props.selecttype == 'unzip') title.value = '解压文件保存到. . .  '
   if (props.selecttype == 'offline') title.value = '离线下载保存到. . .  '
   if (props.selecttype == 'select') title.value = '选择一个文件. . .  '
+  if (props.selecttype == 'sync') title.value = '同步到此文件夹'
   okLoading.value = true
   user_id.value = pantreeStore.user_id
   drive_id.value = pantreeStore.drive_id

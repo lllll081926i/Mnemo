@@ -50,10 +50,10 @@ describe('deep layout shell port', () => {
     expect(utils).toContain("if (typeof pinyinlite !== 'function') return input.toLowerCase()")
   })
 
-  it('main shell only exposes pan/down/share/setting tabs', () => {
+  it('main shell only exposes pan/down/sync/share/setting tabs', () => {
     const page = read('src/layout/PageMain.vue')
     const panes = [...page.matchAll(/a-tab-pane key=["']([^"']+)["']/g)].map((m) => m[1])
-    expect(panes).toEqual(['pan', 'down', 'share', 'setting'])
+    expect(panes).toEqual(['pan', 'down', 'sync', 'share', 'setting'])
     expect(page).toContain("const Down = defineAsyncComponent(() => import('../down/index.vue'))")
     expect(page).toContain("const Share = defineAsyncComponent(() => import('../share/index.vue'))")
     expect(page).toContain("const Setting = defineAsyncComponent(() => import('../setting/index.vue'))")

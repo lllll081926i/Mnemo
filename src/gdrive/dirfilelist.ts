@@ -1,6 +1,7 @@
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
+import { resolveFileExt } from '../utils/filetype'
 import { HanToPin } from '../utils/utils'
 import { googleDriveRequest } from './client'
 
@@ -29,7 +30,7 @@ const escapeQuery = (value: string) => value.replace(/\\/g, '\\\\').replace(/'/g
 export const mapGoogleDriveItemToAliModel = (item: GoogleDriveItem, driveId: string, parentId: string): IAliGetFileModel => {
   const isDir = item.mimeType === GOOGLE_FOLDER_MIME
   const name = item.name || ''
-  const ext = isDir ? '' : (name.split('.').pop() || '').toLowerCase()
+  const ext = isDir ? '' : resolveFileExt(name, '', item.mimeType)
   const size = Number(item.size || 0)
   const time = new Date(item.modifiedTime || item.createdTime || '').getTime() || 0
   const iconInfo = isDir ? ['folder', 'iconfile-folder'] : getFileIcon('others', ext, ext, item.mimeType, size)

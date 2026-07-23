@@ -1,6 +1,7 @@
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
+import { resolveFileExt } from '../utils/filetype'
 import { HanToPin } from '../utils/utils'
 import message from '../utils/message'
 
@@ -126,14 +127,15 @@ const pickThumbnail = (item: OneDriveItem): string => {
 export const mapOneDriveItemToAliModel = (item: OneDriveItem, drive_id: string, parentId: string): IAliGetFileModel => {
   const isDir = !!item.folder
   const name = item.name || ''
-  const ext = isDir ? '' : (name.split('.').pop() || '')
+  const mimeType = item.file?.mimeType || ''
+  const ext = isDir ? '' : resolveFileExt(name, '', mimeType)
   const time = new Date(item.lastModifiedDateTime || item.createdDateTime || '').getTime() || 0
   const timeStr = time ? humanDateTimeDateStr(new Date(time).toISOString()) : ''
   const size = Number(item.size || 0)
   let category = ''
   let icon = 'iconfile-folder'
   if (!isDir) {
-    const iconInfo = getFileIcon(item.file?.mimeType || '', ext, ext, '', size)
+    const iconInfo = getFileIcon('', ext, ext, mimeType, size)
     category = iconInfo[0]
     icon = iconInfo[1]
   }

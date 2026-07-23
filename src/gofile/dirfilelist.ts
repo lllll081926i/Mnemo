@@ -1,13 +1,14 @@
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
+import { resolveFileExt } from '../utils/filetype'
 import { HanToPin } from '../utils/utils'
 import { getGofileRootId, gofileRequest, type GofileItem } from './client'
 
 export const mapGofileItemToAliModel = (item: GofileItem, driveId: string, parentId: string): IAliGetFileModel => {
   const isDir = item.type === 'folder'
   const name = item.name || ''
-  const ext = isDir ? '' : (name.split('.').pop() || '').toLowerCase()
+  const ext = isDir ? '' : resolveFileExt(name, '', item.mimetype)
   const size = Number(item.size || 0)
   const time = Number(item.modTime || item.createTime || 0) * 1000
   const iconInfo = isDir ? ['folder', 'iconfile-folder'] : getFileIcon('others', ext, ext, item.mimetype || '', size)

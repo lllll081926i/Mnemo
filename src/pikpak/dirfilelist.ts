@@ -1,6 +1,7 @@
 import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
+import { resolveFileExt } from '../utils/filetype'
 import { HanToPin } from '../utils/utils'
 import message from '../utils/message'
 import { pikpakApiFetch } from './auth'
@@ -30,6 +31,10 @@ export type PikPakFileItem = {
   created_time?: string
   thumbnail_link?: string
   web_content_link?: string
+  /** PikPak 权威扩展名（如 ".MP4"），文件名异常/过长时依然可靠 */
+  file_extension?: string
+  /** PikPak 权威 MIME（如 "video/mp4"），用于无后缀文件的类型识别 */
+  mime_type?: string
   medias?: PikPakMediaItem[]
   links?: { 'application/octet-stream'?: { url?: string; token?: string; expire?: string | number; type?: string } }
 }
@@ -275,14 +280,16 @@ export const apiPikPakDownloadInfo = async (user_id: string, fileId: string): Pr
 export const mapPikPakFileToAliModel = (item: PikPakFileItem, drive_id: string, parentId: string): IAliGetFileModel => {
   const isDir = isPikPakDir(item)
   const name = item.name || ''
-  const ext = isDir ? '' : (name.split('.').pop() || '')
+  const mimeType = item.mime_type || ''
+  // 优先用 PikPak 返回的 file_extension / mime_type，文件名无后缀或过长时也能正确识别类型
+  const ext = isDir ? '' : resolveFileExt(name, item.file_extension, mimeType)
   const time = new Date(item.modified_time || item.created_time || '').getTime() || 0
   const timeStr = time ? humanDateTimeDateStr(new Date(time).toISOString()) : ''
   const size = Number(item.size || 0)
   let category = ''
   let icon = 'iconfile-folder'
   if (!isDir) {
-    const iconInfo = getFileIcon('', ext, ext, '', size)
+    const iconInfo = getFileIcon('', ext, ext, mimeType, size)
     category = iconInfo[0]
     icon = iconInfo[1]
   }
@@ -294,7 +301,7 @@ export const mapPikPakFileToAliModel = (item: PikPakFileItem, drive_id: string, 
     name,
     namesearch: HanToPin(name),
     ext,
-    mime_type: '',
+    mime_type: mimeType,
     mime_extension: ext,
     category,
     icon,

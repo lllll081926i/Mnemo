@@ -12,14 +12,13 @@ describe('Dropbox auth helpers', () => {
     expect(parsed.searchParams.get('client_id')).toBe('app-key')
     expect(parsed.searchParams.get('response_type')).toBe('code')
     expect(parsed.searchParams.get('token_access_type')).toBe('offline')
-    expect(parsed.searchParams.get('force_reapprove')).toBe('true')
+    // 不传 scope（令牌获得应用已授权的全部权限，避免 invalid_scope 拒登），也不强制重复授权
+    expect(parsed.searchParams.has('force_reapprove')).toBe(false)
+    expect(parsed.searchParams.has('scope')).toBe(false)
     expect(parsed.searchParams.get('code_challenge_method')).toBe('S256')
     expect(parsed.searchParams.get('code_challenge')).toBeTruthy()
     expect(parsed.searchParams.get('state')).toBe('state-1')
     expect(parsed.searchParams.get('redirect_uri')).toBe(redirectUri)
-    expect(parsed.searchParams.get('scope')).toContain('sharing.read')
-    expect(parsed.searchParams.get('scope')).toContain('sharing.write')
-    expect(parsed.searchParams.get('scope')).toContain('files.content.write')
   })
 
   it('creates a verifier accepted by Dropbox PKCE', () => {

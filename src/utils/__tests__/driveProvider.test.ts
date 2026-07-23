@@ -82,6 +82,15 @@ describe('drive provider capabilities', () => {
     for (const provider of ['onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'] as const) expect(getDriveProviderCapabilities(provider).offlineDownload, provider).toBe(false)
   })
 
+  it('enables local tags for every file provider so the tag filter tree is visible', () => {
+    // 本地标签存在本地 localStorage，不依赖网盘服务端；全部文件网盘都应显示“标记”筛选树
+    for (const provider of retainedProviders) {
+      expect(getDriveProviderCapabilities(provider).localTag, provider).toBe(true)
+      expect(getDriveProviderCapabilities(provider).colorTag, provider).toBe(false)
+    }
+    expect(getDriveProviderCapabilities('aliyun').localTag).toBe(false)
+  })
+
   it('builds only retained provider sidebars', () => {
     expect(getDriveProviderSidebarEntries('pikpak').map((entry) => entry.key)).toEqual(['trash'])
     expect(getDriveProviderSidebarEntries('onedrive').map((entry) => entry.key)).toEqual(['search'])

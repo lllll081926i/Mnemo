@@ -8,6 +8,7 @@ import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import type { ITokenInfo } from '../user/userstore'
 import { humanDateTimeDateStr, humanSize } from './format'
+import { extFromFileName } from './filetype'
 
 const STORAGE_KEY = 'Mnemo_S3Connections'
 const S3_PREFIX = 's3:'
@@ -211,7 +212,7 @@ export const createS3UserToken = (connection: S3ConnectionConfig): ITokenInfo =>
 const toAliModel = (config: S3ConnectionConfig, key: string, object?: S3Object, directory = false): IAliGetFileModel => {
   const relativePath = stripRootPrefix(key, config.rootPrefix)
   const name = path.posix.basename(relativePath) || config.name
-  const ext = directory ? '' : path.posix.extname(name).slice(1).toLowerCase()
+  const ext = directory ? '' : extFromFileName(name)
   const size = Number(object?.Size || 0)
   const category = directory ? 'folder' : VIDEO_EXTENSIONS.has(`.${ext}`) ? 'video' : 'others'
   const iconInfo = directory ? ['folder', 'iconfile-folder'] : getFileIcon(category, ext, ext, '', size)
@@ -374,4 +375,37 @@ const uploadS3Entry = async (config: S3ConnectionConfig, localPath: string, remo
 
 export const uploadS3LocalPaths = async (config: S3ConnectionConfig, parentRelativePath: string, localPaths: string[]) => {
   for (const localPath of localPaths) await uploadS3Entry(config, localPath, normalizeS3RelativePath(`${parentRelativePath}/${path.basename(localPath)}`))
+}
+
+/** 递归列出某前缀下的全部文件（同步引擎用），file_id 为相对路径 */
+export const listS3Recursive = async (config: S3ConnectionConfig, relativePath = '/'): Promise<IAliGetFileModel[]> => {
+  const client = createS3Client(config)
+  const prefix = joinS3Key(config.rootPrefix, relativePath, relativePath !== '/')
+  const result: IAliGetFileModel[] = []
+  let continuationToken: string | undefined
+  do {
+    const response = await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: prefix, ContinuationToken: continuationToken }))
+    for (const item of response.Contents || []) {
+      if (!item.Key || item.Key === prefix || item.Key.endsWith('/')) continue
+      result.push(toAliModel(config, item.Key, item, false))
+    }
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined
+  } while (continuationToken)
+  return result
+}
+
+/** 以流的方式上传单个文件（多段上传由 lib-storage 处理） */
+export const uploadS3File = async (config: S3ConnectionConfig, relativePath: string, localPath: string, onProgress?: (transferred: number) => void) => {
+  const stat = await fsPromises.stat(localPath)
+  const client = createS3Client(config)
+  const upload = new Upload({ client, params: { Bucket: config.bucket, Key: joinS3Key(config.rootPrefix, relativePath), Body: fs.createReadStream(localPath), ContentLength: stat.size } })
+  if (onProgress) upload.on('httpUploadProgress', (progress) => onProgress(Number(progress.loaded || 0)))
+  await upload.done()
+  return { size: stat.size, time: Date.now() }
+}
+
+/** 删除单个 S3 对象（同步引擎用，不做目录递归） */
+export const deleteS3File = async (config: S3ConnectionConfig, relativePath: string) => {
+  const client = createS3Client(config)
+  await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: joinS3Key(config.rootPrefix, relativePath) }))
 }

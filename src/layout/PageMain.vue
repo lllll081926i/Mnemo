@@ -12,10 +12,12 @@ import ShutDown from '../setting/ShutDown.vue'
 
 import MyModal from './MyModal.vue'
 import { throttle } from '../utils/debounce'
+import { startSyncScheduler } from '../sync/syncengine'
 
 const Down = defineAsyncComponent(() => import('../down/index.vue'))
 const Share = defineAsyncComponent(() => import('../share/index.vue'))
 const Setting = defineAsyncComponent(() => import('../setting/index.vue'))
+const Sync = defineAsyncComponent(() => import('../sync/index.vue'))
 
 const panVisible = ref(true)
 const appStore = useAppStore()
@@ -66,7 +68,8 @@ const themeTitle = computed(() => {
 const primaryTabDefinitions = [
   { key: 'pan', title: 'Alt+1', label: '网盘' },
   { key: 'down', title: 'Alt+2', label: '传输' },
-  { key: 'share', title: 'Alt+3', label: '分享' }
+  { key: 'sync', title: 'Alt+3', label: '同步' },
+  { key: 'share', title: 'Alt+4', label: '分享' }
 ]
 
 const topNavTabs = computed(() => {
@@ -93,8 +96,9 @@ const handleMaxClick = (_e: any) => {
 keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestAlt('1', state.KeyDownEvent, () => appStore.toggleTab('pan'))) return
   if (TestAlt('2', state.KeyDownEvent, () => appStore.toggleTab('down'))) return
-  if (TestAlt('3', state.KeyDownEvent, () => appStore.toggleTab('share'))) return
-  if (TestAlt('4', state.KeyDownEvent, () => appStore.toggleTab('setting'))) return
+  if (TestAlt('3', state.KeyDownEvent, () => appStore.toggleTab('sync'))) return
+  if (TestAlt('4', state.KeyDownEvent, () => appStore.toggleTab('share'))) return
+  if (TestAlt('5', state.KeyDownEvent, () => appStore.toggleTab('setting'))) return
   if (TestAlt('f4', state.KeyDownEvent, () => handleHideClick(undefined))) return
   if (TestAlt('m', state.KeyDownEvent, () => handleMinClick(undefined))) return
   if (TestAlt('enter', state.KeyDownEvent, () => handleMaxClick(undefined))) return
@@ -157,7 +161,7 @@ const onMouseDown = (event: MouseEvent) => {
 watch(
   () => settingStore.uiDefaultTab,
   (tab) => {
-    const allowed = new Set(['pan', 'down', 'share', 'setting'])
+    const allowed = new Set(['pan', 'down', 'sync', 'share', 'setting'])
     if (tab && allowed.has(tab) && appStore.appTab !== tab) {
       appStore.toggleTab(tab)
     }
@@ -167,6 +171,7 @@ watch(
 
 onMounted(() => {
   onResize()
+  startSyncScheduler()
   window.addEventListener('resize', onResize, { passive: true })
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('mousedown', onMouseDown, true)
@@ -182,6 +187,7 @@ onMounted(() => {
     void import('../down/index.vue')
     void import('../share/index.vue')
     void import('../setting/index.vue')
+    void import('../sync/index.vue')
   }
   if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(preloadWorkspaceTabs, { timeout: 4000 })
   else window.setTimeout(preloadWorkspaceTabs, 2000)
@@ -221,7 +227,7 @@ onUnmounted(() => {
         <a-button
           type="text"
           tabindex="-1"
-          :title="appStore.appTab === 'setting' ? '关闭设置，返回上一页 Alt+4' : '打开设置 Alt+4'"
+          :title="appStore.appTab === 'setting' ? '关闭设置，返回上一页 Alt+5' : '打开设置 Alt+5'"
           :aria-pressed="appStore.appTab === 'setting'"
           :class="appStore.appTab == 'setting' ? 'active' : ''"
           @click="appStore.toggleTab('setting')">
@@ -246,7 +252,10 @@ onUnmounted(() => {
         <a-tab-pane key="down" title="2">
           <Down />
         </a-tab-pane>
-        <a-tab-pane key="share" title="3">
+        <a-tab-pane key="sync" title="3">
+          <Sync />
+        </a-tab-pane>
+        <a-tab-pane key="share" title="4">
           <Share />
         </a-tab-pane>
         <a-tab-pane key="setting" title="4">

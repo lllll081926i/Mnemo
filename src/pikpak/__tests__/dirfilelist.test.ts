@@ -45,6 +45,59 @@ describe('mapPikPakFileToAliModel', () => {
     expect(model.thumbnail).toBe('https://example.com/thumb.jpg')
     expect(model.description).toContain('pikpak_download:https%3A%2F%2Fexample.com%2Fdownload.mp4')
   })
+
+  it('keeps the extension for very long file names so videos stay playable', () => {
+    const longName = `${'【超长合集】某个特别特别长的视频标题第01集'.repeat(10)}.MP4`
+    const model = mapPikPakFileToAliModel({
+      id: 'long-file',
+      kind: 'drive#file',
+      name: longName,
+      size: '1024'
+    }, 'pikpak', 'pikpak_root')
+
+    expect(model.ext).toBe('mp4')
+    expect(model.category).toMatch(/^video/)
+    expect(model.icon).toBe('iconfile_video')
+  })
+
+  it('uses the provider file_extension when the name lost its suffix', () => {
+    const model = mapPikPakFileToAliModel({
+      id: 'truncated-file',
+      kind: 'drive#file',
+      name: '一个被截断的超长文件名没有任何后缀'.repeat(5),
+      file_extension: '.MKV',
+      size: '1024'
+    }, 'pikpak', 'pikpak_root')
+
+    expect(model.ext).toBe('mkv')
+    expect(model.category).toMatch(/^video/)
+  })
+
+  it('falls back to mime_type when neither name nor file_extension identifies the type', () => {
+    const model = mapPikPakFileToAliModel({
+      id: 'mime-file',
+      kind: 'drive#file',
+      name: '没有后缀的视频文件'.repeat(10),
+      mime_type: 'video/mp4',
+      size: '1024'
+    }, 'pikpak', 'pikpak_root')
+
+    expect(model.ext).toBe('mp4')
+    expect(model.mime_type).toBe('video/mp4')
+    expect(model.category).toMatch(/^video/)
+  })
+
+  it('never treats the whole extension-less file name as an extension', () => {
+    const model = mapPikPakFileToAliModel({
+      id: 'noext-file',
+      kind: 'drive#file',
+      name: '完全没有扩展名的普通文件'.repeat(8),
+      size: '1024'
+    }, 'pikpak', 'pikpak_root')
+
+    expect(model.ext).toBe('')
+    expect(model.category).toBe('others')
+  })
 })
 
 describe('buildPikPakVideoQualities', () => {

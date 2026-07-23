@@ -13,7 +13,6 @@ const DROPBOX_AUTH_URL = 'https://www.dropbox.com/oauth2/authorize'
 const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 const DROPBOX_ACCOUNT_URL = 'https://api.dropboxapi.com/2/users/get_current_account'
 const DROPBOX_SPACE_URL = 'https://api.dropboxapi.com/2/users/get_space_usage'
-const DROPBOX_SCOPE = 'account_info.read files.metadata.read files.content.read files.content.write sharing.read sharing.write'
 
 export const resolveDropboxCredentials = (appKey = '', appSecret = '') => {
   const effectiveAppKey = appKey.trim() || DROPBOX_APP_KEY
@@ -54,13 +53,14 @@ export const createDropboxPkceVerifier = (): string => {
 
 export const buildDropboxAuthUrl = async (appKey: string, verifier: string, state: string, redirectUri: string): Promise<string> => {
   const credentials = resolveDropboxCredentials(appKey)
+  // 与 rclone 授权方式保持一致：不手动指定 scope，令牌会获得该应用在 Dropbox 后台已授权的全部权限。
+  // 手动传 scope 时，只要有一个未在该应用后台启用就会被 Dropbox 以 invalid_scope 直接拒绝登录。
+  // 也不使用 force_reapprove，避免每次登录都被强制要求重新授权。
   const params = new URLSearchParams({
     client_id: credentials.appKey,
     response_type: 'code',
     redirect_uri: redirectUri,
     token_access_type: 'offline',
-    force_reapprove: 'true',
-    scope: DROPBOX_SCOPE,
     state
   })
   if (!credentials.appSecret) {

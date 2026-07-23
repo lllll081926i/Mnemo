@@ -23,6 +23,7 @@ export default defineConfig({
       'src/down/motrix-integration/**/*.test.ts',
       'scripts/__tests__/**/*.test.mjs',
       'src/utils/__tests__/**/*.test.ts',
+      'src/sync/__tests__/**/*.test.ts',
       'src/aliapi/__tests__/**/*.test.ts',
       'src/pikpak/__tests__/**/*.test.ts',
       'src/onedrive/__tests__/**/*.test.ts',

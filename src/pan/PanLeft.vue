@@ -34,7 +34,9 @@ const { provider, capabilities: providerCapabilities } = useCurrentDriveProvider
 const treeViewportRef = ref<HTMLElement | null>(null)
 const treeViewportHeight = ref(360)
 const treeHeight = computed(() => Math.max(160, treeViewportHeight.value))
-const quickHeight = computed(() => Math.max(120, treeViewportHeight.value - (providerCapabilities.value.colorTag ? 180 : 0)))
+// 标记（颜色筛选）树：服务端颜色标记或本地标签任一可用即显示（本地标签对所有网盘可用）
+const showColorTree = computed(() => providerCapabilities.value.colorTag || providerCapabilities.value.localTag)
+const quickHeight = computed(() => Math.max(120, treeViewportHeight.value - (showColorTree.value ? 180 : 0)))
 const treeMotion = collapseMotion('mnemo-tree-collapse', false)
 
 const keyboardStore = useKeyboardStore()
@@ -138,7 +140,7 @@ const onQuickDrop = (ev: any) => {
   ev.target.style.outline = 'none'
   ev.target.style.background = ''
 
-  const list: { key: string; drive_id: string; drive_name: string; title: string; file_id: string; parent_file_id: string; kind: 'folder' | 'file'; icon: string; favorite: boolean }[] = []
+  const list: { key: string; drive_id: string; drive_name: string; title: string; file_id: string; parent_file_id: string; kind: 'folder' | 'file'; icon: string; favorite: boolean; ext?: string }[] = []
   const selectedFile = usePanFileStore().GetSelected()
   for (let i = 0, maxi = selectedFile.length; i < maxi; i++) {
     const file = selectedFile[i]
@@ -151,6 +153,7 @@ const onQuickDrop = (ev: any) => {
       parent_file_id: file.parent_file_id,
       kind: file.isDir ? 'folder' : 'file',
       icon: file.icon,
+      ext: file.ext || '',
       favorite: true
     })
   }
@@ -471,7 +474,7 @@ const handleOpenDriveLogin = () => {
         <a-tab-pane key="kuaijie" title="2">
           <div class="shortcut-tree-layout">
             <AntdTree
-              v-if="providerCapabilities.colorTag"
+              v-if="showColorTree"
               :tabindex="-1"
               :focusable="false"
               class="colortree"
