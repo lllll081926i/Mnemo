@@ -333,19 +333,26 @@ function createArtplayer() {
   })
 }
 
-// 当前清晰度播放失败时自动尝试其余档位（转码流偶尔会对个别文件失效）
-const failedQualities = new Set<string>()
+// 当前清晰度播放失败时自动尝试其余档位（转码流偶尔会对个别文件失效）；
+// 没有其它档位时重试当前清晰度（本地代理会自动换新链接，对齐 rclone 过期重取）
+const failedQualities = new Map<string, number>()
 
 async function tryFallbackQuality() {
-  failedQualities.add(currentQuality.value)
+  const fails = (failedQualities.get(currentQuality.value) || 0) + 1
+  failedQualities.set(currentQuality.value, fails)
   const next = resolvedQualities.value.find((item) => !failedQualities.has(item.quality))
-  if (!next || !art) {
-    errorText.value = '当前视频无法播放'
+  if (next && art) {
+    message.info('当前清晰度无法播放，正在尝试其他清晰度')
+    currentQuality.value = next.quality
+    await loadCurrentVideo()
     return
   }
-  message.info('当前清晰度无法播放，正在尝试其他清晰度')
-  currentQuality.value = next.quality
-  await loadCurrentVideo()
+  if (fails < 3 && art) {
+    message.info('播放中断，正在重新获取播放地址...')
+    await loadCurrentVideo()
+    return
+  }
+  errorText.value = '当前视频无法播放'
 }
 
 async function loadCurrentVideo() {

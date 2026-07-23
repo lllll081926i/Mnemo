@@ -245,53 +245,47 @@ export async function createProxyServer(port: number) {
     if (pathname === '/proxy') {
       const driveId = String(drive_id || '')
       const fileId = String(file_id || '')
-      let proxyInfo: any = await Db.getValueObject('ProxyInfo')
-      let proxyUrl = proxy_url || (proxyInfo && proxyInfo.proxy_url || '') || ''
-      const isMatchingCache = proxyInfo && driveId === String(proxyInfo.drive_id || '') && fileId === String(proxyInfo.file_id || '')
-      let resolvedProxyHeaders = String(proxy_headers || (isMatchingCache ? proxyInfo.proxy_headers : '') || '')
       let { uiVideoQuality, securityEncType, securityFileNameAutoDecrypt } = useSettingStore()
-      let selectQuality = quality || uiVideoQuality
-      let subtitle_url = ''
-      if (shouldRefreshProxyUrl({
-        driveId,
-        fileId,
-        proxyUrl: String(proxyUrl || ''),
-        selectQuality: String(selectQuality || ''),
-        proxyInfo
-      })) {
-        // 获取地址
-        const refreshQuality = content_disposition === 'inline' ? 'Origin' : selectQuality
-        let data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', refreshQuality)
-        if (typeof data != 'string' && data.url) {
-          let subtitleData = data.subtitles.find((sub: any) => sub.language === 'chi') || data.subtitles[0]
-          subtitle_url = subtitleData && subtitleData.url || ''
-          proxyUrl = data.url
-          resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''
-          proxyInfo = undefined
+      const selectQuality = quality || uiVideoQuality
+      const refreshQuality = content_disposition === 'inline' ? 'Origin' : selectQuality
+
+      // 解析上游地址；forceRefresh 时（链接过期/401/403）绕过缓存重新获取，对齐 rclone 的链接过期重取
+      const resolveUpstream = async (forceRefresh: boolean): Promise<{ proxyUrl: string; resolvedProxyHeaders: string }> => {
+        const proxyInfo: any = await Db.getValueObject('ProxyInfo')
+        let proxyUrl = String(proxy_url || (proxyInfo && proxyInfo.proxy_url || '') || '')
+        const isMatchingCache = proxyInfo && driveId === String(proxyInfo.drive_id || '') && fileId === String(proxyInfo.file_id || '')
+        let resolvedProxyHeaders = String(proxy_headers || (isMatchingCache ? proxyInfo.proxy_headers : '') || '')
+        if (forceRefresh || shouldRefreshProxyUrl({
+          driveId,
+          fileId,
+          proxyUrl,
+          selectQuality: String(selectQuality || ''),
+          proxyInfo
+        })) {
+          const data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', refreshQuality)
+          if (typeof data != 'string' && data.url) {
+            const subtitleData = data.subtitles.find((sub: any) => sub.language === 'chi') || data.subtitles[0]
+            proxyUrl = data.url
+            resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''
+            if (proxy_kind !== 'subtitle') {
+              // 提前 60 秒判定过期，避免长视频播放到一半链接刚好失效（rclone 也有安全余量）
+              const expiresTime = GetExpiresTime(proxyUrl)
+              await Db.saveValueObject('ProxyInfo', {
+                user_id, drive_id, file_id, file_size, encType,
+                videoQuality: selectQuality,
+                expires_time: expiresTime > 0 ? expiresTime - 60 * 1000 : 0,
+                proxy_url: proxyUrl,
+                proxy_headers: resolvedProxyHeaders,
+                subtitle_url: subtitleData && subtitleData.url || ''
+              } as FileInfo)
+            }
+          } else if (forceRefresh) {
+            proxyUrl = ''
+          }
         }
+        return { proxyUrl, resolvedProxyHeaders }
       }
-      if (!proxyUrl) {
-        clientRes.writeHead(404, { 'Content-Type': 'text/plain' })
-        clientRes.end()
-        await Db.deleteValueObject('ProxyInfo')
-        return
-      } else if (!proxyInfo && proxy_kind !== 'subtitle') {
-        let info: FileInfo = {
-          user_id, drive_id, file_id, file_size, encType,
-          videoQuality: selectQuality,
-          expires_time: GetExpiresTime(proxyUrl),
-          proxy_url: proxyUrl,
-          proxy_headers: resolvedProxyHeaders,
-          subtitle_url: subtitle_url
-        }
-        await Db.saveValueObject('ProxyInfo', info)
-      }
-      // 转码文件302重定向
-      if (proxyUrl.includes('.aliyuncs.com') && !resolvedProxyHeaders && !encType) {
-        clientRes.writeHead(302, { 'Location': proxyUrl })
-        clientRes.end()
-        return
-      }
+
       // 是否需要解密
       let decryptTransform: any = null
       if (encType) {
@@ -304,66 +298,109 @@ export async function createProxyServer(port: number) {
           await flowEnc.setPosition(start)
         }
       }
-      const upstreamHeaders = buildUpstreamProxyHeaders(clientReq.headers, resolvedProxyHeaders)
-      await new Promise((resolve, reject) => {
-        // 处理请求，让下载的流量经过代理服务器
-        const httpRequest = ~proxyUrl.indexOf('https') ? https : http
-        const agentServer = httpRequest.request(proxyUrl, {
-          method: clientReq.method,
-          headers: upstreamHeaders,
-          agent: ~proxyUrl.indexOf('https') ? httpsAgent : httpAgent
-        }, (httpResp: any) => {
-          clientRes.statusCode = httpResp.statusCode
-          for (const key in httpResp.headers) {
-            clientRes.setHeader(key, httpResp.headers[key])
+
+      const maxAttempts = encType ? 1 : 2 // 加密流状态不可重入，不 retry
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const { proxyUrl, resolvedProxyHeaders } = await resolveUpstream(attempt > 0)
+        if (!proxyUrl) {
+          if (!clientRes.headersSent) {
+            clientRes.writeHead(404, { 'Content-Type': 'text/plain' })
           }
-          if (content_disposition === 'inline') {
-            const inlineFileName = String(file_name || getUrlFileName(proxyUrl) || 'preview')
-            clientRes.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(inlineFileName)};`)
-          }
-          if (clientRes.statusCode >= 300 && clientRes.statusCode < 400 && httpResp.headers.location) {
-            const redirectUrl = new URL(httpResp.headers.location, proxyUrl).toString()
-            clientRes.setHeader('location', getProxyUrl({
-              user_id, drive_id, file_id, password, weifa,
-              file_size, encType, quality, proxy_url: redirectUrl,
-              proxy_headers: resolvedProxyHeaders,
-              proxy_kind, content_disposition, file_name
-            }))
-          } else if (httpResp.headers['content-range'] && httpResp.statusCode === 200) {
-            // 文件断点续传下载
-            clientRes.statusCode = 206
-          }
-          // 解密文件名
-          if (clientReq.method === 'GET' && clientRes.statusCode === 200 && encType && securityFileNameAutoDecrypt) {
-            let fileName = getUrlFileName(proxyUrl)
-            if (fileName) {
-              let ext = path.extname(fileName)
-              let securityPassword = getEncPassword(user_id, encType, password)
-              let decName = decodeName(securityPassword, securityEncType, fileName.replace(ext, '')) || ''
-              clientRes.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(decName + ext)};`)
+          clientRes.end()
+          await Db.deleteValueObject('ProxyInfo')
+          return
+        }
+        // 转码文件302重定向
+        if (attempt === 0 && proxyUrl.includes('.aliyuncs.com') && !resolvedProxyHeaders && !encType) {
+          clientRes.writeHead(302, { 'Location': proxyUrl })
+          clientRes.end()
+          return
+        }
+
+        const outcome = await new Promise<'done' | 'retry' | 'failed'>((resolvePromise) => {
+          let settled = false
+          const finish = (value: 'done' | 'retry' | 'failed') => {
+            if (!settled) {
+              settled = true
+              resolvePromise(value)
             }
           }
-          httpResp.on('end', () => resolve(true))
-          if (decryptTransform) {
-            httpResp.pipe(decryptTransform).pipe(clientRes)
-          } else {
-            httpResp.pipe(clientRes)
-          }
+          const upstreamHeaders = buildUpstreamProxyHeaders(clientReq.headers, resolvedProxyHeaders)
+          const isHttps = proxyUrl.indexOf('https') >= 0
+          const httpRequest = isHttps ? https : http
+          const agentServer = httpRequest.request(proxyUrl, {
+            method: clientReq.method,
+            headers: upstreamHeaders,
+            agent: isHttps ? httpsAgent : httpAgent
+          }, (httpResp: any) => {
+            const statusCode = Number(httpResp.statusCode || 502)
+            // 上游返回 401/403：多半是签名链接过期，丢弃缓存换新链接重试一次（rclone 同样按过期重取）
+            if ((statusCode === 401 || statusCode === 403) && attempt < maxAttempts - 1) {
+              httpResp.resume()
+              void Db.deleteValueObject('ProxyInfo')
+              finish('retry')
+              return
+            }
+            clientRes.statusCode = statusCode
+            for (const key in httpResp.headers) {
+              clientRes.setHeader(key, httpResp.headers[key])
+            }
+            if (content_disposition === 'inline') {
+              const inlineFileName = String(file_name || getUrlFileName(proxyUrl) || 'preview')
+              clientRes.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(inlineFileName)};`)
+            }
+            if (clientRes.statusCode >= 300 && clientRes.statusCode < 400 && httpResp.headers.location) {
+              const redirectUrl = new URL(httpResp.headers.location, proxyUrl).toString()
+              clientRes.setHeader('location', getProxyUrl({
+                user_id, drive_id, file_id, password, weifa,
+                file_size, encType, quality, proxy_url: redirectUrl,
+                proxy_headers: resolvedProxyHeaders,
+                proxy_kind, content_disposition, file_name
+              }))
+            } else if (httpResp.headers['content-range'] && httpResp.statusCode === 200) {
+              // 文件断点续传下载
+              clientRes.statusCode = 206
+            }
+            // 解密文件名
+            if (clientReq.method === 'GET' && clientRes.statusCode === 200 && encType && securityFileNameAutoDecrypt) {
+              let fileName = getUrlFileName(proxyUrl)
+              if (fileName) {
+                let ext = path.extname(fileName)
+                let securityPassword = getEncPassword(user_id, encType, password)
+                let decName = decodeName(securityPassword, securityEncType, fileName.replace(ext, '')) || ''
+                clientRes.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(decName + ext)};`)
+              }
+            }
+            httpResp.on('end', () => finish('done'))
+            httpResp.on('error', () => {
+              clientRes.end()
+              finish(clientRes.headersSent ? 'failed' : 'retry')
+            })
+            if (decryptTransform) {
+              httpResp.pipe(decryptTransform).pipe(clientRes)
+            } else {
+              httpResp.pipe(clientRes)
+            }
+          })
+          // 上游空闲 60 秒无数据即断开，避免长视频播放被挂死的连接卡死（播放器会用 Range 重新拉取）
+          agentServer.setTimeout(60 * 1000, () => agentServer.destroy(new Error('upstream idle timeout')))
+          clientReq.pipe(agentServer)
+          // 关闭解密流
+          agentServer.on('close', () => {
+            decryptTransform && decryptTransform.destroy()
+          })
+          agentServer.on('error', (e: Error) => {
+            clientRes.end()
+            console.log('proxyServer socket error: ' + e)
+            finish(!clientRes.headersSent && attempt < maxAttempts - 1 ? 'retry' : 'failed')
+          })
+          // 重定向的请求 关闭时 关闭被重定向的请求
+          clientRes.on('close', () => {
+            agentServer.destroy()
+          })
         })
-        clientReq.pipe(agentServer)
-        // 关闭解密流
-        agentServer.on('close', async () => {
-          decryptTransform && decryptTransform.destroy()
-        })
-        agentServer.on('error', (e: Error) => {
-          clientRes.end()
-          console.log('proxyServer socket error: ' + e)
-        })
-        // 重定向的请求 关闭时 关闭被重定向的请求
-        clientRes.on('close', async () => {
-          agentServer.destroy()
-        })
-      })
+        if (outcome !== 'retry') break
+      }
       clientReq.on('error', (e: Error) => {
         console.log('client socket error: ' + e)
       })
