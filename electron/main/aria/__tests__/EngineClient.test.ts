@@ -24,7 +24,7 @@ vi.mock('electron', () => ({
 describe('EngineClient', () => {
   beforeEach(() => {
     ariaCall.mockReset()
-    ariaCall.mockResolvedValue({})
+    ariaCall.mockImplementation(() => Promise.resolve({}))
   })
 
   it('can be instantiated', async () => {
@@ -36,7 +36,11 @@ describe('EngineClient', () => {
   it('init() calls connect and does not throw', async () => {
     const { default: EngineClient } = await import('../EngineClient')
     const client = new EngineClient({ port: 16800, secret: 'test' })
-    expect(() => client.init()).not.toThrow()
+    const connect = vi.spyOn(client, 'connect').mockImplementation(() => undefined)
+
+    client.init()
+
+    expect(connect).toHaveBeenCalledOnce()
   })
 
   it('waits for the dynamically loaded RPC client before calling it', async () => {
