@@ -27,6 +27,7 @@ describe('createAutoUpdateController', () => {
     expect(workflow).toContain('DROPBOX_APP_KEY')
     expect(workflow).toContain('GOOGLE_DRIVE_CLIENT_ID')
     expect(workflow).not.toMatch(/BAIDU_|CLOUD123_|DRIVE115_|BOX_CLIENT/)
+    expect(workflow).toContain('unset CSC_LINK CSC_KEY_PASSWORD')
     expect(workflow).toContain('-f prerelease=')
     expect(workflow).toContain('-f draft=false')
   })

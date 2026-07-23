@@ -159,6 +159,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${CSC_LINK:-}" ]]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
+          if [[ -z "${APPLE_ID:-}" || -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" || -z "${APPLE_TEAM_ID:-}" ]]; then
+            unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          fi
           if [[ "${GITHUB_REF}" == refs/tags/* && "${GITHUB_REF_NAME}" != *preview* && "${GITHUB_REF_NAME}" != *beta* && "${GITHUB_REF_NAME}" != *rc* && "${GITHUB_REF_NAME}" != *alpha* ]]; then
             node scripts/generate-secrets.mjs --mode=ci --strict
           else

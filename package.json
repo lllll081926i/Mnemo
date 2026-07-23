@@ -6,7 +6,8 @@
   "main": "dist/electron/main/index.js",
   "packageManager": "npm@11.18.0",
   "author": {
-    "name": "lllll081926i"
+    "name": "lllll081926i",
+    "email": "lllll081926i@users.noreply.github.com"
   },
   "homepage": "https://github.com/lllll081926i/Mnemo",
   "repository": {
