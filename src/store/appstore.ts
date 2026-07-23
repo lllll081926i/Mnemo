@@ -189,7 +189,6 @@ const useAppStore = defineStore('app', {
     },
 
     toggleDark(dark: boolean) {
-      console.log('toggleDark', dark, this)
       this.appDark = dark
       const isDark = this.appTheme == 'dark' || (this.appTheme == 'system' && dark)
       if (isDark) {
@@ -330,7 +329,7 @@ const useAppStore = defineStore('app', {
           break
         }
         case 'setting': {
-          next(this.appTab, ['general', 'account-security', 'files-playback', 'transfer', 'advanced'])
+          next(this.appTab, ['general', 'files-playback', 'transfer', 'advanced'])
           break
         }
       }

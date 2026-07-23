@@ -100,7 +100,7 @@ onMounted(() => {
       </div>
       <div class="ui-plain-row">
         <span class="ui-plain-label">启动参数</span>
-        <div class="ui-plain-control"><a-input class="ui-control-lg" size="small" v-model.trim="settingStore.uiVideoPlayerParams" allow-clear @update:model-value="cb({ uiVideoPlayerParams: $event })" /></div>
+        <div class="ui-plain-control"><a-input class="ui-control-lg" size="small" :model-value="settingStore.uiVideoPlayerParams" allow-clear @update:model-value="cb({ uiVideoPlayerParams: String($event || '').trim() })" /></div>
       </div>
       <div v-if="playerType.includes('mpv') || playerType.includes('potplayer')" class="ui-plain-row">
         <span class="ui-plain-label">启用播放列表</span>

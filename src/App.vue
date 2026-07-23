@@ -1,5 +1,5 @@
 <script lang="ts">
-import { defineAsyncComponent, h } from 'vue'
+import { Transition, defineAsyncComponent, h } from 'vue'
 import { useAppStore } from './store'
 import './assets/global.css'
 import './assets/design-tokens.css'
@@ -23,17 +23,21 @@ export default {
     const appStore = useAppStore()
 
     return () => {
-      if (appStore.appPage == 'PageMain') return h(PageMain)
-      if (appStore.appPage == 'PageOffice') return h(PageOffice)
-      if (appStore.appPage == 'PagePdf') return h(PagePdf)
-      if (appStore.appPage == 'PageDocx') return h(PageDocx)
-      if (appStore.appPage == 'PageSheet') return h(PageSheet)
-      if (appStore.appPage == 'PageVideoXBT') return h(PageVideoXBTVue)
-      if (appStore.appPage == 'PageCode') return h(PageCode)
-      if (appStore.appPage == 'PageImage') return h(PageImage)
-      if (appStore.appPage == 'PageVideo') return h(PageVideo)
-      if (appStore.appPage == 'PageMusic') return h(PageMusic)
-      return h('div', { class: 'desktop-loading-empty' })
+      let page: any = null
+      if (appStore.appPage == 'PageMain') page = PageMain
+      else if (appStore.appPage == 'PageOffice') page = PageOffice
+      else if (appStore.appPage == 'PagePdf') page = PagePdf
+      else if (appStore.appPage == 'PageDocx') page = PageDocx
+      else if (appStore.appPage == 'PageSheet') page = PageSheet
+      else if (appStore.appPage == 'PageVideoXBT') page = PageVideoXBTVue
+      else if (appStore.appPage == 'PageCode') page = PageCode
+      else if (appStore.appPage == 'PageImage') page = PageImage
+      else if (appStore.appPage == 'PageVideo') page = PageVideo
+      else if (appStore.appPage == 'PageMusic') page = PageMusic
+      return h(Transition, { name: 'app-page', mode: 'out-in' }, () => {
+        if (!page) return h('div', { class: 'desktop-loading-empty' })
+        return h(page, { key: appStore.appPage })
+      })
     }
   }
 }
@@ -44,5 +48,31 @@ export default {
   position: absolute;
   inset: 0;
   background: transparent;
+}
+
+.app-page-enter-active {
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+
+.app-page-leave-active {
+  transition: opacity 120ms ease-in;
+}
+
+.app-page-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.app-page-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-page-enter-active,
+  .app-page-leave-active {
+    transition: none;
+  }
 }
 </style>

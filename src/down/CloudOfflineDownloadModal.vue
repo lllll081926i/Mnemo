@@ -125,31 +125,113 @@ const handleCreate = async () => {
     <template #title>
       <span class="modaltitle">创建离线下载任务</span>
     </template>
-    <div style="width: 520px">
-      <a-form ref="formRef" :model="form" layout="vertical">
-        <a-form-item field="url" label="下载链接">
+    <div class="offline-modal">
+      <div class="offline-provider">
+        <span class="offline-provider-badge">{{ providerLabel }}</span>
+        <span class="offline-provider-tip">将链接下载到网盘，不经过本机</span>
+      </div>
+      <a-form ref="formRef" :model="form" layout="vertical" class="offline-form">
+        <a-form-item field="url" label="下载链接" class="offline-item">
           <a-textarea v-model="form.url" :placeholder="`${urlPlaceholder}，每行一个`" :auto-size="{ minRows: 4, maxRows: 10 }" />
         </a-form-item>
-        <a-form-item field="fileName" label="自定义文件名（可选）">
-          <a-input v-model.trim="form.fileName" placeholder="例如：视频.mp4" />
+        <a-form-item field="fileName" label="自定义文件名（可选，仅单个链接时生效）" class="offline-item">
+          <a-input v-model.trim="form.fileName" placeholder="例如：视频.mp4" allow-clear />
         </a-form-item>
-        <a-form-item field="dirId" label="保存到">
-          <a-input-search
-            :readonly="true"
-            button-text="选择文件夹"
-            search-button
-            :model-value="form.dirName"
-            @search="handleSelectDir"
-          />
-          <div style="margin-top: 6px; color: var(--color-text-3); font-size: 12px">
-            当前 provider：{{ providerLabel }}。未选择时将保存到默认离线下载目录。
+        <a-form-item field="dirId" label="保存到" class="offline-item">
+          <div class="offline-dir">
+            <div class="offline-dir-name" :title="form.dirName">
+              <IconFont name="iconfile-folder" />
+              <span>{{ form.dirName }}</span>
+            </div>
+            <a-button type="outline" size="small" @click="handleSelectDir">选择文件夹</a-button>
           </div>
         </a-form-item>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
+        <div class="offline-footer">
           <a-button type="outline" @click="handleHide">取消</a-button>
-          <a-button type="primary" :loading="okLoading" @click="handleCreate">创建</a-button>
+          <a-button type="primary" :loading="okLoading" @click="handleCreate">创建任务</a-button>
         </div>
       </a-form>
     </div>
   </a-modal>
 </template>
+
+<style scoped>
+.offline-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 560px;
+  max-width: calc(100vw - 64px);
+}
+
+.offline-provider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.offline-provider-badge {
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  border-radius: 10px;
+}
+
+.offline-provider-tip {
+  font-size: 12px;
+  color: var(--color-text-3);
+}
+
+.offline-form :deep(.arco-form-item-label) {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-2);
+}
+
+.offline-item {
+  margin-bottom: 14px;
+}
+
+.offline-dir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.offline-dir-name {
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--color-text-1);
+  background: var(--color-fill-2);
+  border-radius: 6px;
+}
+
+.offline-dir-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-dir-name .iconfont,
+.offline-dir-name .iconfont-svg {
+  flex: 0 0 auto;
+  color: #ffb74d;
+}
+
+.offline-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+</style>

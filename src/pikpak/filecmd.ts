@@ -1,5 +1,5 @@
 import message from '../utils/message'
-import { pikpakAuthHeaders } from './auth'
+import { pikpakApiFetch } from './auth'
 
 const API_URL = 'https://api-drive.mypikpak.com/drive/v1'
 
@@ -50,13 +50,12 @@ const requestPikPak = async <T = PikPakCommandResp>(
     return null
   }
   try {
-    const resp = await fetch(url, {
-      ...init,
-      headers: {
-        ...pikpakAuthHeaders(token),
-        ...(init.headers || {})
-      }
-    })
+    const method = String(init.method || 'GET').toUpperCase()
+    let action = `${method}:/drive/v1/files`
+    try {
+      action = `${method}:${new URL(url).pathname}`
+    } catch {}
+    const resp = await pikpakApiFetch(token, action, url, init)
     const data = await resp.json().catch(() => undefined) as PikPakCommandResp | undefined
     if (!resp.ok || data?.error) {
       message.error(`${errorTitle}失败 ${data?.error_description || data?.message || data?.error || ''}`)

@@ -51,8 +51,8 @@ const cb = (val: any) => settingStore.updateStore(val)
       <span class="ui-plain-label">标签</span>
       <div class="ui-plain-control settings-tags">
         <div v-for="item in settingStore.uiFileColorArray" :key="item.key" class="settings-tag">
-          <span :style="{ background: item.key }"></span>
-          <a-input size="small" :model-value="item.title" @update:model-value="(val: string) => settingStore.updateFileColor(item.key, val)" />
+          <span class="settings-tag-dot" :style="{ background: item.key }"></span>
+          <a-input size="small" :model-value="item.title" :max-length="12" @update:model-value="(val: string) => settingStore.updateFileColor(item.key, val)" />
         </div>
       </div>
     </div>
@@ -62,9 +62,9 @@ const cb = (val: any) => settingStore.updateStore(val)
 <style scoped>
 .settings-tags {
   display: grid !important;
-  grid-template-columns: repeat(3, 176px);
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   justify-content: start;
-  gap: 6px 16px !important;
+  gap: 8px !important;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -75,18 +75,45 @@ const cb = (val: any) => settingStore.updateStore(val)
 .settings-tag {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  min-height: 28px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--ui-control-radius);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-.settings-tag > span {
-  width: 12px;
-  height: 12px;
+.settings-tag:hover {
+  border-color: var(--border-focus);
+}
+.settings-tag:focus-within {
+  background: var(--control-bg);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+.settings-tag-dot {
+  width: 10px;
+  height: 10px;
   border-radius: 3px;
   flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 10%);
 }
 .settings-tag :deep(.arco-input-wrapper) {
-  width: 148px !important;
+  flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.settings-tag :deep(.arco-input-wrapper:focus-within) {
+  border: 0;
+  box-shadow: none;
+}
+.settings-tag :deep(.arco-input) {
+  height: 100%;
+  padding: 0;
 }
 </style>

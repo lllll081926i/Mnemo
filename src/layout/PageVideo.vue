@@ -324,8 +324,23 @@ function createArtplayer() {
   art.on('video:pause', () => { void saveProgress() })
   art.on('video:ended', () => { void stepPlaylist(1) })
   art.on('video:error', () => {
-    errorText.value = '当前视频无法播放'
+    void tryFallbackQuality()
   })
+}
+
+// 当前清晰度播放失败时自动尝试其余档位（转码流偶尔会对个别文件失效）
+const failedQualities = new Set<string>()
+
+async function tryFallbackQuality() {
+  failedQualities.add(currentQuality.value)
+  const next = resolvedQualities.value.find((item) => !failedQualities.has(item.quality))
+  if (!next || !art) {
+    errorText.value = '当前视频无法播放'
+    return
+  }
+  message.info('当前清晰度无法播放，正在尝试其他清晰度')
+  currentQuality.value = next.quality
+  await loadCurrentVideo()
 }
 
 async function loadCurrentVideo() {
@@ -385,6 +400,7 @@ function applyPlaylistItem(item: IPageVideoPlaylistEntry) {
   pendingPosition = pageVideo.play_cursor
   currentQuality.value = ''
   lastSavedSecond = -1
+  failedQualities.clear()
 }
 
 async function selectPlaylistItem(fileId: string) {

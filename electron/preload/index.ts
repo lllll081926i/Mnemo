@@ -173,6 +173,13 @@ window.WebPikPakCaptchaOnCompleted = function(callback: (payload: { captchaToken
   ipcRenderer.on('PikPakCaptcha:completed', listener)
   return () => ipcRenderer.removeListener('PikPakCaptcha:completed', listener)
 }
+window.WebPikPakCaptchaReset = async function() {
+  try {
+    return await ipcRenderer.invoke('PikPakCaptcha:reset')
+  } catch {
+    return { ok: false }
+  }
+}
 window.WebOAuthBegin = async function(provider: string) {
   return ipcRenderer.invoke('OAuth:begin', { provider })
 }

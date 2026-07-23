@@ -2,7 +2,7 @@ import path from 'path'
 import mime from 'mime-types'
 import type { IUploadingUI } from '../utils/dbupload'
 import UserDAL from '../user/userdal'
-import { initPikPakCaptchaToken, pikpakAuthHeaders } from './auth'
+import { pikpakApiFetch } from './auth'
 import { computeProviderGcid, fetchProviderUploadWithRetry, openProviderUploadFile, parseProviderUploadResponse } from '../utils/providerUpload'
 import { uploadOssFile } from '../utils/ossUpload'
 import { buildPikPakUploadBody, toPikPakOssCredentials, type PikPakUploadCreateResponse } from './uploadProtocol'
@@ -16,23 +16,9 @@ const createPikPakUpload = async (fileui: IUploadingUI, gcid: string): Promise<{
   const token = await UserDAL.GetUserTokenFromDB(fileui.user_id)
   if (!token?.access_token) return { error: '找不到 PikPak 上传 token，请重新登录' }
   const fileName = path.basename(fileui.File.name)
-  let captchaToken = ''
-  try {
-    captchaToken = await initPikPakCaptchaToken({
-      deviceId: token.device_id || '',
-      action: 'POST:/drive/v1/files',
-      accessToken: token.access_token,
-      meta: { user_id: token.user_id.replace(/^pikpak_/, '') }
-    })
-  } catch (err: any) {
-    return { error: err?.message || '获取 PikPak 上传验证信息失败' }
-  }
-  const headers = pikpakAuthHeaders(token) as Record<string, string>
-  headers['X-Captcha-Token'] = captchaToken
   const response = await fetchProviderUploadWithRetry(() =>
-    fetch(PIKPAK_FILES_URL, {
+    pikpakApiFetch(token, 'POST:/drive/v1/files', PIKPAK_FILES_URL, {
       method: 'POST',
-      headers,
       body: JSON.stringify(buildPikPakUploadBody(fileui.parent_file_id, fileName, fileui.File.size, gcid))
     })
   )

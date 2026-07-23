@@ -1,5 +1,5 @@
 import UserDAL from '../user/userdal'
-import { pikpakAuthHeaders } from './auth'
+import { pikpakApiFetch } from './auth'
 import { apiPikPakFileDetail } from './dirfilelist'
 
 export type PikPakOfflineCreateResult = {
@@ -56,9 +56,8 @@ export const apiPikPakOfflineCreate = async (user_id: string, url: string, fileN
     body.folder_type = 'DOWNLOAD'
   }
   try {
-    const resp = await fetch(`${PIKPAK_API_HOST}/drive/v1/files`, {
+    const resp = await pikpakApiFetch(token, 'POST:/drive/v1/files', `${PIKPAK_API_HOST}/drive/v1/files`, {
       method: 'POST',
-      headers: pikpakAuthHeaders(token),
       body: JSON.stringify(body)
     })
     const data = await resp.json().catch(() => undefined)
@@ -99,9 +98,8 @@ export const apiPikPakOfflineProcess = async (user_id: string, taskId: string, f
       }
     }))
     params.set('with', 'reference_resource')
-    const resp = await fetch(`${PIKPAK_API_HOST}/drive/v1/tasks?${params.toString()}`, {
-      method: 'GET',
-      headers: pikpakAuthHeaders(token)
+    const resp = await pikpakApiFetch(token, 'GET:/drive/v1/tasks', `${PIKPAK_API_HOST}/drive/v1/tasks?${params.toString()}`, {
+      method: 'GET'
     })
     const data = await resp.json().catch(() => undefined)
     if (!resp.ok || data?.error) {
@@ -147,9 +145,8 @@ export const apiPikPakOfflineDelete = async (user_id: string, taskIds: string[],
     const params = new URLSearchParams()
     for (const taskId of taskIds) params.append('task_ids', taskId)
     params.set('delete_files', deleteFiles ? 'true' : 'false')
-    const resp = await fetch(`${PIKPAK_API_HOST}/drive/v1/tasks?${params.toString()}`, {
-      method: 'DELETE',
-      headers: pikpakAuthHeaders(token)
+    const resp = await pikpakApiFetch(token, 'DELETE:/drive/v1/tasks', `${PIKPAK_API_HOST}/drive/v1/tasks?${params.toString()}`, {
+      method: 'DELETE'
     })
     return resp.ok
   } catch {

@@ -36,6 +36,8 @@ const props = defineProps({
 })
 
 const okLoading = ref(false)
+// 批量重命名的规则面板默认折叠，需要配置时再展开
+const rulesCollapsed = ref(true)
 const treeref = ref()
 const winStore = useWinStore()
 const treeHeight = computed(() => winStore.height - 42 - 90)
@@ -470,7 +472,7 @@ const handleSelectRow = (visible: boolean, treeNodeKey: string) => {
     </template>
     <div class='modalbody' style='height: calc(100vh - 42px)'>
       <a-layout style='height: 100%'>
-        <a-layout-sider class='renameleft' style='width: 300px'>
+        <a-layout-sider class='renameleft' :width='300' collapsible :collapsed-width='0' v-model:collapsed='rulesCollapsed' :reverse-arrow='true'>
           <div class='headswitch' style='margin: 0'>
             <div class='bghr'></div>
             <div class='sw'>
@@ -952,6 +954,9 @@ const handleSelectRow = (visible: boolean, treeNodeKey: string) => {
           <div style='height: 20px'></div>
           <div class='toppanbtns' style='height: 26px' tabindex='-1'>
             <div class='toppanbtn'>
+              <a-button v-if='rulesCollapsed' type='text' size='small' tabindex='-1' @click='rulesCollapsed = false'>
+                <IconFont name="iconmenuon" />重命名规则
+              </a-button>
               <a-button type='text' size='small' tabindex='-1' :disabled='okLoading' @click='onRunReplaceName()'>
                 <IconFont name="iconreload-1-icon" />刷新
               </a-button>
@@ -966,12 +971,10 @@ const handleSelectRow = (visible: boolean, treeNodeKey: string) => {
               </a-button>
             </div>
             <div style='padding-top: 3px; color: rgb(var(--primary-6)); flex-shrink: 0'>{{ checkInfo }}</div>
-            <div style='flex-grow: 1'></div>
-            <a-radio-group v-model='renameConfig.show' type='button' tabindex='-1' class='renameradio'>
+            <a-radio-group v-model='renameConfig.show' type='button' tabindex='-1' class='renameradio' style='margin-left: 12px'>
               <a-radio tabindex='-1' :value='false' title='高亮显示被替换的文字'>高亮</a-radio>
               <a-radio tabindex='-1' :value='true' title='显示替换后的文件名'>最终</a-radio>
             </a-radio-group>
-            <div style='margin-right: 18px'></div>
           </div>
           <div style='height: 16px'></div>
           <div style='width: 100%; padding-right: 16px; overflow: hidden'>

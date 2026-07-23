@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component, watch } from 'vue'
-import { FolderCog, MonitorCog, Network, ShieldCheck, SlidersHorizontal, X } from 'lucide-vue-next'
+import { nextTick, onBeforeUnmount, onMounted, ref, type Component, watch } from 'vue'
+import { FolderCog, MonitorCog, Network, SlidersHorizontal, X } from 'lucide-vue-next'
 import { useAppStore } from '../store'
-import SettingAccount from './SettingAccount.vue'
 import SettingDebug from './SettingDebug.vue'
 import SettingDown from './SettingDown.vue'
 import SettingLog from './SettingLog.vue'
@@ -12,7 +11,7 @@ import SettingProxy from './SettingProxy.vue'
 import SettingUI from './SettingUI.vue'
 import SettingUpload from './SettingUpload.vue'
 
-type SettingSectionKey = 'general' | 'account-security' | 'files-playback' | 'transfer' | 'advanced'
+type SettingSectionKey = 'general' | 'files-playback' | 'transfer' | 'advanced'
 
 interface SettingPanel {
   component: Component
@@ -34,12 +33,6 @@ const sections: SettingSection[] = [
     panels: [{ component: SettingUI }]
   },
   {
-    key: 'account-security',
-    label: '账号与安全',
-    icon: ShieldCheck,
-    panels: [{ component: SettingAccount }]
-  },
-  {
     key: 'files-playback',
     label: '文件与播放',
     icon: FolderCog,
@@ -58,12 +51,10 @@ const sections: SettingSection[] = [
     panels: [{ component: SettingProxy }, { component: SettingDebug }, { component: SettingLog }]
   }
 ]
-const visibleSections = computed(() => sections)
+const visibleSections = sections
 
 const legacySectionMap: Record<string, SettingSectionKey> = {
   SettingUI: 'general',
-  SettingAccount: 'account-security',
-  SettingSecurity: 'account-security',
   SettingPan: 'files-playback',
   SettingPlay: 'files-playback',
   SettingDown: 'transfer',
@@ -74,13 +65,24 @@ const legacySectionMap: Record<string, SettingSectionKey> = {
 }
 
 const normalizeSectionKey = (key: string): SettingSectionKey => {
-  if (visibleSections.value.some((item) => item.key === key)) return key as SettingSectionKey
+  if (visibleSections.some((item) => item.key === key)) return key as SettingSectionKey
   return legacySectionMap[key] || 'general'
 }
 
 const activeKey = ref<SettingSectionKey>('general')
 const settingsScroll = ref<HTMLElement | null>(null)
 let sectionObserver: IntersectionObserver | undefined
+// 程序化平滑滚动期间锁定高亮，避免途经分组被 IntersectionObserver 反复点亮
+let spyLocked = false
+let spyUnlockTimer: ReturnType<typeof setTimeout> | undefined
+
+const lockScrollSpy = () => {
+  spyLocked = true
+  if (spyUnlockTimer) clearTimeout(spyUnlockTimer)
+  spyUnlockTimer = setTimeout(() => {
+    spyLocked = false
+  }, 500)
+}
 
 const syncActiveSection = (key: SettingSectionKey) => {
   activeKey.value = key
@@ -89,6 +91,7 @@ const syncActiveSection = (key: SettingSectionKey) => {
 
 const scrollToSection = async (key: SettingSectionKey, behavior: ScrollBehavior = 'smooth') => {
   syncActiveSection(key)
+  if (behavior === 'smooth') lockScrollSpy()
   await nextTick()
   document.getElementById(`setting-${key}`)?.scrollIntoView({ block: 'start', behavior })
 }
@@ -110,6 +113,7 @@ onMounted(async () => {
   if (!root) return
   sectionObserver = new IntersectionObserver(
     (entries) => {
+      if (spyLocked) return
       const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
       const key = visible?.target.getAttribute('data-settings-section') as SettingSectionKey | null
       if (key) syncActiveSection(key)
@@ -120,7 +124,10 @@ onMounted(async () => {
   if (appStore.appTab === 'setting') scrollToSection(activeKey.value, 'auto')
 })
 
-onBeforeUnmount(() => sectionObserver?.disconnect())
+onBeforeUnmount(() => {
+  sectionObserver?.disconnect()
+  if (spyUnlockTimer) clearTimeout(spyUnlockTimer)
+})
 
 const closeSettings = () => appStore.closeSettings()
 </script>

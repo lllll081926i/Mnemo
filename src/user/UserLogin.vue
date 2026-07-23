@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useUserStore } from '../store'
 import UserDAL from '../user/userdal'
 import message from '../utils/message'
-import { getPikPakRateLimitRetrySeconds, isPikPakCaptchaInvalidError, isPikPakCaptchaRequiredResponse, loginPikPak, loginPikPakWithCaptcha, loginPikPakWithVerifiedCaptcha, PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, PikPakCaptchaRequiredError } from '../pikpak/auth'
+import { getPikPakRateLimitRetrySeconds, isPikPakCaptchaInvalidError, isPikPakCaptchaRequiredResponse, loginPikPak, loginPikPakWithCaptcha, loginPikPakWithVerifiedCaptcha, PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, PikPakCaptchaRequiredError, resetPikPakDeviceId } from '../pikpak/auth'
 import { getDriveProviderMeta } from '../utils/driveProvider'
 import { createWebDavConnection, createWebDavUserToken, saveWebDavConnection, testWebDavConnection } from '../utils/webdavClient'
 import { createS3Connection, createS3UserToken, saveS3Connection, testS3Connection } from '../utils/s3Client'
@@ -187,6 +187,15 @@ const resetPikPakCaptcha = () => {
   pikpakCaptchaOpening.value = false
   pikpakAutoLoginQueued = false
   void window.WebPikPakCaptchaClose?.()
+}
+
+// 设备被 PikPak 限制登录时：丢弃本机设备身份 + 清空验证页面会话，全新开始
+const resetPikPakDevice = async () => {
+  resetPikPakDeviceId(pikpakUsername.value)
+  await window.WebPikPakCaptchaReset?.()
+  clearPikPakCooldown()
+  resetPikPakCaptcha()
+  message.success('PikPak 设备 ID 已重置，请重新登录')
 }
 
 const queuePikPakCaptchaLogin = () => {
@@ -382,6 +391,7 @@ const handleClose = () => {
             </div>
           </div>
           <a-button v-else html-type="submit" type="primary" long :loading="pikpakLoading" :disabled="pikpakCooldownSeconds > 0">{{ pikpakCooldownSeconds > 0 ? `${pikpakCooldownSeconds} 秒后可重试` : '添加 PikPak 账号' }}</a-button>
+          <div class="pikpak-device-reset"><a-button type="text" size="small" :disabled="pikpakLoading" @click.prevent="resetPikPakDevice">设备被限制登录？重置设备 ID</a-button></div>
         </form>
         <div v-else-if="isOAuthProvider(loginProvider)" class="login-form oauth-login"><a-button type="primary" long :loading="oauthLoading === loginProvider" @click="startOAuthLogin(loginProvider)">在 Mnemo 中登录</a-button></div>
         <form v-else-if="loginProvider === 'gofile'" class="login-form" @submit.prevent="submitGofileLogin"><a-input-password v-model="gofileToken" placeholder="GoFile Account API Token" allow-clear /><a-button html-type="submit" type="primary" long :loading="gofileLoading">登录 GoFile</a-button></form>
@@ -414,6 +424,9 @@ const handleClose = () => {
 .pikpak-captcha-status { color: var(--color-text-2); font-size: 13px; line-height: 20px; text-align: center; }
 .pikpak-captcha-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pikpak-login-status { padding: 9px 10px; color: rgb(var(--warning-6)); background: var(--color-warning-light-1); border: 1px solid var(--color-warning-light-3); border-radius: 6px; font-size: 13px; line-height: 20px; }
+.pikpak-device-reset { display: flex; justify-content: center; }
+.pikpak-device-reset .arco-btn { color: var(--color-text-3); font-size: 12px; }
+.pikpak-device-reset .arco-btn:hover { color: rgb(var(--primary-6)); }
 .oauth-login { align-items: stretch; }
 .s3-login-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; width: 330px; margin: 28px auto 0; }
 .wide { grid-column: 1 / -1; }

@@ -17,6 +17,8 @@ export interface IVideoPreviewUrl {
   width: number
   height: number
   headers?: Record<string, string>
+  /** 非会员等场景下禁止回退到原画直链（只允许转码档位） */
+  no_origin?: boolean
   qualities: {
     html: string
     quality: string

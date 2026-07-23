@@ -6,10 +6,11 @@ import { copyToClipboard } from '../../utils/electronhelper'
 import message from '../../utils/message'
 import { modalCloseAll } from '../../utils/modal'
 import { humanDateTimeDateStr, humanSize, humanTime } from '../../utils/format'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import DebugLog from '../../utils/debuglog'
 import { GetDriveID, isPikPakUser } from '../../aliapi/utils'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from '../../utils/proxyhelper'
+import { folderStatsVersion, getCachedFolderStats, requestFolderStats } from '../../utils/folderstats'
 import TreeStore from '../../store/treestore'
 import { apiPikPakFileDetail, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
 
@@ -32,6 +33,15 @@ const okLoading = ref(false)
 const fileInfo = ref<IAliFileItem>()
 const dirInfo = ref<IAliGetForderSizeModel>()
 const dirPath = ref('')
+
+// 后台统计完成时刷新当前文件夹的结果
+watch(folderStatsVersion, () => {
+  const pantreeStore = usePanTreeStore()
+  const fileId = fileInfo.value?.file_id
+  if (!fileId) return
+  const cached = getCachedFolderStats(pantreeStore.user_id, fileInfo.value?.drive_id || pantreeStore.drive_id, fileId)
+  if (cached) dirInfo.value = cached
+})
 const handleOpen = async () => {
   const pantreeStore = usePanTreeStore()
   let file_id = ''
@@ -102,8 +112,10 @@ const handleOpen = async () => {
         })
       }
     }
-    if (fileInfo.value?.type == 'folder' && !isPikPak) {
-      dirInfo.value = await AliFile.ApiFileGetFolderSize(pantreeStore.user_id, drive_id, file_id)
+    if (fileInfo.value?.type == 'folder') {
+      // 先展示缓存，后台静默缓慢统计（签名一致时直接复用缓存）
+      dirInfo.value = getCachedFolderStats(pantreeStore.user_id, drive_id, file_id)
+      void requestFolderStats(pantreeStore.user_id, drive_id, file_id)
     }
   }
 }
@@ -298,7 +310,7 @@ const handleCopyThumbnail = () => {
         <a-row>
           <a-col flex='1'>
             <a-input size='small' class='small' tabindex='-1'
-                     :model-value="'子文件大小：' + humanSize(dirInfo?.size) + '，子文件：' + dirInfo?.file_count + '个，子文件夹：' + dirInfo?.folder_count + '个'"
+                     :model-value="dirInfo ? '子文件大小：' + humanSize(dirInfo.size) + '，子文件：' + dirInfo.file_count + '个，子文件夹：' + dirInfo.folder_count + '个' + (dirInfo.reach_limit ? '（已达统计上限）' : '') : '正在统计子文件…'"
                      readonly />
           </a-col>
         </a-row>

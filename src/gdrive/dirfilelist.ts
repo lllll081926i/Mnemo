@@ -52,7 +52,7 @@ export const mapGoogleDriveItemToAliModel = (item: GoogleDriveItem, driveId: str
     timeStr: item.modifiedTime ? humanDateTimeDateStr(item.modifiedTime) : '',
     starred: false,
     isDir,
-    thumbnail: item.thumbnailLink || '',
+    thumbnail: isDir ? '' : item.thumbnailLink || '',
     description: item.webViewLink ? `gdrive_view:${encodeURIComponent(item.webViewLink)}` : '',
     content_hash: item.md5Checksum || '',
     created_at: item.createdTime || '',

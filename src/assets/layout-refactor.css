@@ -1472,9 +1472,13 @@ body[arco-theme='dark'] .toppanbtn .arco-btn:hover {
   min-width: 0;
 }
 
+/* 顶部工具行与文件行的勾选框左对齐 */
+.pan-right-shell .toppanarea {
+  padding-left: 2px !important;
+}
+
 .fileitem {
-  min-height: 44px !important;
-  border-bottom: 1px solid var(--border-lighter) !important;
+  border-bottom: none !important;
 }
 
 .fileitem:hover {

@@ -62,6 +62,7 @@ pantreeStore.$subscribe((_m: any, state: PanTreeState) => {
     DriveID = state.drive_id
     inputselectType.value = GetDriveType(state.user_id, state.drive_id).name
     folderPreviewRef.value?.cancel()
+    PanDAL.refreshQuickTree()
   }
 })
 
@@ -288,6 +289,7 @@ let driveSwitcherObserver: ResizeObserver | undefined
 let treeViewportObserver: ResizeObserver | undefined
 
 onMounted(() => {
+  PanDAL.refreshQuickTree()
   if (driveSwitcherRef.value) {
     const syncWidth = () => {
       driveSwitcherWidth.value = Math.round(driveSwitcherRef.value?.getBoundingClientRect().width || 220)

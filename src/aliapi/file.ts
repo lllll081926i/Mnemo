@@ -6,18 +6,19 @@ import { IAliFileItem, IAliGetDirModel, IAliGetFileModel, IAliGetForderSizeModel
 import { ICompilationList, IDownloadUrl, IOfficePreViewUrl, IVideoPreviewUrl, IVideoXBTUrl } from './models'
 import { isPikPakUser } from './utils'
 import { getProxyUrl, getRawUrl } from '../utils/proxyhelper'
-import { apiPikPakDownloadInfo, apiPikPakFileDetail, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
+import { computeFolderStatsNow } from '../utils/folderstats'
+import { apiPikPakDownloadInfo, apiPikPakFileDetail, apiPikPakFileList, buildPikPakVideoQualities, isPikPakVipAccount, mapPikPakFileToAliModel } from '../pikpak/dirfilelist'
 import TreeStore from '../store/treestore'
 import UserDAL from '../user/userdal'
 import { ITokenInfo } from '../user/userstore'
-import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, getWebDavRequestHeaders, isWebDavDrive } from '../utils/webdavClient'
-import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive } from '../utils/s3Client'
+import { getWebDavConnection, getWebDavConnectionId, getWebDavDownloadUrl, getWebDavRequestHeaders, isWebDavDrive, listWebDavDirectory } from '../utils/webdavClient'
+import { getS3Connection, getS3ConnectionId, getS3DownloadUrl, getS3ObjectInfo, isS3Drive, listS3Directory } from '../utils/s3Client'
 import { getDriveProviderLabel, isDriveProviderRootId, resolveDriveProvider } from '../utils/driveProvider'
-import { apiOneDriveFileDetail, getOneDriveDownloadUrl, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
-import { apiDropboxFileDetail, apiDropboxTemporaryLink, mapDropboxFileToAliModel, resolveDropboxParentIdFromPath } from '../dropbox/dirfilelist'
-import { apiGoogleDriveFileDetail, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
+import { apiOneDriveFileDetail, apiOneDriveFileList, getOneDriveDownloadUrl, mapOneDriveItemToAliModel } from '../onedrive/dirfilelist'
+import { apiDropboxFileDetail, apiDropboxFileList, apiDropboxTemporaryLink, mapDropboxFileToAliModel, resolveDropboxParentIdFromPath } from '../dropbox/dirfilelist'
+import { apiGoogleDriveFileDetail, apiGoogleDriveFileList, mapGoogleDriveItemToAliModel } from '../gdrive/dirfilelist'
 import { apiGoogleDriveDownloadInfo } from '../gdrive/download'
-import { apiGofileFileDetail, mapGofileItemToAliModel } from '../gofile/dirfilelist'
+import { apiGofileFileDetail, apiGofileFileList, mapGofileItemToAliModel } from '../gofile/dirfilelist'
 
 const resolveFileProvider = async (user_id: string, drive_id: string) => {
   let token: ITokenInfo | undefined = UserDAL.GetUserToken(user_id)
@@ -153,7 +154,8 @@ export default class AliFile {
       const info = await apiPikPakDownloadInfo(user_id, file_id)
       if (info.error) return info.error
       const detail = info.item
-      const url = info.streamUrl || info.downloadUrl
+      // 下载/原画一律用原文件直链，转码流只用于在线预览的清晰度档位
+      const url = info.downloadUrl || info.streamUrl
       if (!url) return '获取下载地址失败'
       return {
         drive_id: drive_id,
@@ -192,6 +194,25 @@ export default class AliFile {
   static async ApiVideoPreviewUrl(user_id: string, drive_id: string, file_id: string, _promotionSkuCode = ''): Promise<IVideoPreviewUrl | string> {
     if (!drive_id || !file_id) return '参数错误'
     const provider = await resolveFileProvider(user_id, drive_id)
+    if (provider === 'pikpak') {
+      const detail = await apiPikPakFileDetail(user_id, file_id)
+      if (!detail) return '获取 PikPak 视频信息失败'
+      const isVip = await isPikPakVipAccount(user_id)
+      const qualities = buildPikPakVideoQualities(detail, isVip)
+      if (!qualities.length) return 'PikPak 暂无可用转码'
+      return {
+        drive_id,
+        file_id,
+        size: Number(detail.size || 0),
+        duration: 0,
+        expire_time: 0,
+        width: qualities[0].width || 0,
+        height: qualities[0].height || 0,
+        qualities,
+        subtitles: [],
+        ...(isVip ? {} : { no_origin: true })
+      }
+    }
     return `${getDriveProviderLabel(provider)} 暂无转码信息`
   }
 
@@ -247,7 +268,7 @@ export default class AliFile {
 
   static async ApiFileGetFolderSize(user_id: string, drive_id: string, file_id: string): Promise<IAliGetForderSizeModel | undefined> {
     if (!user_id || !drive_id || !file_id) return undefined
-    return { size: 0, folder_count: 0, file_count: 0, reach_limit: undefined }
+    return computeFolderStatsNow(user_id, drive_id, file_id)
   }
 
   static async ApiFileDownText(user_id: string, drive_id: string, file_id: string, filesize: number, maxsize: number, encType: string = '', password: string = ''): Promise<string> {

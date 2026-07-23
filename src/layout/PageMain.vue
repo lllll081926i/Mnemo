@@ -177,6 +177,14 @@ onMounted(() => {
   transferIndicatorTimer = setInterval(() => {
     transferIndicatorTick.value++
   }, 2800)
+  // 空闲时预加载其余工作区标签页，避免首次切换时现拉 chunk 造成卡顿
+  const preloadWorkspaceTabs = () => {
+    void import('../down/index.vue')
+    void import('../share/index.vue')
+    void import('../setting/index.vue')
+  }
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(preloadWorkspaceTabs, { timeout: 4000 })
+  else window.setTimeout(preloadWorkspaceTabs, 2000)
 })
 
 onUnmounted(() => {
@@ -344,7 +352,7 @@ onUnmounted(() => {
   background: transparent !important;
 }
 
-.hidetabs > .arco-tabs-content > .arco-tabs-content-list > .arco-tabs-pane-active {
+.hidetabs > .arco-tabs-content > .arco-tabs-content-list > .arco-tabs-content-item-active {
   animation: workspace-page-enter 160ms ease-out;
 }
 

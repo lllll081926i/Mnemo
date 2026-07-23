@@ -25,6 +25,7 @@ declare global {
     WebOpenExternal: (url: string) => Promise<{ ok: boolean; error?: string }>
     WebPikPakCaptchaOpen: (url: string) => Promise<{ ok: boolean; error?: string }>
     WebPikPakCaptchaClose: () => Promise<{ ok: boolean }>
+    WebPikPakCaptchaReset: () => Promise<{ ok: boolean }>
     WebPikPakCaptchaOnCompleted: (callback: (payload: { captchaToken?: string }) => void) => () => void
     WebOAuthBegin: (provider: 'onedrive' | 'dropbox' | 'gdrive') => Promise<{ ok: boolean; state?: string; redirectUri?: string; error?: string }>
     WebOAuthOpen: (state: string, url: string) => Promise<{ ok: boolean; error?: string }>

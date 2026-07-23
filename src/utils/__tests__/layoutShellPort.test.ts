@@ -393,7 +393,6 @@ describe('deep layout shell port', () => {
     expect(setting).not.toContain('SettingS3')
     expect(setting).not.toContain('SettingAliyun')
     expect(read('src/setting/SettingPan.vue')).not.toContain('value="backup"')
-    expect(read('src/setting/SettingAccount.vue')).not.toContain('aliyundrive.com')
   })
 
   it('does not expose removed Aria or BT controls in the active transfer settings', () => {

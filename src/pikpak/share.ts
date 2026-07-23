@@ -1,5 +1,5 @@
 import UserDAL from '../user/userdal'
-import { pikpakAuthHeaders } from './auth'
+import { pikpakApiFetch } from './auth'
 
 export type PikPakShareCreateResult = {
   shareId: string
@@ -36,9 +36,8 @@ export const apiPikPakShareCreate = async (
     return result
   }
   try {
-    const resp = await fetch(`${PIKPAK_API_HOST}/drive/v1/share`, {
+    const resp = await pikpakApiFetch(token, 'POST:/drive/v1/share', `${PIKPAK_API_HOST}/drive/v1/share`, {
       method: 'POST',
-      headers: pikpakAuthHeaders(token),
       body: JSON.stringify({
         file_ids: fileIDList,
         share_to: needPassword ? 'encryptedlink' : 'publiclink',

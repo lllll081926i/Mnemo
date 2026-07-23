@@ -31,6 +31,17 @@ const viewlist = ref()
 const inputsearch = ref()
 const inputpicType = ref('pic_root')
 const inputselectType = ref('backup')
+const timeParts = (timeStr: string) => {
+  const parts = String(timeStr || '').split(' ')
+  return { date: parts[0] || '', clock: parts[1] || '' }
+}
+// 从 description 中提取标签颜色 class（兼容与其它标记共存，如 pikpak_download:）
+const tagColorClass = (description: string) => (String(description || '').match(/c[0-9a-fA-F]{6}\b/g) || []).join(' ')
+// 缩略图加载失败的文件回退为文件图标，避免图标和缩略图叠加
+const thumbErrors = ref(new Set<string>())
+const onThumbError = (fileId: string) => {
+  thumbErrors.value.add(fileId)
+}
 const inputsearchType = ref<string[]>([])
 
 const handleListScroll = (event?: Event) => {
@@ -779,19 +790,9 @@ const onPanDragEnd = (ev: any) => {
               </div>
             </div>
             <div class="filebtn">
-              <template v-if="!item.album_id && item.description">
-                <a-button v-if="!item.description.includes(',') && !item.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
-                  <IconFont name="iconwbiaoqian" :class="item.description" />
-                </a-button>
-                <a-button v-else-if="item.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
-                  <IconFont
-                    name="iconwbiaoqian"
-                    :class="
-                      item.description
-                        .split(',')
-                        .filter((v: string) => !v.includes('mnemoEncrypt'))
-                        .join('')
-                    " />
+              <template v-if="!item.album_id && tagColorClass(item.description)">
+                <a-button type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="tagColorClass(item.description)" />
                 </a-button>
               </template>
               <a-popover v-if="item.thumbnail && !item.description.includes('mnemoEncrypt')" content-class="popimg" position="lt">
@@ -815,7 +816,7 @@ const onPanDragEnd = (ev: any) => {
 
             <div v-show="!item.album_id" class="filesize">{{ item.sizeStr }}</div>
             <div v-show="item.file_count" class="filesize">{{ '文件数: ' + item.file_count }}</div>
-            <div class="filetime">{{ item.timeStr }}</div>
+            <div class="filetime"><span class="filedate">{{ timeParts(item.timeStr).date }}</span><span class="fileclock">{{ timeParts(item.timeStr).clock }}</span></div>
           </div>
           <div
             v-else
@@ -840,19 +841,9 @@ const onPanDragEnd = (ev: any) => {
               </div>
             </div>
             <div class="filebtn">
-              <template v-if="!item.album_id && item.description">
-                <a-button v-if="!item.description.includes(',') && !item.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
-                  <IconFont name="iconwbiaoqian" :class="item.description" />
-                </a-button>
-                <a-button v-else-if="item.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
-                  <IconFont
-                    name="iconwbiaoqian"
-                    :class="
-                      item.description
-                        .split(',')
-                        .filter((v: string) => !v.includes('mnemoEncrypt'))
-                        .join('')
-                    " />
+              <template v-if="!item.album_id && tagColorClass(item.description)">
+                <a-button type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="tagColorClass(item.description)" />
                 </a-button>
               </template>
               <a-popover v-if="item.thumbnail && !item.description.includes('mnemoEncrypt')" content-class="popimg" position="lt">
@@ -876,7 +867,7 @@ const onPanDragEnd = (ev: any) => {
             <div class="filesize">
               {{ item.sizeStr }}
             </div>
-            <div class="filetime">{{ item.timeStr }}</div>
+            <div class="filetime"><span class="filedate">{{ timeParts(item.timeStr).date }}</span><span class="fileclock">{{ timeParts(item.timeStr).clock }}</span></div>
             <div class="filesize" v-show="item.media_duration || item.media_play_cursor">
               <span>{{ '总时:' + (item.media_duration || '未知时长') }}</span>
               <span>{{ '观看:' + (item.media_play_cursor || '未知状态') }}</span>
@@ -926,17 +917,8 @@ const onPanDragEnd = (ev: any) => {
                 @dragenter="onRowItemDragEnter"
                 @dragleave="onRowItemDragLeave">
                 <div class="gridicon">
-                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
-                </div>
-                <div class="gridicon">
-                  <img
-                    v-if="grid.thumbnail"
-                    :src="grid.thumbnail"
-                    @error="
-                      (e) => {
-                        ;(e.currentTarget! as any).style.display = 'none'
-                      }
-                    " />
+                  <IconFont v-if="!grid.thumbnail || thumbErrors.has(grid.file_id)" :name="grid.icon" aria-hidden="true" role="img" />
+                  <img v-if="grid.thumbnail && !thumbErrors.has(grid.file_id)" :src="grid.thumbnail" @error="onThumbError(grid.file_id)" />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -956,21 +938,11 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont name="iconwbiaoqian" :class="grid.description" />
-                    </a-button>
-                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont
-                        name="iconwbiaoqian"
-                        :class="
-                          grid.description
-                            .split(',')
-                            .filter((v: string) => !v.includes('mnemoEncrypt'))
-                            .join('')
-                        " />
-                    </a-button>
-                  </template>
+                  <template v-if="!grid.album_id && tagColorClass(grid.description)">
+                <a-button type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="tagColorClass(grid.description)" />
+                </a-button>
+              </template>
                   <a-button v-if="grid.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
@@ -989,17 +961,8 @@ const onPanDragEnd = (ev: any) => {
                 @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
                 @dragend="onRowItemDragEnd">
                 <div class="gridicon">
-                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
-                </div>
-                <div class="gridicon">
-                  <img
-                    v-if="grid.thumbnail"
-                    :src="grid.thumbnail"
-                    @error="
-                      (e) => {
-                        ;(e.currentTarget! as any).style.display = 'none'
-                      }
-                    " />
+                  <IconFont v-if="!grid.thumbnail || thumbErrors.has(grid.file_id)" :name="grid.icon" aria-hidden="true" role="img" />
+                  <img v-if="grid.thumbnail && !thumbErrors.has(grid.file_id)" :src="grid.thumbnail" @error="onThumbError(grid.file_id)" />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1019,21 +982,11 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont name="iconwbiaoqian" :class="grid.description" />
-                    </a-button>
-                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont
-                        name="iconwbiaoqian"
-                        :class="
-                          grid.description
-                            .split(',')
-                            .filter((v: string) => !v.includes('mnemoEncrypt'))
-                            .join('')
-                        " />
-                    </a-button>
-                  </template>
+                  <template v-if="!grid.album_id && tagColorClass(grid.description)">
+                <a-button type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="tagColorClass(grid.description)" />
+                </a-button>
+              </template>
                   <a-button v-if="grid.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
@@ -1087,17 +1040,8 @@ const onPanDragEnd = (ev: any) => {
                 @dragenter="onRowItemDragEnter"
                 @dragleave="onRowItemDragLeave">
                 <div class="gridicon">
-                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
-                </div>
-                <div class="gridicon">
-                  <img
-                    v-if="grid.thumbnail"
-                    :src="grid.thumbnail"
-                    @error="
-                      (e) => {
-                        ;(e.currentTarget! as any).style.display = 'none'
-                      }
-                    " />
+                  <IconFont v-if="!grid.thumbnail || thumbErrors.has(grid.file_id)" :name="grid.icon" aria-hidden="true" role="img" />
+                  <img v-if="grid.thumbnail && !thumbErrors.has(grid.file_id)" :src="grid.thumbnail" @error="onThumbError(grid.file_id)" />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1117,21 +1061,11 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont name="iconwbiaoqian" :class="grid.description" />
-                    </a-button>
-                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont
-                        name="iconwbiaoqian"
-                        :class="
-                          grid.description
-                            .split(',')
-                            .filter((v: string) => !v.includes('mnemoEncrypt'))
-                            .join('')
-                        " />
-                    </a-button>
-                  </template>
+                  <template v-if="!grid.album_id && tagColorClass(grid.description)">
+                <a-button type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="tagColorClass(grid.description)" />
+                </a-button>
+              </template>
                   <a-button v-if="grid.description.includes('mnemoEncrypt1')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>
@@ -1150,17 +1084,8 @@ const onPanDragEnd = (ev: any) => {
                 @dragstart="(ev) => onRowItemDragStart(ev, grid.file_id)"
                 @dragend="onRowItemDragEnd">
                 <div class="gridicon">
-                  <IconFont :name="grid.icon" aria-hidden="true" role="img" />
-                </div>
-                <div class="gridicon">
-                  <img
-                    v-if="grid.thumbnail"
-                    :src="grid.thumbnail"
-                    @error="
-                      (e) => {
-                        ;(e.currentTarget! as any).style.display = 'none'
-                      }
-                    " />
+                  <IconFont v-if="!grid.thumbnail || thumbErrors.has(grid.file_id)" :name="grid.icon" aria-hidden="true" role="img" />
+                  <img v-if="grid.thumbnail && !thumbErrors.has(grid.file_id)" :src="grid.thumbnail" @error="onThumbError(grid.file_id)" />
                 </div>
                 <div class="gridicon">
                   <span v-if="grid.category.startsWith('video')" class="playicon" @click="handleOpenFile($event, grid)">
@@ -1183,21 +1108,11 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape="circle" type="text" tabindex="-1" class="select" :title="(index * listGridColumn + gindex).toString()" @click.prevent.stop="handleSelect(grid.file_id, $event, true)">
                     <IconFont :name="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconcrown3' : 'iconrsuccess') : grid.starred ? 'iconcrown' : 'iconpic2'" />
                   </a-button>
-                  <template v-if="!grid.album_id && grid.description">
-                    <a-button v-if="!grid.description.includes(',') && !grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont name="iconwbiaoqian" :class="grid.description" />
-                    </a-button>
-                    <a-button v-else-if="grid.description.includes(',')" type="text" tabindex="-1" class="label" title="标记">
-                      <IconFont
-                        name="iconwbiaoqian"
-                        :class="
-                          grid.description
-                            .split(',')
-                            .filter((v: string) => !v.includes('mnemoEncrypt'))
-                            .join('')
-                        " />
-                    </a-button>
-                  </template>
+                  <template v-if="!grid.album_id && tagColorClass(grid.description)">
+                <a-button type="text" tabindex="-1" class="label" title="标记">
+                  <IconFont name="iconwbiaoqian" :class="tagColorClass(grid.description)" />
+                </a-button>
+              </template>
                   <a-button v-if="grid.description.includes('mnemoEncrypt')" type="text" tabindex="-1" class="label" title="加密文件">
                     <IconFont name="iconsafebox" style="color: grey" />
                   </a-button>

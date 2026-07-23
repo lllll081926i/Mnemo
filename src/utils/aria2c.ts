@@ -367,6 +367,14 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
     }
 
     const info = file.Info
+    // 下载中列表会把 Info 冻结（DowningStore.mAddDownload），GID 写回需要解冻替换
+    const setInfoGid = (gid: string) => {
+      try {
+        info.GID = gid
+      } catch {
+        file.Info = { ...info, GID: gid }
+      }
+    }
     const token = UserDAL.GetUserToken(info.user_id)
     const sourceType = info.sourceType || ''
     const isExternalSource = sourceType === 'url'
@@ -510,7 +518,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
       const addResult = result && result.length >= 3 ? result[2] : undefined
       const addGid = getAriaAddUriGid(addResult)
       if (addGid) {
-        info.GID = addGid
+        setInfoGid(addGid)
         return 'success'
       }
       // GID 不存在时忽略清理错误，尝试单独 addUri
@@ -520,7 +528,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
       })
       const singleGid = getAriaAddUriGid(singleResult)
       if (singleGid) {
-        info.GID = singleGid
+        setInfoGid(singleGid)
         return 'success'
       }
       if (isAriaDuplicateGidError(singleResult) || isAriaDuplicateGidError(singleError)) {
@@ -534,7 +542,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         })
         const retryGid = getAriaAddUriGid(singleResult)
         if (retryGid) {
-          info.GID = retryGid
+          setInfoGid(retryGid)
           return 'success'
         }
         if (isAriaDuplicateGidError(singleResult) || isAriaDuplicateGidError(singleError)) {
@@ -550,7 +558,7 @@ export async function AriaAddUrl(file: IStateDownFile): Promise<string> {
         })
         const fallbackGid = getAriaAddUriGid(singleResult)
         if (fallbackGid) {
-          info.GID = fallbackGid
+          setInfoGid(fallbackGid)
           return 'success'
         }
         return '创建下载任务失败，稍后会自动重试' + ((singleResult && singleResult.message) || (singleError && singleError.message) || (addResult && addResult.message) || '')

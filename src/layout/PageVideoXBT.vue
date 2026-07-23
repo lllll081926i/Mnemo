@@ -67,7 +67,7 @@ const loadXBT = async () => {
 }
 
 const handleWinSizeClick = (size: number) => {
-  settingStore.uiXBTWidth = size
+  settingStore.updateStore({ uiXBTWidth: size })
   window.resizeTo(size + 32, window.outerHeight)
   let node = document.getElementById('docxbttop')
   if (node) node.style.width = size + 'px'

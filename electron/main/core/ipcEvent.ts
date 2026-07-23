@@ -50,6 +50,15 @@ const isPikPakCaptchaUrl = (value: string) => {
   }
 }
 
+// 挑战页可能落在盾服务商域名或经跨域跳转，只要 https 就允许在验证窗口内加载
+const isHttpsUrl = (value: string) => {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 const isPikPakCaptchaCallback = (value: string) => {
   try {
     const url = new URL(value)
@@ -57,6 +66,18 @@ const isPikPakCaptchaCallback = (value: string) => {
   } catch {
     return false
   }
+}
+
+// 部分验证完成后，回调地址会直接携带换发后的 captcha token
+const extractPikPakCallbackToken = (value: string): string => {
+  try {
+    const url = new URL(value)
+    for (const key of ['captcha_token', 'captchaToken', 'token']) {
+      const token = url.searchParams.get(key)
+      if (token && token.length > 20) return token
+    }
+  } catch {}
+  return ''
 }
 
 const isPikPakCaptchaReportUrl = (value: string) => {
@@ -225,7 +246,7 @@ export default class ipcEvent {
   private static handlePikPakCaptcha() {
     ipcMain.handle('PikPakCaptcha:open', async (event, value: unknown) => {
       const challengeUrl = String(value || '').trim()
-      if (!isPikPakCaptchaUrl(challengeUrl)) return { ok: false, error: 'PikPak 验证地址无效' }
+      if (!isHttpsUrl(challengeUrl)) return { ok: false, error: 'PikPak 验证地址无效' }
       closePikPakCaptchaWindow()
       const captchaWindow = new BrowserWindow({
         parent: AppWindow.mainWindow,
@@ -260,23 +281,24 @@ export default class ipcEvent {
         if (!event.sender.isDestroyed()) event.sender.send('PikPakCaptcha:completed', { captchaToken })
         closePikPakCaptchaWindow()
       }
-      const completeFromCallback = () => {
+      const completeFromCallback = (callbackUrl: string) => {
         if (callbackTimer || completed) return
-        callbackTimer = setTimeout(() => completeCaptcha(), 500)
+        const callbackToken = extractPikPakCallbackToken(callbackUrl)
+        callbackTimer = setTimeout(() => completeCaptcha(callbackToken), 500)
       }
       const guardNavigation = (navigationEvent: Electron.Event, url: string) => {
         if (isPikPakCaptchaCallback(url)) {
           navigationEvent.preventDefault()
-          completeFromCallback()
-        } else if (!isPikPakCaptchaUrl(url)) {
+          completeFromCallback(url)
+        } else if (!isHttpsUrl(url)) {
           navigationEvent.preventDefault()
         }
       }
       captchaWindow.webContents.on('will-navigate', guardNavigation)
       captchaWindow.webContents.on('will-redirect', guardNavigation)
       captchaWindow.webContents.setWindowOpenHandler(({ url }) => {
-        if (isPikPakCaptchaCallback(url)) completeFromCallback()
-        else if (isPikPakCaptchaUrl(url)) void captchaWindow.loadURL(url)
+        if (isPikPakCaptchaCallback(url)) completeFromCallback(url)
+        else if (isHttpsUrl(url)) void captchaWindow.loadURL(url)
         return { action: 'deny' }
       })
       const debuggerClient = captchaWindow.webContents.debugger
@@ -322,6 +344,12 @@ export default class ipcEvent {
     })
     ipcMain.handle('PikPakCaptcha:close', () => {
       closePikPakCaptchaWindow()
+      return { ok: true }
+    })
+    ipcMain.handle('PikPakCaptcha:reset', async () => {
+      closePikPakCaptchaWindow()
+      // 清掉验证页面的持久会话（cookie/缓存的盾状态），配合新的设备 ID 全新开始
+      await session.fromPartition('persist:pikpak-captcha').clearStorageData().catch(() => {})
       return { ok: true }
     })
   }

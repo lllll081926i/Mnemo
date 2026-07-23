@@ -308,6 +308,47 @@ export default class PanDAL {
         return
       }
 
+      // 本地标签筛选：标记数据存在本地快捷列表里，所有网盘共用
+      if (dirID.startsWith('color')) {
+        const colorKey = dirID.slice('color'.length).trim().split(' ')[0].toLowerCase()
+        const hexColor = colorKey.startsWith('c') ? `#${colorKey.slice(1)}` : colorKey
+        const tagged = this.readQuickFileList(user_id).filter((entry) => entry.tag && (entry.tagColor || '').toLowerCase() === hexColor)
+        const items: IAliGetFileModel[] = tagged.map((entry) => ({
+          __v_skip: true,
+          drive_id: entry.drive_id,
+          file_id: entry.file_id || entry.key,
+          parent_file_id: entry.parent_file_id || '',
+          name: entry.title,
+          namesearch: entry.title,
+          path: '',
+          ext: '',
+          mime_type: '',
+          mime_extension: '',
+          category: entry.kind === 'file' ? 'file' : 'folder',
+          icon: entry.icon || (entry.kind === 'file' ? 'iconwenjian' : 'iconfile-folder'),
+          size: 0,
+          sizeStr: '',
+          time: 0,
+          timeStr: '',
+          starred: false,
+          isDir: entry.kind !== 'file',
+          thumbnail: '',
+          description: hexColor.replace('#', 'c')
+        }))
+        const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName)
+        dir.items = hasFiles ? items : items.filter((item) => item.isDir)
+        dir.itemsKey = new Set(dir.items.map((item) => item.file_id))
+        dir.next_marker = ''
+        dir.itemsTotal = dir.items.length
+        const panfileStore = usePanFileStore()
+        panfileStore.mSaveDirFileLoadingPart(0, dir, dir.itemsTotal)
+        TreeStore.SaveOneDirFileList(dir, hasFiles).then(() => {
+          if (hasFiles) panfileStore.mSaveDirFileLoadingFinish(drive_id, dirID, dir.items, dir.itemsTotal)
+          resolve(true)
+        })
+        return
+      }
+
       const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
       if (provider === 'onedrive' || provider === 'dropbox' || provider === 'gdrive' || provider === 'gofile') {
         const rootKey = provider === 'onedrive' ? 'onedrive_root' : provider === 'dropbox' ? 'dropbox_root' : provider === 'gdrive' ? 'gdrive_root' : 'gofile_root'
@@ -331,6 +372,7 @@ export default class PanDAL {
         }
         loadItems()
           .then(async (allItems) => {
+            this.applyLocalQuickTags(user_id, allItems)
             const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
             const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName || GetDriveType(user_id, drive_id).title)
             dir.items = items
@@ -365,6 +407,7 @@ export default class PanDAL {
         const requestPath = dirID === '/' ? '/' : dirID
         listWebDavDirectory(connection, requestPath)
           .then(async (allItems) => {
+            this.applyLocalQuickTags(user_id, allItems)
             const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
             const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName || (dirID === '/' ? connection.name : dirID.split('/').pop() || connection.name))
             dir.items = items
@@ -402,6 +445,7 @@ export default class PanDAL {
         const requestPath = dirID === '/' ? '/' : dirID
         listS3Directory(connection, requestPath)
           .then(async (allItems) => {
+            this.applyLocalQuickTags(user_id, allItems)
             const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
             const dir = NewIAliFileResp(user_id, drive_id, dirID, dirName || (dirID === '/' ? connection.name : dirID.split('/').pop() || connection.name))
             dir.items = items
@@ -436,7 +480,7 @@ export default class PanDAL {
         const parentId = dirID === 'pikpak_root' || isTrash ? 'pikpak_root' : dirID
         apiPikPakFileList(user_id, parentId, 100, '', isTrash)
           .then(({ items: list }) => {
-            const allItems = list.map((item) => mapPikPakFileToAliModel(item, drive_id, parentId))
+            const allItems = this.applyLocalQuickTags(user_id, list.map((item) => mapPikPakFileToAliModel(item, drive_id, parentId)))
             const items = hasFiles ? allItems : allItems.filter((item) => item.isDir)
             const order = TreeStore.GetDirOrder(drive_id, dirID).replace('ext ', 'updated_at ')
             const orders = order.split(' ')
@@ -593,7 +637,13 @@ export default class PanDAL {
         indexMap.set(identity, arr.length)
         arr.push(normalized)
       } else {
-        arr[existingIndex] = { ...arr[existingIndex], ...normalized, favorite: normalized.favorite || arr[existingIndex].favorite }
+        arr[existingIndex] = {
+          ...arr[existingIndex],
+          ...normalized,
+          tag: normalized.tag || arr[existingIndex].tag,
+          tagColor: normalized.tagColor || arr[existingIndex].tagColor,
+          favorite: normalized.favorite || arr[existingIndex].favorite
+        }
       }
     }
     this.saveQuickFileList(pantreeStore.user_id, arr)
@@ -628,35 +678,46 @@ export default class PanDAL {
   }
 
   static updateLocalQuickTag(files: IAliGetFileModel[], tag: string, tagColor = '') {
-    const pantreeStore = usePanTreeStore()
-    const existing = this.readQuickFileList(pantreeStore.user_id)
-    const byIdentity = new Map(existing.map((item, index) => [quickEntryIdentity(item), index]))
-    const driveName = (driveId: string) => GetDriveType(pantreeStore.user_id, driveId).title
-    for (const file of files) {
-      const kind: 'folder' | 'file' = file.isDir ? 'folder' : 'file'
-      const identity = `${kind}|${file.drive_id}|${file.file_id}`
-      const index = byIdentity.get(identity)
-      if (index === undefined) {
-        if (!tag) continue
-        byIdentity.set(identity, existing.length)
-        existing.push({
-          key: quickEntryKey(kind, file.drive_id, file.file_id),
-          drive_id: file.drive_id,
-          drive_name: driveName(file.drive_id),
-          title: file.name,
-          file_id: file.file_id,
-          parent_file_id: file.parent_file_id,
-          kind,
-          icon: file.icon,
-          tag,
-          tagColor,
-          favorite: false
-        })
-      } else {
-        existing[index] = { ...existing[index], tag, tagColor, title: file.name, icon: file.icon || existing[index].icon }
+    try {
+      const pantreeStore = usePanTreeStore()
+      const existing = this.readQuickFileList(pantreeStore.user_id)
+      const byIdentity = new Map(existing.map((item, index) => [quickEntryIdentity(item), index]))
+      const driveName = (driveId: string) => GetDriveType(pantreeStore.user_id, driveId).title
+      for (const file of files) {
+        const kind: 'folder' | 'file' = file.isDir ? 'folder' : 'file'
+        const identity = `${kind}|${file.drive_id}|${file.file_id}`
+        const index = byIdentity.get(identity)
+        if (index === undefined) {
+          if (!tag) continue
+          byIdentity.set(identity, existing.length)
+          existing.push({
+            key: quickEntryKey(kind, file.drive_id, file.file_id),
+            drive_id: file.drive_id,
+            drive_name: driveName(file.drive_id),
+            title: file.name,
+            file_id: file.file_id,
+            parent_file_id: file.parent_file_id,
+            kind,
+            icon: file.icon,
+            tag,
+            tagColor,
+            favorite: false
+          })
+        } else {
+          existing[index] = { ...existing[index], tag, tagColor, title: file.name, icon: file.icon || existing[index].icon }
+        }
       }
+      this.saveQuickFileList(pantreeStore.user_id, existing.filter((item) => item.favorite || item.tag))
+      // 正在浏览某个标签筛选视图时同步刷新
+      const panfileStore = usePanFileStore()
+      if (panfileStore.DirID.startsWith('color')) void PanDAL.aReLoadOneDirToShow(panfileStore.DriveID, panfileStore.DirID, false)
+      // 当前列表行立即更新标签图标
+      this.applyLocalQuickTags(pantreeStore.user_id, panfileStore.ListDataRaw)
+      panfileStore.mRefreshListDataShow(false)
+    } catch (err: any) {
+      DebugLog.mSaveDanger('updateLocalQuickTag', err)
+      message.error('本地标签保存失败，请重试')
     }
-    this.saveQuickFileList(pantreeStore.user_id, existing.filter((item) => item.favorite || item.tag))
   }
 
   static hasQuickFile(file: IAliGetFileModel, favoriteOnly = false) {
@@ -664,6 +725,31 @@ export default class PanDAL {
     const identity = `${file.isDir ? 'folder' : 'file'}|${file.drive_id}|${file.file_id}`
     const item = list.find((entry) => quickEntryIdentity(entry) === identity)
     return !!item && (!favoriteOnly || item.favorite === true)
+  }
+
+  /** 把本地标签的颜色 class 叠加到文件行的 description 上，让行内显示标签图标 */
+  private static applyLocalQuickTags(userId: string, items: IAliGetFileModel[]) {
+    if (!items.length) return items
+    const quick = this.readQuickFileList(userId)
+    if (!quick.length) return items
+    const tagMap = new Map<string, string>()
+    for (const entry of quick) {
+      if (!entry.tag || !entry.tagColor) continue
+      tagMap.set(quickEntryIdentity(entry), entry.tagColor.replace('#', 'c'))
+    }
+    if (!tagMap.size) return items
+    for (const item of items) {
+      const colorClass = tagMap.get(`${item.isDir ? 'folder' : 'file'}|${item.drive_id}|${item.file_id}`)
+      if (!colorClass) continue
+      const description = item.description || ''
+      if (description.includes(colorClass)) continue
+      try {
+        item.description = description ? `${description} ${colorClass}` : colorClass
+      } catch {
+        // 个别列表项可能被冻结，跳过行内标签展示不影响标签本身
+      }
+    }
+    return items
   }
 
   static deleteQuickFile(key: string) {
@@ -675,6 +761,13 @@ export default class PanDAL {
 
   static getQuickFileList(): QuickFileEntry[] {
     return this.readQuickFileList(usePanTreeStore().user_id)
+  }
+
+  /** 启动/切换账号后把本地快捷列表水合到左侧树（否则重启后快捷方式页签为空） */
+  static refreshQuickTree() {
+    const userId = usePanTreeStore().user_id
+    if (!userId) return
+    this.saveQuickFileList(userId, this.readQuickFileList(userId))
   }
 
   static aReLoadQuickFile(user_id: string) {

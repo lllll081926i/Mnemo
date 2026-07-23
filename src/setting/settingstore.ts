@@ -3,10 +3,10 @@ import DebugLog from '../utils/debuglog'
 import { getSystemDownloadsPath, getUserDataPath } from '../utils/electronhelper'
 import { useAppStore } from '../store'
 import PanDAL from '../pan/pandal'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'fs'
 
 type ProxyType = 'system' | 'none' | 'http' | 'https' | 'socks5' | 'socks5h'
-declare type VideoQuality = 'Origin' | 'QHD' | 'FHD' | 'HD' | 'SD' | 'LD'
+type VideoQuality = 'Origin' | 'QHD' | 'FHD' | 'HD' | 'SD' | 'LD'
 export interface SettingState {
   // 应用设置
   uiTheme: string
@@ -112,119 +112,149 @@ export interface SettingState {
 
 }
 
-const setting: SettingState = {
-  // 应用设置
-  uiTheme: 'system',
-  uiDefaultTab: 'pan',
-  uiImageMode: 'fill',
-  uiExitOnClose: false,
-  uiLaunchStart: false,
-  uiLaunchStartShow: false,
+function createDefaultSetting(): SettingState {
+  return {
+    // 应用设置
+    uiTheme: 'system',
+    uiDefaultTab: 'pan',
+    uiImageMode: 'fill',
+    uiExitOnClose: false,
+    uiLaunchStart: false,
+    uiLaunchStartShow: false,
 
-  // 安全设置
-  securityEncType: 'aesctr',
-  securityPassword: '',
-  securityPasswordConfirm: false,
-  securityEncFileName: true,
-  securityEncFileNameHideExt: false,
-  securityFileNameAutoDecrypt: true,
-  securityPreviewAutoDecrypt: true,
+    // 安全设置
+    securityEncType: 'aesctr',
+    securityPassword: '',
+    securityPasswordConfirm: false,
+    securityEncFileName: true,
+    securityEncFileNameHideExt: false,
+    securityFileNameAutoDecrypt: true,
+    securityPreviewAutoDecrypt: true,
 
-  securityHideBackupDrive: false,
-  securityHideResourceDrive: false,
-  securityHidePicDrive: false,
+    securityHideBackupDrive: false,
+    securityHideResourceDrive: false,
+    securityHidePicDrive: false,
 
-  // 在线预览
-  uiVideoQuality: 'Origin',
-  uiVideoQualityTips: false,
-  uiVideoQualityLastSelect: true,
-  uiVideoPlayer: 'web',
-  uiVideoEnablePlayerList: false,
-  uiVideoPlayerExit: false,
-  uiVideoPlayerHistory: false,
-  uiVideoPlayerParams: '',
-  uiVideoSubtitleMode: 'auto',
-  uiVideoPlayerPath: '',
+    // 在线预览
+    uiVideoQuality: 'Origin',
+    uiVideoQualityTips: false,
+    uiVideoQualityLastSelect: true,
+    uiVideoPlayer: 'web',
+    uiVideoEnablePlayerList: false,
+    uiVideoPlayerExit: false,
+    uiVideoPlayerHistory: false,
+    uiVideoPlayerParams: '',
+    uiVideoSubtitleMode: 'auto',
+    uiVideoPlayerPath: '',
 
-  uiAutoColorVideo: true,
+    uiAutoColorVideo: true,
 
-  uiXBTNumber: 36,
-  uiXBTWidth: 960,
+    uiXBTNumber: 36,
+    uiXBTWidth: 960,
 
-  // 网盘设置
-  uiShowPanPath: true,
-  uiFolderPreviewEnabled: true,
-  uiFolderPreviewAutoHide: 6,
-  uiFileOrderDuli: 'null',
-  uiTimeFolderFormate: 'yyyy-MM-dd HH-mm-ss',
-  uiTimeFolderIndex: 1,
-  uiShareDays: 'always',
-  uiSharePassword: 'random',
-  uiShareFormate: '「NAME」URL\n提取码: PWD',
-  uiFileListOrder: 'name asc',
-  uiFileListMode: 'list',
-  uiFileColorArray: [
-    { key: '#df5659', title: '鹅冠红' },
-    { key: '#9c27b0', title: '兰花紫' },
-    { key: '#42a5f5', title: '晴空蓝' },
-    { key: '#00bc99', title: '竹叶青' },
-    { key: '#4caf50', title: '宝石绿' },
-    { key: '#ff9800', title: '金盏黄' }
-  ],
+    // 网盘设置
+    uiShowPanPath: true,
+    uiFolderPreviewEnabled: true,
+    uiFolderPreviewAutoHide: 6,
+    uiFileOrderDuli: 'null',
+    uiTimeFolderFormate: 'yyyy-MM-dd HH-mm-ss',
+    uiTimeFolderIndex: 1,
+    uiShareDays: 'always',
+    uiSharePassword: 'random',
+    uiShareFormate: '「NAME」URL\n提取码: PWD',
+    uiFileListOrder: 'name asc',
+    uiFileListMode: 'list',
+    uiFileColorArray: [
+      { key: '#df5659', title: '鹅冠红' },
+      { key: '#9c27b0', title: '兰花紫' },
+      { key: '#42a5f5', title: '晴空蓝' },
+      { key: '#00bc99', title: '竹叶青' },
+      { key: '#4caf50', title: '宝石绿' },
+      { key: '#ff9800', title: '金盏黄' }
+    ],
 
-  // 下载文件
-  downSavePath: '',
-  downSavePathDefault: true,
-  downSavePathFull: true,
-  downFileMax: 5,
-  downThreadMax: 4,
-  downGlobalSpeed: 0,
-  downGlobalSpeedM: 'MB',
-  ariaMaxConnectionPerServer: 16,
-  ariaUserAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4577.63 Safari/537.36',
+    // 下载文件
+    downSavePath: '',
+    downSavePathDefault: true,
+    downSavePathFull: true,
+    downFileMax: 5,
+    downThreadMax: 4,
+    downGlobalSpeed: 0,
+    downGlobalSpeedM: 'MB',
+    ariaMaxConnectionPerServer: 16,
+    ariaUserAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4577.63 Safari/537.36',
 
-  // 上传文件
-  uploadFileMax: 5,
-  uploadGlobalSpeed: 0,
-  uploadGlobalSpeedM: 'MB',
+    // 上传文件
+    uploadFileMax: 5,
+    uploadGlobalSpeed: 0,
+    uploadGlobalSpeedM: 'MB',
 
-  // 上传下载综合设置
-  downAutoShutDown: 0,
-  downSaveShowPro: true,
-  downSmallFileFirst: false,
-  downUploadWhatExist: 'refuse',
-  downIngoredList: ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading'],
-  downFinishAudio: true,
-  downAutoStart: true,
+    // 上传下载综合设置
+    downAutoShutDown: 0,
+    downSaveShowPro: true,
+    downSmallFileFirst: false,
+    downUploadWhatExist: 'refuse',
+    downIngoredList: ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading'],
+    downFinishAudio: true,
+    downAutoStart: true,
 
-  // 高级选项
-  debugCacheSize: '',
-  debugDirSize: '',
-  debugFileListMax: 3000,
-  debugDownedListMax: 5000,
-  debugProxyHost: '127.0.0.1',
-  debugProxyPort: '6666',
-  debugLogEnabled: true,
-  debugLogLevel: 'info',
-  debugLogMaxSizeMB: 5,
-  // 网络代理
-  proxyType: 'system',
-  proxyHost: '',
-  proxyPort: 0,
-  proxyUserName: '',
-  proxyPassword: '',
+    // 高级选项
+    debugCacheSize: '',
+    debugDirSize: '',
+    debugFileListMax: 3000,
+    debugDownedListMax: 5000,
+    debugProxyHost: '127.0.0.1',
+    debugProxyPort: '6666',
+    debugLogEnabled: true,
+    debugLogLevel: 'info',
+    debugLogMaxSizeMB: 5,
+    // 网络代理
+    proxyType: 'system',
+    proxyHost: '',
+    proxyPort: 0,
+    proxyUserName: '',
+    proxyPassword: '',
 
-  // 远程Aria
-  ariaSavePath: '',
-  ariaUrl: '',
-  ariaPwd: '',
-  ariaHttps: false,
-  ariaState: 'local',
-
+    // 远程Aria
+    ariaSavePath: '',
+    ariaUrl: '',
+    ariaPwd: '',
+    ariaHttps: false,
+    ariaState: 'local'
+  }
 }
 
-function _loadSetting(val: any) {
-  console.log('_loadSetting', val)
+function defaultValue(val: any, check: any[]) {
+  if (val && check.includes(val)) return val
+  return check[0]
+}
+
+function defaultString(val: any, check: string) {
+  if (val && typeof val == 'string') return val
+  return check
+}
+
+function defaultBool(val: any, check: boolean) {
+  if (typeof val == 'boolean') return val
+  return check
+}
+
+function defaultNumber(val: any, check: number) {
+  if (typeof val == 'number') return val
+  return check
+}
+
+function defaultNumberSub(val: any, check: number, min: number, max: number) {
+  if (typeof val == 'number') {
+    if (val < min) return min
+    if (val > max) return max
+    return val
+  }
+  return check
+}
+
+// 把磁盘上的配置合并进 state，逐项校验、兜底并做历史值迁移
+function applyStoredConfig(setting: SettingState, val: any) {
   // 应用设置
   setting.uiTheme = defaultValue(val.uiTheme, ['system', 'light', 'dark'])
   setting.uiDefaultTab = defaultValue(val.uiDefaultTab, ['pan', 'down', 'share', 'setting'])
@@ -258,8 +288,8 @@ function _loadSetting(val: any) {
   setting.uiVideoPlayerPath = defaultString(val.uiVideoPlayerPath, '')
   setting.uiAutoColorVideo = defaultBool(val.uiAutoColorVideo, true)
 
-  setting.uiXBTNumber = defaultValue(val.uiXBTNumber, [36, 24, 36, 48, 60, 72])
-  setting.uiXBTWidth = defaultValue(val.uiXBTWidth, [960, 720, 960, 1080, 1280])
+  setting.uiXBTNumber = defaultValue(val.uiXBTNumber, [36, 24, 48, 60, 72])
+  setting.uiXBTWidth = defaultValue(val.uiXBTWidth, [960, 720, 1080, 1280])
 
   // 网盘设置
   setting.uiShowPanPath = defaultBool(val.uiShowPanPath, true)
@@ -270,7 +300,7 @@ function _loadSetting(val: any) {
   setting.uiTimeFolderIndex = defaultNumber(val.uiTimeFolderIndex, 1)
   setting.uiShareDays = defaultValue(val.uiShareDays, ['always', 'week', 'month'])
   setting.uiSharePassword = defaultValue(val.uiSharePassword, ['random', 'last', 'nopassword'])
-  setting.uiShareFormate = defaultString(val.uiShareFormate, 'NAME URL 提取码：PWD')
+  setting.uiShareFormate = defaultString(val.uiShareFormate, '「NAME」URL\n提取码: PWD')
   setting.uiFileListOrder = defaultValue(val.uiFileListOrder, ['updated_at desc', 'name asc', 'name desc', 'updated_at asc', 'updated_at desc', 'size asc', 'size desc'])
   setting.uiFileListMode = defaultValue(val.uiFileListMode, ['list', 'image', 'bigimage'])
   if (val.uiFileColorArray && val.uiFileColorArray.length >= 6) setting.uiFileColorArray = val.uiFileColorArray
@@ -331,64 +361,25 @@ function _loadSetting(val: any) {
   setting.ariaPwd = defaultString(val.ariaPwd, '')
   setting.ariaHttps = defaultBool(val.ariaHttps, false)
   setting.ariaState = defaultValue(val.ariaState, ['local', 'remote'])
-
 }
 
 let settingstr = ''
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+// Pinia 的响应式代理直接写回这个原始对象，beforeunload 时据此强制落盘
+let activeState: SettingState | null = null
 
-
-export function LoadSetting() {
-  try {
-    const settingConfig = getUserDataPath('setting.config')
-    if (settingConfig && existsSync(settingConfig)) {
-      settingstr = readFileSync(settingConfig, 'utf-8')
-      const val = JSON.parse(settingstr)
-      _loadSetting(val)
-      useAppStore().toggleTheme(setting.uiTheme)
-    } else {
-      SaveSetting()
-    }
-  } catch {
-    SaveSetting()
+function persistSetting(state: SettingState, immediate = false) {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = undefined
   }
-  DebugLog.configure({ enabled: setting.debugLogEnabled, level: setting.debugLogLevel, maxSizeMB: setting.debugLogMaxSizeMB })
-  return setting
-}
-
-function defaultValue(val: any, check: any[]) {
-  if (val && check.includes(val)) return val
-  return check[0]
-}
-
-function defaultString(val: any, check: string) {
-  if (val && typeof val == 'string') return val
-  return check
-}
-
-function defaultBool(val: any, check: boolean) {
-  if (typeof val == 'boolean') return val
-  return check
-}
-
-function defaultNumber(val: any, check: number) {
-  if (typeof val == 'number') return val
-  return check
-}
-
-function defaultNumberSub(val: any, check: number, min: number, max: number) {
-  if (typeof val == 'number') {
-    if (val < min) return min
-    if (val > max) return max
-    return val
+  if (!immediate) {
+    // 输入类设置每次击键都会触发保存，合并到一次写盘，避免同步 IO 卡住渲染
+    saveTimer = setTimeout(() => persistSetting(state, true), 400)
+    return
   }
-  return check
-}
-
-
-function SaveSetting() {
   try {
-    const saveStr = JSON.stringify(setting)
-    // console.log('SaveSetting', saveStr)
+    const saveStr = JSON.stringify(state)
     if (saveStr != settingstr) {
       const settingConfig = getUserDataPath('setting.config')
       writeFileSync(settingConfig, saveStr, 'utf-8')
@@ -397,6 +388,34 @@ function SaveSetting() {
   } catch (err: any) {
     DebugLog.mSaveDanger('SaveSettingToJson', err)
   }
+}
+
+if (typeof window !== 'undefined') window.addEventListener('beforeunload', () => {
+  if (activeState) persistSetting(activeState, true)
+})
+
+export function LoadSetting() {
+  const state = createDefaultSetting()
+  try {
+    const settingConfig = getUserDataPath('setting.config')
+    if (settingConfig && existsSync(settingConfig)) {
+      settingstr = readFileSync(settingConfig, 'utf-8')
+      applyStoredConfig(state, JSON.parse(settingstr))
+      useAppStore().toggleTheme(state.uiTheme)
+    }
+  } catch (err) {
+    // 配置文件损坏时先备份再用默认值重建，避免直接覆盖用户数据
+    try {
+      const settingConfig = getUserDataPath('setting.config')
+      if (settingConfig && existsSync(settingConfig)) copyFileSync(settingConfig, `${settingConfig}.bak`)
+    } catch {}
+    DebugLog.mSaveDanger('LoadSetting', err)
+  }
+  DebugLog.configure({ enabled: state.debugLogEnabled, level: state.debugLogLevel, maxSizeMB: state.debugLogMaxSizeMB })
+  activeState = state
+  // 首次运行或配置发生过迁移时，把规范化后的结果回写磁盘
+  persistSetting(state, true)
+  return state
 }
 
 const useSettingStore = defineStore('setting', {
@@ -428,20 +447,17 @@ const useSettingStore = defineStore('setting', {
       if (Object.hasOwn(partial, 'downSaveShowPro') && !this.downSaveShowPro) {
         window.WebToElectron?.({ cmd: 'downloadProgress', progress: -1, activeCount: 0, totalCount: 0 })
       }
-      SaveSetting()
-      useAppStore().toggleTheme(setting.uiTheme)
-      window.MainProxyHost = setting.debugProxyHost
-      window.MainProxyPort = setting.debugProxyPort
+      persistSetting(this.$state)
+      useAppStore().toggleTheme(this.uiTheme)
+      window.MainProxyHost = this.debugProxyHost
+      window.MainProxyPort = this.debugProxyPort
       window.WinMsgToUpload({ cmd: 'SettingRefresh' })
     },
     updateFileColor(key: string, title: string) {
       if (!key) return
-      const arr = setting.uiFileColorArray.concat()
-      for (let i = 0; i < arr.length; i++) {
-        if (arr[i].key == key) arr[i].title = title
-      }
+      const arr = this.uiFileColorArray.map((item) => (item.key == key ? { ...item, title } : item))
       this.$patch({ uiFileColorArray: arr })
-      SaveSetting()
+      persistSetting(this.$state)
     },
     async WebSetProxy(): Promise<boolean> {
       if (this.proxyType === 'system') return await window.WebSetProxy({ mode: 'system' })

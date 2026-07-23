@@ -51,7 +51,7 @@ export const createPikPakDeviceId = (): string => {
   return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
 }
 
-const getDeviceStorage = (): Pick<Storage, 'getItem' | 'setItem'> | undefined => {
+const getDeviceStorage = (): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined => {
   try {
     if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function' || typeof localStorage.setItem !== 'function') return undefined
     return localStorage
@@ -74,6 +74,37 @@ export const getOrCreatePikPakDeviceId = (username: string): string => {
     // In-memory identity remains stable when storage is unavailable.
   }
   return deviceId
+}
+
+/** 丢弃指定账号（缺省为全部账号）的设备身份，下次登录会生成全新的 device_id。 */
+export const resetPikPakDeviceId = (username?: string): void => {
+  clearPikPakApiCaptchaCache()
+  const storage = getDeviceStorage()
+  const account = username?.trim().toLowerCase()
+  if (account) {
+    const accountKey = MD5(account).toString()
+    volatileDeviceIds.delete(accountKey)
+    try {
+      storage?.removeItem(`${PIKPAK_DEVICE_STORAGE_PREFIX}${accountKey}`)
+    } catch {
+      // In-memory identity has already been dropped.
+    }
+    return
+  }
+  volatileDeviceIds.clear()
+  try {
+    const local = typeof localStorage === 'undefined' ? undefined : localStorage
+    if (local) {
+      const keys: string[] = []
+      for (let index = 0; index < local.length; index += 1) {
+        const key = local.key(index)
+        if (key?.startsWith(PIKPAK_DEVICE_STORAGE_PREFIX)) keys.push(key)
+      }
+      keys.forEach((key) => local.removeItem(key))
+    }
+  } catch {
+    // In-memory identities have already been dropped.
+  }
 }
 
 export const getPikPakAccountId = (accessToken: string, username: string): string => {
@@ -130,6 +161,11 @@ const parsePikPakError = (data: any, fallback: string) => {
 }
 
 export const PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS = 30
+
+/** 滑块验证完成后换发登录令牌的退避重试间隔。 */
+const PIKPAK_CAPTCHA_EXCHANGE_RETRY_DELAYS_MS = [600, 1200, 2000]
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 const parseRetryAfterSeconds = (value: string | null): number => {
   if (!value) return 0
@@ -267,17 +303,6 @@ export const initPikPakCaptcha = async (opts: {
   }
 }
 
-/** Resolve captcha_token only. PikPak's URL is informational; rclone uses the token directly. */
-export const initPikPakCaptchaToken = async (opts: {
-  deviceId: string
-  action: string
-  accessToken?: string
-  meta?: Partial<PikPakCaptchaMeta>
-}): Promise<string> => {
-  const result = await initPikPakCaptcha(opts)
-  return result.captchaToken
-}
-
 export const buildPikPakLoginCaptchaMeta = (username: string): Partial<PikPakCaptchaMeta> => {
   const normalizedUsername = username.trim()
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedUsername)) return { email: normalizedUsername }
@@ -343,12 +368,24 @@ export const loginPikPakWithCaptcha = async (username: string, password: string,
   if (!normalizedUsername || !password) throw new Error('请输入 PikPak 账号和密码')
   if (!captchaToken) throw new Error('请先完成 PikPak 验证')
   const resolvedDeviceId = /^[a-f0-9]{32}$/i.test(deviceId || '') ? String(deviceId).toLowerCase() : getOrCreatePikPakDeviceId(normalizedUsername)
-  const captcha = await initPikPakCaptcha({
+  // 滑块完成后立刻换发令牌时，PikPak 服务端可能还没登记验证结果，
+  // 链式带上最新 captcha_token 退避重试几次，避免误判成“尚未验证”反复弹窗刷出设备限制。
+  let captcha = await initPikPakCaptcha({
     deviceId: resolvedDeviceId,
     action: 'POST:/v1/auth/signin',
     meta: buildPikPakLoginCaptchaMeta(normalizedUsername),
     previousToken: captchaToken
   })
+  for (const delayMs of PIKPAK_CAPTCHA_EXCHANGE_RETRY_DELAYS_MS) {
+    if (!captcha.challengeUrl) break
+    await delay(delayMs)
+    captcha = await initPikPakCaptcha({
+      deviceId: resolvedDeviceId,
+      action: 'POST:/v1/auth/signin',
+      meta: buildPikPakLoginCaptchaMeta(normalizedUsername),
+      previousToken: captcha.captchaToken
+    })
+  }
   if (captcha.challengeUrl) throw new PikPakCaptchaRequiredError(resolvedDeviceId, captcha.captchaToken, captcha.challengeUrl, captcha.expiresIn)
   return loginPikPakWithVerifiedCaptcha(normalizedUsername, password, captcha.captchaToken, resolvedDeviceId)
 }
@@ -447,10 +484,14 @@ export const refreshPikPakAccessToken = async (token: ITokenInfo): Promise<IToke
 
 export const apiPikPakAbout = async (token: ITokenInfo): Promise<any | null> => {
   if (!token.access_token) return null
-  return pikpakJson<any>(`${PIKPAK_API_HOST}/drive/v1/about`, {
-    method: 'GET',
-    headers: buildHeaders(token.device_id, token.access_token)
-  }, '获取 PikPak 空间信息失败').catch(() => null)
+  try {
+    const resp = await pikpakApiFetch(token, 'GET:/drive/v1/about', `${PIKPAK_API_HOST}/drive/v1/about`, { method: 'GET' })
+    const data = await resp.json().catch(() => undefined)
+    if (!resp.ok || data?.error) return null
+    return data
+  } catch {
+    return null
+  }
 }
 
 export const applyPikPakQuota = async (token: ITokenInfo): Promise<boolean> => {
@@ -467,3 +508,50 @@ export const applyPikPakQuota = async (token: ITokenInfo): Promise<boolean> => {
 }
 
 export const pikpakAuthHeaders = (token: ITokenInfo): HeadersInit => buildHeaders(token.device_id, token.access_token)
+
+type PikPakApiCaptchaCacheEntry = { token: string; expiresAt: number }
+const pikpakApiCaptchaCache = new Map<string, PikPakApiCaptchaCacheEntry>()
+
+/** 清空 API 验证码令牌缓存（设备重置 / 测试用）。 */
+export const clearPikPakApiCaptchaCache = (): void => {
+  pikpakApiCaptchaCache.clear()
+}
+
+/** rclone 风格：按设备 + 接口 action 缓存 captcha token，过期/失效时用旧 token 链式换发。 */
+export const getPikPakApiCaptchaToken = async (token: ITokenInfo, action: string, forceRefresh = false): Promise<string> => {
+  const cacheKey = `${token.device_id || ''}:${token.user_id}:${action}`
+  const now = Date.now()
+  const cached = pikpakApiCaptchaCache.get(cacheKey)
+  if (!forceRefresh && cached && cached.expiresAt > now + 10_000) return cached.token
+  const result = await initPikPakCaptcha({
+    deviceId: token.device_id || '',
+    action,
+    accessToken: token.access_token,
+    meta: { user_id: token.user_id.replace(/^pikpak_/, '') },
+    previousToken: cached?.token
+  })
+  const expiresIn = Math.max(60, Number(result.expiresIn || 300))
+  pikpakApiCaptchaCache.set(cacheKey, { token: result.captchaToken, expiresAt: now + (expiresIn - 30) * 1000 })
+  return result.captchaToken
+}
+
+/** PikPak 的 drive 接口都要求 X-Captcha-Token；遇到 captcha 失效时换发新令牌并重试一次。 */
+export const pikpakApiFetch = async (token: ITokenInfo, action: string, url: string, init: RequestInit = {}): Promise<Response> => {
+  const request = async (forceRefresh: boolean) => {
+    const captchaToken = await getPikPakApiCaptchaToken(token, action, forceRefresh)
+    return fetch(url, {
+      ...init,
+      headers: {
+        ...(pikpakAuthHeaders(token) as Record<string, string>),
+        'X-Captcha-Token': captchaToken,
+        ...((init.headers as Record<string, string>) || {})
+      }
+    })
+  }
+  let resp = await request(false)
+  if (resp.status === 400 || resp.status === 401 || resp.status === 403) {
+    const data = await resp.clone().json().catch(() => undefined)
+    if (data?.error === 'captcha_invalid' || data?.error === 'captcha_required') resp = await request(true)
+  }
+  return resp
+}

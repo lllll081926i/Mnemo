@@ -3,6 +3,7 @@ import { GOOGLE_DRIVE_CLIENT_ID as CONFIGURED_GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRI
 import { humanSize } from '../utils/format'
 import { buildDriveProviderDriveId, buildDriveProviderUserId } from '../utils/driveProvider'
 import { createProviderToken } from '../utils/providerToken'
+import { isGoogleDriveQuotaError } from './client'
 
 const BUILTIN_GOOGLE_DRIVE_CLIENT_ID = '202264815644.apps.googleusercontent.com'
 const BUILTIN_GOOGLE_DRIVE_CLIENT_SECRET = 'X4Z3ca8xfWDb1Voo-F9a7ZxJ'
@@ -53,15 +54,30 @@ export const buildGoogleDriveAuthUrl = async (clientId: string, verifier: string
   return `${AUTH_URL}?${params.toString()}`
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+// 登录换 token / 拉账号信息也可能撞上共享项目的每分钟配额，退避重试
+const fetchWithQuotaRetry = async (url: string, init: RequestInit, attempts = 3): Promise<Response> => {
+  let response = await fetch(url, init)
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (response.status !== 429 && response.status !== 403) break
+    const payload = await response.clone().json().catch(() => ({}))
+    if (!isGoogleDriveQuotaError(response.status, payload)) break
+    await sleep(attempt * 1500)
+    response = await fetch(url, init)
+  }
+  return response
+}
+
 const tokenRequest = async (body: URLSearchParams) => {
-  const response = await fetch(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
+  const response = await fetchWithQuotaRetry(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || payload?.error) throw new Error(payload?.error_description || payload?.error || 'Google Drive Token 请求失败')
   return payload
 }
 
 const applyGoogleDriveAccount = async (token: ITokenInfo) => {
-  const response = await fetch(ABOUT_URL, { headers: { Authorization: `Bearer ${token.access_token}` } })
+  const response = await fetchWithQuotaRetry(ABOUT_URL, { headers: { Authorization: `Bearer ${token.access_token}` } })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || payload?.error) throw new Error(payload?.error?.message || 'Google Drive 账号信息获取失败')
   const accountId = payload.user?.permissionId || payload.user?.emailAddress

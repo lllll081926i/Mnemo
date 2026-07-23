@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, createPikPakDeviceId, getOrCreatePikPakDeviceId, loginPikPak, loginPikPakWithCaptcha, loginPikPakWithVerifiedCaptcha, PIKPAK_CAPTCHA_REDIRECT_URI, PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME } from '../auth'
+import { buildPikPakCaptchaMeta, buildPikPakLoginCaptchaMeta, captchaSign, clearPikPakApiCaptchaCache, createPikPakDeviceId, getOrCreatePikPakDeviceId, loginPikPak, loginPikPakWithCaptcha, loginPikPakWithVerifiedCaptcha, PIKPAK_CAPTCHA_REDIRECT_URI, PIKPAK_MIN_LOGIN_COOLDOWN_SECONDS, PIKPAK_PROTOCOL_CLIENT_ID, PIKPAK_PROTOCOL_CLIENT_VERSION, PIKPAK_PROTOCOL_PACKAGE_NAME, pikpakApiFetch, resetPikPakDeviceId } from '../auth'
 import { MD5 } from 'crypto-js'
 
 describe('PikPak captcha', () => {
@@ -18,6 +18,18 @@ describe('PikPak captcha', () => {
   it('persists one separate device identity per account', () => {
     expect(getOrCreatePikPakDeviceId('User@Example.com')).toBe(getOrCreatePikPakDeviceId('user@example.com'))
     expect(getOrCreatePikPakDeviceId('first@example.com')).not.toBe(getOrCreatePikPakDeviceId('second@example.com'))
+  })
+
+  it('drops the stored device identity on reset so the next login uses a fresh one', () => {
+    const before = getOrCreatePikPakDeviceId('reset@example.com')
+    resetPikPakDeviceId('reset@example.com')
+    const after = getOrCreatePikPakDeviceId('reset@example.com')
+    expect(after).toMatch(/^[a-f0-9]{32}$/)
+    expect(after).not.toBe(before)
+    // 只影响指定账号
+    const other = getOrCreatePikPakDeviceId('keep@example.com')
+    resetPikPakDeviceId('reset@example.com')
+    expect(getOrCreatePikPakDeviceId('keep@example.com')).toBe(other)
   })
 
   it('matches the MD5 salt chain used by web protocol captcha_sign', () => {
@@ -179,5 +191,54 @@ describe('PikPak captcha', () => {
       retryAfterSeconds: 45
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('PikPak drive API captcha token', () => {
+  beforeEach(() => {
+    clearPikPakApiCaptchaCache()
+  })
+
+  const baseToken = {
+    access_token: 'access',
+    device_id: '0123456789abcdef0123456789abcdef',
+    user_id: 'pikpak_account'
+  } as any
+
+  it('attaches a cached captcha token to every drive api call', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'api-captcha-1', expires_in: 300 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await pikpakApiFetch(baseToken, 'GET:/drive/v1/files', 'https://api-drive.mypikpak.com/drive/v1/files?limit=1')
+    await pikpakApiFetch(baseToken, 'GET:/drive/v1/files', 'https://api-drive.mypikpak.com/drive/v1/files?limit=2')
+
+    // 第一次请求前换发一次令牌，第二次直接复用缓存
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const captchaRequest = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(captchaRequest).toMatchObject({ action: 'GET:/drive/v1/files', device_id: baseToken.device_id })
+    expect(captchaRequest.meta.captcha_sign).toMatch(/^1\./)
+    expect(captchaRequest.meta.user_id).toBe('account')
+    expect((fetchMock.mock.calls[1][1]?.headers as Record<string, string>)['X-Captcha-Token']).toBe('api-captcha-1')
+    expect((fetchMock.mock.calls[2][1]?.headers as Record<string, string>)['X-Captcha-Token']).toBe('api-captcha-1')
+  })
+
+  it('reissues the token chained from the previous one and retries once on captcha_invalid', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'api-captcha-old', expires_in: 300 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'captcha_invalid', error_code: 9 }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ captcha_token: 'api-captcha-new', expires_in: 300 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const resp = await pikpakApiFetch(baseToken, 'GET:/drive/v1/files', 'https://api-drive.mypikpak.com/drive/v1/files?limit=1')
+
+    expect(resp.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    const reissueRequest = JSON.parse(String(fetchMock.mock.calls[2][1]?.body))
+    expect(reissueRequest.captcha_token).toBe('api-captcha-old')
+    expect((fetchMock.mock.calls[3][1]?.headers as Record<string, string>)['X-Captcha-Token']).toBe('api-captcha-new')
   })
 })
