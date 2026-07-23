@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { KeyboardState, MouseState, useAppStore, useDowningStore, useKeyboardStore, useMouseStore, useUploadingStore, useWinStore } from '../store'
 import { onHideRightMenuScroll, onShowRightMenu, RefreshScroll, RefreshScrollTo, TestCtrl, TestKey, TestKeyboardScroll, TestKeyboardSelect } from '../utils/keyboardhelper'
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
-import { TestButton } from '../utils/mosehelper'
+import { isLeftClick } from '../utils/mousehelper'
 import { xorWith } from 'lodash'
 import UrlDownloadModal from './UrlDownloadModal.vue'
 import TaskDetailDrawer from './TaskDetailDrawer.vue'
@@ -159,7 +159,7 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
   if (
-    TestButton(0, mouseEvent, () => {
+    isLeftClick(mouseEvent, () => {
       if (mouseEvent.srcElement) {
         // @ts-ignore
         const className = mouseEvent.srcElement.className

@@ -45,6 +45,7 @@ export interface IRawUrl {
     url: string
     type?: string
     headers?: Record<string, string>
+    forceProxy?: boolean
   }[]
   subtitles: {
     language: string

@@ -11,35 +11,3 @@ export function GetShareUrlFormate(share_name: string, share_url: string, share_
   if (url && s1 >= 0) return url
   return share_name + ' ' + share_url + (share_pwd ? ' 提取码：' + share_pwd : '')
 }
-
-export interface IID {
-  id: string
-  pwd: string
-}
-
-export function ParseShareIDList(txt: string): IID[] {
-  txt = txt.replaceAll('密码', '提取码').replaceAll('password', '提取码').replaceAll('pwd', '提取码').replaceAll('PWD', '提取码')
-  txt = txt.replaceAll('\n提取码', '提取码')
-  const list: IID[] = []
-  txt.split('\n').map((t) => {
-    const p = GetShareID(t)
-    if (p.id) list.push(p)
-    return true
-  })
-  return list
-}
-
-export function ParseShareIDOne(txt: string): IID {
-  txt = txt.replaceAll('密码', '提取码').replaceAll('password', '提取码').replaceAll('pwd', '提取码').replaceAll('PWD', '提取码')
-  txt = txt.replaceAll('\n提取码', '提取码')
-  return GetShareID(txt)
-}
-
-function GetShareID(txt: string): IID {
-  const ret = { id: '', pwd: '' }
-  const id = txt.match(/(?<=\/s\/)[0-9a-zA-Z]{11,12}/)
-  if (id && id.length > 0) ret.id = id[0]
-  const pwd = txt.match(/(?<=提取码[^0-9a-zA-Z]{0,6})[0-9a-zA-Z]{4}/)
-  if (pwd && pwd.length > 0) ret.pwd = pwd[0]
-  return ret
-}

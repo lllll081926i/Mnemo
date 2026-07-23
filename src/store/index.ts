@@ -19,7 +19,6 @@ import useUploadedStore from '../down/UploadedStore'
 import useDownedStore from '../down/DownedStore'
 import useDowningStore from '../down/DowningStore'
 
-import type { AsyncModel } from './footstore'
 import useFootStore from './footstore'
 
 const pinia = createPinia()
@@ -39,7 +38,6 @@ export {
   usePanTreeStore,
   usePanFileStore,
   useFootStore,
-  AsyncModel,
   useUploadingStore,
   useUploadedStore,
   useDowningStore,

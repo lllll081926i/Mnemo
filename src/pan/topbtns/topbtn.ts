@@ -4,7 +4,7 @@ import AliFileCmd from '../../aliapi/filecmd'
 
 import DebugLog from '../../utils/debuglog'
 import message from '../../utils/message'
-import { modalCreatNewShareLink, modalDownload, modalPassword, modalSearchPan, modalSelectPanDir, modalUpload } from '../../utils/modal'
+import { modalCreatNewShareLink, modalDownload, modalPassword, modalSelectPanDir, modalUpload } from '../../utils/modal'
 import { ArrayKeyList } from '../../utils/utils'
 import PanDAL from '../pandal'
 import usePanTreeStore from '../pantreestore'
@@ -630,7 +630,7 @@ export async function menuFileColorChange(istree: boolean, color: string) {
   topbtnLock.delete('menuFileColorChange')
 }
 
-export function menuCreatShare(istree: boolean, shareby: string, driveType: string) {
+export function menuCreatShare(istree: boolean, shareby: string) {
   const selectedData = PanDAL.GetPanSelectedData(istree)
   if (selectedData.isError) {
     message.error('无法创建分享：当前文件夹无效，请先打开网盘中的文件夹')
@@ -688,11 +688,11 @@ export function menuCreatShare(istree: boolean, shareby: string, driveType: stri
       okText: '确认',
       cancelText: '取消',
       onOk(e) {
-        modalCreatNewShareLink(shareby, driveType, list)
+        modalCreatNewShareLink(shareby, list)
       }
     })
   } else {
-    modalCreatNewShareLink(shareby, driveType, list)
+    modalCreatNewShareLink(shareby, list)
   }
 }
 

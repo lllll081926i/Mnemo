@@ -52,6 +52,13 @@ const quickEntryKey = (kind: 'folder' | 'file', driveId: string, fileId: string)
 
 const quickEntryIdentity = (entry: Pick<QuickFileEntry, 'drive_id' | 'file_id' | 'key' | 'kind'>) => `${entry.kind || 'folder'}|${entry.drive_id || ''}|${entry.file_id || entry.key || ''}`
 
+const isLocalTagColorClass = (value: string) => /^c[0-9a-f]{3,8}$/i.test(value)
+
+const removeLocalTagColorClasses = (description: string) => String(description || '')
+  .split(/\s+/)
+  .filter((token) => token && !isLocalTagColorClass(token))
+  .join(' ')
+
 const RefreshLock = new Set<string>()
 export default class PanDAL {
   static async aReLoadProviderDrive(token: ITokenInfo): Promise<void> {
@@ -731,20 +738,18 @@ export default class PanDAL {
   private static applyLocalQuickTags(userId: string, items: IAliGetFileModel[]) {
     if (!items.length) return items
     const quick = this.readQuickFileList(userId)
-    if (!quick.length) return items
     const tagMap = new Map<string, string>()
     for (const entry of quick) {
       if (!entry.tag || !entry.tagColor) continue
       tagMap.set(quickEntryIdentity(entry), entry.tagColor.replace('#', 'c'))
     }
-    if (!tagMap.size) return items
     for (const item of items) {
       const colorClass = tagMap.get(`${item.isDir ? 'folder' : 'file'}|${item.drive_id}|${item.file_id}`)
-      if (!colorClass) continue
-      const description = item.description || ''
-      if (description.includes(colorClass)) continue
+      const description = removeLocalTagColorClasses(item.description || '')
+      const nextDescription = colorClass ? (description ? `${description} ${colorClass}` : colorClass) : description
+      if (nextDescription === (item.description || '')) continue
       try {
-        item.description = description ? `${description} ${colorClass}` : colorClass
+        item.description = nextDescription
       } catch {
         // 个别列表项可能被冻结，跳过行内标签展示不影响标签本身
       }

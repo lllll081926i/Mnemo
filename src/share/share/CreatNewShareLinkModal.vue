@@ -10,7 +10,7 @@ import AliShare from '../../aliapi/share'
 import { ArrayKeyList } from '../../utils/utils'
 import { copyToClipboard } from '../../utils/electronhelper'
 import { GetShareUrlFormate } from '../../utils/shareurl'
-import { getDriveProviderCapabilities, resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'
+import { resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'
 
 const formRef = ref()
 const okLoading = ref(false)
@@ -35,10 +35,6 @@ const props = defineProps({
     required: true
   },
   sharetype: {
-    type: String,
-    required: true
-  },
-  driveType: {
     type: String,
     required: true
   },

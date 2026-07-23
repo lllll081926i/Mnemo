@@ -1,7 +1,6 @@
 import { humanExpiration } from '../utils/format'
 import { isPikPakUser } from './utils'
-import { IAliShareAnonymous, IAliShareFileItem, IAliShareItem } from './alimodels'
-import type { IAliBatchResult } from './models'
+import { IAliShareItem } from './alimodels'
 import { apiPikPakShareCreate } from '../pikpak/share'
 import { getDriveProviderLabel, resolveDriveProvider } from '../utils/driveProvider'
 import { apiOneDriveShareCreate } from '../onedrive/share'
@@ -40,68 +39,7 @@ const createProviderShareItem = (drive_id: string, file_id_list: string[], share
   is_share_saved: false, share_saved: ''
 })
 
-export interface IAliShareFileResp {
-  items: IAliShareFileItem[]
-  itemsKey: Set<string>
-  punished_file_count: number
-  next_marker: string
-  m_user_id: string
-  m_share_id: string
-  dirID: string
-  dirName: string
-}
-
-export interface UpdateShareModel {
-  share_id: string
-  share_pwd: string
-  expiration: string
-  share_name: string
-}
-
 export default class AliShare {
-  static async ApiShareFileCheckAvailable(_user_id: string, _drive_id: string, _file_id_list: string[]) {
-    return []
-  }
-
-  static async ApiGetShareAnonymous(_share_id: string, _share_pwd = ''): Promise<IAliShareAnonymous> {
-    return {
-      shareinfo: {
-        share_id: '',
-        creator_id: '',
-        creator_name: '',
-        creator_phone: '',
-        display_name: '',
-        expiration: '',
-        file_count: 0,
-        share_name: '',
-        created_at: '',
-        updated_at: '',
-        vip: '',
-        is_photo_collection: false,
-        album_id: ''
-      },
-      shareinfojson: '',
-      error: '当前版本不支持导入第三方分享链接'
-    }
-  }
-
-  static async ApiGetShareToken(_share_id: string, _pwd: string): Promise<string> {
-    return '，当前版本不支持导入第三方分享链接'
-  }
-
-  static async ApiShareFileList(_share_id: string, _share_token: string, dirID: string): Promise<IAliShareFileResp> {
-    return {
-      items: [],
-      itemsKey: new Set(),
-      punished_file_count: 0,
-      next_marker: '',
-      m_user_id: '',
-      m_share_id: '',
-      dirID,
-      dirName: ''
-    }
-  }
-
   static async ApiCreatShare(user_id: string, drive_id: string, expiration: string, share_pwd: string, share_name: string, file_id_list: string[]): Promise<string | IAliShareItem> {
     if (!user_id || !drive_id || file_id_list.length == 0) return '创建分享链接失败数据错误'
     if (isPikPakUser(user_id) || drive_id === 'pikpak') {
@@ -130,21 +68,5 @@ export default class AliShare {
       }
     }
     return `${getDriveProviderLabel(provider)} 暂不支持创建分享链接`
-  }
-
-  static async ApiCreatShareBatch(_user_id: string, _drive_id: string, _expiration: string, _share_pwd: string, _file_id_list: string[]): Promise<IAliBatchResult> {
-    return { count: 0, async_task: [], reslut: [], error: [] }
-  }
-
-  static async ApiCancelShareBatch(_user_id: string, _share_idList: string[]): Promise<string[]> {
-    return []
-  }
-
-  static async ApiUpdateShareBatch(_user_id: string, _share_idList: string[], _expirationList: string[], _share_pwdList: string[], _share_nameList?: string[]): Promise<UpdateShareModel[]> {
-    return []
-  }
-
-  static async ApiSaveShareFilesBatch(_share_id: string, _share_token: string, _user_id: string, _drive_id: string, _parent_file_id: string, _file_idList: string[]): Promise<string> {
-    return '当前版本不支持转存第三方分享'
   }
 }

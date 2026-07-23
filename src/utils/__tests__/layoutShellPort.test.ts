@@ -9,12 +9,11 @@ const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8').repl
 describe('deep layout shell port', () => {
   it('does not ship Office online preview surfaces', () => {
     const html = read('index.html')
-    const previewHtml = read('public/main2.html')
     const openFile = read('src/utils/openfile.ts')
     const app = read('src/App.vue')
 
     expect(html).not.toContain('aliyun-web-office-sdk.min.js')
-    expect(previewHtml).not.toContain('aliyun-web-office-sdk.min.js')
+    expect(fs.existsSync(path.join(root, 'public/main2.html'))).toBe(false)
     expect(fs.existsSync(path.join(root, 'src/layout/PageOffice.vue'))).toBe(false)
     expect(fs.existsSync(path.join(root, 'src/layout/PageDocx.vue'))).toBe(false)
     expect(fs.existsSync(path.join(root, 'src/layout/PageSheet.vue'))).toBe(false)
@@ -28,13 +27,12 @@ describe('deep layout shell port', () => {
 
   it('loads Prism only for formatted code previews', () => {
     const html = read('index.html')
-    const previewHtml = read('public/main2.html')
     const code = read('src/layout/PageCode.vue')
 
+    expect(fs.existsSync(path.join(root, 'public/main.html'))).toBe(false)
+    expect(fs.existsSync(path.join(root, 'public/main2.html'))).toBe(false)
     expect(html).not.toContain("src='/prism.js'")
     expect(html).not.toContain("href='/prism-vsc-dark-plus.css'")
-    expect(previewHtml).not.toContain('prism.js')
-    expect(previewHtml).not.toContain('prism-vsc-dark-plus.css')
     expect(code).toContain("const PRISM_SCRIPT_URL = './prism.js'")
     expect(code).toContain('loadPrism')
     expect(code).toContain('format.value = !noformat')
@@ -43,14 +41,10 @@ describe('deep layout shell port', () => {
 
   it('loads pinyin search support only for the main drive window', () => {
     const html = read('index.html')
-    const mainHtml = read('public/main.html')
-    const previewHtml = read('public/main2.html')
     const mainRuntime = read('src/layout/PageMain.ts')
     const utils = read('src/utils/utils.ts')
 
     expect(html).not.toContain("src='/pinyinlite_full.min.js'")
-    expect(mainHtml).not.toContain('pinyinlite_full.min.js')
-    expect(previewHtml).not.toContain('pinyinlite_full.min.js')
     expect(mainRuntime).toContain('await LoadPinyinLite()')
     expect(utils).toContain("const PINYIN_LITE_URL = './pinyinlite_full.min.js'")
     expect(utils).toContain("if (typeof pinyinlite !== 'function') return input.toLowerCase()")
@@ -507,6 +501,33 @@ describe('deep layout shell port', () => {
       if (source.includes('#switcherIcon')) expect(source).toContain('iconarrow-right-2-icon')
       expect(source).not.toMatch(/<i[^>]*iconfont[^>]*>/)
     }
+  })
+
+  it('sets the Mnemo identity before creating Windows windows and shortcuts', () => {
+    const entry = read('electron/main/index.ts')
+    const launch = read('electron/main/launch.ts')
+    const windowSource = read('electron/main/core/window.ts')
+
+    expect(entry).toContain("app.setName('Mnemo')")
+    expect(entry).toContain("app.setAppUserModelId('com.mnemo.app')")
+    expect(entry).toContain("process.title = 'Mnemo'")
+    expect(launch).toContain("app.setName('Mnemo')")
+    expect(launch).not.toContain("app.name = 'Mnemo'")
+    expect(launch).toContain("process.title = 'Mnemo'")
+    expect(windowSource).toContain("title: 'Mnemo'")
+    expect(windowSource).not.toContain('Electron/22.3.24')
+  })
+
+  it('uses a responsive property information layout instead of fixed three-column rows', () => {
+    const modal = read('src/pan/topbtns/ShuXingModal.vue')
+
+    expect(modal).toContain('property-dialog')
+    expect(modal).toContain('property-grid')
+    expect(modal).toContain('property-path')
+    expect(modal).toContain('minmax(0, 1fr)')
+    expect(modal).not.toContain("style='width: 520px")
+    expect(modal).not.toContain("flex='170px'")
+    expect(modal).not.toContain("flex='180px'")
   })
 
   it('uses the operating system proxy by default and applies proxy modes explicitly', () => {

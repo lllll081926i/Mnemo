@@ -31,13 +31,6 @@ export interface IPageImage {
   imageList: IAliGetFileModel[]
 }
 
-export interface IPageVideoXBT {
-  user_id: string
-  drive_id: string
-  file_id: string
-  file_name: string
-}
-
 export interface IPageVideoPlaylistEntry {
   user_id: string
   drive_id: string
@@ -115,7 +108,6 @@ export interface AppState {
   pagePdf?: IPagePdf
   pageCode?: IPageCode
   pageImage?: IPageImage
-  pageVideoXBT?: IPageVideoXBT
   pageVideo?: IPageVideo
   pageMusic?: IPageMusic
 }

@@ -1,4 +1,4 @@
-import { useAppStore, useFootStore, useSettingStore } from '../store'
+import { useAppStore, useSettingStore } from '../store'
 import AppCache from '../utils/appcache'
 import DownDAL from '../down/DownDAL'
 import UploadDAL from '../transfer/uploaddal'
@@ -84,7 +84,6 @@ export const WinMsg = async (arg: any) => {
 let runTime = Math.floor(Date.now() / 1000)
 let chkClearDownLogTime = 0
 let chkTokenTime = 0
-let chkTaskTime = 0
 
 /**
  * 时间事件，一但被调用每秒执行一次 <br/>
@@ -119,13 +118,6 @@ function timeEvent() {
     UserDAL.aRefreshAllUserToken().catch((err: any) => {
       DebugLog.mSaveDanger('aRefreshAllUserToken', err)
     })
-  }
-
-  // 异步任务，2s检查一次
-  chkTaskTime++
-  if (nowTime - runTime > 6 && chkTaskTime >= 2) {
-    chkTaskTime = 0
-    useFootStore().aUpdateTask()
   }
 
   // 刷新下载速度

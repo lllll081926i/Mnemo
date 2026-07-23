@@ -127,8 +127,6 @@ window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {
     appStore.pagePdf = args.data
   } else if (args.page == 'PageImage') {
     appStore.pageImage = args.data
-  } else if (args.page == 'PageVideoXBT') {
-    appStore.pageVideoXBT = args.data
   } else if (args.page == 'PageVideo') {
     appStore.pageVideo = args.data
   } else if (args.page == 'PageMusic') {

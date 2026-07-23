@@ -20,7 +20,7 @@ import TrashTopbtn from './menus/TrashTopbtn.vue'
 import message from '../utils/message'
 import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
-import { TestButton } from '../utils/mosehelper'
+import { isLeftClick, isMouseButton } from '../utils/mousehelper'
 import usePanTreeStore from './pantreestore'
 import { GetDriveID, GetDriveType } from '../aliapi/utils'
 import { xorWith } from 'lodash'
@@ -137,7 +137,7 @@ keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestCtrl('e', state.KeyDownEvent, () => currentProviderCapabilities.value.rename && modalRename(false, panfileStore.IsListSelectedMulti, false))) return
   if (
     TestCtrl('s', state.KeyDownEvent, () => {
-      menuCreatShare(false, 'pan', 'resource_root')
+      menuCreatShare(false, 'pan')
     })
   )
     return
@@ -152,7 +152,7 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
   if (
-    TestButton(0, mouseEvent, () => {
+    isLeftClick(mouseEvent, () => {
       if (mouseEvent.srcElement) {
         // @ts-ignore
         const className = mouseEvent.srcElement.className
@@ -163,7 +163,7 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
     })
   )
     return
-  if (TestButton(3, mouseEvent, () => handleBack())) return
+  if (isMouseButton(3, mouseEvent, () => handleBack())) return
 })
 const handleRefresh = () => {
   let album_id = ''
@@ -205,7 +205,7 @@ const handleBack = () => {
   inputpicType.value = panTreeStore.selectDir.album_type || 'pic_root'
 }
 const handleHome = () => {
-  PanDAL.aReLoadOneDirToShow('', 'backup_root', false)
+  PanDAL.aReLoadOneDirToShow('', 'root', false)
 }
 const handleSelectAll = () => {
   panfileStore.mSelectAll()

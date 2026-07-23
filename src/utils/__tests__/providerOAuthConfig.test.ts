@@ -78,9 +78,13 @@ describe('provider OAuth runtime configuration', () => {
     expect(envExample).toContain('DROPBOX_APP_SECRET=')
   })
 
-  it('keeps the current drive id when a single-root provider node is selected', () => {
+  it('keeps directory selection on the current provider root', () => {
     const selector = read('src/pan/topbtns/SelectPanDirModal.vue')
     expect(selector).toContain('const selectedDriveId = GetDriveID(user_id.value, parentNode.key || key) || drive_id.value')
     expect(selector).toContain('drive_id: selectedDriveId')
+    expect(selector).not.toContain('backup_root')
+    expect(selector).not.toContain('resource_root')
+    expect(selector).not.toContain('securityHideBackupDrive')
+    expect(selector).not.toContain('securityHideResourceDrive')
   })
 })

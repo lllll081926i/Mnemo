@@ -75,7 +75,7 @@ const canCreateShare = computed(() => hasSelection.value && !isPic.value && prop
       <IconFont name="icondownload" />
       下载
     </a-button>
-    <a-button v-if="canCreateShare" type="text" size="small" tabindex="-1" title="Ctrl+S" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
+    <a-button v-if="canCreateShare" type="text" size="small" tabindex="-1" title="Ctrl+S" @click="() => menuCreatShare(istree, 'pan')">
       <IconFont name="iconfenxiang" />
       分享
     </a-button>

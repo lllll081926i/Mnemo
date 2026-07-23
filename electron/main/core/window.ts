@@ -5,7 +5,7 @@ import is from 'electron-is'
 import { ShowErrorAndRelaunch } from './dialog'
 
 const DEBUGGING = !app.isPackaged
-export const ua = 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) aDrive/4.12.0 Chrome/108.0.5359.215 Electron/22.3.24 Safari/537.36'
+export const ua = `Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Mnemo/${app.getVersion()} Chrome/120.0.0.0 Safari/537.36`
 export const Referer = 'https://www.aliyundrive.com/'
 export const AppWindow: {
   mainWindow: BrowserWindow | undefined
@@ -180,6 +180,7 @@ export function createElectronWindow(width: number, height: number, center: bool
   const allowWorkerNodeIntegration = page === 'main'
   const win = new BrowserWindow({
     show: false,
+    title: 'Mnemo',
     width: width,
     height: height,
     minWidth: width > 680 ? 680 : width,
@@ -208,12 +209,14 @@ export function createElectronWindow(width: number, height: number, center: bool
       preload: getPreloadPath()
     }
   })
+  win.setTitle('Mnemo')
   win.removeMenu()
   if (DEBUGGING) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || ''
     win.loadURL(page === 'worker' ? new URL('worker.html', devUrl).toString() : devUrl, { userAgent: ua, httpReferrer: Referer })
   } else {
-    win.loadURL('file://' + getAsarPath('dist/' + page + '.html'), {
+    const htmlFile = page === 'worker' ? 'worker.html' : 'index.html'
+    win.loadURL('file://' + getAsarPath('dist/' + htmlFile), {
       userAgent: ua,
       httpReferrer: Referer
     })

@@ -1,10 +1,6 @@
 import path from 'path'
 import { throttle } from './debounce'
 
-export function getFromClipboard(): string {
-  return window.Electron.clipboard.readText() as string
-}
-
 export function copyToClipboard(text: string): void {
   window.Electron.clipboard.writeText(text, 'clipboard')
 }
@@ -16,17 +12,10 @@ export function openExternal(url: string): void {
 }
 
 const ElectronPath = {
-  
   AppUserData: '',
-  
-  AppResourcesPath: '',
-  
   AppPlatform: '',
-  
   AppArch: '',
-  
   AppExecPath: '',
-
   AppUserName: '',
   env: ''
 }
@@ -39,7 +28,6 @@ function LoadElectronPath(): void {
     ElectronPath.AppExecPath = process.execPath
     ElectronPath.env = JSON.stringify(process.env)
     ElectronPath.AppUserName = process.env.USERNAME || process.env.USER || ''
-    ElectronPath.AppResourcesPath = (process as any).resourcesPath
     if (window.WebPlatformSync) {
       window.WebPlatformSync((data: { appPath: string; execPath: string }) => {
         ElectronPath.AppUserData = data.appPath
@@ -76,24 +64,6 @@ export function getSystemDownloadsPath(): string {
     }
   } catch {}
   return downloadsPath
-}
-
-export function getResourcesPath(fileName: string): string {
-  try {
-    LoadElectronPath()
-    return path.join(ElectronPath.AppResourcesPath, fileName) as string
-  } catch {
-    return ''
-  }
-}
-
-export function getAppNewPath(): string {
-  try {
-    LoadElectronPath()
-    return path.join(ElectronPath.AppResourcesPath, 'app.new') as string
-  } catch {
-    return ''
-  }
 }
 
 let ProgressBarBy = ''

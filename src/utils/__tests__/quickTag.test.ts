@@ -69,9 +69,31 @@ describe('quick tag entries', () => {
   })
 
   it('clears the tag and removes the entry when tagging with empty color', () => {
-    PanDAL.updateLocalQuickTag([makeFile('file-1', '视频A.mp4')], '鹅冠红', '#df5659')
-    PanDAL.updateLocalQuickTag([makeFile('file-1', '视频A.mp4')], '', '')
+    const file = makeFile('file-1', '视频A.mp4')
+    const panfileStore = usePanFileStore()
+    panfileStore.$patch({ DriveID: 'pikpak', DirID: 'pikpak_root' })
+    panfileStore.mSaveDirFileLoadingPart(0, { m_drive_id: 'pikpak', dirID: 'pikpak_root', items: [file] } as any, 1)
+    panfileStore.mSaveDirFileLoadingFinish('pikpak', 'pikpak_root', [file], 1)
+
+    PanDAL.updateLocalQuickTag([file], '鹅冠红', '#df5659')
+    expect(usePanTreeStore().quickData[0]).toMatchObject({ tag: '鹅冠红', tagColor: '#df5659' })
+    expect(file.description).toContain('cdf5659')
+
+    PanDAL.updateLocalQuickTag([file], '', '')
     expect(PanDAL.getQuickFileList()).toHaveLength(0)
+    expect(usePanTreeStore().quickData).toHaveLength(0)
+    expect(file.description).not.toContain('cdf5659')
+  })
+
+  it('updates the existing shortcut tag in place without waiting for a directory reload', () => {
+    const file = makeFile('file-2', '视频B.mp4')
+    PanDAL.addLocalQuickFiles([file])
+    expect(usePanTreeStore().quickData[0]).toMatchObject({ tag: '', tagColor: '' })
+
+    PanDAL.updateLocalQuickTag([file], '靛青', '#5966df')
+
+    expect(usePanTreeStore().quickData[0]).toMatchObject({ tag: '靛青', tagColor: '#5966df' })
+    expect(PanDAL.getQuickFileList()[0]).toMatchObject({ favorite: true, tag: '靛青', tagColor: '#5966df' })
   })
 
   it('tags the selected file through the real menu flow so it shows in 快捷方式', async () => {

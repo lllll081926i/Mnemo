@@ -6,7 +6,8 @@ import { copyToClipboard } from '../../utils/electronhelper'
 import message from '../../utils/message'
 import { modalCloseAll } from '../../utils/modal'
 import { humanDateTimeDateStr, humanSize, humanTime } from '../../utils/format'
-import { ref, watch } from 'vue'
+import { Braces, Copy, Download, FileText, Folder, Link2, RefreshCw } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
 import DebugLog from '../../utils/debuglog'
 import { GetDriveID, isPikPakUser } from '../../aliapi/utils'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from '../../utils/proxyhelper'
@@ -29,10 +30,27 @@ const props = defineProps({
   }
 })
 
-const okLoading = ref(false)
+const loading = ref(false)
+const formateSize = ref(true)
 const fileInfo = ref<IAliFileItem>()
 const dirInfo = ref<IAliGetForderSizeModel>()
 const dirPath = ref('')
+
+const fileTypeLabel = computed(() => fileInfo.value?.type === 'folder' ? '文件夹' : '文件')
+const displaySize = computed(() => {
+  const size = fileInfo.value?.size || dirInfo.value?.size || 0
+  return formateSize.value ? humanSize(size) : `${size} 字节`
+})
+
+const folderStatsText = computed(() => {
+  if (!dirInfo.value) return '正在统计子文件…'
+  return `子文件大小：${humanSize(dirInfo.value.size)}，子文件：${dirInfo.value.file_count} 个，子文件夹：${dirInfo.value.folder_count} 个${dirInfo.value.reach_limit ? '（已达统计上限）' : ''}`
+})
+
+const propertyText = (value: unknown) => {
+  if (value === undefined || value === null || value === '') return '—'
+  return String(value)
+}
 
 // 后台统计完成时刷新当前文件夹的结果
 watch(folderStatsVersion, () => {
@@ -43,14 +61,16 @@ watch(folderStatsVersion, () => {
   if (cached) dirInfo.value = cached
 })
 const handleOpen = async () => {
+  loading.value = true
+  fileInfo.value = undefined
+  dirInfo.value = undefined
+  dirPath.value = ''
   const pantreeStore = usePanTreeStore()
   let file_id = ''
   let drive_id = ''
-  let file_desc = ''
   if (props.istree) {
     file_id = pantreeStore.selectDir.file_id
     drive_id = pantreeStore.selectDir.drive_id
-    file_desc = pantreeStore.selectDir.description || ''
   } else {
     const panfileStore = usePanFileStore()
     let fileList = panfileStore.GetSelected()
@@ -59,16 +79,20 @@ const handleOpen = async () => {
       panfileStore.mKeyboardSelect(focus, false, false)
       fileList = panfileStore.GetSelected()
     }
-    file_id = fileList[0].file_id
-    drive_id = fileList[0].drive_id
-    file_desc = fileList[0].description || ''
+    if (fileList.length > 0) {
+      file_id = fileList[0].file_id
+      drive_id = fileList[0].drive_id
+    }
   }
   if (props.ispic) {
     drive_id = GetDriveID(pantreeStore.user_id, 'pic')
   }
   if (!file_id) {
     message.error('没有选中任何文件')
-  } else {
+    loading.value = false
+    return
+  }
+  try {
     const isPikPak = isPikPakUser(pantreeStore.user_id) || drive_id === 'pikpak'
     if (isPikPak) {
       const pathList = TreeStore.GetDirPath(drive_id, file_id)
@@ -117,12 +141,14 @@ const handleOpen = async () => {
       dirInfo.value = getCachedFolderStats(pantreeStore.user_id, drive_id, file_id)
       void requestFolderStats(pantreeStore.user_id, drive_id, file_id)
     }
+  } finally {
+    loading.value = false
   }
 }
 
 const handleClose = () => {
 
-  if (okLoading.value) okLoading.value = false
+  if (loading.value) loading.value = false
   dirInfo.value = { size: 0, folder_count: 0, file_count: 0, reach_limit: undefined }
   fileInfo.value = undefined
   dirPath.value = ''
@@ -166,7 +192,6 @@ const handleAudioPlay = () => {
   useFootStore().mSaveAudioUrl('')
 }
 
-const formateSize = ref(true)
 const handleSize = () => {
   formateSize.value = !formateSize.value
 }
@@ -179,6 +204,12 @@ const handleCopyFileName = () => {
   if (fileInfo.value?.name) {
     copyToClipboard(fileInfo.value?.name)
     message.success('文件名已复制到剪切板')
+  }
+}
+const handleCopyPath = () => {
+  if (dirPath.value) {
+    copyToClipboard(dirPath.value)
+    message.success('路径已复制到剪切板')
   }
 }
 const handleCopyJson = () => {
@@ -223,251 +254,388 @@ const handleCopyThumbnail = () => {
 </script>
 
 <template>
-  <a-modal :visible='visible' modal-class='modalclass shuxingmodal' :footer='false' :unmount-on-close='true'
+  <a-modal :visible='visible' modal-class='modalclass shuxingmodal property-modal' :footer='false' :unmount-on-close='true'
            :mask-closable='false' @cancel='handleHide' @before-open='handleOpen' @close='handleClose'>
     <template #title>
       <span class='modaltitle'>查看属性</span>
     </template>
-    <div class='modalbody' style='width: 520px; max-height: calc(80vh - 100px); overflow-y: scroll'>
-      <a-row>
-        <a-col flex='auto'> 路径：</a-col>
-      </a-row>
-      <div class='pathtitle'>
-        {{ dirPath }}
-      </div>
-      <div class='h16'></div>
 
-      <a-row>
-        <a-col flex='auto'> 文件名：</a-col>
-      </a-row>
-      <div class='shuxingbox'>
-        <span class='shuxingtitle'>{{ fileInfo?.name }}</span>
-        <a-button type='outline' size='mini' tabindex='-1' title='复制' @click='handleCopyFileName'>复制</a-button>
-      </div>
-      <div class='h16'></div>
+    <div class='modalbody property-dialog'>
+      <div class='property-scroll'>
+        <section class='property-hero'>
+          <div class='property-kind-icon'>
+            <Folder v-if="fileInfo?.type === 'folder'" :size='22' />
+            <FileText v-else :size='22' />
+          </div>
+          <div class='property-hero-copy'>
+            <span class='property-kicker'>{{ fileTypeLabel }}</span>
+            <h2 class='property-name'>{{ propertyText(fileInfo?.name) }}</h2>
+          </div>
+          <a-spin v-if='loading' :size='20' />
+        </section>
 
-      <a-row>
-        <a-col flex='110px'> 文件大小： <IconFont name="iconchakan" class="link" title='点击切换格式' @click='handleSize' />
-        </a-col>
-        <a-col flex='auto'></a-col>
-        <a-col flex='170px'> 创建日期：</a-col>
-        <a-col flex='auto'></a-col>
-        <a-col flex='180px'> 更新日期：</a-col>
-      </a-row>
-      <a-row>
-        <a-col flex='110px'>
-          <a-input size='small' tabindex='-1'
-                   :model-value="formateSize ? humanSize(fileInfo?.size || dirInfo?.size || 0) : (fileInfo?.size || dirInfo?.size || 0) + ' 字节'"
-                   readonly />
-        </a-col>
-        <a-col flex='auto'></a-col>
-        <a-col flex='170px'>
-          <a-input size='small' tabindex='-1' :model-value='humanDateTimeDateStr(fileInfo?.created_at)' readonly />
-        </a-col>
-        <a-col flex='auto'></a-col>
-        <a-col flex='180px'>
-          <a-input size='small' tabindex='-1' :model-value='humanDateTimeDateStr(fileInfo?.updated_at)' readonly />
-        </a-col>
-      </a-row>
-      <div class='h16'></div>
+        <section class='property-section'>
+          <div class='property-section-heading'>
+            <span>路径</span>
+            <a-button type='text' size='mini' title='复制路径' :disabled='!dirPath' @click='handleCopyPath'>
+              <Copy :size='14' />
+            </a-button>
+          </div>
+          <div class='property-path'>{{ propertyText(dirPath) }}</div>
+        </section>
 
-      <div v-if="fileInfo?.type == 'file'">
-        <a-row>
-          <a-col flex='110px'> 分类：</a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='170px'> 媒体类型：</a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='180px'> 描述：</a-col>
-        </a-row>
-        <a-row>
-          <a-col flex='110px'>
-            <a-input size='small' tabindex='-1' :model-value='fileInfo?.category' readonly />
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='170px'>
-            <a-input size='small' tabindex='-1' :model-value='fileInfo?.mime_type' readonly />
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='180px'>
-            <a-input size='small' tabindex='-1' :model-value='fileInfo?.description' readonly />
-          </a-col>
-        </a-row>
-        <div class='h16'></div>
+        <section class='property-section'>
+          <div class='property-section-heading'>
+            <span>文件身份</span>
+            <a-button type='text' size='mini' title='复制文件名' :disabled='!fileInfo?.name' @click='handleCopyFileName'>
+              <Copy :size='14' />
+            </a-button>
+          </div>
+          <div class='property-name-row'>
+            <span class='property-name-value'>{{ propertyText(fileInfo?.name) }}</span>
+            <span class='property-type-badge'>{{ fileTypeLabel }}</span>
+          </div>
+        </section>
 
-        <a-row>
-          <a-col flex='1'> SHA1：</a-col>
-        </a-row>
-        <a-row>
-          <a-col flex='1'>
-            <a-input size='small' class='small' tabindex='-1' :model-value='fileInfo?.content_hash' readonly />
-          </a-col>
-        </a-row>
-      </div>
-      <div v-else>
-        <a-row>
-          <a-col flex='1'> 文件夹信息：</a-col>
-        </a-row>
-        <a-row>
-          <a-col flex='1'>
-            <a-input size='small' class='small' tabindex='-1'
-                     :model-value="dirInfo ? '子文件大小：' + humanSize(dirInfo.size) + '，子文件：' + dirInfo.file_count + '个，子文件夹：' + dirInfo.folder_count + '个' + (dirInfo.reach_limit ? '（已达统计上限）' : '') : '正在统计子文件…'"
-                     readonly />
-          </a-col>
-        </a-row>
-      </div>
+        <section class='property-section'>
+          <div class='property-section-heading'><span>基本信息</span></div>
+          <div class='property-grid'>
+            <div class='property-field'>
+              <span class='property-label'>文件大小</span>
+              <span class='property-value property-value-with-action'>
+                {{ displaySize }}
+                <button class='property-icon-button' type='button' title='切换大小格式' @click='handleSize'>
+                  <RefreshCw :size='14' />
+                </button>
+              </span>
+            </div>
+            <div class='property-field'>
+              <span class='property-label'>创建日期</span>
+              <span class='property-value'>{{ propertyText(humanDateTimeDateStr(fileInfo?.created_at)) }}</span>
+            </div>
+            <div class='property-field'>
+              <span class='property-label'>更新日期</span>
+              <span class='property-value'>{{ propertyText(humanDateTimeDateStr(fileInfo?.updated_at)) }}</span>
+            </div>
+            <div v-if="fileInfo?.type === 'file'" class='property-field'>
+              <span class='property-label'>分类</span>
+              <span class='property-value'>{{ propertyText(fileInfo?.category) }}</span>
+            </div>
+            <div v-if="fileInfo?.type === 'file'" class='property-field'>
+              <span class='property-label'>媒体类型</span>
+              <span class='property-value'>{{ propertyText(fileInfo?.mime_type) }}</span>
+            </div>
+            <div v-if="fileInfo?.type === 'file'" class='property-field property-field-wide'>
+              <span class='property-label'>描述</span>
+              <span class='property-value property-value-multiline'>{{ propertyText(fileInfo?.description) }}</span>
+            </div>
+          </div>
+        </section>
 
-      <div v-if="fileInfo?.category == 'video'">
-        <div class='h16'></div>
-        <a-row>
-          <a-col flex='110px'> 分辨率：</a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='170px'> 视频时长：</a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='180px'> 制作日期：</a-col>
-        </a-row>
-        <a-row>
-          <a-col flex='110px'>
-            <a-input size='small' tabindex='-1'
-                     :model-value='makeFenBianLv(fileInfo?.video_media_metadata?.width, fileInfo?.video_media_metadata?.height)'
-                     readonly />
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='170px'>
-            <a-input size='small' tabindex='-1' :model-value='humanTime(fileInfo?.video_media_metadata?.duration)'
-                     readonly />
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='180px'>
-            <a-input size='small' tabindex='-1'
-                     :model-value='humanDateTimeDateStr(fileInfo?.video_media_metadata?.time)' readonly />
-          </a-col>
-        </a-row>
-      </div>
+        <section v-if="fileInfo?.type === 'folder'" class='property-section'>
+          <div class='property-section-heading'><span>文件夹统计</span></div>
+          <div class='property-stat'>{{ folderStatsText }}</div>
+        </section>
 
-      <div v-if="fileInfo?.category == 'image'">
-        <div class='h16'></div>
-        <a-row>
-          <a-col flex='110px'> 分辨率：</a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='170px'> 拍摄设备：</a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='180px'> 拍摄日期：</a-col>
-        </a-row>
-        <a-row>
-          <a-col flex='110px'>
-            <a-input size='small' tabindex='-1'
-                     :model-value='makeFenBianLv(fileInfo?.image_media_metadata?.width, fileInfo?.image_media_metadata?.height)'
-                     readonly />
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='170px'>
-            <a-input size='small' tabindex='-1' :model-value='makeImageSheBei(fileInfo?.image_media_metadata?.exif)'
-                     readonly />
-          </a-col>
-          <a-col flex='auto'></a-col>
-          <a-col flex='180px'>
-            <a-input size='small' tabindex='-1' :model-value='makeImageShiJian(fileInfo?.image_media_metadata?.exif)'
-                     readonly />
-          </a-col>
-        </a-row>
-      </div>
+        <section v-if="fileInfo?.type === 'file'" class='property-section'>
+          <div class='property-section-heading'><span>文件校验</span></div>
+          <div class='property-field property-field-wide'>
+            <span class='property-label'>SHA1</span>
+            <span class='property-value property-value-multiline'>{{ propertyText(fileInfo?.content_hash) }}</span>
+          </div>
+        </section>
 
-      <div v-if="fileInfo?.category == 'audio'">
-        <div class='h16'></div>
-        <div width='100%'>
-          <audio controls style='width: 100%; height: 32px' :src='fileInfo?.thumbnail' @play='handleAudioPlay'>
+        <section v-if="fileInfo?.category === 'video'" class='property-section'>
+          <div class='property-section-heading'><span>视频元数据</span></div>
+          <div class='property-grid'>
+            <div class='property-field'>
+              <span class='property-label'>分辨率</span>
+              <span class='property-value'>{{ propertyText(makeFenBianLv(fileInfo?.video_media_metadata?.width, fileInfo?.video_media_metadata?.height)) }}</span>
+            </div>
+            <div class='property-field'>
+              <span class='property-label'>视频时长</span>
+              <span class='property-value'>{{ propertyText(humanTime(fileInfo?.video_media_metadata?.duration)) }}</span>
+            </div>
+            <div class='property-field'>
+              <span class='property-label'>制作日期</span>
+              <span class='property-value'>{{ propertyText(humanDateTimeDateStr(fileInfo?.video_media_metadata?.time)) }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="fileInfo?.category === 'image'" class='property-section'>
+          <div class='property-section-heading'><span>图片元数据</span></div>
+          <div class='property-grid'>
+            <div class='property-field'>
+              <span class='property-label'>分辨率</span>
+              <span class='property-value'>{{ propertyText(makeFenBianLv(fileInfo?.image_media_metadata?.width, fileInfo?.image_media_metadata?.height)) }}</span>
+            </div>
+            <div class='property-field'>
+              <span class='property-label'>拍摄设备</span>
+              <span class='property-value property-value-multiline'>{{ propertyText(makeImageSheBei(fileInfo?.image_media_metadata?.exif)) }}</span>
+            </div>
+            <div class='property-field'>
+              <span class='property-label'>拍摄日期</span>
+              <span class='property-value'>{{ propertyText(makeImageShiJian(fileInfo?.image_media_metadata?.exif)) }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="fileInfo?.category === 'audio'" class='property-section property-audio'>
+          <div class='property-section-heading'><span>音频预览</span></div>
+          <audio controls :src='fileInfo?.thumbnail' @play='handleAudioPlay'>
             您的浏览器不支持 audio 元素
           </audio>
-        </div>
+        </section>
       </div>
 
-      <div class='h16'></div>
-    </div>
-    <div class='h16'></div>
-    <div class='modalfoot'>
-      <a-button type='outline' size='small' @click='handleCopyJson'>复制JSON</a-button>
-      <div style='flex-grow: 1'></div>
-      <template v-if="fileInfo?.description && !fileInfo?.description.includes('mnemoEncrypt')">
-        <a-button v-if="fileInfo?.category == 'video'" type='outline' size='small' @click='handleCopyThumbnail'>
-          复制M3U8链接
+      <footer class='property-actions'>
+        <a-button type='outline' size='small' @click='handleCopyJson'><Braces :size='14' />复制JSON</a-button>
+        <span class='property-actions-spacer'></span>
+        <template v-if="fileInfo?.description && !fileInfo?.description.includes('mnemoEncrypt')">
+          <a-button v-if="fileInfo?.category === 'video' || fileInfo?.category === 'audio'" type='outline' size='small' @click='handleCopyThumbnail'>
+            <Link2 :size='14' />复制预览链接
+          </a-button>
+        </template>
+        <a-button v-if="fileInfo?.type !== 'folder'" type='outline' size='small' @click='handleCopyDownload'>
+          <Download :size='14' />复制下载链接
         </a-button>
-        <a-button v-if="fileInfo?.category == 'audio'" type='outline' size='small' @click='handleCopyThumbnail'>
-          复制M3U8链接
-        </a-button>
-      </template>
-      <a-button v-if="fileInfo?.type !== 'folder'" type='outline' size='small' @click='handleCopyDownload'>
-        复制下载链接
-      </a-button>
+      </footer>
     </div>
   </a-modal>
 </template>
 
 <style>
-.shuxingbox {
-  width: 100%;
+.property-modal .arco-modal {
+  width: min(760px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px);
+}
 
-  background-color: rgba(132, 133, 141, 0.08);
-  border-radius: 4px;
-  -webkit-backdrop-filter: saturate(150%) blur(30px);
-  backdrop-filter: saturate(150%) blur(30px);
-  padding: 8px;
+.property-dialog {
   display: flex;
+  width: 100%;
+  max-height: min(720px, calc(82vh - 72px));
+  flex-direction: column;
+  min-width: 0;
+}
+
+.property-scroll {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 2px 4px;
+  scrollbar-width: thin;
+}
+
+.property-hero {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0 18px;
 }
 
-.shuxingtitle {
-  color: rosybrown;
-  margin: 0;
-  max-width: calc(100% - 48px);
-  display: inline-block;
-  font-size: 13px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  word-wrap: break-word;
-  user-select: text;
+.property-kind-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-fill-2);
+  color: rgb(var(--primary-6));
 }
 
-.shuxingbox button {
-  align-self: flex-end;
-  padding: 0 8px;
+.property-hero-copy {
+  min-width: 0;
+  flex: 1;
 }
 
-.pathtitle {
+.property-kicker,
+.property-label {
   color: var(--color-text-3);
-  margin: 0;
-  max-width: calc(100%);
-  display: inline-block;
   font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  word-wrap: break-word;
-  user-select: text;
+}
 
-  background-color: var(--color-fill-2);
-  width: 100%;
-  min-height: 32px;
+.property-name {
+  overflow-wrap: anywhere;
+  margin: 3px 0 0;
+  color: var(--color-text-1);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.property-section {
+  min-width: 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--color-border-2);
+}
+
+.property-section-heading {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.property-section-heading .arco-btn {
+  color: var(--color-text-3);
+}
+
+.property-path,
+.property-name-row,
+.property-stat {
+  min-width: 0;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 6px;
+  background: var(--color-fill-1);
+  color: var(--color-text-2);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.property-name-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px;
+  gap: 10px;
 }
 
-.h16 {
-  padding-top: 16px;
+.property-name-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-1);
+  font-weight: 500;
 }
 
-.shuxingmodal .arco-input-wrapper {
-  padding: 0 8px;
+.property-type-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgb(var(--primary-1));
+  color: rgb(var(--primary-6));
+  font-size: 11px;
 }
 
-.shuxingmodal .small .arco-input {
-  font-size: 13px !important;
-  line-height: 22px !important;
+.property-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
 }
 
-i.link {
+.property-field {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 6px;
+  background: var(--color-fill-1);
+}
+
+.property-field-wide {
+  grid-column: 1 / -1;
+}
+
+.property-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-1);
+  font-size: 13px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.property-value-multiline {
+  white-space: pre-wrap;
+}
+
+.property-value-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.property-icon-button {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: rgb(var(--primary-6));
   cursor: pointer;
+}
+
+.property-icon-button:hover {
+  background: var(--color-fill-3);
+}
+
+.property-audio audio {
+  width: 100%;
+  height: 36px;
+  margin-top: 10px;
+}
+
+.property-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-2);
+}
+
+.property-actions .arco-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.property-actions-spacer {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 560px) {
+  .property-dialog {
+    max-height: calc(84vh - 64px);
+  }
+
+  .property-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .property-field-wide {
+    grid-column: auto;
+  }
+
+  .property-actions {
+    flex-wrap: wrap;
+  }
+
+  .property-actions-spacer {
+    display: none;
+  }
 }
 </style>

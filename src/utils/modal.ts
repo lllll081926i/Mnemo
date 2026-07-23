@@ -10,8 +10,8 @@ export function modalCreatNewDir(dirtype: string, encType: string = '', parentdi
   useModalStore().showModal('creatdir', { dirtype, encType, parentdirid, callback })
 }
 
-export function modalCreatNewShareLink(sharetype: string, driveType: string, filelist: IAliGetFileModel[]) {
-  useModalStore().showModal('creatshare', { sharetype, driveType, filelist })
+export function modalCreatNewShareLink(sharetype: string, filelist: IAliGetFileModel[]) {
+  useModalStore().showModal('creatshare', { sharetype, filelist })
 }
 
 export function modalRename(istree: boolean, ismulti: boolean, ispic: boolean) {
@@ -33,14 +33,6 @@ export function modalShuXing(istree: boolean, ispic: boolean = false) {
   useModalStore().showModal('shuxing', { istree, ispic })
 }
 
-export function modalSearchPan(inputsearchType: string[]) {
-  useModalStore().showModal('searchpan', { inputsearchType })
-}
-
-export function modalM3U8Download() {
-  useModalStore().showModal('m3u8download', {})
-}
-
 export function modalUpload(file_id: string, filelist: string[], ispic: boolean = false, encType: string = '') {
   useModalStore().showModal('upload', { file_id, filelist, ispic, encType })
 }
@@ -51,10 +43,6 @@ export function modalDownload(istree: boolean) {
 
 export function modalCloudOfflineDownload(offlineForm?: { dirId?: string; dirName?: string }) {
   useModalStore().showModal('cloudoffline', offlineForm ? { offlineForm } : {})
-}
-
-export function modalShowPost(msg: string, msgid: string) {
-  useModalStore().showModal('showpostmodal', { msg, msgid })
 }
 
 export function modalPassword(optType: string, callback?: (success: boolean, inputpassword: string) => void) {

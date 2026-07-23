@@ -1,6 +1,5 @@
 import { useSettingStore } from '../store'
 import UserDAL from '../user/userdal'
-import { IAliBatchResult } from './models'
 
 import { SHA1, SHA256 } from 'crypto-js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
@@ -229,33 +228,4 @@ export function DecodeEncName(user_id: string, item: IAliFileItem | IAliGetFileM
     return { name: name, mine_type, ext }
   }
   return { name: item.name, mine_type, ext }
-}
-
-export type AsyncType = '解压' | '复制' | '导入分享' | '回收站还原' | '异步' | '放回收站' | '彻底删除'
-
-export async function ApiBatch(_title: string, _batchList: string[], _user_id: string, _share_token: string): Promise<IAliBatchResult> {
-  return { count: 0, async_task: [], reslut: [], error: [] }
-}
-
-export function ApiBatchMaker(_url: string, _idList: string[], _bodymake: (file_id: string) => any): string[] {
-  return []
-}
-
-export function ApiBatchMaker2(_url: string, _idList: string[], _namelist: string[], _bodymake: (file_id: string, name: string) => any): string[] {
-  return []
-}
-
-export async function ApiBatchSuccess(_title: string, batchList: string[], _user_id: string, _share_token: string): Promise<string[]> {
-  return []
-}
-
-export async function ApiWaitAsyncTask(_title: string, _user_id: string, _taskList: IAliBatchResult['async_task']): Promise<void> {
-}
-
-export async function ApiGetAsyncTask(_user_id: string, _async_task_id: string): Promise<'running' | 'error' | 'success'> {
-  return 'error'
-}
-
-export async function ApiGetAsyncTaskUnzip(_user_id: string, _drive_id: string, _file_id: string, _domain_id: string, _task_id: string): Promise<string> {
-  return 'error'
 }

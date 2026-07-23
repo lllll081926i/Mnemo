@@ -29,6 +29,7 @@ export interface IVideoPreviewUrl {
     url: string
     type?: string
     headers?: Record<string, string>
+    forceProxy?: boolean
   }[]
   subtitles: {
     language: string
@@ -91,56 +92,6 @@ export interface IUploadInfo {
   }[]
 }
 
-export interface IAliBatchResult {
-  count: number
-  async_task: {
-    drive_id: string
-    file_id: string
-    task_id: string
-    newdrive_id: string
-    newfile_id: string
-  }[]
-  reslut: {
-    id: string
-    file_id?: string
-
-    name?: string
-    type?: string
-    parent_file_id?: string
-
-    share_id?: string
-    share_pwd?: string
-    share_url?: string
-    expiration?: string
-    share_name?: string
-
-    body?: any
-  }[]
-  error: {
-    id: string
-    code: string
-    message: string
-  }[]
-}
-
-export interface IBatchResult {
-  count: number
-  task: {
-    file_id: string
-    task_id: string
-    newdrive_id: string
-    newfile_id: string
-  }[]
-  reslut: {
-    id: string
-    file_id: string
-  }[]
-  error: {
-    id: string
-    code: string
-    message: string
-  }[]
-}
 
 
 export interface IAliGetAlbumModel {

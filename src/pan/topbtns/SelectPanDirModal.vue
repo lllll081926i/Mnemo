@@ -2,7 +2,7 @@
 import { modalCloseAll } from '../../utils/modal'
 import { computed, h, PropType, reactive, ref } from 'vue'
 import IconFont from '../../components/IconFont.vue'
-import { usePanTreeStore, useSettingStore, useWinStore } from '../../store'
+import { usePanTreeStore, useWinStore } from '../../store'
 import { CheckFileName, ClearFileName } from '../../utils/filehelper'
 import { Tree as AntdTree } from 'ant-design-vue'
 import TreeStore, { TreeNodeData } from '../../store/treestore'
@@ -14,7 +14,6 @@ import { treeSelectToExpand } from '../../utils/antdtree'
 
 import { fileiconfn } from '../pantreestore'
 import { GetDriveID, GetDriveType, isPikPakUser } from '../../aliapi/utils'
-import { IAliGetDirModel } from '../../aliapi/alimodels'
 import { apiPikPakFileList, mapPikPakFileToAliModel } from '../../pikpak/dirfilelist'
 import { isDriveProviderRootId, resolveDriveProvider } from '../../utils/driveProvider'
 import { apiOneDriveFileList, mapOneDriveItemToAliModel } from '../../onedrive/dirfilelist'
@@ -26,8 +25,6 @@ import { getS3Connection, getS3ConnectionId, listS3Directory } from '../../utils
 
 const iconfolder = h(IconFont, { name: 'iconfile-folder' })
 const foldericonfn = () => iconfolder
-
-const isSingleRootDriveUser = (userId: string) => !!userId
 
 const props = defineProps({
   visible: {
@@ -64,44 +61,50 @@ const title = ref('')
 const user_id = ref('')
 const drive_id = ref('')
 const selectFile = ref({
-  drive_id: pantreeStore.backup_drive_id,
-  name: '备份盘',
-  file_id: 'backup_root',
+  drive_id: '',
+  name: '',
+  file_id: '',
   parent_file_id: '',
   path: '',
   description: '',
   isDir: true
 })
 
+const createRootSelection = (userId: string, driveId: string) => {
+  const driveType = GetDriveType(userId, driveId)
+  const rootDriveId = GetDriveID(userId, driveType.key) || driveId
+  return {
+    drive_id: rootDriveId,
+    name: driveType.title,
+    file_id: driveType.key,
+    parent_file_id: '',
+    path: '',
+    description: '',
+    isDir: true
+  }
+}
+
 const handleOpen = async () => {
   if (props.selecttype == 'copy') title.value = '复制文件到. . .  '
   if (props.selecttype == 'cut') title.value = '移动文件到. . .  '
   if (props.selecttype == 'share') title.value = '保存分享文件到. . .  '
   if (props.selecttype == 'unzip') title.value = '解压文件保存到. . .  '
+  if (props.selecttype == 'offline') title.value = '离线下载保存到. . .  '
   if (props.selecttype == 'select') title.value = '选择一个文件. . .  '
   okLoading.value = true
   user_id.value = pantreeStore.user_id
   drive_id.value = pantreeStore.drive_id
-  const isSingleRootDrive = isSingleRootDriveUser(user_id.value)
   const driveType = GetDriveType(user_id.value, drive_id.value)
-  const expandedKeys: string[] = isSingleRootDrive ? [driveType.key] : ['backup_root', 'resource_root']
+  const cloudDriveId = GetDriveID(user_id.value, driveType.key) || drive_id.value
+  const expandedKeys: string[] = [driveType.key]
   const selectid = props.selectid || localStorage.getItem('selectpandir-' + drive_id.value) || ''
-  if (selectid) {
-    let backup_data: IAliGetDirModel[] = []
-    let resource_data: IAliGetDirModel[] = []
-    let data: IAliGetDirModel[] = []
-    if (isSingleRootDrive) {
-      const cloudDriveId = GetDriveID(user_id.value, driveType.key) || drive_id.value
-      data = TreeStore.GetDirPath(cloudDriveId, selectid)
-    } else {
-      if (!useSettingStore().securityHideBackupDrive) {
-        backup_data = TreeStore.GetDirPath(pantreeStore.backup_drive_id, selectid)
-      }
-      if (!useSettingStore().securityHideResourceDrive) {
-        resource_data = TreeStore.GetDirPath(pantreeStore.resource_drive_id, selectid)
-      }
-      data = [...backup_data, ...resource_data]
-    }
+  let hasRestoredSelection = false
+  if (selectid && (selectid === driveType.key || isDriveProviderRootId({ userId: user_id.value, driveId: cloudDriveId }, selectid))) {
+    selectFile.value = createRootSelection(user_id.value, cloudDriveId)
+    treeSelectedKeys.value = [driveType.key]
+    hasRestoredSelection = true
+  } else if (selectid) {
+    const data = TreeStore.GetDirPath(cloudDriveId, selectid)
     if (data && data.length > 0) {
       for (let i = 0, maxi = data.length; i < maxi; i++) {
         const item = data[i]
@@ -117,55 +120,24 @@ const handleOpen = async () => {
             description: item.description,
             isDir: true
           }
+          hasRestoredSelection = true
         }
       }
     }
-    treeSelectedKeys.value = [selectid]
-    setTimeout(() => {
-      treeref.value?.treeRef?.scrollTo({ key: selectid, offset: 100, align: 'top' })
-    }, 400)
-  } else {
-    if (isSingleRootDrive) {
-      selectFile.value = {
-        drive_id: drive_id.value,
-        name: driveType.title,
-        file_id: driveType.key,
-        parent_file_id: '',
-        path: '',
-        description: '',
-        isDir: true
-      }
-      treeSelectedKeys.value = [driveType.key]
-    } else {
-      selectFile.value = {
-        drive_id: pantreeStore.backup_drive_id,
-        name: '备份盘',
-        file_id: 'backup_root',
-        parent_file_id: '',
-        path: '',
-        description: '',
-        isDir: true
-      }
-      treeSelectedKeys.value = ['backup_root']
+    if (hasRestoredSelection) {
+      treeSelectedKeys.value = [selectid]
+      setTimeout(() => {
+        treeref.value?.treeRef?.scrollTo({ key: selectid, offset: 100, align: 'top' })
+      }, 400)
     }
+  }
+  if (!hasRestoredSelection) {
+    selectFile.value = createRootSelection(user_id.value, cloudDriveId)
+    treeSelectedKeys.value = [driveType.key]
   }
   treeExpandedKeys.value = expandedKeys
-  // 网盘数据
   const flag = props.selecttype === 'select'
-  if (isSingleRootDrive) {
-    const cloudDriveId = GetDriveID(user_id.value, driveType.key) || drive_id.value
-    treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, cloudDriveId, treeExpandedKeys.value, !flag, flag)
-  } else {
-    let backupPan: TreeNodeData[] = []
-    let resourcePan: TreeNodeData[] = []
-    if (!useSettingStore().securityHideBackupDrive) {
-      backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value, !flag, flag)
-    }
-    if (!useSettingStore().securityHideResourceDrive) {
-      resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value, !flag, flag)
-    }
-    treeData.value = [...backupPan, ...resourcePan]
-  }
+  treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, cloudDriveId, treeExpandedKeys.value, !flag, flag)
   okLoading.value = false
 }
 
@@ -173,73 +145,22 @@ const handleClose = () => {
   if (okLoading.value) okLoading.value = false
   user_id.value = ''
   drive_id.value = ''
-  const driveType = GetDriveType(pantreeStore.user_id, pantreeStore.drive_id)
   selectFile.value = {
-    drive_id: pantreeStore.drive_id || pantreeStore.backup_drive_id,
-    name: driveType.title,
-    file_id: driveType.key,
+    drive_id: '',
+    name: '',
+    file_id: '',
     parent_file_id: '',
     path: '',
     description: '',
     isDir: true
   }
-  if (isSingleRootDriveUser(pantreeStore.user_id)) {
-    treeData.value = [{
-      __v_skip: true,
-      key: driveType.key,
-      drive_id: pantreeStore.drive_id,
-      parent_file_id: '',
-      title: driveType.title,
-      namesearch: '',
-      isLeaf: false,
-      icon: foldericonfn,
-      children: []
-    }]
-  } else {
-    treeData.value = [{
-      __v_skip: true,
-      key: 'backup_root',
-      parent_file_id: '',
-      title: '备份盘',
-      namesearch: '',
-      isLeaf: false,
-      icon: foldericonfn,
-      children: []
-    }, {
-      __v_skip: true,
-      key: 'resource_root',
-      parent_file_id: '',
-      title: '资源盘',
-      namesearch: '',
-      isLeaf: false,
-      icon: foldericonfn,
-      children: []
-    }]
-  }
+  treeData.value = []
   treeExpandedKeys.value = []
   treeSelectedKeys.value = []
 }
 
 const treeref = ref()
-const treeData = ref<TreeNodeData[]>([{
-  __v_skip: true,
-  key: 'backup_root',
-  parent_file_id: '',
-  title: '备份盘',
-  namesearch: '',
-  isLeaf: false,
-  icon: foldericonfn,
-  children: []
-}, {
-  __v_skip: true,
-  key: 'resource_root',
-  parent_file_id: '',
-  title: '资源盘',
-  namesearch: '',
-  isLeaf: false,
-  icon: foldericonfn,
-  children: []
-}])
+const treeData = ref<TreeNodeData[]>([])
 const treeExpandedKeys = ref<string[]>([])
 const treeSelectedKeys = ref<string[]>([])
 
@@ -388,15 +309,7 @@ const handleTreeExpand = (keys: any[], info: {
   } else {
     treeExpandedKeys.value = arr.concat([key])
     if (props.selecttype !== 'select' && props.selecttype !== 'offline') { // 仅显示文件夹
-      if (isSingleRootDriveUser(user_id.value)) {
-        treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, drive_id.value, treeExpandedKeys.value)
-      } else {
-        let backupPan: TreeNodeData[] = []
-        let resourcePan: TreeNodeData[] = []
-        if (!useSettingStore().securityHideBackupDrive) backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value)
-        if (!useSettingStore().securityHideResourceDrive) resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value)
-        treeData.value = [...backupPan, ...resourcePan]
-      }
+      treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, drive_id.value, treeExpandedKeys.value)
     }
   }
 }
@@ -464,31 +377,23 @@ const handleOKNewDir = () => {
       } catch (error) {
         console.error('刷新新建文件夹失败:', error)
       }
-        if (selectFileId == pantreeStore.selectDir.file_id) {
-          await PanDAL.aReLoadOneDirToShow('', 'refresh', false)
-        }
-        await Sleep(200)
-        selectFile.value = {
-          drive_id: targetDriveId,
-          name: newName,
-          file_id: newdirid,
-          parent_file_id: selectFileId,
-          path: '',
-          description: '',
-          isDir: true
-        }
-        treeExpandedKeys.value = treeExpandedKeys.value.concat([selectFileId, newdirid])
-        if (isSingleRootDriveUser(user_id.value)) {
-          treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, drive_id.value, treeExpandedKeys.value)
-        } else {
-          let backupPan: TreeNodeData[] = []
-          let resourcePan: TreeNodeData[] = []
-          if (!useSettingStore().securityHideBackupDrive) backupPan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.backup_drive_id, treeExpandedKeys.value)
-          if (!useSettingStore().securityHideResourceDrive) resourcePan = PanDAL.GetPanTreeAllNode(user_id.value, pantreeStore.resource_drive_id, treeExpandedKeys.value)
-          treeData.value = [...backupPan, ...resourcePan]
-        }
-        treeSelectedKeys.value = [newdirid]
-        showCreatNewDir.value = false
+      if (selectFileId == pantreeStore.selectDir.file_id) {
+        await PanDAL.aReLoadOneDirToShow('', 'refresh', false)
+      }
+      await Sleep(200)
+      selectFile.value = {
+        drive_id: targetDriveId,
+        name: newName,
+        file_id: newdirid,
+        parent_file_id: selectFileId,
+        path: '',
+        description: '',
+        isDir: true
+      }
+      treeExpandedKeys.value = treeExpandedKeys.value.concat([selectFileId, newdirid])
+      treeData.value = PanDAL.GetPanTreeAllNode(user_id.value, targetDriveId, treeExpandedKeys.value)
+      treeSelectedKeys.value = [newdirid]
+      showCreatNewDir.value = false
     } catch (err: any) {
       message.error(err?.message || '新建文件夹失败')
     } finally {

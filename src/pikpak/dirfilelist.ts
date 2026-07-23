@@ -15,8 +15,9 @@ export type PikPakMediaItem = {
   is_default?: boolean
   need_more_quota?: boolean
   vip_types?: unknown[]
-  link?: { url?: string }
-  video?: { height?: number | string; width?: number | string }
+  priority?: number
+  link?: { url?: string; token?: string; expire?: string | number; type?: string }
+  video?: { height?: number | string; width?: number | string; video_type?: string }
 }
 
 export type PikPakFileItem = {
@@ -30,7 +31,7 @@ export type PikPakFileItem = {
   thumbnail_link?: string
   web_content_link?: string
   medias?: PikPakMediaItem[]
-  links?: { 'application/octet-stream'?: { url?: string } }
+  links?: { 'application/octet-stream'?: { url?: string; token?: string; expire?: string | number; type?: string } }
 }
 
 export type PikPakDownloadInfo = {
@@ -49,6 +50,8 @@ export type PikPakVideoQuality = {
   value: string
   url: string
   type?: string
+  /** PikPak 的临时媒体链接需要经过本地 Range 代理，避免长视频直连失败。 */
+  forceProxy?: boolean
 }
 
 type PikPakFileListResp = {
@@ -60,18 +63,38 @@ const API_URL = 'https://api-drive.mypikpak.com/drive/v1/files'
 
 const isPikPakDir = (item: PikPakFileItem) => (item.kind || '').includes('folder')
 
-const getPikPakStreamUrl = (item: PikPakFileItem) => {
-  return item.medias?.find(media => media?.link?.url)?.link?.url || ''
+const isUsablePikPakUrl = (url: string) => /^https?:\/\//i.test(String(url || ''))
+
+const getPikPakFid = (url: string) => {
+  try {
+    return new URL(url).searchParams.get('fid') || ''
+  } catch {
+    return ''
+  }
 }
 
-// 原始媒体流（progressive，可拖进度）——比 web_content_link 更适合在线播放
+const getPikPakOriginalLink = (item: PikPakFileItem) => item.links?.['application/octet-stream']?.url || item.web_content_link || ''
+
+const getPikPakStreamUrl = (item: PikPakFileItem) => {
+  const mediaUrl = item.medias?.find(media => isUsablePikPakUrl(media?.link?.url || ''))?.link?.url || ''
+  return mediaUrl || getPikPakOriginalLink(item)
+}
+
+// 原始媒体流（progressive，可拖进度）。只接受与原始文件 fid 一致的媒体链接；
+// rclone 的 PikPak backend 也用这个校验规避 API 偶发返回的失效媒体链接。
 const getPikPakOriginMediaUrl = (item: PikPakFileItem) => {
   const medias = Array.isArray(item.medias) ? item.medias : []
-  const origin = medias.find(media => media?.is_origin && media?.link?.url)
-  return origin?.link?.url || ''
+  const originalUrl = getPikPakOriginalLink(item)
+  const originalFid = getPikPakFid(originalUrl)
+  const origin = medias.find((media) => {
+    const url = media?.link?.url || ''
+    if (!media?.is_origin || !isUsablePikPakUrl(url)) return false
+    return !originalFid || getPikPakFid(url) === originalFid
+  })
+  return origin?.link?.url || originalUrl
 }
 
-const getPikPakWebContentUrl = (item: PikPakFileItem) => item.links?.['application/octet-stream']?.url || item.web_content_link || ''
+const getPikPakWebContentUrl = (item: PikPakFileItem) => getPikPakOriginalLink(item)
 
 const encodeDescription = (item: PikPakFileItem) => {
   const downloadUrl = getPikPakStreamUrl(item) || getPikPakWebContentUrl(item)
@@ -118,12 +141,26 @@ export const isPikPakVipAccount = async (user_id: string): Promise<boolean> => {
   return isVip
 }
 
-const detectPikPakStreamType = (url: string) => {
+const detectPikPakStreamType = (url: string, hint = '') => {
+  const normalizedHint = String(hint || '').toLowerCase()
+  if (normalizedHint.includes('mpegurl') || normalizedHint.includes('hls') || normalizedHint === 'm3u8') return 'm3u8'
+  if (normalizedHint.includes('dash') || normalizedHint === 'mpd') return 'mpd'
   const pathname = String(url || '').split('?')[0].split('#')[0].toLowerCase()
   if (pathname.endsWith('.m3u8')) return 'm3u8'
   if (pathname.endsWith('.mpd')) return 'mpd'
   if (pathname.endsWith('.ts')) return 'ts'
   return ''
+}
+
+const parsePikPakResolutionHeight = (media: PikPakMediaItem) => {
+  const direct = Number(media.video?.height || 0) || 0
+  if (direct > 0) return direct
+  const label = `${media.resolution_name || ''} ${media.media_name || ''}`.toLowerCase()
+  const pixelHeight = label.match(/(?:^|[^0-9])([0-9]{3,4})\s*[pP](?:\b|$)/i)
+  if (pixelHeight) return Number(pixelHeight[1]) || 0
+  const kHeight = label.match(/(?:^|[^0-9])([248])\s*k(?:\b|$)/i)
+  if (kHeight) return Number(kHeight[1]) * 512
+  return 0
 }
 
 const pikPakQualityTier = (height: number): { quality: string; html: string } => {
@@ -140,20 +177,23 @@ export const buildPikPakVideoQualities = (item: PikPakFileItem, isVip: boolean):
   for (const media of Array.isArray(item.medias) ? item.medias : []) {
     const url = media?.link?.url || ''
     if (!url || media.is_visible === false) continue
-    if (!isVip && (media.is_origin || media.need_more_quota)) continue
-    const height = Number(media.video?.height || 0) || 0
+    if (media.is_origin || media.category === 'category_origin') continue
+    if (!isVip && media.need_more_quota) continue
+    const height = parsePikPakResolutionHeight(media)
     const width = Number(media.video?.width || 0) || 0
     if (!isVip && height > 720) continue
     const tier = pikPakQualityTier(height)
     const existing = tiers.get(tier.quality)
-    if (!existing || height > existing.height) {
-      tiers.set(tier.quality, { html: tier.html, quality: tier.quality, height, width, label: tier.html, value: tier.quality, url, type: detectPikPakStreamType(url) })
+    const priority = Number(media.priority || 0) || 0
+    const existingPriority = Number((existing as any)?.priority || 0) || 0
+    if (!existing || height > existing.height || (height === existing.height && priority > existingPriority)) {
+      tiers.set(tier.quality, { html: tier.html, quality: tier.quality, height, width, label: tier.html, value: tier.quality, url, type: detectPikPakStreamType(url, media.link?.type || media.video?.video_type), forceProxy: true })
     }
   }
   const qualities = ['QHD', 'FHD', 'HD', 'SD', 'LD'].map((key) => tiers.get(key)).filter((item): item is PikPakVideoQuality => !!item)
   if (isVip) {
     const originUrl = getPikPakOriginMediaUrl(item) || getPikPakWebContentUrl(item)
-    if (originUrl) qualities.unshift({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl) })
+    if (originUrl) qualities.unshift({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true })
   }
   return qualities
 }

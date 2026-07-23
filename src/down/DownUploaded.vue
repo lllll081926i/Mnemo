@@ -11,7 +11,7 @@ import message from '../utils/message'
 import AliFile from '../aliapi/file'
 import PanDAL from '../pan/pandal'
 import { humanSize } from '../utils/format'
-import { TestButton } from '../utils/mosehelper'
+import { isLeftClick } from '../utils/mousehelper'
 import fs from 'node:fs'
 import { xorWith } from 'lodash'
 import { getDriveAccountLabel } from '../utils/driveAccount'
@@ -111,7 +111,7 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
   if (
-    TestButton(0, mouseEvent, () => {
+    isLeftClick(mouseEvent, () => {
       if (mouseEvent.srcElement) {
         // @ts-ignore
         const className = mouseEvent.srcElement.className

@@ -85,10 +85,9 @@ export default class launch extends EventEmitter {
     app.commandLine.appendSwitch('wm-window-animations-disabled')
     app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
 
-    app.name = 'Mnemo'
-    if (is.windows()) {
-      app.setAppUserModelId('com.mnemo.app')
-    }
+    app.setName('Mnemo')
+    process.title = 'Mnemo'
+    if (is.windows()) app.setAppUserModelId('com.mnemo.app')
     this.hasExitArgv(process.argv)
   }
 

@@ -6,7 +6,7 @@ import useUploadingStore from './UploadingStore'
 
 import { Tooltip as AntdTooltip } from 'ant-design-vue'
 import UploadingDAL from '../transfer/uploadingdal'
-import { TestButton } from '../utils/mosehelper'
+import { isLeftClick } from '../utils/mousehelper'
 import { xorWith } from 'lodash'
 import { getDriveAccountLabel } from '../utils/driveAccount'
 
@@ -120,7 +120,7 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   const mouseEvent = state.MouseEvent
   // console.log('MouseEvent', state.MouseEvent)
   if (
-    TestButton(0, mouseEvent, () => {
+    isLeftClick(mouseEvent, () => {
       if (mouseEvent.srcElement) {
         // @ts-ignore
         const className = mouseEvent.srcElement.className

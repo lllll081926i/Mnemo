@@ -16,6 +16,7 @@ interface VideoQuality {
   url: string
   type?: string
   headers?: Record<string, string>
+  forceProxy?: boolean
   default?: boolean
 }
 
@@ -132,7 +133,9 @@ function selectQuality(qualities: VideoQuality[]) {
 }
 
 function playableUrl(item: VideoQuality, size: number, fileId = pageVideo.file_id) {
-  if (!item.headers || Object.keys(item.headers).length === 0 || isLocalProxyUrl(item.url)) return item.url
+  const headers = item.headers || {}
+  const shouldProxy = item.forceProxy === true || Object.keys(headers).length > 0
+  if (!shouldProxy || isLocalProxyUrl(item.url)) return item.url
   return getProxyUrl({
     user_id: pageVideo.user_id,
     drive_id: pageVideo.drive_id,
@@ -142,7 +145,8 @@ function playableUrl(item: VideoQuality, size: number, fileId = pageVideo.file_i
     password: pageVideo.password,
     quality: item.quality || 'Origin',
     proxy_url: item.url,
-    proxy_headers: JSON.stringify(item.headers)
+    proxy_headers: JSON.stringify(item.headers),
+    proxy_kind: 'video'
   })
 }
 
@@ -168,7 +172,8 @@ async function resolveCurrentSource(): Promise<ResolvedVideoSource> {
       quality: item.quality || item.value || 'Origin',
       url: item.url,
       type: item.type,
-      headers: item.headers || data.headers
+      headers: item.headers || data.headers,
+      forceProxy: item.forceProxy
     }))
     : data.url ? [{ html: '原画', quality: 'Origin', url: data.url, headers: data.headers }] : []
   if (!rawQualities.length) throw new Error('未获取到可用的视频地址')

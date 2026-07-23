@@ -73,7 +73,7 @@ const canCreateShare = computed(() => capabilities.value.createShare)
         <template #icon><IconFont name="icondownload" /></template>
         <template #default>下载</template>
       </a-doption>
-      <a-doption v-if="canCreateShare" @click="() => menuCreatShare(istree, 'pan', 'resource_root')">
+      <a-doption v-if="canCreateShare" @click="() => menuCreatShare(istree, 'pan')">
         <template #icon><IconFont name="iconfenxiang" /></template>
         <template #default>分享</template>
       </a-doption>

@@ -1,5 +1,3 @@
-import { deflateRawSync, inflateRawSync } from 'zlib'
-
 const PINYIN_LITE_URL = './pinyinlite_full.min.js'
 let pinyinLitePromise: Promise<boolean> | undefined
 
@@ -37,17 +35,7 @@ import crypto from 'crypto'
 import pkg from '../../package.json'
 import { getUserDataPath } from './electronhelper'
 import fs, { stat } from 'node:fs'
-import net from 'net'
 import { Buffer } from 'buffer'
-
-
-export function ArrayCopyReverse(arr: any[]): any[] {
-  const copy: any[] = []
-  for (let i = arr.length - 1; i >= 0; i--) {
-    copy.push(arr[i])
-  }
-  return copy
-}
 
 export function ArrayCopy(arr: any[]): any[] {
   const copy: any[] = []
@@ -55,18 +43,6 @@ export function ArrayCopy(arr: any[]): any[] {
     copy.push(arr[i])
   }
   return copy
-}
-
-export function MapKeyToArray<T>(map: Map<T, any>): T[] {
-  const arr: T[] = []
-  const keys = map.keys()
-  for (let i = 0, maxi = map.size; i < maxi; i++) {
-    const value = keys.next().value
-    if (value !== undefined) {
-      arr.push(value)
-    }
-  }
-  return arr
 }
 
 export function MapValueToArray<T>(map: Map<any, T>): T[] {
@@ -119,14 +95,6 @@ export function BlobToBuff(body: Blob): Promise<ArrayBuffer | undefined> {
   })
 }
 
-export function GzipObject(input: object): Buffer {
-  return deflateRawSync(JSON.stringify(input))
-}
-
-export function UnGzipObject(input: Buffer): object {
-  return JSON.parse(inflateRawSync(input).toString())
-}
-
 export function HanToPin(input: string): string {
   if (!input) return ''
   if (typeof pinyinlite !== 'function') return input.toLowerCase()
@@ -149,27 +117,23 @@ export function HanToPin(input: string): string {
 }
 
 export function GetExpiresTime(downUrl: string) {
-  let url = decodeURIComponent(downUrl)
-  if (!url || !url.includes('x-oss-expires=')) return 0
   try {
-    let expires = url.substring(url.indexOf('x-oss-expires=') + 'x-oss-expires='.length)
-    expires = expires.substring(0, expires.indexOf('&'))
-    return parseInt(expires) * 1000
+    const rawUrl = decodeURIComponent(String(downUrl || ''))
+    if (!rawUrl) return 0
+    const parsed = new URL(rawUrl)
+    const keys = ['x-oss-expires', 'expire', 'expires', 'expires_at', 'exp']
+    for (const key of keys) {
+      const value = parsed.searchParams.get(key)
+      if (!value) continue
+      const numeric = Number(value)
+      if (Number.isFinite(numeric) && numeric > 0) return numeric < 10_000_000_000 ? numeric * 1000 : numeric
+      const date = Date.parse(value)
+      if (Number.isFinite(date) && date > 0) return date
+    }
   } catch {
     return 0
   }
-}
-
-export function GetOssExpires(downUrl: string) {
-  let url = decodeURIComponent(downUrl)
-  if (!url || !url.includes('x-oss-expires=')) return 0
-  try {
-    let expires = url.substring(url.indexOf('x-oss-expires=') + 'x-oss-expires='.length)
-    expires = expires.substring(0, expires.indexOf('&'))
-    return parseInt(expires) - Math.floor(Date.now() / 1000)
-  } catch {
-    return 0
-  }
+  return 0
 }
 
 export function hashCode(key: string) {
@@ -207,25 +171,5 @@ export function delTmpFile(tmpFilePath: string) {
     if (!err) {
       fs.rmSync(tmpFilePath, { recursive: true })
     }
-  })
-}
-
-export function portIsOccupied(port: number) {
-  return new Promise<number>((resolve, reject) => {
-    let server = net.createServer().listen(port)
-    server.on('listening', async () => {
-      console.log(`the server is runnint on port ${port}`)
-      server.close()
-      resolve(port) // 返回可用端口
-    })
-    server.on('error', (err: any) => {
-      if (err.code === 'EADDRINUSE') {
-        resolve(portIsOccupied(port + 1)) // 如传入端口号被占用则 +1
-        console.log(`this port ${port} is occupied.try another.`)
-      } else {
-        // reject(err)
-        resolve(port)
-      }
-    })
   })
 }

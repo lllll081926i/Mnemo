@@ -38,7 +38,7 @@ describe('provider dir list residual cleanup', () => {
     expect(openFile).toContain('IMAGE_PREVIEW_EXTS.has(normalizedExt)')
     expect(openFile).toContain('VIDEO_PREVIEW_EXTS.has(normalizedExt)')
     expect(read('src/utils/driveProvider.ts')).not.toContain('canUseAliyunPreviewApi')
-    expect(read('src/aliapi/dirfilelist.ts')).toContain('legacy Aliyun directory APIs are removed')
+    expect(read('src/aliapi/dirfilelist.ts')).toContain('NewIAliFileResp')
     expect(read('src/aliapi/dirfilelist.ts')).not.toContain('adrive/v1.0/openFile/list')
     expect(read('src/aliapi/alihttp.ts')).not.toContain('AliUser')
     expect(read('src/onedrive/upload.ts')).toContain('const SMALL_UPLOAD_LIMIT = 4 * 1024 * 1024')

@@ -2,7 +2,7 @@
   "name": "mnemo",
   "productName": "Mnemo",
   "description": "Mnemo multi-cloud desktop file manager",
-  "version": "0.1.2",
+  "version": "0.1.3-preview.1",
   "main": "dist/electron/main/index.js",
   "packageManager": "npm@11.18.0",
   "author": {

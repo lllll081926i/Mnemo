@@ -55,11 +55,36 @@ describe('provider upload routing', () => {
 
   it('only exposes share settings and combined sharing where the provider supports them', () => {
     const modal = read('src/share/share/CreatNewShareLinkModal.vue')
-    expect(modal).toContain("import { getDriveProviderCapabilities, resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'")
+    const modalHost = read('src/layout/MyModal.vue')
+    const modalActions = read('src/utils/modal.ts')
+    expect(modal).toContain("import { resolveDriveProvider, type DriveProvider } from '../../utils/driveProvider'")
     expect(modal).toContain('supportsShareSettings')
     expect(modal).toContain('supportsCombinedShare')
     expect(modal).not.toContain('manageCreatedShares')
     expect(modal).not.toContain('ShareDAL')
+    expect(modal).not.toContain('driveType')
+    expect(modalHost).not.toContain(':driveType=')
+    expect(modalActions).not.toContain('driveType')
+  })
+
+  it('removes inactive Aliyun batch, import and renderer utility stubs', () => {
+    const aliUtils = read('src/aliapi/utils.ts')
+    const aliShare = read('src/aliapi/share.ts')
+    const rendererUtils = read('src/utils/utils.ts')
+    const electronHelper = read('src/utils/electronhelper.ts')
+    const shareUrl = read('src/utils/shareurl.ts')
+    const appStore = read('src/store/appstore.ts')
+    const footStore = read('src/store/footstore.ts')
+
+    for (const symbol of ['ApiBatchMaker', 'ApiWaitAsyncTask', 'ApiGetAsyncTaskUnzip']) expect(aliUtils).not.toContain(symbol)
+    for (const symbol of ['ApiGetShareAnonymous', 'ApiShareFileList', 'ApiCreatShareBatch', 'ApiSaveShareFilesBatch']) expect(aliShare).not.toContain(symbol)
+    for (const symbol of ['ArrayCopyReverse', 'MapKeyToArray', 'GzipObject', 'UnGzipObject', 'GetOssExpires', 'portIsOccupied']) expect(rendererUtils).not.toContain(symbol)
+    for (const symbol of ['getFromClipboard', 'getResourcesPath', 'getAppNewPath', 'AppResourcesPath']) expect(electronHelper).not.toContain(symbol)
+    for (const symbol of ['ParseShareIDList', 'ParseShareIDOne', 'GetShareID', 'interface IID']) expect(shareUrl).not.toContain(symbol)
+    expect(appStore).not.toContain('IPageVideoXBT')
+    expect(appStore).not.toContain('pageVideoXBT')
+    expect(footStore).not.toContain('taskList')
+    expect(footStore).not.toContain('aUpdateTask')
   })
 
   it('hides and rejects upload actions outside real drive folders', () => {

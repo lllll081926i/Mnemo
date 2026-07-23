@@ -7,14 +7,11 @@ import CreatNewDirModal from '../pan/topbtns/CreatNewDirModal.vue'
 import SelectPanDirModal from '../pan/topbtns/SelectPanDirModal.vue'
 import CreatNewShareLinkModal from '../share/share/CreatNewShareLinkModal.vue'
 import ShuXingModal from '../pan/topbtns/ShuXingModal.vue'
-import SearchPanModal from '../pan/topbtns/SearchPanModal.vue'
-import M3U8DownloadModal from '../pan/topbtns/M3U8DownloadModal.vue'
 import UploadModal from '../pan/topbtns/UploadModal.vue'
 import DownloadModal from '../pan/topbtns/DownloadModal.vue'
-import PostModal from '../pan/topbtns/PostModal.vue'
-import PasswordModal from '../pan/topbtns/PasswordModal.vue'
 import SelectVideoQualityModal from '../pan/topbtns/SelectVideoQualityModal.vue'
 import CloudOfflineDownloadModal from '../down/CloudOfflineDownloadModal.vue'
+import PasswordModal from '../pan/topbtns/PasswordModal.vue'
 
 export default defineComponent({
   components: {
@@ -27,11 +24,8 @@ export default defineComponent({
     CreatNewShareLinkModal,
     SelectPanDirModal,
     ShuXingModal,
-    SearchPanModal,
-    M3U8DownloadModal,
     UploadModal,
-    DownloadModal,
-    PostModal
+    DownloadModal
   },
   setup() {
     const modalStore = useModalStore()
@@ -47,9 +41,8 @@ export default defineComponent({
                     :parentdirid="modalStore.modalData.parentdirid || ''"
                     :callback='modalStore.modalData.callback' />
   <CreatNewShareLinkModal :visible="modalStore.modalName == 'creatshare'"
-                          :sharetype="modalStore.modalData.sharetype || ''"
-                          :driveType="modalStore.modalData.driveType || ''"
-                          :filelist='modalStore.modalData.filelist || []' />
+                           :sharetype="modalStore.modalData.sharetype || ''"
+                           :filelist='modalStore.modalData.filelist || []' />
 
   <RenameModal :visible="modalStore.modalName == 'rename'"
                :istree='modalStore.modalData.istree || false'
@@ -59,10 +52,6 @@ export default defineComponent({
                 :istree='modalStore.modalData.istree || false'
                 :inputselectType="modalStore.modalData.inputselectType || ''"
                 :ispic='modalStore.modalData.ispic || false' />
-  <SearchPanModal :visible="modalStore.modalName == 'searchpan'"
-                  :inputsearchType="modalStore.modalData.inputsearchType || []" />
-
-  <M3U8DownloadModal :visible="modalStore.modalName == 'm3u8download'" />
 
   <UploadModal :visible="modalStore.modalName == 'upload'"
                :file_id="modalStore.modalData.file_id || ''"
@@ -88,7 +77,4 @@ export default defineComponent({
   <PasswordModal :visible="modalStore.modalName == 'showpassword'"
                  :opt-type="modalStore.modalData.optType || ''"
                  :callback="modalStore.modalData.callback" />
-  <PostModal :visible="modalStore.modalName == 'showpostmodal'"
-             :msg="modalStore.modalData.msg || ''"
-             :msgid="modalStore.modalData.msgid || ''" />
 </template>
