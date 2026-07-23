@@ -113,5 +113,8 @@
     "onedrive",
     "dropbox",
     "gdrive"
-  ]
+  ],
+  "dependencies": {
+    "mpegts.js": "^1.8.0"
+  }
 }

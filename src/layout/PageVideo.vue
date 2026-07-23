@@ -51,6 +51,7 @@ const playlist = ref<IPageVideoPlaylistEntry[]>(pageVideo?.custom_playlist?.leng
 let art: Artplayer | null = null
 let hls: { destroy: () => void } | null = null
 let dashPlayer: any = null
+let tsPlayer: { destroy: () => void } | null = null
 let loadToken = 0
 let streamingLoadToken = 0
 let jassubPlayer: Artplayer | null = null
@@ -72,6 +73,10 @@ function destroyStreamingPlayers() {
   streamingLoadToken++
   hls?.destroy()
   hls = null
+  if (tsPlayer) {
+    try { tsPlayer.destroy() } catch {}
+    tsPlayer = null
+  }
   if (dashPlayer) {
     try { dashPlayer.reset() } catch {}
     dashPlayer = null
@@ -95,6 +100,31 @@ function playHls(video: HTMLMediaElement, url: string) {
     hls = player
     player.loadSource(url)
     player.attachMedia(video)
+  }).catch(() => {
+    if (token === streamingLoadToken) video.src = url
+  })
+}
+
+function playTs(video: HTMLMediaElement, url: string) {
+  destroyStreamingPlayers()
+  const token = streamingLoadToken
+  // PikPak 转码流是 MPEG-TS（video_type: mpegts），浏览器原生 video 无法解码，用 mpegts.js 走 MSE 播放
+  void import('mpegts.js').then(({ default: Mpegts }) => {
+    if (token !== streamingLoadToken) return
+    if (!Mpegts.isSupported()) {
+      video.src = url
+      return
+    }
+    const player = Mpegts.createPlayer({ type: 'mpegts', isLive: false, url })
+    if (token !== streamingLoadToken) {
+      player.destroy()
+      return
+    }
+    tsPlayer = player
+    player.attachMediaElement(video)
+    player.load()
+    const playResult = player.play() as Promise<void> | undefined
+    if (playResult && typeof playResult.catch === 'function') playResult.catch(() => undefined)
   }).catch(() => {
     if (token === streamingLoadToken) video.src = url
   })
@@ -129,7 +159,10 @@ function qualityMatchesPreference(item: VideoQuality, preference: string) {
 
 function selectQuality(qualities: VideoQuality[]) {
   const preferred = settingStore.uiVideoQuality || 'Origin'
-  return qualities.find((item) => qualityMatchesPreference(item, preferred)) || qualities[0]
+  const match = qualities.find((item) => qualityMatchesPreference(item, preferred))
+  // 非会员的原画只是兼底档（排在最后），默认仍播转码；会员原画在首位时才优先原画
+  if (match && (match.quality !== 'Origin' || qualities[0]?.quality === 'Origin')) return match
+  return qualities[0]
 }
 
 function playableUrl(item: VideoQuality, size: number, fileId = pageVideo.file_id) {
@@ -302,7 +335,7 @@ function createArtplayer() {
     subtitle: { escape: false },
     customType: {
       m3u8: (video, url) => playHls(video, url),
-      ts: (video, url) => playHls(video, url),
+      ts: (video, url) => playTs(video, url),
       mpd: (video, url) => playDash(video, url)
     }
   }

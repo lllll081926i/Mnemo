@@ -145,4 +145,22 @@ describe('buildPikPakVideoQualities', () => {
       expect.objectContaining({ quality: 'HD', height: 720, url: 'https://media.example/long-video', forceProxy: true })
     ])
   })
+
+  it('detects mpegts transcode streams as ts and appends origin as last-resort quality for non-VIP', () => {
+    const qualities = buildPikPakVideoQualities({
+      id: 'file-id',
+      name: 'long-video.mp4',
+      links: { 'application/octet-stream': { url: 'https://download.example/file.mp4?fid=file-id&expire=1999999999' } },
+      medias: [{
+        is_visible: true,
+        resolution_name: '720P',
+        link: { url: 'https://media.example/transcode?fid=file-id&expire=1999999999', type: 'video/mp2t' },
+        video: { width: 1280, height: 720, video_type: 'mpegts' }
+      }]
+    }, false)
+
+    expect(qualities).toHaveLength(2)
+    expect(qualities[0]).toMatchObject({ quality: 'HD', type: 'ts', forceProxy: true })
+    expect(qualities[1]).toMatchObject({ quality: 'Origin', url: 'https://download.example/file.mp4?fid=file-id&expire=1999999999', forceProxy: true })
+  })
 })

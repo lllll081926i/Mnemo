@@ -150,6 +150,8 @@ const detectPikPakStreamType = (url: string, hint = '') => {
   const normalizedHint = String(hint || '').toLowerCase()
   if (normalizedHint.includes('mpegurl') || normalizedHint.includes('hls') || normalizedHint === 'm3u8') return 'm3u8'
   if (normalizedHint.includes('dash') || normalizedHint === 'mpd') return 'mpd'
+  // PikPak 转码流的 video_type 是 "mpegts"（见 rclone backend/pikpak/api 注释）
+  if (normalizedHint.includes('mpegts') || normalizedHint.includes('mp2t') || normalizedHint === 'ts') return 'ts'
   const pathname = String(url || '').split('?')[0].split('#')[0].toLowerCase()
   if (pathname.endsWith('.m3u8')) return 'm3u8'
   if (pathname.endsWith('.mpd')) return 'mpd'
@@ -199,6 +201,11 @@ export const buildPikPakVideoQualities = (item: PikPakFileItem, isVip: boolean):
   if (isVip) {
     const originUrl = getPikPakOriginMediaUrl(item) || getPikPakWebContentUrl(item)
     if (originUrl) qualities.unshift({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true })
+  } else {
+    // 非会员也把原画放在最后兼底：长视频可能没有低码率转码，或转码流（MPEG-TS）播放失败时，
+    // 还能像 rclone 一样播原始文件链接（经本地代理）。
+    const originUrl = getPikPakOriginMediaUrl(item) || getPikPakWebContentUrl(item)
+    if (originUrl) qualities.push({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true })
   }
   return qualities
 }
