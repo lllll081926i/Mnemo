@@ -1,4 +1,4 @@
-name: Build Windows Release
+name: Build Multi-Platform Release
 
 on:
   workflow_dispatch:
@@ -10,32 +10,98 @@ concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
+env:
+  NODE_VERSION: '22.12.0'
+  NODE_OPTIONS: --max-old-space-size=6144
+
 jobs:
-  release:
-    name: Build Windows
-    runs-on: windows-latest
+  test:
+    name: Typecheck & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate secrets placeholders
+        run: node scripts/generate-secrets.mjs --mode=ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+  build:
+    name: ${{ matrix.name }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 + arm64
+            os: windows-latest
+            platform: win
+            args: --win --x64 --arm64
+            artifact: mnemo-windows
+            path: |
+              release/*.exe
+              release/*.blockmap
+              release/latest*.yml
+
+          - name: Linux x64 + arm64
+            os: ubuntu-latest
+            platform: linux
+            args: --linux --x64 --arm64
+            artifact: mnemo-linux
+            path: |
+              release/*.AppImage
+              release/*.deb
+              release/*.pacman
+              release/*.blockmap
+              release/latest*.yml
+
+          - name: macOS x64 + arm64
+            os: macos-latest
+            platform: mac
+            args: --mac --x64 --arm64
+            artifact: mnemo-macos
+            path: |
+              release/*.dmg
+              release/*.zip
+              release/*.blockmap
+              release/latest*.yml
 
     permissions:
       contents: write
 
     steps:
-      - name: Checkout Git repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Run Tests
-        run: npm test
+      - name: Install Linux packaging tools
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg
 
-      - name: Build Windows Package
+      - name: Generate secrets & build
         env:
           REQUIRED_RELEASE_SECRETS: ALIYUN_APP_ID,ALIYUN_APP_SECRET,PIKPAK_CLIENT_ID,PIKPAK_CLIENT_SECRET,GUANGYA_CLIENT_ID,CLOUD189_APP_ID,ONEDRIVE_CLIENT_ID,ONEDRIVE_CLIENT_SECRET,DROPBOX_APP_KEY,DROPBOX_APP_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET
           ALIYUN_APP_ID: ${{ secrets.ALIYUN_APP_ID }}
@@ -53,62 +119,81 @@ jobs:
           SUBTITLE_SEARCH_API_KEY: ${{ secrets.SUBTITLE_SEARCH_API_KEY }}
           SUBTITLE_DOWNLOAD_API_KEY: ${{ secrets.SUBTITLE_DOWNLOAD_API_KEY }}
           MNEMO_AI_API_URL: ${{ secrets.MNEMO_AI_API_URL }}
+          # Windows code signing (optional)
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          NODE_OPTIONS: --max-old-space-size=6144
+          # macOS signing / notarization (optional; unsigned when missing)
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          $isTag = '${{ startsWith(github.ref, 'refs/tags/') }}' -eq 'true'
-          $isPreview = $isTag -and ('${{ github.ref_name }}' -match 'preview|beta|rc|alpha')
-          if ($isTag -and -not $isPreview) {
+          set -euo pipefail
+          is_tag=false
+          is_preview=false
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            is_tag=true
+            if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
+              is_preview=true
+            fi
+          fi
+
+          if [[ "${is_tag}" == "true" && "${is_preview}" == "false" ]]; then
             node scripts/generate-secrets.mjs --mode=ci --strict
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } else {
+          else
             # Preview / manual builds may ship with empty OAuth placeholders when repo secrets are incomplete.
             node scripts/generate-secrets.mjs --mode=ci
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          npm run build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($isTag) {
-            npx electron-builder --win --publish always
-          } else {
-            npx electron-builder --win --publish never
-          }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          fi
 
-      - name: Upload Windows Artifact
+          npm run build
+
+          # Ensure Windows/macOS/Linux product identity is not the default Electron shell
+          if [[ "${is_tag}" == "true" ]]; then
+            npx electron-builder ${{ matrix.args }} --publish always
+          else
+            npx electron-builder ${{ matrix.args }} --publish never
+          fi
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mnemo-windows-${{ github.ref_name }}
-          path: |
-            release/*.exe
-            release/*.blockmap
-            release/latest*.yml
+          name: ${{ matrix.artifact }}-${{ github.ref_name }}
+          path: ${{ matrix.path }}
           if-no-files-found: error
 
-      - name: Generate GitHub Release Notes
-        if: startsWith(github.ref, 'refs/tags/')
+  publish-notes:
+    name: Finalize GitHub Release Notes
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -euo pipefail
           release_doc="docs/releases/${GITHUB_REF_NAME}.md"
           if [[ -f "${release_doc}" ]]; then
             cp "${release_doc}" release-notes.md
           else
             gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="${GITHUB_REF_NAME}" \
-              --jq .body > release-notes.md
+              --jq .body > release-notes.md || echo "Mnemo ${GITHUB_REF_NAME}" > release-notes.md
           fi
+
           is_prerelease=false
           if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
             is_prerelease=true
           fi
-          # electron-builder --publish always creates a draft release. Update it via API only (gh release edit fails on drafts with 422).
-          # Fetch all releases and find the one matching our tag (drafts are visible in the list).
+
+          # electron-builder --publish always creates a draft release; finalize via API.
           release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
             --jq "[.[] | select(.tag_name == \"${GITHUB_REF_NAME}\")][0].id")
           if [[ -n "${release_id}" && "${release_id}" != "null" ]]; then

@@ -10,10 +10,7 @@ import './assets/layout-refactor.css'
 const PageMain = defineAsyncComponent(() => import('./layout/PageMain.vue'))
 const PageVideoXBTVue = defineAsyncComponent(() => import('./layout/PageVideoXBT.vue'))
 const PageCode = defineAsyncComponent(() => import('./layout/PageCode.vue'))
-const PageOffice = defineAsyncComponent(() => import('./layout/PageOffice.vue'))
 const PagePdf = defineAsyncComponent(() => import('./layout/PagePdf.vue'))
-const PageDocx = defineAsyncComponent(() => import('./layout/PageDocx.vue'))
-const PageSheet = defineAsyncComponent(() => import('./layout/PageSheet.vue'))
 const PageImage = defineAsyncComponent(() => import('./layout/PageImage.vue'))
 const PageVideo = defineAsyncComponent(() => import('./layout/PageVideo.vue'))
 const PageMusic = defineAsyncComponent(() => import('./layout/PageMusic.vue'))
@@ -25,10 +22,7 @@ export default {
     return () => {
       let page: any = null
       if (appStore.appPage == 'PageMain') page = PageMain
-      else if (appStore.appPage == 'PageOffice') page = PageOffice
       else if (appStore.appPage == 'PagePdf') page = PagePdf
-      else if (appStore.appPage == 'PageDocx') page = PageDocx
-      else if (appStore.appPage == 'PageSheet') page = PageSheet
       else if (appStore.appPage == 'PageVideoXBT') page = PageVideoXBTVue
       else if (appStore.appPage == 'PageCode') page = PageCode
       else if (appStore.appPage == 'PageImage') page = PageImage

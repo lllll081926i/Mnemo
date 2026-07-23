@@ -2,32 +2,7 @@ import { onHideRightMenu } from '../utils/keyboardhelper'
 import { defineStore } from 'pinia'
 import { IAliGetFileModel } from '../aliapi/alimodels'
 
-export interface IPageOffice {
-  user_id: string
-  drive_id: string
-  file_id: string
-  file_name: string
-  preview_url: string
-  access_token: string
-}
-
 export interface IPagePdf {
-  user_id: string
-  drive_id: string
-  file_id: string
-  file_name: string
-  preview_url: string
-}
-
-export interface IPageDocx {
-  user_id: string
-  drive_id: string
-  file_id: string
-  file_name: string
-  preview_url: string
-}
-
-export interface IPageSheet {
   user_id: string
   drive_id: string
   file_id: string
@@ -137,10 +112,7 @@ export interface AppState {
   appDark: boolean
   appShutDown: boolean
 
-  pageOffice?: IPageOffice
   pagePdf?: IPagePdf
-  pageDocx?: IPageDocx
-  pageSheet?: IPageSheet
   pageCode?: IPageCode
   pageImage?: IPageImage
   pageVideoXBT?: IPageVideoXBT

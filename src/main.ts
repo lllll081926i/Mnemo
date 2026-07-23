@@ -123,14 +123,8 @@ window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {
     window.IsMainPage = true
   } else if (args.page == 'PageCode') {
     appStore.pageCode = args.data
-  } else if (args.page == 'PageOffice') {
-    appStore.pageOffice = args.data
   } else if (args.page == 'PagePdf') {
     appStore.pagePdf = args.data
-  } else if (args.page == 'PageDocx') {
-    appStore.pageDocx = args.data
-  } else if (args.page == 'PageSheet') {
-    appStore.pageSheet = args.data
   } else if (args.page == 'PageImage') {
     appStore.pageImage = args.data
   } else if (args.page == 'PageVideoXBT') {

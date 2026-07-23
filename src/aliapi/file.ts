@@ -3,7 +3,7 @@ import DebugLog from '../utils/debuglog'
 import { GetExpiresTime } from '../utils/utils'
 import AliHttp from './alihttp'
 import { IAliFileItem, IAliGetDirModel, IAliGetFileModel, IAliGetForderSizeModel } from './alimodels'
-import { ICompilationList, IDownloadUrl, IOfficePreViewUrl, IVideoPreviewUrl, IVideoXBTUrl } from './models'
+import { ICompilationList, IDownloadUrl, IVideoPreviewUrl, IVideoXBTUrl } from './models'
 import { isPikPakUser } from './utils'
 import { getProxyUrl, getRawUrl } from '../utils/proxyhelper'
 import { computeFolderStatsNow } from '../utils/folderstats'
@@ -223,10 +223,6 @@ export default class AliFile {
   static async ApiAudioPreviewUrl(user_id: string, drive_id: string, file_id: string): Promise<IDownloadUrl | string> {
     if (!user_id || !drive_id || !file_id) return '参数错误'
     return AliFile.ApiFileDownloadUrl(user_id, drive_id, file_id, 14400)
-  }
-
-  static async ApiOfficePreViewUrl(_user_id: string, _drive_id: string, _file_id: string): Promise<IOfficePreViewUrl | undefined> {
-    return undefined
   }
 
   static async ApiGetFile(user_id: string, drive_id: string, file_id: string): Promise<IAliGetFileModel | undefined> {

@@ -54,13 +54,6 @@ export interface ICompilationList {
 }
 
 
-export interface IOfficePreViewUrl {
-  drive_id: string
-  file_id: string
-  access_token: string
-  preview_url: string
-}
-
 
 export interface IVideoXBTUrl {
   time: string

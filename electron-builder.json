@@ -54,6 +54,7 @@
     "fpm": ["--deb-no-default-config-files"]
   },
   "win": {
+    "executableName": "Mnemo",
     "icon": "./static/images/icon_256x256.ico",
     "artifactName": "mnemo-${version}-win-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker",
@@ -62,7 +63,7 @@
       { "from": "./static/images/icon_256x256.ico", "to": "./images/icon_256x256.ico" },
       { "from": "./static/engine/win32/${arch}", "to": "./engine/win32/${arch}", "filter": ["**/*", "!mpv{,/**}"] }
     ],
-    "target": [{ "target": "nsis", "arch": ["x64"] }]
+    "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }]
   },
   "dmg": {
     "title": "Mnemo",
@@ -78,7 +79,12 @@
     "perMachine": true,
     "allowElevation": true,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": false
+    "deleteAppDataOnUninstall": false,
+    "shortcutName": "Mnemo",
+    "uninstallDisplayName": "Mnemo",
+    "installerIcon": "./static/images/icon_256x256.ico",
+    "uninstallerIcon": "./static/images/icon_256x256.ico",
+    "installerHeaderIcon": "./static/images/icon_256x256.ico"
   },
   "publish": [
     {

@@ -1,7 +1,8 @@
 {
   "name": "mnemo",
-  "description": "Mnemo",
-  "version": "0.1.2-preview.1",
+  "productName": "Mnemo",
+  "description": "Mnemo multi-cloud desktop file manager",
+  "version": "0.1.2",
   "main": "dist/electron/main/index.js",
   "packageManager": "npm@11.18.0",
   "author": {
@@ -63,7 +64,6 @@
     "dashjs": "^5.1.1",
     "dayjs": "^1.11.10",
     "dexie": "^4.0.1",
-    "docx-preview": "^0.3.7",
     "dom-to-image": "^2.6.0",
     "electron": "40.10.6",
     "electron-builder": "^26.15.3",
@@ -92,8 +92,7 @@
     "vitest": "^3.2.7",
     "vue": "^3.5.40",
     "vue-tsc": "^2.2.12",
-    "webdav": "5.9.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "webdav": "5.9.0"
   },
   "debug": {
     "env": {
@@ -103,11 +102,15 @@
     }
   },
   "keywords": [
-    "aliyunpan",
+    "mnemo",
+    "cloud",
+    "file-manager",
     "electron",
-    "rollup",
     "vite",
     "vue3",
-    "vue"
+    "pikpak",
+    "onedrive",
+    "dropbox",
+    "gdrive"
   ]
 }

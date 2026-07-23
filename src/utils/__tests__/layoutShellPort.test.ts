@@ -7,18 +7,23 @@ const root = process.cwd()
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n')
 
 describe('deep layout shell port', () => {
-  it('loads the Aliyun Office SDK only inside the Office preview window', () => {
+  it('does not ship Office online preview surfaces', () => {
     const html = read('index.html')
     const previewHtml = read('public/main2.html')
-    const office = read('src/layout/PageOffice.vue')
+    const openFile = read('src/utils/openfile.ts')
+    const app = read('src/App.vue')
 
     expect(html).not.toContain('aliyun-web-office-sdk.min.js')
     expect(previewHtml).not.toContain('aliyun-web-office-sdk.min.js')
-    expect(previewHtml).toContain('Content-Security-Policy')
-    expect(previewHtml).toContain("script-src 'self' https://g.alicdn.com")
-    expect(office).toContain("const ALIYUN_OFFICE_SDK_URL = 'https://g.alicdn.com/IMM/office-js/1.1.5/aliyun-web-office-sdk.min.js'")
-    expect(office).toContain('loadAliyunOfficeSdk')
-    expect(office).toContain('office-preview-state')
+    expect(fs.existsSync(path.join(root, 'src/layout/PageOffice.vue'))).toBe(false)
+    expect(fs.existsSync(path.join(root, 'src/layout/PageDocx.vue'))).toBe(false)
+    expect(fs.existsSync(path.join(root, 'src/layout/PageSheet.vue'))).toBe(false)
+    expect(app).not.toContain('PageOffice')
+    expect(app).not.toContain('PageDocx')
+    expect(app).not.toContain('PageSheet')
+    expect(openFile).not.toContain('OfficePdf')
+    expect(openFile).not.toContain('PageDocx')
+    expect(openFile).not.toContain('docx-preview')
   })
 
   it('loads Prism only for formatted code previews', () => {
@@ -256,7 +261,7 @@ describe('deep layout shell port', () => {
     expect(image).toContain('getProxyUrl')
     expect(image).not.toContain('thirdPartyImageDrives')
     expect(image).not.toContain('api.aliyundrive.com/v2/file/download')
-    expect(openFile.match(/proxy_headers: rawData\.headers \? JSON\.stringify\(rawData\.headers\) : undefined/g)).toHaveLength(5)
+    expect(openFile.match(/proxy_headers: rawData\.headers \? JSON\.stringify\(rawData\.headers\) : undefined/g)).toHaveLength(1)
     expect(proxy).toContain("resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''")
     expect(proxy).toContain('proxy_headers: resolvedProxyHeaders')
     expect(proxy).toContain('buildUpstreamProxyHeaders(clientReq.headers, resolvedProxyHeaders)')

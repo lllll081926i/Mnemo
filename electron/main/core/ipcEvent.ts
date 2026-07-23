@@ -101,53 +101,6 @@ const findCaptchaToken = (value: unknown, depth = 0): string => {
   return ''
 }
 
-function pathToFileUrl(filePath: string): string {
-  const normalized = path.resolve(filePath).replace(/\\/g, '/')
-  return 'file://' + (normalized.startsWith('/') ? normalized : '/' + normalized)
-}
-
-function findSoffice(): string {
-  const candidates = [
-    process.env.LIBREOFFICE_PATH || '',
-    process.env.SOFFICE_PATH || '',
-    is.macOS() ? '/Applications/LibreOffice.app/Contents/MacOS/soffice' : '',
-    is.windows() ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe' : '',
-    is.windows() ? 'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe' : '',
-    '/usr/bin/libreoffice',
-    '/usr/local/bin/libreoffice',
-    '/opt/homebrew/bin/libreoffice',
-    '/usr/bin/soffice',
-    '/usr/local/bin/soffice',
-    '/opt/homebrew/bin/soffice'
-  ].filter(Boolean)
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate
-  }
-  const names = is.windows() ? ['soffice.exe', 'libreoffice.exe'] : ['soffice', 'libreoffice']
-  const pathDirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean)
-  for (const dir of pathDirs) {
-    for (const name of names) {
-      const candidate = path.join(dir, name)
-      if (existsSync(candidate)) return candidate
-    }
-  }
-  return ''
-}
-
-function convertOfficeFileToPdf(soffice: string, inputPath: string, outDir: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const userInstall = path.join(outDir, 'lo-profile').replace(/\\/g, '/')
-    const args = ['--headless', '--nologo', '--nofirststartwizard', `-env:UserInstallation=file://${userInstall}`, '--convert-to', 'pdf', '--outdir', outDir, inputPath]
-    execFile(soffice, args, { windowsHide: true }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error((stderr || stdout || err.message || '').trim() || 'LibreOffice 转换失败'))
-      } else {
-        resolve()
-      }
-    })
-  })
-}
-
 function buildOpenDataLoaderPdfOptions(data: any): OpenDataLoaderPdfOptions {
   const outputDir = String(data?.outputDir || '')
   const options: OpenDataLoaderPdfOptions = {
@@ -218,7 +171,6 @@ export default class ipcEvent {
     this.handleOAuthCallback()
     this.handleAutoUpdate()
     this.handleSafeStorage()
-    this.handleOfficePreviewConvertToPdf()
     this.handleOpenDataLoaderConvertPdf()
     this.handleWebOpenWindow()
     this.handlePowerSaveBlocker()
@@ -825,44 +777,6 @@ export default class ipcEvent {
       await session.defaultSession.closeAllConnections()
       await syncMotrixApplicationProxy(ariaProxy)
       return true
-    })
-  }
-
-  private static handleOfficePreviewConvertToPdf() {
-    ipcMain.handle('OfficePreview:convertToPdf', async (_event, data: { sourceUrl?: string; fileName?: string }) => {
-      try {
-        const sourceUrl = data?.sourceUrl || ''
-        const fileName = path.basename(data?.fileName || 'document')
-        if (!sourceUrl) return { ok: false, error: '文档预览地址为空' }
-        const soffice = findSoffice()
-        if (!soffice) {
-          return {
-            ok: false,
-            error: '未找到 LibreOffice。请安装 LibreOffice 后重试，或继续使用网盘自带预览。'
-          }
-        }
-
-        const hash = createHash('sha1')
-          .update(sourceUrl + fileName)
-          .digest('hex')
-        const previewRoot = path.join(app.getPath('userData'), 'office-preview')
-        const workDir = path.join(previewRoot, hash)
-        mkdirSync(workDir, { recursive: true })
-        const ext = path.extname(fileName) || '.office'
-        const inputPath = path.join(workDir, `source${ext}`)
-        const outputPath = path.join(workDir, 'source.pdf')
-        if (!existsSync(outputPath)) {
-          const response = await fetch(sourceUrl)
-          if (!response.ok) return { ok: false, error: `文档下载失败：${response.status}` }
-          const arrayBuffer = await response.arrayBuffer()
-          writeFileSync(inputPath, Buffer.from(arrayBuffer))
-          await convertOfficeFileToPdf(soffice, inputPath, workDir)
-        }
-        if (!existsSync(outputPath)) return { ok: false, error: 'LibreOffice 未生成 PDF 文件' }
-        return { ok: true, pdfUrl: pathToFileUrl(outputPath) }
-      } catch (err: any) {
-        return { ok: false, error: err?.message || '文档转换 PDF 失败' }
-      }
     })
   }
 

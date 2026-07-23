@@ -2,7 +2,7 @@ import { IAliGetFileModel } from '../aliapi/alimodels'
 import AliFile from '../aliapi/file'
 import AliFileCmd from '../aliapi/filecmd'
 import { ITokenInfo, useAppStore, useFootStore, usePanFileStore, useSettingStore, useUserStore } from '../store'
-import { IPageCode, IPageDocx, IPageImage, IPageMusic, IPageMusicTrack, IPageOffice, IPagePdf, IPageSheet, IPageVideo, IPageVideoPlaylistEntry } from '../store/appstore'
+import { IPageCode, IPageImage, IPageMusic, IPageMusicTrack, IPagePdf, IPageVideo, IPageVideoPlaylistEntry } from '../store/appstore'
 import UserDAL from '../user/userdal'
 import { clickWait } from './debounce'
 import DebugLog from './debuglog'
@@ -74,11 +74,6 @@ function buildSiblingVideoPlaylist(file: IAliGetFileModel, provided?: IPageVideo
 
 const TEXT_PREVIEW_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv', 'nfo', 'srt', 'vtt', 'ass', 'ssa'])
 const PDF_PREVIEW_DRIVES = new Set(['pikpak', 'onedrive', 'dropbox', 'gdrive', 'gofile', 'webdav', 's3'])
-const DOCX_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
-const OFFICE_TO_PDF_DRIVES = PDF_PREVIEW_DRIVES
-const SHEET_PREVIEW_DRIVES = PDF_PREVIEW_DRIVES
-const SHEET_PREVIEW_EXTS = new Set(['xls', 'xlsx', 'xlsm', 'xlsb', 'csv', 'tsv'])
-const OFFICE_TO_PDF_EXTS = new Set(['doc', 'docm', 'dot', 'dotm', 'dotx', 'rtf', 'odt', 'ott', 'wps', 'wpt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ots', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'pot', 'potx', 'odp', 'dps', 'dpt'])
 const IMAGE_PREVIEW_EXTS = new Set(['bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'webp'])
 const AUDIO_PREVIEW_EXTS = new Set(['aac', 'ape', 'flac', 'm4a', 'mp3', 'ogg', 'wav', 'wma'])
 const VIDEO_PREVIEW_EXTS = new Set([...videoPlaylistExtensions, 'asf', 'm3u8', 'mpd', 'mts', 'ogv', 'rmvb', 'vob'])
@@ -96,9 +91,6 @@ export function isSupportedPreviewExtension(fileExt: string): boolean {
     || VIDEO_PREVIEW_EXTS.has(ext)
     || TEXT_PREVIEW_EXTS.has(ext)
     || ext === 'pdf'
-    || ext === 'docx'
-    || SHEET_PREVIEW_EXTS.has(ext)
-    || OFFICE_TO_PDF_EXTS.has(ext)
     || (CODE_PREVIEW_EXTS.has(ext) && Boolean(PrismExt(ext)))
 }
 
@@ -138,18 +130,6 @@ export async function menuOpenFile(
 
   if (normalizedExt === 'pdf' && PDF_PREVIEW_DRIVES.has(fileProvider)) {
     await Pdf(file, password)
-    return
-  }
-  if (normalizedExt === 'docx' && DOCX_PREVIEW_DRIVES.has(fileProvider)) {
-    await Docx(file, password)
-    return
-  }
-  if (SHEET_PREVIEW_EXTS.has(normalizedExt) && SHEET_PREVIEW_DRIVES.has(fileProvider)) {
-    await Sheet(file, password)
-    return
-  }
-  if (OFFICE_TO_PDF_EXTS.has(normalizedExt) && OFFICE_TO_PDF_DRIVES.has(fileProvider)) {
-    await OfficePdf(file, password)
     return
   }
   if (IMAGE_PREVIEW_EXTS.has(normalizedExt)) {
@@ -361,151 +341,6 @@ async function Pdf(file: IAliGetFileModel, password: string = ''): Promise<void>
   window.WebOpenWindow({ page: 'PagePdf', data: pagePdf, theme: 'dark' })
 }
 
-async function Docx(file: IAliGetFileModel, password: string = ''): Promise<void> {
-  const token = await resolveTokenForFile(file)
-  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('无法预览：网盘登录已失效，请重新登录后再试')
-    return
-  }
-  message.loading('加载中...', 2)
-  const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
-  if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '无法打开 Word 文档：没有获取到预览地址，请稍后重试')
-    return
-  }
-  const pageDocx: IPageDocx = {
-    user_id: token.user_id,
-    drive_id: file.drive_id,
-    file_id: file.file_id,
-    file_name: file.name,
-    preview_url: getProxyUrl({
-      user_id: token.user_id,
-      drive_id: file.drive_id,
-      file_id: file.file_id,
-      file_size: rawData.size || file.size,
-      proxy_url: rawData.url,
-      proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
-      content_disposition: 'inline',
-      file_name: file.name
-    })
-  }
-  window.WebOpenWindow({ page: 'PageDocx', data: pageDocx, theme: 'dark' })
-}
-
-async function OfficePdf(file: IAliGetFileModel, password: string = ''): Promise<void> {
-  const token = await resolveTokenForFile(file)
-  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('无法预览：网盘登录已失效，请重新登录后再试')
-    return
-  }
-  message.loading('正在转换文档...', 2)
-  const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
-  if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '无法打开文档：没有获取到预览地址，请稍后重试')
-    return
-  }
-  const sourceUrl = getProxyUrl({
-    user_id: token.user_id,
-    drive_id: file.drive_id,
-    file_id: file.file_id,
-    file_size: rawData.size || file.size,
-    proxy_url: rawData.url,
-    proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
-    content_disposition: 'inline',
-    file_name: file.name
-  })
-  const converted = await window.TvBoxInvoke('OfficePreview:convertToPdf', {
-    sourceUrl,
-    fileName: file.name
-  }) as { ok: boolean; pdfUrl?: string; error?: string }
-  if (!converted?.ok || !converted.pdfUrl) {
-    message.error(converted?.error || '文档转换失败，请稍后重试')
-    return
-  }
-  const pagePdf: IPagePdf = {
-    user_id: token.user_id,
-    drive_id: file.drive_id,
-    file_id: file.file_id,
-    file_name: file.name + '.pdf',
-    preview_url: converted.pdfUrl
-  }
-  window.WebOpenWindow({ page: 'PagePdf', data: pagePdf, theme: 'dark' })
-}
-
-async function Sheet(file: IAliGetFileModel, password: string = ''): Promise<void> {
-  const token = await resolveTokenForFile(file)
-  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('无法预览：网盘登录已失效，请重新登录后再试')
-    return
-  }
-  message.loading('加载中...', 2)
-  const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), password, file.icon == 'iconweifa', 'other', 'Origin')
-  if (typeof rawData === 'string' || !rawData.url) {
-    message.error(typeof rawData === 'string' ? rawData : '无法打开表格：没有获取到预览地址，请稍后重试')
-    return
-  }
-  const pageSheet: IPageSheet = {
-    user_id: token.user_id,
-    drive_id: file.drive_id,
-    file_id: file.file_id,
-    file_name: file.name,
-    preview_url: getProxyUrl({
-      user_id: token.user_id,
-      drive_id: file.drive_id,
-      file_id: file.file_id,
-      file_size: rawData.size || file.size,
-      proxy_url: rawData.url,
-      proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
-      content_disposition: 'inline',
-      file_name: file.name
-    })
-  }
-  window.WebOpenWindow({ page: 'PageSheet', data: pageSheet, theme: 'dark' })
-}
-
-async function Office(file: IAliGetFileModel): Promise<void> {
-  const token = await resolveTokenForFile(file)
-  if (!isDriveProviderSessionUsable(token, { driveId: file.drive_id })) {
-    message.error('无法预览：网盘登录已失效，请重新登录后再试')
-    return
-  }
-  message.loading('加载中...', 2)
-  let data = await AliFile.ApiOfficePreViewUrl(token.user_id, file.drive_id, file.file_id)
-  if (!data?.preview_url) {
-    const rawData = await getRawUrl(token.user_id, file.drive_id, file.file_id, getEncType(file), '', file.icon == 'iconweifa', 'other', 'Origin')
-    if (typeof rawData !== 'string' && rawData.url) {
-      data = {
-        drive_id: file.drive_id,
-        file_id: file.file_id,
-        preview_url: getProxyUrl({
-          user_id: token.user_id,
-          drive_id: file.drive_id,
-          file_id: file.file_id,
-          file_size: rawData.size || file.size,
-          proxy_url: rawData.url,
-          proxy_headers: rawData.headers ? JSON.stringify(rawData.headers) : undefined,
-          content_disposition: 'inline',
-          file_name: file.name
-        }),
-        access_token: ''
-      }
-    }
-  }
-  if (!data?.preview_url) {
-    message.error('无法打开文件：没有获取到预览地址，请稍后重试')
-    return
-  }
-  const pageOffice: IPageOffice = {
-    user_id: token.user_id,
-    drive_id: file.drive_id,
-    file_id: file.file_id,
-    file_name: file.name,
-    preview_url: data.preview_url,
-    access_token: data.access_token
-  }
-  window.WebOpenWindow({ page: 'PageOffice', data: pageOffice })
-}
-
 async function Audio(file: IAliGetFileModel, password: string = ''): Promise<void> {
   const weifa = file.icon == 'iconweifa'
   if (weifa) {
@@ -622,6 +457,7 @@ async function Code(file: IAliGetFileModel, codeExt: string, password: string = 
   }
   window.WebOpenWindow({ page: 'PageCode', data: pageCode, theme: 'dark' })
 }
+
 
 export function PrismExt(fileExt: string): string {
   const ext = '.' + fileExt.toLowerCase() + '.'
