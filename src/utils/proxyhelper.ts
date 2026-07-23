@@ -371,7 +371,11 @@ export async function createProxyServer(port: number) {
                 clientRes.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(decName + ext)};`)
               }
             }
-            httpResp.on('end', () => finish('done'))
+            httpResp.on('end', () => {
+              // 响应结束后清除超时定时器，避免误杀 keep-alive 复用连接上的其他请求
+              agentServer.setTimeout(0)
+              finish('done')
+            })
             httpResp.on('error', () => {
               clientRes.end()
               finish(clientRes.headersSent ? 'failed' : 'retry')

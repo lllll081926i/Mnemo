@@ -109,16 +109,20 @@ const saveTask = async () => {
     message.error(overlapError)
     return false
   }
+  const existing = syncStore.tasks.find((item) => item.id === task.id)
+  if (existing && (existing.local_path !== task.local_path || existing.remote_dir_id !== task.remote_dir_id || existing.drive_id !== task.drive_id || existing.direction !== task.direction)) {
+    // 同步路径/方向变更后旧快照已失效，必须丢弃，否则会把另一侧文件误判为“已删除”
+    await deleteSyncTaskData(task.id)
+    task.last_sync_at = 0
+    task.last_sync_status = ''
+    task.last_sync_message = ''
+  }
   const tasks = syncStore.tasks.filter((item) => item.id !== task.id)
   tasks.push(JSON.parse(JSON.stringify(task)))
   syncStore.mSaveTasks(tasks)
   await persistTasks()
   message.success('同步任务已保存')
   return true
-}
-
-const handleSave = async () => {
-  if (await saveTask()) editVisible.value = false
 }
 
 const handleDelete = (task: SyncTask) => {
@@ -228,7 +232,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <a-modal v-model:visible="editVisible" title="同步任务设置" :ok-text="'保存'" :cancel-text="'取消'" unmount-on-close @ok="handleSave">
+    <a-modal v-model:visible="editVisible" title="同步任务设置" :ok-text="'保存'" :cancel-text="'取消'" unmount-on-close :on-before-ok="saveTask">
       <a-form v-if="editTask" :model="editTask" layout="vertical" class="sync-edit-form">
         <a-form-item label="任务名称" required>
           <a-input v-model="editTask.name" placeholder="例如：电影备份" :max-length="30" />

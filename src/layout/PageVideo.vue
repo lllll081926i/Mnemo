@@ -115,12 +115,17 @@ function playTs(video: HTMLMediaElement, url: string) {
       video.src = url
       return
     }
-    const player = Mpegts.createPlayer({ type: 'mpegts', isLive: false, url })
+    const player = Mpegts.createPlayer({ type: 'mpegts', isLive: false, url }, { seekType: 'range' })
     if (token !== streamingLoadToken) {
       player.destroy()
       return
     }
     tsPlayer = player
+    // mpegts.js 的错误不会冒泡成 video:error，必须自己监听并触发降级，否则 TS 流失败会静默卡死
+    player.on(Mpegts.Events.ERROR, (errorType: string, errorDetail: string) => {
+      console.warn('mpegts 播放错误:', errorType, errorDetail)
+      void tryFallbackQuality()
+    })
     player.attachMediaElement(video)
     player.load()
     const playResult = player.play() as Promise<void> | undefined

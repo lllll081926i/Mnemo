@@ -394,12 +394,21 @@ export const listS3Recursive = async (config: S3ConnectionConfig, relativePath =
   return result
 }
 
-/** 以流的方式上传单个文件（多段上传由 lib-storage 处理） */
-export const uploadS3File = async (config: S3ConnectionConfig, relativePath: string, localPath: string, onProgress?: (transferred: number) => void) => {
+/** 以流的方式上传单个文件（多段上传由 lib-storage 处理）；onProgress 回报增量字节数 */
+export const uploadS3File = async (config: S3ConnectionConfig, relativePath: string, localPath: string, onProgress?: (transferredDelta: number) => void) => {
   const stat = await fsPromises.stat(localPath)
   const client = createS3Client(config)
   const upload = new Upload({ client, params: { Bucket: config.bucket, Key: joinS3Key(config.rootPrefix, relativePath), Body: fs.createReadStream(localPath), ContentLength: stat.size } })
-  if (onProgress) upload.on('httpUploadProgress', (progress) => onProgress(Number(progress.loaded || 0)))
+  if (onProgress) {
+    let lastLoaded = 0
+    upload.on('httpUploadProgress', (progress) => {
+      const loaded = Number(progress.loaded || 0)
+      if (loaded > lastLoaded) {
+        onProgress(loaded - lastLoaded)
+        lastLoaded = loaded
+      }
+    })
+  }
   await upload.done()
   return { size: stat.size, time: Date.now() }
 }
