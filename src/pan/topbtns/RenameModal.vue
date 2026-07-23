@@ -208,26 +208,25 @@ const handleRename = (newName: string, encType: string = '', inputpassword: stri
     <template #title>
       <span class='modaltitle'>{{ ispic ? '重命名相册' : '重命名一个文件' }}</span>
     </template>
-    <div class='rename-modal'>
-      <div v-if='form.bakName' class='rename-old' :title='form.bakName'>
-        <span class='rename-old-label'>当前名称</span>
-        <span class='rename-old-name'>{{ form.bakName }}</span>
+    <div class="mn-modal">
+      <div v-if='form.bakName' class='mn-panel' :title='form.bakName'>
+        <span class='mn-panel-label'>当前名称</span>
+        <span class='mn-panel-value'>{{ form.bakName }}</span>
       </div>
-      <a-form ref='formRef' :model='form' layout='vertical'>
-        <a-form-item field='fileName' :rules='ispic ? album_rules : file_rules' class='rename-item'>
-          <template #label>{{ ispic ? '相册名' : '新名称' }}</template>
+      <a-form ref='formRef' :model='form' layout='vertical' class='mn-form'>
+        <a-form-item field='fileName' :rules='ispic ? album_rules : file_rules' :label="ispic ? '相册名' : '新名称'">
           <a-input v-model='form.fileName' :placeholder='form.bakName' allow-clear
                    :input-attrs="{ id: 'RenameInput', autofocus: 'autofocus' }" />
-          <div class='rename-hint'>不要包含特殊字符 &lt; &gt; : * ?  / ' "</div>
         </a-form-item>
-        <a-form-item v-if='ispic' field='description' label='相册描述' class='rename-item'>
+        <a-form-item v-if='ispic' field='description' label='相册描述'>
           <a-textarea v-model='form.description' placeholder='修改相册描述' show-word-limit
                       @keydown='(e:any) => e.stopPropagation()' :disabled="encType!=''" />
         </a-form-item>
       </a-form>
-      <div class='rename-footer'>
+      <div class='mn-hint'>不要包含特殊字符 &lt; &gt; : * ? / ' "</div>
+      <div class='mn-footer'>
         <a-button v-if='!ispic' type='text' size='small' @click='handleMulti'>批量重命名…</a-button>
-        <div style='flex-grow: 1'></div>
+        <span class='mn-footer-spacer'></span>
         <a-button v-if='!okLoading' type='outline' size='small' @click='handleHide'>取消</a-button>
         <a-button type='primary' size='small' :loading='okLoading' @click='handleOK'>重命名</a-button>
       </div>
@@ -236,57 +235,4 @@ const handleRename = (newName: string, encType: string = '', inputpassword: stri
 </template>
 
 <style scoped>
-.rename-modal {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 460px;
-  max-width: calc(100vw - 64px);
-}
-
-.rename-old {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 7px 10px;
-  background: var(--color-fill-2);
-  border-radius: 6px;
-}
-
-.rename-old-label {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--color-text-3);
-}
-
-.rename-old-name {
-  overflow: hidden;
-  font-size: 13px;
-  color: var(--color-text-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rename-item {
-  margin-bottom: 0;
-}
-
-.rename-item :deep(.arco-form-item-label) {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-2);
-}
-
-.rename-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--color-text-3);
-}
-
-.rename-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 </style>

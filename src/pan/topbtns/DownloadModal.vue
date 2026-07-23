@@ -1,6 +1,7 @@
 <script lang="ts">
 import { modalCloseAll, modalDownload } from '../../utils/modal'
 import { computed, defineComponent, ref } from 'vue'
+import { Download } from 'lucide-vue-next'
 import useSettingStore from "../../setting/settingstore";
 import { menuDownload } from './topbtn'
 import { isEmpty } from 'lodash'
@@ -9,6 +10,7 @@ import message from '../../utils/message'
 
 
 export default defineComponent({
+  components: { Download },
   props: {
     visible: {
       type: Boolean,
@@ -79,18 +81,24 @@ export default defineComponent({
     <template #title>
       <span class="modaltitle">从网盘下载 文件/文件夹 到本地</span>
     </template>
-    <div class="modalbody" style="width: 440px;padding-bottom: 24px;">
-      <a-input-search tabindex="-1"
-                      :readonly="true"
-                      button-text="更改"
-                      search-button
-                      :model-value="displayDownSavePath"
-                      @search="handleSelectDownSavePath" />
-    </div>
-    <div class="modalfoot">
-      <div style="flex-grow: 1"></div>
-      <a-button v-if="!okLoading" type="outline" size="small" @click="handleHide">取消</a-button>
-      <a-button type="primary" size="small" :loading="okLoading" @click="handleOK">开始下载</a-button>
+    <div class="mn-modal">
+      <div class="mn-hero">
+        <div class="mn-hero-icon"><Download :size="20" /></div>
+        <div class="mn-hero-text">
+          <div class="mn-hero-title">下载选中的文件 / 文件夹</div>
+          <div class="mn-hero-sub">从网盘下载到本地文件夹</div>
+        </div>
+      </div>
+      <div class="mn-panel">
+        <span class="mn-panel-label">保存到</span>
+        <span class="mn-panel-value" :title="displayDownSavePath">{{ displayDownSavePath }}</span>
+        <a-button type="outline" size="mini" @click="handleSelectDownSavePath">更改</a-button>
+      </div>
+      <div class="mn-footer">
+        <span class="mn-footer-spacer"></span>
+        <a-button v-if="!okLoading" type="outline" size="small" @click="handleHide">取消</a-button>
+        <a-button type="primary" size="small" :loading="okLoading" @click="handleOK">开始下载</a-button>
+      </div>
     </div>
   </a-modal>
 </template>

@@ -233,7 +233,7 @@ onMounted(() => {
     </div>
 
     <a-modal v-model:visible="editVisible" title="同步任务设置" :ok-text="'保存'" :cancel-text="'取消'" unmount-on-close :on-before-ok="saveTask">
-      <a-form v-if="editTask" :model="editTask" layout="vertical" class="sync-edit-form">
+      <a-form v-if="editTask" :model="editTask" layout="vertical" class="sync-edit-form mn-form">
         <a-form-item label="任务名称" required>
           <a-input v-model="editTask.name" placeholder="例如：电影备份" :max-length="30" />
         </a-form-item>

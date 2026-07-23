@@ -1,0 +1,161 @@
+/* ============================================================
+   统一弹窗布局系统（所有 a-modal 内容区使用 .mn-* 类）
+   结构约定：
+   <div class="mn-modal">
+     <div class="mn-hero">图标 + 标题 + 副标题</div>
+     <div class="mn-panel">关键信息面板（路径/当前值/选中项）</div>
+     <a-form class="mn-form">表单项</a-form>
+     <div class="mn-hint">辅助说明</div>
+     <div class="mn-footer">次要操作 … spacer … 取消 + 主按钮</div>
+   </div>
+   ============================================================ */
+
+.mn-modal {
+  display: flex;
+  width: 480px;
+  max-width: calc(100vw - 64px);
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mn-modal-wide {
+  width: 560px;
+}
+
+.mn-hero {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.mn-hero-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-fill-2);
+  color: rgb(var(--primary-6));
+}
+
+.mn-hero-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.mn-hero-title {
+  overflow: hidden;
+  color: var(--color-text-1);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mn-hero-sub {
+  margin-top: 2px;
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.mn-panel {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  background: var(--color-fill-1);
+  color: var(--color-text-2);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.mn-panel-label {
+  flex: 0 0 auto;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.mn-panel-value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--color-text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mn-panel-wrap {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  user-select: text;
+}
+
+.mn-form .arco-form-item {
+  margin-bottom: 0;
+}
+
+.mn-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mn-section-title {
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mn-form .arco-form-item-label {
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mn-hint {
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.mn-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-2);
+}
+
+.mn-footer .arco-btn {
+  white-space: nowrap;
+}
+
+.mn-footer-spacer {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 560px) {
+  .mn-modal,
+  .mn-modal-wide {
+    width: calc(100vw - 48px);
+  }
+
+  .mn-footer {
+    flex-wrap: wrap;
+  }
+
+  .mn-footer-spacer {
+    display: none;
+  }
+}

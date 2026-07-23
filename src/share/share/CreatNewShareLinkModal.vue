@@ -2,6 +2,7 @@
 import { IAliGetFileModel } from '../../aliapi/alimodels'
 import { modalCloseAll } from '../../utils/modal'
 import { computed, PropType, reactive, ref } from 'vue'
+import { Share2 } from 'lucide-vue-next'
 import dayjs from 'dayjs'
 import { usePanTreeStore, useSettingStore } from '../../store'
 import { humanDateTime, randomSharePassword } from '../../utils/format'
@@ -144,81 +145,85 @@ const handleOK = async (multi: boolean) => {
            :unmount-on-close='true' :mask-closable='false'
            @cancel='handleHide' @before-open='handleOpen' @close='handleClose'>
     <template #title>
-      <span class='modaltitle'>
-        创建{{ shareType.title }}链接
-        <span class='titletips'> (已选择{{ filelist.length }}个文件) </span>
-      </span>
+      <span class='modaltitle'>创建{{ shareType.title }}链接</span>
     </template>
-    <div class='modalbody' style='width: 440px'>
-      <a-form ref='formRef' :model='form' layout='vertical'>
+    <div class='mn-modal'>
+      <div class='mn-hero'>
+        <div class='mn-hero-icon'><Share2 :size='19' /></div>
+        <div class='mn-hero-text'>
+          <div class='mn-hero-title'>创建{{ shareType.title }}链接</div>
+          <div class='mn-hero-sub'>已选择 {{ filelist.length }} 个文件</div>
+        </div>
+      </div>
+      <a-form ref='formRef' :model='form' layout='vertical' class='mn-form'>
         <a-form-item field='share_name'>
           <template #label>
-            <template v-if='shareType.type === "s"'> {{ shareType.title }}链接标题：</template>
-            <template v-else> {{ shareType.title }}文件：</template>
-            <span class='opblue' style='margin-left: 0; font-size: 12px' v-if='shareType.type === "s"'> 修改后的标题只有自己可见 </span>
-            <span class='opblue' style='margin-left: 0; font-size: 12px' v-else> 🎉快传支持发送所有格式的文件 </span>
+            <template v-if='shareType.type === "s"'> {{ shareType.title }}链接标题</template>
+            <template v-else> {{ shareType.title }}文件</template>
+            <span class='share-label-tip' v-if='shareType.type === "s"'>修改后的标题只有自己可见</span>
           </template>
           <a-input v-model.trim='form.share_name' :placeholder='form.share_name' />
         </a-form-item>
 
         <template v-if='shareType.type === "s" && supportsShareSettings'>
-          <a-row>
-            <a-col v-if='supportsShareExpiration' flex='200px'> 有效期：</a-col>
-            <a-col v-if='supportsShareExpiration && supportsSharePassword' flex='12px'></a-col>
-            <a-col v-if='supportsSharePassword' flex='100px'> 提取码：</a-col>
-            <a-col flex='auto'></a-col>
-          </a-row>
-          <a-row>
-            <a-col v-if='supportsShareExpiration' flex='200px'>
-              <a-form-item field='expiration'>
-                <a-date-picker
-                  v-model='form.expiration'
-                  style='width: 200px; margin: 0'
-                  show-time
-                  placeholder='永久有效'
-                  value-format='YYYY-MM-DD HH:mm:ss'
-                  :shortcuts="[
-                    { label: '永久', value: () => '' },
-                    { label: '3小时', value: () => dayjs().add(3, 'hour') },
-                    { label: '1天', value: () => dayjs().add(1, 'day') },
-                    { label: '3天', value: () => dayjs().add(3, 'day') },
-                    { label: '7天', value: () => dayjs().add(7, 'day') },
-                    { label: '30天', value: () => dayjs().add(30, 'day') }
-                  ]" />
-              </a-form-item>
-            </a-col>
-            <a-col v-if='supportsShareExpiration && supportsSharePassword' flex='12px'></a-col>
-            <a-col v-if='supportsSharePassword' flex='120px'>
-              <a-form-item field='share_pwd' :rules="[{ length: 4, message: '提取码必须是4个字符' }]">
-                <a-input v-model='form.share_pwd' tabindex='-1' placeholder='没有不填' />
-              </a-form-item>
-            </a-col>
-            <a-col flex='auto'></a-col>
-          </a-row>
+          <div class='share-settings-row'>
+            <a-form-item v-if='supportsShareExpiration' field='expiration' label='有效期' class='share-settings-item'>
+              <a-date-picker
+                v-model='form.expiration'
+                style='width: 100%'
+                show-time
+                placeholder='永久有效'
+                value-format='YYYY-MM-DD HH:mm:ss'
+                :shortcuts="[
+                  { label: '永久', value: () => '' },
+                  { label: '3小时', value: () => dayjs().add(3, 'hour') },
+                  { label: '1天', value: () => dayjs().add(1, 'day') },
+                  { label: '3天', value: () => dayjs().add(3, 'day') },
+                  { label: '7天', value: () => dayjs().add(7, 'day') },
+                  { label: '30天', value: () => dayjs().add(30, 'day') }
+                ]" />
+            </a-form-item>
+            <a-form-item v-if='supportsSharePassword' field='share_pwd' label='提取码' class='share-settings-item share-settings-pwd' :rules="[{ length: 4, message: '提取码必须是4个字符' }]">
+              <a-input v-model='form.share_pwd' tabindex='-1' placeholder='没有不填' />
+            </a-form-item>
+          </div>
         </template>
       </a-form>
-    </div>
-    <div class='modalfoot'>
-      <a-button v-if='filelist.length > 1' type='outline' size='small' :loading='okBatchLoading' @click='handleOK(true)'>
-        为每个文件单独创建
-      </a-button>
-      <div style='flex-grow: 1'></div>
-      <a-button v-if='!okLoading' type='outline' size='small' @click='handleHide'>取消</a-button>
-      <a-button v-if="supportsCombinedShare || filelist.length === 1 || shareType.type === 't'" type='primary' size='small' :loading='okLoading' @click='handleOK(false)'>
-        创建{{ shareType.title }}链接
-      </a-button>
+      <div class='mn-footer'>
+        <a-button v-if='filelist.length > 1' type='outline' size='small' :loading='okBatchLoading' @click='handleOK(true)'>
+          为每个文件单独创建
+        </a-button>
+        <span class='mn-footer-spacer'></span>
+        <a-button v-if='!okLoading' type='outline' size='small' @click='handleHide'>取消</a-button>
+        <a-button v-if="supportsCombinedShare || filelist.length === 1 || shareType.type === 't'" type='primary' size='small' :loading='okLoading' @click='handleOK(false)'>
+          创建{{ shareType.title }}链接
+        </a-button>
+      </div>
     </div>
   </a-modal>
 </template>
 
 <style scoped>
-.iconbulb {
-  display: inline-block;
-  height: 22px;
-  margin-left: 4px;
-  color: #ffc107dd;
-  font-size: 18px;
-  line-height: 22px;
-  cursor: help;
+.share-label-tip {
+  margin-left: 8px;
+  color: var(--color-text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.share-settings-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.share-settings-item {
+  min-width: 0;
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.share-settings-pwd {
+  flex: 0 0 130px;
 }
 </style>

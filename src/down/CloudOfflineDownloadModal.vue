@@ -146,9 +146,10 @@ const handleCreate = async () => {
             <a-button type="outline" size="small" @click="handleSelectDir">选择文件夹</a-button>
           </div>
         </a-form-item>
-        <div class="offline-footer">
-          <a-button type="outline" @click="handleHide">取消</a-button>
-          <a-button type="primary" :loading="okLoading" @click="handleCreate">创建任务</a-button>
+        <div class="offline-footer mn-footer">
+          <span class="mn-footer-spacer"></span>
+          <a-button type="outline" size="small" @click="handleHide">取消</a-button>
+          <a-button type="primary" size="small" :loading="okLoading" @click="handleCreate">创建任务</a-button>
         </div>
       </a-form>
     </div>
@@ -230,8 +231,7 @@ const handleCreate = async () => {
 
 .offline-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
-  padding-top: 4px;
 }
 </style>

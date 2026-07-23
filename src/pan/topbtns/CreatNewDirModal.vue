@@ -5,9 +5,11 @@ import message from '../../utils/message'
 import { modalCloseAll } from '../../utils/modal'
 import { CheckFileName, ClearFileName } from '../../utils/filehelper'
 import { defineComponent, PropType, reactive, ref } from 'vue'
+import { FolderPlus } from 'lucide-vue-next'
 import PanDAL from '../pandal'
 
 export default defineComponent({
+  components: { FolderPlus },
   props: {
     visible: {
       type: Boolean,
@@ -153,20 +155,25 @@ export default defineComponent({
     <template #title>
       <span class="modaltitle">新建文件夹</span>
     </template>
-    <div class="modalbody" style="width: 440px">
-      <a-form ref="formRef" :model="form" layout="vertical">
-        <a-form-item field="dirName" :rules="rules">
-          <template #label>文件夹名：<span class="opblue" style="margin-left: 16px; font-size: 12px"> 不要有特殊字符 &lt; > : * ? \\ / \' " </span> </template>
+    <div class="mn-modal">
+      <div class="mn-hero">
+        <div class="mn-hero-icon"><FolderPlus :size="20" /></div>
+        <div class="mn-hero-text">
+          <div class="mn-hero-title">新建文件夹</div>
+          <div class="mn-hero-sub">在当前位置创建一个新的文件夹</div>
+        </div>
+      </div>
+      <a-form ref="formRef" :model="form" layout="vertical" class="mn-form">
+        <a-form-item field="dirName" :rules="rules" label="文件夹名">
           <a-input v-model.trim="form.dirName" placeholder="例如：新建文件夹" allow-clear :input-attrs="{ id: 'CreatNewDirInput', autofocus: 'autofocus' }" />
         </a-form-item>
       </a-form>
-      <br />
-    </div>
-    <div class="modalfoot">
-      <a-button v-if="false" type="outline" size="small" @click="handleHide">批量创建</a-button>
-      <div style="flex-grow: 1"></div>
-      <a-button v-if="!okLoading" type="outline" size="small" @click="handleHide">取消</a-button>
-      <a-button type="primary" size="small" :loading="okLoading" @click="handleOK">创建</a-button>
+      <div class="mn-hint">不要包含特殊字符 &lt; &gt; : * ? \ / ' "</div>
+      <div class="mn-footer">
+        <span class="mn-footer-spacer"></span>
+        <a-button v-if="!okLoading" type="outline" size="small" @click="handleHide">取消</a-button>
+        <a-button type="primary" size="small" :loading="okLoading" @click="handleOK">创建</a-button>
+      </div>
     </div>
   </a-modal>
 </template>

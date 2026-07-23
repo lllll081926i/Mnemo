@@ -461,10 +461,13 @@ const handleOK = () => {
         </template>
       </AntdTree>
     </div>
-    <div id='selectdir'>已选择：{{ selectFile.name }}</div>
-    <div class='modalfoot'>
+    <div id='selectdir' class='mn-panel selectdir-panel'>
+      <span class='mn-panel-label'>已选择</span>
+      <span class='mn-panel-value'>{{ selectFile.name }}</span>
+    </div>
+    <div class='mn-footer'>
       <a-button v-if="selecttype !== 'select'" type='outline' size='small' @click='handleCreatNew'>新建文件夹</a-button>
-      <div style='flex-grow: 1'></div>
+      <span class='mn-footer-spacer'></span>
       <a-button v-if='!okLoading' type='outline' size='small' tabindex='-1' @click='handleHide'>取消</a-button>
       <a-button type='primary' size='small' tabindex='-1' :loading='okLoading' @click='handleOK'>选择</a-button>
     </div>
@@ -475,39 +478,30 @@ const handleOK = () => {
     <template #title>
       <span class='modaltitle'>新建文件夹</span>
     </template>
-    <div class='modalbody' style='width: 440px'>
-      <a-form ref='formRef' :model='form' layout='vertical'>
-        <a-form-item field='dirName' :rules='rules'>
-          <template #label>文件夹名：<span class='opblue' style='margin-left: 16px; font-size: 12px'> 不要有特殊字符 &lt; > : * ? \\ / \' " </span>
-          </template>
+    <div class='mn-modal'>
+      <a-form ref='formRef' :model='form' layout='vertical' class='mn-form'>
+        <a-form-item field='dirName' :rules='rules' label='文件夹名'>
           <a-input v-model.trim='form.dirName' placeholder='例如：新建文件夹' allow-clear
                    :input-attrs="{ id: 'SelectDirCreatNewDirInput', autofocus: 'autofocus' }" />
         </a-form-item>
       </a-form>
-      <br />
-    </div>
-    <div class='modalfoot'>
-      <div style='flex-grow: 1'></div>
-      <a-button v-if='!okLoading' type='outline' size='small' @click='handleHideNewDir'>取消</a-button>
-      <a-button type='primary' size='small' :loading='okLoading' @click='handleOKNewDir'>创建</a-button>
+      <div class='mn-hint'>不要包含特殊字符 &lt; &gt; : * ? \ / ' "</div>
+      <div class='mn-footer'>
+        <span class='mn-footer-spacer'></span>
+        <a-button v-if='!okLoading' type='outline' size='small' @click='handleHideNewDir'>取消</a-button>
+        <a-button type='primary' size='small' :loading='okLoading' @click='handleOKNewDir'>创建</a-button>
+      </div>
     </div>
   </a-modal>
 </template>
 
 <style>
-#selectdir {
+#selectdir.selectdir-panel {
+  margin-top: 10px;
+  margin-bottom: 0;
   text-align: left;
-  margin-bottom: 8px;
-  font-size: 14px;
-  line-height: 18px;
-  overflow: hidden;
-  -o-text-overflow: ellipsis;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  word-break: keep-all;
-  color: var(--color-text-3);
-  height: 18px;
-  width: 80vw;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .showpandirmodal .arco-modal-header {

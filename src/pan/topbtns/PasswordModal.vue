@@ -3,6 +3,7 @@ import { computed, PropType, reactive, ref } from 'vue'
 import { modalCloseAll } from '../../utils/modal'
 import { usePanTreeStore, useSettingStore } from '../../store'
 import { decodeName, encodeName } from '../../module/flow-enc/utils'
+import { Lock } from 'lucide-vue-next'
 import Db from '../../utils/db'
 import message from '../../utils/message'
 import { localPwd } from '../../utils/aria2c'
@@ -149,8 +150,15 @@ const getCountTime = async () => {
     <template #title>
       <span class='modaltitle'>{{ modalTitle }}</span>
     </template>
-    <a-space direction='vertical' size='large' :style="{ width: '380px'}">
-      <a-form ref='formRef' auto-label-width :model='form'>
+    <div class='mn-modal'>
+      <div class='mn-hero'>
+        <div class='mn-hero-icon'><Lock :size='19' /></div>
+        <div class='mn-hero-text'>
+          <div class='mn-hero-title'>{{ modalTitle }}</div>
+          <div class='mn-hero-sub'>安全密码用于加密文件名和私密文件的访问</div>
+        </div>
+      </div>
+      <a-form ref='formRef' :model='form' layout='vertical' class='mn-form'>
         <a-form-item v-if='optType === "modify"'
                      field='oldEncPassWord' label='旧密码'
                      :validate-trigger="['change','input']"
@@ -169,7 +177,6 @@ const getCountTime = async () => {
           <a-input-password
             v-model.trim='form.oldEncPassWord'
             :input-attrs="{ id: 'oldEncPassWordInput', autofocus: 'autofocus' }"
-            :style="{width:'320px'}"
             placeholder="旧密码" allow-clear />
         </a-form-item>
         <a-form-item field='encPassword' label='安全密码'
@@ -191,7 +198,6 @@ const getCountTime = async () => {
           <a-input-password
             :input-attrs="{ id: 'encPasswordInput', autofocus: 'autofocus' }"
             v-model.trim='form.encPassword'
-            :style="{width:'320px'}"
             placeholder="安全密码" allow-clear />
         </a-form-item>
         <a-form-item v-if='optType === "new" || optType === "modify" '
@@ -212,19 +218,20 @@ const getCountTime = async () => {
           <a-input-password
             :input-attrs="{ id: 'encConfirmPasswordInput', autofocus: 'autofocus' }"
             v-model.trim='form.encConfirmPassword'
-            :style="{width:'320px'}"
             placeholder="确认密码" allow-clear />
         </a-form-item>
       </a-form>
-    </a-space>
-    <div class='modalfoot'>
-      <div style='flex-grow: 1'></div>
-      <a-button v-if='!okLoading' type='outline' size='small' @click='handleCancel'>取消</a-button>
-      <a-button type='primary' size='small' :loading='okLoading' @click='handleOK'>确认</a-button>
+      <div class='mn-footer'>
+        <span class='mn-footer-spacer'></span>
+        <a-button v-if='!okLoading' type='outline' size='small' @click='handleCancel'>取消</a-button>
+        <a-button type='primary' size='small' :loading='okLoading' @click='handleOK'>确认</a-button>
+      </div>
     </div>
   </a-modal>
 </template>
 
 <style scoped>
-
+.mn-form .arco-form-item {
+  margin-bottom: 12px;
+}
 </style>

@@ -4,6 +4,7 @@ import { useAppStore } from './store'
 import './assets/global.css'
 import './assets/design-tokens.css'
 import './assets/fileitem.css'
+import './assets/modal.css'
 import './assets/antd.css'
 import './assets/layout-refactor.css'
 
