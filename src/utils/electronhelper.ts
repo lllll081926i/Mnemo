@@ -2,12 +2,12 @@ import path from 'path'
 import { throttle } from './debounce'
 
 export function copyToClipboard(text: string): void {
-  window.Electron.clipboard.writeText(text, 'clipboard')
+  window.WebClipboardWriteText(text)
 }
 export function openExternal(url: string): void {
   try {
     const target = new URL(url)
-    if (target.protocol === 'https:' || target.protocol === 'http:') window.Electron.shell.openExternal(target.toString())
+    if (target.protocol === 'https:' || target.protocol === 'http:') void window.WebOpenExternal(target.toString())
   } catch {}
 }
 
@@ -32,11 +32,8 @@ function LoadElectronPath(): void {
       window.WebPlatformSync((data: { appPath: string; execPath: string }) => {
         ElectronPath.AppUserData = data.appPath
         ElectronPath.AppExecPath = data.execPath
-        window.Electron.WebPlatformSync = data
       })
     }
-
-    window.Electron.ElectronPath = ElectronPath
   }
 }
 

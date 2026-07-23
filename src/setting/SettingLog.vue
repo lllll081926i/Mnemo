@@ -9,7 +9,7 @@ const settingStore = useSettingStore()
 const logPath = getUserDataPath('mnemo.log')
 const cb = (val: any) => settingStore.updateStore(val)
 const setLogLevel = (level: unknown) => cb({ debugLogLevel: String(level) as DebugLogLevel })
-const openLogFile = () => window.Electron.shell.showItemInFolder(logPath)
+const openLogFile = () => window.WebShowItemInFolder(logPath)
 </script>
 
 <template>

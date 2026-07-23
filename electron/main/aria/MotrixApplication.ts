@@ -34,12 +34,12 @@ export default class MotrixApplication extends EventEmitter {
   }
 
   async ensureEngineReady (): Promise<void> {
-    if (this.engineClient) return
+    if (this.engineClient) return this.engineClient.waitUntilReady()
     if (this.engineReady) return this.engineReady
     this.engineReady = Promise.resolve().then(() => {
       this.startEngine()
       this.initEngineClient()
-    })
+    }).then(() => this.engineClient.waitUntilReady())
     return this.engineReady
   }
 

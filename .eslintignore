@@ -1,0 +1,6 @@
+dist/
+node_modules/
+static/
+rclone/
+*.config.js
+*.config.ts

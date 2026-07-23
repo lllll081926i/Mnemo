@@ -7,6 +7,7 @@
     "jsx": "preserve",
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "strict": true,
     "baseUrl": "./",
     "paths": {
       "@shared/*": ["shared/*"],
@@ -14,5 +15,5 @@
     }
   },
   "include": ["package.json", "electron", "shared"],
-  "exclude": ["shared/__tests__", "shared/types/reedy.ts", "shared/utils/vector.ts"]
+  "exclude": ["shared/__tests__"]
 }

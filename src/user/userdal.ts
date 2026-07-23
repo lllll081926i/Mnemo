@@ -4,6 +4,7 @@ import useUserStore, { ITokenInfo } from './userstore'
 import { useAppStore, useFootStore, usePanFileStore, usePanTreeStore, useSettingStore } from '../store'
 import PanDAL from '../pan/pandal'
 import DebugLog from '../utils/debuglog'
+import { clearTreeCache } from '../store/treestore'
 import { applyPikPakQuota, refreshPikPakAccessToken } from '../pikpak/auth'
 import { isPikPakUser, isS3User, isWebDavUser } from '../aliapi/utils'
 import { applyWebDavQuota, getWebDavConnection, getWebDavConnectionId, testWebDavConnection } from '../utils/webdavClient'
@@ -301,6 +302,7 @@ export default class UserDAL {
         tokenfrom: token.tokenfrom,
         login: true
       })
+      if (previousActiveUserId && previousActiveUserId !== token.user_id) clearTreeCache()
       await UserDAL.LoadPanData(token)
 
       await DB.saveValueString('uiDefaultUser', token.user_id)

@@ -51,7 +51,9 @@ describe('MotrixApplication', () => {
     const { default: MotrixApplication } = await import('../MotrixApplication')
     const app = new MotrixApplication()
     const startEngine = vi.spyOn(app, 'startEngine').mockImplementation(() => {})
-    const initEngineClient = vi.spyOn(app, 'initEngineClient').mockImplementation(() => {})
+    const initEngineClient = vi.spyOn(app, 'initEngineClient').mockImplementation(() => {
+      ;(app as any).engineClient = { waitUntilReady: vi.fn().mockResolvedValue(undefined) }
+    })
 
     await app.init()
     expect(startEngine).not.toHaveBeenCalled()

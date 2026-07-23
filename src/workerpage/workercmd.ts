@@ -9,7 +9,7 @@ export function WorkerPage(type: string) {
 
   if (type == 'upload') {
     window.WinMsg = WinMsgUpload
-    window.Electron.ipcRenderer.send('uploadWorkerReady')
+    window.WebWorkerPort.notifyReady()
     const func = () => {
       try {
         UploadReport().catch()

@@ -12,22 +12,18 @@ class FlowEnc {
   constructor(password: string, encryptType: string = 'mix', sizeSalt: number = 0) {
     let encryptFlow = null
     if (encryptType === 'mix') {
-      console.log('@@mix', encryptType)
       encryptFlow = new MixEnc(password, sizeSalt)
       this.passwdOutward = encryptFlow.passwdOutward
     }
     if (encryptType === 'rc4md5') {
-      console.log('@@rc4md5', encryptType, sizeSalt)
       encryptFlow = new Rc4Md5(password, sizeSalt)
       this.passwdOutward = encryptFlow.passwdOutward
     }
     if (encryptType === 'aesctr') {
-      console.log('@@AesCTR', encryptType, sizeSalt)
       encryptFlow = new AesCTR(password, sizeSalt)
       this.passwdOutward = encryptFlow.passwdOutward
     }
     if (encryptType === 'cha20') {
-      console.log('@@ChaCha20Poly', encryptType, sizeSalt)
       encryptFlow = new ChaCha20Poly(password, sizeSalt)
       this.passwdOutward = encryptFlow.passwdOutward
     }

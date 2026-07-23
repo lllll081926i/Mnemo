@@ -413,8 +413,8 @@ const uploadWebDavEntry = async (client: ReturnType<typeof createWebDavClient>, 
     return
   }
 
-  const content = await fsPromises.readFile(localPath)
-  await client.putFileContents(remotePath, content, { overwrite: true })
+  const stream = createReadStream(localPath)
+  await client.putFileContents(remotePath, stream, { overwrite: true, contentLength: stat.size })
 }
 
 export const uploadWebDavLocalPaths = async (config: WebDavConnectionConfig, parentRelativePath: string, localPaths: string[]) => {
@@ -453,10 +453,9 @@ export const uploadWebDavFile = async (config: WebDavConnectionConfig, relativeP
   const stat = await fsPromises.stat(localPath)
   const stream = createReadStream(localPath)
   if (onProgress) {
-    let transferred = 0
+    // 回调上报的是本次增量（delta），与下载路径一致；同步引擎会自行累加总传输量
     stream.on('data', (chunk: string | Buffer) => {
-      transferred += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
-      onProgress(transferred)
+      onProgress(typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length)
     })
   }
   await client.putFileContents(remotePath, stream, { overwrite: true, contentLength: stat.size })

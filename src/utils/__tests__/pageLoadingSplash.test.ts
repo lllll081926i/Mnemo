@@ -23,7 +23,7 @@ describe('app startup rendering', () => {
     expect(app).not.toContain('PageWorker')
     expect(rendererEntry).not.toContain("import { PageMain } from './layout/PageMain'")
     expect(rendererEntry).not.toContain("import { WorkerPage } from './workerpage/workercmd'")
-    expect(rendererEntry).toContain("ipcRenderer.on('setPage', async")
+    expect(rendererEntry).toContain("window.WebOnSetPage(async")
     expect(rendererEntry).toContain("await import('./layout/PageMain')")
     expect(rendererEntry).toContain("import('./layout/PageMain')")
     expect(workerHtml).toContain("src=\"/src/workerpage/main.ts\"")

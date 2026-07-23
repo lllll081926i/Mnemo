@@ -62,6 +62,7 @@ export function PageMain() {
       })
 
       // 开启定时任务
+      timeEventRunning = true
       setTimeout(timeEvent, 1000)
     })
     .catch((err: any) => {
@@ -84,6 +85,11 @@ export const WinMsg = async (arg: any) => {
 let runTime = Math.floor(Date.now() / 1000)
 let chkClearDownLogTime = 0
 let chkTokenTime = 0
+
+let timeEventRunning = false
+export function stopTimeEvent() {
+  timeEventRunning = false
+}
 
 /**
  * 时间事件，一但被调用每秒执行一次 <br/>
@@ -133,5 +139,5 @@ function timeEvent() {
     }
   }
 
-  setTimeout(timeEvent, 1000)
+  if (timeEventRunning) setTimeout(timeEvent, 1000)
 }

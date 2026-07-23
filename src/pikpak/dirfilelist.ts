@@ -2,7 +2,7 @@ import type { IAliGetFileModel } from '../aliapi/alimodels'
 import getFileIcon from '../aliapi/fileicon'
 import { humanDateTimeDateStr, humanSize } from '../utils/format'
 import { resolveFileExt } from '../utils/filetype'
-import { HanToPin } from '../utils/utils'
+import { GetExpiresTime, HanToPin } from '../utils/utils'
 import message from '../utils/message'
 import { pikpakApiFetch } from './auth'
 
@@ -43,6 +43,8 @@ export type PikPakDownloadInfo = {
   item: PikPakFileItem | null
   streamUrl: string
   downloadUrl: string
+  /** 下载链接过期时间（毫秒）；URL 无 expire 参数时回退到 JSON link.expire（对齐 rclone Link.Valid()）。 */
+  expireTime: number
   error: string
 }
 
@@ -57,6 +59,8 @@ export type PikPakVideoQuality = {
   type?: string
   /** PikPak 的临时媒体链接需要经过本地 Range 代理，避免长视频直连失败。 */
   forceProxy?: boolean
+  /** 链接过期时间（毫秒）；URL 无 expire 参数时回退到 JSON link.expire（对齐 rclone Link.Valid()）。 */
+  expireTime?: number
 }
 
 type PikPakFileListResp = {
@@ -77,6 +81,17 @@ const getPikPakFid = (url: string) => {
     return ''
   }
 }
+
+// rclone 的 Link.Valid() 在 URL 没有 expire 参数时回退到 JSON 的 link.expire 字段（RFC3339）。
+// PikPak 转码/原画链接有时不带 expire 查询参数，此时只能靠这个字段判定过期。
+const parseRfc3339Expire = (expire: string | number | undefined): number => {
+  if (!expire) return 0
+  const t = new Date(expire).getTime()
+  return Number.isFinite(t) && t > 0 ? t : 0
+}
+
+// 链接过期时间（毫秒）：优先读 URL 的 expire 查询参数，回退到 JSON 的 link.expire（RFC3339）
+const getPikPakLinkExpireTime = (url: string, expire: string | number | undefined): number => GetExpiresTime(url) || parseRfc3339Expire(expire)
 
 const getPikPakOriginalLink = (item: PikPakFileItem) => item.links?.['application/octet-stream']?.url || item.web_content_link || ''
 
@@ -100,6 +115,19 @@ const getPikPakOriginMediaUrl = (item: PikPakFileItem) => {
 }
 
 const getPikPakWebContentUrl = (item: PikPakFileItem) => getPikPakOriginalLink(item)
+
+// 为实际选中的下载链接找到对应的 JSON expire 字段（原画取 links，转码取匹配 medias），
+// 再结合 URL 的 expire 参数得出过期时间，供代理缓存判定刷新（对齐 rclone Link.Valid()）。
+const getPikPakDownloadExpireTime = (item: PikPakFileItem | null, url: string): number => {
+  if (!item || !url) return 0
+  let jsonExpire: string | number | undefined
+  if (url === getPikPakOriginalLink(item)) {
+    jsonExpire = item.links?.['application/octet-stream']?.expire
+  } else {
+    jsonExpire = (Array.isArray(item.medias) ? item.medias : []).find((media) => media?.link?.url === url)?.link?.expire
+  }
+  return getPikPakLinkExpireTime(url, jsonExpire)
+}
 
 const encodeDescription = (item: PikPakFileItem) => {
   const downloadUrl = getPikPakStreamUrl(item) || getPikPakWebContentUrl(item)
@@ -181,11 +209,15 @@ const pikPakQualityTier = (height: number): { quality: string; html: string } =>
 /** 把 PikPak 的 medias 转码流映射成清晰度列表；会员含原画，非会员只保留 ≤720p 的转码。 */
 export const buildPikPakVideoQualities = (item: PikPakFileItem, isVip: boolean): PikPakVideoQuality[] => {
   const tiers = new Map<string, PikPakVideoQuality>()
+  // rclone 的 setMetaData 只对 fid 与原始文件一致的媒体链接采信；转码档位同样套用这个校验，
+  // 规避 API 偶发返回的失效/陈旧转码链接（原始 fid 未知时不校验，保持兼容）。
+  const originalFid = getPikPakFid(getPikPakOriginalLink(item))
   for (const media of Array.isArray(item.medias) ? item.medias : []) {
     const url = media?.link?.url || ''
     if (!url || media.is_visible === false) continue
     if (media.is_origin || media.category === 'category_origin') continue
     if (!isVip && media.need_more_quota) continue
+    if (originalFid && getPikPakFid(url) !== originalFid) continue
     const height = parsePikPakResolutionHeight(media)
     const width = Number(media.video?.width || 0) || 0
     if (!isVip && height > 720) continue
@@ -194,18 +226,18 @@ export const buildPikPakVideoQualities = (item: PikPakFileItem, isVip: boolean):
     const priority = Number(media.priority || 0) || 0
     const existingPriority = Number((existing as any)?.priority || 0) || 0
     if (!existing || height > existing.height || (height === existing.height && priority > existingPriority)) {
-      tiers.set(tier.quality, { html: tier.html, quality: tier.quality, height, width, label: tier.html, value: tier.quality, url, type: detectPikPakStreamType(url, media.link?.type || media.video?.video_type), forceProxy: true })
+      tiers.set(tier.quality, { html: tier.html, quality: tier.quality, height, width, label: tier.html, value: tier.quality, url, type: detectPikPakStreamType(url, media.link?.type || media.video?.video_type), forceProxy: true, expireTime: getPikPakLinkExpireTime(url, media.link?.expire) })
     }
   }
   const qualities = ['QHD', 'FHD', 'HD', 'SD', 'LD'].map((key) => tiers.get(key)).filter((item): item is PikPakVideoQuality => !!item)
   if (isVip) {
     const originUrl = getPikPakOriginMediaUrl(item) || getPikPakWebContentUrl(item)
-    if (originUrl) qualities.unshift({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true })
+    if (originUrl) qualities.unshift({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true, expireTime: getPikPakLinkExpireTime(originUrl, item.links?.['application/octet-stream']?.expire) })
   } else {
     // 非会员也把原画放在最后兼底：长视频可能没有低码率转码，或转码流（MPEG-TS）播放失败时，
     // 还能像 rclone 一样播原始文件链接（经本地代理）。
     const originUrl = getPikPakOriginMediaUrl(item) || getPikPakWebContentUrl(item)
-    if (originUrl) qualities.push({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true })
+    if (originUrl) qualities.push({ html: '原画', quality: 'Origin', height: 0, width: 0, label: '原画', value: 'Origin', url: originUrl, type: detectPikPakStreamType(originUrl), forceProxy: true, expireTime: getPikPakLinkExpireTime(originUrl, item.links?.['application/octet-stream']?.expire) })
   }
   return qualities
 }
@@ -250,33 +282,59 @@ export const apiPikPakFileList = async (
   }
 }
 
+// 文件详情里是否已经有可用的媒体/下载链接。刚离线或转码中的文件首次返回可能两者都空。
+const hasUsablePikPakMediaOrLink = (item: PikPakFileItem | null): boolean => {
+  if (!item) return false
+  if (isPikPakDir(item)) return true
+  if (Array.isArray(item.medias) && item.medias.some((media) => isUsablePikPakUrl(media?.link?.url || ''))) return true
+  return isUsablePikPakUrl(getPikPakOriginalLink(item))
+}
+
+// rclone 的 getFile 在链接还没就绪时会 sleep 后重试；这里对刚离线/转码的长视频做同样的重试。
+const fetchPikPakDetailWithRetry = async (fetchFn: () => Promise<PikPakFileItem | null>, maxRetries = 2, delayMs = 3000): Promise<PikPakFileItem | null> => {
+  let data: PikPakFileItem | null = null
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    data = await fetchFn()
+    if (hasUsablePikPakMediaOrLink(data)) return data
+    if (attempt < maxRetries) await new Promise((resolve) => setTimeout(resolve, delayMs))
+  }
+  return data
+}
+
 export const apiPikPakFileDetail = async (user_id: string, fileId: string): Promise<PikPakFileItem | null> => {
   const token = await getPikPakToken(user_id)
   if (!token?.access_token) return null
-  const resp = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
-  const data = await resp.json().catch(() => undefined)
-  if (!resp.ok || data?.error) return null
-  return data as PikPakFileItem
+  return fetchPikPakDetailWithRetry(async () => {
+    const resp = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
+    const data = await resp.json().catch(() => undefined)
+    if (!resp.ok || data?.error) return null
+    return data as PikPakFileItem
+  })
 }
 
 export const apiPikPakDownloadInfo = async (user_id: string, fileId: string): Promise<PikPakDownloadInfo> => {
-  const result: PikPakDownloadInfo = { item: null, streamUrl: '', downloadUrl: '', error: '获取 PikPak 下载地址失败' }
+  const result: PikPakDownloadInfo = { item: null, streamUrl: '', downloadUrl: '', expireTime: 0, error: '获取 PikPak 下载地址失败' }
   const token = await getPikPakToken(user_id)
   if (!token?.access_token) {
     result.error = '请先登录 PikPak'
     return result
   }
   try {
-    const resp = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
-    const data = await resp.json().catch(() => undefined)
-    if (!resp.ok || data?.error) {
-      result.error = parsePikPakError(data, result.error)
-      return result
-    }
-    const item = data as PikPakFileItem
+    // 刚离线/转码中的文件首次返回可能还没有可用链接，像 rclone 的 getFile 那样稍等重试
+    const item = await fetchPikPakDetailWithRetry(async () => {
+      const resp = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
+      const data = await resp.json().catch(() => undefined)
+      if (!resp.ok || data?.error) {
+        result.error = parsePikPakError(data, result.error)
+        return null
+      }
+      return data as PikPakFileItem
+    })
+    if (!item) return result
     result.item = item
     result.streamUrl = getPikPakStreamUrl(item)
     result.downloadUrl = getPikPakWebContentUrl(item) || getPikPakOriginMediaUrl(item)
+    result.expireTime = getPikPakDownloadExpireTime(item, result.downloadUrl || result.streamUrl)
     result.error = result.streamUrl || result.downloadUrl ? '' : '获取 PikPak 下载地址失败'
   } catch (err: any) {
     result.error = err?.message || result.error

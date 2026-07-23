@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
 import path from 'node:path'
-import { CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, type _Object as S3Object } from '@aws-sdk/client-s3'
+import { AbortMultipartUploadCommand, CompleteMultipartUploadCommand, CopyObjectCommand, CreateMultipartUploadCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, UploadPartCopyCommand, type _Object as S3Object } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { IAliGetFileModel } from '../aliapi/alimodels'
@@ -12,6 +12,8 @@ import { extFromFileName } from './filetype'
 
 const STORAGE_KEY = 'Mnemo_S3Connections'
 const S3_PREFIX = 's3:'
+// S3 CopyObject 单次复制上限为 5GB，超过需改用分段复制
+const FIVE_GB = 5 * 1024 * 1024 * 1024
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.rmvb', '.asf', '.divx', '.xvid', '.ts', '.m2ts', '.mts', '.vob', '.ogv', '.dv'])
 
 export interface S3ConnectionConfig {
@@ -315,13 +317,36 @@ const normalizeS3TransferPaths = (sourcePath: string, targetPath: string) => {
   return { source, target }
 }
 
+// 复制单个对象：小于 5GB 用 CopyObject，超过 5GB 改用分段复制（UploadPartCopy），避免 CopyObject 的 5GB 上限
+const copyS3Object = async (client: S3Client, bucket: string, sourceKey: string, destKey: string, objectSize: number) => {
+  if (objectSize <= FIVE_GB) {
+    await client.send(new CopyObjectCommand({ Bucket: bucket, CopySource: encodeCopySource(bucket, sourceKey), Key: destKey }))
+    return
+  }
+  const multipart = await client.send(new CreateMultipartUploadCommand({ Bucket: bucket, Key: destKey }))
+  const uploadId = multipart.UploadId!
+  try {
+    const partSize = 100 * 1024 * 1024
+    const parts: { ETag?: string; PartNumber: number }[] = []
+    for (let start = 0, partNumber = 1; start < objectSize; start += partSize, partNumber++) {
+      const end = Math.min(start + partSize - 1, objectSize - 1)
+      const part = await client.send(new UploadPartCopyCommand({ Bucket: bucket, Key: destKey, CopySource: encodeCopySource(bucket, sourceKey), UploadId: uploadId, PartNumber: partNumber, CopySourceRange: `bytes=${start}-${end}` }))
+      parts.push({ ETag: part.CopyPartResult?.ETag, PartNumber: partNumber })
+    }
+    await client.send(new CompleteMultipartUploadCommand({ Bucket: bucket, Key: destKey, UploadId: uploadId, MultipartUpload: { Parts: parts } }))
+  } catch (error) {
+    await client.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key: destKey, UploadId: uploadId })).catch(() => {})
+    throw error
+  }
+}
+
 export const copyS3Path = async (config: S3ConnectionConfig, sourcePath: string, targetPath: string) => {
   const { source, target } = normalizeS3TransferPaths(sourcePath, targetPath)
   const client = createS3Client(config)
   const info = await getS3ObjectInfo(config, source)
   if (!info.isDir) {
     const targetKey = joinS3Key(config.rootPrefix, target)
-    await client.send(new CopyObjectCommand({ Bucket: config.bucket, CopySource: encodeCopySource(config.bucket, info.key), Key: targetKey }))
+    await copyS3Object(client, config.bucket, info.key, targetKey, info.size)
     return
   }
   const sourcePrefix = joinS3Key(config.rootPrefix, source, true)
@@ -329,7 +354,7 @@ export const copyS3Path = async (config: S3ConnectionConfig, sourcePath: string,
   for (const object of await listAllS3Objects(config, sourcePrefix)) {
     if (!object.Key) continue
     const targetKey = `${targetPrefix}${object.Key.slice(sourcePrefix.length)}`
-    await client.send(new CopyObjectCommand({ Bucket: config.bucket, CopySource: encodeCopySource(config.bucket, object.Key), Key: targetKey }))
+    await copyS3Object(client, config.bucket, object.Key, targetKey, Number(object.Size || 0))
   }
 }
 

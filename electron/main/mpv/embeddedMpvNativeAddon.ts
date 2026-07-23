@@ -205,7 +205,7 @@ function toEmbeddedMpvNativeAddon(value: any): EmbeddedMpvNativeAddon | null {
         return mpvTexture.getTrackStatus?.() || { audioId: -1, subtitleId: -1, tracks: [] }
       },
       onStatus(callback: (status: EmbeddedMpvStatus) => void) {
-        mpvTexture.onStatus((status) => callback(normalizeMpvStatus(status)))
+        mpvTexture.onStatus((status: any) => callback(normalizeMpvStatus(status)))
       },
       setSpeed: mpvTexture.setSpeed,
       setAudioTrack: mpvTexture.setAudioTrack,

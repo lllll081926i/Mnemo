@@ -58,10 +58,14 @@ const DriverData = new Map<string, IDriverModel>()
 
 const UserAllDir = new Map<string, number>()
 
+export function clearTreeCache() {
+  DriverData.clear()
+  UserAllDir.clear()
+}
+
 export default class TreeStore {
 
   static async ConvertToOneDriver(user_id: string, drive_id: string, children: DirData[], saveToDB: boolean, saveToDriverData: boolean): Promise<IDriverModel> {
-    console.log('ConvertToOneDriver', drive_id)
     if (saveToDB) {
       UserAllDir.set(drive_id, new Date().getTime())
       await DB.saveValueObject('AllDir_' + drive_id, children)
@@ -151,7 +155,6 @@ export default class TreeStore {
 
 
   static async SaveOneDirFileList(oneDir: IAliFileResp, hasFiles: boolean): Promise<void> {
-    console.log('SaveOneDirFileList', oneDir.dirID)
     if (oneDir.dirID == 'favorite' || oneDir.dirID == 'trash'
       || oneDir.dirID == 'recover' || oneDir.dirID.includes('pic')
       || oneDir.dirID.startsWith('search') || oneDir.dirID.startsWith('video')
@@ -162,10 +165,8 @@ export default class TreeStore {
     if (!driverData) {
       const cache = await DB.getValueObject('AllDir_' + oneDir.m_drive_id)
       if (cache) {
-        console.log('SaveOneDirFileList LoadCacheAllDir')
         driverData = await TreeStore.ConvertToOneDriver(oneDir.m_user_id, oneDir.m_drive_id, cache as DirData[], false, true)
       } else {
-        console.log('SaveOneDirFileList 初始化空目录树')
         driverData = await TreeStore.ConvertToOneDriver(oneDir.m_user_id, oneDir.m_drive_id, [], false, true)
       }
     }
@@ -703,7 +704,6 @@ export default class TreeStore {
   }[]): void {
     const driverData = DriverData.get(drive_id)
     if (!driverData) return
-    console.log('SaveDirSizeNeedRefresh', drive_id)
     const fileMap = driverData.DirFileSizeMap
     const timeMap = driverData.DirFileSizeTimeMap
     const timeNow = Math.floor(Date.now() / 1000) - 1654500000
@@ -740,7 +740,6 @@ const _RefreshAllDirTotalSize = throttle((drive_id: string) => {
 function _RefreshAllDirTotalSizeFunc(drive_id: string): void {
   const driverData = DriverData.get(drive_id)
   if (!driverData) return
-  console.log('_RefreshAllDirTotalSizeFunc', drive_id)
   const driveType = GetDriveType(usePanTreeStore().user_id, drive_id)
   driverData.DirTotalSizeMap.root = TotalSize(driveType.key, driverData.DirTotalSizeMap, driverData.DirFileSizeMap, driverData.DirChildrenMap)
   _SaveDirSize(drive_id)

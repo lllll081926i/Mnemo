@@ -85,9 +85,18 @@ const unwrapSearchMetadata = (match: DropboxSearchMatch): DropboxMetadata | unde
 }
 
 export const apiDropboxSearch = async (user_id: string, query: string, limit = 100): Promise<DropboxMetadata[]> => {
-  const data = await dropboxRpc<DropboxSearchResp>(user_id, '/files/search_v2', buildDropboxSearchBody(query, limit), '搜索 Dropbox 文件失败')
-  const matches = Array.isArray(data?.matches) ? data.matches : []
-  return matches
+  const allMatches: DropboxSearchMatch[] = []
+  let data = await dropboxRpc<DropboxSearchResp>(user_id, '/files/search_v2', buildDropboxSearchBody(query, limit), '搜索 Dropbox 文件失败')
+  if (Array.isArray(data?.matches)) allMatches.push(...data.matches)
+
+  let pages = 0
+  while (data?.has_more && data?.cursor && pages < 10) {
+    pages++
+    data = await dropboxRpc<DropboxSearchResp>(user_id, '/files/search/continue_v2', { cursor: data.cursor }, '搜索 Dropbox 文件失败')
+    if (Array.isArray(data?.matches)) allMatches.push(...data.matches)
+  }
+
+  return allMatches
     .map(unwrapSearchMetadata)
     .filter((item): item is DropboxMetadata => !!item && item['.tag'] !== 'deleted')
 }

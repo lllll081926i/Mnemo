@@ -71,42 +71,19 @@ app.use(store)
 app.mount('#app')
 
 
-const pendingUploadMessages: any[] = []
-
-function flushPendingUploadMessages() {
-  if (!window.UploadPort || pendingUploadMessages.length === 0) return
-  const messages = pendingUploadMessages.splice(0, pendingUploadMessages.length)
-  for (const messageToSend of messages) {
-    window.UploadPort.postMessage(messageToSend)
-  }
-}
-
 window.WinMsgToUpload = function (event: any) {
-  if (window.UploadPort) {
-    window.UploadPort.postMessage(event)
-    return
-  }
-  pendingUploadMessages.push(event)
-  window.Electron.ipcRenderer.send('ensureUploadWorker')
+  window.WebUploadPort.send(event)
 }
 
-window.Electron.ipcRenderer.on('setUploadPort', (_event: any, args: any) => {
-  const [port] = _event.ports
-  window.UploadPort = port
-  port.onmessage = (event: any) => {
-    Promise.resolve().then(() => {
-      try {
-        if (window.WinMsg) window.WinMsg(event.data)
-      } catch {}
-    })
-  }
-  flushPendingUploadMessages()
-})
-window.Electron.ipcRenderer.on('clearUploadPort', () => {
-  window.UploadPort = undefined
+window.WebUploadPort.onMessage((data: any) => {
+  Promise.resolve().then(() => {
+    try {
+      if (window.WinMsg) window.WinMsg(data)
+    } catch {}
+  })
 })
 
-window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {
+window.WebOnSetPage(async (args: any) => {
   console.log('setPage', args.page, args)
   const appStore = useAppStore()
   const settingStore = useSettingStore()
@@ -135,7 +112,7 @@ window.Electron.ipcRenderer.on('setPage', async (_event: any, args: any) => {
   if (args.page) appStore.togglePage(args.page)
 })
 
-window.Electron.ipcRenderer.on('setTheme', (_event: any, args: any) => {
+window.WebOnSetTheme((args: any) => {
   const appStore = useAppStore()
   appStore.toggleDark(args.dark)
 })

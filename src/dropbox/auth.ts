@@ -63,10 +63,10 @@ export const buildDropboxAuthUrl = async (appKey: string, verifier: string, stat
     token_access_type: 'offline',
     state
   })
-  if (!credentials.appSecret) {
-    params.set('code_challenge', base64UrlEncode(await sha256(verifier)))
-    params.set('code_challenge_method', 'S256')
-  }
+  // 始终启用 PKCE：即便使用内置 client_secret，也叠加 S256 code_challenge，
+  // 避免授权码在回调链路中被截获后直接换取令牌（rclone 的 Dropbox 后端同样恒用 PKCE）。
+  params.set('code_challenge', base64UrlEncode(await sha256(verifier)))
+  params.set('code_challenge_method', 'S256')
   return `${DROPBOX_AUTH_URL}?${params.toString()}`
 }
 
@@ -192,8 +192,9 @@ export const exchangeDropboxCodeForToken = async (code: string, appKey: string, 
     client_id: credentials.appKey,
     redirect_uri: redirectUri
   })
+  // 授权 URL 恒带 PKCE challenge，换取令牌时就必须带上 code_verifier；有 secret 时一并附上。
+  body.set('code_verifier', verifier)
   if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
-  else body.set('code_verifier', verifier)
   const data = await dropboxJson<any>(
     DROPBOX_TOKEN_URL,
     {
@@ -212,34 +213,47 @@ export const exchangeDropboxCodeForToken = async (code: string, appKey: string, 
   return token
 }
 
+const refreshPromises = new Map<string, Promise<ITokenInfo | null>>()
+
 export const refreshDropboxAccessToken = async (token: ITokenInfo): Promise<ITokenInfo | null> => {
-  const credentials = resolveDropboxCredentials(token.device_id)
-  const appKey = credentials.appKey
-  if (!appKey || !token.refresh_token) return null
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: token.refresh_token,
-    client_id: appKey
-  })
-  if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
-  const data = await dropboxJson<any>(
-    DROPBOX_TOKEN_URL,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    },
-    '刷新 Dropbox Token 失败'
-  )
-  if (!data?.access_token) return null
-  token.access_token = data.access_token
-  token.expires_in = Number(data.expires_in || token.expires_in || 14400)
-  token.token_type = data.token_type || token.token_type || 'Bearer'
-  token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
-  token.tokenfrom = 'dropbox'
-  token.default_drive_id = token.default_drive_id || buildDriveProviderDriveId('dropbox', token.user_id)
-  await applyDropboxAccount(token)
-  return token
+  const flightKey = token.user_id || token.refresh_token
+  const inflight = refreshPromises.get(flightKey)
+  if (inflight) return inflight
+  const promise = (async (): Promise<ITokenInfo | null> => {
+    try {
+      const credentials = resolveDropboxCredentials(token.device_id)
+      const appKey = credentials.appKey
+      if (!appKey || !token.refresh_token) return null
+      const body = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: token.refresh_token,
+        client_id: appKey
+      })
+      if (credentials.appSecret) body.set('client_secret', credentials.appSecret)
+      const data = await dropboxJson<any>(
+        DROPBOX_TOKEN_URL,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body
+        },
+        '刷新 Dropbox Token 失败'
+      )
+      if (!data?.access_token) return null
+      token.access_token = data.access_token
+      token.expires_in = Number(data.expires_in || token.expires_in || 14400)
+      token.token_type = data.token_type || token.token_type || 'Bearer'
+      token.expire_time = new Date(Date.now() + token.expires_in * 1000).toISOString()
+      token.tokenfrom = 'dropbox'
+      token.default_drive_id = token.default_drive_id || buildDriveProviderDriveId('dropbox', token.user_id)
+      await applyDropboxAccount(token)
+      return token
+    } finally {
+      refreshPromises.delete(flightKey)
+    }
+  })()
+  refreshPromises.set(flightKey, promise)
+  return promise
 }
 
 export const applyDropboxQuota = async (token: ITokenInfo): Promise<boolean> => {

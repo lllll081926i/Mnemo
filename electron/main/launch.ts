@@ -46,14 +46,14 @@ export default class launch extends EventEmitter {
   }
 
   init() {
-    this.start()
-    if (is.mas()) return
-    const gotSingleLock = app.requestSingleInstanceLock()
-    if (!gotSingleLock) {
-      app.exit()
-    } else {
+    if (!is.mas()) {
+      const gotSingleLock = app.requestSingleInstanceLock()
+      if (!gotSingleLock) {
+        app.exit()
+        return
+      }
       app.on('second-instance', (event, commandLine, workingDirectory) => {
-        if (commandLine && commandLine.join(' ').indexOf('exit') >= 0) {
+        if (commandLine && commandLine.some((arg) => arg === 'exit' || arg === '--exit')) {
           this.hasExitArgv(commandLine)
           return
         }
@@ -66,6 +66,7 @@ export default class launch extends EventEmitter {
         }
       })
     }
+    this.start()
   }
 
   start() {
@@ -81,7 +82,6 @@ export default class launch extends EventEmitter {
     if (release().startsWith('6.1')) {
       app.disableHardwareAcceleration()
     }
-    app.commandLine.appendSwitch('ignore-connections-limit', 'bj29-enet.cn-beijing.data.alicloudccp.com,bj29-hz.cn-hangzhou.data.alicloudccp.com,bj29.cn-beijing.data.alicloudccp.com,alicloudccp.com,api.aliyundrive.com,aliyundrive.com,api.alipan.com,alipan.com')
     app.commandLine.appendSwitch('wm-window-animations-disabled')
     app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
 
@@ -91,8 +91,8 @@ export default class launch extends EventEmitter {
     this.hasExitArgv(process.argv)
   }
 
-  hasExitArgv(args) {
-    if (args && args.join(' ').indexOf('exit') >= 0) {
+  hasExitArgv(args: string[]) {
+    if (args && args.some((arg) => arg === 'exit' || arg === '--exit')) {
       app.exit()
     }
   }
@@ -141,36 +141,14 @@ export default class launch extends EventEmitter {
         } catch (err) {
         }
         session.defaultSession.webRequest.onBeforeSendHeaders((details, cb) => {
-          const { hostname, pathname } = parseRequestUrl(details.url)
-          const shouldGieeReferer = isHost(hostname, 'gitee.com')
+          const { hostname } = parseRequestUrl(details.url)
           const shouldBiliBili = isHost(hostname, 'bilibili.com')
           const shouldQQTv = hostname === 'v.qq.com' || hostname === 'video.qq.com'
-          const shouldAliPanOrigin = isHost(hostname, 'aliyundrive.com') || isHost(hostname, 'alipan.com')
-          const shouldAliReferer = !shouldQQTv && !shouldBiliBili && !shouldGieeReferer && (!details.referrer || details.referrer.trim() === '' || /(\/localhost:)|(^file:\/\/)|(\/127.0.0.1:)/.exec(details.referrer) !== null)
-          const shouldToken = shouldAliPanOrigin && pathname.includes('download')
-          const shouldOpenApiToken = shouldAliPanOrigin && (pathname.includes('/adrive/v1.0') || pathname.includes('/adrive/v1.1'))
-          const forbidUrl = details.url.includes('younoyes') || details.url.includes('onatoshi')
-          const hasAuthorizationHeader = Object.keys(details.requestHeaders || {}).some((key) => key.toLowerCase() === 'authorization')
-          const fallbackAccessToken = this.userToken?.access_token || ''
-          const fallbackOpenApiToken = this.userToken?.open_api_access_token || ''
-          const baseRequestHeaders = { ...details.requestHeaders }
 
           cb({
             cancel: false,
             requestHeaders: {
-              ...baseRequestHeaders,
-              ...(shouldGieeReferer && {
-                Referer: 'https://gitee.com/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-              }),
-              ...(shouldAliPanOrigin && {
-                Origin: 'https://www.aliyundrive.com',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-              }),
-              ...(shouldAliReferer && {
-                Referer: 'https://www.aliyundrive.com/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-              }),
+              ...details.requestHeaders,
               ...(shouldBiliBili && {
                 Referer: 'https://www.bilibili.com/',
                 Cookie: 'buvid_fp=4e5ab1b80f684b94efbf0d2f4721913e;buvid3=0679D9AB-1548-ED1E-B283-E0114517315E63379infoc;buvid4=990C4544-0943-1FBF-F13C-4C42A4EA97AA63379-024020214-83%2BAINcbQP917Ye0PjtrCg%3D%3D;',
@@ -180,20 +158,6 @@ export default class launch extends EventEmitter {
                 Referer: 'https://m.v.qq.com/',
                 Origin: 'https://m.v.qq.com',
                 'user-agent': 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36 Edg/121.0.0.0'
-              }),
-              ...(forbidUrl && {
-                'user-agent': 'SenPlayer'
-              }),
-              ...(shouldToken && !hasAuthorizationHeader && fallbackAccessToken && {
-                Authorization: fallbackAccessToken,
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-              }),
-              ...(shouldOpenApiToken && !hasAuthorizationHeader && fallbackOpenApiToken && {
-                Authorization: 'Bearer ' + fallbackOpenApiToken,
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-              }),
-              ...(shouldAliPanOrigin && {
-                'X-Canary': 'client=windows,app=adrive,version=v4.12.0'
               }),
               'Accept-Language': 'zh-CN,zh;q=0.9'
             }
@@ -242,14 +206,21 @@ export default class launch extends EventEmitter {
   }
 
   handleAppWillQuit() {
-    app.on('will-quit', async () => {
-      try { await this.motrixApp?.quit() } catch {}
-      try {
-        if (AppWindow.appTray) {
-          AppWindow.appTray.destroy()
-          AppWindow.appTray = undefined
-        }
-      } catch {}
+    let isQuitting = false
+    app.on('will-quit', (event) => {
+      if (isQuitting) return
+      event.preventDefault()
+      isQuitting = true
+      void (async () => {
+        try { await this.motrixApp?.quit() } catch {}
+        try {
+          if (AppWindow.appTray) {
+            AppWindow.appTray.destroy()
+            AppWindow.appTray = undefined
+          }
+        } catch {}
+        app.quit()
+      })()
     })
   }
 

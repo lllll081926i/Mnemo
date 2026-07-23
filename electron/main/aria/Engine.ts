@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from 'node:child_process'
-import { existsSync, writeFile, unlink } from 'node:fs'
+import { existsSync, readFileSync, writeFile, unlink } from 'node:fs'
 import is from 'electron-is'
 import {
   getEnginePidPath, getAria2BinPath, getAria2ConfPath,
@@ -24,12 +24,17 @@ export default class Engine {
 
   start (): void {
     if (this.instance) return
+    this.killStaleEngine()
     const binPath = this.getEngineBinPath()
     const args = this.getStartArgs()
     logger.info(`[motrix] Engine.start binPath=${binPath}`)
     this.instance = spawn(binPath, args, {
       windowsHide: true,
       stdio: is.dev() ? 'pipe' : 'ignore'
+    })
+    this.instance.on('error', (err) => {
+      logger.error('[Engine] spawn error:', err.message)
+      this.instance = null
     })
     if (!this.instance || !this.instance.pid) {
       logger.error('[motrix] Engine spawn failed')
@@ -83,5 +88,25 @@ export default class Engine {
   isRunning (pid: number): boolean {
     try { process.kill(pid, 0); return true }
     catch (err: any) { return err.code === 'EPERM' }
+  }
+
+  private readPidFile (): number | null {
+    try {
+      const pidPath = getEnginePidPath()
+      if (!existsSync(pidPath)) return null
+      const pid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10)
+      return isNaN(pid) ? null : pid
+    } catch {
+      return null
+    }
+  }
+
+  private killStaleEngine (): void {
+    const pid = this.readPidFile()
+    if (pid === null) return
+    if (this.isRunning(pid)) {
+      logger.info(`[motrix] killing stale engine pid=${pid}`)
+      try { process.kill(pid, 'SIGTERM') } catch {}
+    }
   }
 }

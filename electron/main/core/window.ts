@@ -6,7 +6,7 @@ import { ShowErrorAndRelaunch } from './dialog'
 
 const DEBUGGING = !app.isPackaged
 export const ua = `Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Mnemo/${app.getVersion()} Chrome/120.0.0.0 Safari/537.36`
-export const Referer = 'https://www.aliyundrive.com/'
+export const Referer = 'https://mnemo.app/'
 export const AppWindow: {
   mainWindow: BrowserWindow | undefined
   uploadWindow: BrowserWindow | undefined
@@ -177,7 +177,6 @@ export function createTray() {
 }
 
 export function createElectronWindow(width: number, height: number, center: boolean, page: string, theme: string, devTools: boolean = true, backgroundThrottling: boolean = true) {
-  const allowWorkerNodeIntegration = page === 'main'
   const win = new BrowserWindow({
     show: false,
     title: 'Mnemo',
@@ -197,15 +196,17 @@ export function createElectronWindow(width: number, height: number, center: bool
       spellcheck: false,
       devTools: DEBUGGING && devTools,
       webviewTag: false,
-      nodeIntegration: true,
-      nodeIntegrationInWorker: allowWorkerNodeIntegration,
+      nodeIntegration: false,
+      nodeIntegrationInWorker: false,
+      // sandbox: false required because preload uses require('electron') for macOS sharedTexture bridge
+      // and clipboard/shell APIs. Moving these to IPC would allow sandbox: true.
       sandbox: false,
       webSecurity: false,
       allowRunningInsecureContent: false,
-      contextIsolation: false,
+      contextIsolation: true,
       backgroundThrottling,
       enableWebSQL: false,
-      disableBlinkFeatures: 'OutOfBlinkCors,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure',
+      disableBlinkFeatures: 'OutOfBlinkCors',
       preload: getPreloadPath()
     }
   })
@@ -358,8 +359,11 @@ ipcMain.on('ensureUploadWorker', () => {
 })
 
 ipcMain.on('uploadWorkerReady', (event) => {
+  uploadCrashCount = 0
   if (event.sender === AppWindow.uploadWindow?.webContents) creatUploadPort()
 })
+
+let uploadCrashCount = 0
 
 function createUpload() {
   if (AppWindow.uploadWindow && AppWindow.uploadWindow.isDestroyed() == false) return
@@ -373,7 +377,12 @@ function createUpload() {
         AppWindow.uploadWindow?.destroy()
       } catch {}
       AppWindow.uploadWindow = undefined
-      createUpload()
+      uploadCrashCount++
+      if (uploadCrashCount < 5) {
+        createUpload()
+      } else {
+        AppWindow.mainWindow?.webContents.send('ElectronToWeb', 'upload-worker-crash-limit')
+      }
     }
   })
   // AppWindow.uploadWindow.webContents.openDevTools({ mode: 'undocked' })

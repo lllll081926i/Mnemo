@@ -33,6 +33,7 @@ export default class EngineClient {
   connect (): void {
     const { host, port, secret } = this.options
     ;(globalThis as any).self ||= globalThis
+    // @ts-ignore
     this.clientPromise = import('aria2-lib').then(({ default: Aria2 }) => {
       this.client = new Aria2({ host, port, secret } as any)
       return this.client

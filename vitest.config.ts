@@ -14,7 +14,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    maxWorkers: 1,
+    maxWorkers: 4,
     include: [
       'electron/main/core/__tests__/**/*.test.ts',
       'electron/main/aria/__tests__/**/*.test.ts',

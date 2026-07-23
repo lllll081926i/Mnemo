@@ -151,7 +151,8 @@ onMounted(() => {
 })
 onUnmounted(() => {
   preloadIndex = -1
-  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keydown', onKeyDown, true)
+  viewver?.destroy()
 })
 
 const showImage = () => {

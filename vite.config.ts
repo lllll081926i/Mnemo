@@ -45,7 +45,7 @@ export default defineConfig(({ command }) => {
         }
       }
     },
-    esbuild: isBuild ? { drop: ['console', 'debugger'] } : {},
+    esbuild: isBuild ? { drop: ['debugger'], pure: ['console.log', 'console.debug'] } : {},
     plugins: [
       vue({
         template: {
@@ -106,7 +106,7 @@ export default defineConfig(({ command }) => {
     server: {
       host: devServerUrl.hostname,
       port: Number(devServerUrl.port),
-      strictPort: false,
+      strictPort: true,
       hmr: true
     }
   }

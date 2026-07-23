@@ -160,7 +160,8 @@ export default class AliFile {
       return {
         drive_id: drive_id,
         file_id: file_id,
-        expire_time: GetExpiresTime(url),
+        // URL 无 expire 参数时回退到 JSON link.expire（对齐 rclone Link.Valid()），长视频才能正确判定过期
+        expire_time: info.expireTime,
         url,
         size: Number(detail?.size || 0)
       }

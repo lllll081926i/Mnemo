@@ -178,6 +178,22 @@ npm run secrets:generate
 - 字幕相关 key（可选）  
 - Apple 签名（macOS 发布，可选）
 
+## Git LFS
+
+This repository uses Git LFS for large binary files (aria2c, mpv binaries, native addons).
+
+After cloning, run:
+
+```bash
+git lfs pull
+```
+
+To contribute, ensure Git LFS is installed:
+
+```bash
+git lfs install
+```
+
 ---
 
 # 架构

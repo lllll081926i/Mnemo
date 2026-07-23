@@ -22,12 +22,25 @@ import { isWebDavDrive } from './webdavClient'
 const httpsAgent = new HttpsAgent({ keepAlive: true })
 const httpAgent = new HttpAgent({ keepAlive: true })
 
+// 单飞守卫：长视频跨越过期边界时，大量并发 Range 请求会各自触发一次上游链接刷新，
+// 造成对网盘 API 的限流踩踏。用 per-key 的在途 Promise 让并发刷新合并成一次（对齐 rclone 的 linkMu 语义）。
+const inflightRefresh = new Map<string, Promise<{ proxyUrl: string; resolvedProxyHeaders: string }>>()
+
 const detectProxyVideoType = (url: string) => {
   const lower = String(url || '').split('?')[0].split('#')[0].toLowerCase()
   if (lower.endsWith('.m3u8')) return 'm3u8'
   if (lower.endsWith('.mpd')) return 'mpd'
   if (lower.endsWith('.ts')) return 'ts'
   return ''
+}
+
+// 从刷新结果里解析链接过期时间：优先用清晰度档位携带的 expireTime（PikPak 转码/原画，
+// 已含 JSON link.expire 回退），否则回退到 URL 的 expire 查询参数。
+const resolveQualityExpireTime = (data: any, url: string, quality: string): number => {
+  const list = Array.isArray(data?.qualities) ? data.qualities : []
+  const match = list.find((q: any) => q.url && q.url === url) || list.find((q: any) => q.quality === quality)
+  const fromQuality = Number(match?.expireTime || 0)
+  return fromQuality > 0 ? fromQuality : GetExpiresTime(url)
 }
 
 export interface IRawUrl {
@@ -47,6 +60,7 @@ export interface IRawUrl {
     type?: string
     headers?: Record<string, string>
     forceProxy?: boolean
+    expireTime?: number
   }[]
   subtitles: {
     language: string
@@ -255,35 +269,48 @@ export async function createProxyServer(port: number) {
         let proxyUrl = String(proxy_url || (proxyInfo && proxyInfo.proxy_url || '') || '')
         const isMatchingCache = proxyInfo && driveId === String(proxyInfo.drive_id || '') && fileId === String(proxyInfo.file_id || '')
         let resolvedProxyHeaders = String(proxy_headers || (isMatchingCache ? proxyInfo.proxy_headers : '') || '')
-        if (forceRefresh || shouldRefreshProxyUrl({
+        if (!(forceRefresh || shouldRefreshProxyUrl({
           driveId,
           fileId,
           proxyUrl,
           selectQuality: String(selectQuality || ''),
           proxyInfo
-        })) {
-          const data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', refreshQuality)
-          if (typeof data != 'string' && data.url) {
-            const subtitleData = data.subtitles.find((sub: any) => sub.language === 'chi') || data.subtitles[0]
-            proxyUrl = data.url
-            resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''
-            if (proxy_kind !== 'subtitle') {
-              // 提前 60 秒判定过期，避免长视频播放到一半链接刚好失效（rclone 也有安全余量）
-              const expiresTime = GetExpiresTime(proxyUrl)
-              await Db.saveValueObject('ProxyInfo', {
-                user_id, drive_id, file_id, file_size, encType,
-                videoQuality: selectQuality,
-                expires_time: expiresTime > 0 ? expiresTime - 60 * 1000 : 0,
-                proxy_url: proxyUrl,
-                proxy_headers: resolvedProxyHeaders,
-                subtitle_url: subtitleData && subtitleData.url || ''
-              } as FileInfo)
-            }
-          } else if (forceRefresh) {
-            proxyUrl = ''
-          }
+        }))) {
+          return { proxyUrl, resolvedProxyHeaders }
         }
-        return { proxyUrl, resolvedProxyHeaders }
+        // 单飞：同一文件的并发 Range 请求在过期边界合并成一次刷新，避免限流踩踏（对齐 rclone 的 linkMu）
+        const key = `${driveId}:${fileId}:${String(refreshQuality || '')}:${forceRefresh ? 'force' : 'auto'}`
+        const existing = inflightRefresh.get(key)
+        if (existing) return existing
+        const promise = (async () => {
+          try {
+            const data = await getRawUrl(user_id, drive_id, file_id, encType, '', weifa, 'other', refreshQuality)
+            if (typeof data != 'string' && data.url) {
+              const subtitleData = data.subtitles.find((sub: any) => sub.language === 'chi') || data.subtitles[0]
+              proxyUrl = data.url
+              resolvedProxyHeaders = data.headers ? JSON.stringify(data.headers) : ''
+              if (proxy_kind !== 'subtitle') {
+                // 提前 60 秒判定过期，避免长视频播放到一半链接刚好失效（rclone 也有安全余量）
+                const expiresTime = resolveQualityExpireTime(data, proxyUrl, String(refreshQuality || ''))
+                await Db.saveValueObject('ProxyInfo', {
+                  user_id, drive_id, file_id, file_size, encType,
+                  videoQuality: selectQuality,
+                  expires_time: expiresTime > 0 ? expiresTime - 60 * 1000 : 0,
+                  proxy_url: proxyUrl,
+                  proxy_headers: resolvedProxyHeaders,
+                  subtitle_url: subtitleData && subtitleData.url || ''
+                } as FileInfo)
+              }
+            } else if (forceRefresh) {
+              proxyUrl = ''
+            }
+            return { proxyUrl, resolvedProxyHeaders }
+          } finally {
+            inflightRefresh.delete(key)
+          }
+        })()
+        inflightRefresh.set(key, promise)
+        return promise
       }
 
       // 是否需要解密

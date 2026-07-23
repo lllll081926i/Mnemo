@@ -38,9 +38,9 @@ describe('Dropbox auth helpers', () => {
     expect(resolveDropboxCredentials('custom-key', 'custom-secret')).toEqual({ appKey: 'custom-key', appSecret: 'custom-secret' })
   })
 
-  it('uses the built-in confidential client without PKCE parameters', async () => {
-    const url = new URL(await buildDropboxAuthUrl(DROPBOX_APP_KEY, 'unused-verifier', 'state-2', 'http://localhost:53682/'))
-    expect(url.searchParams.has('code_challenge')).toBe(false)
-    expect(url.searchParams.has('code_challenge_method')).toBe(false)
+  it('always uses PKCE parameters even with the built-in confidential client', async () => {
+    const url = new URL(await buildDropboxAuthUrl(DROPBOX_APP_KEY, 'test-verifier-value-01234567890123456789012', 'state-2', 'http://localhost:53682/'))
+    expect(url.searchParams.has('code_challenge')).toBe(true)
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256')
   })
 })

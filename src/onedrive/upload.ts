@@ -104,6 +104,24 @@ const uploadChunk = async (uploadUrl: string, buff: Buffer, start: number, total
   return { data, error: '' }
 }
 
+// 分片上传失败时重试（网络抖动 / 服务端 5xx 等瞬时错误）；暂停或取消时立即退出，不做无谓重试
+const uploadChunkWithRetry = async (uploadUrl: string, buff: Buffer, start: number, total: number, fileui: import('../utils/dbupload').IUploadingUI, maxRetries = 3): Promise<{ data?: any; error: string }> => {
+  let last: { data?: any; error: string } = { error: '上传 OneDrive 分片失败' }
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (!fileui.IsRunning) return { error: '已暂停' }
+    try {
+      const result = await uploadChunk(uploadUrl, buff, start, total, fileui)
+      if (!result.error) return result
+      last = result
+    } catch (error: any) {
+      if (error?.name === 'AbortError' || !fileui.IsRunning) throw error
+      last = { error: error?.message || '上传 OneDrive 分片失败' }
+    }
+    if (attempt < maxRetries) await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
+  }
+  return last
+}
+
 const uploadSmallFile = async (accessToken: string, fileHandle: import('fs/promises').FileHandle, fileui: import('../utils/dbupload').IUploadingUI): Promise<string> => {
   const buff = await readSlice(fileHandle, 0, fileui.File.size)
   const resp = await fetchCancellableProviderUpload(fileui, `${GRAPH_API_HOST}${buildOneDriveSmallUploadPath(fileui.parent_file_id || 'onedrive_root', fileui.File.name)}`, {
@@ -137,11 +155,13 @@ const uploadSessionFile = async (accessToken: string, fileHandle: import('fs/pro
   while (offset < total) {
     if (!fileui.IsRunning) return '已暂停'
     const size = Math.min(SESSION_CHUNK_SIZE, total - offset)
-    const buff = await readSlice(fileHandle, offset, size)
-    const uploaded = await uploadChunk(uploadUrl, buff, offset, total, fileui)
+    let buff: Buffer | null = await readSlice(fileHandle, offset, size)
+    const uploaded = await uploadChunkWithRetry(uploadUrl, buff, offset, total, fileui)
+    const chunkLength = buff.length
+    buff = null
     if (uploaded.error) return uploaded.error
-    offset += buff.length
-    await recordUploadProgress(fileui.UploadID, buff.length, offset)
+    offset += chunkLength
+    await recordUploadProgress(fileui.UploadID, chunkLength, offset)
     if (uploaded.data?.id) {
       fileui.File.uploaded_file_id = uploaded.data.id
       fileui.File.uploaded_is_rapid = false

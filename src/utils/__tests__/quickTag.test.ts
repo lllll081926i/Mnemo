@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 // node 环境下补 localStorage / self（需在被测模块导入前就位）
@@ -48,7 +48,7 @@ const makeFile = (fileId: string, name: string) =>
     description: ''
   }) as any
 
-describe('quick tag entries', () => {
+describe('local tag model', () => {
   beforeEach(() => {
     ;((globalThis as any).__quickTagStorage as Map<string, string>).clear()
     setActivePinia(createPinia())
@@ -56,19 +56,24 @@ describe('quick tag entries', () => {
     usePanTreeStore().$patch({ drive_id: 'pikpak' })
   })
 
-  it('adds a tagged file into the quick list and quick tree', () => {
+  it('tags a file into the dedicated tag model (defs + links), not the quick list', () => {
     PanDAL.updateLocalQuickTag([makeFile('file-1', '视频A.mp4')], '鹅冠红', '#df5659')
 
-    const list = PanDAL.getQuickFileList()
-    expect(list).toHaveLength(1)
-    expect(list[0]).toMatchObject({ file_id: 'file-1', tag: '鹅冠红', tagColor: '#df5659', favorite: false })
+    const defs = PanDAL.getTagDefs()
+    expect(defs).toHaveLength(1)
+    expect(defs[0]).toMatchObject({ name: '鹅冠红', color: '#df5659' })
 
-    const tree = usePanTreeStore().quickData
-    expect(tree).toHaveLength(1)
-    expect(tree[0]).toMatchObject({ tag: '鹅冠红', tagColor: '#df5659' })
+    const links = PanDAL.getTagLinks()
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({ drive_id: 'pikpak', file_id: 'file-1', kind: 'file', tagId: defs[0].id })
+
+    // 标签与收藏/快捷方式解耦：快捷列表里没有这个纯标签文件
+    expect(PanDAL.getQuickFileList()).toHaveLength(0)
+
+    expect(PanDAL.getFileTags('pikpak', 'file-1', 'file')).toMatchObject([{ name: '鹅冠红', color: '#df5659' }])
   })
 
-  it('clears the tag and removes the entry when tagging with empty color', () => {
+  it('clears the tag and removes the link when tagging with empty color', () => {
     const file = makeFile('file-1', '视频A.mp4')
     const panfileStore = usePanFileStore()
     panfileStore.$patch({ DriveID: 'pikpak', DirID: 'pikpak_root' })
@@ -76,27 +81,39 @@ describe('quick tag entries', () => {
     panfileStore.mSaveDirFileLoadingFinish('pikpak', 'pikpak_root', [file], 1)
 
     PanDAL.updateLocalQuickTag([file], '鹅冠红', '#df5659')
-    expect(usePanTreeStore().quickData[0]).toMatchObject({ tag: '鹅冠红', tagColor: '#df5659' })
+    expect(PanDAL.getTagLinks()).toHaveLength(1)
     expect(file.description).toContain('cdf5659')
 
     PanDAL.updateLocalQuickTag([file], '', '')
-    expect(PanDAL.getQuickFileList()).toHaveLength(0)
-    expect(usePanTreeStore().quickData).toHaveLength(0)
+    expect(PanDAL.getTagLinks()).toHaveLength(0)
+    expect(PanDAL.getFileTags('pikpak', 'file-1', 'file')).toHaveLength(0)
     expect(file.description).not.toContain('cdf5659')
   })
 
-  it('updates the existing shortcut tag in place without waiting for a directory reload', () => {
+  it('keeps a shortcut and its tag independent of each other', () => {
     const file = makeFile('file-2', '视频B.mp4')
     PanDAL.addLocalQuickFiles([file])
-    expect(usePanTreeStore().quickData[0]).toMatchObject({ tag: '', tagColor: '' })
+    expect(PanDAL.getQuickFileList()[0]).toMatchObject({ favorite: true })
+    expect(PanDAL.getTagLinks()).toHaveLength(0)
 
     PanDAL.updateLocalQuickTag([file], '靛青', '#5966df')
 
-    expect(usePanTreeStore().quickData[0]).toMatchObject({ tag: '靛青', tagColor: '#5966df' })
-    expect(PanDAL.getQuickFileList()[0]).toMatchObject({ favorite: true, tag: '靛青', tagColor: '#5966df' })
+    // 快捷方式仍在，标签独立存在
+    expect(PanDAL.getQuickFileList()[0]).toMatchObject({ favorite: true })
+    expect(PanDAL.getTagLinks()).toHaveLength(1)
+    expect(PanDAL.getFileTags('pikpak', 'file-2', 'file')).toMatchObject([{ name: '靛青', color: '#5966df' }])
   })
 
-  it('tags the selected file through the real menu flow so it shows in 快捷方式', async () => {
+  it('reuses the same tag definition for the same color across files', () => {
+    PanDAL.updateLocalQuickTag([makeFile('file-a', 'A.mp4')], '鹅冠红', '#df5659')
+    PanDAL.updateLocalQuickTag([makeFile('file-b', 'B.mp4')], '鹅冠红', '#df5659')
+
+    expect(PanDAL.getTagDefs()).toHaveLength(1)
+    expect(PanDAL.getTagLinks()).toHaveLength(2)
+    expect(PanDAL.getTagLinks()[0].tagId).toBe(PanDAL.getTagLinks()[1].tagId)
+  })
+
+  it('tags the selected file through the real menu flow', async () => {
     const pantreeStore = usePanTreeStore()
     const panfileStore = usePanFileStore()
     const file = makeFile('file-9', '长视频.mp4')
@@ -110,13 +127,10 @@ describe('quick tag entries', () => {
 
     await menuFileColorChange(false, '#df5659')
 
-    const list = PanDAL.getQuickFileList()
-    expect(list.map((item) => item.file_id)).toContain('file-9')
-    expect(list.find((item) => item.file_id === 'file-9')).toMatchObject({ tag: '鹅冠红', tagColor: '#df5659' })
-
-    // 标记筛选视图（标记 · 鹅冠红）能列出刚打的标签文件
-    const pantreeStoreAfter = usePanTreeStore()
-    expect(pantreeStoreAfter.quickData.some((item) => item.tag === '鹅冠红')).toBe(true)
+    const links = PanDAL.getTagLinks()
+    expect(links.map((item) => item.file_id)).toContain('file-9')
+    const def = PanDAL.getTagDefs().find((item) => item.id === links.find((link) => link.file_id === 'file-9')!.tagId)
+    expect(def).toMatchObject({ name: '鹅冠红', color: '#df5659' })
   })
 
   it('loads tagged files in the color filter view', async () => {
@@ -142,5 +156,100 @@ describe('quick tag entries', () => {
     expect(item!.ext).toBe('mp4')
     expect(item!.category).toMatch(/^video/)
     expect(item!.icon).toBe('iconfile-video')
+  })
+})
+
+describe('tag definition CRUD', () => {
+  beforeEach(() => {
+    ;((globalThis as any).__quickTagStorage as Map<string, string>).clear()
+    setActivePinia(createPinia())
+    usePanTreeStore().mSaveUser('user-1', 'pikpak', '', '', '')
+    usePanTreeStore().$patch({ drive_id: 'pikpak' })
+  })
+
+  it('creates, renames and deletes a tag definition', () => {
+    const def = PanDAL.createTag('工作', '#42a5f5')
+    expect(PanDAL.getTagDefs()).toMatchObject([{ id: def.id, name: '工作', color: '#42a5f5' }])
+
+    PanDAL.renameTag(def.id, '重要工作')
+    expect(PanDAL.getTagDefs().find((item) => item.id === def.id)).toMatchObject({ name: '重要工作' })
+
+    PanDAL.deleteTag(def.id)
+    expect(PanDAL.getTagDefs()).toHaveLength(0)
+  })
+
+  it('deleting a tag also removes all of its file links', () => {
+    PanDAL.updateLocalQuickTag([makeFile('file-x', 'X.mp4'), makeFile('file-y', 'Y.mp4')], '鹅冠红', '#df5659')
+    const def = PanDAL.getTagDefs()[0]
+    expect(PanDAL.getTagLinks()).toHaveLength(2)
+
+    PanDAL.deleteTag(def.id)
+    expect(PanDAL.getTagDefs()).toHaveLength(0)
+    expect(PanDAL.getTagLinks()).toHaveLength(0)
+  })
+
+  it('removeFileTag only removes the targeted tag from a file', () => {
+    const files = [makeFile('file-z', 'Z.mp4')]
+    PanDAL.updateLocalQuickTag(files, '鹅冠红', '#df5659')
+    const redDef = PanDAL.getTagDefs()[0]
+    const blueDef = PanDAL.createTag('晴空蓝', '#42a5f5')
+    PanDAL.setFileTag(files, blueDef.id)
+    expect(PanDAL.getFileTags('pikpak', 'file-z', 'file')).toHaveLength(2)
+
+    PanDAL.removeFileTag(files, redDef.id)
+    expect(PanDAL.getFileTags('pikpak', 'file-z', 'file')).toMatchObject([{ id: blueDef.id }])
+  })
+})
+
+describe('legacy tag migration', () => {
+  beforeEach(() => {
+    ;((globalThis as any).__quickTagStorage as Map<string, string>).clear()
+    setActivePinia(createPinia())
+    usePanTreeStore().mSaveUser('user-1', 'pikpak', '', '', '')
+    usePanTreeStore().$patch({ drive_id: 'pikpak' })
+  })
+
+  it('migrates old FileQuick tag/tagColor entries into the new tag model once', () => {
+    const storage = (globalThis as any).__quickTagStorage as Map<string, string>
+    storage.set(
+      'FileQuick-user-1',
+      JSON.stringify([
+        { key: 'quick:file:pikpak:old-1', drive_id: 'pikpak', drive_name: 'PikPak', title: '旧标签视频.mp4', file_id: 'old-1', parent_file_id: 'pikpak_root', kind: 'file', icon: 'iconfile-video', ext: 'mp4', tag: '鹅冠红', tagColor: '#df5659', favorite: false },
+        { key: 'quick:file:pikpak:fav-1', drive_id: 'pikpak', drive_name: 'PikPak', title: '收藏视频.mp4', file_id: 'fav-1', parent_file_id: 'pikpak_root', kind: 'file', icon: 'iconfile-video', ext: 'mp4', tag: '', tagColor: '', favorite: true }
+      ])
+    )
+
+    PanDAL.migrateLegacyTags('user-1')
+
+    const defs = PanDAL.getTagDefs()
+    expect(defs).toHaveLength(1)
+    expect(defs[0]).toMatchObject({ name: '鹅冠红', color: '#df5659' })
+
+    const links = PanDAL.getTagLinks()
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({ file_id: 'old-1', tagId: defs[0].id })
+
+    // 收藏的快捷方式不受影响
+    expect(PanDAL.getQuickFileList().some((item) => item.file_id === 'fav-1' && item.favorite)).toBe(true)
+
+    // 再次迁移不会重复产生数据
+    PanDAL.migrateLegacyTags('user-1')
+    expect(PanDAL.getTagDefs()).toHaveLength(1)
+    expect(PanDAL.getTagLinks()).toHaveLength(1)
+  })
+
+  it('migrated tags show up in the color filter view', async () => {
+    const storage = (globalThis as any).__quickTagStorage as Map<string, string>
+    storage.set(
+      'FileQuick-user-1',
+      JSON.stringify([{ key: 'quick:file:pikpak:old-2', drive_id: 'pikpak', drive_name: 'PikPak', title: '迁移视频.mp4', file_id: 'old-2', parent_file_id: 'pikpak_root', kind: 'file', icon: 'iconfile-video', ext: 'mp4', tag: '鹅冠红', tagColor: '#df5659', favorite: false }])
+    )
+
+    const panfileStore = usePanFileStore()
+    panfileStore.$patch({ DriveID: 'pikpak', DirID: 'colorcdf5659 鹅冠红' })
+    const ok = await PanDAL.GetDirFileList('user-1', 'pikpak', 'colorcdf5659 鹅冠红', '标记 · 鹅冠红', '', true)
+
+    expect(ok).toBe(true)
+    expect(panfileStore.ListDataShow.map((item) => item.file_id)).toContain('old-2')
   })
 })

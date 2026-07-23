@@ -2,7 +2,7 @@ import { AppWindow, createElectronWindow } from './window'
 import path from 'path'
 import is from 'electron-is'
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, safeStorage, session, shell } from 'electron'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import fs, { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { execFile } from 'child_process'
 import { ShowError } from './dialog'
 import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
@@ -14,6 +14,12 @@ import { checkForUpdatesNow } from './autoUpdate'
 import { isOAuthAuthorizationUrl, oauthCallbackServer, type OAuthCallbackTarget, type OAuthProvider } from './oauthServer'
 
 let psbId: any
+
+const quitMotrixApplication = async () => {
+  try {
+    await (globalThis as any).motrixApplication?.quit?.()
+  } catch {}
+}
 
 interface OAuthSessionOwner {
   provider: OAuthProvider
@@ -159,6 +165,7 @@ export default class ipcEvent {
     this.handleWebShutDown()
     this.handleWebSetProxy()
     this.handleWebOpenExternal()
+    this.handleShellOpenPath()
     this.handlePikPakCaptcha()
     this.handleOAuthCallback()
     this.handleAutoUpdate()
@@ -183,6 +190,19 @@ export default class ipcEvent {
         return { ok: true }
       } catch (error: any) {
         return { ok: false, error: error?.message || '无法打开系统浏览器' }
+      }
+    })
+  }
+
+  private static handleShellOpenPath() {
+    ipcMain.handle('Shell:openPath', async (event, fullPath: string) => {
+      try {
+        const resolved = path.resolve(fullPath)
+        const stats = await fs.promises.stat(resolved)
+        if (!stats.isFile()) return 'Path is not a file'
+        return await shell.openPath(resolved)
+      } catch (err: any) {
+        return err.message || 'Failed to open path'
       }
     })
   }
@@ -386,6 +406,7 @@ export default class ipcEvent {
           mainWindow.destroy()
           mainWindow = undefined
         }
+        await quitMotrixApplication()
         try {
           app.relaunch({ args: process.argv.slice(1).concat(['--relaunch']) })
           app.exit(0)
@@ -395,6 +416,7 @@ export default class ipcEvent {
           mainWindow.destroy()
           mainWindow = undefined
         }
+        await quitMotrixApplication()
         try {
           app.exit(0)
         } catch {}
@@ -497,7 +519,7 @@ export default class ipcEvent {
       ]
       // 显示菜单
       const contextMenu = Menu.buildFromTemplate(template)
-      contextMenu.popup({ window })
+      contextMenu.popup({ window: window ?? undefined })
     })
   }
 
@@ -609,28 +631,38 @@ export default class ipcEvent {
 
   private static handleWebClearCookies() {
     ipcMain.on('WebClearCookies', (event, data) => {
-      session.defaultSession.clearStorageData(data)
+      const { origin, storages } = data || {}
+      session.defaultSession.clearStorageData({ origin, storages })
     })
   }
 
   private static handleWebGetCookies() {
     ipcMain.handle('WebGetCookies', async (event, data) => {
-      return await session.defaultSession.cookies.get(data)
+      const allowedDomains = ['pikpak.com', 'onedrive.com', 'dropbox.com', 'google.com', 'gofile.io']
+      const filter = data || {}
+      if (filter.domain && !allowedDomains.some((d) => filter.domain.includes(d))) {
+        return []
+      }
+      return await session.defaultSession.cookies.get(filter)
     })
   }
 
   private static handleWebSetCookies() {
     ipcMain.on('WebSetCookies', (event, data) => {
       for (let i = 0, maxi = data.length; i < maxi; i++) {
-        const cookie = {
-          url: data[i].url,
-          name: data[i].name,
-          value: data[i].value,
-          domain: '.' + data[i].url.substring(data[i].url.lastIndexOf('/') + 1),
-          secure: data[i].url.indexOf('https://') == 0,
-          expirationDate: data[i].expirationDate
+        try {
+          const cookie = {
+            url: data[i].url,
+            name: data[i].name,
+            value: data[i].value,
+            domain: new URL(data[i].url).hostname,
+            secure: data[i].url.indexOf('https://') == 0,
+            expirationDate: data[i].expirationDate
+          }
+          session.defaultSession.cookies.set(cookie).catch((err: any) => console.error(err))
+        } catch (err: any) {
+          console.error('[WebSetCookies] invalid cookie url:', err?.message)
         }
-        session.defaultSession.cookies.set(cookie).catch((err: any) => console.error(err))
       }
     })
   }
@@ -653,8 +685,9 @@ export default class ipcEvent {
   }
 
   private static handleWebRelaunch() {
-    ipcMain.on('WebRelaunch', (event, data) => {
+    ipcMain.on('WebRelaunch', async (event, data) => {
       app.relaunch()
+      await quitMotrixApplication()
       try {
         app.exit()
       } catch {}
@@ -680,9 +713,11 @@ export default class ipcEvent {
 
   private static handleWebShutDown() {
     ipcMain.on('WebShutDown', (event, data) => {
+      if (!data || data.confirm !== true) return
       if (is.macOS()) {
-        execFile('osascript', ['-e', 'tell application "System Events" to shut down'], (err: any) => {
+        execFile('osascript', ['-e', 'tell application "System Events" to shut down'], async (err: any) => {
           if (data.quitApp) {
+            await quitMotrixApplication()
             try {
               app.exit()
             } catch {}
@@ -695,19 +730,16 @@ export default class ipcEvent {
         let command = 'shutdown'
         const cmdArguments: string[] = []
         if (is.linux()) {
-          if (data.sudo) {
-            command = 'sudo'
-            cmdArguments.push('shutdown')
-          }
-          cmdArguments.push('-h')
-          cmdArguments.push('now')
+          command = 'systemctl'
+          cmdArguments.push('poweroff')
         }
         if (is.windows()) {
           cmdArguments.push('/s', '/f', '/t', '0')
         }
 
-        execFile(command, cmdArguments, (err: any) => {
+        execFile(command, cmdArguments, async (err: any) => {
           if (data.quitApp) {
+            await quitMotrixApplication()
             try {
               app.exit()
             } catch {}

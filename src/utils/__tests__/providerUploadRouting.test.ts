@@ -25,7 +25,7 @@ describe('provider upload routing', () => {
     expect(helper).toContain('fetchCancellableProviderUpload')
     expect(helper).toContain("if (!fileui.IsRunning) controller.abort('已暂停')")
     expect(google).toContain('const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024')
-    expect(google).toContain('response.status !== 308')
+    expect(google).toContain('response.status === 308')
     expect(gofile).toContain('fetchCancellableProviderUpload(fileui')
     expect(oneDrive).toContain('fetchCancellableProviderUpload(fileui')
     expect(dropbox).toContain("req.destroy(new Error('已暂停'))")

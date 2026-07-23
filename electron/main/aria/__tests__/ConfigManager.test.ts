@@ -25,7 +25,8 @@ describe('ConfigManager', () => {
     const { default: ConfigManager } = await import('../ConfigManager')
     const cm = new ConfigManager()
     expect(cm.getSystemConfig('rpc-listen-port')).toBe(16800)
-    expect(cm.getSystemConfig('rpc-secret')).toBe('S4znWTaZYQi3cpRNb')
+    expect(typeof cm.getSystemConfig('rpc-secret')).toBe('string')
+    expect(cm.getSystemConfig('rpc-secret').length).toBeGreaterThan(0)
   })
 
   it('initializes user config with defaults', async () => {

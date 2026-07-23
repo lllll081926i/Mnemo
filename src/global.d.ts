@@ -5,7 +5,6 @@ declare global {
   interface Window {
     Go: any
     require: any
-    Electron: any
     openDatabase: any
     WebRelaunchAria: () => Promise<number>
     platform: string
@@ -64,6 +63,19 @@ declare global {
     }
     speedLimte: number
     WebSetProgressBar: any
-    TvBoxInvoke: (channel: string, data: unknown) => Promise<unknown>
+    WebUploadPort: {
+      send: (data: any) => void
+      onMessage: (callback: (data: any) => void) => void
+      removeMessageHandler: () => void
+    }
+    WebWorkerPort: {
+      send: (data: any) => void
+      onMessage: (callback: (data: any) => void) => void
+      notifyReady: () => void
+    }
+    WebOnSetPage: (callback: (args: any) => void) => void
+    WebOnSetTheme: (callback: (args: any) => void) => void
+    WebClipboardWriteText: (text: string) => void
+    WebShellOpenPath: (fullPath: string) => void
   }
 }

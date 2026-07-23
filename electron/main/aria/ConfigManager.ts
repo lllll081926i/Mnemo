@@ -1,12 +1,32 @@
 import { app } from 'electron'
 import is from 'electron-is'
 import Store from 'electron-store'
+import { randomBytes } from 'crypto'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { APP_THEME, APP_RUN_MODE, ENGINE_RPC_PORT, ENGINE_MAX_CONCURRENT_DOWNLOADS } from '@shared/constants'
 import { CHROME_UA } from '@shared/ua'
 import { userKeys, systemKeys } from '@shared/configKeys'
 import { separateConfig } from '@shared/utils'
 import { getConfigBasePath, getMaxConnectionPerServer, getUserDownloadsPath } from './utils'
 import logger from './Logger'
+
+const LEGACY_RPC_SECRET = 'S4znWTaZYQi3cpRNb'
+
+function getOrCreateRpcSecret (userDataPath: string): string {
+  const secretPath = join(userDataPath, '.aria2-rpc-secret')
+  try {
+    if (existsSync(secretPath)) {
+      const existing = readFileSync(secretPath, 'utf-8').trim()
+      if (existing) return existing
+    }
+  } catch {}
+  const secret = randomBytes(24).toString('base64url')
+  try {
+    writeFileSync(secretPath, secret, 'utf-8')
+  } catch {}
+  return secret
+}
 
 export default class ConfigManager {
   systemConfig!: InstanceType<typeof Store>
@@ -38,7 +58,7 @@ export default class ConfigManager {
         'no-proxy': '',
         'pause': true,
         'rpc-listen-port': ENGINE_RPC_PORT,
-        'rpc-secret': 'S4znWTaZYQi3cpRNb',
+        'rpc-secret': getOrCreateRpcSecret(getConfigBasePath()),
         'split': getMaxConnectionPerServer(),
         'user-agent': CHROME_UA
       }
@@ -82,6 +102,10 @@ export default class ConfigManager {
     const all = this.systemConfig.store as Record<string, any>
     for (const k of Object.keys(all)) {
       if (!systemKeys.includes(k)) (this.systemConfig as any).delete(k)
+    }
+    // Migrate away from the old hardcoded rpc-secret
+    if ((this.systemConfig.get('rpc-secret') as string) === LEGACY_RPC_SECRET) {
+      this.systemConfig.set('rpc-secret', getOrCreateRpcSecret(getConfigBasePath()))
     }
   }
 

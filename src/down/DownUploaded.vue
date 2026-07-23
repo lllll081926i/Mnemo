@@ -196,7 +196,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
     try {
       if (fs.existsSync(full)) {
         message.loading('Loading...', 2)
-        window.Electron.shell.openPath(full)
+        window.WebShellOpenPath(full)
       } else {
         message.error('文件可能已经被删除')
       }
@@ -207,7 +207,7 @@ const onSelectFile = (item: IStateUploadTask | undefined, cmd: string) => {
     try {
       if (fs.existsSync(full)) {
         message.loading('Loading...', 2)
-        window.Electron.shell.showItemInFolder(full)
+        window.WebShowItemInFolder(full)
       } else {
         message.error('文件夹可能已经被删除')
       }

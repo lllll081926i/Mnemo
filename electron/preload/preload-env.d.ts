@@ -1,6 +1,5 @@
 /* eslint-disable no-unused-vars */
 declare interface Window {
-  Electron: any
   platform: any
   WinMsg: any
   WebToElectron: any
@@ -51,6 +50,19 @@ declare interface Window {
     onClear: (callback: () => void) => void
     removeClearListener: () => void
   }
-  TvBoxInvoke: (channel: string, data?: unknown) => Promise<unknown>
+  WebUploadPort: {
+    send: (data: any) => void
+    onMessage: (callback: (data: any) => void) => void
+    removeMessageHandler: () => void
+  }
+  WebWorkerPort: {
+    send: (data: any) => void
+    onMessage: (callback: (data: any) => void) => void
+    notifyReady: () => void
+  }
+  WebOnSetPage: (callback: (args: any) => void) => void
+  WebOnSetTheme: (callback: (args: any) => void) => void
+  WebClipboardWriteText: (text: string) => void
+  WebShellOpenPath: (fullPath: string) => void
   IsMainPage: boolean
 }

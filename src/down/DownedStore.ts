@@ -269,7 +269,7 @@ const useDownStore = defineStore('down', {
       const openDir = (localFilePath: string) => {
         try {
           if (fs.existsSync(localFilePath)) {
-            window.Electron.shell.showItemInFolder(localFilePath)
+            window.WebShowItemInFolder(localFilePath)
           } else {
             message.error('文件夹可能已经被删除')
           }
@@ -280,7 +280,7 @@ const useDownStore = defineStore('down', {
       const openFile = (localFilePath: string) => {
         try {
           if (fs.existsSync(localFilePath)) {
-            window.Electron.shell.openPath(localFilePath)
+            window.WebShellOpenPath(localFilePath)
           } else {
             message.error('文件可能已经被删除')
           }

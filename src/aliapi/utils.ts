@@ -1,8 +1,6 @@
 import { useSettingStore } from '../store'
 import UserDAL from '../user/userdal'
 
-import { SHA1, SHA256 } from 'crypto-js'
-import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { IAliFileItem, IAliGetFileModel } from './alimodels'
 import { decodeName, encodeName } from '../module/flow-enc/utils'
 import path from 'path'
@@ -81,11 +79,6 @@ function resolveUserTokenInfo(user: string | { user_id?: string; tokenfrom?: str
   }
 }
 
-/** Aliyun Drive is no longer a product login surface; keep helper for legacy guards only. */
-export function isAliyunUser(_user?: string | { user_id?: string; tokenfrom?: string }): boolean {
-  return false
-}
-
 export function isPikPakUser(user: string | { user_id?: string; tokenfrom?: string }): boolean {
   const { user_id, tokenfrom } = resolveUserTokenInfo(user)
   if (tokenfrom === 'pikpak') return true
@@ -134,35 +127,6 @@ export function isNonAliyunProvider(user: string | { user_id?: string; tokenfrom
     isWebDavUser(user) ||
     isS3User(user)
   )
-}
-
-export function GetDeviceId(userId: string): string {
-  const hash = SHA1(userId).toString()
-  const variant = ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16)
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`
-}
-
-export function GetSignature(nonce: number, user_id: string, deviceId: string) {
-  const toHex = (bytes: Uint8Array) => {
-    const hashArray = Array.from(bytes) // convert buffer to byte array
-    // convert bytes to hex string
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
-  }
-  const toU8 = (wordArray: CryptoJS.lib.WordArray) => {
-    const words = wordArray.words
-    const sigBytes = wordArray.sigBytes
-    // Convert
-    const u8 = new Uint8Array(sigBytes)
-    for (let i = 0; i < sigBytes; i++) {
-      u8[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff
-    }
-    return u8
-  }
-  const privateKey = toU8(SHA256(user_id))
-  const publicKey = '04' + toHex(secp256k1.getPublicKey(privateKey, true))
-  const appId = ''
-  const signature = toHex(secp256k1.sign(toU8(SHA256(`${appId}:${deviceId}:${user_id}:${nonce}`)), privateKey, { prehash: false, lowS: true })) + '01'
-  return { signature, publicKey }
 }
 
 export function EncodeEncName(user_id: string, name: string, isDir: boolean, encType: string, inputpassword: string = '') {
