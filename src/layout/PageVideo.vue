@@ -167,15 +167,15 @@ function isMpegTsQuality(item: VideoQuality) {
 }
 
 function selectQuality(qualities: VideoQuality[]) {
-  // rclone 播放的是可随机访问的原始文件流。PikPak 的 MPEG-TS 转码流可以播放，
-  // 但 MSE 往往无法给出总时长，也无法按时间定位；有原画时优先走本地 Range 代理。
-  const progressiveOrigin = qualities.find((item) => item.quality === 'Origin')
-  if (progressiveOrigin && qualities.some(isMpegTsQuality)) return progressiveOrigin
+  // 对齐 rclone/官方：优先可快速起播的转码/progressive，避免默认硬走原画代理拖慢首帧
   const preferred = settingStore.uiVideoQuality || 'Origin'
-  const match = qualities.find((item) => qualityMatchesPreference(item, preferred))
-  // 没有 MPEG-TS 时，仍按用户设置选择；非会员原画位于列表末尾时默认保留转码优先级。
-  if (match && (match.quality !== 'Origin' || qualities[0]?.quality === 'Origin')) return match
-  return qualities[0]
+  const nonTs = qualities.filter((item) => !isMpegTsQuality(item))
+  const pool = nonTs.length ? nonTs : qualities
+  const match = pool.find((item) => qualityMatchesPreference(item, preferred))
+  if (match) return match
+  // 用户偏好原画但无可用 progressive 时，先用最高可用转码起播
+  const bestTranscode = pool.find((item) => item.quality !== 'Origin')
+  return bestTranscode || pool[0] || qualities[0]
 }
 
 function playableUrl(item: VideoQuality, size: number, fileId = pageVideo.file_id) {

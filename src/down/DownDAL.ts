@@ -98,12 +98,55 @@ export interface IAriaDownProgress {
 /** 存盘的时机：默认 10 时进行 */
 let SaveTimeWait = 0
 let completionSound: HTMLAudioElement | undefined
+let batchPendingCount = 0
+let batchPendingName = ''
+let batchNotifyTimer: ReturnType<typeof setTimeout> | undefined
+
 const playCompletionSound = () => {
   if (typeof Audio === 'undefined') return
   completionSound ||= new Audio('./audio/download_finished.mp3')
   if (!completionSound.paused) return
   completionSound.currentTime = 0
   void completionSound.play().catch(() => undefined)
+}
+
+const flushBatchDownloadNotify = () => {
+  batchNotifyTimer = undefined
+  const stillWorking = useDowningStore().ListDataRaw.some((item) => !item.Down.IsCompleted && !item.Down.IsStop && !item.Down.IsFailed)
+  if (stillWorking) {
+    batchNotifyTimer = setTimeout(flushBatchDownloadNotify, 800)
+    return
+  }
+  const setting = useSettingStore()
+  const count = batchPendingCount
+  const name = batchPendingName
+  batchPendingCount = 0
+  batchPendingName = ''
+  if (count <= 0) return
+  if (setting.downFinishAudio) playCompletionSound()
+  if (setting.downFinishNotify) {
+    window.WebToElectron?.({
+      cmd: 'downloadCompleted',
+      fileName: count === 1 ? name : `共 ${count} 个文件`
+    })
+  }
+}
+
+/** 下载完成提示：支持关闭、每文件/整批，并避免同一文件重复弹。 */
+const notifyDownloadFinished = (fileName: string) => {
+  const setting = useSettingStore()
+  const mode = setting.downFinishNotifyMode === 'batch' ? 'batch' : 'each'
+
+  if (mode === 'each') {
+    if (setting.downFinishAudio) playCompletionSound()
+    if (setting.downFinishNotify) window.WebToElectron?.({ cmd: 'downloadCompleted', fileName })
+    return
+  }
+
+  batchPendingCount += 1
+  if (batchPendingCount === 1) batchPendingName = fileName
+  if (batchNotifyTimer) clearTimeout(batchNotifyTimer)
+  batchNotifyTimer = setTimeout(flushBatchDownloadNotify, 700)
 }
 
 const buildAriaTaskGid = (file: IAliGetFileModel) => {
@@ -489,6 +532,7 @@ export default class DownDAL {
         Down.DownSpeed = parseInt(downloadSpeed) || 0
         Down.DownSpeedStr = humanSize(Down.DownSpeed) + '/s'
         Down.DownProcess = Math.floor((Down.DownSize * 100) / (totalLengthInt + 1)) % 100
+        const justFinished = isComplete && !Down.IsCompleted
         Down.IsCompleted = isComplete
         Down.IsDowning = isDowning
         const errorState = resolveAriaProgressErrorState({ status, errorCode, errorMessage }, FormatAriaError)
@@ -499,13 +543,12 @@ export default class DownDAL {
         }
         Down.FailedCode = errorState.failedCode
         Down.FailedMessage = errorState.failedMessage
-        if (isComplete) {
+        if (justFinished) {
           downingStore.mUpdateDownState(downingItem, 'valid')
           const check = AriaHashFile(downingItem)
           if (check.Check) {
-            if (useSettingStore().downFinishAudio) playCompletionSound()
             downingStore.mUpdateDownState(downingItem, 'downed')
-            window.WebToElectron?.({ cmd: 'downloadCompleted', fileName: Info.name })
+            notifyDownloadFinished(Info.name)
           } else {
             downingStore.mUpdateDownState(downingItem, 'error', '下载已完成，但文件未能保存到下载目录。请检查文件是否被占用或下载目录是否可写，然后重试')
           }

@@ -58,5 +58,22 @@ const handleSelectDownSavePath = () => {
         </a-radio-group>
       </div>
     </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">下载完成提示</span>
+      <div class="ui-plain-control"><MySwitch :value="settingStore.downFinishNotify" @update:value="cb({ downFinishNotify: $event })" /></div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">完成提示音</span>
+      <div class="ui-plain-control"><MySwitch :value="settingStore.downFinishAudio" @update:value="cb({ downFinishAudio: $event })" /></div>
+    </div>
+    <div class="ui-plain-row">
+      <span class="ui-plain-label">提示方式</span>
+      <div class="ui-plain-control">
+        <a-select class="ui-control-md" size="small" :model-value="settingStore.downFinishNotifyMode" :disabled="!settingStore.downFinishNotify && !settingStore.downFinishAudio" @update:model-value="cb({ downFinishNotifyMode: $event })">
+          <a-option value="each">每完成一个文件提示一次</a-option>
+          <a-option value="batch">本次下载队列全部完成后提示</a-option>
+        </a-select>
+      </div>
+    </div>
   </div>
 </template>

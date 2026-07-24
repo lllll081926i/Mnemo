@@ -195,19 +195,20 @@ export default class AliFile {
     if (!drive_id || !file_id) return '参数错误'
     const provider = await resolveFileProvider(user_id, drive_id)
     if (provider === 'pikpak') {
-      const detail = await apiPikPakFileDetail(user_id, file_id)
+      // 文件详情 + 会员状态并行，少一轮串行 RTT（官方客户端也会尽量并行）
+      const [detail, isVip] = await Promise.all([apiPikPakFileDetail(user_id, file_id), isPikPakVipAccount(user_id)])
       if (!detail) return '获取 PikPak 视频信息失败'
-      const isVip = await isPikPakVipAccount(user_id)
       const qualities = buildPikPakVideoQualities(detail, isVip)
       if (!qualities.length) return 'PikPak 暂无可用转码'
+      const preferred = qualities.find((q) => q.quality === 'Origin') || qualities[0]
       return {
         drive_id,
         file_id,
         size: Number(detail.size || 0),
         duration: 0,
         expire_time: 0,
-        width: qualities[0].width || 0,
-        height: qualities[0].height || 0,
+        width: preferred.width || qualities[0].width || 0,
+        height: preferred.height || qualities[0].height || 0,
         qualities,
         subtitles: [],
         ...(isVip ? {} : { no_origin: true })

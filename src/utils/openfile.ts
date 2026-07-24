@@ -10,6 +10,7 @@ import message from './message'
 import { modalSelectPanDir, modalSelectVideoQuality } from './modal'
 import PlayerUtils from './playerhelper'
 import { getEncType, getProxyUrl, getRawUrl, isLocalProxyUrl } from './proxyhelper'
+import { resolveFileExt } from './filetype'
 import { isPikPakUser } from '../aliapi/utils'
 import { isDriveProviderRootId, isDriveProviderSessionUsable, resolveDriveProvider } from './driveProvider'
 
@@ -49,9 +50,7 @@ function buildSiblingVideoPlaylist(file: IAliGetFileModel, provided?: IPageVideo
   const sameDirectory = visibleItems.filter((item: any) => item.parent_file_id === file.parent_file_id)
   const candidates = (sameDirectory.length > 1 ? sameDirectory : visibleItems).filter((item: any) => {
     const name = String(item.name || item.file_name || item.html || '')
-    const extension = name.includes('.')
-      ? name.slice(name.lastIndexOf('.') + 1).toLowerCase()
-      : String(item.ext || '').replace(/^\./, '').toLowerCase()
+    const extension = resolveFileExt(name, item.ext || item.mime_extension || '', item.mime_type || '')
     return videoPlaylistExtensions.has(extension)
   })
   if (!candidates.some((item: any) => item.file_id === file.file_id)) candidates.push(file)
@@ -112,7 +111,7 @@ export async function menuOpenFile(
   if (isDriveProviderRootId({ driveId: file.drive_id }, parent_file_id)) parent_file_id = 'root'
   const drive_id = file.drive_id
   const fileProvider = resolveDriveProvider({ driveId: file.drive_id })
-  const normalizedExt = (file.ext || '').toLowerCase().replace(/^\./, '').trim()
+  const normalizedExt = resolveFileExt(file.name || '', file.ext || file.mime_extension || '', file.mime_type || '')
   if (!isSupportedPreviewExtension(normalizedExt)) {
     message.info('暂不支持打开此格式，请下载后使用其他应用查看')
     return
@@ -147,7 +146,7 @@ export async function menuOpenFile(
     const { uiVideoPlayer, uiVideoSubtitleMode } = useSettingStore()
     const useMacEmbeddedMpv = uiVideoPlayer === 'mpv' && window.platform === 'darwin'
     const listDataRaw: IAliGetFileModel[] = usePanFileStore().ListDataRaw || []
-    const subTitlesList: IAliGetFileModel[] = listDataRaw.filter((file) => /srt|vtt|ass/.test(file.ext))
+    const subTitlesList: IAliGetFileModel[] = listDataRaw.filter((file) => /^(srt|vtt|ass|ssa)$/i.test(resolveFileExt(file.name || '', file.ext || '', file.mime_type || '')))
     if (uiVideoPlayer !== 'web' && !useMacEmbeddedMpv) {
       if (uiVideoSubtitleMode === 'auto') {
         subTitleFile = PlayerUtils.filterSubtitleFile(file.name, subTitlesList)
@@ -206,19 +205,8 @@ async function Video(
     AliFileCmd.ApiFileColorBatch(token.user_id, file.drive_id, file.description, 'ce74c3c', [file.file_id])
   }
   if (uiVideoPlayer == 'web' || (uiVideoPlayer === 'mpv' && window.platform === 'darwin')) {
-    let play_cursor = 0
-    let playCursorInfo = await PlayerUtils.getPlayCursor(token.user_id, file.drive_id, file.file_id)
-    if (playCursorInfo) {
-      play_cursor = playCursorInfo.play_cursor
-    } else {
-      play_cursor = file.media_play_cursor ? parseInt(file.media_play_cursor) : 0
-    }
-    // 获取文件夹信息
-    const info = await AliFile.ApiFileInfo(token.user_id, file.drive_id, file.parent_file_id)
-    let parent_file_name = ''
-    if (info && typeof info !== 'string') {
-      parent_file_name = info.name
-    }
+    // 尽快开窗：进度/父目录不阻塞首帧（对齐官方客户端先起播放页再补元数据）
+    const play_cursor = file.media_play_cursor ? parseInt(file.media_play_cursor) || 0 : 0
     const pageVideo: IPageVideo = {
       user_id: token.user_id,
       file_name: file.name,
@@ -226,15 +214,22 @@ async function Video(
       drive_id: file.drive_id,
       file_id: file.file_id,
       parent_file_id: file.parent_file_id,
-      parent_file_name: parent_file_name,
+      parent_file_name: '',
       expire_time: 0,
       password: password,
-      encType: getEncType(playCursorInfo?.info || ''),
-      play_cursor: play_cursor,
+      encType: getEncType(file),
+      play_cursor,
       custom_playlist_label: options?.customPlaylistLabel || '',
       custom_playlist: buildSiblingVideoPlaylist(file, options?.customPlaylist)
     }
     window.WebOpenWindow({ page: 'PageVideo', data: pageVideo, theme: 'dark' })
+    // 后台补全播放进度，不阻塞开窗
+    void PlayerUtils.getPlayCursor(token.user_id, file.drive_id, file.file_id).then((playCursorInfo) => {
+      const store = useAppStore()
+      if (playCursorInfo?.play_cursor && store.pageVideo?.file_id === file.file_id) {
+        store.pageVideo.play_cursor = playCursorInfo.play_cursor
+      }
+    }).catch(() => undefined)
     return
   }
   message.loading('加载中...', 2)
@@ -292,7 +287,7 @@ async function Image(file: IAliGetFileModel, password: string = ''): Promise<voi
   }
   message.loading('加载中...', 2)
   const fileList = usePanFileStore().ListDataRaw
-  const imageList = fileList.filter((v) => IMAGE_PREVIEW_EXTS.has((v.ext || '').toLowerCase().replace(/^\./, '')))
+  const imageList = fileList.filter((v) => IMAGE_PREVIEW_EXTS.has(resolveFileExt(v.name || '', v.ext || '', v.mime_type || '')))
   if (imageList.length == 0) {
     message.error('无法打开文件：没有获取到预览地址，请稍后重试')
     return
@@ -354,9 +349,9 @@ async function Audio(file: IAliGetFileModel, password: string = ''): Promise<voi
     return
   }
 
-  const ext = file.ext || (file.name?.split('.')?.pop() || '')
+  const ext = resolveFileExt(file.name || '', file.ext || file.mime_extension || '', file.mime_type || '')
   const listRaw = usePanFileStore().ListDataRaw || []
-  const audioList = listRaw.filter((v) => !v.isDir && AUDIO_PREVIEW_EXTS.has((v.ext || '').toLowerCase().replace(/^\./, '')))
+  const audioList = listRaw.filter((v) => !v.isDir && AUDIO_PREVIEW_EXTS.has(resolveFileExt(v.name || '', v.ext || v.mime_extension || '', v.mime_type || '')))
   const sourceList = audioList.length > 0 ? audioList : [file]
 
   const playlist: IPageMusicTrack[] = sourceList.map((item) => ({

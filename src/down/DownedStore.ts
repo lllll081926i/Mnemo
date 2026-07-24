@@ -266,25 +266,44 @@ const useDownStore = defineStore('down', {
      */
     mOpenUploadedFile(file: Item | null, downIDList: string[], isDir: boolean) {
       const DownedList = this.ListDataRaw
-      const openDir = (localFilePath: string) => {
+      const toAbsPath = (localFilePath: string) => {
+        const abs = path.resolve(localFilePath)
+        // Windows 长路径前缀，避免超长文件名 openPath 失败
+        if (process.platform === 'win32' && abs.length >= 240 && !abs.startsWith('\\\\?\\')) {
+          return '\\\\?\\' + abs
+        }
+        return abs
+      }
+      const openDir = async (localFilePath: string) => {
         try {
-          if (fs.existsSync(localFilePath)) {
-            window.Electron.shell.showItemInFolder(localFilePath)
+          const abs = toAbsPath(localFilePath)
+          const checkPath = abs.startsWith('\\\\?\\') ? abs.slice(4) : abs
+          if (fs.existsSync(checkPath) || fs.existsSync(abs)) {
+            window.Electron.shell.showItemInFolder(abs.startsWith('\\\\?\\') ? abs.slice(4) : abs)
           } else {
             message.error('文件夹可能已经被删除')
           }
         } catch {
+          message.error('无法打开文件夹')
         }
       }
-
-      const openFile = (localFilePath: string) => {
+      const openFile = async (localFilePath: string) => {
         try {
-          if (fs.existsSync(localFilePath)) {
-            window.Electron.shell.openPath(localFilePath)
-          } else {
+          const abs = toAbsPath(localFilePath)
+          const checkPath = abs.startsWith('\\\\?\\') ? abs.slice(4) : abs
+          if (!(fs.existsSync(checkPath) || fs.existsSync(abs))) {
             message.error('文件可能已经被删除')
+            return
+          }
+          // 优先用绝对路径打开；失败时回退到资源管理器定位，避免误启动 electron.exe
+          const openTarget = abs.startsWith('\\\\?\\') ? abs.slice(4) : abs
+          const err = await window.Electron.shell.openPath(openTarget)
+          if (err) {
+            window.Electron.shell.showItemInFolder(openTarget)
+            message.error(err || '无法打开文件，已在资源管理器中定位')
           }
         } catch {
+          message.error('无法打开文件')
         }
       }
 

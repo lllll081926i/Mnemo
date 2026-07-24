@@ -80,9 +80,26 @@ const getPikPakFid = (url: string) => {
 
 const getPikPakOriginalLink = (item: PikPakFileItem) => item.links?.['application/octet-stream']?.url || item.web_content_link || ''
 
+/** 对齐 rclone setMetaData：优先同 fid 的 media 链（Range 更友好、通常更快） */
+export const getPikPakBestDownloadLink = (item: PikPakFileItem): string => {
+  const originalUrl = getPikPakOriginalLink(item)
+  const originalFid = getPikPakFid(originalUrl)
+  const medias = Array.isArray(item.medias) ? item.medias : []
+  if (originalFid) {
+    let firstSameFid = ''
+    for (const media of medias) {
+      const url = media?.link?.url || ''
+      if (!isUsablePikPakUrl(url) || getPikPakFid(url) !== originalFid) continue
+      if (!firstSameFid) firstSameFid = url
+      if (media.is_origin || media.category === 'category_origin') return url
+    }
+    if (firstSameFid) return firstSameFid
+  }
+  return originalUrl
+}
+
 const getPikPakStreamUrl = (item: PikPakFileItem) => {
-  const mediaUrl = item.medias?.find(media => isUsablePikPakUrl(media?.link?.url || ''))?.link?.url || ''
-  return mediaUrl || getPikPakOriginalLink(item)
+  return getPikPakBestDownloadLink(item) || getPikPakOriginalLink(item)
 }
 
 // 原始媒体流（progressive，可拖进度）。只接受与原始文件 fid 一致的媒体链接；
@@ -194,7 +211,8 @@ export const buildPikPakVideoQualities = (item: PikPakFileItem, isVip: boolean):
     const priority = Number(media.priority || 0) || 0
     const existingPriority = Number((existing as any)?.priority || 0) || 0
     if (!existing || height > existing.height || (height === existing.height && priority > existingPriority)) {
-      tiers.set(tier.quality, { html: tier.html, quality: tier.quality, height, width, label: tier.html, value: tier.quality, url, type: detectPikPakStreamType(url, media.link?.type || media.video?.video_type), forceProxy: true })
+      // 转码直连 CDN（rclone Open 也是直接拉 media URL）；原画才 forceProxy
+      tiers.set(tier.quality, { html: tier.html, quality: tier.quality, height, width, label: tier.html, value: tier.quality, url, type: detectPikPakStreamType(url, media.link?.type || media.video?.video_type), forceProxy: false })
     }
   }
   const qualities = ['QHD', 'FHD', 'HD', 'SD', 'LD'].map((key) => tiers.get(key)).filter((item): item is PikPakVideoQuality => !!item)

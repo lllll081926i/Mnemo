@@ -47,7 +47,8 @@ class DebugLogC {
   }
 
   configure(options: Partial<DebugLogOptions>) {
-    if (typeof options.enabled === 'boolean') this.options.enabled = options.enabled
+    // 始终写入日志：enabled 强制 true
+    this.options.enabled = true
     if (options.level && levelAliases[options.level] === options.level) this.options.level = options.level
     if (typeof options.maxSizeMB === 'number' && Number.isFinite(options.maxSizeMB)) this.options.maxSizeMB = Math.min(100, Math.max(1, Math.round(options.maxSizeMB)))
   }

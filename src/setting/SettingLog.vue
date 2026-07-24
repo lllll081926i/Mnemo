@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { FileText } from 'lucide-vue-next'
-import MySwitch from '../layout/MySwitch.vue'
 import DebugLog, { type DebugLogLevel } from '../utils/debuglog'
 import { getUserDataPath } from '../utils/electronhelper'
 import useSettingStore from './settingstore'
@@ -14,10 +13,6 @@ const openLogFile = () => window.Electron.shell.showItemInFolder(logPath)
 
 <template>
   <div class="ui-plain-list">
-    <div class="ui-plain-row">
-      <span class="ui-plain-label">写入日志</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.debugLogEnabled" @update:value="cb({ debugLogEnabled: $event })" /></div>
-    </div>
     <div class="ui-plain-row">
       <span class="ui-plain-label">日志等级</span>
       <div class="ui-plain-control">

@@ -31,10 +31,6 @@ const cb = (val: any) => settingStore.updateStore(val)
       <div class="ui-plain-control"><MySwitch :value="settingStore.downAutoShutDown > 0" @update:value="cb({ downAutoShutDown: $event ? 1 : 0 })" /></div>
     </div>
     <div class="ui-plain-row">
-      <span class="ui-plain-label">完成提示音</span>
-      <div class="ui-plain-control"><MySwitch :value="settingStore.downFinishAudio" @update:value="cb({ downFinishAudio: $event })" /></div>
-    </div>
-    <div class="ui-plain-row">
       <span class="ui-plain-label">优先小文件</span>
       <div class="ui-plain-control"><MySwitch :value="settingStore.downSmallFileFirst" @update:value="cb({ downSmallFileFirst: $event })" /></div>
     </div>

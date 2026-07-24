@@ -720,7 +720,7 @@ body,
 }
 
 .pan-drive-menu-list {
-  max-height: 280px;
+  max-height: min(70vh, 520px);
   overflow: auto;
 }
 

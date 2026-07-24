@@ -84,6 +84,8 @@ export interface SettingState {
   downUploadWhatExist: string
   downIngoredList: string[]
   downFinishAudio: boolean
+  downFinishNotify: boolean
+  downFinishNotifyMode: 'each' | 'batch'
   downAutoStart: boolean
 
   // 高级选项
@@ -196,6 +198,8 @@ function createDefaultSetting(): SettingState {
     downUploadWhatExist: 'refuse',
     downIngoredList: ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading'],
     downFinishAudio: true,
+    downFinishNotify: true,
+    downFinishNotifyMode: 'each',
     downAutoStart: true,
 
     // 高级选项
@@ -326,6 +330,8 @@ function applyStoredConfig(setting: SettingState, val: any) {
   setting.downUploadWhatExist = defaultValue(val.downUploadWhatExist, ['ignore', 'overwrite', 'auto_rename', 'refuse'])
   setting.downIngoredList = val.downIngoredList && val.downIngoredList.length > 0 ? val.downIngoredList : ['thumbs.db', 'desktop.ini', '.ds_store', '.td', '~', '.downloading']
   setting.downFinishAudio = defaultBool(val.downFinishAudio, true)
+  setting.downFinishNotify = defaultBool(val.downFinishNotify, true)
+  setting.downFinishNotifyMode = defaultValue(val.downFinishNotifyMode, ['each', 'batch']) as 'each' | 'batch'
   setting.downAutoStart = defaultBool(val.downAutoStart, true)
 
   // 高级选项
@@ -338,7 +344,8 @@ function applyStoredConfig(setting: SettingState, val: any) {
   // Migrate the historical default so media playback can reach the local proxy.
   const debugProxyPort = defaultString(val.debugProxyPort, '18888')
   setting.debugProxyPort = debugProxyPort === '6666' ? '18888' : debugProxyPort
-  setting.debugLogEnabled = defaultBool(val.debugLogEnabled, true)
+  // 日志必须写入：忽略用户配置中的关闭开关
+  setting.debugLogEnabled = true
   setting.debugLogLevel = defaultValue(val.debugLogLevel, ['info', 'debug', 'warn', 'error'])
   setting.debugLogMaxSizeMB = defaultNumberSub(val.debugLogMaxSizeMB, 5, 1, 100)
   // 网络代理
@@ -411,7 +418,7 @@ export function LoadSetting() {
     } catch {}
     DebugLog.mSaveDanger('LoadSetting', err)
   }
-  DebugLog.configure({ enabled: state.debugLogEnabled, level: state.debugLogLevel, maxSizeMB: state.debugLogMaxSizeMB })
+  DebugLog.configure({ enabled: true, level: state.debugLogLevel, maxSizeMB: state.debugLogMaxSizeMB })
   activeState = state
   // 首次运行或配置发生过迁移时，把规范化后的结果回写磁盘
   persistSetting(state, true)
@@ -431,9 +438,11 @@ const useSettingStore = defineStore('setting', {
         partial.uiTimeFolderFormate = partial.uiTimeFolderFormate
           .replace('mm-dd', 'MM-dd').replace('HH-MM', 'HH-mm')
       }
+      // 日志始终开启，不允许被 UI/配置关闭
+      if (Object.hasOwn(partial, 'debugLogEnabled')) partial.debugLogEnabled = true
       this.$patch(partial)
       if (Object.hasOwn(partial, 'debugLogEnabled') || Object.hasOwn(partial, 'debugLogLevel') || Object.hasOwn(partial, 'debugLogMaxSizeMB')) {
-        DebugLog.configure({ enabled: this.debugLogEnabled, level: this.debugLogLevel, maxSizeMB: this.debugLogMaxSizeMB })
+        DebugLog.configure({ enabled: true, level: this.debugLogLevel, maxSizeMB: this.debugLogMaxSizeMB })
       }
       if (Object.hasOwn(partial, 'uiLaunchStart')) {
         window.WebToElectron({ cmd: { launchStart: this.uiLaunchStart, launchStartShow: this.uiLaunchStartShow } })

@@ -194,15 +194,26 @@ export async function getRawUrl(
   }
   // 违规文件无法获取地址
   const blockOriginFallback = (data as any).no_origin === true
+  const provider = resolveDriveProvider({ userId: user_id, driveId: drive_id })
+  const isPikPak = provider === 'pikpak'
+  // 已有清晰度列表时补默认 url，避免再打一遍下载接口
+  if (!data.url && data.qualities?.length) {
+    const preferred = data.qualities.find((q: any) => q.quality === quality) || data.qualities.find((q: any) => q.quality === 'Origin') || data.qualities[0]
+    data.url = preferred?.url || ''
+    if (preferred?.headers) data.headers = preferred.headers
+    if (preferred?.type) data.type = preferred.type
+  }
   const needOriginQuality = !encType && preview_type === 'video' && !blockOriginFallback && !data.qualities.some((q: any) => q.quality === 'Origin')
-  if ((!weifa && !data.url) || (uiVideoPlayer == 'web' && !blockOriginFallback) || needOriginQuality) {
+  // PikPak：文件详情里 medias/links 已带齐地址（对齐 rclone getFile），不再二次请求下载接口
+  const skipDownloadFetch = isPikPak && data.qualities?.length > 0 && !needOriginQuality
+  if (!skipDownloadFetch && ((!weifa && !data.url) || (uiVideoPlayer == 'web' && !blockOriginFallback && !isPikPak) || needOriginQuality)) {
     let downUrl = await AliFile.ApiFileDownloadUrl(user_id, drive_id, file_id, 14400)
     if (typeof downUrl != 'string') {
       if (getUrlFileName(downUrl.url).includes('wma')) {
         return '不支持预览的加密音频格式'
       }
-      // PikPak 的临时直链必须走本地 Range 代理（长视频没有转码流时只能播原画，直连 CDN 会失败）
-      const forceProxy = resolveDriveProvider({ userId: user_id, driveId: drive_id }) === 'pikpak' ? true : undefined
+      // PikPak 原画直链走本地 Range 代理；转码流在清晰度列表里已直连 CDN
+      const forceProxy = isPikPak ? true : undefined
       if (!encType && preview_type && !blockOriginFallback && !data.qualities.some((q: any) => q.quality === 'Origin')) {
         data.qualities.unshift({ quality: 'Origin', html: '原画', label: '原画', value: '', url: downUrl.url, type: detectProxyVideoType(downUrl.url), forceProxy })
       }

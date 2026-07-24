@@ -214,7 +214,8 @@ describe('deep layout shell port', () => {
     const stores = read('src/store/index.ts')
     const db = read('src/utils/dbcache.ts')
 
-    expect(component).toContain('debugLogEnabled')
+    expect(component).not.toContain('写入日志')
+    expect(component).not.toContain('debugLogEnabled')
     expect(component).toContain('debugLogLevel')
     expect(component).toContain('debugLogMaxSizeMB')
     expect(component).toContain('日志位置')

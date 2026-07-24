@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPikPakVideoQualities, mapPikPakFileToAliModel } from '../dirfilelist'
+import { buildPikPakVideoQualities, getPikPakBestDownloadLink, mapPikPakFileToAliModel } from '../dirfilelist'
 
 (globalThis as any).pinyinlite = (input: string) => input.split('').map((char) => [char])
 
@@ -129,7 +129,7 @@ describe('buildPikPakVideoQualities', () => {
     expect(qualities.filter((item) => item.quality === 'FHD')).toHaveLength(0)
   })
 
-  it('derives missing video height from resolution_name and forces PikPak streams through the local range proxy', () => {
+  it('derives missing video height from resolution_name and plays transcode streams without local proxy (rclone-style direct CDN)', () => {
     const qualities = buildPikPakVideoQualities({
       id: 'file-id',
       name: 'long-video.mp4',
@@ -142,7 +142,7 @@ describe('buildPikPakVideoQualities', () => {
     }, false)
 
     expect(qualities).toEqual([
-      expect.objectContaining({ quality: 'HD', height: 720, url: 'https://media.example/long-video', forceProxy: true })
+      expect.objectContaining({ quality: 'HD', height: 720, url: 'https://media.example/long-video', forceProxy: false })
     ])
   })
 
@@ -160,7 +160,19 @@ describe('buildPikPakVideoQualities', () => {
     }, false)
 
     expect(qualities).toHaveLength(2)
-    expect(qualities[0]).toMatchObject({ quality: 'HD', type: 'ts', forceProxy: true })
+    expect(qualities[0]).toMatchObject({ quality: 'HD', type: 'ts', forceProxy: false })
     expect(qualities[1]).toMatchObject({ quality: 'Origin', url: 'https://download.example/file.mp4?fid=file-id&expire=1999999999', forceProxy: true })
+  })
+})
+
+
+describe('getPikPakBestDownloadLink', () => {
+  it('prefers same-fid origin media link like rclone setMetaData', () => {
+    const url = getPikPakBestDownloadLink({
+      id: 'file-id',
+      links: { 'application/octet-stream': { url: 'https://download.example/file.mp4?fid=file-id&expire=1999999999' } },
+      medias: [{ is_origin: true, link: { url: 'https://media.example/origin.mp4?fid=file-id&expire=1999999999' } }]
+    } as any)
+    expect(url).toContain('media.example/origin.mp4')
   })
 })
