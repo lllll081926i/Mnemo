@@ -1,4 +1,4 @@
-import { AppWindow, createMainWindow, createTray } from './core/window'
+import { AppWindow, createMainWindow, createTray, showOrCreateMainWindow } from './core/window'
 import { app, ipcMain, session } from 'electron'
 import { registerAutoUpdate } from './core/autoUpdate'
 import is from 'electron-is'
@@ -46,26 +46,25 @@ export default class launch extends EventEmitter {
   }
 
   init() {
-    this.start()
-    if (is.mas()) return
-    const gotSingleLock = app.requestSingleInstanceLock()
-    if (!gotSingleLock) {
-      app.exit()
-    } else {
-      app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // 单实例锁必须在 start() 之前：否则第二个进程会短暂初始化再 exit，表现为「打开就闪退」
+    if (!is.mas()) {
+      const gotSingleLock = app.requestSingleInstanceLock()
+      if (!gotSingleLock) {
+        app.exit(0)
+        return
+      }
+      app.on('second-instance', (_event, commandLine) => {
         if (commandLine && commandLine.join(' ').indexOf('exit') >= 0) {
           this.hasExitArgv(commandLine)
           return
         }
-        if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
-          if (AppWindow.mainWindow.isMinimized()) {
-            AppWindow.mainWindow.restore()
-          }
-          AppWindow.mainWindow.show()
-          AppWindow.mainWindow.focus()
-        }
+        // 重复打开快捷方式 / 安装包启动：唤起已有界面，而不是静默闪退
+        const awaken = () => showOrCreateMainWindow()
+        if (app.isReady()) awaken()
+        else app.whenReady().then(awaken).catch(() => {})
       })
     }
+    this.start()
   }
 
   start() {

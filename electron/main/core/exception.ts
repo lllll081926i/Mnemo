@@ -1,23 +1,28 @@
 import is from 'electron-is'
-import { ShowErrorAndExit } from './dialog'
+import { ShowError } from './dialog'
 import { app } from 'electron'
 
 export default class exception {
-  private constructor() {
-
-  }
+  private constructor() {}
 
   static handler() {
     if (is.dev()) {
       return
     }
     process.on('unhandledRejection', (reason, p) => {
-      console.log('Unhandled Rejection at:', p, 'reason:', reason)
+      console.error('[mnemo] Unhandled Rejection at:', p, 'reason:', reason)
     })
     process.on('uncaughtException', (err) => {
-      let { message, stack = '' } = err
+      const message = err?.message || String(err)
+      const stack = err?.stack || ''
+      console.error('[mnemo] uncaughtException:', message, stack)
+      // 不要在任意未知异常上强制退出 / 重启，否则表现为「报错后闪退」
       if (app.isReady()) {
-        ShowErrorAndExit('发生未定义的异常', err.message + '\n' + stack)
+        try {
+          ShowError('发生未处理的异常', message + (stack ? '\n' + stack : ''))
+        } catch (showErr) {
+          console.error('[mnemo] failed to show exception dialog', showErr)
+        }
       }
     })
   }

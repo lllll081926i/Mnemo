@@ -11,7 +11,7 @@
     "output": "release",
     "buildResources": "build"
   },
-  "icon": "icon.ico",
+  "icon": "build/icon.ico",
   "files": ["dist"],
   "extraMetadata": {
     "name": "mnemo",
@@ -79,15 +79,13 @@
   },
   "win": {
     "executableName": "Mnemo",
-    "icon": "icon.ico",
+    "icon": "build/icon.ico",
     "legalTrademarks": "Mnemo",
-    "artifactName": "mnemo-${version}-win-${arch}.${ext}",
+    "artifactName": "Mnemo-${version}-Setup-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker",
     "signAndEditExecutable": true,
     "extraResources": [
-      { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
-      { "from": "./static/images/icon_256x256.ico", "to": "./images/icon_256x256.ico" },
-      { "from": "./static/images/icon_256x256.png", "to": "./images/icon_256x256.png" },
+      { "from": "./static/images", "to": "./images" },
       { "from": "./static/engine/win32/${arch}", "to": "./engine/win32/${arch}", "filter": ["**/*", "!mpv{,/**}"] }
     ],
     "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }]
@@ -112,11 +110,11 @@
     "createStartMenuShortcut": true,
     "shortcutName": "Mnemo",
     "uninstallDisplayName": "Mnemo",
-    "installerIcon": "installerIcon.ico",
-    "uninstallerIcon": "installerIcon.ico",
-    "installerHeaderIcon": "installerIcon.ico",
-    "runAfterFinish": true,
-    "menuCategory": false
+    "installerIcon": "build/installerIcon.ico",
+    "uninstallerIcon": "build/installerIcon.ico",
+    "installerHeaderIcon": "build/installerIcon.ico",
+    "include": "installer.nsh",
+    "runAfterFinish": true
   },
   "publish": [
     {

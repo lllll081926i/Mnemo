@@ -44,9 +44,21 @@ export function getResourcesPath(fileName: string) {
   return path.join(basePath, fileName)
 }
 
+function resolveStaticBasePath(): string {
+  // Prefer Electron's own packaged flag — more reliable than electron-is under vite-plugin-electron.
+  if (!app.isPackaged) {
+    const fromAppPath = path.resolve(app.getAppPath(), 'static')
+    if (existsSync(fromAppPath)) return fromAppPath
+    const fromCwd = path.resolve(process.cwd(), 'static')
+    if (existsSync(fromCwd)) return fromCwd
+    return fromAppPath
+  }
+  // Packaged: resources/ next to app.asar
+  return process.resourcesPath || path.resolve(app.getAppPath(), '..')
+}
+
 export function getStaticPath(fileName: string) {
-  let basePath = path.resolve(app.getAppPath(), '..')
-  if (is.dev()) basePath = path.resolve(app.getAppPath(), './static')
+  const basePath = resolveStaticBasePath()
   if (fileName.startsWith('icon')) {
     if (fileName === 'icon_256x256.ico' && !is.windows()) {
       fileName = path.join('images', 'icon_30x30.png')
@@ -57,7 +69,7 @@ export function getStaticPath(fileName: string) {
   return path.join(basePath, fileName)
 }
 
-/** Resolve the first existing Mnemo app icon for BrowserWindow / Tray / About. */
+/** Resolve the first existing Mnemo app icon for BrowserWindow / About. */
 export function getAppIconPath(): string {
   const candidates = is.windows()
     ? ['icon_256x256.ico', 'icon_256x256.png', 'icon_64x64.png']
@@ -70,8 +82,26 @@ export function getAppIconPath(): string {
     if (existsSync(full)) return full
   }
 
-  // Last resort: packaged resources images / dev static root
   return getStaticPath(is.windows() ? 'icon_256x256.ico' : 'icon_256x256.png')
+}
+
+/**
+ * Windows 系统托盘必须用 .ico（Electron 官方建议）。
+ * 开发 / 打包统一锁死 icon_256x256.ico。
+ */
+export function getTrayIconPath(): string {
+  const candidates: string[] = []
+  candidates.push(getStaticPath('icon_256x256.ico'))
+  if (!app.isPackaged) {
+    candidates.push(path.resolve(process.cwd(), 'static', 'images', 'icon_256x256.ico'))
+    candidates.push(path.resolve(app.getAppPath(), 'static', 'images', 'icon_256x256.ico'))
+  } else if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'images', 'icon_256x256.ico'))
+  }
+  for (const p of candidates) {
+    if (p && existsSync(p)) return p
+  }
+  return candidates[0]
 }
 
 export function getUserDataPath(fileName: string) {

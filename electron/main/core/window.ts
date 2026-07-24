@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, screen, shell, Tray } from 'electron'
-import { getAppIconPath, getAsarPath, getPreloadPath, getUserDataPath } from '../utils/mainfile'
+import { getAsarPath, getPreloadPath, getUserDataPath } from '../utils/mainfile'
+import { loadAppNativeImage, loadTrayNativeImage } from '../utils/appIcon'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import is from 'electron-is'
 import { ShowErrorAndRelaunch } from './dialog'
@@ -134,18 +135,36 @@ export function createMainWindow() {
 
 }
 
+/** 显示已有主窗口，没有则创建。用于托盘点击与二次启动唤起。 */
+export function showOrCreateMainWindow() {
+  if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
+    const win = AppWindow.mainWindow
+    if (win.isMinimized()) win.restore()
+    if (!win.isVisible()) win.show()
+    // Windows 上从托盘/二次启动唤起时，强制置前，避免焦点被原进程抢走
+    if (is.windows()) {
+      win.setAlwaysOnTop(true)
+      win.show()
+      win.focus()
+      win.moveTop()
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.setAlwaysOnTop(false)
+      }, 200)
+    } else {
+      win.show()
+      win.focus()
+    }
+    return
+  }
+  createMainWindow()
+}
+
 export function createTray() {
   const trayMenuTemplate = [
     {
       label: '显示主界面',
       click: function () {
-        if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
-          if (AppWindow.mainWindow.isMinimized()) AppWindow.mainWindow.restore()
-          AppWindow.mainWindow.show()
-          AppWindow.mainWindow.focus()
-        } else {
-          createMainWindow()
-        }
+        showOrCreateMainWindow()
       }
     },
     {
@@ -160,20 +179,24 @@ export function createTray() {
     }
   ]
 
-  const iconPath = getAppIconPath()
-  const trayImage = nativeImage.createFromPath(iconPath)
-  AppWindow.appTray = new Tray(trayImage.isEmpty() ? iconPath : trayImage)
+  try {
+    const trayImage = loadTrayNativeImage()
+    if (trayImage.isEmpty()) {
+      console.error('[mnemo] tray NativeImage empty — check static/images')
+      return
+    }
+    AppWindow.appTray = new Tray(trayImage)
+    AppWindow.appTray.setImage(trayImage)
+    console.log('[mnemo] tray icon ok', trayImage.getSize())
+  } catch (err) {
+    console.error('[mnemo] createTray icon failed, skip tray', err)
+    return
+  }
   const contextMenu = Menu.buildFromTemplate(trayMenuTemplate)
   AppWindow.appTray.setToolTip('Mnemo')
   AppWindow.appTray.setContextMenu(contextMenu)
   AppWindow.appTray.on('click', () => {
-    if (AppWindow.mainWindow && AppWindow.mainWindow.isDestroyed() == false) {
-      if (AppWindow.mainWindow.isMinimized()) AppWindow.mainWindow.restore()
-      AppWindow.mainWindow.show()
-      AppWindow.mainWindow.focus()
-    } else {
-      createMainWindow()
-    }
+    showOrCreateMainWindow()
   })
 }
 
@@ -187,7 +210,7 @@ export function createElectronWindow(width: number, height: number, center: bool
     minWidth: width > 680 ? 680 : width,
     minHeight: height > 500 ? 500 : height,
     center: center,
-    icon: getAppIconPath(),
+    icon: loadAppNativeImage(),
     useContentSize: true,
     frame: false,
     transparent: false,
@@ -211,6 +234,12 @@ export function createElectronWindow(width: number, height: number, center: bool
     }
   })
   win.setTitle('Mnemo')
+  try {
+    const appIcon = loadAppNativeImage()
+    if (!appIcon.isEmpty()) win.setIcon(appIcon)
+  } catch (err) {
+    console.error('[mnemo] setIcon failed', err)
+  }
   win.removeMenu()
   if (DEBUGGING) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || ''

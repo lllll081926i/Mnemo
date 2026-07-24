@@ -5,7 +5,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerSaveBlocker, safeS
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { execFile } from 'child_process'
 import { ShowError } from './dialog'
-import { getAppIconPath, getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
+import { getAsarPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
+import { loadAppNativeImage } from '../utils/appIcon'
 import { createHash } from 'crypto'
 import { getMotrixApplicationRpcPort, parseElectronProxyRules, syncMotrixApplicationProxy } from '../aria/runtime'
 import { embeddedMpvBridge } from '../mpv/embeddedMpvBridge'
@@ -201,7 +202,7 @@ export default class ipcEvent {
         minWidth: 420,
         minHeight: 560,
         title: 'PikPak 安全验证',
-        icon: getAppIconPath(),
+        icon: loadAppNativeImage(),
         autoHideMenuBar: true,
         webPreferences: {
           nodeIntegration: false,
