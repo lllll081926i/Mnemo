@@ -7,7 +7,7 @@ declare global {
     require: any
     Electron: any
     openDatabase: any
-    WebRelaunchAria: () => Promise<number>
+    WebRelaunchAria: () => Promise<{ port: number; secret: string }>
     platform: string
     WinMsg: any
     postdataFunc: any

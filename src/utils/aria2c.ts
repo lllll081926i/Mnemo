@@ -177,8 +177,9 @@ export async function AriaChangeToLocal() {
     try {
       let port = 16800
       if (Aria2EngineLocal == undefined) {
-        port = window.WebRelaunchAria ? await window.WebRelaunchAria() : 16800
-        const options = { host: '127.0.0.1', port, secure: false, secret: localPwd, path: '/jsonrpc' }
+        const connection = window.WebRelaunchAria ? await window.WebRelaunchAria() : { port, secret: localPwd }
+        port = Number(connection.port) || port
+        const options = { host: '127.0.0.1', port, secure: false, secret: connection.secret || localPwd, path: '/jsonrpc' }
         Aria2EngineLocal = new Aria2({ WebSocket: global.WebSocket, fetch: (...args: any[]) => (window.fetch as any)(...args), ...options })
         Aria2EngineLocal.on('close', () => {
           IsAria2cOnlineLocal = false

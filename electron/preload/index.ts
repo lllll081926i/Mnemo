@@ -119,7 +119,7 @@ window.WebRelaunchAria = async function() {
   try {
     return await ipcRenderer.invoke('WebRelaunchAria')
   } catch {
-    return 0
+    return { port: 0, secret: '' }
   }
 }
 window.WebSetProgressBar = function(data: any) {

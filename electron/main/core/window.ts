@@ -1,5 +1,5 @@
-import { app, BrowserWindow, ipcMain, Menu, MessageChannelMain, nativeTheme, screen, shell, Tray } from 'electron'
-import { getAsarPath, getPreloadPath, getStaticPath, getUserDataPath } from '../utils/mainfile'
+import { app, BrowserWindow, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, screen, shell, Tray } from 'electron'
+import { getAppIconPath, getAsarPath, getPreloadPath, getUserDataPath } from '../utils/mainfile'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import is from 'electron-is'
 import { ShowErrorAndRelaunch } from './dialog'
@@ -160,8 +160,9 @@ export function createTray() {
     }
   ]
 
-  const icon = getStaticPath('icon_256x256.ico')
-  AppWindow.appTray = new Tray(icon)
+  const iconPath = getAppIconPath()
+  const trayImage = nativeImage.createFromPath(iconPath)
+  AppWindow.appTray = new Tray(trayImage.isEmpty() ? iconPath : trayImage)
   const contextMenu = Menu.buildFromTemplate(trayMenuTemplate)
   AppWindow.appTray.setToolTip('Mnemo')
   AppWindow.appTray.setContextMenu(contextMenu)
@@ -186,7 +187,7 @@ export function createElectronWindow(width: number, height: number, center: bool
     minWidth: width > 680 ? 680 : width,
     minHeight: height > 500 ? 500 : height,
     center: center,
-    icon: getStaticPath('icon_256x256.ico'),
+    icon: getAppIconPath(),
     useContentSize: true,
     frame: false,
     transparent: false,

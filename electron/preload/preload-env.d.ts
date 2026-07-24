@@ -18,7 +18,7 @@ declare interface Window {
   WebSaveTheme: any
   WebReload: any
   WebRelaunch: any
-  WebRelaunchAria: () => Promise<number>
+  WebRelaunchAria: () => Promise<{ port: number; secret: string }>
   WebSetProgressBar: any
   WebGetCookies: any
   WebSetCookies: any

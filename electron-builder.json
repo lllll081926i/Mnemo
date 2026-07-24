@@ -1,19 +1,33 @@
 {
   "appId": "com.mnemo.app",
   "productName": "Mnemo",
+  "executableName": "Mnemo",
   "copyright": "copyright ©2026 Mnemo",
   "asar": true,
   "compression": "maximum",
   "npmRebuild": false,
   "buildDependenciesFromSource": true,
-  "directories": { "output": "release" },
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "icon": "icon.ico",
   "files": ["dist"],
+  "extraMetadata": {
+    "name": "mnemo",
+    "productName": "Mnemo",
+    "description": "Mnemo multi-cloud desktop file manager",
+    "author": {
+      "name": "Mnemo",
+      "email": "lllll081926i@users.noreply.github.com"
+    }
+  },
   "extraResources": [
     { "from": "./static/engine/aria2.conf", "to": "./engine/aria2.conf" },
     { "from": "./static/crx", "to": "./crx" }
   ],
   "mac": {
-    "icon": "./static/images/icon.icns",
+    "icon": "icon.icns",
     "type": "distribution",
     "artifactName": "mnemo-${version}-mac-${arch}.${ext}",
     "darkModeSupport": true,
@@ -25,18 +39,28 @@
     "extraResources": [
       { "from": "./static/images/icon.icns", "to": "./images/icon.icns" },
       { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png" },
+      { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
       { "from": "./static/engine/darwin/${arch}", "to": "./engine/darwin/${arch}" }
     ],
     "target": [
       { "target": "dmg", "arch": ["x64", "arm64"] },
       { "target": "zip", "arch": ["x64", "arm64"] }
-    ],
-    "notarize": true
+    ]
   },
   "linux": {
     "executableName": "mnemo",
-    "icon": "./static/images/icon_256x256.png",
+    "icon": "icons",
+    "synopsis": "Mnemo multi-cloud desktop file manager",
+    "description": "Mnemo multi-cloud desktop file manager",
     "category": "Network",
+    "desktop": {
+      "entry": {
+        "Name": "Mnemo",
+        "GenericName": "Cloud File Manager",
+        "Comment": "Mnemo multi-cloud desktop file manager",
+        "StartupWMClass": "Mnemo"
+      }
+    },
     "artifactName": "mnemo-${version}-linux-${arch}.${ext}",
     "extraResources": [
       { "from": "./static/images/icon_30x30.png", "to": "./images/icon_30x30.png" },
@@ -55,18 +79,22 @@
   },
   "win": {
     "executableName": "Mnemo",
-    "icon": "./static/images/icon_256x256.ico",
+    "icon": "icon.ico",
+    "legalTrademarks": "Mnemo",
     "artifactName": "mnemo-${version}-win-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker",
+    "signAndEditExecutable": true,
     "extraResources": [
       { "from": "./static/images/icon_64x64.png", "to": "./images/icon_64x64.png" },
       { "from": "./static/images/icon_256x256.ico", "to": "./images/icon_256x256.ico" },
+      { "from": "./static/images/icon_256x256.png", "to": "./images/icon_256x256.png" },
       { "from": "./static/engine/win32/${arch}", "to": "./engine/win32/${arch}", "filter": ["**/*", "!mpv{,/**}"] }
     ],
     "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }]
   },
   "dmg": {
     "title": "Mnemo",
+    "icon": "icon.icns",
     "window": { "width": 560, "height": 320 },
     "iconSize": 96,
     "contents": [
@@ -80,11 +108,15 @@
     "allowElevation": true,
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
     "shortcutName": "Mnemo",
     "uninstallDisplayName": "Mnemo",
-    "installerIcon": "./static/images/icon_256x256.ico",
-    "uninstallerIcon": "./static/images/icon_256x256.ico",
-    "installerHeaderIcon": "./static/images/icon_256x256.ico"
+    "installerIcon": "installerIcon.ico",
+    "uninstallerIcon": "installerIcon.ico",
+    "installerHeaderIcon": "installerIcon.ico",
+    "runAfterFinish": true,
+    "menuCategory": false
   },
   "publish": [
     {
