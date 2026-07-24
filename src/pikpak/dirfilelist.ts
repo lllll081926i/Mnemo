@@ -262,40 +262,71 @@ export const apiPikPakFileList = async (
     message.error(data?.error_description || data?.message || '获取 PikPak 文件列表失败')
     return { items: [], nextPageToken: '' }
   }
+  // 列表阶段预热会员状态，开播时少一轮 VIP RTT
+  if (!pageToken) void isPikPakVipAccount(user_id)
   return {
     items: Array.isArray(data?.files) ? data.files : [],
     nextPageToken: data?.next_page_token || ''
   }
 }
 
-export const apiPikPakFileDetail = async (user_id: string, fileId: string): Promise<PikPakFileItem | null> => {
+const pikpakFileDetailCache = new Map<string, { item: PikPakFileItem; expiresAt: number }>()
+const PIKPAK_FILE_DETAIL_TTL_MS = 45_000
+
+export const clearPikPakFileDetailCache = (user_id?: string, fileId?: string) => {
+  if (!user_id) {
+    pikpakFileDetailCache.clear()
+    return
+  }
+  if (!fileId) {
+    for (const key of [...pikpakFileDetailCache.keys()]) {
+      if (key.startsWith(`${user_id}:`)) pikpakFileDetailCache.delete(key)
+    }
+    return
+  }
+  pikpakFileDetailCache.delete(`${user_id}:${fileId}`)
+}
+
+export const apiPikPakFileDetail = async (user_id: string, fileId: string, forceRefresh = false): Promise<PikPakFileItem | null> => {
+  const cacheKey = `${user_id}:${fileId}`
+  if (!forceRefresh) {
+    const hit = pikpakFileDetailCache.get(cacheKey)
+    if (hit && hit.expiresAt > Date.now()) return hit.item
+  }
   const token = await getPikPakToken(user_id)
   if (!token?.access_token) return null
   const resp = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
   const data = await resp.json().catch(() => undefined)
   if (!resp.ok || data?.error) return null
-  return data as PikPakFileItem
+  const item = data as PikPakFileItem
+  // 对齐 rclone getFile：链接尚未就绪时短暂重试一次
+  const hasLink = !!(item.links?.['application/octet-stream']?.url || item.web_content_link || item.medias?.some((m) => m?.link?.url))
+  if (!hasLink) {
+    await new Promise((r) => setTimeout(r, 400))
+    const retry = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
+    const retryData = await retry.json().catch(() => undefined)
+    if (retry.ok && retryData && !retryData.error) {
+      Object.assign(item, retryData)
+    }
+  }
+  pikpakFileDetailCache.set(cacheKey, { item, expiresAt: Date.now() + PIKPAK_FILE_DETAIL_TTL_MS })
+  return item
 }
 
 export const apiPikPakDownloadInfo = async (user_id: string, fileId: string): Promise<PikPakDownloadInfo> => {
   const result: PikPakDownloadInfo = { item: null, streamUrl: '', downloadUrl: '', error: '获取 PikPak 下载地址失败' }
-  const token = await getPikPakToken(user_id)
-  if (!token?.access_token) {
-    result.error = '请先登录 PikPak'
-    return result
-  }
   try {
-    const resp = await pikpakApiFetch(token, `GET:/drive/v1/files/${fileId}`, `${API_URL}/${fileId}?thumbnail_size=SIZE_LARGE`)
-    const data = await resp.json().catch(() => undefined)
-    if (!resp.ok || data?.error) {
-      result.error = parsePikPakError(data, result.error)
+    // 复用详情短缓存，避免播放链路里二次 GET files/{id}
+    const item = await apiPikPakFileDetail(user_id, fileId)
+    if (!item) {
+      result.error = '获取 PikPak 文件信息失败'
       return result
     }
-    const item = data as PikPakFileItem
     result.item = item
-    result.streamUrl = getPikPakStreamUrl(item)
-    result.downloadUrl = getPikPakWebContentUrl(item) || getPikPakOriginMediaUrl(item)
-    result.error = result.streamUrl || result.downloadUrl ? '' : '获取 PikPak 下载地址失败'
+    const best = getPikPakBestDownloadLink(item) || getPikPakWebContentUrl(item)
+    result.streamUrl = best
+    result.downloadUrl = best
+    result.error = best ? '' : '获取 PikPak 下载地址失败'
   } catch (err: any) {
     result.error = err?.message || result.error
   }

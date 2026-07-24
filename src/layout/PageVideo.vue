@@ -54,6 +54,9 @@ let dashPlayer: any = null
 let tsPlayer: { destroy: () => void } | null = null
 let loadToken = 0
 let streamingLoadToken = 0
+// 同文件清晰度列表短缓存：切清晰度/失败重试不重复打 PikPak API（对齐 rclone link 复用）
+let cachedSourceRaw: { fileId: string; data: IRawUrl; at: number } | null = null
+const SOURCE_CACHE_TTL_MS = 45_000
 let jassubPlayer: Artplayer | null = null
 let pendingPosition = Number(pageVideo?.play_cursor || 0)
 let lastSavedSecond = -1
@@ -210,7 +213,18 @@ async function resolveCurrentSource(): Promise<ResolvedVideoSource> {
     }
   }
 
-  const data = await getRawUrl(pageVideo.user_id, pageVideo.drive_id, pageVideo.file_id, pageVideo.encType, pageVideo.password, false, 'video', '', 'thirdParty')
+  let data: IRawUrl | string
+  const canReuse = cachedSourceRaw
+    && cachedSourceRaw.fileId === pageVideo.file_id
+    && Date.now() - cachedSourceRaw.at < SOURCE_CACHE_TTL_MS
+  if (canReuse) {
+    data = cachedSourceRaw!.data
+  } else {
+    data = await getRawUrl(pageVideo.user_id, pageVideo.drive_id, pageVideo.file_id, pageVideo.encType, pageVideo.password, false, 'video', '', 'thirdParty')
+    if (typeof data !== 'string') {
+      cachedSourceRaw = { fileId: pageVideo.file_id, data, at: Date.now() }
+    }
+  }
   if (typeof data === 'string') throw new Error(data || '获取视频地址失败')
   const rawQualities: VideoQuality[] = data.qualities.length
     ? data.qualities.map((item) => ({
@@ -446,6 +460,8 @@ async function saveProgress(position = art?.currentTime || mpvStatus.value?.posi
 }
 
 function applyPlaylistItem(item: IPageVideoPlaylistEntry) {
+  cachedSourceRaw = null
+  failedQualities.clear()
   pageVideo.user_id = item.user_id || pageVideo.user_id
   pageVideo.drive_id = item.drive_id || pageVideo.drive_id
   pageVideo.file_id = item.file_id
