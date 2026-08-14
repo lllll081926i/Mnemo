@@ -1,0 +1,534 @@
+// Package dropbox implements the Dropbox provider (API v2).
+package dropbox
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
+	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
+)
+
+const (
+	apiHost    = "https://api.dropboxapi.com/2"
+	contentHost = "https://content.dropboxapi.com/2"
+	RootID     = "dropbox_root"
+	uploadSingleLimit = 150 * 1024 * 1024 // Dropbox single upload cap
+	sessionChunkSize = 8 * 1024 * 1024
+)
+
+const providerID = model.ProviderDropbox
+
+func init() {
+	drive.Register(drive.Registration{
+		ID:   providerID,
+		Meta: drive.GetMeta(providerID),
+		Caps: drive.NewCapabilities(providerID, map[string]bool{
+			"search":          true,
+			"createShare":     true,
+			"shareExpiration": true,
+			"sharePassword":   true,
+			"shareHistory":    true,
+		}, nil),
+		Factory: func() drive.Driver { return &Driver{} },
+		Auth:    authPKCE,
+		Login: drive.LoginConfig{Fields: []drive.LoginField{
+			{Key: "action", Type: "oauth", Label: "OAuth 授权"},
+		}},
+	})
+}
+
+// Metadata is a raw Dropbox file/folder entry.
+type Metadata struct {
+	Tag           string `json:".tag"`
+	Name          string `json:"name"`
+	ID            string `json:"id"`
+	PathLower     string `json:"path_lower"`
+	PathDisplay   string `json:"path_display"`
+	Rev           string `json:"rev"`
+	Size          int64  `json:"size"`
+	ServerModified string `json:"server_modified"`
+	ContentHash   string `json:"content_hash"`
+}
+
+// client is an authenticated Dropbox session.
+type client struct {
+	http  *netx.Client
+	token string
+}
+
+func newClient(token string) *client {
+	return &client{http: netx.NewClient(90 * time.Second), token: token}
+}
+
+func clientOf(c drive.Context) (*client, error) {
+	if c.Token == nil || c.Token.AccessToken == "" {
+		return nil, drive.ErrUnauthorized
+	}
+	return newClient(c.Token.AccessToken), nil
+}
+
+// rpc posts a JSON body to an RPC endpoint and decodes the JSON response.
+func (c *client) rpc(ctx context.Context, endpoint string, body any, out any) error {
+	resp, err := c.http.Do(ctx, http.MethodPost, apiHost+endpoint,
+		map[string]string{"Authorization": "Bearer " + c.token, "Content-Type": "application/json"},
+		netx.JSONBody(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		var errBody struct {
+			ErrorSummary string `json:"error_summary"`
+		}
+		_ = json.Unmarshal(data, &errBody)
+		if errBody.ErrorSummary != "" {
+			return errors.New(strings.TrimPrefix(errBody.ErrorSummary, "path/"))
+		}
+		return fmt.Errorf("dropbox: http %d", resp.StatusCode)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(data, out)
+}
+
+type listFolderResp struct {
+	Entries []Metadata `json:"entries"`
+	Cursor  string     `json:"cursor"`
+	HasMore bool       `json:"has_more"`
+}
+
+// ListPage lists one page of a folder.
+func (c *client) ListPage(ctx context.Context, parentID, cursor string) ([]Metadata, string, bool, error) {
+	if cursor != "" {
+		var resp listFolderResp
+		if err := c.rpc(ctx, "/files/list_folder/continue", map[string]any{"cursor": cursor}, &resp); err != nil {
+			return nil, "", false, err
+		}
+		return filterDeleted(resp.Entries), resp.Cursor, resp.HasMore, nil
+	}
+	path := ""
+	if parentID != "" && parentID != RootID {
+		path = parentID
+	}
+	var resp listFolderResp
+	err := c.rpc(ctx, "/files/list_folder", map[string]any{
+		"path": path, "recursive": false, "include_media_info": false,
+		"include_deleted": false, "include_has_explicit_shared_members": false,
+		"include_mounted_folders": true, "limit": 500,
+	}, &resp)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return filterDeleted(resp.Entries), resp.Cursor, resp.HasMore, nil
+}
+
+func filterDeleted(items []Metadata) []Metadata {
+	out := items[:0]
+	for _, it := range items {
+		if it.Tag != "deleted" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// List fetches every page of a folder.
+func (c *client) List(ctx context.Context, parentID string) ([]Metadata, error) {
+	var out []Metadata
+	seen := map[string]bool{}
+	cursor := ""
+	for {
+		items, next, hasMore, err := c.ListPage(ctx, parentID, cursor)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+		if !hasMore || next == "" {
+			break
+		}
+		if seen[next] {
+			return nil, errors.New("dropbox: duplicate cursor")
+		}
+		seen[next] = true
+		cursor = next
+	}
+	return out, nil
+}
+
+// Detail returns metadata for a path.
+func (c *client) Detail(ctx context.Context, path string) (*Metadata, error) {
+	var m Metadata
+	if err := c.rpc(ctx, "/files/get_metadata", map[string]any{
+		"path": path, "include_media_info": true, "include_deleted": false,
+		"include_has_explicit_shared_members": false,
+	}, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// Search uses search_v2 and flattens matches.
+func (c *client) Search(ctx context.Context, query string) ([]Metadata, error) {
+	var resp struct {
+		Matches []struct {
+			Metadata *struct {
+				Metadata Metadata `json:"metadata"`
+			} `json:"metadata"`
+		} `json:"matches"`
+		HasMore bool   `json:"has_more"`
+		Cursor  string `json:"cursor"`
+	}
+	if err := c.rpc(ctx, "/files/search_v2", map[string]any{
+		"query": query, "max_results": 1000, "options": map[string]any{"path": "", "filename_only": false},
+	}, &resp); err != nil {
+		return nil, err
+	}
+	var out []Metadata
+	for _, m := range resp.Matches {
+		if m.Metadata != nil && m.Metadata.Metadata.Tag != "deleted" {
+			out = append(out, m.Metadata.Metadata)
+		}
+	}
+	return out, nil
+}
+
+// TemporaryLink returns a ~4h temporary download link.
+func (c *client) TemporaryLink(ctx context.Context, path string) (string, int64, error) {
+	var resp struct {
+		Link     string   `json:"link"`
+		Metadata Metadata `json:"metadata"`
+	}
+	if err := c.rpc(ctx, "/files/get_temporary_link", map[string]any{"path": path}, &resp); err != nil {
+		return "", 0, err
+	}
+	return resp.Link, resp.Metadata.Size, nil
+}
+
+// Mkdir creates a folder.
+func (c *client) Mkdir(ctx context.Context, parent, name string) (*drive.MkdirResult, error) {
+	var resp struct {
+		Metadata Metadata `json:"metadata"`
+	}
+	path := resolveCommandPath(parent, "", "")
+	if path == "" {
+		path = "/" + name
+	} else {
+		path = strings.TrimRight(path, "/") + "/" + name
+	}
+	if err := c.rpc(ctx, "/files/create_folder_v2", map[string]any{"path": path, "autorename": true}, &resp); err != nil {
+		return &drive.MkdirResult{Error: err.Error()}, nil
+	}
+	id := resp.Metadata.ID
+	if id == "" {
+		id = resp.Metadata.PathDisplay
+	}
+	return &drive.MkdirResult{FileID: id}, nil
+}
+
+// Rename moves path to new name in place (autorename).
+func (c *client) Rename(ctx context.Context, path, name string) (string, error) {
+	to := renameTarget(path, name)
+	var resp struct {
+		Metadata Metadata `json:"metadata"`
+	}
+	if err := c.rpc(ctx, "/files/move_v2", map[string]any{"from_path": path, "to_path": to, "autorename": true}, &resp); err != nil {
+		return "", err
+	}
+	return resp.Metadata.ID, nil
+}
+
+// Delete removes a path.
+func (c *client) Delete(ctx context.Context, path string) error {
+	var resp struct{}
+	return c.rpc(ctx, "/files/delete_v2", map[string]any{"path": path}, &resp)
+}
+
+// Move moves entries into a target folder.
+func (c *client) Move(ctx context.Context, from, targetParent string) error {
+	to := joinTarget(targetParent, from)
+	var resp struct{}
+	return c.rpc(ctx, "/files/move_v2", map[string]any{"from_path": from, "to_path": to, "autorename": true}, &resp)
+}
+
+// Copy copies entries into a target folder.
+func (c *client) Copy(ctx context.Context, from, targetParent string) error {
+	to := joinTarget(targetParent, from)
+	var resp struct{}
+	return c.rpc(ctx, "/files/copy_v2", map[string]any{"from_path": from, "to_path": to, "autorename": true}, &resp)
+}
+
+// sharedLinkMetadata is a create_shared_link response.
+type sharedLinkMetadata struct {
+	URL          string `json:"url"`
+	ID           string `json:"id"`
+	PathLower    string `json:"path_lower"`
+	Name         string `json:"name"`
+	LinkAccess   string `json:"link_access_level"`
+	Expires      string `json:"expires"`
+	LinkPassword string `json:"link_password"`
+}
+
+// CreateSharedLink creates or reuses a public share link for a path.
+func (c *client) CreateSharedLink(ctx context.Context, path, expiration, password string) (*model.ShareItem, error) {
+	settings := map[string]any{"requested_visibility": "public"}
+	if expiration != "" {
+		settings["expires"] = expiration
+	}
+	if password != "" {
+		settings["link_password"] = password
+	}
+	body := map[string]any{"path": path, "settings": settings}
+	var link sharedLinkMetadata
+	err := c.rpc(ctx, "/sharing/create_shared_link_with_settings", body, &link)
+	if err != nil {
+		// fall back to listing existing links and modifying
+		var existing []sharedLinkMetadata
+		if err2 := c.rpc(ctx, "/sharing/list_shared_links", map[string]any{"path": path}, &existing); err2 == nil && len(existing) > 0 {
+			link = existing[0]
+			if expiration != "" || password != "" {
+				mod := map[string]any{"url": link.URL}
+				if expiration != "" {
+					mod["settings"] = map[string]any{"expires": expiration}
+				}
+				_ = c.rpc(ctx, "/sharing/modify_shared_link_settings", mod, &link)
+			}
+			return mapSharedLink(link, path, password), nil
+		}
+		return nil, err
+	}
+	return mapSharedLink(link, path, password), nil
+}
+
+func mapSharedLink(l sharedLinkMetadata, path, pwd string) *model.ShareItem {
+	shareID := l.ID
+	if shareID == "" {
+		shareID = l.URL
+	}
+	return &model.ShareItem{
+		ShareID: shareID, ShareURL: l.URL, SharePwd: pwd,
+		ShareName: l.Name, SharePolicy: l.LinkAccess, Expiration: l.Expires,
+		FileID: path,
+	}
+}
+
+// ---- content upload ----
+
+// UploadSmall PUTs a file ≤150MB.
+func (c *client) UploadSmall(ctx context.Context, path string, r io.Reader, size int64) error {
+	arg, _ := json.Marshal(map[string]any{
+		"path": path, "mode": "add", "autorename": true, "mute": false,
+		"strict_conflict": false,
+	})
+	resp, err := c.http.Do(ctx, http.MethodPost, contentHost+"/files/upload",
+		map[string]string{
+			"Authorization":  "Bearer " + c.token,
+			"Content-Type":   "application/octet-stream",
+			"Dropbox-API-Arg": string(arg),
+		}, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("dropbox: upload http %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return nil
+}
+
+// UploadSession streams a file >150MB via upload session chunks.
+func (c *client) UploadSession(ctx context.Context, f *os.File, path string, size int64, ui *model.UploadingUI) error {
+	var sessID string
+	buf := make([]byte, sessionChunkSize)
+	var pos int64
+	// start + append (skip last chunk, finish separately)
+	for pos < size {
+		n, err := f.ReadAt(buf, pos)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+		chunk := buf[:n]
+		isLast := pos+int64(n) >= size
+		if sessID == "" {
+			sessID, err = c.sessionStart(ctx, chunk)
+			if err != nil {
+				return err
+			}
+		} else if !isLast {
+			if err := c.sessionAppend(ctx, sessID, pos, chunk); err != nil {
+				return err
+			}
+		}
+		pos += int64(n)
+		if isLast {
+			return c.sessionFinish(ctx, sessID, pos-int64(n), chunk, path)
+		}
+		if ui != nil {
+			ui.Upload.DownSize = pos
+			ui.Upload.DownProcess = int(pos * 100 / size)
+		}
+	}
+	return errors.New("dropbox: upload session empty")
+}
+
+func (c *client) sessionStart(ctx context.Context, chunk []byte) (string, error) {
+	var resp struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := c.contentJSON(ctx, "/files/upload_session/start", nil, chunk, &resp); err != nil {
+		return "", err
+	}
+	return resp.SessionID, nil
+}
+
+func (c *client) sessionAppend(ctx context.Context, sessID string, offset int64, chunk []byte) error {
+	arg, _ := json.Marshal(map[string]any{
+		"cursor": map[string]any{"session_id": sessID, "offset": offset},
+	})
+	return c.contentJSON(ctx, "/files/upload_session/append_v2", arg, chunk, nil)
+}
+
+func (c *client) sessionFinish(ctx context.Context, sessID string, offset int64, chunk []byte, path string) error {
+	arg, _ := json.Marshal(map[string]any{
+		"cursor": map[string]any{"session_id": sessID, "offset": offset},
+		"commit": map[string]any{"path": path, "mode": "add", "autorename": true, "mute": false, "strict_conflict": false},
+	})
+	return c.contentJSON(ctx, "/files/upload_session/finish", arg, chunk, nil)
+}
+
+func (c *client) contentJSON(ctx context.Context, endpoint string, apiArg []byte, chunk []byte, out any) error {
+	headers := map[string]string{
+		"Authorization": "Bearer " + c.token,
+		"Content-Type":  "application/octet-stream",
+	}
+	if apiArg != nil {
+		headers["Dropbox-API-Arg"] = string(apiArg)
+	}
+	resp, err := c.http.Do(ctx, http.MethodPost, contentHost+endpoint, headers, strings.NewReader(string(chunk)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("dropbox: %s http %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	if out != nil {
+		return json.Unmarshal(data, out)
+	}
+	return nil
+}
+
+// ---- helpers ----
+
+// resolveCommandPath maps a file id to a Dropbox path.
+func resolveCommandPath(fileID, description, path string) string {
+	if fileID == "" || fileID == "root" || fileID == RootID {
+		return ""
+	}
+	if path != "" {
+		return path
+	}
+	if strings.HasPrefix(fileID, "/") {
+		return fileID
+	}
+	return fileID
+}
+
+// renameTarget computes the target path for a rename.
+func renameTarget(path, name string) string {
+	parent := ""
+	if i := strings.LastIndex(path, "/"); i > 0 {
+		parent = path[:i]
+	}
+	if parent == "" {
+		return "/" + name
+	}
+	return parent + "/" + name
+}
+
+func joinTarget(targetParent, from string) string {
+	base := from
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	if targetParent == "" || targetParent == RootID {
+		return "/" + base
+	}
+	return strings.TrimRight(targetParent, "/") + "/" + base
+}
+
+// mapItem converts a Dropbox entry to the unified file model.
+func mapItem(item *Metadata, driveID, parentID string) model.File {
+	isDir := item.Tag == "folder"
+	path := item.PathDisplay
+	if path == "" {
+		path = item.PathLower
+	}
+	timeUnix := int64(0)
+	if parsed, err := time.Parse(time.RFC3339, item.ServerModified); err == nil {
+		timeUnix = parsed.Unix()
+	}
+	f := driveutil.NewFile(driveID, fileIDOf(item), parentID, item.Name, isDir, item.Size, timeUnix)
+	f.Path = path
+	f.ContentHash = item.ContentHash
+	if item.ContentHash != "" {
+		f.ContentHashName = "dropbox"
+	}
+	f.Description = encodeDescription(item)
+	return f
+}
+
+func fileIDOf(item *Metadata) string {
+	if item.ID != "" {
+		return item.ID
+	}
+	if item.PathDisplay != "" {
+		return item.PathDisplay
+	}
+	return item.PathLower
+}
+
+func encodeDescription(item *Metadata) string {
+	parts := []string{}
+	p := item.PathDisplay
+	if p == "" {
+		p = item.PathLower
+	}
+	if p != "" {
+		parts = append(parts, "dropbox_path:"+p)
+	}
+	if item.Rev != "" {
+		parts = append(parts, "dropbox_rev:"+item.Rev)
+	}
+	if item.ContentHash != "" {
+		parts = append(parts, "dropbox_hash:"+item.ContentHash)
+	}
+	return strings.Join(parts, ";")
+}
+
+func parentOf(path string) string {
+	if path == "" {
+		return RootID
+	}
+	parent := strings.TrimRight(path, "/")
+	if i := strings.LastIndex(parent, "/"); i > 0 {
+		return parent[:i]
+	}
+	return RootID
+}
