@@ -4,5 +4,7 @@ package providers
 
 import (
 	_ "mnemo-go/internal/drive/providers/s3"
+	_ "mnemo-go/internal/drive/providers/onedrive"
+	_ "mnemo-go/internal/drive/providers/s3"
 	_ "mnemo-go/internal/drive/providers/webdav"
 )

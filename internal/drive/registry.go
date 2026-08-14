@@ -11,6 +11,11 @@ type Registration struct {
 	Meta    Meta
 	Caps    Capabilities
 	Factory func() Driver
+	// Auth is the login flow for this provider; nil means login is handled
+	// by a plain config form + RefreshAccount (e.g. token-based providers).
+	Auth AuthFunc
+	// Login declares the UI form fields for this provider.
+	Login LoginConfig
 }
 
 var registry = map[string]Registration{}
