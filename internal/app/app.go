@@ -96,14 +96,23 @@ func (a *App) OpenBrowser(url string) {
 	runtime.BrowserOpenURL(a.ctx, url)
 }
 
+// ProviderInfo is the JSON-safe projection of a provider registration exposed
+// to the frontend (excludes func-typed Factory/Auth).
+type ProviderInfo struct {
+	ID           string               `json:"ID"`
+	Meta         drive.Meta           `json:"Meta"`
+	Capabilities drive.Capabilities   `json:"Capabilities"`
+	Login        drive.LoginConfig    `json:"Login"`
+}
+
 // ---- providers ----
 
-// ListProviders returns the 13 in-scope drive providers with metas + caps.
-func (a *App) ListProviders() []drive.Registration {
+// ListProviders returns the 13 in-scope drive providers (JSON-safe DTOs).
+func (a *App) ListProviders() []ProviderInfo {
 	regs := drive.All()
-	out := make([]drive.Registration, 0, len(regs))
+	out := make([]ProviderInfo, 0, len(regs))
 	for _, r := range regs {
-		out = append(out, r)
+		out = append(out, ProviderInfo{ID: r.ID, Meta: r.Meta, Capabilities: r.Caps, Login: r.Login})
 	}
 	return out
 }

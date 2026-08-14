@@ -3,6 +3,7 @@
 import {store} from '../models';
 import {drive} from '../models';
 import {model} from '../models';
+import {app} from '../models';
 import {sync} from '../models';
 import {migrate} from '../models';
 
@@ -56,7 +57,7 @@ export function ListLocalTags(arg1:string,arg2:string):Promise<Array<store.Local
 
 export function ListOfflineTasks(arg1:string):Promise<Array<model.OfflineTask>>;
 
-export function ListProviders():Promise<Array<drive.Registration>>;
+export function ListProviders():Promise<Array<app.ProviderInfo>>;
 
 export function ListShareHistory(arg1:string):Promise<Array<model.ShareHistoryEntry>>;
 

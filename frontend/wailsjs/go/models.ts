@@ -1,3 +1,44 @@
+export namespace app {
+	
+	export class ProviderInfo {
+	    ID: string;
+	    Meta: drive.Meta;
+	    Capabilities: drive.Capabilities;
+	    Login: drive.LoginConfig;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Meta = this.convertValues(source["Meta"], drive.Meta);
+	        this.Capabilities = this.convertValues(source["Capabilities"], drive.Capabilities);
+	        this.Login = this.convertValues(source["Login"], drive.LoginConfig);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace drive {
 	
 	export class Capabilities {
@@ -220,42 +261,6 @@ export namespace drive {
 	        this.file_id = source["file_id"];
 	        this.error = source["error"];
 	    }
-	}
-	export class Registration {
-	    ID: string;
-	    Meta: Meta;
-	    Caps: Capabilities;
-	    Login: LoginConfig;
-	
-	    static createFrom(source: any = {}) {
-	        return new Registration(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
-	        this.Meta = this.convertValues(source["Meta"], Meta);
-	        this.Caps = this.convertValues(source["Caps"], Capabilities);
-	        this.Login = this.convertValues(source["Login"], LoginConfig);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class RenameResult {
 	    file_id: string;

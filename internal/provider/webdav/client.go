@@ -1,8 +1,10 @@
 // Package webdav implements a minimal RFC 4918 WebDAV client used by the
-// webdav drive provider. Pure Go, no external dependency.
+// webdav drive provider. Pure Go, no external dependency. PROPFIND responses
+// are parsed namespace-agnostically with an XML token walk.
 package webdav
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -22,7 +24,7 @@ import (
 // Client is a WebDAV connection bound to an endpoint + credentials.
 type Client struct {
 	HTTP     *http.Client
-	Endpoint string // base endpoint, e.g. https://dav.example.com
+	Endpoint string
 	Username string
 	Password string
 	UA       string
@@ -34,6 +36,9 @@ func New(conn *model.ConnConfig, timeout time.Duration) (*Client, error) {
 		return nil, errors.New("webdav: missing endpoint")
 	}
 	endpoint := strings.TrimRight(conn.Endpoint, "/")
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
 	return &Client{
 		HTTP:     &http.Client{Timeout: timeout},
 		Endpoint: endpoint,
@@ -43,13 +48,6 @@ func New(conn *model.ConnConfig, timeout time.Duration) (*Client, error) {
 	}, nil
 }
 
-// BasicAuth applies basic auth header when credentials are set.
-func (c *Client) BasicAuth(req *http.Request) {
-	if c.Username != "" || c.Password != "" {
-		req.SetBasicAuth(c.Username, c.Password)
-	}
-}
-
 func (c *Client) newReq(ctx context.Context, method, href string, body io.Reader, headers map[string]string) (*http.Request, error) {
 	rawURL := c.resolve(href)
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
@@ -57,14 +55,15 @@ func (c *Client) newReq(ctx context.Context, method, href string, body io.Reader
 		return nil, err
 	}
 	req.Header.Set("User-Agent", c.UA)
-	c.BasicAuth(req)
+	if c.Username != "" || c.Password != "" {
+		req.SetBasicAuth(c.Username, c.Password)
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	return req, nil
 }
 
-// resolve joins the endpoint with an href (absolute or relative).
 func (c *Client) resolve(href string) string {
 	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 		return href
@@ -78,41 +77,6 @@ func (c *Client) resolve(href string) string {
 	return c.Endpoint + href
 }
 
-// Prop is one DAV property value.
-type Prop struct {
-	XMLName xml.Name
-	Value   string `xml:",chardata"`
-}
-
-// MultiStatus is a parsed PROPFIND response.
-type MultiStatus struct {
-	Responses []Response `xml:"response"`
-}
-
-// Response is one PROPFIND resource entry.
-type Response struct {
-	Href  string `xml:"href"`
-	Props []Prop `xml:"propstat>prop"`
-}
-
-// propValue extracts a property by local name.
-func (r Response) propValue(names ...string) string {
-	for _, p := range r.Props {
-		for _, want := range names {
-			if strings.EqualFold(p.XMLName.Local, want) {
-				return p.Value
-			}
-		}
-	}
-	return ""
-}
-
-// propBool extracts a property as boolean.
-func (r Response) propBool(names ...string) bool {
-	v := strings.TrimSpace(r.propValue(names...))
-	return v == "1" || strings.EqualFold(v, "true")
-}
-
 // Entry is a normalized directory listing entry.
 type Entry struct {
 	Name     string
@@ -120,6 +84,87 @@ type Entry struct {
 	IsDir    bool
 	Size     int64
 	Modified time.Time
+}
+
+// davEntry is one PROPFIND resource parsed namespace-agnostically.
+type davEntry struct {
+	Href  string
+	Props map[string]string
+}
+
+func (e davEntry) davValue(names ...string) string {
+	for _, want := range names {
+		if v, ok := e.Props[want]; ok {
+			return v
+		}
+	}
+	return ""
+}
+
+func (e davEntry) davBool(names ...string) bool {
+	v := strings.TrimSpace(e.davValue(names...))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// parsePropfind walks a multistatus document namespace-agnostically.
+func parsePropfind(data []byte) ([]davEntry, error) {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var out []davEntry
+	var cur *davEntry
+	var inProp bool
+	var propName, propText string
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "response":
+				cur = &davEntry{Props: map[string]string{}}
+			case "href":
+				propName = ""
+				propText = ""
+			case "prop":
+				inProp = true
+			default:
+				if inProp {
+					propName = t.Name.Local
+					propText = ""
+				}
+			}
+		case xml.CharData:
+			propText += string(t)
+		case xml.EndElement:
+			switch t.Name.Local {
+			case "href":
+				if cur != nil {
+					cur.Href = propText
+				}
+				propText = ""
+			case "prop":
+				inProp = false
+			case "response":
+				if cur != nil {
+					out = append(out, *cur)
+					cur = nil
+				}
+			default:
+				if inProp && propName != "" {
+					if cur != nil {
+						cur.Props[propName] = propText
+					}
+					propName = ""
+					propText = ""
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // List PROPFINDs a directory (depth 1) and returns its entries.
@@ -140,8 +185,12 @@ func (c *Client) List(ctx context.Context, href string) ([]Entry, error) {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return nil, fmt.Errorf("webdav: PROPFIND %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	var ms MultiStatus
-	if err := xml.NewDecoder(resp.Body).Decode(&ms); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := parsePropfind(body)
+	if err != nil {
 		return nil, fmt.Errorf("webdav: PROPFIND decode: %w", err)
 	}
 	base := href
@@ -150,7 +199,7 @@ func (c *Client) List(ctx context.Context, href string) ([]Entry, error) {
 	}
 	base = strings.TrimRight(base, "/") + "/"
 	var out []Entry
-	for _, r := range ms.Responses {
+	for _, r := range entries {
 		p := r.Href
 		if u, err := url.Parse(p); err == nil && u.Path != "" {
 			p = u.Path
@@ -159,18 +208,17 @@ func (c *Client) List(ctx context.Context, href string) ([]Entry, error) {
 		if err == nil {
 			p = decoded
 		}
-		// skip the queried directory itself
 		if strings.TrimRight(p, "/") == strings.TrimRight(base, "/") {
 			continue
 		}
-		isDir := r.propBool("resourcetype", "directory") || strings.HasSuffix(p, "/")
+		isDir := r.davBool("resourcetype", "collection") || strings.HasSuffix(p, "/")
 		name := path.Base(strings.TrimRight(p, "/"))
 		if name == "" || name == "." || name == "/" {
 			continue
 		}
-		size, _ := strconv.ParseInt(strings.TrimSpace(r.propValue("getcontentlength")), 10, 64)
+		size, _ := strconv.ParseInt(strings.TrimSpace(r.davValue("getcontentlength")), 10, 64)
 		var mod time.Time
-		if s := strings.TrimSpace(r.propValue("getlastmodified")); s != "" {
+		if s := strings.TrimSpace(r.davValue("getlastmodified")); s != "" {
 			mod, _ = time.Parse(http.TimeFormat, s)
 		}
 		out = append(out, Entry{Name: name, Path: p, IsDir: isDir, Size: size, Modified: mod})
@@ -198,20 +246,24 @@ func (c *Client) Stat(ctx context.Context, href string) (*Entry, error) {
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("webdav: PROPFIND %d", resp.StatusCode)
 	}
-	var ms MultiStatus
-	if err := xml.NewDecoder(resp.Body).Decode(&ms); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return nil, err
 	}
-	if len(ms.Responses) == 0 {
+	entries, err := parsePropfind(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
 		return nil, errors.New("webdav: empty PROPFIND response")
 	}
-	r := ms.Responses[0]
+	r := entries[0]
 	p := r.Href
 	if u, err := url.Parse(p); err == nil && u.Path != "" {
 		p = u.Path
 	}
-	isDir := r.propBool("resourcetype", "directory")
-	size, _ := strconv.ParseInt(strings.TrimSpace(r.propValue("getcontentlength")), 10, 64)
+	isDir := r.davBool("resourcetype", "collection")
+	size, _ := strconv.ParseInt(strings.TrimSpace(r.davValue("getcontentlength")), 10, 64)
 	return &Entry{Name: path.Base(strings.TrimRight(p, "/")), Path: p, IsDir: isDir, Size: size}, nil
 }
 
@@ -249,11 +301,10 @@ func (c *Client) Delete(ctx context.Context, href string) error {
 	return nil
 }
 
-// Move renames/moves a resource (destination may be absolute or relative).
+// Move renames/moves a resource.
 func (c *Client) Move(ctx context.Context, from, to string) error {
-	dest := c.resolve(to)
 	req, err := c.newReq(ctx, "MOVE", from, nil, map[string]string{
-		"Destination": dest,
+		"Destination": c.resolve(to),
 		"Overwrite":   "T",
 	})
 	if err != nil {
