@@ -1,0 +1,140 @@
+// Package drive defines the provider plugin contract: every cloud drive
+// provider implements the Driver interface and registers itself through
+// drive.Register. The rest of the application talks only to this package and
+// to the ops facade.
+package drive
+
+import (
+	"context"
+
+	"mnemo-go/internal/model"
+)
+
+// Context carries the acting account identity into every driver call.
+type Context struct {
+	UserID    string           `json:"userId"`
+	DriveID   string           `json:"driveId"`
+	TokenFrom string           `json:"tokenfrom,omitempty"`
+	Token     *model.TokenInfo `json:"token,omitempty"`
+}
+
+// Account returns the context's account id (provider-namespace stripped).
+func (c Context) AccountID() string {
+	if c.UserID == "" {
+		return ""
+	}
+	return model.StripUserID(c.TokenFrom, c.UserID)
+}
+
+// ListOptions controls listing behaviour.
+type ListOptions struct {
+	Force   bool   `json:"force"`
+	Trashed bool   `json:"trashed"`
+	Search  string `json:"search,omitempty"`
+}
+
+// DirPage is one cursor-paginated page of a directory listing.
+type DirPage struct {
+	Items      []model.File `json:"items"`
+	NextMarker string       `json:"nextMarker,omitempty"`
+	Total      int64        `json:"total,omitempty"`
+}
+
+// MkdirResult reports the created folder id (file_id empty = failed with error).
+type MkdirResult struct {
+	FileID string `json:"file_id"`
+	Error  string `json:"error"`
+}
+
+// RenameResult reports the renamed entry.
+type RenameResult struct {
+	FileID       string `json:"file_id"`
+	ParentFileID string `json:"parent_file_id"`
+	Name         string `json:"name"`
+	IsDir        bool   `json:"isDir"`
+}
+
+// ShareParams carries share creation parameters.
+type ShareParams struct {
+	FileIDs    []string `json:"fileIds"`
+	ShareName  string   `json:"shareName"`
+	Expiration string   `json:"expiration,omitempty"`
+	Password   string   `json:"password,omitempty"`
+}
+
+// FileRef optionally distinguishes folder vs file for batch write ops where
+// the provider needs the kind (e.g. ILanZou).
+type FileRef struct {
+	ID    string `json:"id"`
+	IsDir *bool  `json:"isDir,omitempty"`
+}
+
+// RapidUploadRequest is the fingerprint-based秒传 request on the target drive.
+type RapidUploadRequest struct {
+	ParentID  string `json:"parentId"`
+	FileName  string `json:"fileName"`
+	Method    string `json:"method"` // md5 | sha1
+	Hash      string `json:"hash"`
+	Size      int64  `json:"size"`
+	Duplicate int    `json:"duplicate,omitempty"` // 1 skip / 2 overwrite / 0 rename
+}
+
+// RapidUploadResult reports the outcome of a fingerprint秒传 attempt.
+type RapidUploadResult struct {
+	Reuse    bool   `json:"reuse"`
+	FileID   string `json:"fileId,omitempty"`
+	ParentID string `json:"parentId,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+// UploadHandler carries a concrete file upload job into the provider.
+type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
+
+// Driver is the plugin contract every provider implements.
+// Only List is required; everything else is capability-gated and optional.
+type Driver interface {
+	ID() string
+	Meta() Meta
+	Capabilities() Capabilities
+
+	// RootID returns the canonical root folder id for this provider.
+	RootID() string
+
+	// List returns the entries of a directory. opts.Search triggers search.
+	List(ctx context.Context, c Context, dirID string, opts *ListOptions) ([]model.File, error)
+	// ListPaged optionally returns one cursor page (first frame faster).
+	ListPaged(ctx context.Context, c Context, dirID, marker string, opts *ListOptions) (*DirPage, error)
+	// ListTrash optionally lists the recycle bin.
+	ListTrash(ctx context.Context, c Context, opts *ListOptions) ([]model.File, error)
+	// Search optionally performs server-side search.
+	Search(ctx context.Context, c Context, keyword string) ([]model.File, error)
+
+	// GetInfo returns raw provider detail (untyped, provider specific).
+	GetInfo(ctx context.Context, c Context, fileID string) (any, error)
+	// GetFile returns the mapped unified file model.
+	GetFile(ctx context.Context, c Context, fileID string) (*model.File, error)
+	// GetDownloadURL resolves a (possibly authenticated) download source.
+	GetDownloadURL(ctx context.Context, c Context, fileID string, expireSec int) (*model.DownloadURL, error)
+	// GetVideoPreview resolves playback sources (qualities + subtitles).
+	GetVideoPreview(ctx context.Context, c Context, fileID string) (*model.VideoPreview, error)
+
+	Mkdir(ctx context.Context, c Context, parentID, name string) (*MkdirResult, error)
+	Rename(ctx context.Context, c Context, fileID, name string) (*RenameResult, error)
+	Trash(ctx context.Context, c Context, fileIDs []string) ([]string, error)
+	Delete(ctx context.Context, c Context, refs []FileRef) ([]string, error)
+	Restore(ctx context.Context, c Context, fileIDs []string) ([]string, error)
+	Move(ctx context.Context, c Context, refs []FileRef, toParentID, toParentDesc string) ([]string, error)
+	Copy(ctx context.Context, c Context, refs []FileRef, toParentID, toParentDesc string) ([]string, error)
+	Favorite(ctx context.Context, c Context, fileIDs []string, favorite bool) ([]string, error)
+	CreateShare(ctx context.Context, c Context, params ShareParams) (*model.ShareItem, error)
+
+	// UploadOneFile performs a single queue/direct upload job.
+	UploadOneFile(ctx context.Context, c Context, ui *model.UploadingUI) error
+	// RapidUploadByHash creates a file by content fingerprint on the target drive.
+	RapidUploadByHash(ctx context.Context, c Context, req RapidUploadRequest) (*RapidUploadResult, error)
+	// ResolveTransferHash computes/reads a content fingerprint for migration.
+	ResolveTransferHash(ctx context.Context, c Context, fileID, method string, allowStream bool) (string, error)
+
+	// RefreshAccount refreshes the session; returns nil when unsupported.
+	RefreshAccount(ctx context.Context, c Context, token *model.TokenInfo) (*model.TokenInfo, error)
+}
