@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+  <style type="text/css">.cls-0 {fill:url(#SVGID_1_);}
+.cls-1 {opacity:0.9;fill:#F672E0;}
+.cls-2 {fill:#0CE1EF;}
+.cls-3 {fill:url(#SVGID_2_);}
+.cls-4 {fill:url(#SVGID_3_);}
+.cls-5 {fill:#3ED1FE;}</style>
+  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  <g transform="translate(19.0, 14.24) scale(0.28)">
+    <linearGradient id="SVGID_1_" x1="61" x2="141.7" y1="59.23" y2="59.23" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FD6DE9" offset="0"/>
+      <stop stop-color="#EC16CF" offset="1"/>
+    </linearGradient>
+    <path class="cls-0" d="m63.5 43 68-40.7c4.7 7.4 10.2 19.6 10.2 35.2 0 22.7-12.7 43.4-33.3 56.5l-40.5 23.7-6.9 3.9v-54.6c0-8.7 0.8-17 2.5-24z"/>
+    <path class="cls-1" d="m65.5 48.6 63.3-37.4c3.1 6.2 6.3 15.1 6.3 25.8 0 19.8-11 38.9-29.3 51.2l-37.9 22v7.5-52c-0.1-6.1-1-11.5-2.4-17.1z"/>
+    <circle class="cls-2" cx="114.7" cy="149" r="33.3"/>
+    <linearGradient id="SVGID_2_" x1="1.851" x2="67.92" y1="74.69" y2="74.69" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B80FA" offset=".06893"/>
+      <stop stop-color="#0C51FC" offset="1"/>
+    </linearGradient>
+    <path class="cls-3" d="m1.9 1.9v111.1c0 11.2 2.3 24.3 10.5 38.6l55.5-33.9v-51.5c0-26.3-22.3-64.3-66-64.3z"/>
+    <linearGradient id="SVGID_3_" x1="8.219" x2="59.81" y1="69.43" y2="69.43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#457EFB" offset="0"/>
+      <stop stop-color="#36A2FB" offset="1"/>
+    </linearGradient>
+    <path class="cls-4" d="m8.2 8.5v81.5c5.8-12 14.8-21.5 26.1-29.4l29.2-17.6c-7-16.4-24.5-36.6-55.3-34.5z"/>
+    <path class="cls-5" d="m12.2 151.6c9.4 14.7 27.1 30.6 55.7 30.6v-64.5l-55.5 33.9h-0.2z"/>
+    <linearGradient id="SVGID_4_" x1="1.851" x2="67.92" y1="94.82" y2="94.82" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1D3CCF" offset=".0759"/>
+      <stop stop-color="#0E6ACB" offset="1"/>
+    </linearGradient>
+    <path d="m63.5 43-29.2 17.1c-17.2 10-32.4 29.2-32.4 55.2 0 9.8 2.2 21.1 7.5 36.3l58.5-33.9v-52c0-7.1-1.6-15.4-4.4-21.9z" fill="url(#SVGID_4_)"/>
+    <linearGradient id="SVGID_5_" x1="27.07" x2="42.74" y1="53.94" y2="135.1" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#345AD6" offset=".06839"/>
+      <stop stop-color="#4852D3" offset="1"/>
+    </linearGradient>
+    <path d="m62 67c0-7-1.6-13.4-3.9-20.8l-20.7 12.3c-16.6 9.3-31.9 27.9-32.8 49.7l-0.2 4.8c-0.4 10.2 2.1 21.5 6.5 33.4l51.1-30.8v-48.6z" fill="url(#SVGID_5_)"/>
+    <path class="cls-5" d="m17.8 148.2c7.7 11.7 21.7 24.5 44 27.1v-53.7l-44 26.6z"/>
+  </g>
+</svg>
