@@ -1,0 +1,1088 @@
+export namespace drive {
+	
+	export class Capabilities {
+	    provider: string;
+	    mountedStorage: boolean;
+	    download: boolean;
+	    offlineDownload: boolean;
+	    search: boolean;
+	    upload: boolean;
+	    uploadMode: string;
+	    createFolder: boolean;
+	    createDateFolder: boolean;
+	    createTextFile: boolean;
+	    rename: boolean;
+	    move: boolean;
+	    copy: boolean;
+	    recycleBin: boolean;
+	    permanentDelete: boolean;
+	    trashView: boolean;
+	    trashRestore: boolean;
+	    trashPurge: boolean;
+	    trashClear: boolean;
+	    createShare: boolean;
+	    shareExpiration: boolean;
+	    sharePassword: boolean;
+	    combinedShare: boolean;
+	    importShare: boolean;
+	    manageCreatedShares: boolean;
+	    editCreatedShares: boolean;
+	    cancelCreatedShares: boolean;
+	    manageImportedShares: boolean;
+	    shareHistory: boolean;
+	    quickTransfer: boolean;
+	    favorite: boolean;
+	    encryption: boolean;
+	    playbackHistory: boolean;
+	    copyTree: boolean;
+	    photoAlbum: boolean;
+	    provideHashes: string[];
+	    rapidUploadHashes: string[];
+	    uploadConflictPolicies: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Capabilities(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.mountedStorage = source["mountedStorage"];
+	        this.download = source["download"];
+	        this.offlineDownload = source["offlineDownload"];
+	        this.search = source["search"];
+	        this.upload = source["upload"];
+	        this.uploadMode = source["uploadMode"];
+	        this.createFolder = source["createFolder"];
+	        this.createDateFolder = source["createDateFolder"];
+	        this.createTextFile = source["createTextFile"];
+	        this.rename = source["rename"];
+	        this.move = source["move"];
+	        this.copy = source["copy"];
+	        this.recycleBin = source["recycleBin"];
+	        this.permanentDelete = source["permanentDelete"];
+	        this.trashView = source["trashView"];
+	        this.trashRestore = source["trashRestore"];
+	        this.trashPurge = source["trashPurge"];
+	        this.trashClear = source["trashClear"];
+	        this.createShare = source["createShare"];
+	        this.shareExpiration = source["shareExpiration"];
+	        this.sharePassword = source["sharePassword"];
+	        this.combinedShare = source["combinedShare"];
+	        this.importShare = source["importShare"];
+	        this.manageCreatedShares = source["manageCreatedShares"];
+	        this.editCreatedShares = source["editCreatedShares"];
+	        this.cancelCreatedShares = source["cancelCreatedShares"];
+	        this.manageImportedShares = source["manageImportedShares"];
+	        this.shareHistory = source["shareHistory"];
+	        this.quickTransfer = source["quickTransfer"];
+	        this.favorite = source["favorite"];
+	        this.encryption = source["encryption"];
+	        this.playbackHistory = source["playbackHistory"];
+	        this.copyTree = source["copyTree"];
+	        this.photoAlbum = source["photoAlbum"];
+	        this.provideHashes = source["provideHashes"];
+	        this.rapidUploadHashes = source["rapidUploadHashes"];
+	        this.uploadConflictPolicies = source["uploadConflictPolicies"];
+	    }
+	}
+	export class DirPage {
+	    items: model.File[];
+	    nextMarker?: string;
+	    total?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DirPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], model.File);
+	        this.nextMarker = source["nextMarker"];
+	        this.total = source["total"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FileRef {
+	    id: string;
+	    isDir?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.isDir = source["isDir"];
+	    }
+	}
+	export class LoginField {
+	    key: string;
+	    label: string;
+	    type: string;
+	    required: boolean;
+	    hint?: string;
+	    placeholder?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LoginField(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.type = source["type"];
+	        this.required = source["required"];
+	        this.hint = source["hint"];
+	        this.placeholder = source["placeholder"];
+	    }
+	}
+	export class LoginConfig {
+	    fields: LoginField[];
+	
+	    static createFrom(source: any = {}) {
+	        return new LoginConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fields = this.convertValues(source["fields"], LoginField);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class Meta {
+	    key: string;
+	    label: string;
+	    icon: string;
+	    rootKey?: string;
+	    rootTitle?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Meta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.icon = source["icon"];
+	        this.rootKey = source["rootKey"];
+	        this.rootTitle = source["rootTitle"];
+	    }
+	}
+	export class MkdirResult {
+	    file_id: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MkdirResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file_id = source["file_id"];
+	        this.error = source["error"];
+	    }
+	}
+	export class Registration {
+	    ID: string;
+	    Meta: Meta;
+	    Caps: Capabilities;
+	    Login: LoginConfig;
+	
+	    static createFrom(source: any = {}) {
+	        return new Registration(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Meta = this.convertValues(source["Meta"], Meta);
+	        this.Caps = this.convertValues(source["Caps"], Capabilities);
+	        this.Login = this.convertValues(source["Login"], LoginConfig);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RenameResult {
+	    file_id: string;
+	    parent_file_id: string;
+	    name: string;
+	    isDir: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RenameResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file_id = source["file_id"];
+	        this.parent_file_id = source["parent_file_id"];
+	        this.name = source["name"];
+	        this.isDir = source["isDir"];
+	    }
+	}
+	export class ShareParams {
+	    fileIds: string[];
+	    shareName: string;
+	    expiration?: string;
+	    password?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fileIds = source["fileIds"];
+	        this.shareName = source["shareName"];
+	        this.expiration = source["expiration"];
+	        this.password = source["password"];
+	    }
+	}
+
+}
+
+export namespace model {
+	
+	export class Quota {
+	    type: string;
+	    size: number;
+	    sizeStr: string;
+	    used: number;
+	    usedStr: string;
+	    expired?: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Quota(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.size = source["size"];
+	        this.sizeStr = source["sizeStr"];
+	        this.used = source["used"];
+	        this.usedStr = source["usedStr"];
+	        this.expired = source["expired"];
+	        this.description = source["description"];
+	    }
+	}
+	export class ConnConfig {
+	    name?: string;
+	    endpoint?: string;
+	    username?: string;
+	    password?: string;
+	    region?: string;
+	    bucket?: string;
+	    basePath?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.endpoint = source["endpoint"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.region = source["region"];
+	        this.bucket = source["bucket"];
+	        this.basePath = source["basePath"];
+	    }
+	}
+	export class TokenInfo {
+	    tokenfrom: string;
+	    access_token: string;
+	    refresh_token: string;
+	    token_type: string;
+	    expires_in: number;
+	    open_api_token_type: string;
+	    open_api_access_token: string;
+	    open_api_refresh_token: string;
+	    open_api_expires_in: number;
+	    signature?: string;
+	    device_id?: string;
+	    user_id?: string;
+	    user_name?: string;
+	    avatar?: string;
+	    nick_name?: string;
+	    name?: string;
+	    role?: string;
+	    status?: string;
+	    state?: string;
+	    expire_time?: string;
+	    spu_id?: string;
+	    default_drive_id?: string;
+	    resource_drive_id?: string;
+	    backup_drive_id?: string;
+	    sbox_drive_id?: string;
+	    pic_drive_id?: string;
+	    default_sbox_drive_id?: string;
+	    provider_account_id?: string;
+	    provider_root_id?: string;
+	    used_size?: number;
+	    total_size?: number;
+	    free_size?: number;
+	    vipname?: string;
+	    vipIcon?: string;
+	    vipexpire?: string;
+	    conn?: ConnConfig;
+	
+	    static createFrom(source: any = {}) {
+	        return new TokenInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tokenfrom = source["tokenfrom"];
+	        this.access_token = source["access_token"];
+	        this.refresh_token = source["refresh_token"];
+	        this.token_type = source["token_type"];
+	        this.expires_in = source["expires_in"];
+	        this.open_api_token_type = source["open_api_token_type"];
+	        this.open_api_access_token = source["open_api_access_token"];
+	        this.open_api_refresh_token = source["open_api_refresh_token"];
+	        this.open_api_expires_in = source["open_api_expires_in"];
+	        this.signature = source["signature"];
+	        this.device_id = source["device_id"];
+	        this.user_id = source["user_id"];
+	        this.user_name = source["user_name"];
+	        this.avatar = source["avatar"];
+	        this.nick_name = source["nick_name"];
+	        this.name = source["name"];
+	        this.role = source["role"];
+	        this.status = source["status"];
+	        this.state = source["state"];
+	        this.expire_time = source["expire_time"];
+	        this.spu_id = source["spu_id"];
+	        this.default_drive_id = source["default_drive_id"];
+	        this.resource_drive_id = source["resource_drive_id"];
+	        this.backup_drive_id = source["backup_drive_id"];
+	        this.sbox_drive_id = source["sbox_drive_id"];
+	        this.pic_drive_id = source["pic_drive_id"];
+	        this.default_sbox_drive_id = source["default_sbox_drive_id"];
+	        this.provider_account_id = source["provider_account_id"];
+	        this.provider_root_id = source["provider_root_id"];
+	        this.used_size = source["used_size"];
+	        this.total_size = source["total_size"];
+	        this.free_size = source["free_size"];
+	        this.vipname = source["vipname"];
+	        this.vipIcon = source["vipIcon"];
+	        this.vipexpire = source["vipexpire"];
+	        this.conn = this.convertValues(source["conn"], ConnConfig);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Account {
+	    user_id: string;
+	    drive_id: string;
+	    token?: TokenInfo;
+	    order?: number;
+	    disabled?: boolean;
+	    usage?: Quota;
+	
+	    static createFrom(source: any = {}) {
+	        return new Account(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.user_id = source["user_id"];
+	        this.drive_id = source["drive_id"];
+	        this.token = this.convertValues(source["token"], TokenInfo);
+	        this.order = source["order"];
+	        this.disabled = source["disabled"];
+	        this.usage = this.convertValues(source["usage"], Quota);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class DownloadTask {
+	    id: string;
+	    user_id: string;
+	    drive_id: string;
+	    provider: string;
+	    file_id: string;
+	    name: string;
+	    size: number;
+	    downloaded: number;
+	    speed: number;
+	    progress: number;
+	    status: string;
+	    localPath: string;
+	    url?: string;
+	    error?: string;
+	    created: number;
+	    updated: number;
+	    concurrency?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DownloadTask(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.user_id = source["user_id"];
+	        this.drive_id = source["drive_id"];
+	        this.provider = source["provider"];
+	        this.file_id = source["file_id"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.downloaded = source["downloaded"];
+	        this.speed = source["speed"];
+	        this.progress = source["progress"];
+	        this.status = source["status"];
+	        this.localPath = source["localPath"];
+	        this.url = source["url"];
+	        this.error = source["error"];
+	        this.created = source["created"];
+	        this.updated = source["updated"];
+	        this.concurrency = source["concurrency"];
+	    }
+	}
+	export class DownloadURL {
+	    drive_id: string;
+	    file_id: string;
+	    expire_time: number;
+	    url: string;
+	    size: number;
+	    headers?: Record<string, string>;
+	    downloadMode?: string;
+	    forceLocalProxy?: boolean;
+	    concurrency?: number;
+	    chunkSize?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DownloadURL(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.drive_id = source["drive_id"];
+	        this.file_id = source["file_id"];
+	        this.expire_time = source["expire_time"];
+	        this.url = source["url"];
+	        this.size = source["size"];
+	        this.headers = source["headers"];
+	        this.downloadMode = source["downloadMode"];
+	        this.forceLocalProxy = source["forceLocalProxy"];
+	        this.concurrency = source["concurrency"];
+	        this.chunkSize = source["chunkSize"];
+	    }
+	}
+	export class File {
+	    drive_id: string;
+	    file_id: string;
+	    parent_file_id: string;
+	    name: string;
+	    namesearch: string;
+	    path?: string;
+	    ext: string;
+	    mime_type: string;
+	    mime_extension: string;
+	    category: string;
+	    icon: string;
+	    file_count?: number;
+	    size: number;
+	    sizeStr: string;
+	    time: number;
+	    timeStr: string;
+	    starred: boolean;
+	    isDir: boolean;
+	    thumbnail: string;
+	    punish_flag?: number;
+	    from_share_id?: string;
+	    description: string;
+	    content_hash?: string;
+	    content_hash_name?: string;
+	    crc64_hash?: string;
+	    album_id?: string;
+	    compilation_id?: string;
+	    download_url?: string;
+	    media_width?: number;
+	    media_height?: number;
+	    media_duration?: string;
+	    media_play_cursor?: string;
+	    media_time?: string;
+	    user_meta?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new File(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.drive_id = source["drive_id"];
+	        this.file_id = source["file_id"];
+	        this.parent_file_id = source["parent_file_id"];
+	        this.name = source["name"];
+	        this.namesearch = source["namesearch"];
+	        this.path = source["path"];
+	        this.ext = source["ext"];
+	        this.mime_type = source["mime_type"];
+	        this.mime_extension = source["mime_extension"];
+	        this.category = source["category"];
+	        this.icon = source["icon"];
+	        this.file_count = source["file_count"];
+	        this.size = source["size"];
+	        this.sizeStr = source["sizeStr"];
+	        this.time = source["time"];
+	        this.timeStr = source["timeStr"];
+	        this.starred = source["starred"];
+	        this.isDir = source["isDir"];
+	        this.thumbnail = source["thumbnail"];
+	        this.punish_flag = source["punish_flag"];
+	        this.from_share_id = source["from_share_id"];
+	        this.description = source["description"];
+	        this.content_hash = source["content_hash"];
+	        this.content_hash_name = source["content_hash_name"];
+	        this.crc64_hash = source["crc64_hash"];
+	        this.album_id = source["album_id"];
+	        this.compilation_id = source["compilation_id"];
+	        this.download_url = source["download_url"];
+	        this.media_width = source["media_width"];
+	        this.media_height = source["media_height"];
+	        this.media_duration = source["media_duration"];
+	        this.media_play_cursor = source["media_play_cursor"];
+	        this.media_time = source["media_time"];
+	        this.user_meta = source["user_meta"];
+	    }
+	}
+	export class OfflineTask {
+	    id: string;
+	    user_id: string;
+	    drive_id: string;
+	    task_id?: string;
+	    url?: string;
+	    file_name?: string;
+	    status: string;
+	    progress: number;
+	    created: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new OfflineTask(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.user_id = source["user_id"];
+	        this.drive_id = source["drive_id"];
+	        this.task_id = source["task_id"];
+	        this.url = source["url"];
+	        this.file_name = source["file_name"];
+	        this.status = source["status"];
+	        this.progress = source["progress"];
+	        this.created = source["created"];
+	    }
+	}
+	
+	export class ShareHistoryEntry {
+	    share_id: string;
+	    account_id: string;
+	    drive_id: string;
+	    file_id: string;
+	    share_url: string;
+	    share_pwd?: string;
+	    share_name: string;
+	    created_at: number;
+	    provider: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareHistoryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.share_id = source["share_id"];
+	        this.account_id = source["account_id"];
+	        this.drive_id = source["drive_id"];
+	        this.file_id = source["file_id"];
+	        this.share_url = source["share_url"];
+	        this.share_pwd = source["share_pwd"];
+	        this.share_name = source["share_name"];
+	        this.created_at = source["created_at"];
+	        this.provider = source["provider"];
+	    }
+	}
+	export class ShareItem {
+	    account_id?: string;
+	    account_name?: string;
+	    account_provider?: string;
+	    share_key?: string;
+	    created_at: string;
+	    creator?: string;
+	    description?: string;
+	    display_name?: string;
+	    display_label?: string;
+	    download_count?: number;
+	    drive_id?: string;
+	    expiration?: string;
+	    expired?: boolean;
+	    file_id?: string;
+	    file_id_list?: string[];
+	    icon?: string;
+	    preview_count?: number;
+	    save_count?: number;
+	    share_id: string;
+	    share_msg?: string;
+	    full_share_msg?: string;
+	    share_name?: string;
+	    share_policy?: string;
+	    share_pwd?: string;
+	    share_url?: string;
+	    status?: string;
+	    updated_at?: string;
+	    is_share_saved?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.account_id = source["account_id"];
+	        this.account_name = source["account_name"];
+	        this.account_provider = source["account_provider"];
+	        this.share_key = source["share_key"];
+	        this.created_at = source["created_at"];
+	        this.creator = source["creator"];
+	        this.description = source["description"];
+	        this.display_name = source["display_name"];
+	        this.display_label = source["display_label"];
+	        this.download_count = source["download_count"];
+	        this.drive_id = source["drive_id"];
+	        this.expiration = source["expiration"];
+	        this.expired = source["expired"];
+	        this.file_id = source["file_id"];
+	        this.file_id_list = source["file_id_list"];
+	        this.icon = source["icon"];
+	        this.preview_count = source["preview_count"];
+	        this.save_count = source["save_count"];
+	        this.share_id = source["share_id"];
+	        this.share_msg = source["share_msg"];
+	        this.full_share_msg = source["full_share_msg"];
+	        this.share_name = source["share_name"];
+	        this.share_policy = source["share_policy"];
+	        this.share_pwd = source["share_pwd"];
+	        this.share_url = source["share_url"];
+	        this.status = source["status"];
+	        this.updated_at = source["updated_at"];
+	        this.is_share_saved = source["is_share_saved"];
+	    }
+	}
+	export class Subtitle {
+	    language: string;
+	    url: string;
+	    headers?: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new Subtitle(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.language = source["language"];
+	        this.url = source["url"];
+	        this.headers = source["headers"];
+	    }
+	}
+	
+	export class UploadInfo {
+	    localFilePath: string;
+	    parent_file_id: string;
+	    drive_id: string;
+	    path: string;
+	    name: string;
+	    size: number;
+	    sizeStr: string;
+	    icon: string;
+	    isDir: boolean;
+	    isMiaoChuan: boolean;
+	    sha1: string;
+	    crc64: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UploadInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.localFilePath = source["localFilePath"];
+	        this.parent_file_id = source["parent_file_id"];
+	        this.drive_id = source["drive_id"];
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.sizeStr = source["sizeStr"];
+	        this.icon = source["icon"];
+	        this.isDir = source["isDir"];
+	        this.isMiaoChuan = source["isMiaoChuan"];
+	        this.sha1 = source["sha1"];
+	        this.crc64 = source["crc64"];
+	    }
+	}
+	export class UploadState {
+	    DownState: string;
+	    DownTime: number;
+	    DownSize: number;
+	    DownSpeed: number;
+	    DownSpeedStr: string;
+	    DownProcess: number;
+	    IsStop: boolean;
+	    IsDowning: boolean;
+	    IsCompleted: boolean;
+	    IsFailed: boolean;
+	    failedCode: number;
+	    failedMessage: string;
+	    AutoTry: number;
+	    upload_id: string;
+	    file_id: string;
+	    IsBreakExist: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UploadState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.DownState = source["DownState"];
+	        this.DownTime = source["DownTime"];
+	        this.DownSize = source["DownSize"];
+	        this.DownSpeed = source["DownSpeed"];
+	        this.DownSpeedStr = source["DownSpeedStr"];
+	        this.DownProcess = source["DownProcess"];
+	        this.IsStop = source["IsStop"];
+	        this.IsDowning = source["IsDowning"];
+	        this.IsCompleted = source["IsCompleted"];
+	        this.IsFailed = source["IsFailed"];
+	        this.failedCode = source["failedCode"];
+	        this.failedMessage = source["failedMessage"];
+	        this.AutoTry = source["AutoTry"];
+	        this.upload_id = source["upload_id"];
+	        this.file_id = source["file_id"];
+	        this.IsBreakExist = source["IsBreakExist"];
+	    }
+	}
+	export class UploadingUI {
+	    UploadID: string;
+	    Info: UploadInfo;
+	    Upload: UploadState;
+	
+	    static createFrom(source: any = {}) {
+	        return new UploadingUI(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.UploadID = source["UploadID"];
+	        this.Info = this.convertValues(source["Info"], UploadInfo);
+	        this.Upload = this.convertValues(source["Upload"], UploadState);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class VideoQuality {
+	    html: string;
+	    quality: string;
+	    height: number;
+	    width: number;
+	    label: string;
+	    value: string;
+	    url: string;
+	    type?: string;
+	    headers?: Record<string, string>;
+	    forceProxy?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new VideoQuality(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.html = source["html"];
+	        this.quality = source["quality"];
+	        this.height = source["height"];
+	        this.width = source["width"];
+	        this.label = source["label"];
+	        this.value = source["value"];
+	        this.url = source["url"];
+	        this.type = source["type"];
+	        this.headers = source["headers"];
+	        this.forceProxy = source["forceProxy"];
+	    }
+	}
+	export class VideoPreview {
+	    drive_id: string;
+	    file_id: string;
+	    size: number;
+	    duration: number;
+	    expire_time: number;
+	    width: number;
+	    height: number;
+	    headers?: Record<string, string>;
+	    no_origin?: boolean;
+	    qualities?: VideoQuality[];
+	    subtitles?: Subtitle[];
+	
+	    static createFrom(source: any = {}) {
+	        return new VideoPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.drive_id = source["drive_id"];
+	        this.file_id = source["file_id"];
+	        this.size = source["size"];
+	        this.duration = source["duration"];
+	        this.expire_time = source["expire_time"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.headers = source["headers"];
+	        this.no_origin = source["no_origin"];
+	        this.qualities = this.convertValues(source["qualities"], VideoQuality);
+	        this.subtitles = this.convertValues(source["subtitles"], Subtitle);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace store {
+	
+	export class Favorite {
+	    user_id: string;
+	    drive_id: string;
+	    file_id: string;
+	    name: string;
+	    isDir: boolean;
+	    added: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Favorite(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.user_id = source["user_id"];
+	        this.drive_id = source["drive_id"];
+	        this.file_id = source["file_id"];
+	        this.name = source["name"];
+	        this.isDir = source["isDir"];
+	        this.added = source["added"];
+	    }
+	}
+	export class LocalTag {
+	    user_id: string;
+	    drive_id: string;
+	    file_id: string;
+	    name: string;
+	    color: string;
+	    tag_id: string;
+	    created: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LocalTag(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.user_id = source["user_id"];
+	        this.drive_id = source["drive_id"];
+	        this.file_id = source["file_id"];
+	        this.name = source["name"];
+	        this.color = source["color"];
+	        this.tag_id = source["tag_id"];
+	        this.created = source["created"];
+	    }
+	}
+	export class Settings {
+	    theme: string;
+	    defaultTab: string;
+	    proxy?: string;
+	    downloadDir?: string;
+	    maxConcurrentDownloads: number;
+	    maxDownloadSpeed: number;
+	    maxUploadSpeed: number;
+	    autoUpdate: boolean;
+	    confirmUpdate: boolean;
+	    playbackResume: boolean;
+	    keepTasks: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.theme = source["theme"];
+	        this.defaultTab = source["defaultTab"];
+	        this.proxy = source["proxy"];
+	        this.downloadDir = source["downloadDir"];
+	        this.maxConcurrentDownloads = source["maxConcurrentDownloads"];
+	        this.maxDownloadSpeed = source["maxDownloadSpeed"];
+	        this.maxUploadSpeed = source["maxUploadSpeed"];
+	        this.autoUpdate = source["autoUpdate"];
+	        this.confirmUpdate = source["confirmUpdate"];
+	        this.playbackResume = source["playbackResume"];
+	        this.keepTasks = source["keepTasks"];
+	    }
+	}
+
+}
+
+export namespace sync {
+	
+	export class Config {
+	    id: string;
+	    name: string;
+	    user_id: string;
+	    drive_id: string;
+	    local_dir: string;
+	    remote_dir: string;
+	    direction: string;
+	    enabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Config(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.user_id = source["user_id"];
+	        this.drive_id = source["drive_id"];
+	        this.local_dir = source["local_dir"];
+	        this.remote_dir = source["remote_dir"];
+	        this.direction = source["direction"];
+	        this.enabled = source["enabled"];
+	    }
+	}
+
+}
+

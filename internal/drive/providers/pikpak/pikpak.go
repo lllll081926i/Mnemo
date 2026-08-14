@@ -366,3 +366,29 @@ func mapFiles(items []File, driveID, parentID string) []model.File {
 }
 
 func httpMethodPost() string { return "POST" }
+// OfflineCreate submits a cloud offline task (magnet/link) to PikPak servers.
+func (d *Driver) OfflineCreate(ctx context.Context, c drive.Context, url, fileName, parentID string) (taskID, fileID string, err error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return "", "", err
+	}
+	return cl.OfflineCreate(ctx, url, fileName, parentID)
+}
+
+// OfflineList returns PikPak offline tasks.
+func (d *Driver) OfflineList(ctx context.Context, c drive.Context) ([]OfflineTask, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	return cl.OfflineList(ctx)
+}
+
+// OfflineFind locates one task by task id or file id.
+func (d *Driver) OfflineFind(ctx context.Context, c drive.Context, taskID, fileID string) (*OfflineTask, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	return cl.FindOfflineTask(ctx, taskID, fileID)
+}
