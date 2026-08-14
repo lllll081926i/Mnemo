@@ -296,6 +296,47 @@ export namespace drive {
 
 }
 
+export namespace migrate {
+	
+	export class Job {
+	    id: string;
+	    srcUser: string;
+	    srcDrive: string;
+	    fileIDs: string[];
+	    dstUser: string;
+	    dstDrive: string;
+	    dstParent: string;
+	    move: boolean;
+	    total: number;
+	    processed: number;
+	    failed: number;
+	    status: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Job(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.srcUser = source["srcUser"];
+	        this.srcDrive = source["srcDrive"];
+	        this.fileIDs = source["fileIDs"];
+	        this.dstUser = source["dstUser"];
+	        this.dstDrive = source["dstDrive"];
+	        this.dstParent = source["dstParent"];
+	        this.move = source["move"];
+	        this.total = source["total"];
+	        this.processed = source["processed"];
+	        this.failed = source["failed"];
+	        this.status = source["status"];
+	        this.message = source["message"];
+	    }
+	}
+
+}
+
 export namespace model {
 	
 	export class Quota {

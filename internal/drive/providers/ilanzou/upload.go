@@ -1,0 +1,322 @@
+package ilanzou
+
+import (
+	"bytes"
+	"context"
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"time"
+
+	"mnemo-go/internal/drive"
+	"mnemo-go/internal/model"
+)
+
+const uploadPartSize = 8 * 1024 * 1024 // 单片 8MB
+
+// fileMD5 computes the lowercase hex MD5 of the whole local file.
+func fileMD5(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// qiniuPart is one completed multipart part.
+type qiniuPart struct {
+	PartNumber int    `json:"partNumber"`
+	Etag       string `json:"etag"`
+}
+
+// qiniuJSON issues a JSON body request to upload.qiniup.com with the UpToken.
+func qiniuJSON(ctx context.Context, method, rawURL, upToken string, body any) (map[string]any, int, error) {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, err
+		}
+		reader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, reader)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "UpToken "+upToken)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	text, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, nil
+	}
+	var j map[string]any
+	if err := json.Unmarshal(text, &j); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("七牛响应异常: %s", truncate(string(text), 200))
+	}
+	return j, resp.StatusCode, nil
+}
+
+// qiniuPut PUTs a raw part body.
+func qiniuPut(ctx context.Context, rawURL, upToken string, data []byte) (map[string]any, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, rawURL, bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "UpToken "+upToken)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	text, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, nil
+	}
+	var j map[string]any
+	if err := json.Unmarshal(text, &j); err != nil {
+		return nil, resp.StatusCode, nil
+	}
+	return j, resp.StatusCode, nil
+}
+
+// formatGoTokenTime mirrors the legacy formatGoTokenTime (Go time.Format
+// "Mon Jan 02 2006 15:04:05 GMT-0700 (MST)" timezone-abbreviation format).
+func formatGoTokenTime(t time.Time) string {
+	return t.Format("Mon Jan 02 2006 15:04:05 GMT-0700 (MST)")
+}
+
+// UploadOneFile uploads one file: MD5 → getUpToken (可能秒传) → qiniu 直传
+// (form ≤8MB / multipart >8MB) → /7n/results 确认轮询。
+func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil {
+		return errors.New("优享版蓝奏云: 无效的上传任务")
+	}
+	ui.Upload.DownState = "uploading"
+	ui.Upload.IsDowning = true
+
+	md5hex, err := fileMD5(ui.Info.LocalFilePath)
+	if err != nil {
+		return err
+	}
+	if md5hex == "" {
+		return errors.New("计算 MD5 失败")
+	}
+	size := ui.Info.Size
+	if stat, err := os.Stat(ui.Info.LocalFilePath); err == nil {
+		size = stat.Size()
+	}
+	folderID := ToILanzouFolderId(firstNonEmpty(ui.Info.ParentFileID, "0"))
+	up, _, err := d.request(ctx, c, "/7n/getUpToken", requestOptions{
+		method: http.MethodPost,
+		body: map[string]any{
+			"fileId":   "",
+			"fileName": ui.Info.Name,
+			"fileSize": size/1024 + 1,
+			"folderId": folderID,
+			"md5":      md5hex,
+			"type":     1,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	upToken := strOf(up["upToken"])
+	rapidFileID := strOf(firstOf(up, "fileId", "id"))
+	if data := mapVal(up, "data"); data != nil {
+		upToken = firstNonEmpty(upToken, strOf(data["upToken"]))
+		rapidFileID = firstNonEmpty(rapidFileID, strOf(firstOf(data, "fileId", "id")))
+	}
+	if upToken == "" && rapidFileID != "" {
+		// MD5 命中秒传：直接返回 fileId
+		markUploadDone(ui, size, rapidFileID)
+		return nil
+	}
+	if upToken == "" {
+		return errors.New("获取上传凭证失败")
+	}
+
+	account := "user"
+	if c.Token != nil {
+		account = firstNonEmpty(c.Token.UserName, "user")
+		if cr := parseCred(c.Token.RefreshToken); cr != nil && cr.Account != "" {
+			account = cr.Account
+		}
+	}
+	now := time.Now()
+	key := fmt.Sprintf("disk/%d/%d/%d/%s/%016d", now.Year(), int(now.Month()), now.Day(), account, now.UnixMilli())
+	keyB64 := base64.RawURLEncoding.EncodeToString([]byte(key))
+
+	var commitToken string
+	f, err := os.Open(ui.Info.LocalFilePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if size <= uploadPartSize {
+		buff := make([]byte, size)
+		if _, err := io.ReadFull(f, buff); err != nil && err != io.EOF {
+			return err
+		}
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		_ = mw.WriteField("token", upToken)
+		_ = mw.WriteField("key", key)
+		_ = mw.WriteField("fname", ui.Info.Name)
+		fw, err := mw.CreateFormFile("file", ui.Info.Name)
+		if err != nil {
+			return err
+		}
+		if _, err := fw.Write(buff); err != nil {
+			return err
+		}
+		if err := mw.Close(); err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://upload.qiniup.com/", &body)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("上传失败 HTTP %d", resp.StatusCode)
+		}
+		var j map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
+			return errors.New("上传失败: 七牛响应异常")
+		}
+		commitToken = strOf(j["token"])
+		ui.Upload.DownSize = size
+	} else {
+		initURL := fmt.Sprintf("https://upload.qiniup.com/buckets/%s/objects/%s/uploads", ILANZOU_CONF.Bucket, keyB64)
+		j, status, err := qiniuJSON(ctx, http.MethodPost, initURL, upToken, nil)
+		if err != nil {
+			return err
+		}
+		if status >= 400 {
+			return fmt.Errorf("初始化分片上传失败 HTTP %d", status)
+		}
+		uploadID := strOf(j["uploadId"])
+		if uploadID == "" {
+			return errors.New("初始化分片上传失败")
+		}
+		parts := make([]qiniuPart, 0)
+		partNum := int((size + uploadPartSize - 1) / uploadPartSize)
+		for i := 1; i <= partNum; i++ {
+			start := int64(i-1) * uploadPartSize
+			cur := int64(uploadPartSize)
+			if size-start < cur {
+				cur = size - start
+			}
+			buff := make([]byte, cur)
+			if _, err := f.ReadAt(buff, start); err != nil && err != io.EOF {
+				return err
+			}
+			partURL := fmt.Sprintf("%s/%s/%d", initURL, uploadID, i)
+			pj, status, err := qiniuPut(ctx, partURL, upToken, buff)
+			if err != nil {
+				return err
+			}
+			if status >= 400 {
+				return fmt.Errorf("分片上传失败 %d", status)
+			}
+			parts = append(parts, qiniuPart{PartNumber: i, Etag: strOf(pj["etag"])})
+			ui.Upload.DownSize = start + cur
+			if size > 0 {
+				ui.Upload.DownProcess = int(100 * (start + cur) / size)
+			}
+		}
+		finURL := fmt.Sprintf("%s/%s", initURL, uploadID)
+		fj, status, err := qiniuJSON(ctx, http.MethodPost, finURL, upToken, map[string]any{
+			"fnmae": ui.Info.Name, // 服务端字段拼写即 fnmae（历史沿用）
+			"parts": parts,
+		})
+		if err != nil {
+			return err
+		}
+		if status >= 400 {
+			return fmt.Errorf("完成分片上传失败 HTTP %d", status)
+		}
+		commitToken = strOf(fj["token"])
+	}
+	if commitToken == "" {
+		return errors.New("上传完成令牌为空")
+	}
+	ui.Upload.DownProcess = 100
+
+	for i := 0; i < 10; i++ {
+		results, _, err := d.request(ctx, c, "/7n/results", requestOptions{
+			method:   http.MethodPost,
+			unproved: true,
+			query: map[string]string{
+				"tokenList": commitToken,
+				"tokenTime": formatGoTokenTime(time.Now()),
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if row := firstRow(results["list"]); row != nil && numOf(row["status"]) == 1 {
+			markUploadDone(ui, size, "")
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return errors.New("上传确认超时")
+}
+
+func firstRow(v any) map[string]any {
+	arr, ok := v.([]any)
+	if !ok || len(arr) == 0 {
+		return nil
+	}
+	if m, ok := arr[0].(map[string]any); ok {
+		return m
+	}
+	return nil
+}
+
+func firstOf(m map[string]any, keys ...string) any {
+	for _, k := range keys {
+		if v, ok := m[k]; ok && v != nil && strOf(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func markUploadDone(ui *model.UploadingUI, size int64, fileID string) {
+	ui.Upload.DownSize = size
+	ui.Upload.DownProcess = 100
+	ui.Upload.IsDowning = false
+	ui.Upload.IsCompleted = true
+	ui.Upload.DownState = "completed"
+	if fileID != "" {
+		ui.Upload.FileID = fileID
+	}
+}

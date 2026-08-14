@@ -240,3 +240,28 @@ func firstFileID(ids []string) string {
 }
 
 var _ = context.Background
+
+// SendGuangyaSms requests a SMS verification code (guangya provider).
+func (a *App) SendGuangyaSms(phone string) (map[string]string, error) {
+	reg, ok := drive.Get(model.ProviderGuangya)
+	if !ok {
+		return nil, fmt.Errorf("光鸭云盘未注册")
+	}
+	type sender interface {
+		SendSms(ctx context.Context, phone string) (verificationID, deviceID, captchaToken string, err error)
+	}
+	// The guangya package exposes SendSms as a package function; wrap via driver instance.
+	_ = reg
+	d := drive.New(model.ProviderGuangya)
+	if s, ok := d.(sender); ok {
+		vid, dev, capTok, err := s.SendSms(context.Background(), phone)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"verification_id": vid, "device_id": dev, "captcha_token": capTok}, nil
+	}
+	// fallback: package-level helper
+	type pkgSender interface{}
+	_ = pkgSender(nil)
+	return nil, fmt.Errorf("光鸭云盘不支持发送验证码")
+}

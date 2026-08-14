@@ -35,6 +35,9 @@ export function download(userId, driveId, file) { return App.DownloadFile(userId
 export function downloadUrl(name, url, headers) { return App.DownloadURL(name, url, headers) }
 export function createShare(userId, driveId, params) { return App.CreateShare(userId, driveId, params) }
 export function uploadFiles(userId, driveId, parentId, paths) { return App.UploadFiles(userId, driveId, parentId, paths) }
+export function migrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move) {
+  return App.MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move)
+}
 
 export function formatBytes(n) {
   if (!n || n <= 0) return '0 B'

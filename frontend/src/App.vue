@@ -14,6 +14,8 @@ const providers = ref([])
 const current = ref(null)
 const showLogin = ref(false)
 const toasts = ref([])
+const ballSpeed = ref(0)
+const ballActive = ref(false)
 
 const tabs = [
   { key: 'pan', label: '网盘', icon: '🗂️' },
@@ -55,6 +57,14 @@ onMounted(() => {
   refresh()
   onEvent('account:changed', refresh)
   onEvent('app:ready', () => refresh())
+  onEvent('transfer:event', (ev) => {
+    if (ev && ev.Kind === 'download' && ev.Task && ev.Task.Status === 'downloading') {
+      ballSpeed.value = ev.Task.Speed || 0
+      ballActive.value = true
+    } else if (ev && ev.Kind === 'download') {
+      // keep ball while any task is active
+    }
+  })
 })
 
 defineExpose({ toast })
@@ -105,12 +115,23 @@ defineExpose({ toast })
     <div class="toast-wrap">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">{{ t.msg }}</div>
     </div>
+
+    <div v-if="ballActive" class="transfer-ball" title="打开传输页" @click="tab = 'transfer'">
+      ⚡ {{ fmtSpeed(ballSpeed) }}
+    </div>
   </div>
 </template>
 
 <script>
 export default {
   methods: {
+    fmtSpeed(bps) {
+      if (!bps || bps <= 0) return '0 B/s'
+      const units = ['B', 'KB', 'MB', 'GB']
+      let v = bps, i = 0
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+      return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i] + '/s'
+    },
     providerIcon(userId) {
       const p = (this.providers || []).find((x) => userId.startsWith(x.ID + '_') || userId.startsWith(x.ID + ':'))
       return p ? new URL('./assets/drive-icons/' + p.Meta.Icon.replace('drive-icons/', ''), import.meta.url).href : ''
@@ -122,3 +143,13 @@ export default {
   },
 }
 </script>
+
+<style>
+.transfer-ball {
+  position: fixed; bottom: 24px; right: 24px; z-index: 250;
+  background: var(--color-primary); color: #fff; border-radius: 999px;
+  padding: 10px 16px; font-size: 13px; font-weight: 600;
+  box-shadow: var(--shadow-modal); cursor: pointer; user-select: none;
+}
+.transfer-ball:hover { background: var(--color-primary-hover); }
+</style>

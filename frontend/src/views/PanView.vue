@@ -2,7 +2,7 @@
 import { ref, watch, onMounted } from 'vue'
 import {
   listDir, listTrash, search, mkdir, rename, trash, remove, restore,
-  move, copy, favorite, download, createShare, uploadFiles, formatBytes, formatTime,
+  move, copy, favorite, download, createShare, uploadFiles, migrateFiles, formatBytes, formatTime,
   iconOf, extOf, onEvent,
 } from '../api'
 
@@ -115,6 +115,16 @@ async function act(kind) {
     else if (kind === 'move') { const target = prompt('目标文件夹 ID'); if (target) await move(uid, did, [file.file_id], target) }
     else if (kind === 'play') { await play(file) }
     else if (kind === 'upload') { const paths = prompt('本地路径（逗号分隔）'); if (paths) await uploadFiles(uid, did, dir.value, paths.split(',').map((s) => s.trim())) }
+    else if (kind === 'migrate') {
+      const target = prompt('目标账号 user_id、目标目录（空格分隔，留空目录=root）')
+      if (target) {
+        const parts = target.trim().split(/\s+/)
+        const dstUser = parts[0]
+        const dstParent = parts[1] || 'root'
+        const dstDrive = prompt('目标账号 drive_id（回车自动）') || dstUser
+        await migrateFiles(uid, did, dstUser, dstDrive, dstParent, [file.file_id], false)
+      }
+    }
     load(mode.value === 'trash' ? null : dir.value)
     emit('toast', '操作成功', 'success')
   } catch (e) {
@@ -209,6 +219,7 @@ defineExpose({ act })
       <div class="ctx-sep"></div>
       <div class="ctx-item" @click="act('copy')" v-if="c.Copy">📋 复制到…</div>
       <div class="ctx-item" @click="act('move')" v-if="c.Move">📂 移动到…</div>
+      <div class="ctx-item" @click="act('migrate')">🔄 跨盘迁移…</div>
       <div class="ctx-sep"></div>
       <div class="ctx-item" @click="act('trash')" v-if="c.RecycleBin">🗑️ 移入回收站</div>
       <div class="ctx-item" @click="act('restore')" v-if="mode === 'trash' && c.TrashRestore">♻️ 恢复</div>

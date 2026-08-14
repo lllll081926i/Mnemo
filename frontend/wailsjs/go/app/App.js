@@ -130,6 +130,10 @@ export function MediaProxy() {
   return window['go']['app']['App']['MediaProxy']();
 }
 
+export function MigrateFiles(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['app']['App']['MigrateFiles'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function Mkdir(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['Mkdir'](arg1, arg2, arg3, arg4);
 }
@@ -220,6 +224,10 @@ export function SearchFiles(arg1, arg2, arg3) {
 
 export function SeekPlayer(arg1) {
   return window['go']['app']['App']['SeekPlayer'](arg1);
+}
+
+export function SendGuangyaSms(arg1) {
+  return window['go']['app']['App']['SendGuangyaSms'](arg1);
 }
 
 export function SetPlayerSpeed(arg1) {

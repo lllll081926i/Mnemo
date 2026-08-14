@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { login, saveMounted } from '../api'
+import { login, saveMounted, SendGuangyaSms } from '../api'
 
 const props = defineProps({ providers: Array })
 const emit = defineEmits(['close', 'toast'])
@@ -9,6 +9,7 @@ const provider = ref('pikpak')
 const form = ref({})
 const mountedForm = ref({ name: '', endpoint: '', username: '', password: '', bucket: '', region: '', basePath: '' })
 const busy = ref(false)
+const smsBusy = ref(false)
 
 const loginFields = () => {
   const p = props.providers.find((x) => x.ID === provider.value)
@@ -16,6 +17,18 @@ const loginFields = () => {
 }
 
 const isMounted = () => provider.value === 'webdav' || provider.value === 's3'
+
+async function sendSms() {
+  if (!form.value.phone) { emit('toast', '请先填写手机号', 'error'); return }
+  smsBusy.value = true
+  try {
+    const r = await SendGuangyaSms(form.value.phone)
+    form.value.verification_id = r.verification_id
+    form.value.device_id = r.device_id
+    emit('toast', '验证码已发送', 'success')
+  } catch (e) { emit('toast', String(e), 'error') }
+  smsBusy.value = false
+}
 
 async function submit() {
   busy.value = true
@@ -66,6 +79,9 @@ async function submit() {
             v-model="form[f.Key]"
             :placeholder="f.Placeholder || ''"
           />
+          <button v-if="provider === 'guangya' && f.Key === 'sms_code'" class="btn sm" style="margin-top:6px" :disabled="smsBusy" @click="sendSms">
+            {{ smsBusy ? '发送中…' : '发送验证码' }}
+          </button>
         </div>
         <div v-if="provider === 'onedrive' || provider === 'dropbox'" class="field" style="color:var(--text-tertiary);font-size:12px">
           点击登录后将在浏览器完成 OAuth 授权，自动回调。

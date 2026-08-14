@@ -18,6 +18,8 @@ import (
 	"mnemo-go/internal/preview"
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/transfer"
+	"mnemo-go/internal/transfer/migrate"
+	"time"
 	"mnemo-go/internal/transfer/dlengine"
 )
 
@@ -280,3 +282,17 @@ var _ = dlengine.DefaultConcurrency
 
 // Startup is the exported Wails startup hook.
 func (a *App) Startup(ctx context.Context) { a.startup(ctx) }
+
+// MigrateFiles copies/moves files across two accounts.
+func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent string, fileIDs []string, move bool) (*migrate.Job, error) {
+	job := &migrate.Job{
+		ID: "mig-" + fmt.Sprint(time.Now().UnixNano()),
+		SrcUser: srcUser, SrcDrive: srcDrive, FileIDs: fileIDs,
+		DstUser: dstUser, DstDrive: dstDrive, DstParent: dstParent, Move: move,
+	}
+	eng := migrate.NewEngine(func(j *migrate.Job) {
+		a.emit("migrate:progress", j)
+	})
+	go eng.Run(context.Background(), job)
+	return job, nil
+}

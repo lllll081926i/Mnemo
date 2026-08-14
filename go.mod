@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.35
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.1
 	github.com/wailsapp/wails/v2 v2.14.0
+	golang.org/x/sync v0.22.0
 )
 
 require (

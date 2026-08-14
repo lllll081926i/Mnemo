@@ -4,6 +4,7 @@ import {store} from '../models';
 import {drive} from '../models';
 import {model} from '../models';
 import {sync} from '../models';
+import {migrate} from '../models';
 
 export function AddFavorite(arg1:string,arg2:string,arg3:store.Favorite):Promise<void>;
 
@@ -69,6 +70,8 @@ export function LocalPreviewURL(arg1:string):Promise<string>;
 
 export function MediaProxy():Promise<string>;
 
+export function MigrateFiles(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:Array<string>,arg7:boolean):Promise<migrate.Job>;
+
 export function Mkdir(arg1:string,arg2:string,arg3:string,arg4:string):Promise<drive.MkdirResult>;
 
 export function MoveFiles(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<Array<string>>;
@@ -114,6 +117,8 @@ export function SaveSyncConfig(arg1:sync.Config):Promise<void>;
 export function SearchFiles(arg1:string,arg2:string,arg3:string):Promise<Array<model.File>>;
 
 export function SeekPlayer(arg1:number):Promise<void>;
+
+export function SendGuangyaSms(arg1:string):Promise<Record<string, string>>;
 
 export function SetPlayerSpeed(arg1:number):Promise<void>;
 
