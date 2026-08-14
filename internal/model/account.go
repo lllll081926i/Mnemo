@@ -73,6 +73,20 @@ type TokenInfo struct {
 
 	// Raw preserves the original JSON document for opaque providers.
 	Raw json.RawMessage `json:"-"`
+
+	// Conn carries mounted-storage connection config (webdav/s3).
+	Conn *ConnConfig `json:"conn,omitempty"`
+}
+
+// ConnConfig describes a mounted storage connection.
+type ConnConfig struct {
+	Name     string `json:"name,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Region   string `json:"region,omitempty"`
+	Bucket   string `json:"bucket,omitempty"`
+	BasePath string `json:"basePath,omitempty"`
 }
 
 // Account is the persisted session record. UserID is the primary key and is
