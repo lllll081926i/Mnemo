@@ -571,6 +571,38 @@ func (c *client) OfflineList(ctx context.Context) ([]OfflineTask, error) {
 	return resp.Tasks, nil
 }
 
+// OfflineDelete cancels and removes an offline download task. deleteFiles=true
+// also removes any partially downloaded file.
+func (c *client) OfflineDelete(ctx context.Context, taskIDs []string, deleteFiles bool) error {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	q := url.Values{}
+	q.Set("type", "offline")
+	q.Set("task_ids", strings.Join(taskIDs, ","))
+	if deleteFiles {
+		q.Set("delete_files", "true")
+	}
+	target := apiHost + "/drive/v1/tasks?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range c.headers(nil) {
+		req.Header.Set(k, v)
+	}
+	resp, err := c.http.Do(ctx, http.MethodDelete, target, c.headers(nil), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("pikpak: offline delete %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
 // FindOfflineTask searches tasks for one matching task/file id.
 func (c *client) FindOfflineTask(ctx context.Context, taskID, fileID string) (*OfflineTask, error) {
 	tasks, err := c.OfflineList(ctx)

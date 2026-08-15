@@ -548,3 +548,12 @@ func (d *Driver) OfflineFind(ctx context.Context, c drive.Context, taskID, fileI
 	}
 	return cl.FindOfflineTask(ctx, taskID, fileID)
 }
+
+// OfflineDelete cancels and removes offline tasks.
+func (d *Driver) OfflineDelete(ctx context.Context, c drive.Context, taskIDs []string, deleteFiles bool) error {
+	cl, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	return cl.OfflineDelete(ctx, taskIDs, deleteFiles)
+}

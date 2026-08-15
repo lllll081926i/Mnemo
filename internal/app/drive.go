@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/providers/pikpak"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
 )
@@ -259,6 +260,67 @@ func (a *App) ListOfflineTasks(userID string) []model.OfflineTask {
 		}
 	}
 	return out
+}
+
+// RefreshOfflineTasks queries the provider for live offline task status and
+// updates the local cache. Returns the refreshed list.
+func (a *App) RefreshOfflineTasks(userID, driveID string) ([]model.OfflineTask, error) {
+	ctx := context.Background()
+	c, err := drive.BuildContext(userID, driveID, "")
+	if err != nil {
+		return nil, err
+	}
+	d, err := drive.DriverFor(c)
+	if err != nil {
+		return nil, err
+	}
+	type lister interface {
+		OfflineList(ctx context.Context, c drive.Context) ([]pikpak.OfflineTask, error)
+	}
+	l, ok := d.(lister)
+	if !ok {
+		return nil, fmt.Errorf("当前网盘不支持云离线")
+	}
+	tasks, err := l.OfflineList(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.OfflineTask
+	for _, t := range tasks {
+		ot := model.OfflineTask{
+			ID: t.TaskID, UserID: userID, DriveID: driveID,
+			TaskID: t.TaskID, FileName: t.Name,
+			Status: t.Phase, Progress: t.Progress,
+		}
+		_ = a.store.SaveOfflineTask(&ot)
+		out = append(out, ot)
+	}
+	return out, nil
+}
+
+// DeleteOfflineTask cancels and removes a PikPak cloud offline task.
+func (a *App) DeleteOfflineTask(userID, driveID, taskID string, deleteFiles bool) error {
+	ctx := context.Background()
+	c, err := drive.BuildContext(userID, driveID, "")
+	if err != nil {
+		return err
+	}
+	d, err := drive.DriverFor(c)
+	if err != nil {
+		return err
+	}
+	type deleter interface {
+		OfflineDelete(ctx context.Context, c drive.Context, taskIDs []string, deleteFiles bool) error
+	}
+	del, ok := d.(deleter)
+	if !ok {
+		return fmt.Errorf("当前网盘不支持删除云离线任务")
+	}
+	if err := del.OfflineDelete(ctx, c, []string{taskID}, deleteFiles); err != nil {
+		return err
+	}
+	_ = a.store.DeleteOfflineTask(taskID)
+	return nil
 }
 
 func firstFileID(ids []string) string {
