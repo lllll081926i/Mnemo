@@ -110,15 +110,25 @@ function openLink(h) {
   OpenBrowser(h.share_url)
 }
 
-async function copy(text, tip) {
+const copiedMap = ref({})
+
+async function copy(text, tip, key) {
   const ok = await copyText(text)
+  if (ok && key) {
+    copiedMap.value[key] = true
+    setTimeout(() => {
+      const m = { ...copiedMap.value }
+      delete m[key]
+      copiedMap.value = m
+    }, 1600)
+  }
   emit('toast', ok ? tip : '复制失败', ok ? 'success' : 'error')
 }
 
-function copyAll(h) {
+function copyAll(h, key) {
   const lines = [h.share_name || '分享文件', h.share_url || '']
   if (h.share_pwd) lines.push('提取码: ' + h.share_pwd)
-  copy(lines.join('\n'), '已复制分享信息')
+  copy(lines.join('\n'), '已复制分享信息', key)
 }
 
 const offs = []
@@ -136,6 +146,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       <span class="search-quick-wrap">
         <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
         <input class="search-quick share-search" style="width:240px" v-model="kwRaw" placeholder="搜索名称 / 链接 / 提取码" />
+        <button v-if="kwRaw" class="sq-clear" title="清空搜索" @click="kwRaw = ''"><UiIcon name="close" :size="11" /></button>
       </span>
       <UiSelect
         v-model="filterProvider"
@@ -153,8 +164,17 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       </button>
     </div>
 
-    <!-- 状态区 -->
-    <div v-if="loading && !history.length" class="empty" style="flex:1"><span class="spin"></span></div>
+    <!-- 骨架屏加载状态 -->
+    <div v-if="loading && !history.length" class="skeleton-list" style="max-width:960px">
+      <div v-for="i in 4" :key="i" class="skeleton-row" style="height:64px;border:1px solid var(--border-lighter);border-radius:var(--radius-md);margin-bottom:8px">
+        <div class="skeleton skeleton-icon" style="width:32px;height:32px"></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+          <div class="skeleton" :style="{ width: (30 + (i * 11) % 40) + '%', height: '14px' }"></div>
+          <div class="skeleton" style="width:50%;height:10px"></div>
+        </div>
+        <div class="skeleton" style="width:120px;height:24px;border-radius:var(--radius-sm)"></div>
+      </div>
+    </div>
     <div v-else-if="!groups.length" class="workspace-empty-state" style="flex:1">
       <UiIcon name="link" :size="40" style="opacity:.4" />
       <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有创建过分享记录' }}</span>
@@ -183,9 +203,21 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
             <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
             <div class="share-record-actions">
               <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
-              <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接')"><UiIcon name="copy" :size="13" />链接</button>
-              <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码')"><UiIcon name="copy" :size="13" />提取码</button>
-              <button class="tbtn" @click="copyAll(h)"><UiIcon name="copy" :size="13" />全部</button>
+              <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接', 'url_' + (h.share_id || '') + h.account_id)">
+                <UiIcon v-if="copiedMap['url_' + (h.share_id || '') + h.account_id]" name="check" :size="13" class="icon-check-pop" />
+                <UiIcon v-else name="copy" :size="13" />
+                <span>{{ copiedMap['url_' + (h.share_id || '') + h.account_id] ? '已复制' : '链接' }}</span>
+              </button>
+              <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码', 'pwd_' + (h.share_id || '') + h.account_id)">
+                <UiIcon v-if="copiedMap['pwd_' + (h.share_id || '') + h.account_id]" name="check" :size="13" class="icon-check-pop" />
+                <UiIcon v-else name="copy" :size="13" />
+                <span>{{ copiedMap['pwd_' + (h.share_id || '') + h.account_id] ? '已复制' : '提取码' }}</span>
+              </button>
+              <button class="tbtn" @click="copyAll(h, 'all_' + (h.share_id || '') + h.account_id)">
+                <UiIcon v-if="copiedMap['all_' + (h.share_id || '') + h.account_id]" name="check" :size="13" class="icon-check-pop" />
+                <UiIcon v-else name="copy" :size="13" />
+                <span>{{ copiedMap['all_' + (h.share_id || '') + h.account_id] ? '已复制' : '全部' }}</span>
+              </button>
             </div>
           </div>
         </div>

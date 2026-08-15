@@ -11,6 +11,7 @@ import AccountRail from './components/AccountRail.vue'
 import UiIcon from './components/UiIcon.vue'
 import Modal from './components/Modal.vue'
 import LoginModal from './components/LoginModal.vue'
+import QuickOpen from './components/QuickOpen.vue'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -27,6 +28,7 @@ const accounts = ref([])
 const providers = ref([])
 const current = ref(null)
 const showLogin = ref(false)
+const showQuickOpen = ref(false)
 const infoAcc = ref(null)
 const curTheme = ref('system')
 const isDark = ref(false)
@@ -47,6 +49,7 @@ async function saveThemePref() {
 const toasts = ref([])
 const ball = ref(null) // { down, up }
 const ballPos = ref(null) // { x, y } 拖动后的固定位置
+const isBallDragging = ref(false)
 
 function onBallPointerDown(e) {
   const el = e.currentTarget
@@ -54,6 +57,7 @@ function onBallPointerDown(e) {
   const startX = e.clientX, startY = e.clientY
   const offX = startX - rect.left, offY = startY - rect.top
   let moved = false
+  isBallDragging.value = true
   const onMove = (ev) => {
     const dx = ev.clientX - startX, dy = ev.clientY - startY
     if (!moved && Math.hypot(dx, dy) < 4) return
@@ -63,6 +67,7 @@ function onBallPointerDown(e) {
     ballPos.value = { x, y }
   }
   const onUp = () => {
+    isBallDragging.value = false
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     if (!moved) switchTab('transfer')
@@ -143,9 +148,28 @@ function applyTheme(theme) {
 }
 
 function onKey(e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.code === 'KeyP')) {
+    e.preventDefault()
+    showQuickOpen.value = !showQuickOpen.value
+    return
+  }
   if (!e.altKey) return
   const map = { Digit1: 'pan', Digit2: 'transfer', Digit3: 'sync', Digit4: 'share', Digit5: 'settings' }
   if (map[e.code]) { switchTab(map[e.code]); e.preventDefault() }
+}
+
+function onQuickAction(action) {
+  if (action === 'toggle-theme') quickToggleTheme()
+  else if (action === 'refresh') {
+    switchTab('pan')
+    panView.value?.refresh()
+  } else if (action === 'mkdir') {
+    switchTab('pan')
+    panView.value?.openMkdirModal()
+  } else if (action === 'upload') {
+    switchTab('pan')
+    panView.value?.openUploadModal()
+  }
 }
 
 onMounted(async () => {
@@ -202,6 +226,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         >{{ t.label }}</button>
       </div>
       <div class="spacer"></div>
+      <button class="icon-btn" title="快捷命令面板 (Ctrl+P)" @click="showQuickOpen = true"><UiIcon name="search" :size="16" /></button>
       <button class="icon-btn" :title="isDark ? '切换到浅色' : '切换到深色'" @click="quickToggleTheme"><UiIcon :name="isDark ? 'sun' : 'moon'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
     </header>
@@ -230,6 +255,17 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
 
     <LoginModal v-if="showLogin" :providers="providers" @close="showLogin = false" @toast="toast" />
 
+    <QuickOpen
+      :show="showQuickOpen"
+      :accounts="accounts"
+      :providers="providers"
+      :current-account="current"
+      @close="showQuickOpen = false"
+      @select-tab="switchTab"
+      @select-account="select"
+      @action="onQuickAction"
+    />
+
     <Modal v-if="infoAcc" title="账号信息" width="420px" @close="infoAcc = null">
       <div class="kv-row"><span class="kv-label">账号</span><span style="user-select:text">{{ accountName(infoAcc) }}</span></div>
       <div class="kv-row"><span class="kv-label">网盘</span><span>{{ providerLabel(infoAcc) }}</span></div>
@@ -245,16 +281,17 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </template>
     </Modal>
 
-    <div class="toast-wrap">
+    <transition-group name="toast-list" tag="div" class="toast-wrap">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">
         <span v-if="t.type" class="t-icon"><UiIcon :name="t.type === 'error' ? 'warning' : 'check'" :size="14" /></span>
         <span>{{ t.msg }}</span>
       </div>
-    </div>
+    </transition-group>
 
     <div
       v-if="ball"
       class="transfer-ball"
+      :class="{ dragging: isBallDragging }"
       :style="ballPos ? { left: ballPos.x + 'px', top: ballPos.y + 'px', right: 'auto', bottom: 'auto' } : {}"
       title="传输中，点击打开传输页 (Alt+2)，可拖动"
       @pointerdown="onBallPointerDown"

@@ -18,6 +18,7 @@ import UiSelect from '../components/UiSelect.vue'
 import PlayerPanel from '../components/PlayerPanel.vue'
 import TreeNode from '../components/TreeNode.vue'
 import AccountAvatar from '../components/AccountAvatar.vue'
+import DragDropZone from '../components/DragDropZone.vue'
 import { getPrefs, setPref } from '../appearance'
 
 const props = defineProps({
@@ -68,10 +69,12 @@ const rangIsSelecting = ref(false)
 const rangAnchor = ref('')
 const viewMode = ref(getPrefs().viewMode || 'list')  // list | grid
 const sideWidth = ref(getPrefs().sideWidth || 220) // 侧边栏宽度
+const isSideResizing = ref(false)
 let sideResizing = null
 function sideDown(e) {
   e.preventDefault()
   sideResizing = { x: e.clientX, w: sideWidth.value }
+  isSideResizing.value = true
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
 }
@@ -83,6 +86,7 @@ function sideMove(e) {
 function sideUp() {
   if (!sideResizing) return
   sideResizing = null
+  isSideResizing.value = false
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
   setPref('sideWidth', sideWidth.value)
@@ -100,6 +104,7 @@ const treeSelected = ref('root')
 
 // 弹窗
 const modal = ref(null) // mkdir | rename | renamemulti | share | upload | offline | migrate | movedir | copydir | preview | detail | download
+const modalBusy = ref(false)
 const modalFile = ref(null)
 const inputText = ref('')
 const shareForm = ref({ name: '', expiration: '', password: '' })
@@ -183,17 +188,20 @@ const displayFiles = computed(() => {
   return arr
 })
 
-// 名称高亮：搜索/筛选关键词命中部分拆段（模板用 <mark> 渲染）
+// 名称高亮：搜索/筛选关键词命中部分拆段（模板用 <mark> 渲染，无关键词时零开销）
 const hlKeyword = computed(() => (mode.value === 'search' ? keyword.value.trim() : filter.value.trim()))
+const thumbErrors = ref({})
+
 function nameParts(name) {
   const kw = hlKeyword.value
-  if (!kw) return [{ text: name, hit: false }]
-  const i = (name || '').toLowerCase().indexOf(kw.toLowerCase())
-  if (i < 0) return [{ text: name, hit: false }]
+  if (!kw) return null
+  const str = String(name || '')
+  const i = str.toLowerCase().indexOf(kw.toLowerCase())
+  if (i < 0) return null
   return [
-    { text: name.slice(0, i), hit: false },
-    { text: name.slice(i, i + kw.length), hit: true },
-    { text: name.slice(i + kw.length), hit: false },
+    { text: str.slice(0, i), hit: false },
+    { text: str.slice(i, i + kw.length), hit: true },
+    { text: str.slice(i + kw.length), hit: false },
   ]
 }
 
@@ -536,22 +544,28 @@ function onMenuSelect(action) {
 // ---------- 弹窗动作 ----------
 async function doMkdir() {
   const name = inputText.value.trim()
-  if (!name) return
-  modal.value = null
-  await run(async () => {
-    const r = await mkdir(uid.value, did.value, dirId.value, name)
-    if (r && r.error) throw new Error(r.error)
-  }, '文件夹已创建')
-  inputText.value = ''
+  if (!name || modalBusy.value) return
+  modalBusy.value = true
+  try {
+    await run(async () => {
+      const r = await mkdir(uid.value, did.value, dirId.value, name)
+      if (r && r.error) throw new Error(r.error)
+    }, '文件夹已创建')
+    modal.value = null
+    inputText.value = ''
+  } finally { modalBusy.value = false }
 }
 
 async function doRename() {
   const name = inputText.value.trim()
-  if (!name || !modalFile.value) return
+  if (!name || !modalFile.value || modalBusy.value) return
   const file = modalFile.value
-  modal.value = null
-  await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名')
-  inputText.value = ''
+  modalBusy.value = true
+  try {
+    await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名')
+    modal.value = null
+    inputText.value = ''
+  } finally { modalBusy.value = false }
 }
 
 // 有效期选项（天数）转为绝对时间字符串，与后端 parseFlexibleTime 契约一致
@@ -565,21 +579,25 @@ function shareExpireAt(days) {
 
 async function doShare() {
   const list = modalFile.value
-  modal.value = null
-  await run(async () => {
-    const item = await createShare(uid.value, did.value, {
-      fileIds: list.map((f) => f.file_id),
-      shareName: shareForm.value.name,
-      expiration: shareExpireAt(shareForm.value.expiration),
-      password: shareForm.value.password || undefined,
-    })
-    const url = item && (item.share_url || item.share_msg)
-    if (url) {
-      const text = shareForm.value.password ? `${url}\n提取码: ${shareForm.value.password}` : url
-      await copyText(text)
-      emit('toast', '分享链接已复制到剪贴板', 'success')
-    }
-  }, null)
+  if (!list || modalBusy.value) return
+  modalBusy.value = true
+  try {
+    await run(async () => {
+      const item = await createShare(uid.value, did.value, {
+        fileIds: list.map((f) => f.file_id),
+        shareName: shareForm.value.name,
+        expiration: shareExpireAt(shareForm.value.expiration),
+        password: shareForm.value.password || undefined,
+      })
+      const url = item && (item.share_url || item.share_msg)
+      if (url) {
+        const text = shareForm.value.password ? `${url}\n提取码: ${shareForm.value.password}` : url
+        await copyText(text)
+        emit('toast', '分享链接已复制到剪贴板', 'success')
+      }
+    }, null)
+    modal.value = null
+  } finally { modalBusy.value = false }
 }
 
 // 上传：原生文件/目录选择器（选择文件夹时后端递归入队），停留当前页 + toast
@@ -599,10 +617,13 @@ async function pickUploadFolder() {
 
 async function doOffline() {
   const url = inputText.value.trim()
-  if (!url) return
-  modal.value = null
-  inputText.value = ''
-  await run(() => OfflineDownload(uid.value, did.value, url, ''), '已提交云离线任务')
+  if (!url || modalBusy.value) return
+  modalBusy.value = true
+  try {
+    await run(() => OfflineDownload(uid.value, did.value, url, ''), '已提交云离线任务')
+    modal.value = null
+    inputText.value = ''
+  } finally { modalBusy.value = false }
 }
 
 async function onDirPicked(target) {
@@ -622,11 +643,15 @@ async function doMigrate() {
   const targetAcc = props.accounts.find((a) => a.user_id === migrateTarget.value)
   if (!targetAcc) { emit('toast', '请选择目标账号', 'error'); return }
   const list = modalFile.value
-  modal.value = null
-  await run(
-    () => migrateFiles(uid.value, did.value, targetAcc.user_id, targetAcc.drive_id, migrateDir.value || 'root', list.map((f) => f.file_id), false),
-    '迁移任务已创建'
-  )
+  if (!list || modalBusy.value) return
+  modalBusy.value = true
+  try {
+    await run(
+      () => migrateFiles(uid.value, did.value, targetAcc.user_id, targetAcc.drive_id, migrateDir.value || 'root', list.map((f) => f.file_id), false),
+      '迁移任务已创建'
+    )
+    modal.value = null
+  } finally { modalBusy.value = false }
 }
 
 // ---------- 工具条分享 ----------
@@ -760,6 +785,26 @@ watch(() => props.account, (a) => {
   expandTree(rootKey.value, rootTitle.value) // 根目录默认展开
 })
 
+async function onDropUpload(paths) {
+  if (!props.account || mode.value !== 'list' || !caps.value.upload) return
+  await run(() => uploadFiles(uid.value, did.value, dirId.value, paths), `已添加拖拽上传（${paths.length} 项）`)
+}
+
+function openMkdirModal() {
+  inputText.value = ''
+  modal.value = 'mkdir'
+}
+
+function openUploadModal() {
+  uploadPickModal.value = true
+}
+
+defineExpose({
+  refresh,
+  openMkdirModal,
+  openUploadModal,
+})
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', sideMove)
@@ -836,10 +881,10 @@ onBeforeUnmount(() => {
 
         </div>
         <!-- 侧边栏拖拽手柄 -->
-        <div class="pan-resizer" @mousedown="sideDown"></div>
+        <div class="pan-resizer" :class="{ resizing: isSideResizing }" @mousedown="sideDown"></div>
 
-        <!-- 右侧文件区 -->
-        <div class="pan-right">
+        <!-- 右侧文件区（支持桌面文件拖拽上传） -->
+        <DragDropZone class="pan-right" @drop-files="onDropUpload">
           <!-- 面包屑路径条（置顶、矮） -->
           <div class="pathbar">
             <template v-if="mode === 'list'">
@@ -914,16 +959,34 @@ onBeforeUnmount(() => {
                   @keydown.enter="goSearch"
                   @keydown="onSearchKey"
                 />
+                <button v-if="keyword" class="sq-clear" title="清空搜索" @click="keyword = ''; if (mode === 'search') goHome()"><UiIcon name="close" :size="11" /></button>
               </span>
               <span class="search-quick-wrap">
                 <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
                 <input id="pan-filter" class="search-quick" v-model="filterRaw" placeholder="快速筛选 (Ctrl+F)" />
+                <button v-if="filterRaw" class="sq-clear" title="清空筛选" @click="filterRaw = ''"><UiIcon name="close" :size="11" /></button>
               </span>
             </div>
           </div>
 
-          <!-- 状态区 -->
-          <div v-if="loading" class="empty"><span class="spin"></span><span>加载中…</span></div>
+          <!-- 骨架屏加载状态 -->
+          <div v-if="loading && !listShown.length" :class="viewMode === 'list' ? 'skeleton-list' : 'skeleton-grid'">
+            <template v-if="viewMode === 'list'">
+              <div v-for="i in 8" :key="i" class="skeleton-row">
+                <div class="skeleton skeleton-icon"></div>
+                <div class="skeleton skeleton-name" :style="{ width: (40 + (i * 7) % 35) + '%' }"></div>
+                <div class="skeleton skeleton-size"></div>
+                <div class="skeleton skeleton-date"></div>
+              </div>
+            </template>
+            <template v-else>
+              <div v-for="i in 10" :key="i" class="skeleton-card">
+                <div class="skeleton skeleton-card-icon"></div>
+                <div class="skeleton skeleton-card-text"></div>
+                <div class="skeleton skeleton-card-sub"></div>
+              </div>
+            </template>
+          </div>
           <div v-else-if="error" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>{{ error }}</span><button class="btn sm" @click="refresh">重试</button></div>
 
           <!-- 列表视图（旧版 fileitem 行） -->
@@ -937,7 +1000,7 @@ onBeforeUnmount(() => {
               v-for="f in listShown"
               :key="f.file_id"
               class="fileitem"
-              :class="{ selected: isSel(f), focus: focusId === f.file_id }"
+              :class="{ selected: isSel(f), focus: focusId === f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === f.file_id }"
               @click="toggleSel(f, $event)"
               @dblclick="onRowOpen(f)"
               @contextmenu.prevent="onCtx($event, f)"
@@ -949,7 +1012,12 @@ onBeforeUnmount(() => {
               </div>
               <div class="fileicon" :class="'ft-' + iconOf(f)"><UiIcon :name="iconOf(f)" :size="20" /></div>
               <div class="filename">
-                <div :title="f.name" @click.stop="onRowOpen(f)"><template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></div>
+                <div :title="f.name" @click.stop="onRowOpen(f)">
+                  <template v-if="hlKeyword && nameParts(f.name)">
+                    <template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
+                  </template>
+                  <template v-else>{{ f.name }}</template>
+                </div>
               </div>
               <span v-if="f.starred" class="fstar-mark"><UiIcon name="star" :size="13" /></span>
               <div class="filesize">{{ f.isDir ? (f.file_count != null ? f.file_count + ' 项' : '-') : formatBytes(f.size) }}</div>
@@ -970,7 +1038,7 @@ onBeforeUnmount(() => {
               v-for="f in listShown"
               :key="f.file_id"
               class="griditem"
-              :class="{ selected: isSel(f), focus: focusId === f.file_id }"
+              :class="{ selected: isSel(f), focus: focusId === f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === f.file_id }"
               @click="toggleSel(f, $event)"
               @dblclick="onRowOpen(f)"
               @contextmenu.prevent="onCtx($event, f)"
@@ -981,11 +1049,16 @@ onBeforeUnmount(() => {
                 </button>
               </span>
               <span v-if="f.starred" class="gstar"><UiIcon name="star" :size="12" /></span>
-              <div class="gridicon" :class="!f.thumbnail ? 'ft-' + iconOf(f) : ''">
-                <img v-if="f.thumbnail" :src="f.thumbnail" loading="lazy" alt="" />
+              <div class="gridicon" :class="!(f.thumbnail && !thumbErrors[f.file_id]) ? 'ft-' + iconOf(f) : ''">
+                <img v-if="f.thumbnail && !thumbErrors[f.file_id]" :src="f.thumbnail" loading="lazy" alt="" @error="thumbErrors[f.file_id] = true" />
                 <UiIcon v-else :name="iconOf(f)" :size="32" />
               </div>
-              <div class="gridname" :title="f.name"><template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></div>
+              <div class="gridname" :title="f.name">
+                <template v-if="hlKeyword && nameParts(f.name)">
+                  <template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
+                </template>
+                <template v-else>{{ f.name }}</template>
+              </div>
               <div class="gridinfo">{{ f.isDir ? '文件夹' : formatBytes(f.size) }}</div>
             </div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
@@ -993,7 +1066,7 @@ onBeforeUnmount(() => {
               <span class="wes-title">空目录</span>
             </div>
           </div>
-        </div>
+        </DragDropZone>
       </div>
     </template>
 
@@ -1042,11 +1115,14 @@ onBeforeUnmount(() => {
     <Modal v-if="modal === 'mkdir'" title="新建文件夹" @close="modal = null">
       <div class="field">
         <label>文件夹名称</label>
-        <input class="input" v-model="inputText" placeholder="输入名称" @keyup.enter="doMkdir" autofocus />
+        <input class="input" v-model="inputText" placeholder="输入名称" @keyup.enter="doMkdir" autofocus :disabled="modalBusy" />
       </div>
       <template #actions>
-        <button class="btn" @click="modal = null">取消</button>
-        <button class="btn primary" @click="doMkdir">创建</button>
+        <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
+        <button class="btn primary" :disabled="!inputText.trim() || modalBusy" @click="doMkdir">
+          <span v-if="modalBusy" class="spin spin-on-primary"></span>
+          {{ modalBusy ? '创建中…' : '创建' }}
+        </button>
       </template>
     </Modal>
 
@@ -1054,11 +1130,14 @@ onBeforeUnmount(() => {
     <Modal v-if="modal === 'rename'" title="重命名" @close="modal = null">
       <div class="field">
         <label>新名称</label>
-        <input class="input" v-model="inputText" @keyup.enter="doRename" autofocus />
+        <input class="input" v-model="inputText" @keyup.enter="doRename" autofocus :disabled="modalBusy" />
       </div>
       <template #actions>
-        <button class="btn" @click="modal = null">取消</button>
-        <button class="btn primary" @click="doRename">确定</button>
+        <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
+        <button class="btn primary" :disabled="!inputText.trim() || modalBusy" @click="doRename">
+          <span v-if="modalBusy" class="spin spin-on-primary"></span>
+          {{ modalBusy ? '保存中…' : '确定' }}
+        </button>
       </template>
     </Modal>
 
@@ -1066,13 +1145,14 @@ onBeforeUnmount(() => {
     <Modal v-if="modal === 'share'" title="创建分享" @close="modal = null">
       <div class="field">
         <label>分享名称</label>
-        <input class="input" v-model="shareForm.name" />
+        <input class="input" v-model="shareForm.name" :disabled="modalBusy" />
       </div>
       <div class="field" v-if="caps.shareExpiration">
         <label>有效期（可选）</label>
         <UiSelect
           v-model="shareForm.expiration"
           block
+          :disabled="modalBusy"
           :options="[
             { value: '', label: '永久有效' },
             { value: '1', label: '1 天' },
@@ -1083,11 +1163,14 @@ onBeforeUnmount(() => {
       </div>
       <div class="field" v-if="caps.sharePassword">
         <label>提取码（可选）</label>
-        <input class="input" v-model="shareForm.password" placeholder="留空则自动生成或无提取码" />
+        <input class="input" v-model="shareForm.password" placeholder="留空则自动生成或无提取码" :disabled="modalBusy" />
       </div>
       <template #actions>
-        <button class="btn" @click="modal = null">取消</button>
-        <button class="btn primary" @click="doShare">创建并复制链接</button>
+        <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
+        <button class="btn primary" :disabled="modalBusy" @click="doShare">
+          <span v-if="modalBusy" class="spin spin-on-primary"></span>
+          {{ modalBusy ? '创建中…' : '创建并复制链接' }}
+        </button>
       </template>
     </Modal>
 
@@ -1095,11 +1178,14 @@ onBeforeUnmount(() => {
     <Modal v-if="modal === 'offline'" title="云离线下载" @close="modal = null">
       <div class="field">
         <label>下载链接（磁力 / HTTP / ed2k）</label>
-        <textarea class="textarea" v-model="inputText" placeholder="magnet:?xt=urn:btih:…" rows="3"></textarea>
+        <textarea class="textarea" v-model="inputText" placeholder="magnet:?xt=urn:btih:…" rows="3" :disabled="modalBusy"></textarea>
       </div>
       <template #actions>
-        <button class="btn" @click="modal = null">取消</button>
-        <button class="btn primary" @click="doOffline">提交</button>
+        <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
+        <button class="btn primary" :disabled="!inputText.trim() || modalBusy" @click="doOffline">
+          <span v-if="modalBusy" class="spin spin-on-primary"></span>
+          {{ modalBusy ? '提交中…' : '提交' }}
+        </button>
       </template>
     </Modal>
 
@@ -1110,6 +1196,7 @@ onBeforeUnmount(() => {
         <UiSelect
           v-model="migrateTarget"
           block
+          :disabled="modalBusy"
           placeholder="选择目标账号"
           :options="migrateAccounts.map((a) => ({ value: a.user_id, label: (a.token && (a.token.nick_name || a.token.user_name)) || a.user_id }))"
         />
@@ -1119,12 +1206,15 @@ onBeforeUnmount(() => {
         <label>目标目录</label>
         <div class="panel-row" style="display:flex;gap:6px;align-items:center">
           <input class="input" style="flex:1" :value="migrateDirName" readonly placeholder="根目录" />
-          <button class="btn sm" @click="migrateDirPick = true">选择目录</button>
+          <button class="btn sm" :disabled="modalBusy" @click="migrateDirPick = true">选择目录</button>
         </div>
       </div>
       <template #actions>
-        <button class="btn" @click="modal = null">取消</button>
-        <button class="btn primary" :disabled="!migrateTarget" @click="doMigrate">开始迁移</button>
+        <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
+        <button class="btn primary" :disabled="!migrateTarget || modalBusy" @click="doMigrate">
+          <span v-if="modalBusy" class="spin spin-on-primary"></span>
+          {{ modalBusy ? '创建任务中…' : '开始迁移' }}
+        </button>
       </template>
     </Modal>
 
@@ -1148,8 +1238,16 @@ onBeforeUnmount(() => {
       @select="(d) => { migrateDir = d.id; migrateDirName = d.name; migrateDirPick = false }"
     />
 
-    <!-- 预览 -->
-    <PreviewModal v-if="modal === 'preview'" :account="account" :file="modalFile" @close="modal = null" />
+    <!-- 预览（支持画廊/翻页/缩放/文本编辑保存） -->
+    <PreviewModal
+      v-if="modal === 'preview'"
+      :account="account"
+      :file="modalFile"
+      :file-list="listShown"
+      @close="modal = null"
+      @toast="(m, t) => emit('toast', m, t)"
+      @saved="refresh"
+    />
     <PlayerPanel v-if="modal === 'player'" :account="account" :file="modalFile" @close="modal = null" @toast="(m, t) => emit('toast', m, t)" />
 
     <!-- 批量重命名 -->
