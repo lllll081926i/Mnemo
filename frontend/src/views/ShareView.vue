@@ -1,74 +1,195 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { ListShareHistory, CreateShare, OfflineDownload, ListOfflineTasks, onEvent } from '../api'
+// 分享记录页：聚合全部账号的分享历史，按网盘 + 账号分组展示。
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, formatTime, copyText } from '../api'
+import UiIcon from '../components/UiIcon.vue'
+import UiSelect from '../components/UiSelect.vue'
 
-const props = defineProps({ account: Object })
+const props = defineProps({
+  accounts: { type: Array, default: () => [] },
+  providers: { type: Array, default: () => [] },
+})
 const emit = defineEmits(['toast'])
-const seg = ref('history')
-const history = ref([])
-const offline = ref([])
-const offlineUrl = ref('')
 
-const meta = ref(null)
+const history = ref([])
+const loading = ref(false)
+const kw = ref('')
+const kwRaw = ref('')   // 输入原值，kw 为防抖后值
+let kwTimer = null
+watch(kwRaw, (v) => {
+  clearTimeout(kwTimer)
+  kwTimer = setTimeout(() => { kw.value = v }, 120)
+})
+onBeforeUnmount(() => clearTimeout(kwTimer))
+const filterProvider = ref('')
+const filterAccount = ref('')
 
 async function refresh() {
-  const uid = props.account ? props.account.UserID : ''
-  history.value = (await ListShareHistory(uid)) || []
-  offline.value = (await ListOfflineTasks(uid)) || []
-}
-
-async function createShareFor(fileIds, name) {
-  if (!props.account) { emit('toast', '请先选择账号', 'error'); return }
+  loading.value = true
   try {
-    const item = await CreateShare(props.account.UserID, props.account.DriveID, { fileIds, shareName: name })
-    emit('toast', (item && item.ShareURL) || '分享已创建', 'success')
-    refresh()
-  } catch (e) { emit('toast', String(e), 'error') }
+    history.value = (await ListShareHistory('')) || []
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  }
+  loading.value = false
 }
 
-async function doOffline() {
-  if (!props.account) { emit('toast', '请先选择 PikPak 账号', 'error'); return }
-  if (!offlineUrl.value) { emit('toast', '请输入链接', 'error'); return }
-  try {
-    await OfflineDownload(props.account.UserID, props.account.DriveID, offlineUrl.value, '')
-    offlineUrl.value = ''
-    emit('toast', '已提交云离线', 'success')
-    refresh()
-  } catch (e) { emit('toast', String(e), 'error') }
+function metaOf(pid) {
+  const p = props.providers.find((x) => x.ID === pid)
+  return (p && p.Meta) || {}
 }
 
-watch(() => props.account, () => refresh())
-onMounted(() => { refresh(); onEvent('account:changed', refresh) })
+function labelOf(pid) {
+  return metaOf(pid).label || pid || '未知网盘'
+}
+
+function accountOf(userId) {
+  return props.accounts.find((a) => a.user_id === userId) || null
+}
+
+// 从记录中聚合出现过的 provider 列表
+const providerOptions = computed(() => {
+  const seen = new Set()
+  for (const h of history.value) {
+    const pid = h.provider || providerOf(h.account_id)
+    if (pid) seen.add(pid)
+  }
+  return [...seen]
+})
+
+// 账号筛选只列出有分享记录的账号
+const accountOptions = computed(() => {
+  const seen = new Map()
+  for (const h of history.value) {
+    if (!h.account_id || seen.has(h.account_id)) continue
+    const acc = accountOf(h.account_id)
+    seen.set(h.account_id, acc ? accountName(acc) : h.account_id)
+  }
+  return [...seen.entries()].map(([id, name]) => ({ id, name }))
+})
+
+const filtered = computed(() => {
+  const k = kw.value.trim().toLowerCase()
+  return history.value.filter((h) => {
+    const pid = h.provider || providerOf(h.account_id)
+    if (filterProvider.value && pid !== filterProvider.value) return false
+    if (filterAccount.value && h.account_id !== filterAccount.value) return false
+    if (!k) return true
+    return (
+      String(h.share_name || '').toLowerCase().includes(k) ||
+      String(h.share_url || '').toLowerCase().includes(k) ||
+      String(h.share_pwd || '').toLowerCase().includes(k)
+    )
+  })
+})
+
+// 按 provider + account 分组
+const groups = computed(() => {
+  const map = new Map()
+  for (const h of filtered.value) {
+    const pid = h.provider || providerOf(h.account_id)
+    const key = pid + '|' + h.account_id
+    if (!map.has(key)) {
+      const acc = accountOf(h.account_id)
+      map.set(key, {
+        key,
+        pid,
+        icon: providerIconUrl(metaOf(pid)),
+        label: labelOf(pid),
+        accName: acc ? accountName(acc) : h.account_id,
+        items: [],
+      })
+    }
+    map.get(key).items.push(h)
+  }
+  return [...map.values()]
+})
+
+function openLink(h) {
+  if (!h.share_url) return
+  OpenBrowser(h.share_url)
+}
+
+async function copy(text, tip) {
+  const ok = await copyText(text)
+  emit('toast', ok ? tip : '复制失败', ok ? 'success' : 'error')
+}
+
+function copyAll(h) {
+  const lines = [h.share_name || '分享文件', h.share_url || '']
+  if (h.share_pwd) lines.push('提取码: ' + h.share_pwd)
+  copy(lines.join('\n'), '已复制分享信息')
+}
+
+const offs = []
+onMounted(() => {
+  refresh()
+  offs.push(onEvent('account:changed', refresh))
+})
+onBeforeUnmount(() => offs.forEach((off) => off && off()))
 </script>
 
 <template>
-  <div class="panel">
-    <div class="panel-row">
-      <div class="seg">
-        <button :class="{ active: seg === 'history' }" @click="seg = 'history'">我的分享</button>
-        <button :class="{ active: seg === 'offline' }" @click="seg = 'offline'">云离线</button>
-      </div>
+  <div class="share-page">
+    <!-- 工具条 -->
+    <div class="share-toolbar">
+      <span class="search-quick-wrap">
+        <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
+        <input class="search-quick share-search" style="width:240px" v-model="kwRaw" placeholder="搜索名称 / 链接 / 提取码" />
+      </span>
+      <UiSelect
+        v-model="filterProvider"
+        style="width:150px"
+        :options="[{ value: '', label: '全部网盘' }, ...providerOptions.map((pid) => ({ value: pid, label: labelOf(pid) }))]"
+      />
+      <UiSelect
+        v-model="filterAccount"
+        style="width:150px"
+        :options="[{ value: '', label: '全部账号' }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]"
+      />
+      <div style="flex:1"></div>
+      <button class="tbtn" :disabled="loading" @click="refresh">
+        <span v-if="loading" class="spin"></span><template v-else><UiIcon name="refresh" :size="14" />刷新</template>
+      </button>
     </div>
 
-    <template v-if="seg === 'history'">
-      <div v-if="!history.length" class="empty">暂无分享记录</div>
-      <div v-for="h in history" :key="h.ShareID + h.AccountID" class="task-item">
-        <span class="tname">{{ h.ShareName }}</span>
-        <a class="tmeta" :href="h.ShareURL" target="_blank" style="color:var(--text-link)">{{ h.ShareURL }}</a>
-        <span v-if="h.SharePwd" class="tstatus">密码 {{ h.SharePwd }}</span>
-      </div>
-    </template>
+    <!-- 状态区 -->
+    <div v-if="loading && !history.length" class="empty" style="flex:1"><span class="spin"></span></div>
+    <div v-else-if="!groups.length" class="workspace-empty-state" style="flex:1">
+      <UiIcon name="link" :size="40" style="opacity:.4" />
+      <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有创建过分享记录' }}</span>
+      <span v-if="!history.length" class="wes-desc">在「网盘」页选中文件后点击「分享」创建链接</span>
+    </div>
 
-    <template v-else>
-      <div class="panel-row">
-        <input class="input" style="flex:1" v-model="offlineUrl" placeholder="磁力链接 / HTTP 下载链接（提交到 PikPak 云端离线下载）" />
-        <button class="btn primary" @click="doOffline">提交</button>
-      </div>
-      <div v-for="t in offline" :key="t.ID" class="task-item">
-        <span class="tname">{{ t.FileName || t.URL }}</span>
-        <span class="tstatus">{{ t.Status }}</span>
-      </div>
-      <div v-if="!offline.length" class="empty">暂无云离线任务</div>
-    </template>
+    <!-- 分组记录 -->
+    <div v-else class="share-groups">
+      <section v-for="g in groups" :key="g.key" class="share-group">
+        <header class="share-group-header">
+          <img v-if="g.icon" :src="g.icon" style="width:16px;height:16px;border-radius:4px" alt="" />
+          <span class="share-group-provider">{{ g.label }}</span>
+          <span class="share-group-account">{{ g.accName }}</span>
+          <span class="share-group-count">{{ g.items.length }} 条</span>
+        </header>
+
+        <div v-for="h in g.items" :key="h.share_id + h.account_id" class="share-record">
+          <div class="share-record-main">
+            <div class="share-record-name" :title="h.share_name">{{ h.share_name || '未命名分享' }}</div>
+            <div class="share-record-meta">
+              <span>创建于 {{ formatTime(h.created_at) }}</span>
+            </div>
+            <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
+          </div>
+          <div class="share-record-side">
+            <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
+            <div class="share-record-actions">
+              <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
+              <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接')"><UiIcon name="copy" :size="13" />链接</button>
+              <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码')"><UiIcon name="copy" :size="13" />提取码</button>
+              <button class="tbtn" @click="copyAll(h)"><UiIcon name="copy" :size="13" />全部</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>

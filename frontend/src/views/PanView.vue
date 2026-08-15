@@ -1,229 +1,1186 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import {
   listDir, listTrash, search, mkdir, rename, trash, remove, restore,
-  move, copy, favorite, download, createShare, uploadFiles, migrateFiles, formatBytes, formatTime,
-  iconOf, extOf, onEvent,
+  move, copy, favorite, createShare, uploadFiles, migrateFiles, download,
+  AddFavorite, RemoveFavorite, ListFavorites, OfflineDownload, PickDirectory, PickFiles,
+  formatBytes, formatTime, formatTimeParts, iconOf, extOf, openKindOf, copyText,
+  capsOf, providerMetaOf,
 } from '../api'
+import ContextMenu from '../components/ContextMenu.vue'
+import DropdownBtn from '../components/DropdownBtn.vue'
+import Modal from '../components/Modal.vue'
+import SelectDirModal from '../components/SelectDirModal.vue'
+import PreviewModal from '../components/PreviewModal.vue'
+import RenameMultiModal from '../components/RenameMultiModal.vue'
+import UiIcon from '../components/UiIcon.vue'
+import UiSelect from '../components/UiSelect.vue'
+import PlayerPanel from '../components/PlayerPanel.vue'
+import TreeNode from '../components/TreeNode.vue'
+import AccountAvatar from '../components/AccountAvatar.vue'
+import { getPrefs, setPref } from '../appearance'
 
-const props = defineProps({ account: Object, providerMeta: Object })
-const emit = defineEmits(['toast'])
+const props = defineProps({
+  account: Object,
+  accounts: { type: Array, default: () => [] },
+  providers: { type: Array, default: () => [] },
+})
+const emit = defineEmits(['toast', 'go'])
 
-const files = ref([])
-const dir = ref('root')
-const pathStack = ref([])
-const selected = ref([])
-const keyword = ref('')
+// ---------- 状态 ----------
 const mode = ref('list') // list | trash | search | favorite
+const dirId = ref('root')
+const pathStack = ref([]) // [{id,name}]
+const files = ref([])
+const selected = ref([]) // file 对象数组
+const focusId = ref('')  // 键盘焦点行
 const loading = ref(false)
+const error = ref('')
+const keyword = ref('')       // 全盘搜索关键词
+const filterRaw = ref('')     // 当前目录快速筛选（输入原值）
+const filter = ref('')        // 防抖后的筛选值
+let filterTimer = null
+watch(filterRaw, (v) => {
+  clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => { filter.value = v }, 120)
+})
+const sortKey = ref('name')   // name | time | size
+const sortAsc = ref(true)
+const sortLabel = computed(() => ({ name: '名称', time: '修改时间', size: '大小' }[sortKey.value] + '·' + (sortAsc.value ? '升' : '降')))
+const sortMenuItems = computed(() => [
+  { header: '排序方式' },
+  { icon: sortKey.value === 'name' ? 'check' : '', label: '名称', action: 'key name' },
+  { icon: sortKey.value === 'size' ? 'check' : '', label: '大小', action: 'key size' },
+  { icon: sortKey.value === 'time' ? 'check' : '', label: '修改时间', action: 'key time' },
+  { sep: true },
+  { header: '方向' },
+  { icon: sortAsc.value ? 'check' : '', label: '升序', action: 'dir asc' },
+  { icon: !sortAsc.value ? 'check' : '', label: '降序', action: 'dir desc' },
+])
+function onSortPick(action) {
+  const [kind, v] = action.split(' ')
+  if (kind === 'key') sortKey.value = v
+  else if (kind === 'dir') sortAsc.value = v === 'asc'
+}
+
+// 区间选择模式：开启后点两个行选定区间
+const rangIsSelecting = ref(false)
+const rangAnchor = ref('')
+const viewMode = ref(getPrefs().viewMode || 'list')  // list | grid
+const sideWidth = ref(getPrefs().sideWidth || 220) // 侧边栏宽度
+let sideResizing = null
+function sideDown(e) {
+  e.preventDefault()
+  sideResizing = { x: e.clientX, w: sideWidth.value }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+function sideMove(e) {
+  if (!sideResizing) return
+  const w = Math.max(180, Math.min(420, sideResizing.w + (e.clientX - sideResizing.x)))
+  sideWidth.value = w
+}
+function sideUp() {
+  if (!sideResizing) return
+  sideResizing = null
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  setPref('sideWidth', sideWidth.value)
+}
+if (typeof window !== 'undefined') { /* listeners added in onMounted */ }
 const menu = ref(null)
-const tree = ref({})
+const favorites = ref([])
+const favExpanded = ref(false)
+
+// 目录树
+const tree = ref({})          // id -> 子目录数组
+const treeNames = ref({})     // id -> name
 const expanded = ref({})
+const treeSelected = ref('root')
 
-const caps = () => (props.account ? (props.providerMeta[providerOf()] || {}) : {})
+// 弹窗
+const modal = ref(null) // mkdir | rename | renamemulti | share | upload | offline | migrate | movedir | copydir | preview | detail | download
+const modalFile = ref(null)
+const inputText = ref('')
+const shareForm = ref({ name: '', expiration: '', password: '' })
+const migrateTarget = ref('') // 目标账号 user_id
+const migrateDir = ref('root')
+const migrateDirName = ref('根目录')
+const migrateDirPick = ref(false)
 
-function providerOf() {
-  const acc = props.account
-  if (!acc) return ''
-  const uid = acc.UserID || ''
-  for (const key of ['pikpak', 'onedrive', 'dropbox', 'pan123', 'lanzou', 'ilanzou', 'pan139', 'pan189', 'yike', 'aliopen', 'guangya']) {
-    if (uid.startsWith(key + '_')) return key
-  }
-  if (uid.startsWith('webdav:')) return 'webdav'
-  if (uid.startsWith('s3:')) return 's3'
-  return ''
+const uid = computed(() => (props.account ? props.account.user_id : ''))
+const did = computed(() => (props.account ? props.account.drive_id : ''))
+const caps = computed(() => capsOf(props.account, props.providers))
+const meta = computed(() => providerMetaOf(props.account, props.providers))
+
+const rootKey = computed(() => meta.value.rootKey || 'root')
+const rootTitle = computed(() => meta.value.rootTitle || '全部文件')
+
+// ---------- 数据加载 ----------
+// 目录缓存：按 uid|did|mode|id 隔离，切走再切回直接展示缓存再后台刷新。
+const dirCache = new Map() // key -> { files: File[], at: number }
+const DIR_CACHE_MAX = 200
+function dirCacheKey(uidV, didV, modeV, idV, kwV) { return uidV + '|' + didV + '|' + modeV + '|' + (idV || '') + '|' + (kwV || '') }
+function cacheDir(key, list) {
+  dirCache.set(key, { files: list || [], at: Date.now() })
+  if (dirCache.size > DIR_CACHE_MAX) { const first = dirCache.keys().next().value; dirCache.delete(first) }
 }
-
-const c = caps()
-
-async function load(d) {
+function invalidateDirCache(uidV, didV, modeV, idV) {
+  // 变更后清掉该目录缓存，避免后台刷新前闪现旧数据
+  const prefix = uidV + '|' + didV + '|' + modeV + '|' + (idV || '') + '|'
+  for (const k of dirCache.keys()) if (k.startsWith(prefix)) dirCache.delete(k)
+}
+let loadSeq = 0
+async function load(id) {
   if (!props.account) return
-  loading.value = true
+  const seq = ++loadSeq
+  const snapUid = uid.value, snapDid = did.value, snapMode = mode.value, snapKw = keyword.value
+  const ckey = dirCacheKey(snapUid, snapDid, snapMode, id, snapKw)
+  // 快路径：有缓存先立即展示，后台静默刷新
+  const cached = dirCache.get(ckey)
+  if (cached) { files.value = cached.files; loading.value = false }
+  else loading.value = true
+  error.value = ''
   try {
-    if (mode.value === 'trash') files.value = await listTrash(props.account.UserID, props.account.DriveID) || []
-    else if (mode.value === 'search' && keyword.value) files.value = await search(props.account.UserID, props.account.DriveID, keyword.value) || []
-    else files.value = await listDir(props.account.UserID, props.account.DriveID, d) || []
+    let list
+    if (snapMode === 'trash') list = (await listTrash(snapUid, snapDid)) || []
+    else if (snapMode === 'search') list = snapKw ? (await search(snapUid, snapDid, snapKw.trim())) || [] : []
+    else list = (await listDir(snapUid, snapDid, id)) || []
+    // 时序保护：过期响应（账号/目录已切换或有更新请求）直接丢弃
+    if (seq !== loadSeq) return
+    files.value = list
+    cacheDir(ckey, list)
   } catch (e) {
-    emit('toast', String(e), 'error')
+    if (seq !== loadSeq) return
+    error.value = String(e)
+    files.value = []
   }
-  loading.value = false
+  if (seq === loadSeq) loading.value = false
 }
 
-function open(file) {
-  if (!file.isDir) {
-    playOrDownload(file)
-    return
-  }
-  pathStack.value.push(dir.value)
-  dir.value = file.file_id
-  load(dir.value)
+async function loadFavorites() {
+  if (!props.account) { favorites.value = []; return }
+  try { favorites.value = (await ListFavorites(uid.value, did.value)) || [] }
+  catch { favorites.value = [] }
 }
 
-function up() {
+const displayFiles = computed(() => {
+  let list = files.value
+  if (filter.value) {
+    const kw = filter.value.toLowerCase()
+    list = list.filter((f) => (f.name || '').toLowerCase().includes(kw))
+  }
+  const arr = [...list]
+  const key = sortKey.value
+  arr.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+    let r = 0
+    if (key === 'name') r = (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN')
+    else if (key === 'time') r = (a.time || 0) - (b.time || 0)
+    else r = (a.size || 0) - (b.size || 0)
+    return sortAsc.value ? r : -r
+  })
+  return arr
+})
+
+// 名称高亮：搜索/筛选关键词命中部分拆段（模板用 <mark> 渲染）
+const hlKeyword = computed(() => (mode.value === 'search' ? keyword.value.trim() : filter.value.trim()))
+function nameParts(name) {
+  const kw = hlKeyword.value
+  if (!kw) return [{ text: name, hit: false }]
+  const i = (name || '').toLowerCase().indexOf(kw.toLowerCase())
+  if (i < 0) return [{ text: name, hit: false }]
+  return [
+    { text: name.slice(0, i), hit: false },
+    { text: name.slice(i, i + kw.length), hit: true },
+    { text: name.slice(i + kw.length), hit: false },
+  ]
+}
+
+const crumbs = computed(() => [{ id: rootKey.value, name: rootTitle.value }, ...pathStack.value])
+
+const modeTitle = computed(() => ({
+  trash: '回收站',
+  favorite: '收藏',
+  search: `搜索“${keyword.value}”`,
+}[mode.value] || ''))
+
+// ---------- 导航 ----------
+function openDir(file) {
+  pathStack.value.push({ id: file.file_id, name: file.name })
+  dirId.value = file.file_id
+  treeSelected.value = file.file_id
+  mode.value = 'list'
+  selected.value = []
+  load(file.file_id)
+}
+
+function goCrumb(i) {
+  if (i === crumbs.value.length - 1) return
+  pathStack.value = pathStack.value.slice(0, i)
+  dirId.value = crumbs.value[i].id
+  treeSelected.value = dirId.value
+  mode.value = 'list'
+  selected.value = []
+  load(dirId.value)
+}
+
+function goUp() {
   if (!pathStack.value.length) return
-  dir.value = pathStack.value.pop()
-  load(dir.value)
+  pathStack.value.pop()
+  dirId.value = pathStack.value.length ? pathStack.value[pathStack.value.length - 1].id : rootKey.value
+  treeSelected.value = dirId.value
+  load(dirId.value)
 }
 
-function goSearch() {
-  if (!keyword.value) return
-  mode.value = 'search'
-  load()
+function goHome() {
+  mode.value = 'list'
+  pathStack.value = []
+  dirId.value = rootKey.value
+  treeSelected.value = dirId.value
+  keyword.value = ''
+  selected.value = []
+  load(dirId.value)
+}
+
+function refresh() {
+  if (mode.value === 'list') load(dirId.value)
+  else if (mode.value === 'favorite') loadFavorites()
+  else load(null)
 }
 
 function showTrash() {
   mode.value = 'trash'
+  selected.value = []
+  treeSelected.value = 'trash'
   load()
 }
 
-function backToList() {
-  mode.value = 'list'
-  keyword.value = ''
-  load(dir.value)
+function showFavorites() {
+  mode.value = 'favorite'
+  selected.value = []
+  treeSelected.value = 'favorite'
+  loadFavorites()
 }
 
-function toggleSel(file) {
-  const i = selected.value.findIndex((s) => s.file_id === file.file_id)
-  if (i >= 0) selected.value.splice(i, 1)
-  else selected.value.push(file)
+const favoriteFiles = computed(() =>
+  favorites.value.map((f) => ({
+    file_id: f.file_id, name: f.name, isDir: f.isDir, size: 0, time: f.added, category: '', starred: false,
+  }))
+)
+
+// 搜索：Enter/按钮触发；Esc 清空并返回目录
+function enterSearch() {
+  if (!caps.value.search) return
+  mode.value = 'search'
+  selected.value = []
+  treeSelected.value = ''
+  files.value = []
+  nextTick(() => document.getElementById('pan-search')?.focus())
+}
+function goSearch() {
+  if (!keyword.value.trim()) return
+  mode.value = 'search'
+  selected.value = []
+  treeSelected.value = ''
+  load()
+}
+function onSearchKey(e) {
+  if (e.key === 'Escape') { keyword.value = ''; if (mode.value === 'search') goHome(); e.target.blur() }
 }
 
-function onCtx(e, file) {
-  menu.value = { x: e.clientX, y: e.clientY, file }
-}
+// ---------- 目录树 ----------
+function treeChildren(id) { return tree.value[id] || [] }
 
-function closeMenu() { menu.value = null }
-
-async function act(kind) {
-  const file = menu.value && menu.value.file
-  closeMenu()
-  if (!file || !props.account) return
-  const uid = props.account.UserID, did = props.account.DriveID
-  try {
-    if (kind === 'download') await download(uid, did, file)
-    else if (kind === 'rename') { const name = prompt('新名称', file.name); if (name) await rename(uid, did, file.file_id, name) }
-    else if (kind === 'mkdir') { const name = prompt('文件夹名称'); if (name) await mkdir(uid, did, dir.value, name) }
-    else if (kind === 'trash') await trash(uid, did, [file.file_id])
-    else if (kind === 'delete') { if (confirm('永久删除？')) await remove(uid, did, [file.file_id]) }
-    else if (kind === 'restore') await restore(uid, did, [file.file_id])
-    else if (kind === 'favorite') await favorite(uid, did, true, [file.file_id])
-    else if (kind === 'share') {
-      const res = await createShare(uid, did, { fileIds: [file.file_id], shareName: file.name })
-      if (res && res.ShareURL) { emit('toast', res.ShareURL); navigator.clipboard && navigator.clipboard.writeText(res.ShareURL) }
-    }
-    else if (kind === 'copy') { const target = prompt('目标文件夹 ID'); if (target) await copy(uid, did, [file.file_id], target) }
-    else if (kind === 'move') { const target = prompt('目标文件夹 ID'); if (target) await move(uid, did, [file.file_id], target) }
-    else if (kind === 'play') { await play(file) }
-    else if (kind === 'upload') { const paths = prompt('本地路径（逗号分隔）'); if (paths) await uploadFiles(uid, did, dir.value, paths.split(',').map((s) => s.trim())) }
-    else if (kind === 'migrate') {
-      const target = prompt('目标账号 user_id、目标目录（空格分隔，留空目录=root）')
-      if (target) {
-        const parts = target.trim().split(/\s+/)
-        const dstUser = parts[0]
-        const dstParent = parts[1] || 'root'
-        const dstDrive = prompt('目标账号 drive_id（回车自动）') || dstUser
-        await migrateFiles(uid, did, dstUser, dstDrive, dstParent, [file.file_id], false)
-      }
-    }
-    load(mode.value === 'trash' ? null : dir.value)
-    emit('toast', '操作成功', 'success')
-  } catch (e) {
-    emit('toast', String(e), 'error')
-  }
-}
-
-async function play(file) {
-  const { PlayVideo, MediaProxy, LocalPreviewURL } = await import('../../wailsjs/go/app/App')
-  try {
-    await PlayVideo(props.account.UserID, props.account.DriveID, file.file_id)
-    emit('toast', '已开始播放', 'success')
-  } catch (e) {
-    // fallback: try browser playback via preview proxy
-    emit('toast', String(e), 'error')
-  }
-}
-
-function playOrDownload(file) {
-  const cat = file.category
-  if (cat === 'video' || cat === 'audio' || cat === 'image' || cat === 'text' || extOf(file.name) === 'pdf') {
-    play(file)
-  } else {
-    download(props.account.UserID, props.account.DriveID, file).then(() => emit('toast', '已加入下载', 'success'))
-  }
-}
-
-function expand(id, name) {
+async function toggleTree(idOrNode, name) {
+  const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
   expanded.value[id] = !expanded.value[id]
-  if (expanded.value[id] && !tree.value[id]) {
-    listDir(props.account.UserID, props.account.DriveID, id).then((list) => { tree.value[id] = list })
+  if (expanded.value[id] && !tree.value[id] && props.account) {
+    try {
+      const list = await listDir(uid.value, did.value, id)
+      tree.value[id] = (list || []).filter((f) => f.isDir)
+      for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
+    } catch { tree.value[id] = [] }
+  }
+}
+
+// 幂等展开（加载子目录），用于根节点默认展开
+async function expandTree(id, name) {
+  if (expanded.value[id]) return
+  expanded.value[id] = true
+  if (!tree.value[id] && props.account) {
+    try {
+      const list = await listDir(uid.value, did.value, id)
+      tree.value[id] = (list || []).filter((f) => f.isDir)
+      for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
+    } catch { tree.value[id] = [] }
+  }
+}
+
+function selectTreeNode(idOrNode, name) {
+  const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
+  if (typeof idOrNode === 'object') name = idOrNode.name
+  treeSelected.value = id
+  mode.value = 'list'
+  selected.value = []
+  if (id === rootKey.value) { pathStack.value = [] }
+  else { pathStack.value = [{ id, name }] }
+  dirId.value = id
+  load(id)
+  // 双击跳转后展开该节点（加载子目录），便于在树中定位
+  if (!expanded.value[id]) toggleTree(id, name)
+}
+
+// ---------- 选中 ----------
+function isSel(f) { return selected.value.some((s) => s.file_id === f.file_id) }
+
+// 在 listShown 中选中 [fromId, toId] 区间（含端点）
+function selectRange(fromId, toId) {
+  const list = listShown.value
+  const a = list.findIndex((x) => x.file_id === fromId)
+  const b = list.findIndex((x) => x.file_id === toId)
+  if (a < 0 || b < 0) return
+  const [lo, hi] = a < b ? [a, b] : [b, a]
+  selected.value = list.slice(lo, hi + 1)
+}
+
+function toggleSel(f, e) {
+  // 区间选择模式：第一次点定起点，第二次点选中区间并退出
+  if (rangIsSelecting.value) {
+    if (!rangAnchor.value) { rangAnchor.value = f.file_id; focusId.value = f.file_id; return }
+    selectRange(rangAnchor.value, f.file_id)
+    rangIsSelecting.value = false
+    rangAnchor.value = ''
+    focusId.value = f.file_id
+    return
+  }
+  // Shift+点击：以上次焦点为锚点选区间（标准桌面行为）
+  if (e && e.shiftKey && focusId.value && focusId.value !== f.file_id) {
+    selectRange(focusId.value, f.file_id)
+    focusId.value = f.file_id
+    return
+  }
+  focusId.value = f.file_id
+  if (e && (e.ctrlKey || e.metaKey)) {
+    const i = selected.value.findIndex((s) => s.file_id === f.file_id)
+    if (i >= 0) selected.value.splice(i, 1)
+    else selected.value.push(f)
+  } else {
+    selected.value = isSel(f) && selected.value.length === 1 ? [] : [f]
+  }
+}
+
+function toggleRangSelect() {
+  rangIsSelecting.value = !rangIsSelecting.value
+  rangAnchor.value = ''
+}
+
+const listShown = computed(() => (mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value))
+const allSelected = computed(() => listShown.value.length > 0 && selected.value.length === listShown.value.length)
+
+function selectAll() { selected.value = [...listShown.value] }
+function toggleSelectAll() { allSelected.value ? (selected.value = []) : selectAll() }
+function invertSel() { selected.value = listShown.value.filter((f) => !isSel(f)) }
+
+// ---------- 打开 ----------
+async function openFile(file) {
+  if (file.isDir) { openDir(file); return }
+  if (mode.value === 'trash') { emit('toast', '回收站中的文件无法打开', 'error'); return }
+  const kind = openKindOf(file)
+  if (kind === 'video') {
+    modalFile.value = file
+    modal.value = 'player'
+  } else if (kind === 'download') {
+    doDownload([file])
+  } else {
+    modalFile.value = file
+    modal.value = 'preview'
+  }
+}
+
+// ---------- 操作 ----------
+function selIds() { return selected.value.map((f) => f.file_id) }
+
+let running = false
+async function run(fn, okMsg) {
+  if (running) return // 防重入：连点/双击不重复提交
+  running = true
+  try {
+    await fn()
+    if (okMsg) emit('toast', okMsg, 'success')
+    invalidateDirCache(uid.value, did.value, mode.value, dirId.value)
+    refresh()
+    loadFavorites()
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  } finally {
+    running = false
+  }
+}
+
+// 下载：直接入队，停留当前页 + toast，不弹确认框、不跳转传输页
+async function doDownload(list) {
+  const targets = list || selected.value.filter((f) => !f.isDir)
+  if (!targets.length) { emit('toast', '请选择要下载的文件', 'error'); return }
+  if (running) return
+  running = true
+  try {
+    for (const f of targets) await download(uid.value, did.value, f)
+    emit('toast', `已加入下载队列（${targets.length} 项）`, 'success')
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  } finally {
+    running = false
+  }
+}
+
+function targets(file) {
+  return file && isSel(file) && selected.value.length > 1 ? selected.value : [file]
+}
+
+// ---------- 收藏（本地收藏 + 云端收藏同步） ----------
+function isFav(file) { return favorites.value.some((f) => f.file_id === file.file_id) }
+
+async function toggleFav(file) {
+  const list = targets(file)
+  const removing = isFav(file)
+  await run(async () => {
+    if (removing) {
+      for (const f of list) await RemoveFavorite(uid.value, did.value, f.file_id)
+      if (caps.value.favorite) { try { await favorite(uid.value, did.value, false, list.map((f) => f.file_id)) } catch { /* 云端同步失败不阻塞 */ } }
+    } else {
+      for (const f of list) await AddFavorite(uid.value, did.value, { file_id: f.file_id, name: f.name, isDir: f.isDir, user_id: uid.value, drive_id: did.value, added: Math.floor(Date.now() / 1000) })
+      if (caps.value.favorite) { try { await favorite(uid.value, did.value, true, list.map((f) => f.file_id)) } catch { /* 同上 */ } }
+    }
+  }, removing ? '已移出收藏' : '已加入收藏')
+}
+
+// ---------- 右键菜单 ----------
+function onCtx(e, file) {
+  if (mode.value === 'trash') {
+    menu.value = {
+      x: e.clientX, y: e.clientY, file,
+      items: [
+        caps.value.trashRestore ? { icon: 'restore', label: '还原', action: 'restore' } : null,
+        caps.value.permanentDelete ? { icon: 'x-circle', label: '彻底删除', danger: true, action: 'delete' } : null,
+      ].filter(Boolean),
+    }
+    return
+  }
+  const list = [
+    caps.value.download && { icon: 'download', label: '下载', action: 'download' },
+    !file.isDir && { icon: 'play', label: '播放 / 预览', action: 'open' },
+    caps.value.createShare && { icon: 'share', label: '分享', action: 'share' },
+    { icon: 'star', label: isFav(file) ? '移出收藏' : '加入收藏', action: 'fav' },
+    { sep: true },
+    caps.value.move && { icon: 'move', label: '移动到…', action: 'move' },
+    caps.value.copy && { icon: 'copy', label: '复制到…', action: 'copy' },
+    { icon: 'migrate', label: '迁移到其他网盘…', action: 'migrate' },
+    caps.value.rename && { icon: 'pencil', label: '重命名', action: 'rename' },
+    caps.value.rename && selected.value.length > 1 && { icon: 'pencil', label: `批量重命名 (${selected.value.length})`, action: 'renamemulti' },
+    { sep: true },
+    caps.value.recycleBin && mode.value !== 'trash' && { icon: 'trash', label: '放回收站', danger: true, action: 'trash' },
+    caps.value.permanentDelete && { icon: 'x-circle', label: '彻底删除', danger: true, action: 'delete' },
+    { sep: true },
+    { icon: 'copy', label: '复制文件名', action: 'copyname' },
+    { icon: 'info', label: '属性', action: 'detail' },
+  ].filter(Boolean)
+  menu.value = { x: e.clientX, y: e.clientY, file, items: list }
+}
+
+function onMenuSelect(action) {
+  const file = menu.value.file
+  const list = targets(file)
+  const ids = list.map((f) => f.file_id)
+  menu.value = null
+  switch (action) {
+    case 'treeopen': selectTreeNode(file.file_id, file.name); break
+    case 'treerefresh': {
+      delete tree.value[file.file_id]
+      expanded.value[file.file_id] = false
+      if (treeSelected.value === file.file_id || dirId.value === file.file_id) load(file.file_id)
+      break
+    }
+    case 'download': doDownload([file]); break
+    case 'open': openFile(file); break
+    case 'share':
+      shareForm.value = { name: list.length === 1 ? list[0].name : `${list.length} 个文件`, expiration: '', password: '' }
+      modalFile.value = list
+      modal.value = 'share'
+      break
+    case 'fav': toggleFav(file); break
+    case 'rename':
+      if (list.length !== 1) { emit('toast', '重命名仅支持单个文件', 'error'); return }
+      modalFile.value = file
+      inputText.value = file.name
+      modal.value = 'rename'
+      break
+    case 'renamemulti':
+      modalFile.value = [...selected.value]
+      modal.value = 'renamemulti'
+      break
+    case 'move': modalFile.value = list; modal.value = 'movedir'; break
+    case 'copy': modalFile.value = list; modal.value = 'copydir'; break
+    case 'migrate': modalFile.value = list; migrateTarget.value = ''; migrateDir.value = 'root'; migrateDirName.value = '根目录'; migrateDirPick.value = false; modal.value = 'migrate'; break
+    case 'trash': run(() => trash(uid.value, did.value, ids), '已移入回收站'); break
+    case 'delete':
+      if (!confirm(`彻底删除 ${list.length} 项？删除后无法还原。`)) return
+      run(() => remove(uid.value, did.value, ids), '已彻底删除')
+      break
+    case 'restore': run(() => restore(uid.value, did.value, ids), '已还原'); break
+    case 'copyname': copyText(file.name).then(() => emit('toast', '已复制文件名', 'success')); break
+    case 'detail': modalFile.value = file; modal.value = 'detail'; break
+  }
+}
+
+// ---------- 弹窗动作 ----------
+async function doMkdir() {
+  const name = inputText.value.trim()
+  if (!name) return
+  modal.value = null
+  await run(async () => {
+    const r = await mkdir(uid.value, did.value, dirId.value, name)
+    if (r && r.error) throw new Error(r.error)
+  }, '文件夹已创建')
+  inputText.value = ''
+}
+
+async function doRename() {
+  const name = inputText.value.trim()
+  if (!name || !modalFile.value) return
+  const file = modalFile.value
+  modal.value = null
+  await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名')
+  inputText.value = ''
+}
+
+// 有效期选项（天数）转为绝对时间字符串，与后端 parseFlexibleTime 契约一致
+function shareExpireAt(days) {
+  const d = Number(days)
+  if (!days || !Number.isFinite(d) || d <= 0) return undefined
+  const t = new Date(Date.now() + d * 86400000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`
+}
+
+async function doShare() {
+  const list = modalFile.value
+  modal.value = null
+  await run(async () => {
+    const item = await createShare(uid.value, did.value, {
+      fileIds: list.map((f) => f.file_id),
+      shareName: shareForm.value.name,
+      expiration: shareExpireAt(shareForm.value.expiration),
+      password: shareForm.value.password || undefined,
+    })
+    const url = item && (item.share_url || item.share_msg)
+    if (url) {
+      const text = shareForm.value.password ? `${url}\n提取码: ${shareForm.value.password}` : url
+      await copyText(text)
+      emit('toast', '分享链接已复制到剪贴板', 'success')
+    }
+  }, null)
+}
+
+// 上传：原生文件/目录选择器（选择文件夹时后端递归入队），停留当前页 + toast
+const uploadPickModal = ref(false) // 上传前的小弹窗：选文件还是文件夹
+async function pickUploadFiles() {
+  let paths
+  try { paths = await PickFiles('选择要上传的文件') } catch { return }
+  if (!paths || !paths.length) return
+  await run(() => uploadFiles(uid.value, did.value, dirId.value, paths), `已加入上传队列（${paths.length} 项）`)
+}
+async function pickUploadFolder() {
+  let dir
+  try { dir = await PickDirectory('选择要上传的文件夹', '') } catch { return }
+  if (!dir) return
+  await run(() => uploadFiles(uid.value, did.value, dirId.value, [dir]), '已加入上传队列（文件夹）')
+}
+
+async function doOffline() {
+  const url = inputText.value.trim()
+  if (!url) return
+  modal.value = null
+  inputText.value = ''
+  await run(() => OfflineDownload(uid.value, did.value, url, ''), '已提交云离线任务')
+}
+
+async function onDirPicked(target) {
+  const which = modal.value
+  const list = modalFile.value
+  modal.value = null
+  if (!list) return
+  const ids = list.map((f) => f.file_id)
+  if (which === 'movedir') await run(() => move(uid.value, did.value, ids, target.id), '已移动')
+  else if (which === 'copydir') await run(() => copy(uid.value, did.value, ids, target.id), '已复制')
+}
+
+const migrateAccounts = computed(() => props.accounts.filter((a) => a.user_id !== uid.value))
+const migrateTargetAcc = computed(() => props.accounts.find((a) => a.user_id === migrateTarget.value) || null)
+
+async function doMigrate() {
+  const targetAcc = props.accounts.find((a) => a.user_id === migrateTarget.value)
+  if (!targetAcc) { emit('toast', '请选择目标账号', 'error'); return }
+  const list = modalFile.value
+  modal.value = null
+  await run(
+    () => migrateFiles(uid.value, did.value, targetAcc.user_id, targetAcc.drive_id, migrateDir.value || 'root', list.map((f) => f.file_id), false),
+    '迁移任务已创建'
+  )
+}
+
+// ---------- 工具条分享 ----------
+function openShareModal() {
+  shareForm.value = { name: selected.value.length === 1 ? selected.value[0].name : `${selected.value.length} 个文件`, expiration: '', password: '' }
+  modalFile.value = [...selected.value]
+  modal.value = 'share'
+}
+
+function confirmDeleteSelected() {
+  if (!selected.value.length) return
+  if (!confirm(`彻底删除 ${selected.value.length} 项？删除后无法还原。`)) return
+  run(() => remove(uid.value, did.value, selIds()), '已彻底删除')
+}
+
+// ---------- 收藏打开 ----------
+function openFav(f) {
+  if (f.isDir) {
+    mode.value = 'list'
+    pathStack.value = [{ id: f.file_id, name: f.name }]
+    dirId.value = f.file_id
+    treeSelected.value = f.file_id
+    selected.value = []
+    load(f.file_id)
+  } else {
+    openFile(f)
+  }
+}
+
+function onRowOpen(f) {
+  if (mode.value === 'favorite') openFav(f)
+  else openFile(f)
+}
+
+// ---------- 目录树右键菜单 ----------
+function onTreeCtx(e, node) {
+  const file = { file_id: node.file_id || node.id, name: node.name, isDir: true }
+  const isRoot = file.file_id === rootKey.value
+  const items = [
+    { icon: 'folder', label: '打开', action: 'treeopen' },
+    { icon: 'refresh', label: '刷新', action: 'treerefresh' },
+    { sep: true },
+    caps.value.download && { icon: 'download', label: '下载', action: 'download' },
+    caps.value.createShare && { icon: 'share', label: '分享', action: 'share' },
+    { icon: 'star', label: '加入收藏', action: 'fav' },
+    { sep: true },
+    !isRoot && caps.value.rename && { icon: 'pencil', label: '重命名', action: 'rename' },
+    !isRoot && caps.value.recycleBin && { icon: 'trash', label: '放回收站', danger: true, action: 'trash' },
+    { icon: 'info', label: '属性', action: 'detail' },
+  ].filter(Boolean)
+  menu.value = { x: e.clientX, y: e.clientY, file, items }
+}
+
+// ---------- 文件夹悬停预览 ----------
+const hoverPreview = ref(null) // { id, name, x, y, items, loading }
+let hoverTimer = null
+
+function onTreeEnter(e, node) {
+  if (!getPrefs().hoverPreview) return
+  clearTimeout(hoverTimer)
+  const id = node.file_id || node.id
+  hoverTimer = setTimeout(async () => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.min(rect.right + 8, window.innerWidth - 290)
+    const y = Math.min(rect.top, window.innerHeight - 320)
+    hoverPreview.value = { id, name: node.name, x, y, items: [], loading: true }
+    try {
+      const list = await listDir(uid.value, did.value, id)
+      if (hoverPreview.value && hoverPreview.value.id === id) {
+        hoverPreview.value.items = (list || []).slice(0, 8)
+        hoverPreview.value.loading = false
+      }
+    } catch {
+      if (hoverPreview.value && hoverPreview.value.id === id) { hoverPreview.value.items = []; hoverPreview.value.loading = false }
+    }
+  }, 450)
+}
+
+function onTreeLeave() {
+  clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(() => { hoverPreview.value = null }, 200)
+}
+
+function onPreviewEnter() { clearTimeout(hoverTimer) }
+function onPreviewLeave() { hoverPreview.value = null }
+
+function openPreviewItem(f) {
+  hoverPreview.value = null
+  openFile(f)
+}
+
+// ---------- 快捷键 ----------
+function onKey(e) {
+  const tag = (e.target.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return
+  if (!props.account || modal.value) return
+  if (e.ctrlKey && e.code === 'KeyA') { selectAll(); e.preventDefault() }
+  else if (e.code === 'F5') { refresh(); e.preventDefault() }
+  else if (e.code === 'Backspace' && mode.value === 'list' && pathStack.value.length) { goUp(); e.preventDefault() }
+  else if (e.ctrlKey && e.code === 'KeyF') { document.getElementById('pan-filter')?.focus(); e.preventDefault() }
+  else if (e.ctrlKey && e.shiftKey && e.code === 'KeyF') { enterSearch(); e.preventDefault() }
+  else if (e.ctrlKey && e.shiftKey && e.code === 'KeyN' && caps.value.createFolder) { inputText.value = ''; modal.value = 'mkdir'; e.preventDefault() }
+  else if (e.ctrlKey && e.code === 'KeyU' && caps.value.upload && mode.value === 'list') { pickUploadFiles(); e.preventDefault() }
+  else if (e.ctrlKey && e.code === 'KeyH') { goHome(); e.preventDefault() }
+  else if (e.code === 'F2' && selected.value.length === 1 && caps.value.rename) {
+    modalFile.value = selected.value[0]; inputText.value = selected.value[0].name; modal.value = 'rename'; e.preventDefault()
+  }
+  else if (e.code === 'Delete' && selected.value.length && caps.value.recycleBin && mode.value !== 'trash') {
+    run(() => trash(uid.value, did.value, selIds()), '已移入回收站'); e.preventDefault()
+  }
+  else if (e.ctrlKey && e.code === 'KeyS' && selected.value.length && caps.value.createShare) { openShareModal(); e.preventDefault() }
+  else if (e.code === 'Enter' && selected.value.length === 1) { onRowOpen(selected.value[0]); e.preventDefault() }
+  else if (e.code === 'ArrowDown' || e.code === 'ArrowUp') {
+    const list = listShown.value
+    if (!list.length) return
+    const cur = selected.value.length ? list.findIndex((f) => f.file_id === selected.value[selected.value.length - 1].file_id) : -1
+    const next = e.code === 'ArrowDown' ? Math.min(list.length - 1, cur + 1) : Math.max(0, cur - 1)
+    selected.value = [list[next]]
+    focusId.value = list[next].file_id
+    e.preventDefault()
   }
 }
 
 watch(() => props.account, (a) => {
-  if (a) { dir.value = 'root'; pathStack.value = []; files.value = []; load('root') }
+  if (!a) { files.value = []; return }
+  tree.value = {}
+  expanded.value = {}
+  treeNames.value = {}
+  goHome()
+  loadFavorites()
+  expandTree(rootKey.value, rootTitle.value) // 根目录默认展开
 })
-
-watch(() => props.providerMeta, () => { if (props.account) load(dir.value) })
 
 onMounted(() => {
-  onEvent('transfer:event', () => {})
+  window.addEventListener('keydown', onKey)
+  window.addEventListener('mousemove', sideMove)
+  window.addEventListener('mouseup', sideUp)
+  if (props.account) { load(rootKey.value); loadFavorites(); expandTree(rootKey.value, rootTitle.value) }
 })
-
-defineExpose({ act })
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('mousemove', sideMove)
+  window.removeEventListener('mouseup', sideUp)
+  clearTimeout(filterTimer)
+  clearTimeout(hoverTimer)
+})
 </script>
 
 <template>
-  <div class="panel">
-    <div class="panel-row">
-      <button class="btn sm" @click="backToList" :disabled="mode !== 'search' && mode !== 'trash'">返回列表</button>
-      <button v-if="c.TrashView" class="btn sm" @click="showTrash">回收站</button>
-      <input class="input" style="flex:1;max-width:320px" v-model="keyword" placeholder="全盘搜索" @keyup.enter="goSearch" />
-      <button class="btn sm" @click="goSearch">搜索</button>
-      <div style="flex:1"></div>
-      <button v-if="c.CreateFolder" class="btn sm" @click="act('mkdir')">新建文件夹</button>
-      <button v-if="c.Upload" class="btn sm" @click="act('upload')">上传</button>
-      <span class="fmeta">{{ files.length }} 项</span>
-    </div>
-    <div v-if="mode === 'trash'" class="panel-row" style="color:var(--text-secondary);font-size:12px">回收站视图</div>
-    <div class="file-list" @click.self="closeMenu">
-      <div class="file-head">
-        <span></span><span>名称</span><span>大小</span><span>修改时间</span><span></span>
-      </div>
-      <div class="file-row dir-up" v-if="mode === 'list' && pathStack.length" @click="up">
-        <span class="fi">⬆️</span><span class="fname ftext">返回上级</span><span></span><span></span><span></span>
-      </div>
-      <div
-        v-for="f in files"
-        :key="f.file_id"
-        class="file-row"
-        :class="{ selected: selected.some((s) => s.file_id === f.file_id) }"
-        @click="toggleSel(f)"
-        @dblclick="open(f)"
-        @contextmenu.prevent="onCtx($event, f)"
-      >
-        <span class="fi">{{ iconOf(f) }}</span>
-        <span class="fname"><span class="ftext">{{ f.name }}</span></span>
-        <span class="fmeta">{{ f.isDir ? '-' : formatBytes(f.size) }}</span>
-        <span class="fmeta">{{ formatTime(f.time) }}</span>
-        <span class="fmeta" v-if="f.starred">★</span><span v-else></span>
-      </div>
-      <div v-if="!loading && !files.length" class="empty">空目录</div>
+  <div class="page">
+    <!-- 无账号空态 -->
+    <div v-if="!account" class="workspace-empty-state" style="flex:1">
+      <UiIcon name="drive" :size="40" style="opacity:.4" />
+      <span class="wes-title">登录后查看文件</span>
+      <button class="btn primary sm" @click="emit('go', 'login')">登录网盘账号</button>
     </div>
 
-    <div v-if="menu" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mouseleave="closeMenu">
-      <div class="ctx-item" @click="act('download')">⬇️ 下载</div>
-      <div class="ctx-item" @click="act('play')">▶️ 播放/预览</div>
-      <div class="ctx-item" @click="act('rename')" v-if="c.Rename">✏️ 重命名</div>
-      <div class="ctx-item" @click="act('share')" v-if="c.CreateShare">🔗 分享</div>
-      <div class="ctx-item" @click="act('favorite')" v-if="c.Favorite">⭐ 收藏</div>
-      <div class="ctx-sep"></div>
-      <div class="ctx-item" @click="act('copy')" v-if="c.Copy">📋 复制到…</div>
-      <div class="ctx-item" @click="act('move')" v-if="c.Move">📂 移动到…</div>
-      <div class="ctx-item" @click="act('migrate')">🔄 跨盘迁移…</div>
-      <div class="ctx-sep"></div>
-      <div class="ctx-item" @click="act('trash')" v-if="c.RecycleBin">🗑️ 移入回收站</div>
-      <div class="ctx-item" @click="act('restore')" v-if="mode === 'trash' && c.TrashRestore">♻️ 恢复</div>
-      <div class="ctx-item danger" @click="act('delete')" v-if="c.PermanentDelete">❌ 永久删除</div>
-    </div>
+    <template v-else>
+      <div class="pan-split">
+        <!-- 左侧：快捷入口 + 收藏 + 目录树 -->
+        <div class="pan-left" :style="{ width: sideWidth + 'px' }">
+          <div class="tree-node" :class="{ active: mode === 'favorite' }" @click="showFavorites">
+            <span class="tn-arrow" :class="{ open: favExpanded }" @click.stop="favExpanded = !favExpanded"><UiIcon v-if="favorites.length" name="chevron-right" :size="12" /></span>
+            <UiIcon name="star" :size="14" /><span class="tn-label">收藏</span>
+            <span class="tn-count" v-if="favorites.length">{{ favorites.length }}</span>
+          </div>
+          <div v-if="favExpanded" class="tree-children">
+            <div
+              v-for="f in favorites" :key="f.file_id"
+              class="tree-node"
+              :title="f.name"
+              @click="openFav(f)"
+            >
+              <span class="tn-arrow"></span><UiIcon :name="f.isDir ? 'folder' : iconOf(f)" :size="14" :class="f.isDir ? '' : 'ft-' + iconOf(f)" /><span class="tn-label">{{ f.name }}</span>
+            </div>
+            <div v-if="!favorites.length" class="tree-empty">暂无收藏</div>
+          </div>
+          <div
+            v-if="caps.trashView"
+            class="tree-node"
+            :class="{ active: mode === 'trash' }"
+            @click="showTrash"
+          ><span class="tn-arrow"></span><UiIcon name="trash" :size="14" /><span class="tn-label">回收站</span></div>
+          <div
+            class="tree-node"
+            :class="{ active: mode === 'list' && treeSelected === rootKey }"
+            @click="goHome"
+            @contextmenu.prevent="onTreeCtx($event, { id: rootKey, name: rootTitle })"
+          >
+            <span class="tn-arrow" :class="{ open: expanded[rootKey] }" @click.stop="toggleTree(rootKey, rootTitle)"><UiIcon name="chevron-right" :size="12" /></span>
+            <UiIcon name="cloud" :size="14" /><span class="tn-label">{{ rootTitle }}</span>
+          </div>
+          <div v-if="expanded[rootKey]" class="tree-children">
+            <TreeNode
+              v-for="d in treeChildren(rootKey)" :key="d.file_id"
+              :node="d"
+              :tree="tree"
+              :expanded="expanded"
+              :selected-id="mode === 'list' ? treeSelected : ''"
+              @toggle="toggleTree"
+              @select="selectTreeNode"
+              @ctx="onTreeCtx"
+              @enter="onTreeEnter"
+              @leave="onTreeLeave"
+            />
+          </div>
+
+        </div>
+        <!-- 侧边栏拖拽手柄 -->
+        <div class="pan-resizer" @mousedown="sideDown"></div>
+
+        <!-- 右侧文件区 -->
+        <div class="pan-right">
+          <!-- 面包屑路径条（置顶、矮） -->
+          <div class="pathbar">
+            <template v-if="mode === 'list'">
+              <template v-for="(c, i) in crumbs" :key="c.id + i">
+                <span v-if="i" class="crumb-sep">/</span>
+                <span class="crumb" @click="goCrumb(i)">{{ c.name }}</span>
+              </template>
+            </template>
+            <template v-else>
+              <span class="crumb" @click="goHome">{{ rootTitle }}</span><span class="crumb-sep">/</span><span class="crumb">{{ modeTitle }}</span>
+            </template>
+            <span class="pathbar-acc"><AccountAvatar :account="props.account" :providers="props.providers" /></span>
+          </div>
+
+          <!-- 合并工具条：导航 + 新建/上传 + 选择管理 + 文件操作 + 排序/视图/筛选 -->
+          <div class="toppanbtns">
+            <div class="toppanbtn">
+              <button class="tbtn icon" :disabled="mode !== 'list' || !pathStack.length" title="后退 (Backspace)" @click="goUp"><UiIcon name="back" :size="16" /></button>
+              <button class="tbtn icon" :disabled="loading" title="刷新 (F5)" @click="refresh"><UiIcon name="refresh" :size="16" /></button>
+              <button v-if="caps.search" class="tbtn icon" title="全盘搜索 (Ctrl+Shift+F)" @click="enterSearch"><UiIcon name="search" :size="16" /></button>
+              <button v-if="caps.offlineDownload && mode === 'list'" class="tbtn icon" title="云离线下载" @click="inputText = ''; modal = 'offline'"><UiIcon name="cloud-down" :size="16" /></button>
+            </div>
+            <div class="toppanbtn" v-if="mode === 'list'">
+              <button v-if="caps.createFolder" class="tbtn sm" title="新建文件夹 (Ctrl+Shift+N)" @click="inputText = ''; modal = 'mkdir'"><UiIcon name="plus" :size="14" />新建</button>
+              <button v-if="caps.upload" class="tbtn sm" title="上传 (Ctrl+U)" @click="uploadPickModal = true"><UiIcon name="upload" :size="14" />上传</button>
+            </div>
+            <div class="toppanbtn sel-mgmt">
+              <button class="btn-check" :class="{ on: allSelected }" title="全选 (Ctrl+A)" @click="toggleSelectAll">
+                <UiIcon v-if="allSelected" name="check" :size="11" />
+              </button>
+              <span class="selectInfo">已选中 {{ selected.length }}/{{ listShown.length }} 个</span>
+              <button
+                class="tbtn xs"
+                :class="{ danger: rangIsSelecting }"
+                title="点击后依次点两个文件选中区间（或按住 Shift 点击）"
+                @click="toggleRangSelect"
+              >{{ rangIsSelecting ? '取消选择' : '区间选择' }}</button>
+              <button
+                v-if="!rangIsSelecting && selected.length && selected.length < listShown.length"
+                class="tbtn xs"
+                @click="invertSel"
+              >反向选择</button>
+              <button v-if="!rangIsSelecting && selected.length" class="tbtn xs" @click="selected = []">取消已选</button>
+            </div>
+            <div class="toppanbtn" v-if="selected.length">
+              <button v-if="caps.download" class="tbtn" @click="doDownload()"><UiIcon name="download" :size="15" />下载</button>
+              <button v-if="caps.createShare" class="tbtn" title="分享 (Ctrl+S)" @click="openShareModal"><UiIcon name="share" :size="15" />分享</button>
+              <button class="tbtn" @click="toggleFav(selected[0])"><UiIcon name="star" :size="15" />{{ isFav(selected[0]) && selected.length === 1 ? '移出收藏' : '收藏' }}</button>
+              <button v-if="caps.move" class="tbtn" @click="modalFile = [...selected]; modal = 'movedir'"><UiIcon name="move" :size="15" />移动</button>
+              <button v-if="caps.copy" class="tbtn" @click="modalFile = [...selected]; modal = 'copydir'"><UiIcon name="copy" :size="15" />复制</button>
+              <button v-if="caps.recycleBin && mode !== 'trash'" class="tbtn danger" title="删除 (Delete)" @click="run(() => trash(uid, did, selIds()), '已移入回收站')"><UiIcon name="trash" :size="15" />删除</button>
+            </div>
+            <div class="toppanbtn" v-if="mode === 'trash' && selected.length">
+              <button v-if="caps.trashRestore" class="tbtn" @click="run(() => restore(uid, did, selIds()), '已还原')"><UiIcon name="restore" :size="15" />还原</button>
+              <button v-if="caps.permanentDelete" class="tbtn danger" @click="confirmDeleteSelected"><UiIcon name="x-circle" :size="15" />彻底删除</button>
+            </div>
+            <div class="toolbar-spacer"></div>
+            <div class="toppanbtn">
+              <DropdownBtn :label="sortLabel" :icon="sortAsc ? 'sort-asc' : 'sort-desc'" :items="sortMenuItems" title="排序方式" @select="onSortPick" />
+              <div class="view-switch">
+                <button class="vs-btn" :class="{ on: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'; setPref('viewMode', 'list')"><UiIcon name="list" :size="15" /></button>
+                <button class="vs-btn" :class="{ on: viewMode === 'grid' }" title="网格视图" @click="viewMode = 'grid'; setPref('viewMode', 'grid')"><UiIcon name="grid" :size="15" /></button>
+              </div>
+              <span v-if="mode === 'search' && caps.search" class="search-quick-wrap">
+                <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
+                <input
+                  id="pan-search"
+                  class="search-quick"
+                  style="width:220px"
+                  v-model="keyword"
+                  placeholder="输入关键字进行搜索 (Enter)"
+                  @keydown.enter="goSearch"
+                  @keydown="onSearchKey"
+                />
+              </span>
+              <span class="search-quick-wrap">
+                <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
+                <input id="pan-filter" class="search-quick" v-model="filterRaw" placeholder="快速筛选 (Ctrl+F)" />
+              </span>
+            </div>
+          </div>
+
+          <!-- 状态区 -->
+          <div v-if="loading" class="empty"><span class="spin"></span><span>加载中…</span></div>
+          <div v-else-if="error" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>{{ error }}</span><button class="btn sm" @click="refresh">重试</button></div>
+
+          <!-- 列表视图（旧版 fileitem 行） -->
+          <div v-else-if="viewMode === 'list'" class="file-list">
+            <div v-if="mode === 'list' && pathStack.length" class="fileitem dir-up" @click="goUp">
+              <div class="rangselect"></div>
+              <div class="fileicon"><UiIcon name="up-level" :size="16" /></div>
+              <div class="filename"><div>返回上级目录</div></div>
+            </div>
+            <div
+              v-for="f in listShown"
+              :key="f.file_id"
+              class="fileitem"
+              :class="{ selected: isSel(f), focus: focusId === f.file_id }"
+              @click="toggleSel(f, $event)"
+              @dblclick="onRowOpen(f)"
+              @contextmenu.prevent="onCtx($event, f)"
+            >
+              <div class="rangselect">
+                <button class="btn-check" :class="{ on: isSel(f) }" tabindex="-1" @click.stop="toggleSel(f, { ctrlKey: true })">
+                  <UiIcon v-if="isSel(f)" name="check" :size="11" />
+                </button>
+              </div>
+              <div class="fileicon" :class="'ft-' + iconOf(f)"><UiIcon :name="iconOf(f)" :size="20" /></div>
+              <div class="filename">
+                <div :title="f.name" @click.stop="onRowOpen(f)"><template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></div>
+              </div>
+              <span v-if="f.starred" class="fstar-mark"><UiIcon name="star" :size="13" /></span>
+              <div class="filesize">{{ f.isDir ? (f.file_count != null ? f.file_count + ' 项' : '-') : formatBytes(f.size) }}</div>
+              <div class="filetime">
+                <span class="filedate">{{ formatTimeParts(f.time).date }}</span>
+                <span class="fileclock">{{ formatTimeParts(f.time).clock }}</span>
+              </div>
+            </div>
+            <div v-if="!listShown.length" class="workspace-empty-state">
+              <UiIcon :name="mode === 'trash' ? 'trash' : mode === 'search' ? 'search' : mode === 'favorite' ? 'star' : 'folder'" :size="36" style="opacity:.4" />
+              <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有匹配的文件' : mode === 'favorite' ? '暂无收藏，右键文件加入收藏' : '空目录' }}</span>
+            </div>
+          </div>
+
+          <!-- 网格视图（旧版 griditem） -->
+          <div v-else class="file-list gridlist">
+            <div
+              v-for="f in listShown"
+              :key="f.file_id"
+              class="griditem"
+              :class="{ selected: isSel(f), focus: focusId === f.file_id }"
+              @click="toggleSel(f, $event)"
+              @dblclick="onRowOpen(f)"
+              @contextmenu.prevent="onCtx($event, f)"
+            >
+              <span class="gsel">
+                <button class="btn-check" :class="{ on: isSel(f) }" tabindex="-1" @click.stop="toggleSel(f, { ctrlKey: true })">
+                  <UiIcon v-if="isSel(f)" name="check" :size="11" />
+                </button>
+              </span>
+              <span v-if="f.starred" class="gstar"><UiIcon name="star" :size="12" /></span>
+              <div class="gridicon" :class="!f.thumbnail ? 'ft-' + iconOf(f) : ''">
+                <img v-if="f.thumbnail" :src="f.thumbnail" loading="lazy" alt="" />
+                <UiIcon v-else :name="iconOf(f)" :size="32" />
+              </div>
+              <div class="gridname" :title="f.name"><template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></div>
+              <div class="gridinfo">{{ f.isDir ? '文件夹' : formatBytes(f.size) }}</div>
+            </div>
+            <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
+              <UiIcon name="folder" :size="36" style="opacity:.4" />
+              <span class="wes-title">空目录</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 右键菜单 -->
+    <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menu = null" @select="onMenuSelect" />
+
+    <!-- 文件夹悬停预览 -->
+    <teleport to="body">
+      <div
+        v-if="hoverPreview"
+        class="folder-preview"
+        :style="{ left: hoverPreview.x + 'px', top: hoverPreview.y + 'px' }"
+        @mouseenter="onPreviewEnter"
+        @mouseleave="onPreviewLeave"
+      >
+        <div class="fp-head"><UiIcon name="folder" :size="13" /> {{ hoverPreview.name }}</div>
+        <div v-if="hoverPreview.loading" class="fp-empty"><span class="spin"></span></div>
+        <div v-else-if="!hoverPreview.items.length" class="fp-empty">空文件夹</div>
+        <div
+          v-else
+          v-for="f in hoverPreview.items"
+          :key="f.file_id"
+          class="fp-item"
+          @click="openPreviewItem(f)"
+        >
+          <UiIcon :name="iconOf(f)" :size="13" :class="'ft-' + iconOf(f)" />
+          <span class="fp-name">{{ f.name }}</span>
+          <span class="fp-size">{{ f.isDir ? '' : formatBytes(f.size) }}</span>
+        </div>
+      </div>
+    </teleport>
+
+    <!-- 上传前选择：文件 / 文件夹 -->
+    <Modal v-if="uploadPickModal" title="上传" width="360px" @close="uploadPickModal = false">
+      <div class="uppick">
+        <button class="uppick-card" @click="uploadPickModal = false; pickUploadFiles()">
+          <UiIcon name="file" :size="24" /><span class="uppick-name">上传文件</span><span class="uppick-desc">选择一个或多个文件</span>
+        </button>
+        <button class="uppick-card" @click="uploadPickModal = false; pickUploadFolder()">
+          <UiIcon name="folder" :size="24" /><span class="uppick-name">上传文件夹</span><span class="uppick-desc">选择整个文件夹</span>
+        </button>
+      </div>
+    </Modal>
+
+    <!-- 新建文件夹 -->
+    <Modal v-if="modal === 'mkdir'" title="新建文件夹" @close="modal = null">
+      <div class="field">
+        <label>文件夹名称</label>
+        <input class="input" v-model="inputText" placeholder="输入名称" @keyup.enter="doMkdir" autofocus />
+      </div>
+      <template #actions>
+        <button class="btn" @click="modal = null">取消</button>
+        <button class="btn primary" @click="doMkdir">创建</button>
+      </template>
+    </Modal>
+
+    <!-- 重命名 -->
+    <Modal v-if="modal === 'rename'" title="重命名" @close="modal = null">
+      <div class="field">
+        <label>新名称</label>
+        <input class="input" v-model="inputText" @keyup.enter="doRename" autofocus />
+      </div>
+      <template #actions>
+        <button class="btn" @click="modal = null">取消</button>
+        <button class="btn primary" @click="doRename">确定</button>
+      </template>
+    </Modal>
+
+    <!-- 创建分享 -->
+    <Modal v-if="modal === 'share'" title="创建分享" @close="modal = null">
+      <div class="field">
+        <label>分享名称</label>
+        <input class="input" v-model="shareForm.name" />
+      </div>
+      <div class="field" v-if="caps.shareExpiration">
+        <label>有效期（可选）</label>
+        <UiSelect
+          v-model="shareForm.expiration"
+          block
+          :options="[
+            { value: '', label: '永久有效' },
+            { value: '1', label: '1 天' },
+            { value: '7', label: '7 天' },
+            { value: '30', label: '30 天' },
+          ]"
+        />
+      </div>
+      <div class="field" v-if="caps.sharePassword">
+        <label>提取码（可选）</label>
+        <input class="input" v-model="shareForm.password" placeholder="留空则自动生成或无提取码" />
+      </div>
+      <template #actions>
+        <button class="btn" @click="modal = null">取消</button>
+        <button class="btn primary" @click="doShare">创建并复制链接</button>
+      </template>
+    </Modal>
+
+    <!-- 云离线下载 -->
+    <Modal v-if="modal === 'offline'" title="云离线下载" @close="modal = null">
+      <div class="field">
+        <label>下载链接（磁力 / HTTP / ed2k）</label>
+        <textarea class="textarea" v-model="inputText" placeholder="magnet:?xt=urn:btih:…" rows="3"></textarea>
+      </div>
+      <template #actions>
+        <button class="btn" @click="modal = null">取消</button>
+        <button class="btn primary" @click="doOffline">提交</button>
+      </template>
+    </Modal>
+
+    <!-- 跨盘迁移 -->
+    <Modal v-if="modal === 'migrate'" title="迁移到其他网盘" @close="modal = null">
+      <div class="field">
+        <label>目标账号</label>
+        <UiSelect
+          v-model="migrateTarget"
+          block
+          placeholder="选择目标账号"
+          :options="migrateAccounts.map((a) => ({ value: a.user_id, label: (a.token && (a.token.nick_name || a.token.user_name)) || a.user_id }))"
+        />
+        <div class="hint" v-if="!migrateAccounts.length">没有其他可用账号，请先在左侧添加网盘账号</div>
+      </div>
+      <div class="field" v-if="migrateTarget">
+        <label>目标目录</label>
+        <div class="panel-row" style="display:flex;gap:6px;align-items:center">
+          <input class="input" style="flex:1" :value="migrateDirName" readonly placeholder="根目录" />
+          <button class="btn sm" @click="migrateDirPick = true">选择目录</button>
+        </div>
+      </div>
+      <template #actions>
+        <button class="btn" @click="modal = null">取消</button>
+        <button class="btn primary" :disabled="!migrateTarget" @click="doMigrate">开始迁移</button>
+      </template>
+    </Modal>
+
+    <!-- 移动到 / 复制到 -->
+    <SelectDirModal
+      v-if="modal === 'movedir' || modal === 'copydir'"
+      :title="modal === 'movedir' ? '移动到' : '复制到'"
+      :account="account"
+      :providers="providers"
+      @close="modal = null"
+      @select="onDirPicked"
+    />
+
+    <!-- 迁移目标目录（浏览目标账号） -->
+    <SelectDirModal
+      v-if="migrateDirPick && migrateTargetAcc"
+      title="选择迁移目标目录"
+      :account="migrateTargetAcc"
+      :providers="providers"
+      @close="migrateDirPick = false"
+      @select="(d) => { migrateDir = d.id; migrateDirName = d.name; migrateDirPick = false }"
+    />
+
+    <!-- 预览 -->
+    <PreviewModal v-if="modal === 'preview'" :account="account" :file="modalFile" @close="modal = null" />
+    <PlayerPanel v-if="modal === 'player'" :account="account" :file="modalFile" @close="modal = null" @toast="(m, t) => emit('toast', m, t)" />
+
+    <!-- 批量重命名 -->
+    <RenameMultiModal
+      v-if="modal === 'renamemulti'"
+      :account="account"
+      :files="modalFile"
+      @close="modal = null"
+      @done="refresh"
+      @toast="(m, t) => emit('toast', m, t)"
+    />
+
+    <!-- 属性 -->
+    <Modal v-if="modal === 'detail'" title="属性" @close="modal = null">
+      <div class="kv-row"><span class="kv-label">名称</span><span style="user-select:text">{{ modalFile.name }}</span></div>
+      <div class="kv-row"><span class="kv-label">类型</span><span>{{ modalFile.isDir ? '文件夹' : (modalFile.category || extOf(modalFile.name) || '文件') }}</span></div>
+      <div class="kv-row" v-if="!modalFile.isDir"><span class="kv-label">大小</span><span>{{ formatBytes(modalFile.size) }}</span></div>
+      <div class="kv-row"><span class="kv-label">修改时间</span><span>{{ formatTime(modalFile.time) }}</span></div>
+      <div class="kv-row"><span class="kv-label">文件 ID</span><span style="user-select:text;font-size: 12px">{{ modalFile.file_id }}</span></div>
+      <template #actions>
+        <button class="btn primary" @click="modal = null">关闭</button>
+      </template>
+    </Modal>
   </div>
 </template>
+
+<style scoped>
+mark.hl {
+  background: color-mix(in srgb, var(--color-warning) 35%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+</style>

@@ -1,0 +1,170 @@
+<script setup>
+// 网盘账号头像（右上角）：圆形头像(object-fit:cover 裁掉黑边) + provider 小徽章；
+// 悬停弹窗显示已用/剩余/总容量；静默低频刷新配额(RefreshAccount)。
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { RefreshAccount, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
+import UiIcon from './UiIcon.vue'
+
+const props = defineProps({
+  account: { type: Object, required: false, default: null },
+  providers: { type: Array, default: () => [] },
+})
+
+// 本地 token 副本：静默刷新后更新展示，不依赖父组件重传
+const tok = ref(props.account ? (props.account.token || {}) : {})
+watch(() => props.account, (a) => { tok.value = a ? (a.token || {}) : {} })
+
+const avatar = computed(() => tok.value.avatar || '')
+const nick = computed(() => accountName(props.account))
+const providerMeta = computed(() => providerMetaOf(props.account, props.providers))
+const providerIcon = computed(() => providerIconUrl(providerMeta.value))
+const pid = computed(() => providerMeta.value.provider || (props.account ? props.account.user_id : ''))
+const providerLabel = computed(() => providerMeta.value.label || pid.value)
+
+const total = computed(() => Math.max(0, Number(tok.value.total_size) || 0))
+const used = computed(() => {
+  const u = Math.max(0, Number(tok.value.used_size) || 0)
+  if (u > 0) return u
+  // used 缺失时用 total - free 推算
+  const f = Math.max(0, Number(tok.value.free_size) || 0)
+  return total.value > 0 && f > 0 ? Math.max(0, total.value - f) : 0
+})
+const free = computed(() => {
+  const f = Math.max(0, Number(tok.value.free_size) || 0)
+  if (f > 0) return f
+  return total.value > 0 ? Math.max(0, total.value - used.value) : 0
+})
+const pct = computed(() => total.value > 0 ? Math.min(100, Math.round((used.value / total.value) * 100)) : 0)
+const hasQuota = computed(() => total.value > 0)
+
+const vipName = computed(() => tok.value.vipname || '')
+const vipExpire = computed(() => tok.value.vipexpire || '')
+
+// 头像加载失败回退到 provider 图标，再失败回退昵称首字
+const avatarFailed = ref(false)
+watch(avatar, () => { avatarFailed.value = false })
+const avatarText = computed(() => {
+  const n = nick.value || ''
+  return n ? n.slice(0, 2) : '?'
+})
+
+// ---------- 悬停弹窗 ----------
+const show = ref(false)
+let enterTimer = null, leaveTimer = null
+function onEnter() {
+  clearTimeout(leaveTimer)
+  enterTimer = setTimeout(() => { show.value = true }, 120)
+}
+function onLeave() {
+  clearTimeout(enterTimer)
+  leaveTimer = setTimeout(() => { show.value = false }, 200)
+}
+onBeforeUnmount(() => { clearTimeout(enterTimer); clearTimeout(leaveTimer); clearInterval(refreshTimer) })
+
+// ---------- 静默低频刷新配额 ----------
+let refreshTimer = null
+async function silentRefresh() {
+  if (!props.account || document.hidden) return
+  try {
+    const acc = await RefreshAccount(props.account.user_id)
+    if (acc && acc.token) tok.value = acc.token
+  } catch { /* 静默 */ }
+}
+watch(() => props.account && props.account.user_id, (uid) => {
+  if (uid) silentRefresh()
+})
+onMounted(() => {
+  if (props.account) silentRefresh()
+  refreshTimer = setInterval(() => { if (!document.hidden && props.account) silentRefresh() }, 10 * 60 * 1000)
+})
+</script>
+
+<template>
+  <div class="acc-ava" @mouseenter="onEnter" @mouseleave="onLeave">
+    <div class="ava-circle">
+      <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
+      <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
+      <span v-else class="ava-text">{{ avatarText }}</span>
+      <img v-if="providerIcon" :src="providerIcon" alt="" class="ava-badge" :title="providerLabel" />
+    </div>
+
+    <teleport to="body">
+      <div
+        v-if="show"
+        class="acc-pop"
+        @mouseenter="onEnter"
+        @mouseleave="onLeave"
+      >
+        <div class="ap-head">
+          <div class="ava-circle sm">
+            <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
+            <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
+            <span v-else class="ava-text">{{ avatarText }}</span>
+          </div>
+          <div class="ap-meta">
+            <div class="ap-name">{{ nick }}</div>
+            <div class="ap-provider">{{ providerLabel }}</div>
+            <div v-if="vipName" class="ap-vip"><UiIcon name="star" :size="12" />{{ vipName }}<template v-if="vipExpire"> · {{ vipExpire }}</template></div>
+          </div>
+        </div>
+        <div class="ap-quota">
+          <div v-if="hasQuota" class="ap-qrow">
+            <span class="ap-qpct">{{ pct }}%</span>
+            <span class="ap-qhint">已用 / 总容量</span>
+          </div>
+          <div v-if="hasQuota" class="ap-bar">
+            <div class="ap-bar-fill" :class="{ full: pct >= 95 }" :style="{ width: pct + '%' }"></div>
+          </div>
+          <div v-if="hasQuota" class="ap-nums">
+            <div><span class="ap-num-k">已用</span><span class="ap-num-v">{{ formatBytes(used) }}</span></div>
+            <div><span class="ap-num-k">剩余</span><span class="ap-num-v">{{ formatBytes(free) }}</span></div>
+            <div><span class="ap-num-k">总容量</span><span class="ap-num-v">{{ formatBytes(total) }}</span></div>
+          </div>
+          <div v-else class="ap-noquota">该网盘暂未返回容量信息</div>
+        </div>
+      </div>
+    </teleport>
+  </div>
+</template>
+
+<style scoped>
+.acc-ava { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; }
+.ava-circle {
+  width: 30px; height: 30px; border-radius: 50%; overflow: hidden;
+  background: var(--bg-subtle); color: var(--text-secondary);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-light); position: relative; cursor: pointer;
+  flex-shrink: 0;
+}
+.ava-circle.sm { width: 36px; height: 36px; }
+.ava-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ava-text { font-size: 12px; font-weight: 600; }
+.ava-badge {
+  position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px;
+  border-radius: 50%; object-fit: cover; background: var(--bg-surface);
+  border: 1.5px solid var(--bg-surface);
+}
+.acc-pop {
+  position: fixed; z-index: 9999; min-width: 260px; padding: 12px;
+  background: var(--bg-surface); border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  animation: list-in 140ms var(--motion-ease);
+}
+.ap-head { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-lighter); }
+.ap-meta { min-width: 0; }
+.ap-name { font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-provider { font-size: 12px; color: var(--text-tertiary); }
+.ap-vip { display: inline-flex; align-items: center; gap: 3px; margin-top: 3px; font-size: 11px; color: #b8860b; }
+.ap-quota { padding-top: 10px; }
+.ap-qrow { display: flex; align-items: baseline; justify-content: space-between; }
+.ap-qpct { font-size: 16px; font-weight: 700; color: var(--color-primary); }
+.ap-qhint { font-size: 11px; color: var(--text-tertiary); }
+.ap-bar { height: 6px; border-radius: 3px; background: var(--bg-subtle); overflow: hidden; margin: 6px 0 8px; }
+.ap-bar-fill { height: 100%; border-radius: 3px; background: var(--color-primary); transition: width var(--motion-normal) var(--motion-ease); }
+.ap-bar-fill.full { background: var(--color-error); }
+.ap-nums { display: flex; gap: 8px; }
+.ap-nums > div { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.ap-num-k { font-size: 11px; color: var(--text-tertiary); }
+.ap-num-v { font-size: 12px; color: var(--text-primary); font-weight: 600; }
+.ap-noquota { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 6px 0; }
+</style>

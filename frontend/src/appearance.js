@@ -1,0 +1,47 @@
+// 外观应用：主题（明/暗）。强调色固定为品牌紫，不再提供色包切换。
+import { WindowSetDarkTheme, WindowSetLightTheme, WindowSetSystemDefaultTheme } from '../wailsjs/runtime/runtime'
+
+export function isDarkMode(theme) {
+  return theme === 'dark' || (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
+
+// 一次性应用主题；theme 为后端设置值（system/light/dark）
+export function applyAppearance(theme) {
+  const dark = isDarkMode(theme)
+  document.documentElement.classList.toggle('dark', dark)
+  // 清理旧版色包残留
+  localStorage.removeItem('mnemo.themePackLight')
+  localStorage.removeItem('mnemo.themePackDark')
+  // 系统标题栏跟随主题（Wails Windows 主题 API）
+  try {
+    if (theme === 'dark') WindowSetDarkTheme()
+    else if (theme === 'light') WindowSetLightTheme()
+    else WindowSetSystemDefaultTheme()
+  } catch { /* 非 Windows 或旧版 runtime 时忽略 */ }
+  return dark
+}
+
+// ---------- 纯前端偏好（后端 Settings 无对应字段，存 localStorage） ----------
+const PREFS_KEY = 'mnemo.prefs'
+const PREFS_DEFAULTS = {
+  viewMode: 'list',       // 网盘默认视图 list | grid
+  hoverPreview: true,     // 目录树悬停预览
+  transferBall: true,     // 传输悬浮球
+  defaultVolume: 50,      // 播放器默认音量 0-100
+  defaultSpeed: 1,        // 播放器默认倍速
+  seekStep: 10,           // 快进/快退步长（秒）
+  autoCloseOnEnd: false,  // 播放到结尾自动收起控制条
+  sideWidth: 220,         // 网盘侧边栏宽度（px）
+}
+
+export function getPrefs() {
+  try {
+    return { ...PREFS_DEFAULTS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}) }
+  } catch { return { ...PREFS_DEFAULTS } }
+}
+
+export function setPref(key, value) {
+  const p = getPrefs()
+  p[key] = value
+  localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+}

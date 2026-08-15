@@ -1,73 +1,277 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, RunSync } from '../api'
+// 文件夹同步页：本地文件夹与网盘目录的双向/单向同步任务管理。
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, RunSync, onEvent, accountName, PickDirectory } from '../api'
+import Modal from '../components/Modal.vue'
+import SegTabs from '../components/SegTabs.vue'
+import SelectDirModal from '../components/SelectDirModal.vue'
+import UiIcon from '../components/UiIcon.vue'
+import UiSelect from '../components/UiSelect.vue'
 
-const props = defineProps({ account: Object })
+const props = defineProps({
+  account: { type: Object, default: null },
+  accounts: { type: Array, default: () => [] },
+  providers: { type: Array, default: () => [] },
+})
 const emit = defineEmits(['toast'])
+
 const jobs = ref([])
-const form = ref({ name: '', localDir: '', remoteDir: '', direction: 'two-way' })
-const editing = ref(false)
+const progress = ref({}) // id -> { done, total }
+const running = ref(new Set())
+
+const showEdit = ref(false)
+const showDirPick = ref(false)
+const editingId = ref('')
+const form = ref(emptyForm())
+
+const dirOptions = [
+  { key: 'two-way', label: '双向同步' },
+  { key: 'push', label: '仅上传' },
+  { key: 'pull', label: '仅下载' },
+]
+
+const dirLabel = { 'two-way': '双向', push: '仅上传', pull: '仅下载' }
+const dirArrow = { 'two-way': '⇄', push: '→', pull: '←' }
+
+function emptyForm() {
+  return { name: '', local_dir: '', user_id: '', drive_id: '', remote_dir: 'root', remote_name: '根目录', direction: 'two-way' }
+}
 
 function refresh() {
-  ListSyncConfigs().then((j) => { jobs.value = j || [] })
+  ListSyncConfigs().then((j) => { jobs.value = j || [] }).catch((e) => emit('toast', String(e), 'error'))
 }
 
+function accountOf(job) {
+  return props.accounts.find((a) => a.user_id === job.user_id) || null
+}
+
+const formAccount = computed(() => props.accounts.find((a) => a.user_id === form.value.user_id) || null)
+
+function openCreate() {
+  editingId.value = ''
+  form.value = emptyForm()
+  if (props.account) {
+    form.value.user_id = props.account.user_id
+    form.value.drive_id = props.account.drive_id
+  } else if (props.accounts.length) {
+    form.value.user_id = props.accounts[0].user_id
+    form.value.drive_id = props.accounts[0].drive_id
+  }
+  showEdit.value = true
+}
+
+function openEdit(job) {
+  editingId.value = job.id
+  form.value = {
+    name: job.name || '',
+    local_dir: job.local_dir || '',
+    user_id: job.user_id || '',
+    drive_id: job.drive_id || '',
+    remote_dir: job.remote_dir || 'root',
+    remote_name: job.remote_dir && job.remote_dir !== 'root' ? job.remote_dir : '根目录',
+    direction: job.direction || 'two-way',
+  }
+  showEdit.value = true
+}
+
+function onFormAccount() {
+  const acc = formAccount.value
+  if (acc) {
+    form.value.drive_id = acc.drive_id
+    form.value.remote_dir = 'root'
+    form.value.remote_name = '根目录'
+  }
+}
+
+// 选择本地同步文件夹（原生目录选择对话框）
+async function pickLocalDir() {
+  let dir
+  try { dir = await PickDirectory('选择本地文件夹', form.value.local_dir || '') } catch { return }
+  if (dir) form.value.local_dir = dir
+}
+
+let savingEdit = false
 async function save() {
-  if (!props.account) { emit('toast', '请先选择账号', 'error'); return }
-  const id = editing.value || 'sync-' + Date.now()
-  await SaveSyncConfig({
-    id, name: form.value.name || id, direction: form.value.direction,
-    user_id: props.account.UserID, drive_id: props.account.DriveID,
-    local_dir: form.value.localDir, remote_dir: form.value.remoteDir || 'root', enabled: true,
-  })
-  editing.value = false
-  form.value = { name: '', localDir: '', remoteDir: '', direction: 'two-way' }
+  if (savingEdit) return // 防重入
+  if (!form.value.name.trim()) { emit('toast', '请填写任务名称', 'error'); return }
+  if (!form.value.local_dir.trim()) { emit('toast', '请填写本地文件夹路径', 'error'); return }
+  if (!formAccount.value) { emit('toast', '请选择绑定账号', 'error'); return }
+  savingEdit = true
+  const id = editingId.value || 'sync-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+  try {
+    await SaveSyncConfig({
+      id,
+      name: form.value.name.trim(),
+      user_id: form.value.user_id,
+      drive_id: form.value.drive_id,
+      local_dir: form.value.local_dir.trim(),
+      remote_dir: form.value.remote_dir || 'root',
+      direction: form.value.direction,
+      enabled: editingId.value ? (jobs.value.find((j) => j.id === editingId.value) || {}).enabled !== false : true,
+    })
+    showEdit.value = false
+    refresh()
+    emit('toast', '已保存同步任务', 'success')
+  } catch (e) { emit('toast', String(e), 'error') }
+  finally { savingEdit = false }
+}
+
+async function toggle(job) {
+  if (running.value.has(job.id)) return
+  running.value = new Set([...running.value, job.id])
+  const next = { ...job, enabled: !job.enabled }
+  try {
+    await SaveSyncConfig(next)
+    job.enabled = next.enabled
+  } catch (e) { emit('toast', String(e), 'error') }
+  finally {
+    const s = new Set(running.value); s.delete(job.id); running.value = s
+  }
+}
+
+async function run(job) {
+  if (running.value.has(job.id)) return
+  running.value = new Set([...running.value, job.id])
+  emit('toast', `开始同步「${job.name}」…`, 'success')
+  try {
+    await RunSync(job.id)
+    emit('toast', `「${job.name}」同步完成`, 'success')
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  }
+  const s = new Set(running.value)
+  s.delete(job.id)
+  running.value = s
+  const p = { ...progress.value }
+  delete p[job.id]
+  progress.value = p
+}
+
+async function remove(job) {
+  if (!confirm(`删除同步任务「${job.name}」？本地与网盘文件不受影响。`)) return
+  try {
+    await DeleteSyncConfig(job.id)
+    refresh()
+    emit('toast', '已删除同步任务', 'success')
+  } catch (e) { emit('toast', String(e), 'error') }
+}
+
+function pct(id) {
+  const p = progress.value[id]
+  if (!p || !p.total) return 0
+  return Math.min(100, Math.round((p.done / p.total) * 100))
+}
+
+const offs = []
+onMounted(() => {
   refresh()
-  emit('toast', '已保存同步任务', 'success')
-}
-
-function edit(job) {
-  editing.value = job.ID
-  form.value = { name: job.Name, localDir: job.LocalDir, remoteDir: job.RemoteDir, direction: job.Direction }
-}
-
-async function remove(id) {
-  await DeleteSyncConfig(id)
-  refresh()
-}
-
-async function run(id) {
-  emit('toast', '开始同步…', 'success')
-  try { await RunSync(id); emit('toast', '同步完成', 'success') }
-  catch (e) { emit('toast', String(e), 'error') }
-}
-
-watch(() => props.account, () => refresh())
-onMounted(refresh)
+  offs.push(onEvent('sync:progress', (ev) => {
+    if (!ev || !ev.id) return
+    progress.value = { ...progress.value, [ev.id]: { done: ev.done || 0, total: ev.total || 0 } }
+  }))
+  offs.push(onEvent('account:changed', refresh))
+})
+onBeforeUnmount(() => offs.forEach((off) => off && off()))
 </script>
 
 <template>
-  <div class="panel">
-    <div class="panel-title">双向同步（本地 ⇄ 网盘）</div>
-    <div class="panel-row">
-      <input class="input" style="width:140px" v-model="form.name" placeholder="名称" />
-      <input class="input" style="flex:1" v-model="form.localDir" placeholder="本地目录，如 D:\sync" />
-      <input class="input" style="width:160px" v-model="form.remoteDir" placeholder="网盘目录 ID (root)" />
-      <select class="select" v-model="form.direction">
-        <option value="two-way">双向</option>
-        <option value="push">仅上传</option>
-        <option value="pull">仅下载</option>
-      </select>
-      <button class="btn primary" @click="save">{{ editing ? '保存修改' : '添加任务' }}</button>
+  <div class="syncpage">
+    <header class="syncpage-head">
+      <div class="syncpage-title">
+        <UiIcon name="refresh" :size="18" />
+        <strong>文件夹同步</strong>
+        <span class="syncpage-sub">本地文件夹与网盘文件夹保持同步</span>
+      </div>
+      <button class="btn primary sm" :disabled="!accounts.length" @click="openCreate">
+        <UiIcon name="plus" :size="13" /> 新建同步任务
+      </button>
+    </header>
+
+    <div v-if="!jobs.length" class="workspace-empty-state" style="flex:1">
+      <UiIcon name="refresh" :size="40" style="opacity:.4" />
+      <span class="wes-title">还没有同步任务</span>
+      <span class="wes-desc">新建一个任务，把本地文件夹和网盘文件夹关联起来</span>
     </div>
-    <div v-for="job in jobs" :key="job.ID" class="task-item">
-      <span class="tname">{{ job.Name }}</span>
-      <span class="tmeta">{{ job.LocalDir }} ⇄ {{ job.RemoteDir }}</span>
-      <span class="tstatus">{{ job.Direction }}</span>
-      <button class="btn sm" @click="run(job.ID)">同步</button>
-      <button class="btn sm" @click="edit(job)">编辑</button>
-      <button class="btn sm danger" @click="remove(job.ID)">删除</button>
+
+    <div v-else class="syncpage-list">
+      <div v-for="job in jobs" :key="job.id" class="sync-task" :class="{ disabled: !job.enabled }">
+        <div class="sync-task-main">
+          <div class="sync-task-name">
+            <strong>{{ job.name }}</strong>
+            <span class="sync-task-direction">{{ dirLabel[job.direction] || job.direction }}</span>
+            <span v-if="!accountOf(job)" class="sync-task-warn">绑定账号不可用</span>
+          </div>
+          <div class="sync-task-paths">
+            <span class="sync-path" :title="job.local_dir">本地：{{ job.local_dir }}</span>
+            <span style="color:var(--text-tertiary);flex-shrink:0">{{ dirArrow[job.direction] || '⇄' }}</span>
+            <span class="sync-path" :title="job.remote_dir">网盘：{{ accountOf(job) ? accountName(accountOf(job)) + ' / ' : '' }}{{ job.remote_dir === 'root' ? '根目录' : job.remote_dir }}</span>
+          </div>
+          <div v-if="running.has(job.id) && progress[job.id]" class="sync-task-progress">
+            <div class="progress-total">
+              <div class="progress-current active" :style="{ width: pct(job.id) + '%' }"></div>
+            </div>
+            <div class="sync-task-meta" style="margin-top:4px">
+              <span>{{ progress[job.id].done || 0 }} / {{ progress[job.id].total || 0 }}（{{ pct(job.id) }}%）</span>
+            </div>
+          </div>
+        </div>
+        <div class="sync-task-actions">
+          <div class="switch" :class="{ on: job.enabled }" :title="job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></div>
+          <button class="btn-circle" :disabled="running.has(job.id) || !accountOf(job)" title="立即同步" @click="run(job)">
+            <span v-if="running.has(job.id)" class="spin"></span><UiIcon v-else name="play" :size="14" />
+          </button>
+          <button class="btn-circle" title="编辑" @click="openEdit(job)"><UiIcon name="pencil" :size="14" /></button>
+          <button class="btn-circle" title="删除" style="color:var(--color-error)" @click="remove(job)"><UiIcon name="trash" :size="14" /></button>
+        </div>
+      </div>
     </div>
-    <div v-if="!jobs.length" class="empty">暂无同步任务</div>
+
+    <Modal v-if="showEdit" :title="editingId ? '编辑同步任务' : '新建同步任务'" width="480px" @close="showEdit = false">
+      <div class="field">
+        <label>任务名称</label>
+        <input class="input" style="width:100%" v-model="form.name" placeholder="如：工作文档同步" />
+      </div>
+      <div class="field">
+        <label>本地文件夹</label>
+        <div style="display:flex;gap:8px">
+          <input class="input" style="flex:1" v-model="form.local_dir" placeholder="选择本地文件夹" />
+          <button class="btn sm" @click="pickLocalDir">选择目录</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>绑定账号</label>
+        <UiSelect
+          v-model="form.user_id"
+          block
+          placeholder="请选择账号"
+          :options="accounts.map((a) => ({ value: a.user_id, label: accountName(a) }))"
+          @change="onFormAccount"
+        />
+      </div>
+      <div class="field">
+        <label>网盘目录</label>
+        <div style="display:flex;gap:8px">
+          <input class="input" style="flex:1" :value="form.remote_name" readonly placeholder="根目录" />
+          <button class="btn sm" :disabled="!formAccount" @click="showDirPick = true">选择目录</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>同步方向</label>
+        <SegTabs v-model="form.direction" :options="dirOptions" />
+      </div>
+      <template #actions>
+        <button class="btn" @click="showEdit = false">取消</button>
+        <button class="btn primary" @click="save">保存</button>
+      </template>
+    </Modal>
+
+    <SelectDirModal
+      v-if="showDirPick && formAccount"
+      title="选择网盘目录"
+      :account="formAccount"
+      :providers="providers"
+      @close="showDirPick = false"
+      @select="(d) => { form.remote_dir = d.id; form.remote_name = d.name; showDirPick = false }"
+    />
   </div>
 </template>
