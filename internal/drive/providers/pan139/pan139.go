@@ -20,6 +20,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -427,17 +428,30 @@ type listData struct {
 
 // ListPage lists one page.
 func (d *Driver) ListPage(ctx context.Context, c drive.Context, parentID, marker string) ([]model.File, string, error) {
+	pageNum := 1
+	startNumber := 0
+	if marker != "" {
+		// marker encodes the next page number and start offset as "page:start"
+		if parts := strings.SplitN(marker, ":", 2); len(parts) == 2 {
+			if n, err := strconv.Atoi(parts[0]); err == nil {
+				pageNum = n
+			}
+			if n, err := strconv.Atoi(parts[1]); err == nil {
+				startNumber = n
+			}
+		}
+	}
 	raw, err := d.personalPost(ctx, c, "/file/list", map[string]any{
 		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
 		"catalogID":         toID(parentID),
 		"contentCategory":   1,
 		"orderBy":           "updateTime",
-		"pageNum":           1,
+		"pageNum":           pageNum,
 		"pageSize":          100,
 		"sortDirection":     "desc",
 		"sortType":          1,
 		"searchName":        "",
-		"startNumber":       0,
+		"startNumber":       startNumber,
 	})
 	if err != nil {
 		return nil, "", err
@@ -448,7 +462,11 @@ func (d *Driver) ListPage(ctx context.Context, c drive.Context, parentID, marker
 	for _, it := range data.Items {
 		items = append(items, mapFile(it, c.DriveID, parentID))
 	}
-	return items, data.NextPageCursor, nil
+	nextMarker := ""
+	if len(data.Items) >= 100 {
+		nextMarker = strconv.Itoa(pageNum+1) + ":" + strconv.Itoa(startNumber+len(data.Items))
+	}
+	return items, nextMarker, nil
 }
 
 func accountOf(c drive.Context) string {

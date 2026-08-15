@@ -22,7 +22,9 @@ func init() {
 			"recycleBin":      false,
 			"permanentDelete": true,
 			"trashView":       false,
-		}, nil),
+		}, func(c *drive.Capabilities) {
+			c.SetHashes([]string{"md5"}, []string{"md5"})
+		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "username", Type: "text", Label: "账号", Required: true},
 			{Key: "password", Type: "password", Label: "密码", Required: true},

@@ -285,9 +285,20 @@ func (a *App) GetSettings() store.Settings {
 	return s
 }
 
-// SaveSettings persists settings and applies them.
+// SaveSettings persists settings and applies runtime-relevant changes.
 func (a *App) SaveSettings(s store.Settings) error {
-	return a.store.SetSettings(s)
+	if err := a.store.SetSettings(s); err != nil {
+		return err
+	}
+	// apply download directory at runtime
+	if s.DownloadDir != "" && a.dl != nil {
+		a.dl.SetDir(s.DownloadDir)
+	}
+	// apply concurrency limit at runtime
+	if s.MaxConcurrentDownloads > 0 && a.dl != nil {
+		a.dl.SetConcurrency(s.MaxConcurrentDownloads)
+	}
+	return nil
 }
 
 // ---- transfer bindings ----

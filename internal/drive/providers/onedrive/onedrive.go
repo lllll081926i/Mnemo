@@ -26,7 +26,9 @@ func init() {
 			"shareExpiration": true,
 			"sharePassword": true,
 			"shareHistory":  true,
-		}, nil),
+		}, func(c *drive.Capabilities) {
+			c.SetHashes([]string{"sha1", "quickxorhash"}, nil)
+		}),
 		Factory: func() drive.Driver { return &Driver{} },
 		Auth:    authPKCE,
 		Login: drive.LoginConfig{Fields: []drive.LoginField{

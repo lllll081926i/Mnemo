@@ -69,6 +69,31 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 // SetEventSink wires the event callback (used by the app layer).
 func (m *Manager) SetEventSink(fn OnTaskEvent) { m.onEvent = fn }
 
+// SetDir updates the download directory at runtime. Subsequent downloads use
+// the new directory; existing tasks keep their already-assigned LocalPath.
+func (m *Manager) SetDir(dir string) {
+	if dir == "" {
+		return
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	m.mu.Lock()
+	m.dir = dir
+	m.mu.Unlock()
+}
+
+// SetConcurrency rebuilds the semaphore capacity. In-flight tasks are not
+// interrupted; only future starts are affected.
+func (m *Manager) SetConcurrency(n int) {
+	if n <= 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// drain old sem and replace; in-flight acquirers will release into the old
+	// channel they captured, so we only swap the reference.
+	m.sem = make(chan struct{}, n)
+}
+
 func (m *Manager) loadPersisted() {
 	list, err := m.store.ListDownloadTasks()
 	if err != nil {

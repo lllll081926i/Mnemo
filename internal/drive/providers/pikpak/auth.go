@@ -34,11 +34,8 @@ func init() {
 			"importShare":       true,
 			"trashView":         true,
 			"trashRestore":      true,
-			"trashPurge":        true,
-			"trashClear":        true,
 			"favorite":          true,
 			"permanentDelete":   true,
-			"playbackHistory":   true,
 		}, nil),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "username", Type: "text", Label: "账号（手机/邮箱）", Required: true},

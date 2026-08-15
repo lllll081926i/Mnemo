@@ -39,7 +39,9 @@ func init() {
 			"shareExpiration": true,
 			"sharePassword":   true,
 			"shareHistory":    true,
-		}, nil),
+		}, func(c *drive.Capabilities) {
+			c.SetHashes([]string{"dropbox"}, nil)
+		}),
 		Factory: func() drive.Driver { return &Driver{} },
 		Auth:    authPKCE,
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
@@ -288,6 +290,7 @@ func (c *client) CreateSharedLink(ctx context.Context, path, expiration, passwor
 		settings["expires"] = expiration
 	}
 	if password != "" {
+		settings["requested_visibility"] = "password"
 		settings["link_password"] = password
 	}
 	body := map[string]any{"path": path, "settings": settings}

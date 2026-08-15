@@ -74,8 +74,6 @@ func init() {
 			"importShare":     true,
 			"trashView":       true,
 			"trashRestore":    true,
-			"trashPurge":      true,
-			"trashClear":      true,
 			"copy":            false,
 			"permanentDelete": true,
 		}, func(c *drive.Capabilities) {
