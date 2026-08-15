@@ -39,8 +39,8 @@
 | pan139 | ✅ | ➖ | Authorization | ➖ | ➖ | ✅ | ✅ | ✅ |
 | lanzou | ✅ | ➖ | ✅ | ➖ | ➖ | ✅(内联) | ✅ | ➖ |
 | ilanzou | ✅ | ➖ | session | ➖ | ➖ | ✅(内联) | ✅ | ➖ |
-| onedrive | ➖ | ✅ | refresh_token | ➖ | ➖ | ❌**缺失** | ❌**缺失** | ❌**缺失** |
-| dropbox | ➖ | ✅ | refresh_token | ➖ | ➖ | ❌**缺失** | ❌**缺失** | ❌**缺失** |
+| onedrive | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
+| dropbox | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
 | yike | ➖ | ➖ | BDUSS | ➖ | ➖ | ➖ | ✅(无配额) | ❌ |
 | guangya | ➖ | ➖ | refresh_token | ✅ | ➖ | ✅ | ✅ | ✅ |
 | webdav | ➖ | ➖ | 账密 | ➖ | ➖ | ➖ | ➖ | ➖ |
@@ -55,18 +55,18 @@
 | Provider | List | ListPaged | 游标分页 | 分页防环 | Search(云端) | 本地搜索索引 |
 |----------|:----:|:---------:|:--------:|:--------:|:------------:|:------------:|
 | pikpak | ✅ | ✅ | ✅ | ✅ | ❌(设计) | 由 ops 兜底 |
-| aliopen | ✅ | ✅ | ✅ | ❌**缺** | ✅ | — |
+| aliopen | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | pan123 | ✅ | ⚠️(marker未用) | ❌ | ❌ | ✅ | — |
 | pan189 | ✅ | ✅ | ✅ | ➖ | ❌(设计) | — |
 | pan139 | ✅ | ✅ | ⚠️(参数未推进) | ❌ | ❌(设计) | — |
 | lanzou | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
 | ilanzou | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
-| onedrive | ✅ | ✅ | ✅ | ✅ | ⚠️(无分页) | — |
-| dropbox | ✅ | ✅ | ✅ | ✅ | ⚠️(无分页) | — |
+| onedrive | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| dropbox | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | yike | ✅ | ➖ | ✅ | ➖ | ❌(设计) | — |
 | guangya | ✅ | ➖ | page翻页 | ➖ | ❌(设计) | — |
 | webdav | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
-| s3 | ✅ | ✅ | ✅ | ❌**缺** | ❌(设计) | — |
+| s3 | ✅ | ✅ | ✅ | ✅ | ❌(设计) | — |
 
 ---
 
@@ -94,19 +94,19 @@
 
 | Provider | UploadOneFile | 分片上传 | 整包上传 | 断点续传 | 秒传 | 冲突策略 | 进度回调 | 上传模式 |
 |----------|:-------------:|:--------:|:--------:|:--------:|:----:|:--------:|:--------:|:--------:|
-| pikpak | ✅ | ➖ | ✅(OSS PUT) | ❌ | ✅(GCID) | ❌**缺** | ⚠️(仅完成) | queue |
-| aliopen | ✅ | ✅(固定10MB) | ➖ | ❌**缺** | ✅(SHA1) | ❌(固定ignore) | ✅ | queue |
-| pan123 | ✅ | ✅(16MB) | ➖ | ❌**缺** | ✅(MD5) | ⚠️(duplicate) | ✅ | queue |
-| pan189 | ✅ | ✅(10/20MB) | ➖ | ❌**缺** | ✅(MD5) | ➖ | ✅ | queue |
+| pikpak | ✅ | ➖ | ✅(OSS PUT) | ✅ | ✅(GCID) | ❌(设计) | ⚠️(仅完成) | queue |
+| aliopen | ✅ | ✅(10MB) | ➖ | ✅ | ✅(SHA1) | ❌(固定ignore) | ✅ | queue |
+| pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ⚠️(duplicate) | ✅ | queue |
+| pan189 | ✅ | ✅(10/20MB) | ➖ | ✅ | ✅(MD5) | ➖ | ✅ | queue |
 | pan139 | ✅ | ✅(5MB base64) | ➖ | ➖ | ➖ | ➖ | ✅ | queue |
 | lanzou | ✅ | ➖ | ✅(≤200MB) | ➖ | ➖ | ➖ | ➖ | queue |
 | ilanzou | ✅ | ✅(8MB) | ✅(≤8MB) | ➖ | ✅(MD5) | ➖ | ✅ | queue |
-| onedrive | ✅ | ✅(10MB session) | ✅(≤4MB) | ❌**缺** | ➖ | ❌(固定rename) | ✅ | queue |
+| onedrive | ✅ | ✅(10MB session) | ✅(≤4MB) | ✅ | ➖ | ❌(固定rename) | ✅ | queue |
 | dropbox | ✅ | ✅(8MB session) | ✅(≤150MB) | ➖ | ➖ | ❌(固定add) | ✅ | queue |
 | yike | ✅ | ✅(4MB) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
 | guangya | ✅ | ✅(OSS multipart) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
-| webdav | ✅ | ➖ | ✅(PUT) | ➖ | ➖ | ❌**缺** | ❌**缺** | direct |
-| s3 | ✅ | ❌**缺** | ✅(PUT) | ➖ | ➖ | ❌**缺** | ❌**缺** | direct |
+| webdav | ✅ | ➖ | ✅(PUT) | ➖ | ➖ | ✅ | ❌**缺** | direct |
+| s3 | ✅ | ✅(PUT) | ✅(PUT) | ➖ | ➖ | ✅ | ❌**缺** | direct |
 
 > ⚠️ 多个 queue 盘缺失断点续传持久化（aliopen/pan123/pan189/onedrive），进程重启后大文件无法恢复。
 > ⚠️ webdav/s3 两个 direct 盘完全缺失冲突策略，上传直接覆盖同名文件。
@@ -117,7 +117,7 @@
 
 | Provider | Mkdir | Rename | Move | Copy | 批量任务轮询 |
 |----------|:-----:|:------:|:----:|:----:|:------------:|
-| pikpak | ✅ | ✅ | ✅ | ✅ | ❌**缺** |
+| pikpak | ✅ | ✅ | ✅ | ✅ | ✅(waitForTasks) |
 | aliopen | ✅ | ✅ | ✅ | ✅ | ➖ |
 | pan123 | ✅ | ✅ | ✅ | ❌(设计) | ➖ |
 | pan189 | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -139,9 +139,9 @@
 
 | Provider | Trash(移入) | Delete(永久) | Restore(恢复) | ListTrash(查看) | TrashPurge(清空) | TrashClear |
 |----------|:-----------:|:------------:|:-------------:|:---------------:|:----------------:|:----------:|
-| pikpak | ✅ | ✅ | ✅ | ✅ | ⚠️(声明未实现) | ⚠️(声明未实现) |
+| pikpak | ✅ | ✅ | ✅ | ✅ | ❌(声明已移除) | ❌(声明已移除) |
 | aliopen | ✅ | ✅ | ❌(设计) | ❌(设计) | ➖ | ➖ |
-| pan123 | ✅ | ✅ | ✅ | ✅ | ⚠️(声明未实现) | ⚠️(声明未实现) |
+| pan123 | ✅ | ✅ | ✅ | ✅ | ❌(声明已移除) | ❌(声明已移除) |
 | pan189 | ✅ | ✅(清空回收站) | ❌**缺** | ❌(设计禁用) | ✅(Delete内联) | ✅(Delete内联) |
 | pan139 | ✅ | ✅ | ✅ | ❌(设计) | ➖ | ➖ |
 | lanzou | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
@@ -162,9 +162,9 @@
 
 | Provider | CreateShare | 过期时间 | 密码 | 分享导入(转存) | 分享历史 |
 |----------|:-----------:|:--------:|:----:|:--------------:|:--------:|
-| pikpak | ✅ | ✅ | ✅ | ❌**缺**(声明true) | ✅ |
-| aliopen | ✅ | ✅ | ✅ | ❌**缺**(声明true) | ✅ |
-| pan123 | ✅ | ✅ | ✅ | ❌**缺**(声明true) | ✅ |
+| pikpak | ✅ | ✅ | ✅ | ✅ | ✅ |
+| aliopen | ✅ | ✅ | ✅ | ✅ | ✅ |
+| pan123 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | pan189 | ❌(设计禁用) | ➖ | ➖ | ➖ | ➖ |
 | pan139 | ❌(设计) | ➖ | ➖ | ➖ | ➖ |
 | lanzou | ✅ | ➖ | ✅(API返回) | ➖ | ✅ |
@@ -185,7 +185,7 @@
 
 | Provider | 能力声明 | 提交任务 | 任务列表 | 进度查询 | 任务删除 |
 |----------|:--------:|:--------:|:--------:|:--------:|:--------:|
-| pikpak | ✅ | ✅ | ✅ | ❌**缺** | ❌**缺** |
+| pikpak | ✅ | ✅ | ✅ | ✅(RefreshOffline) | ✅(DeleteOffline) |
 | 其余 12 盘 | ❌(设计) | ➖ | ➖ | ➖ | ➖ |
 
 > ⚠️ pikpak 的离线下载只实现了创建和列表，缺进度查询和任务删除，列表 `page_size=100` 可能漏查大量任务。
@@ -231,14 +231,14 @@
 
 | # | 差距 | 影响范围 | 状态 | 详情 |
 |---|------|---------|:----:|------|
-| 7 | 上传断点续传持久化缺失 | 4 盘 | ⚠️未修复 | aliopen/pan123/pan189/onedrive 进程重启后大文件无法恢复 |
+| 7 | 上传断点续传持久化缺失 | 4 盘 | ✅已修复 | aliopen/pan123/pan189/onedrive 已实现 session 存储 |
 | 8 | webdav/s3 上传冲突策略完全缺失 | 2 盘 | ✅已修复 | refuse/rename/overwrite + ConflictPolicy 字段 |
 | 9 | 能力声明与实现不符 | 多盘 | ✅已修复 | pikpak/pan123 的 trashPurge/trashClear/playbackHistory 改为 false |
 | 10 | 哈希能力声明缺失 | 4 盘 | ✅已修复 | ilanzou/onedrive/dropbox 已声明 SetHashes |
 | 11 | pikpak 离线下载进度/删除缺失 | 1 盘 | ✅已修复 | RefreshOfflineTasks + DeleteOfflineTask 绑定 |
 | 12 | pan139 ListPage 分页参数未推进 | 1 盘 | ✅已修复 | pageNum/startNumber 随 marker 递增 |
-| 13 | onedrive/dropbox 搜索无分页 | 2 盘 | ⚠️未修复 | 只取第一页结果 |
-| 14 | pikpak batch 操作无任务轮询 | 1 盘 | ⚠️未修复 | move/copy/trash 操作未等待完成就返回 |
+| 13 | onedrive/dropbox 搜索无分页 | 2 盘 | ✅已修复 | 跟随 nextLink/cursor 分页 |
+| 14 | pikpak batch 操作无任务轮询 | 1 盘 | ✅已修复 | waitForTasks 60s 超时轮询 |
 
 ### 🟢 P2 — 体验优化
 

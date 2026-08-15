@@ -75,19 +75,19 @@
 
 | Provider | 完成度 | P0 差距 |
 |----------|:------:|---------|
-| pikpak | ~75% | API captcha 续接、分享导入、离线下载进度/删除 |
-| aliopen | ~70% | CompleteUpload 空 upload_id bug、分享导入、上传断点续传 |
-| pan123 | ~80% | 断点续传持久化、分享导入、TrashPurge/TrashClear 声明未实现 |
+| pikpak | ~85% | API captcha 续接(部分) |
+| aliopen | ~85% | (已修复) |
+| pan123 | ~90% | (已修复) |
 | pan189 | ~95% | 无（最忠实移植） |
-| pan139 | ~90% | ListPage 分页参数未推进 |
+| pan139 | ~95% | (已修复) |
 | lanzou | ~98% | 无（源码级移植） |
 | ilanzou | ~95% | 秒传 caps 声明缺失 |
-| onedrive | ~70% | RefreshAccount 完全缺失、上传断点续传、搜索分页 |
-| dropbox | ~70% | RefreshAccount 完全缺失、分享 visibility bug、搜索分页 |
+| onedrive | ~85% | (已修复) |
+| dropbox | ~85% | (已修复) |
 | yike | ~90% | decryptYikeMd5 缺失 |
 | guangya | ~98% | 无 |
-| webdav | ~75% | 上传冲突策略缺失、rootPath 缺失 |
-| s3 | ~70% | forcePathStyle 硬编码、目录递归操作缺失、冲突策略缺失 |
+| webdav | ~85% | rootPath 缺失 |
+| s3 | ~85% | (已修复) |
 
 ---
 

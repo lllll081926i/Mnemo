@@ -2,21 +2,21 @@
 
 > 调研范围：`internal/drive/providers/pikpak/`（auth.go, client.go, pikpak.go, gcid.go, oss.go）
 > 对照旧版：`../Mnemo/src/pikpak/`（8 文件）+ `src/drive/providers/pikpak.ts`
-> 整体完成度：⚠️ ~75%
+> 整体完成度：✅ ~95%（captcha 续接仍有部分标记）
 
 ---
 
-## 能力声明（pikpak.go:35-50）
+## 能力声明（auth.go:27-39）
 
 | 能力 | 值 | 实现 |
 |------|:--:|------|
 | download | true | ✅ |
-| offlineDownload | true | ⚠️(缺进度/删除) |
+| offlineDownload | true | ✅ |
 | createShare / shareExpiration / sharePassword / combinedShare / shareHistory | true | ✅ / ✅ / ✅ / 声明 / 声明 |
-| importShare | true | ❌(未实现) |
+| importShare | true | ✅ `pikpak.go:390-475` ImportShareSession + `pikpak.go:477-500` SaveShare |
 | favorite | true | ✅ |
-| trashView / trashRestore / trashPurge / trashClear | true | ✅ / ✅ / ⚠️(未实现) / ⚠️(未实现) |
-| playbackHistory | true | ❌(未实现) |
+| trashView / trashRestore / trashPurge / trashClear | true / true / — / — | ✅ / ✅ / 声明已移除 / 声明已移除 |
+| playbackHistory | 未声明 | 声明已移除 |
 | recycleBin / permanentDelete | true | ✅ / ✅ |
 
 ---
@@ -97,7 +97,7 @@
 | Rename | ✅ | `client.go:330-333` POST `/files:batch_rename` | 端点不同（旧版 PATCH 单文件） |
 | Move | ✅ | `client.go:345-348` POST `/files:batch_move` requests 包裹 | body 结构不同（旧版 to 包裹） |
 | Copy | ✅ | `client.go:353-356` POST `/files:batch_copy` | 同 Move |
-| **任务轮询等待** | ❌ | 无 | 🟡 旧版 `waitForPikPakTask` 60×1s 轮询，新版不等待完成 |
+| **任务轮询等待** | ✅ | `client.go:526-555` waitForTasks 60×1s 轮询 | 无 |
 
 ---
 
@@ -109,8 +109,8 @@
 | Delete | ✅ | `client.go:342` POST `/files:batch_delete` | 无 |
 | Restore | ✅ | `client.go:346` POST `/files:batch_restore` | 端点不同（旧版 batchUntrash） |
 | ListTrash | ✅ | `pikpak.go:58-63` listPages(trashed=true) | ⚠️ filters `{"trashed":true}` 旧版 `{"trashed":{"eq":true},"parent_id":"*"}`，可能列不正确 |
-| TrashPurge | ❌ | 声明 true 但无实现 | 🔴 能力声明与实现不符 |
-| TrashClear | ❌ | 声明 true 但无实现 | 🔴 同上 |
+| TrashPurge | — | 声明已移除（auth.go Caps 不再声明） | — |
+| TrashClear | — | 声明已移除（auth.go Caps 不再声明） | — |
 
 ---
 
@@ -121,7 +121,7 @@
 | CreateShare | ✅ | `client.go:366-381` POST `/drive/v1/share` | body 结构差异大（旧版 share_to + expiration_days + pass_code_option） |
 | 过期时间 | ✅ | 直传 expiration 字符串 | 旧版转 expiration_days 整数 |
 | 密码 | ✅ | 直传 pass_code | 无 |
-| **分享导入 importShare** | ❌ | 声明 true 但无实现 | 🔴 旧版 3 步：getShareToken → listByShare → copy with share_token |
+| **分享导入 importShare** | ✅ | `pikpak.go:390-475` ImportShareSession（getShareToken → listByShare → SaveShare `pikpak.go:477-500`） | 无 |
 
 ---
 
@@ -131,8 +131,8 @@
 |--------|:----:|---------|------|
 | 提交任务 | ✅ | `client.go:384-405` POST `/drive/v1/tasks?type=offline` | 端点+body 与旧版完全不同（旧版 /files + url 对象） |
 | 任务列表 | ✅ | `client.go:560-570` GET `/drive/v1/tasks?type=offline&page_size=100` | ⚠️ 无 phase 过滤、无 reference_resource、page_size=100 vs 旧版 limit=10000 |
-| **进度查询** | ❌ | 无 OfflineProcess | 🔴 旧版 `apiPikPakOfflineProcess` 按 taskId 查询 |
-| **任务删除** | ❌ | 无 OfflineDelete | 🔴 旧版 DELETE `/tasks?task_ids=...` |
+| **进度查询** | ✅ | `pikpak.go:544-552` OfflineFind → FindOfflineTask 按 taskID/fileID 查询 | 无 |
+| **任务删除** | ✅ | `pikpak.go:553-560` OfflineDelete DELETE `/tasks?task_ids=...` | 无 |
 | 任务查找 | ✅ | `client.go:572-585` FindOfflineTask | 无 |
 
 ---
@@ -166,8 +166,9 @@
 
 ## P0 差距清单
 
-1. 🔴 **API captcha token 续接不完整**：登录流程已用 X-Captcha-Token(`auth.go:204`)，但业务 API 遇到二次挑战后的完整续接体系仍不完整
-2. 🔴 **分享导入**：声明 `importShare:true` 但 3 个 API 完全未迁移
-3. 🔴 **离线下载进度/删除**：只实现创建和列表
-4. 🟡 **TrashPurge/TrashClear**：声明 true 但无实现
-5. 🟡 **PlaybackHistory**：声明 true 但无实现
+1. ⚠️ **API captcha token 续接不完整**：登录流程已用 X-Captcha-Token(`auth.go:204`)，但业务 API 遇到二次挑战后的完整续接体系仍不完整
+2. ✅ **分享导入**：已实现（`pikpak.go:390-500` ImportShareSession + SaveShare）
+3. ✅ **离线下载进度/删除**：已实现（`pikpak.go:544-560` OfflineFind + OfflineDelete）
+4. ✅ **TrashPurge/TrashClear**：声明已移除（auth.go Caps 不再声明）
+5. ✅ **PlaybackHistory**：声明已移除
+6. ✅ **任务轮询等待**：已实现（`client.go:526-555` waitForTasks）

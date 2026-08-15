@@ -32,7 +32,7 @@ SetHashes(["md5"], nil)  // 仅 ProvideHashes，无 RapidUploadHashes
 | 相册列表 album | ✅ | `yike.go:174-200` listRoot album 部分 GET albumAPI/list cursor 分页 limit=100 | 无 |
 | 文件列表 | ✅ | `yike.go:202-228` listRoot loose files GET fileV1/list cursor | 无 |
 | 相册内文件 | ✅ | `yike.go:230-258` listAlbum albumAPI/listfile cursor limit=1000 | 无 |
-| **decryptYikeMd5** | ❌ | 全文件搜索无匹配 | 🟡 旧版有 md5 解密，Go 版直接取 API 字段，可能取到错误值 |
+| **decryptYikeMd5** | ✅ | `yike.go:676-725` decryptYikeMd5（纯 hex 返回；否则 XOR position + 8-char block 重排） | 无 |
 | **albumDirId** | ❌ | 无此概念 | 🟡 改用 album: 前缀 ID（`yike.go:610-617`），功能等价 |
 
 ---
@@ -84,15 +84,13 @@ SetHashes(["md5"], nil)  // 仅 ProvideHashes，无 RapidUploadHashes
 
 ## 9. ProvideHashes
 
-✅ `yike.go:44` SetHashes(["md5"], nil)。mapFile `f.ContentHash = item.MD5`。
-
-> 注：若 API 返回的是加密 md5（decryptYikeMd5 缺失），ProvideHashes 值可能不正确。
+✅ `yike.go:44` SetHashes(["md5"], nil)。mapFile `yike.go:665` `hash := decryptYikeMd5(item.MD5)` → f.ContentHash。
 
 ---
 
 ## 差距清单
 
-1. 🟡 **decryptYikeMd5 缺失**：旧版有 md5 解密逻辑，Go 版直接取字段，可能导致 hash 值错误
+1. ✅ **decryptYikeMd5 已实现**（`yike.go:676-725`）：纯 hex 直接返回，非 hex 执行 XOR+重排解密
 2. 🟡 RefreshAccount 无配额（一刻 API 限制）
 3. albumDirId 改为 album: 前缀方案（功能等价，实现不同）
 4. Move/Copy 不支持——与旧版设计一致，非差距

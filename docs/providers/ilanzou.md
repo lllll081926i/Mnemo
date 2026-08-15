@@ -86,15 +86,15 @@ search, createShare, copy, recycleBin, trashView: false
 
 ## 8. ProvideHashes / RapidUploadHashes
 
-⚠️ **功能有但 caps 未声明**。
+✅ **已声明**。
 
-`upload.go:62-81` 实际计算 MD5 并通过 getUpToken 秒传判定，但 `ilanzou.go:19-23` NewCapabilities 第三参数 nil，未声明 ProvideHashes/RapidUploadHashes。
+`ilanzou.go:26` SetHashes(["md5"], ["md5"]) — ProvideHashes 和 RapidUploadHashes 均已声明。
 
-> 这会导致跨盘秒传路由（`internal/transfer/upload.go:186` 遍历 caps.RapidUploadHashes）不识别 ilanzou 的秒传能力。旧版 TS 在 adapter 层声明，功能等价但 Go 版 caps 退化。
+`upload.go:62-81` 实际计算 MD5 并通过 getUpToken 秒传判定，与 caps 声明一致。
 
 ---
 
 ## 差距清单
 
-1. 🟡 **秒传 caps 声明缺失**：upload.go 实现了 MD5 秒传，但 ProvideHashes/RapidUploadHashes 未声明，跨盘秒传路由失效
+1. ✅ **秒传 caps 已声明**（`ilanzou.go:26` SetHashes(["md5"], ["md5"])）：跨盘秒传路由正常工作
 2. 其余功能与旧版对齐，无重大缺失

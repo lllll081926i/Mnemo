@@ -2,16 +2,17 @@
 
 > 调研范围：`internal/drive/providers/onedrive/`（onedrive.go, auth.go, graph.go, upload.go）
 > 对照旧版：`../Mnemo/src/onedrive/` + `src/drive/providers/onedrive.ts`
-> 整体完成度：⚠️ ~70%（RefreshAccount 完全缺失是最大问题）
+> 整体完成度：✅ ~90%
 
 ---
 
 ## 能力声明（onedrive.go:18-22）
 
 ```
-createShare, shareExpiration, sharePassword: true
+search, createShare, shareExpiration, sharePassword, shareHistory: true
+SetHashes(["sha1", "quickxorhash"], nil)
 ```
-> trashView 未设；ProvideHashes 未声明（但实际映射了 hash）
+> trashView 未设；ProvideHashes 已声明
 
 ---
 
@@ -23,8 +24,8 @@ createShare, shareExpiration, sharePassword: true
 | 本地回调 | ✅ | `auth.go:66-113` net.Listen 127.0.0.1:0 随机端口 + state 校验 + 10min 超时 | Go 版内置回调服务器 |
 | Token 交换 | ✅ | `auth.go:134-166` POST msTokenURL | 🟡 缺 client_secret 传递 |
 | client_id | ✅ | `auth.go:30-34` req.Config 或 onedrive_client_id | 🟡 无内置 fallback client_id |
-| **Token 刷新** | ❌ | 无 RefreshAccount 重写，回退 BaseDriver 返回 nil | 🔴 旧版 refreshOneDriveAccessToken 完整逻辑未迁移 |
-| **账号信息/配额** | ❌ | 不获取 /me 和 /me/drive 配额 | 🔴 旧版 applyOneDriveAccount |
+| **Token 刷新** | ✅ | `onedrive.go:361-414` RefreshAccount 调 refreshOneDriveToken | 无 |
+| **账号信息/配额** | ✅ | `onedrive.go:386-414` 获取 /me 和 /me/drive 配额 | 无 |
 
 ---
 
@@ -63,9 +64,9 @@ createShare, shareExpiration, sharePassword: true
 |--------|:----:|---------|------|
 | 小文件 PUT ≤4MB | ✅ | `upload.go:43-56` rawPut /content | 无 |
 | 大文件 session | ✅ | `upload.go:59-110` CreateUploadSession + 10MB chunked PUT + Content-Range | 无 |
-| **断点续传** | ❌ | 无会话持久化 | 🔴 旧版 querySessionPosition + 416 恢复 + saveUploadSession |
-| **416 处理** | ⚠️ | `upload.go:96-98` 遇 416 直接 return nil | 🟡 旧版查询实际位置跳过已传 |
-| **会话取消** | ❌ | 无 | 🟡 旧版 cancelUploadSession DELETE |
+| **断点续传** | ✅ | `upload.go:65-128` UploadSessionKey + LoadUploadSession + SaveUploadSession + querySessionPosition 恢复 | 无 |
+| **416 处理** | ✅ | `upload.go:67-72` querySessionPosition 查询实际位置跳过已传 | 无 |
+| **会话取消** | ✅ | `upload.go:128` ClearUploadSession | 无 |
 | 冲突策略 | ⚠️ | 硬编码 rename | 🟡 旧版 fail/replace/rename |
 | **ignore 模式** | ❌ | 无 | 🟡 旧版先删同名再 overwrite |
 
@@ -108,7 +109,7 @@ createShare, shareExpiration, sharePassword: true
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | Search | ✅ | `graph.go:317-325` /me/drive/root/search(q=...) | 无 |
-| **搜索分页** | ❌ | 只取第一页 | 🟡 旧版跟 @odata.nextLink 循环 |
+| **搜索分页** | ✅ | `graph.go:238-261` 跟随 @odata.nextLink 循环 | 无 |
 | **缩略图** | ❌ | URL 无 $expand=thumbnails | 🟡 旧版有 |
 | **过滤器** | ❌ | 无 | 🟡 旧版 filterOneDriveSearchResults |
 | **引号转义** | ⚠️ | url.QueryEscape | 🟡 旧版 OData `''` 转义（潜在 bug） |
@@ -117,13 +118,13 @@ createShare, shareExpiration, sharePassword: true
 
 ## 10. RefreshAccount
 
-❌ **完全缺失**。未重写 BaseDriver.RefreshAccount，返回 nil。
+✅ `onedrive.go:361-414` 调 refreshOneDriveToken 刷新 token，再获取 /me 和 /me/drive 配额。对齐。
 
 ---
 
 ## 11. ProvideHashes
 
-⚠️ `graph.go:460-472` mapItem 提取 sha1Hash/quickXorHash → ContentHash，但 Caps 未声明 ProvideHashes。
+✅ `onedrive.go:30` SetHashes(["sha1", "quickxorhash"], nil)。`graph.go:460-472` mapItem 提取 sha1Hash/quickXorHash → ContentHash。
 
 ---
 
@@ -135,11 +136,12 @@ createShare, shareExpiration, sharePassword: true
 
 ## P0 差距清单
 
-1. 🔴 **Token 刷新完全缺失**：RefreshAccount 未实现，token 过期后无法续期
-2. 🔴 **账号信息/配额缺失**：不获取用户信息和配额
-3. 🔴 **上传断点续传缺失**：无会话持久化、无 416 位置查询、无会话取消
-4. 🟡 上传冲突策略单一（仅 rename）
-5. 🟡 搜索无分页、无缩略图、引号转义可能错误
-6. 🟡 版本历史完全缺失
-7. 🟡 client_secret 不传递、无内置 fallback client_id
-8. 🟡 ProvideHashes 未在 Caps 声明
+1. ✅ **Token 刷新已实现**（`onedrive.go:361-414` RefreshAccount）
+2. ✅ **账号信息/配额已实现**（`onedrive.go:386-414`）
+3. ✅ **上传断点续传已实现**（`upload.go:65-128` UploadSession + querySessionPosition + ClearUploadSession）
+4. ✅ **ProvideHashes 已声明**（`onedrive.go:30` SetHashes）
+5. ✅ **搜索分页已实现**（`graph.go:238-261` 跟随 nextLink）
+6. 🟡 上传冲突策略单一（仅 rename）
+7. 🟡 搜索无缩略图、引号转义可能错误
+8. 🟡 版本历史完全缺失
+9. 🟡 client_secret 不传递、无内置 fallback client_id

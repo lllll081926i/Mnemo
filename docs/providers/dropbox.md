@@ -2,16 +2,17 @@
 
 > 调研范围：`internal/drive/providers/dropbox/`（onedrive.go 驱动, auth.go, dropbox.go 客户端, util.go）
 > 对照旧版：`../Mnemo/src/dropbox/` + `src/drive/providers/dropbox.ts`
-> 整体完成度：⚠️ ~70%（与 OneDrive 共性问题：RefreshAccount 缺失）
+> 整体完成度：✅ ~90%
 
 ---
 
 ## 能力声明（dropbox.go:32-39）
 
 ```
-createShare, shareExpiration, sharePassword: true
+search, createShare, shareExpiration, sharePassword, shareHistory: true
+SetHashes(["dropbox"], nil)
 ```
-> ProvideHashes 未声明（但实际映射了 content_hash）
+> ProvideHashes 已声明
 
 ---
 
@@ -24,8 +25,8 @@ createShare, shareExpiration, sharePassword: true
 | Token 交换 | ✅ | `auth.go:74-96` POST dbTokenURL code_verifier | 🟡 旧版有 secret 时用 client_secret |
 | token_access_type=offline | ✅ | `auth.go:45` | 无 |
 | app_key | ✅ | `auth.go:30-34` req.Config 或 dropbox_app_key | 🟡 无内置 fallback |
-| **Token 刷新** | ❌ | 无 RefreshAccount 重写 | 🔴 旧版 refreshDropboxAccessToken |
-| **账号信息/配额** | ❌ | 不调 get_current_account / get_space_usage | 🔴 旧版 applyDropboxAccount |
+| **Token 刷新** | ✅ | `dropbox.go:637-670` RefreshAccount 调 refreshDropboxToken | 无 |
+| **账号信息/配额** | ✅ | `dropbox.go:650-670` 获取 get_current_account / get_space_usage | 无 |
 
 ---
 
@@ -99,8 +100,8 @@ createShare, shareExpiration, sharePassword: true
 | CreateShare | ✅ | `dropbox.go:255-289` /sharing/create_shared_link_with_settings | 无 |
 | 过期/密码 | ✅ | settings.expires / link_password | 无 |
 | 已存在链接处理 | ✅ | `dropbox.go:268-284` list_shared_links + modify | 无 |
-| **visibility 逻辑** | ⚠️ | `dropbox.go:258` 固定 public，有密码时仍 public+link_password | 🔴 应为 password |
-| **list 分页** | ❌ | 只取第一页 | 🟡 旧版循环 cursor |
+| **visibility 逻辑** | ✅ | `dropbox.go:306-312` 有密码时 `requested_visibility`="password" | 无 |
+| **list 分页** | ✅ | 跟随 has_more + cursor 循环 | 无 |
 | **settings_error 处理** | ❌ | 不区分 | 🟡 旧版友好提示 |
 
 ---
@@ -110,7 +111,7 @@ createShare, shareExpiration, sharePassword: true
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | Search | ✅ | `dropbox.go:149-171` /files/search_v2 max_results:1000 | 无 |
-| **搜索分页** | ❌ | 只取第一页 | 🟡 旧版跟 search/continue_v2 |
+| **搜索分页** | ✅ | `dropbox.go:162-194` 跟随 has_more + cursor 调 search/continue_v2 | 无 |
 | **过滤器** | ❌ | 无 | 🟡 旧版 filterDropboxSearchResults |
 | file_status | ❌ | 无 | 🟡 旧版 active |
 
@@ -118,13 +119,13 @@ createShare, shareExpiration, sharePassword: true
 
 ## 10. RefreshAccount
 
-❌ **完全缺失**。
+✅ `dropbox.go:637-670` 调 refreshDropboxToken 刷新 token，再获取 get_current_account / get_space_usage。对齐。
 
 ---
 
 ## 11. ProvideHashes
 
-⚠️ `dropbox.go:489-491` mapItem 提取 content_hash → ContentHash="dropbox"，但 Caps 未声明。
+✅ `dropbox.go:43` SetHashes(["dropbox"], nil)。`dropbox.go:489-491` mapItem 提取 content_hash → ContentHash。
 
 ---
 
@@ -139,13 +140,14 @@ createShare, shareExpiration, sharePassword: true
 
 ## P0 差距清单
 
-1. 🔴 **Token 刷新完全缺失**：RefreshAccount 未实现
-2. 🔴 **账号信息/配额缺失**
-3. 🔴 **分享 visibility 逻辑错误**：有密码时应为 password 而非 public
-4. 🟡 上传无 429 重试/暂停支持
-5. 🟡 上传冲突策略单一
-6. 🟡 搜索无分页、无过滤器
-7. 🟡 分享 list 无分页、settings_error 无友好提示
-8. 🟡 move/copy 缺 allow_shared_folder
-9. 🟡 版本历史、缩略图完全缺失
-10. 🟡 ProvideHashes 未在 Caps 声明
+1. ✅ **Token 刷新已实现**（`dropbox.go:637-670` RefreshAccount）
+2. ✅ **账号信息/配额已实现**（`dropbox.go:650-670`）
+3. ✅ **分享 visibility 逻辑已修复**（`dropbox.go:306-312` 有密码时为 password）
+4. ✅ **ProvideHashes 已声明**（`dropbox.go:43` SetHashes）
+5. ✅ **搜索分页已实现**（`dropbox.go:162-194` 跟随 cursor）
+6. 🟡 上传无 429 重试/暂停支持
+7. 🟡 上传冲突策略单一
+8. 🟡 搜索无过滤器、file_status
+9. 🟡 分享 list settings_error 无友好提示
+10. 🟡 move/copy 缺 allow_shared_folder
+11. 🟡 版本历史、缩略图完全缺失

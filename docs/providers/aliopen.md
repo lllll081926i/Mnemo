@@ -2,7 +2,7 @@
 
 > 调研范围：`internal/drive/providers/aliopen/aliopen.go`（单文件，~810 行）
 > 对照旧版：`../Mnemo/src/aliopen/`（10 文件）+ `src/drive/providers/aliopen.ts`
-> 整体完成度：⚠️ ~70%
+> 整体完成度：✅ ~90%
 
 ---
 
@@ -64,8 +64,8 @@ SetHashes(["sha1"], ["sha1"])
 | SHA1 秒传 | ✅ | `aliopen.go:438-468` RapidUpload | 无 |
 | CreateUploadFile | ✅ | `aliopen.go:483-505` `/adrive/v1.0/openFile/create` | 🔴 未传 pre_hash/content_hash/proof_code/local_modified_at |
 | 分片上传 | ✅ | 固定 partSize=10MiB | 🟡 旧版 calPartSize 8 档(20MB-5GB) |
-| **CompleteUpload** | ❌ | `aliopen.go:511` 传空 upload_id | 🔴 **bug**：上传完成调用可能失败 |
-| **断点续传** | ❌ | 无 | 🔴 旧版 uploadSession 持久化 + uploadedSet |
+| **CompleteUpload** | ✅ | `aliopen.go:533-540` 传真实 uploadID (`aliopen.go:912`) | 无 |
+| **断点续传** | ✅ | `aliopen.go:873-914` UploadSession（LoadUploadSession + SaveUploadSession + ClearUploadSession） | 无 |
 | **pre_hash 探测** | ❌ | 无 | 🟡 旧版前 1KB SHA1 探测提升秒传命中率 |
 | **proof_code** | ❌ | 无 | 🟡 旧版 calProofCode |
 | **分片地址过期刷新** | ❌ | 无 | 🟡 旧版 50min 刷新 |
@@ -108,7 +108,7 @@ SetHashes(["sha1"], ["sha1"])
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | CreateShare | ✅ | `aliopen.go:386-416` createShareLink | 无 |
-| **分享导入 importShare** | ❌ | 声明 true 但无实现 | 🔴 旧版 3 步：getShareToken → listByShare → copy with share_token |
+| **分享导入 importShare** | ✅ | `aliopen.go:952-1027` ImportShareSession（getShareToken → listByShare → SaveShare `aliopen.go:1028-1055`） | 无 |
 
 ---
 
@@ -126,10 +126,10 @@ SetHashes(["sha1"], ["sha1"])
 
 ## P0 差距清单
 
-1. 🔴 **CompleteUpload 传空 upload_id**（`aliopen.go:511`）：上传完成调用可能失败
-2. 🔴 **分享导入完全未实现**：声明 `importShare:true` 但无任何实现
-3. 🔴 **上传无断点续传**：大文件中断后无法恢复
-4. 🔴 **上传无 pre_hash/proof_code**：秒传命中率降低
+1. ✅ **CompleteUpload 传真实 upload_id**（`aliopen.go:912`）：已修复
+2. ✅ **分享导入已实现**（`aliopen.go:952-1055` ImportShareSession + SaveShare）
+3. ✅ **上传断点续传已实现**（`aliopen.go:873-914` UploadSession）
+4. 🟡 上传无 pre_hash/proof_code：秒传命中率降低
 5. 🟡 无 401 自动重试、无并发限速
 6. 🟡 上传分片大小固定 10MB（大文件可能超 10000 片限制）
 7. 🟡 `.livp` 下载无 streamsUrl 回退
