@@ -23,6 +23,8 @@ export function CreateShare(arg1:string,arg2:string,arg3:drive.ShareParams):Prom
 
 export function DeleteFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
+export function DeleteOfflineTask(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<void>;
+
 export function DeleteLocalTag(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DeleteSyncConfig(arg1:string):Promise<void>;
@@ -42,6 +44,8 @@ export function GetPlayCursor(arg1:string,arg2:string,arg3:string):Promise<numbe
 export function GetSettings():Promise<store.Settings>;
 
 export function GetVideoPreview(arg1:string,arg2:string,arg3:string):Promise<model.VideoPreview>;
+
+export function ImportShare(arg1:string,arg2:string,arg3:string,arg4:string):Promise<drive.ShareImportSession>;
 
 export function ListAccounts():Promise<Array<model.Account>>;
 
@@ -115,6 +119,10 @@ export function RestoreFiles(arg1:string,arg2:string,arg3:Array<string>):Promise
 
 export function ResumeDownload(arg1:string):Promise<void>;
 
+export function ResumeUpload(arg1:string):Promise<void>;
+
+export function RefreshOfflineTasks(arg1:string,arg2:string):Promise<Array<model.OfflineTask>>;
+
 export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RunSync(arg1:string):Promise<void>;
@@ -124,6 +132,8 @@ export function SaveCloudTextFile(arg1:string,arg2:string,arg3:string,arg4:strin
 export function SaveLocalTag(arg1:store.LocalTag):Promise<void>;
 
 export function SaveMountedAccount(arg1:string,arg2:model.ConnConfig):Promise<model.Account>;
+
+export function SaveImportedShare(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<Array<string>>;
 
 export function SavePlayCursor(arg1:string,arg2:string,arg3:string,arg4:number):Promise<void>;
 

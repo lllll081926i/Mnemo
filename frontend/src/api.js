@@ -48,6 +48,49 @@ export function migrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fi
   return App.MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move)
 }
 
+// ---------- transfer (download) ----------
+export function listDownloads() { return App.ListDownloads() }
+export function pauseDownload(id) { return App.PauseDownload(id) }
+export function resumeDownload(id) { return App.ResumeDownload(id) }
+export function cancelDownload(id) { return App.CancelDownload(id) }
+export function removeDownload(id) { return App.RemoveDownload(id) }
+export function prioritizeDownload(id) { return App.PrioritizeDownload(id) }
+export function clearDownloads() { return App.ClearDownloads() }
+
+// ---------- transfer (upload) ----------
+export function listUploads() { return App.ListUploads() }
+export function cancelUpload(id) { return App.CancelUpload(id) }
+export function resumeUpload(id) { return App.ResumeUpload(id) }
+export function clearUploads() { return App.ClearUploads() }
+
+// ---------- offline (PikPak cloud) ----------
+export function offlineDownload(userId, driveId, url, fileName) { return App.OfflineDownload(userId, driveId, url, fileName) }
+export function listOfflineTasks(userId) { return App.ListOfflineTasks(userId) }
+export function refreshOfflineTasks(userId, driveId) { return App.RefreshOfflineTasks(userId, driveId) }
+export function deleteOfflineTask(userId, driveId, taskId, deleteFiles) { return App.DeleteOfflineTask(userId, driveId, taskId, deleteFiles) }
+
+// ---------- share import ----------
+export function importShare(userId, driveId, shareUrl, password) { return App.ImportShare(userId, driveId, shareUrl, password) }
+export function saveImportedShare(userId, driveId, session, fileIDs, toParentId) { return App.SaveImportedShare(userId, driveId, session, fileIDs, toParentId) }
+export function listShareHistory(userId) { return App.ListShareHistory(userId) }
+
+// ---------- settings ----------
+export function getSettings() { return App.GetSettings() }
+export function saveSettings(s) { return App.SaveSettings(s) }
+
+// ---------- account ----------
+export function refreshAccount(userId) { return App.RefreshAccount(userId) }
+
+// ---------- preview / player ----------
+export function previewUrl(userId, driveId, fileId) { return App.PreviewURL(userId, driveId, fileId) }
+export function localPreviewUrl(path) { return App.LocalPreviewURL(path) }
+export function mediaProxy() { return App.MediaProxy() }
+export function playVideo(userId, driveId, fileId) { return App.PlayVideo(userId, driveId, fileId) }
+export function pausePlayer(paused) { return App.PausePlayer(paused) }
+export function seekPlayer(sec) { return App.SeekPlayer(sec) }
+export function setPlayerVolume(v) { return App.SetPlayerVolume(v) }
+export function stopPlayer() { return App.StopPlayer() }
+
 /** 从 user_id 解析 provider：普通盘 `pikpak_xxx`，挂载存储 `webdav:xxx` / `s3:xxx`。 */
 export function providerOf(userId) {
   const uid = String(userId || '')

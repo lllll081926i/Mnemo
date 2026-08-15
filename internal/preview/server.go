@@ -102,13 +102,18 @@ func (s *Server) AddRoot(dir string) {
 // BaseURL returns http://127.0.0.1:port.
 func (s *Server) BaseURL() string { return fmt.Sprintf("http://127.0.0.1:%d", s.Port) }
 
-// ProxyURL builds a proxied media URL for a remote stream.
-func (s *Server) ProxyURL(target string, headers map[string]string) string {
+// ProxyURL builds a proxied media URL for a remote stream. filename is an
+// optional display name forwarded to the browser via Content-Disposition so
+// the preview shows the real file name instead of a guessed one.
+func (s *Server) ProxyURL(target string, headers map[string]string, filename string) string {
 	hdrs, _ := json.Marshal(headers)
 	q := url.Values{}
 	q.Set("u", target)
 	q.Set("h", base64.StdEncoding.EncodeToString(hdrs))
 	q.Set("t", s.token)
+	if filename != "" {
+		q.Set("f", filename)
+	}
 	return fmt.Sprintf("%s/proxy/?%s", s.BaseURL(), q.Encode())
 }
 
@@ -167,7 +172,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	// strip hop-by-hop and sensitive headers
 	filtered := filterProxyHeaders(headers)
-	proxyRequest(w, r, target, filtered)
+	filename := r.URL.Query().Get("f")
+	proxyRequest(w, r, target, filtered, filename)
 }
 
 func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +282,7 @@ func filterProxyHeaders(headers map[string]string) map[string]string {
 }
 
 // proxyRequest streams a remote URL with Range passthrough.
-func proxyRequest(w http.ResponseWriter, r *http.Request, target string, headers map[string]string) {
+func proxyRequest(w http.ResponseWriter, r *http.Request, target string, headers map[string]string, filename string) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -307,6 +313,11 @@ func proxyRequest(w http.ResponseWriter, r *http.Request, target string, headers
 		}
 	}
 	corsHeaders(w, r)
+	// surface the real file name so the browser preview shows it correctly
+	// instead of guessing from the opaque proxy URL.
+	if filename != "" {
+		w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeDispositionFilename(filename)+"\"")
+	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
@@ -372,3 +383,26 @@ func contentTypeFor(path string) string {
 
 // Close shuts the server down.
 func (s *Server) Close() error { return s.server.Close() }
+
+// sanitizeDispositionFilename strips characters that are invalid inside a
+// Content-Disposition filename quoted-string (RFC 6266). It keeps CJK and
+// common punctuation but drops quotes, backslashes and control bytes.
+func sanitizeDispositionFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "file"
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r == '"' || r == '\\' || r < 0x20 {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	s := b.String()
+	if s == "" {
+		return "file"
+	}
+	return s
+}

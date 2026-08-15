@@ -34,6 +34,10 @@ export function DeleteFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteFiles'](arg1, arg2, arg3);
 }
 
+export function DeleteOfflineTask(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DeleteOfflineTask'](arg1, arg2, arg3, arg4);
+}
+
 export function DeleteLocalTag(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteLocalTag'](arg1, arg2, arg3);
 }
@@ -72,6 +76,10 @@ export function GetSettings() {
 
 export function GetVideoPreview(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetVideoPreview'](arg1, arg2, arg3);
+}
+
+export function ImportShare(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ImportShare'](arg1, arg2, arg3, arg4);
 }
 
 export function ListAccounts() {
@@ -218,6 +226,14 @@ export function ResumeDownload(arg1) {
   return window['go']['app']['App']['ResumeDownload'](arg1);
 }
 
+export function ResumeUpload(arg1) {
+  return window['go']['app']['App']['ResumeUpload'](arg1);
+}
+
+export function RefreshOfflineTasks(arg1, arg2) {
+  return window['go']['app']['App']['RefreshOfflineTasks'](arg1, arg2);
+}
+
 export function RevealInFolder(arg1) {
   return window['go']['app']['App']['RevealInFolder'](arg1);
 }
@@ -236,6 +252,10 @@ export function SaveLocalTag(arg1) {
 
 export function SaveMountedAccount(arg1, arg2) {
   return window['go']['app']['App']['SaveMountedAccount'](arg1, arg2);
+}
+
+export function SaveImportedShare(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SaveImportedShare'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SavePlayCursor(arg1, arg2, arg3, arg4) {

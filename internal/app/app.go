@@ -375,7 +375,11 @@ func (a *App) PreviewURL(userID, driveID, fileID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return a.preview.ProxyURL(u.URL, u.Headers), nil
+	name := ""
+	if f, ferr := drive.GetFile(userID, driveID, fileID); ferr == nil {
+		name = f.Name
+	}
+	return a.preview.ProxyURL(u.URL, u.Headers, name), nil
 }
 
 // LocalPreviewURL builds a local file URL.

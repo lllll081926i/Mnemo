@@ -45,7 +45,7 @@ func (a *App) PlayVideo(userID, driveID, fileID string) (*model.VideoPreview, er
 	}
 	streamURL := quality.URL
 	if quality.ForceProxy || quality.Headers != nil || preview.Headers != nil {
-		streamURL = a.preview.ProxyURL(quality.URL, quality.Headers)
+		streamURL = a.preview.ProxyURL(quality.URL, quality.Headers, preview.FileID)
 	}
 	if err := a.ensurePlayer(); err != nil {
 		return nil, err

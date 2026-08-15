@@ -399,7 +399,7 @@ async function openFile(file) {
     modalFile.value = file
     modal.value = 'player'
   } else if (kind === 'download') {
-    doDownload([file])
+    emit('toast', '此格式不支持在线预览，请下载后本地打开', 'info')
   } else {
     modalFile.value = file
     modal.value = 'preview'
