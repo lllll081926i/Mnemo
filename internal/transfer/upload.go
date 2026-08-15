@@ -22,6 +22,7 @@ type UploadQueue struct {
 	jobs    map[string]*model.UploadingUI
 	onEvent OnTaskEvent
 	ctx     context.Context // root context, canceled on Close
+	cancel  context.CancelFunc
 	sem     chan struct{}    // global concurrency slot
 	cancels map[string]context.CancelFunc
 }
@@ -33,11 +34,13 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 		// reuse the concurrency setting as an upper bound for uploads too
 		maxConc = s.MaxConcurrentDownloads
 	}
+	rootCtx, rootCancel := context.WithCancel(context.Background())
 	q := &UploadQueue{
 		store:   st,
 		jobs:    map[string]*model.UploadingUI{},
 		onEvent: onEvent,
-		ctx:     context.Background(),
+		ctx:     rootCtx,
+		cancel:  rootCancel,
 		sem:     make(chan struct{}, maxConc),
 		cancels: map[string]context.CancelFunc{},
 	}
@@ -322,6 +325,9 @@ func DownloadDir(st *store.Store) string {
 
 // Close cancels all in-flight uploads and persists pending state.
 func (q *UploadQueue) Close() {
+	if q.cancel != nil {
+		q.cancel()
+	}
 	q.mu.Lock()
 	for _, c := range q.cancels {
 		c()

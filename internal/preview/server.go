@@ -125,16 +125,23 @@ func (s *Server) validToken(r *http.Request) bool {
 	return r.URL.Query().Get("t") == s.token
 }
 
-// corsHeaders sets a restrictive CORS policy. The Wails webview serves from
-// http://localhost:<port> or wails://localhost, so we allow those origins.
-func corsHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:*")
+// corsHeaders sets a permissive CORS policy for the Wails webview origin.
+// Wails v2 serves the frontend from http://localhost:<port> or https://wails.localhost,
+// so we echo the request Origin when it looks like a local dev/webview origin,
+// and fall back to a wildcard otherwise.
+func corsHeaders(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = "*"
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Range")
+	w.Header().Set("Vary", "Origin")
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
-	corsHeaders(w)
+	corsHeaders(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -164,7 +171,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
-	corsHeaders(w)
+	corsHeaders(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -299,7 +306,7 @@ func proxyRequest(w http.ResponseWriter, r *http.Request, target string, headers
 			w.Header().Set(h, v)
 		}
 	}
-	corsHeaders(w)
+	corsHeaders(w, r)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }

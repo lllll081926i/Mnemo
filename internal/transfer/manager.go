@@ -37,6 +37,7 @@ type Manager struct {
 	dir     string
 	stop    chan struct{}
 	ctx     context.Context // root context for all downloads, canceled on Shutdown
+	cancel  context.CancelFunc
 	sem     chan struct{}    // concurrency semaphore (cap = MaxConcurrentDownloads)
 }
 
@@ -51,6 +52,7 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 	if s, err := st.GetSettings(); err == nil && s.MaxConcurrentDownloads > 0 {
 		maxConc = s.MaxConcurrentDownloads
 	}
+	rootCtx, rootCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		store:   st,
 		tasks:   map[string]*model.DownloadTask{},
@@ -58,8 +60,9 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		onEvent: onEvent,
 		dir:     downloadDir,
 		stop:    make(chan struct{}),
-		ctx:     context.Background(),
+		ctx:     rootCtx,
 		sem:     make(chan struct{}, maxConc),
+		cancel:  rootCancel,
 	}
 	// restore persisted tasks
 	m.loadPersisted()
@@ -398,7 +401,11 @@ func (m *Manager) ClearCompleted() {
 
 // Shutdown stops background work.
 func (m *Manager) Shutdown() {
-	// cancel all active downloads first
+	// cancel the root context so goroutines waiting on m.sem or m.ctx.Done()
+	// unblock immediately, in addition to any in-flight task contexts.
+	if m.cancel != nil {
+		m.cancel()
+	}
 	m.mu.Lock()
 	for _, c := range m.cancels {
 		c()

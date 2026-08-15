@@ -438,13 +438,23 @@ func (l *speedLimiter) waitN(n int64) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := time.Now()
+	// slide the window: if more than 1s has passed since the last reset,
+	// reset the accumulator and the start timestamp so the limiter keeps
+	// tracking the recent rate rather than a lifetime average that drifts.
+	if now.Sub(l.start) >= time.Second {
+		l.start = now
+		l.window = 0
+	}
 	l.window += n
-	elapsed := time.Since(l.start).Seconds()
+	elapsed := now.Sub(l.start).Seconds()
 	allowed := float64(l.rate) * elapsed
 	if float64(l.window) > allowed {
 		wait := time.Duration((float64(l.window)-allowed)/float64(l.rate)*1000) * time.Millisecond
 		if wait > 0 && wait < 10*time.Second {
+			l.mu.Unlock()
 			time.Sleep(wait)
+			l.mu.Lock()
 		}
 	}
 }
