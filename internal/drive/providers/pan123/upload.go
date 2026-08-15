@@ -230,6 +230,13 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		api = apiS3Prepare
 	}
 
+	// Resume: load previously uploaded part numbers
+	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
+	uploadedSet := make(map[int]bool)
+	for _, pn := range drive.LoadUploadSession(sessionKey) {
+		uploadedSet[int(pn)] = true
+	}
+
 	var i int64
 	for i = 1; i <= plan.ChunkCount; i += batchSize {
 		if stopped(ctx, ui) {
@@ -267,6 +274,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				mark(false, true, "读取上传文件失败: "+err.Error())
 				return err
 			}
+			// Skip already-uploaded parts (resume)
+			if uploadedSet[int(j)] {
+				ui.Upload.DownSize = offset + cur
+				if size > 0 {
+					ui.Upload.DownProcess = int(100 * (offset + cur) / size)
+				}
+				continue
+			}
 			status, err := putChunk(ctx, uploadURL, buff)
 			if err != nil {
 				mark(false, true, err.Error())
@@ -293,6 +308,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				mark(false, true, err.Error())
 				return err
 			}
+			uploadedSet[int(j)] = true
+			_ = drive.SaveUploadSession(sessionKey, drive.SortedUniqueParts(uploadedSet))
 			ui.Upload.DownSize = offset + cur
 			if size > 0 {
 				ui.Upload.DownProcess = int(100 * (offset + cur) / size)
@@ -320,6 +337,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 	}
 	mark(true, false, "")
+	drive.ClearUploadSession(sessionKey)
 	return nil
 }
 

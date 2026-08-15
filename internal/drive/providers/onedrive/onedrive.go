@@ -272,7 +272,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		target := graphHost + smallUploadPath(parentID, name)
 		return cl.rawPut(ctx, target, f)
 	}
-	return cl.sessionUpload(ctx, f, parentID, name, ui)
+	return cl.sessionUpload(ctx, c, f, parentID, name, ui)
 }
 
 // oneDriveScope is the OAuth scope used for token refresh.

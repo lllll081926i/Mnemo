@@ -2,6 +2,10 @@ package drive
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"sort"
+	"strconv"
 
 	"mnemo-go/internal/model"
 )
@@ -34,6 +38,68 @@ func Secret(key string) string {
 		return ""
 	}
 	return secretResolver(key)
+}
+
+// ---- Upload session persistence (resumable uploads) ----
+
+// UploadSessionStore abstracts per-key upload session persistence so the
+// drive package stays free of store imports. The app layer wires it at
+// startup via SetUploadSessionStore.
+type UploadSessionStore interface {
+	SaveUploadSession(key string, partNumbers []int) error
+	LoadUploadSession(key string) []int
+	ClearUploadSession(key string)
+}
+
+var uploadSessionStore UploadSessionStore
+
+// SetUploadSessionStore installs the store-backed upload session persistence
+// (called once at startup by the app wiring).
+func SetUploadSessionStore(s UploadSessionStore) { uploadSessionStore = s }
+
+// SaveUploadSession persists uploaded part numbers for a session key.
+func SaveUploadSession(key string, partNumbers []int) error {
+	if uploadSessionStore == nil {
+		return nil
+	}
+	return uploadSessionStore.SaveUploadSession(key, partNumbers)
+}
+
+// LoadUploadSession returns the persisted uploaded part numbers for a key,
+// or nil when no session exists.
+func LoadUploadSession(key string) []int {
+	if uploadSessionStore == nil {
+		return nil
+	}
+	return uploadSessionStore.LoadUploadSession(key)
+}
+
+// ClearUploadSession removes the persisted session for a key.
+func ClearUploadSession(key string) {
+	if uploadSessionStore == nil {
+		return
+	}
+	uploadSessionStore.ClearUploadSession(key)
+}
+
+// UploadSessionKey computes a stable hash key from the tuple
+// userID:driveID:parentID:name:size, suitable for deduplicating resume state.
+func UploadSessionKey(userID, driveID, parentID, name string, size int64) string {
+	raw := userID + ":" + driveID + ":" + parentID + ":" + name + ":" + formatSize(size)
+	h := sha1.Sum([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
+
+func formatSize(n int64) string { return strconv.FormatInt(n, 10) }
+
+// SortedUniqueParts deduplicates and sorts part numbers for stable persistence.
+func SortedUniqueParts(set map[int]bool) []int {
+	out := make([]int, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Ints(out)
+	return out
 }
 
 // BuildContext resolves the provider + session for an account.

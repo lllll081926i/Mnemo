@@ -869,6 +869,12 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return err
 	}
+	// Resume: load previously uploaded part numbers
+	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
+	uploadedSet := make(map[int]bool)
+	for _, pn := range drive.LoadUploadSession(sessionKey) {
+		uploadedSet[pn] = true
+	}
 	// Upload parts
 	buf := make([]byte, partSize)
 	var pos int64
@@ -884,7 +890,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return err
 		}
 		chunk := buf[:n]
-		if part.UploadURL != "" {
+		if !uploadedSet[part.PartNumber] && part.UploadURL != "" {
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPut, part.UploadURL, strings.NewReader(string(chunk)))
 			resp, err2 := cl.http.HTTP.Do(req)
 			if err2 != nil {
@@ -892,13 +898,22 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			}
 			resp.Body.Close()
 		}
+		// Persist uploaded part number incrementally
+		if !uploadedSet[part.PartNumber] {
+			uploadedSet[part.PartNumber] = true
+			_ = drive.SaveUploadSession(sessionKey, drive.SortedUniqueParts(uploadedSet))
+		}
 		pos += int64(n)
 		if ui != nil {
 			ui.Upload.DownSize = pos
 			ui.Upload.DownProcess = int(pos * 100 / size)
 		}
 	}
-	return cl.CompleteUpload(ctx, ref.Scope, fileID, uploadID)
+	err = cl.CompleteUpload(ctx, ref.Scope, fileID, uploadID)
+	if err == nil {
+		drive.ClearUploadSession(sessionKey)
+	}
+	return err
 }
 
 func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req drive.RapidUploadRequest) (*drive.RapidUploadResult, error) {

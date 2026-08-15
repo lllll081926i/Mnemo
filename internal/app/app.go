@@ -76,6 +76,10 @@ func (a *App) startup(ctx context.Context) {
 		return ""
 	})
 
+	// upload session persistence so providers can resume interrupted uploads
+	store.InitUploadSessions(dir)
+	drive.SetUploadSessionStore(uploadSessionAdapter{})
+
 	// internal media/preview server. Roots restrict /local/ serving to the
 	// download dir, engine dir and data dir (logs, mpv-config, etc.).
 	dlDir := transfer.DownloadDir(st)
@@ -392,4 +396,18 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	})
 	go eng.Run(context.Background(), job)
 	return job, nil
+}
+
+// uploadSessionAdapter bridges store.UploadSession* into the
+// drive.UploadSessionStore interface.
+type uploadSessionAdapter struct{}
+
+func (uploadSessionAdapter) SaveUploadSession(key string, partNumbers []int) error {
+	return store.SaveUploadSession(key, partNumbers)
+}
+func (uploadSessionAdapter) LoadUploadSession(key string) []int {
+	return store.LoadUploadSession(key)
+}
+func (uploadSessionAdapter) ClearUploadSession(key string) {
+	store.ClearUploadSession(key)
 }

@@ -662,8 +662,9 @@ func mapFile(item *File, driveID, parentID string) model.File {
 		}
 		f := driveutil.NewFile(driveID, fileID, parentID, item.Name, false, item.Size, item.Mtime)
 		f.Thumbnail = item.ThumbURL
-		f.ContentHash = item.MD5
-		if item.MD5 != "" {
+		hash := decryptYikeMd5(item.MD5)
+		f.ContentHash = hash
+		if hash != "" {
 			f.ContentHashName = "md5"
 		}
 		return f
@@ -671,6 +672,56 @@ func mapFile(item *File, driveID, parentID string) model.File {
 }
 
 func isRoot(id string) bool { return id == "" || id == RootID || id == "root" || id == "/" }
+
+// decryptYikeMd5 mirrors alist DecryptMd5: a pure-hex value is returned as-is;
+// otherwise each char is XORed with its position (position 9 uses charCode-103)
+// and the result is re-ordered into 8-char blocks (8:16 0:8 24:32 16:24).
+func decryptYikeMd5(encryptMd5 string) string {
+	raw := encryptMd5
+	if len(raw) != 32 {
+		return ""
+	}
+	// pure hex -> already plain
+	isHex := true
+	for _, ch := range raw {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+			isHex = false
+			break
+		}
+	}
+	if isHex {
+		return raw
+	}
+	out := make([]byte, 32)
+	for i := 0; i < 32; i++ {
+		ch := raw[i]
+		var n int
+		if i == 9 {
+			n = int(ch) - 103
+		} else {
+			// parse hex digit
+			switch {
+			case ch >= '0' && ch <= '9':
+				n = int(ch - '0')
+			case ch >= 'a' && ch <= 'f':
+				n = int(ch-'a') + 10
+			case ch >= 'A' && ch <= 'F':
+				n = int(ch-'A') + 10
+			default:
+				n = 0
+			}
+		}
+		n = n ^ (15 & i)
+		// to hex char
+		if n >= 0 && n <= 9 {
+			out[i] = byte('0' + n)
+		} else {
+			out[i] = byte('a' + n - 10)
+		}
+	}
+	decrypted := string(out)
+	return decrypted[8:16] + decrypted[0:8] + decrypted[24:32] + decrypted[16:24]
+}
 
 func idsToRefs(ids []string) []drive.FileRef {
 	refs := make([]drive.FileRef, 0, len(ids))

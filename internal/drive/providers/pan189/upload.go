@@ -303,16 +303,28 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return nil
 	}
 
+	// Resume: load previously uploaded part numbers
+	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
+	uploadedSet := make(map[int]bool)
+	for _, pn := range drive.LoadUploadSession(sessionKey) {
+		uploadedSet[pn] = true
+	}
+
 	for i := 1; i <= count; i++ {
 		partInfo := partInfos[i-1]
-		uploadURLStr, headers, err := d.getUploadURLs(ctx, c, base, uploadFileID, partInfo, i)
-		if err != nil {
-			return err
-		}
 		start := (int64(i) - 1) * slice
 		cur := slice
 		if remain := size - start; remain < cur {
 			cur = remain
+		}
+		// Skip already-uploaded parts (resume)
+		if uploadedSet[i] {
+			setUploadState(ui, start+cur, size)
+			continue
+		}
+		uploadURLStr, headers, err := d.getUploadURLs(ctx, c, base, uploadFileID, partInfo, i)
+		if err != nil {
+			return err
 		}
 		chunk := make([]byte, cur)
 		if _, err := f.ReadAt(chunk, start); err != nil && err != io.EOF {
@@ -321,6 +333,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if err := putPart(ctx, uploadURLStr, headers, chunk); err != nil {
 			return err
 		}
+		uploadedSet[i] = true
+		_ = drive.SaveUploadSession(sessionKey, drive.SortedUniqueParts(uploadedSet))
 		setUploadState(ui, start+cur, size)
 	}
 
@@ -328,6 +342,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return err
 	}
+	drive.ClearUploadSession(sessionKey)
 	ui.Upload.FileID = fileID
 	setUploadState(ui, size, size)
 	return nil
