@@ -595,7 +595,7 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 	}
 	ref := parseRef(dirID)
 	// Root: show virtual drive dirs
-	if ref.FID == "root" && dirID == RootID || dirID == "root" {
+	if dirID == RootID || dirID == "root" {
 		dirs := []model.File{virtualFile(c.DriveID, ScopeBackup)}
 		// check if resource drive exists
 		hasResource := cl.session.ResourceDriveID != ""
@@ -617,7 +617,7 @@ func (d *Driver) ListPaged(ctx context.Context, c drive.Context, dirID, marker s
 		return nil, err
 	}
 	ref := parseRef(dirID)
-	if ref.FID == "root" && (dirID == RootID || dirID == "root") {
+	if dirID == RootID || dirID == "root" {
 		dirs := []model.File{virtualFile(c.DriveID, ScopeBackup)}
 		if cl.session.ResourceDriveID != "" {
 			dirs = append(dirs, virtualFile(c.DriveID, ScopeResource))

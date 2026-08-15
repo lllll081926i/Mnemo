@@ -25,12 +25,21 @@ type Client struct {
 	Proxy string // optional http(s) proxy url
 }
 
+// TestTransportHook, when set, is used as the transport of every NewClient
+// http.Client. It exists so provider integration tests can route real outbound
+// requests to local mock servers (never set in production).
+var TestTransportHook http.RoundTripper
+
 // NewClient builds a client with sane defaults.
 func NewClient(timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	return &Client{HTTP: &http.Client{Timeout: timeout}, UA: DefaultUA}
+	c := &Client{HTTP: &http.Client{Timeout: timeout}, UA: DefaultUA}
+	if TestTransportHook != nil {
+		c.HTTP = &http.Client{Timeout: timeout, Transport: TestTransportHook}
+	}
+	return c
 }
 
 // WithProxy returns a client that routes traffic through proxyURL.

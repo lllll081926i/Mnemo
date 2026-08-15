@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -55,6 +56,17 @@ type conn struct {
 	prefix string // base path prefix, "" or "dir/"
 }
 
+// TransportOverride, when set, is used as the S3 SDK transport. Test-only hook
+// to route real S3 traffic to a local mock (never set in production).
+var TransportOverride http.RoundTripper
+
+func httpClientForS3() *http.Client {
+	if TransportOverride != nil {
+		return &http.Client{Transport: TransportOverride}
+	}
+	return nil
+}
+
 func connOf(c drive.Context) (*conn, error) {
 	cfg := c.Token
 	if cfg == nil || cfg.Conn == nil || cfg.Conn.Endpoint == "" {
@@ -70,10 +82,11 @@ func connOf(c drive.Context) (*conn, error) {
 		return nil, errors.New("s3: 缺少 bucket")
 	}
 	client := s3.New(s3.Options{
-		Region:       firstNonEmpty(cc.Region, "us-east-1"),
-		BaseEndpoint: aws.String(endpoint),
-		Credentials:  credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, ""),
-		UsePathStyle: true, // compatible with minio/aliyun oss style endpoints
+		Region:        firstNonEmpty(cc.Region, "us-east-1"),
+		BaseEndpoint:  aws.String(endpoint),
+		Credentials:   credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, ""),
+		UsePathStyle:  true, // compatible with minio/aliyun oss style endpoints
+		HTTPClient:    httpClientForS3(),
 	})
 	return &conn{client: client, bucket: bucket, prefix: normalizePrefix(cc.BasePath)}, nil
 }
