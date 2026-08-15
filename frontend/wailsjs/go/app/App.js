@@ -226,6 +226,10 @@ export function RunSync(arg1) {
   return window['go']['app']['App']['RunSync'](arg1);
 }
 
+export function SaveCloudTextFile(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SaveCloudTextFile'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function SaveLocalTag(arg1) {
   return window['go']['app']['App']['SaveLocalTag'](arg1);
 }

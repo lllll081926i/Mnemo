@@ -119,6 +119,8 @@ export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RunSync(arg1:string):Promise<void>;
 
+export function SaveCloudTextFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function SaveLocalTag(arg1:store.LocalTag):Promise<void>;
 
 export function SaveMountedAccount(arg1:string,arg2:model.ConnConfig):Promise<model.Account>;

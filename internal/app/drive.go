@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
@@ -10,6 +12,20 @@ import (
 )
 
 // ---- drive file operations (thin pass-through to the drive facade) ----
+
+// SaveCloudTextFile writes text content to a temporary file and triggers an upload back to the cloud.
+func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content string) error {
+	tmpDir := filepath.Join(os.TempDir(), "mnemo_edit")
+	_ = os.MkdirAll(tmpDir, 0o755)
+	tmpPath := filepath.Join(tmpDir, fileName)
+	if err := os.WriteFile(tmpPath, []byte(content), 0o644); err != nil {
+		return err
+	}
+	if a.uploads != nil {
+		a.uploads.AddFiles(userID, driveID, parentID, []string{tmpPath})
+	}
+	return nil
+}
 
 // ListDir lists a directory.
 func (a *App) ListDir(userID, driveID, dirID string) ([]model.File, error) {

@@ -62,6 +62,15 @@ func (s *Server) LocalURL(path string) string {
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
+	// CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	target := r.URL.Query().Get("u")
 	if target == "" {
 		http.Error(w, "missing url", http.StatusBadRequest)
@@ -77,6 +86,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
+	// CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	path := r.URL.Query().Get("p")
 	if path == "" {
 		http.Error(w, "missing path", http.StatusBadRequest)
@@ -130,37 +148,53 @@ func proxyRequest(w http.ResponseWriter, r *http.Request, target string, headers
 			w.Header().Set(h, v)
 		}
 	}
+	// ensure CORS on proxied response
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
 
 func contentTypeFor(path string) string {
+	lower := strings.ToLower(path)
 	switch {
-	case strings.HasSuffix(path, ".mp4"), strings.HasSuffix(path, ".m4v"):
+	case strings.HasSuffix(lower, ".mp4"), strings.HasSuffix(lower, ".m4v"):
 		return "video/mp4"
-	case strings.HasSuffix(path, ".webm"):
+	case strings.HasSuffix(lower, ".webm"):
 		return "video/webm"
-	case strings.HasSuffix(path, ".mkv"):
+	case strings.HasSuffix(lower, ".mkv"):
 		return "video/x-matroska"
-	case strings.HasSuffix(path, ".mp3"):
+	case strings.HasSuffix(lower, ".mp3"):
 		return "audio/mpeg"
-	case strings.HasSuffix(path, ".m4a"):
+	case strings.HasSuffix(lower, ".m4a"), strings.HasSuffix(lower, ".aac"):
 		return "audio/mp4"
-	case strings.HasSuffix(path, ".flac"):
+	case strings.HasSuffix(lower, ".flac"):
 		return "audio/flac"
-	case strings.HasSuffix(path, ".jpg"), strings.HasSuffix(path, ".jpeg"):
+	case strings.HasSuffix(lower, ".wav"):
+		return "audio/wav"
+	case strings.HasSuffix(lower, ".ogg"):
+		return "audio/ogg"
+	case strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"):
 		return "image/jpeg"
-	case strings.HasSuffix(path, ".png"):
+	case strings.HasSuffix(lower, ".png"):
 		return "image/png"
-	case strings.HasSuffix(path, ".gif"):
+	case strings.HasSuffix(lower, ".gif"):
 		return "image/gif"
-	case strings.HasSuffix(path, ".webp"):
+	case strings.HasSuffix(lower, ".webp"):
 		return "image/webp"
-	case strings.HasSuffix(path, ".pdf"):
+	case strings.HasSuffix(lower, ".svg"):
+		return "image/svg+xml"
+	case strings.HasSuffix(lower, ".ico"):
+		return "image/x-icon"
+	case strings.HasSuffix(lower, ".pdf"):
 		return "application/pdf"
-	case strings.HasSuffix(path, ".txt"), strings.HasSuffix(path, ".md"), strings.HasSuffix(path, ".log"):
-		return "text/plain; charset=utf-8"
-	case strings.HasSuffix(path, ".srt"):
+	case strings.HasSuffix(lower, ".txt"), strings.HasSuffix(lower, ".md"), strings.HasSuffix(lower, ".log"),
+		strings.HasSuffix(lower, ".js"), strings.HasSuffix(lower, ".ts"), strings.HasSuffix(lower, ".vue"),
+		strings.HasSuffix(lower, ".json"), strings.HasSuffix(lower, ".go"), strings.HasSuffix(lower, ".py"),
+		strings.HasSuffix(lower, ".java"), strings.HasSuffix(lower, ".c"), strings.HasSuffix(lower, ".cpp"),
+		strings.HasSuffix(lower, ".h"), strings.HasSuffix(lower, ".css"), strings.HasSuffix(lower, ".html"),
+		strings.HasSuffix(lower, ".xml"), strings.HasSuffix(lower, ".yaml"), strings.HasSuffix(lower, ".yml"),
+		strings.HasSuffix(lower, ".ini"), strings.HasSuffix(lower, ".sh"), strings.HasSuffix(lower, ".bat"),
+		strings.HasSuffix(lower, ".srt"), strings.HasSuffix(lower, ".vtt"), strings.HasSuffix(lower, ".ass"):
 		return "text/plain; charset=utf-8"
 	default:
 		return "application/octet-stream"

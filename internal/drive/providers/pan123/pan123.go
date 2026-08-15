@@ -917,6 +917,10 @@ func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID s
 	if f, ok := poolGet(fid); ok && f.S3KeyFlag != "" {
 		return &f, nil
 	}
+	// 先尝试直接请求 /file/info 详情接口补全
+	if det, err := d.detail(ctx, c, fileID); err == nil && det != nil && det.S3KeyFlag != "" {
+		return det, nil
+	}
 	// 冷启动/池被驱逐：用池里残条的父目录与文件名做线索
 	var parentID, name string
 	if stub, ok := poolGet(fid); ok {
@@ -953,7 +957,7 @@ func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID s
 	if f, ok := poolGet(fid); ok && f.S3KeyFlag != "" {
 		return &f, nil
 	}
-	return nil, errors.New("can't convert obj（无列表 File，请先打开所在文件夹）")
+	return nil, errors.New("can't convert obj（无法获取 123 盘下载直链，请先刷新所在文件夹）")
 }
 
 // extractPan123RedirectURL parses either JSON redirect_url or an href in HTML.

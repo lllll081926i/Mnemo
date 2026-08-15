@@ -364,7 +364,13 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if err != nil {
 		return nil, err
 	}
-	return &model.DownloadURL{DriveID: c.DriveID, FileID: fileID, URL: u, DownloadMode: "redirect"}, nil
+	return &model.DownloadURL{
+		DriveID: c.DriveID, FileID: fileID, URL: u, DownloadMode: "proxy",
+		Headers: map[string]string{
+			"Referer":    "https://pan.quark.cn/",
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		},
+	}, nil
 }
 
 func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID string) (*model.VideoPreview, error) {

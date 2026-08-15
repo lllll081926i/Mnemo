@@ -4,9 +4,11 @@ package transfer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,7 @@ type Manager struct {
 	store   *store.Store
 	mu      sync.Mutex
 	tasks   map[string]*model.DownloadTask
+	cancels map[string]context.CancelFunc
 	onEvent OnTaskEvent
 	dir     string
 	stop    chan struct{}
@@ -45,6 +48,7 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 	m := &Manager{
 		store:   st,
 		tasks:   map[string]*model.DownloadTask{},
+		cancels: map[string]context.CancelFunc{},
 		onEvent: onEvent,
 		dir:     downloadDir,
 		stop:    make(chan struct{}),
@@ -137,15 +141,27 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 }
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.cancels[t.ID] = cancel
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.cancels, t.ID)
+		m.mu.Unlock()
+	}()
+
 	url := t.URL
 	var headers map[string]string
 	opts := dlengine.Options{Concurrency: DefaultConcurrencyFromSettings()}
 	if url == "" && t.UserID != "" {
 		u, err := drive.GetDownloadURL(t.UserID, t.DriveID, t.FileID, 14400)
 		if err != nil {
+			m.mu.Lock()
 			t.Status = "failed"
 			t.Error = err.Error()
+			t.Updated = time.Now().Unix()
+			m.mu.Unlock()
 			m.update(t)
 			return
 		}
@@ -162,74 +178,117 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		}
 	}
 	if url == "" {
+		m.mu.Lock()
 		t.Status = "failed"
 		t.Error = "无法获取下载地址"
+		t.Updated = time.Now().Unix()
+		m.mu.Unlock()
 		m.update(t)
 		return
 	}
+
+	m.mu.Lock()
 	t.URL = url
 	t.Status = "downloading"
 	t.Updated = time.Now().Unix()
+	m.mu.Unlock()
 	opts.Headers = headers
 	m.update(t)
 
 	err := dlengine.Download(ctx, opts, url, t.LocalPath, func(p dlengine.Progress) {
+		m.mu.Lock()
 		t.Downloaded = p.Downloaded
 		t.Speed = p.Speed
 		t.Progress = p.Percent
 		t.Updated = time.Now().Unix()
+		m.mu.Unlock()
 		m.update(t)
 	})
+
+	m.mu.Lock()
 	if err != nil {
-		t.Status = "failed"
-		t.Error = err.Error()
+		if errors.Is(ctx.Err(), context.Canceled) || strings.Contains(err.Error(), "canceled") {
+			// user paused or canceled
+			if t.Status != "canceled" {
+				t.Status = "paused"
+			}
+		} else {
+			t.Status = "failed"
+			t.Error = err.Error()
+		}
 	} else {
 		t.Status = "completed"
 		t.Downloaded = t.Size
 		t.Progress = 100
 	}
 	t.Updated = time.Now().Unix()
+	m.mu.Unlock()
 	m.update(t)
 }
 
-// Pause marks a task paused (downloads resume on restart; in-flight run is
-// allowed to finish current chunk).
+// Pause marks a task paused and cancels active download immediately.
 func (m *Manager) Pause(id string) {
-	if t, ok := m.get(id); ok && (t.Status == "downloading" || t.Status == "queued") {
-		t.Status = "paused"
-		m.update(t)
+	m.mu.Lock()
+	if cancel, ok := m.cancels[id]; ok {
+		cancel()
 	}
+	t, ok := m.tasks[id]
+	if ok && (t.Status == "downloading" || t.Status == "queued") {
+		t.Status = "paused"
+		t.Updated = time.Now().Unix()
+		m.mu.Unlock()
+		m.update(t)
+		return
+	}
+	m.mu.Unlock()
 }
 
 // Resume re-queues a paused task.
 func (m *Manager) Resume(id string) {
-	if t, ok := m.get(id); ok && t.Status == "paused" {
+	m.mu.Lock()
+	t, ok := m.tasks[id]
+	if ok && (t.Status == "paused" || t.Status == "failed") {
 		t.Status = "queued"
+		t.Error = ""
+		t.Updated = time.Now().Unix()
+		m.mu.Unlock()
 		m.update(t)
 		go m.runDownload(t)
+		return
 	}
+	m.mu.Unlock()
 }
 
 // Cancel stops and removes a task.
 func (m *Manager) Cancel(id string) {
-	if t, ok := m.get(id); ok {
+	m.mu.Lock()
+	if cancel, ok := m.cancels[id]; ok {
+		cancel()
+	}
+	t, ok := m.tasks[id]
+	if ok {
 		t.Status = "canceled"
 		t.Updated = time.Now().Unix()
+		m.mu.Unlock()
 		m.update(t)
 		_ = os.Remove(t.LocalPath + ".part")
 		_ = os.Remove(t.LocalPath + ".state.json")
+		return
 	}
+	m.mu.Unlock()
 }
 
 // Remove hard-deletes a task record (from memory and the store) immediately.
-// Used by the “已完成”列表删除：删除即从列表移除，不留下 canceled 记录。
 func (m *Manager) Remove(id string) {
-	if t, ok := m.get(id); ok {
-		// 清理可能残留的分卷临时文件（不删已完成的成品文件）
+	m.mu.Lock()
+	if cancel, ok := m.cancels[id]; ok {
+		cancel()
+	}
+	t, ok := m.tasks[id]
+	if ok {
 		_ = os.Remove(t.LocalPath + ".part")
 		_ = os.Remove(t.LocalPath + ".state.json")
 	}
-	m.mu.Lock()
 	delete(m.tasks, id)
 	m.mu.Unlock()
 	_ = m.store.DeleteDownloadTask(id)
@@ -240,15 +299,13 @@ func (m *Manager) Remove(id string) {
 
 // Prioritize boosts one task: pause every other active (downloading/queued)
 // task and (re)start this one so it gets the full bandwidth.
-// 引擎是全并发的（无队列），“优先”即暂停其他任务把带宽让给该任务。
 func (m *Manager) Prioritize(id string) {
-	t, ok := m.get(id)
-	if !ok {
-		return
-	}
 	m.mu.Lock()
 	for oid, o := range m.tasks {
 		if oid != id && (o.Status == "downloading" || o.Status == "queued") {
+			if cancel, ok := m.cancels[oid]; ok {
+				cancel()
+			}
 			o.Status = "paused"
 			o.Updated = time.Now().Unix()
 			_ = m.store.SaveDownloadTask(o)
@@ -257,12 +314,21 @@ func (m *Manager) Prioritize(id string) {
 			}
 		}
 	}
-	m.mu.Unlock()
+	t, ok := m.tasks[id]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	start := false
 	if t.Status == "paused" || t.Status == "failed" || t.Status == "canceled" {
 		t.Status = "queued"
 		t.Error = ""
 		t.Updated = time.Now().Unix()
-		m.update(t)
+		start = true
+	}
+	m.mu.Unlock()
+	m.update(t)
+	if start {
 		go m.runDownload(t)
 	}
 }
