@@ -15,6 +15,7 @@ import (
 	_ "mnemo-go/internal/drive/providers" // register all plugins
 	"mnemo-go/internal/engine"
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
 	"mnemo-go/internal/preview"
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/transfer"
@@ -302,6 +303,8 @@ func (a *App) SaveSettings(s store.Settings) error {
 	if s.MaxConcurrentDownloads > 0 && a.dl != nil {
 		a.dl.SetConcurrency(s.MaxConcurrentDownloads)
 	}
+	// apply proxy globally (affects netx clients + download engine)
+	netx.SetGlobalProxy(s.Proxy)
 	return nil
 }
 

@@ -30,6 +30,17 @@ type Client struct {
 // requests to local mock servers (never set in production).
 var TestTransportHook http.RoundTripper
 
+// globalProxy is the application-wide proxy URL set by SetGlobalProxy. Every
+// NewClient call picks it up so providers don't each need proxy plumbing.
+var globalProxy string
+
+// SetGlobalProxy configures the proxy used by all subsequently created netx
+// clients (and the download engine). An empty string disables proxying.
+func SetGlobalProxy(proxyURL string) { globalProxy = proxyURL }
+
+// GlobalProxy returns the currently configured global proxy URL.
+func GlobalProxy() string { return globalProxy }
+
 // NewClient builds a client with sane defaults.
 func NewClient(timeout time.Duration) *Client {
 	if timeout <= 0 {
@@ -38,6 +49,10 @@ func NewClient(timeout time.Duration) *Client {
 	c := &Client{HTTP: &http.Client{Timeout: timeout}, UA: DefaultUA}
 	if TestTransportHook != nil {
 		c.HTTP = &http.Client{Timeout: timeout, Transport: TestTransportHook}
+		return c
+	}
+	if globalProxy != "" {
+		return c.WithProxy(globalProxy)
 	}
 	return c
 }

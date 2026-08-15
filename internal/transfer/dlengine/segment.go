@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"mnemo-go/internal/netx"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -85,7 +88,7 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	// 只限制连接/响应头阶段，body 读取不设总时限（对齐 aria2 的空闲超时语义）。
 	hc := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
+			Proxy: proxyFunc(),
 			DialContext: (&net.Dialer{
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
@@ -447,3 +450,15 @@ func (l *speedLimiter) waitN(n int64) {
 }
 
 var _ = filepath.Base
+
+// proxyFunc returns a proxy function that honors the netx global proxy first,
+// falling back to the environment (HTTP_PROXY/HTTPS_PROXY).
+func proxyFunc() func(*http.Request) (*url.URL, error) {
+	gp := netx.GlobalProxy()
+	if gp != "" {
+		if u, err := url.Parse(gp); err == nil && u.Scheme != "" {
+			return http.ProxyURL(u)
+		}
+	}
+	return http.ProxyFromEnvironment
+}
