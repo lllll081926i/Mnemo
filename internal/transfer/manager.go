@@ -36,6 +36,8 @@ type Manager struct {
 	onEvent OnTaskEvent
 	dir     string
 	stop    chan struct{}
+	ctx     context.Context // root context for all downloads, canceled on Shutdown
+	sem     chan struct{}    // concurrency semaphore (cap = MaxConcurrentDownloads)
 }
 
 // NewManager creates a download manager.
@@ -45,6 +47,10 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		downloadDir = filepath.Join(home, "Downloads")
 	}
 	_ = os.MkdirAll(downloadDir, 0o755)
+	maxConc := 3
+	if s, err := st.GetSettings(); err == nil && s.MaxConcurrentDownloads > 0 {
+		maxConc = s.MaxConcurrentDownloads
+	}
 	m := &Manager{
 		store:   st,
 		tasks:   map[string]*model.DownloadTask{},
@@ -52,6 +58,8 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		onEvent: onEvent,
 		dir:     downloadDir,
 		stop:    make(chan struct{}),
+		ctx:     context.Background(),
+		sem:     make(chan struct{}, maxConc),
 	}
 	// restore persisted tasks
 	m.loadPersisted()
@@ -141,7 +149,21 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 }
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
-	ctx, cancel := context.WithCancel(context.Background())
+	// wait for a concurrency slot before doing any work
+	select {
+	case m.sem <- struct{}{}:
+		defer func() { <-m.sem }()
+	case <-m.ctx.Done():
+		// app shutting down before the task could start
+		m.mu.Lock()
+		t.Status = "paused"
+		t.Updated = time.Now().Unix()
+		m.mu.Unlock()
+		m.update(t)
+		return
+	}
+
+	ctx, cancel := context.WithCancel(m.ctx)
 	m.mu.Lock()
 	m.cancels[t.ID] = cancel
 	m.mu.Unlock()
@@ -153,7 +175,11 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 
 	url := t.URL
 	var headers map[string]string
-	opts := dlengine.Options{Concurrency: DefaultConcurrencyFromSettings()}
+	s, _ := m.store.GetSettings()
+	opts := dlengine.Options{Concurrency: concurrencyFromSettings(s)}
+	if s.MaxDownloadSpeed > 0 {
+		opts.MaxSpeed = s.MaxDownloadSpeed
+	}
 	if url == "" && t.UserID != "" {
 		u, err := drive.GetDownloadURL(t.UserID, t.DriveID, t.FileID, 14400)
 		if err != nil {
@@ -346,7 +372,15 @@ func (m *Manager) ClearCompleted() {
 }
 
 // Shutdown stops background work.
-func (m *Manager) Shutdown() { close(m.stop) }
+func (m *Manager) Shutdown() {
+	// cancel all active downloads first
+	m.mu.Lock()
+	for _, c := range m.cancels {
+		c()
+	}
+	m.mu.Unlock()
+	close(m.stop)
+}
 
 func newID(prefix string) string {
 	return fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), time.Now().UnixMilli()%1000)

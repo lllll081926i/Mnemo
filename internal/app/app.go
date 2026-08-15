@@ -326,6 +326,9 @@ func (a *App) CancelUpload(id string) { a.uploads.Cancel(id) }
 // ClearUploads removes finished uploads.
 func (a *App) ClearUploads() { a.uploads.ClearCompleted() }
 
+// ResumeUpload restarts a paused or failed upload job.
+func (a *App) ResumeUpload(id string) error { return a.uploads.Resume(id) }
+
 // ---- preview ----
 
 // PreviewURL builds a proxied URL for a media file.

@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,11 +21,38 @@ type UploadQueue struct {
 	mu      sync.Mutex
 	jobs    map[string]*model.UploadingUI
 	onEvent OnTaskEvent
+	ctx     context.Context // root context, canceled on Close
+	sem     chan struct{}    // global concurrency slot
+	cancels map[string]context.CancelFunc
 }
 
-// NewUploadQueue creates the upload queue.
+// NewUploadQueue creates the upload queue and restores persisted jobs.
 func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
-	return &UploadQueue{store: st, jobs: map[string]*model.UploadingUI{}, onEvent: onEvent}
+	maxConc := 2
+	if s, err := st.GetSettings(); err == nil && s.MaxConcurrentDownloads > 0 {
+		// reuse the concurrency setting as an upper bound for uploads too
+		maxConc = s.MaxConcurrentDownloads
+	}
+	q := &UploadQueue{
+		store:   st,
+		jobs:    map[string]*model.UploadingUI{},
+		onEvent: onEvent,
+		ctx:     context.Background(),
+		sem:     make(chan struct{}, maxConc),
+		cancels: map[string]context.CancelFunc{},
+	}
+	// restore persisted tasks as paused (user must resume manually)
+	if list, err := st.ListUploadTasks(); err == nil {
+		for i := range list {
+			j := list[i]
+			if j.Upload.IsDowning {
+				j.Upload.IsDowning = false
+				j.Upload.DownState = "paused"
+			}
+			q.jobs[j.UploadID] = &j
+		}
+	}
+	return q
 }
 
 // List returns active upload jobs.
@@ -109,6 +137,7 @@ func (q *UploadQueue) AddFiles(userID, driveID, parentID string, localPaths []st
 func (q *UploadQueue) enqueue(userID, driveID, parentID, localPath, name string, size int64) *model.UploadingUI {
 	j := &model.UploadingUI{
 		UploadID: newID("up"),
+		UserID:   userID,
 		Info: model.UploadInfo{
 			LocalFilePath: localPath, ParentFileID: parentID,
 			DriveID: driveID, Name: name, Size: size,
@@ -124,11 +153,38 @@ func (q *UploadQueue) enqueue(userID, driveID, parentID, localPath, name string,
 	return j
 }
 
-// runUpload executes one job through the provider's UploadOneFile.
+// runUpload executes one job through the provider's UploadOneFile. It waits
+// for a global concurrency slot and runs under a cancelable context so Cancel
+// can stop the provider request, not just flip a UI flag.
 func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
-	ctx := context.Background()
+	// wait for a slot
+	select {
+	case q.sem <- struct{}{}:
+		defer func() { <-q.sem }()
+	case <-q.ctx.Done():
+		return
+	}
+
+	ctx, cancel := context.WithCancel(q.ctx)
+	q.mu.Lock()
+	q.cancels[j.UploadID] = cancel
+	q.mu.Unlock()
+	defer func() {
+		cancel()
+		q.mu.Lock()
+		delete(q.cancels, j.UploadID)
+		q.mu.Unlock()
+	}()
+
+	// honor a stop requested while the job was queued
+	q.mu.Lock()
+	if j.Upload.IsStop {
+		q.mu.Unlock()
+		return
+	}
 	j.Upload.IsDowning = true
 	j.Upload.DownState = "uploading"
+	q.mu.Unlock()
 	q.update(j)
 
 	// compute hash for providers that support 秒传 (optional, best-effort)
@@ -165,10 +221,15 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	close(done)
 	if handlerErr != nil {
 		j.Upload.IsDowning = false
-		j.Upload.IsFailed = true
-		j.Upload.FailedCode = 1
-		j.Upload.FailedMessage = handlerErr.Error()
-		j.Upload.DownState = "failed"
+		if errors.Is(ctx.Err(), context.Canceled) {
+			j.Upload.IsStop = true
+			j.Upload.DownState = "stopped"
+		} else {
+			j.Upload.IsFailed = true
+			j.Upload.FailedCode = 1
+			j.Upload.FailedMessage = handlerErr.Error()
+			j.Upload.DownState = "failed"
+		}
 		q.update(j)
 		return
 	}
@@ -191,14 +252,50 @@ func rapidMethod2(provider string) string {
 	return ""
 }
 
-// Cancel stops a job.
+// Cancel stops a job by canceling its provider request and marking it stopped.
 func (q *UploadQueue) Cancel(id string) {
-	if j, ok := q.get(id); ok {
+	q.mu.Lock()
+	if c, ok := q.cancels[id]; ok {
+		c()
+		delete(q.cancels, id)
+	}
+	j, ok := q.jobs[id]
+	q.mu.Unlock()
+	if ok {
 		j.Upload.IsStop = true
 		j.Upload.IsDowning = false
 		j.Upload.DownState = "stopped"
 		q.update(j)
 	}
+}
+
+// Resume restarts a paused, failed or stopped job.
+func (q *UploadQueue) Resume(id string) error {
+	q.mu.Lock()
+	j, ok := q.jobs[id]
+	if !ok {
+		q.mu.Unlock()
+		return errors.New("上传任务不存在")
+	}
+	if j.Upload.IsDowning {
+		q.mu.Unlock()
+		return errors.New("任务正在上传中")
+	}
+	if j.Upload.IsCompleted {
+		q.mu.Unlock()
+		return errors.New("任务已完成")
+	}
+	// reset state and re-enqueue
+	j.Upload.IsStop = false
+	j.Upload.IsFailed = false
+	j.Upload.FailedMessage = ""
+	j.Upload.DownState = "queued"
+	userID := j.UserID
+	driveID := j.Info.DriveID
+	q.mu.Unlock()
+	q.update(j)
+	go q.runUpload(userID, driveID, j)
+	return nil
 }
 
 // ClearCompleted removes finished uploads.
@@ -223,14 +320,16 @@ func DownloadDir(st *store.Store) string {
 	return s.DownloadDir
 }
 
-// Close persists any in-flight job state. The queue has no long-lived worker
-// loop (each job runs in its own goroutine), so there is no channel to close.
+// Close cancels all in-flight uploads and persists pending state.
 func (q *UploadQueue) Close() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	for _, c := range q.cancels {
+		c()
+	}
 	for _, j := range q.jobs {
 		if !j.Upload.IsCompleted && !j.Upload.IsFailed && !j.Upload.IsStop {
 			_ = q.store.SaveUploadTask(j)
 		}
 	}
+	q.mu.Unlock()
 }

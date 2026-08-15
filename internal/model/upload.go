@@ -39,6 +39,7 @@ type UploadState struct {
 // UploadingUI is the full upload job view model (mirrors legacy IUploadingUI).
 type UploadingUI struct {
 	UploadID string      `json:"UploadID"`
+	UserID   string      `json:"user_id"`
 	Info     UploadInfo  `json:"Info"`
 	Upload   UploadState `json:"Upload"`
 }
