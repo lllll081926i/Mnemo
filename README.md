@@ -6,11 +6,11 @@ Mnemo 的 Go + Wails v2 重写版 —— 多网盘桌面文件管理器。
 
 ## 技术栈
 
-- **Go 1.26** + **Wails v2**（桌面壳：Go 后端 + WebView2 前端）
-- **Vue 3 + Vite + TypeScript**（全新精简前端，样式 token 复用旧版）
-- **aria2c** 多线程下载引擎（懒启动）
-- **mpv** 进程 JSON IPC 内嵌播放
-- 纯 Go 无 cgo 外部依赖（现代 `net/http`、纯 JSON 本地存储）
+- **Go 1.25+** + **Wails v2.14**（桌面壳：Go 后端 + WebView2 前端）
+- **Vue 3.5 + Vite 6**（前端为纯 JavaScript，非 TypeScript；样式 token 复用旧版）
+- 原生 Go HTTP Range 分段下载器，不再依赖 aria2c
+- **mpv** 进程 JSON IPC 播放
+- 纯 Go 无 cgo 外部依赖（现代 `net/http`、纯 JSON 本地存储，无加密存储）
 
 ## 支持的网盘（13 个）
 

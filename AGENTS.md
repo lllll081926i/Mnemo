@@ -1,107 +1,81 @@
-# AGENTS.md — Mnemo
+# AGENTS.md — Mnemo-Go
 
 ## Product
 
-**Mnemo** is a free multi-cloud desktop file manager (Electron + Vue 3).  
+**Mnemo-Go** is a free multi-cloud desktop file manager built with Go + Wails v2.
 Mythology: Mnemosyne — memory.
 
-**Active providers** (login + `driveProvider`):  
-`pikpak` · `onedrive` · `dropbox` · `gdrive` · `gofile` · `pan123` · `lanzou` · `ilanzou` · `pan139` · `pan189` · `yike` · `aliopen` · `guangya` · `webdav` · `s3`
+**Active providers** (13, login + `drive.Driver`):
+`pikpak` · `onedrive` · `dropbox` · `pan123` · `lanzou` · `ilanzou` · `pan139` · `pan189` · `yike` · `aliopen` · `guangya` · `webdav` · `s3`
+
+> `gofile`、`gdrive` 已按需求移除；`encryption`（加密文件名/加密流）不再支持。
 
 Default login provider: **PikPak**.
 
 ## Quick reference
 
 ```bash
-npm install          # npm only (package-lock.json)
-npm run dev
-npm run build        # typecheck → vite build
-npm run test
-npm run secrets:generate
+# 环境：Go ≥ 1.25（实测 1.26.6）、gcc（Windows）、Node ≥ 20
+go mod tidy
+wails dev          # 热重载开发
+wails build        # 产物 build/bin/
+go build ./...     # 编译检查
+go test ./...      # 单元测试
 ```
 
-## Package manager / Node
+## 技术栈
 
-- Lockfile: `package-lock.json` only  
-- `engines.node >= 22.12.0`
+- **Go 1.25+** + **Wails v2.14**（桌面壳：Go 后端 + WebView2 前端）
+- **Vue 3.5 + Vite 6**（前端为纯 JavaScript，非 TypeScript；样式 token 复用旧版）
+- 原生 Go HTTP Range 分段下载器（`internal/transfer/dlengine`），不再依赖 aria2c
+- **mpv** 进程 JSON IPC 播放（`internal/player`），资源和实现偏 Windows
+- 多份原子 JSON 文件持久化（`internal/store`），无 SQLite、无加密存储
+- 纯 Go 无 cgo 外部依赖
 
 ## Build order
 
-`npm run build` = **typecheck → vite bundle** (clears `dist/`; full electron build also clears `release/`).  
-`npm run build:electron` runs build then electron-builder. Product name: **Mnemo**, appId `com.mnemo.app`.  
-Version line: `0.1.1-preview.x` during preview.
+`wails build` → `build/bin/`。前端 `frontend/dist` 由 `wails build` 内嵌（`//go:embed all:frontend/dist`）。
+`go build ./...` 仅编译检查后端。
 
 ## Secrets
 
-Real keys: `.env.local` / GitHub Secrets → `scripts/generate-secrets.mjs` → `src/secrets.generated.ts` (gitignored).  
-Typical: OneDrive / Dropbox / Google Drive OAuth, optional subtitle keys, Apple signing.
+OAuth client_id 等从 `config.LoadSecrets(dataDir)` 读取（`internal/config`）。OneDrive/Dropbox 的 OAuth PKCE 在各 provider 的 `auth.go` 实现，本地回调监听 `127.0.0.1:0` 随机端口。
 
 ## Architecture
 
 | Directory | Purpose |
 |---|---|
-| `electron/main/` | Main process (Aria lazy-start, OAuth callback, windows) |
-| `electron/preload/` | Preload |
-| `worker.html` + `src/workerpage/` | Light upload worker entry |
-| `src/` | Vue renderer + providers |
-| `shared/` | Shared code |
-| `scripts/` | Build / secrets |
-| `static/engine/` | aria2 / platform resources |
+| `main.go` | Wails 应用装配（入口） |
+| `internal/app/` | Wails 绑定层（前端调用的全部方法 + 事件） |
+| `internal/drive/` | provider 插件契约（接口/能力/元数据/注册表）+ ops 门面 |
+| `internal/drive/providers/` | 13 个网盘插件（每个一个包，init() 注册） |
+| `internal/drive/driveutil/` | 通用工具（路径、冲突策略） |
+| `internal/model/` | 统一数据模型（文件/账号/分享/任务/设置） |
+| `internal/netx/` | HTTP 客户端/上传/哈希/限速 |
+| `internal/store/` | 本地持久化（账号/设置/标签/收藏/任务，原子 JSON） |
+| `internal/transfer/` | 下载管理器 + 上传队列 + 跨盘迁移 |
+| `internal/transfer/dlengine/` | 原生 Go 分段下载器（Range + 断点续传） |
+| `internal/transfer/migrate/` | 跨盘迁移引擎 |
+| `internal/player/` | mpv JSON IPC 桥 |
+| `internal/sync/` | 双向同步引擎 |
+| `internal/preview/` | 本地 Range 代理（鉴权流/预览，会话令牌保护） |
+| `internal/engine/` | 内嵌引擎二进制（mpv）释放 |
+| `internal/config/` | secrets 加载、UserDataDir |
+| `frontend/` | Vue 3 前端（Wails webview，纯 JS） |
+| `docs/` | 架构/加盘指南/设计规范/网盘状态/迁移进度 |
 
-Providers under `src/`（各盘独立文件夹，对齐 AList driver）：`pikpak/` `onedrive/` `dropbox/` `gdrive/` `gofile/` `pan123/` `lanzou/` `ilanzou/` `pan139/` `pan189/` `yike/` `aliopen/` `guangya/`。  
-Mounted storage: `utils/webdavClient.ts` `utils/s3Client.ts`。  
-**Drive plugin layer:** `src/drive/` — `registry` + `ops` + `providers/*`；UI/传输只走 `drive/ops`，禁止中央 `if (provider === …)`。  
-加盘：`src/<id>/` API → `src/drive/providers/<id>.ts` + `providers/index.ts` 注册。  
-共用：`providerRateLimit`（防风控）、`providerUpload`、`driveSyncAdapter`、`proxyhelper` 头透传。  
-**ProviderNet 中继**：小网盘 API 无 CORS 且需 Cookie/Referer 等禁用头，渲染进程 fetch 必挂。`public/global-shim.js` 将中继域名的 fetch 透明转发到主进程 `ProviderNet:request`（`ipcEvent.ts`，net.fetch + 域名白名单）；新加盘若 API 无 CORS，把根域名加进 `PROVIDER_NET_RELAY_ROOTS` 与 shim 的 `RELAY_ROOTS`。
-登录优先账密/OAuth/refresh_token/SMS；`yike` 仅 BDUSS（AList 限制）；`photoAlbum` 瀑布流 UI。图标源：`logo/` → `public/images/drive-icons/`。
+**Drive plugin layer:** `internal/drive/` — `driver.go`(契约) + `ops.go`(门面) + `registry.go`(注册表) + `capabilities.go`(能力位)。UI/传输只走 `drive/ops`，禁止中央 `if (provider == …)`。
 
-Aliases: `@shared/*`, `@main/*`.
+加盘：`internal/drive/providers/<id>/` 实现 `drive.Driver` → `Register(drive.Registration{...})` → `providers/all.go` 空白导入。详见 `docs/PROVIDER_GUIDE.md`。
 
-## Out of scope (removed from product)
+## Out of scope (removed)
 
-Media library UI, media-server clients, music library product, books/Reedy/AI, clouddrive-cli/MCP, local BT seeding, WebDAV **server**, App Pro/paywall, RSS toolbox.  
-Login removed for Quark / Nextcloud（未做完整 checklist 勿加菜单）。`aliopen` / `guangya` / `pan139` / `pan189` / `yike` 已按 AList 重新接入。
-
-Keep: multi-cloud file manager, HTTP Aria download, PikPak cloud offline, video/file preview, slim share, cross-drive migrate (`src/migrate/`, see `docs/MIGRATE_SPEC.md`).
+`gofile`、`gdrive`、`encryption`（加密文件名/加密流）已移除。媒体库 UI、媒体服务器、WebDAV server 等也不在范围内。
 
 ## Testing
 
-Vitest Node env; explicit dirs in `vitest.config.ts`. Prefer normalizing CRLF when asserting multi-line source strings on Windows.
+`go test ./...`。现有测试覆盖：pan123/pan189/lanzou/ilanzou 单测 + e2e（dlengine/webdav/provider mock）。前端无测试框架。
 
 ## Provider checklist
 
-When adding a provider, implement in order (do not ship list-only):
-
-1. Account/auth (`auth.ts`, secrets placeholders, userstore/userdal, login UI)  
-2. Detection (`tokenfrom`, drive model, `driveProvider` meta + capabilities)  
-3. List/detail → shared file model  
-4. Download/playback URLs (no wrong-provider APIs)  
-5. Search if supported  
-6. Thumbnails  
-7. File ops (mkdir/rename/move/copy/trash/delete)  
-8. Share if supported  
-9. Upload  
-10. Folder picker modals  
-11. Menu capability boundaries  
-12. Properties / recycle if any  
-13. Tests + `vitest.config.ts`  
-14. `npm run build`  
-
-Recommended layout:
-- API: `src/<provider>/{auth,dirfilelist,filecmd,search?,share?,upload?,…}.ts`
-- Plugin adapter: `src/drive/providers/<provider>.ts` + `providers/index.ts` import（单文件宜 <200 行）
-- Shared: `src/drive/ops.ts`、`dirQuery.ts`、`mountedUpload.ts`、`shareHelpers.ts`
-- Local tags/favorites: `src/pan/quickFiles.ts`（非盘协议）
-- Do **not** add central `if (provider === …)` in `fileapi/*` or pan list loaders
-
-## Formatting
-
-Single quotes, no semicolons, printWidth 260, no trailing commas, LF.
-
-## 协作偏好（产品体验原则）
-
-- **后台无感**：索引、缓存、同步等基础能力在后台静默建立与维护（及时增删、及时同步）；不向用户展示「系统做了什么」的说明性提示，仅真正需要用户决策/纠错时才提示
-- **资源克制**：后台任务默认低占用——防抖写回、惰性加载、限量上限，不阻塞交互、不刷磁盘/网络
-- **链路闭环**：功能必须打通到可用终点（入口→处理→结果），不留死路；能力缺失时静默降级（如本地索引兜底搜索），不堆解释文案
-- **验证方式**：以静态分析 + 单测/typecheck 为准，不代用户启动或操作 App
+新增 provider 参见 `docs/PROVIDER_GUIDE.md` 和 `docs/providers/<id>.md`（13 个盘的功能详情与迁移状态）。

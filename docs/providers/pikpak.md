@@ -32,7 +32,7 @@
 | refresh_token 存储 | ✅ | `auth.go:198-234` authSignIn | 无 |
 | token 刷新 | ✅ | `auth.go:237-260` refreshToken `/v1/auth/token` | 无 |
 | **速率限制处理** | ❌ | 无 | 🔴 旧版 `PikPakRateLimitError` + 30s 冷却完全缺失 |
-| **API captcha token 注入** | ❌ | `client.go` jsonDo/get 无 X-Captcha-Token | 🔴 旧版 `pikpakApiFetch` 按 action 缓存 + 失效换发，批量操作可能 `captcha_required` |
+| **API captcha token 注入** | ⚠️ | `auth.go:204` 登录流程已用 X-Captcha-Token；业务 API 续接不完整 | 🟡 业务 API 遇到二次挑战后的完整续接体系仍不完整 |
 
 ---
 
@@ -166,7 +166,7 @@
 
 ## P0 差距清单
 
-1. 🔴 **API captcha token 注入**：所有 drive API 调用不注入 `X-Captcha-Token`，部分接口可能 `captcha_required`
+1. 🔴 **API captcha token 续接不完整**：登录流程已用 X-Captcha-Token(`auth.go:204`)，但业务 API 遇到二次挑战后的完整续接体系仍不完整
 2. 🔴 **分享导入**：声明 `importShare:true` 但 3 个 API 完全未迁移
 3. 🔴 **离线下载进度/删除**：只实现创建和列表
 4. 🟡 **TrashPurge/TrashClear**：声明 true 但无实现

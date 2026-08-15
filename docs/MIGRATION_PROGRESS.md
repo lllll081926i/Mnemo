@@ -75,7 +75,7 @@
 
 | Provider | 完成度 | P0 差距 |
 |----------|:------:|---------|
-| pikpak | ~75% | API captcha token 注入、分享导入、离线下载进度/删除 |
+| pikpak | ~75% | API captcha 续接、分享导入、离线下载进度/删除 |
 | aliopen | ~70% | CompleteUpload 空 upload_id bug、分享导入、上传断点续传 |
 | pan123 | ~80% | 断点续传持久化、分享导入、TrashPurge/TrashClear 声明未实现 |
 | pan189 | ~95% | 无（最忠实移植） |
@@ -140,7 +140,7 @@
 
 1. **onedrive/dropbox RefreshAccount**：token 刷新 + 账号信息/配额
 2. **分享导入 importShare**：pikpak/aliopen/pan123 三个盘
-3. **pikpak API captcha token 体系**：drive API 注入 X-Captcha-Token
+3. **pikpak API captcha 续接**：登录已用 X-Captcha-Token，业务 API 二次挑战续接不完整
 4. **aliopen CompleteUpload bug**：传空 upload_id（`aliopen.go:511`）
 5. **s3 目录递归操作**：Rename/Move/Copy/Delete 不递归目录
 6. **s3 forcePathStyle 可配置**：硬编码 true

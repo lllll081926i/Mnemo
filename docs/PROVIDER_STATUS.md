@@ -222,7 +222,7 @@
 |---|------|---------|------|
 | 1 | onedrive/dropbox `RefreshAccount` 完全缺失 | 2 盘 | token 过期后无法续期，登录后不获取账号信息/配额 |
 | 2 | 分享导入 `importShare` 声明未实现 | 3 盘(pikpak/aliopen/pan123) | 能力声明 `true` 但无任何实现代码 |
-| 3 | pikpak API captcha token 体系未迁移 | 1 盘 | drive API 调用不注入 `X-Captcha-Token`，批量操作可能返回 `captcha_required` |
+| 3 | pikpak API captcha token 续接不完整 | 1 盘 | 登录已用 X-Captcha-Token(`auth.go:204`)，但业务 API 遇到二次挑战后的完整续接体系仍不完整 |
 | 4 | aliopen `CompleteUpload` 传空 `upload_id` | 1 盘 | `aliopen.go:511` 上传完成调用可能失败 |
 | 5 | s3 目录递归操作完全缺失 | 1 盘 | Rename/Move/Copy/Delete 仅处理单对象，不递归目录 |
 | 6 | s3 `forcePathStyle` 硬编码不可配置 | 1 盘 | `s3.go:71` 写死 true，对 AWS 原生 endpoint 可能不兼容 |

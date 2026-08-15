@@ -58,42 +58,90 @@ func (e *Engine) Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-// push uploads newer local files to the drive.
+// remoteTree recursively lists all files under remoteDir, preserving the
+// relative path (slash-joined) in RemoteName. It recurses into IsDir entries
+// returned by drive.ListDir so that nested subdirectories are not skipped.
+func remoteTree(cfg Config) ([]Entry, error) {
+	var out []Entry
+	var walk func(parentID, relPrefix string) error
+	walk = func(parentID, relPrefix string) error {
+		files, err := drive.ListDir(cfg.UserID, cfg.DriveID, parentID, nil)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			rel := f.Name
+			if relPrefix != "" {
+				rel = relPrefix + "/" + f.Name
+			}
+			if f.IsDir {
+				// recurse into subdirectory, carrying the relative path forward
+				if err := walk(f.FileID, rel); err != nil {
+					return err
+				}
+				continue
+			}
+			out = append(out, Entry{
+				RemoteID:   f.FileID,
+				RemoteName: rel,
+				Size:       f.Size,
+				ModTime:    f.Time,
+				IsDir:      false,
+			})
+		}
+		return nil
+	}
+	if err := walk(cfg.RemoteDir, ""); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// push uploads newer local files to the drive, preserving nested directory
+// structure on the remote side.
 func (e *Engine) push(ctx context.Context, cfg Config) error {
-	remoteFiles, err := drive.ListDir(cfg.UserID, cfg.DriveID, cfg.RemoteDir, nil)
+	remoteFiles, err := remoteTree(cfg)
 	if err != nil {
 		return err
 	}
-	remoteByID := map[string]model.File{}
-	for _, f := range remoteFiles {
-		remoteByID[f.FileID] = f
+	remoteByName := map[string]Entry{}
+	for _, r := range remoteFiles {
+		remoteByName[r.RemoteName] = r
 	}
+
 	var local []Entry
 	err = filepath.Walk(cfg.LocalDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel(cfg.LocalDir, path)
-		local = append(local, Entry{LocalPath: path, RemoteName: filepath.ToSlash(rel), Size: info.Size(), ModTime: info.ModTime().Unix(), IsDir: false})
+		local = append(local, Entry{
+			LocalPath:  path,
+			RemoteName: filepath.ToSlash(rel),
+			Size:       info.Size(),
+			ModTime:    info.ModTime().Unix(),
+			IsDir:      false,
+		})
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	// find local files missing or newer on remote
+
+	// find local files missing or newer than remote
 	needUpload := []Entry{}
 	for _, l := range local {
-		found := false
-		for _, r := range remoteFiles {
-			if r.Name == filepath.Base(l.RemoteName) && r.Size == l.Size {
-				found = true
-				break
-			}
-		}
+		r, found := remoteByName[l.RemoteName]
 		if !found {
+			needUpload = append(needUpload, l)
+			continue
+		}
+		// upload if local is newer (ModTime) or size differs
+		if l.ModTime > r.ModTime || l.Size != r.Size {
 			needUpload = append(needUpload, l)
 		}
 	}
+
 	total := len(needUpload)
 	for i, l := range needUpload {
 		select {
@@ -111,13 +159,65 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 	return nil
 }
 
+// ensureRemoteDir walks the slash-relative path components and creates each
+// directory level on the remote drive as needed, returning the leaf FileID.
+func ensureRemoteDir(cfg Config, relDir string) (string, error) {
+	parentID := cfg.RemoteDir
+	if relDir == "" || relDir == "." {
+		return parentID, nil
+	}
+	parts := strings.Split(filepath.ToSlash(relDir), "/")
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		// check if it already exists under parentID
+		existing, err := drive.ListDir(cfg.UserID, cfg.DriveID, parentID, nil)
+		if err != nil {
+			return "", err
+		}
+		found := ""
+		for _, f := range existing {
+			if f.IsDir && f.Name == part {
+				found = f.FileID
+				break
+			}
+		}
+		if found != "" {
+			parentID = found
+			continue
+		}
+		res, err := drive.Mkdir(cfg.UserID, cfg.DriveID, parentID, part)
+		if err != nil {
+			return "", err
+		}
+		if res.Error != "" {
+			return "", &driveError{op: "Mkdir", msg: res.Error}
+		}
+		parentID = res.FileID
+	}
+	return parentID, nil
+}
+
+type driveError struct {
+	op  string
+	msg string
+}
+
+func (e *driveError) Error() string { return e.op + ": " + e.msg }
+
 func (e *Engine) uploadFile(ctx context.Context, cfg Config, entry Entry) error {
-	// build an upload UI job and run through the provider
+	// resolve/create remote parent directory so nested paths are preserved
+	relDir := filepath.Dir(entry.RemoteName)
+	parentID, err := ensureRemoteDir(cfg, relDir)
+	if err != nil {
+		return err
+	}
 	ui := &model.UploadingUI{
 		UploadID: entry.LocalPath,
 		Info: model.UploadInfo{
 			LocalFilePath: entry.LocalPath,
-			ParentFileID:  cfg.RemoteDir,
+			ParentFileID:  parentID,
 			DriveID:       cfg.DriveID,
 			Name:          filepath.Base(entry.LocalPath),
 			Size:          entry.Size,
@@ -130,31 +230,40 @@ func (e *Engine) uploadFile(ctx context.Context, cfg Config, entry Entry) error 
 	return handler(ctx, ui)
 }
 
-// pull downloads remote files missing/changed locally.
+// pull downloads remote files missing or changed locally, recursing into
+// remote subdirectories and preserving relative path structure locally.
 func (e *Engine) pull(ctx context.Context, cfg Config) error {
-	remoteFiles, err := drive.ListDir(cfg.UserID, cfg.DriveID, cfg.RemoteDir, nil)
+	remoteFiles, err := remoteTree(cfg)
 	if err != nil {
 		return err
 	}
 	total := len(remoteFiles)
 	for i, f := range remoteFiles {
-		if f.IsDir {
-			continue
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		localPath := filepath.Join(cfg.LocalDir, f.Name)
-		if _, err := os.Stat(localPath); err == nil {
-			continue // exists
+		// preserve relative path structure locally
+		localPath := filepath.Join(cfg.LocalDir, filepath.FromSlash(f.RemoteName))
+		localModTime, localSize := int64(0), int64(-1)
+		if info, statErr := os.Stat(localPath); statErr == nil {
+			localModTime = info.ModTime().Unix()
+			localSize = info.Size()
 		}
-		u, err := drive.GetDownloadURL(cfg.UserID, cfg.DriveID, f.FileID, 14400)
+		// only download if remote is newer or size differs
+		if f.ModTime <= localModTime && f.Size == localSize {
+			continue
+		}
+		u, err := drive.GetDownloadURL(cfg.UserID, cfg.DriveID, f.RemoteID, 14400)
 		if err != nil {
 			continue
 		}
-		if err := downloadTo(u, localPath); err != nil {
+		// ensure local parent directory exists
+		if mkErr := os.MkdirAll(filepath.Dir(localPath), 0o755); mkErr != nil {
+			continue
+		}
+		if err := downloadTo(ctx, u, localPath); err != nil {
 			continue
 		}
 		if e.onProgress != nil {
@@ -173,7 +282,8 @@ func (e *Engine) twoWay(ctx context.Context, cfg Config) error {
 }
 
 // downloadTo streams a download url to a local file via the segmented engine.
-func downloadTo(u *model.DownloadURL, path string) error {
+// It accepts the caller's context so downloads can be cancelled reliably.
+func downloadTo(ctx context.Context, u *model.DownloadURL, path string) error {
 	opts := dlengine.Options{}
 	if u.ForceLocalProxy || u.DownloadMode == "proxy" {
 		opts.Concurrency = 1
@@ -183,8 +293,13 @@ func downloadTo(u *model.DownloadURL, path string) error {
 	}
 	// single-stream download for sync simplicity
 	opts.Concurrency = 1
-	return dlengine.Download(context.Background(), opts, u.URL, path, nil)
+	return dlengine.Download(ctx, opts, u.URL, path, nil)
 }
+
+// TODO: delete propagation (remote→local and local→remote) is not yet
+// implemented. It requires a persisted snapshot of the last sync state to
+// distinguish "file was deleted on one side" from "never existed". This is
+// intentionally out of scope for the minimal fix.
 
 var _ = time.Now
 var _ = strings.TrimSpace
