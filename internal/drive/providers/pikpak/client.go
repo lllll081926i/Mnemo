@@ -120,6 +120,25 @@ func (c *client) headers(extra map[string]string) map[string]string {
 
 // jsonDo performs an authenticated JSON call against the drive API.
 func (c *client) jsonDo(ctx context.Context, method, path string, body any, out any, extra map[string]string) error {
+	err := c.jsonDoOnce(ctx, method, path, body, out, extra)
+	if err != nil && isCaptchaError(err) {
+		// Acquire a fresh captcha token for this action and retry once.
+		action := method + ":" + path
+		tok, _, terr := initCaptcha(ctx, c.http, c.deviceID, "", action)
+		if terr == nil && tok != "" {
+			merged := map[string]string{}
+			for k, v := range extra {
+				merged[k] = v
+			}
+			merged["X-Captcha-Token"] = tok
+			return c.jsonDoOnce(ctx, method, path, body, out, merged)
+		}
+	}
+	return err
+}
+
+// jsonDoOnce performs a single authenticated JSON call without captcha retry.
+func (c *client) jsonDoOnce(ctx context.Context, method, path string, body any, out any, extra map[string]string) error {
 	target := apiHost + path
 	var reader io.Reader
 	if body != nil {
@@ -143,13 +162,35 @@ func (c *client) jsonDo(ctx context.Context, method, path string, body any, out 
 	return json.Unmarshal(data, out)
 }
 
+// isCaptchaError reports whether err is a PikPak captcha challenge that can be
+// retried after acquiring a fresh X-Captcha-Token.
+func isCaptchaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "captcha_required") || strings.Contains(s, "captcha_invalid") || strings.Contains(s, "验证失败")
+}
+
 // get performs a GET with query params.
 func (c *client) get(ctx context.Context, path string, q url.Values, out any) error {
+	err := c.getOnce(ctx, path, q, out, nil)
+	if err != nil && isCaptchaError(err) {
+		action := http.MethodGet + ":" + path
+		tok, _, terr := initCaptcha(ctx, c.http, c.deviceID, "", action)
+		if terr == nil && tok != "" {
+			return c.getOnce(ctx, path, q, out, map[string]string{"X-Captcha-Token": tok})
+		}
+	}
+	return err
+}
+
+func (c *client) getOnce(ctx context.Context, path string, q url.Values, out any, extra map[string]string) error {
 	target := apiHost + path
 	if q != nil {
 		target += "?" + q.Encode()
 	}
-	resp, err := c.http.Do(ctx, http.MethodGet, target, c.headers(nil), nil)
+	resp, err := c.http.Do(ctx, http.MethodGet, target, c.headers(extra), nil)
 	if err != nil {
 		return err
 	}

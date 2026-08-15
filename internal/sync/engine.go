@@ -3,6 +3,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +16,16 @@ import (
 
 // Config describes one sync job.
 type Config struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	UserID    string `json:"user_id"`
-	DriveID   string `json:"drive_id"`
-	LocalDir  string `json:"local_dir"`
-	RemoteDir string `json:"remote_dir"`
-	Direction string `json:"direction"` // two-way | push | pull
-	Enabled   bool   `json:"enabled"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	UserID            string `json:"user_id"`
+	DriveID           string `json:"drive_id"`
+	LocalDir          string `json:"local_dir"`
+	RemoteDir         string `json:"remote_dir"`
+	Direction         string `json:"direction"` // two-way | push | pull
+	Enabled           bool   `json:"enabled"`
+	IntervalMin       int    `json:"intervalMin"`       // scheduler interval in minutes; <=0 means no scheduling
+	DeletePropagation bool   `json:"deletePropagation"` // propagate deletions across sides
 }
 
 // Entry is one synced file record.
@@ -36,26 +39,71 @@ type Entry struct {
 	IsDir      bool   `json:"isDir"`
 }
 
+// SnapshotStore persists sync snapshots (last-sync file lists) so the engine
+// can detect cross-side deletions on the next run. The store package provides
+// a JSON-backed implementation; the interface keeps the engine testable.
+type SnapshotStore interface {
+	SaveSyncSnapshot(id string, entries []Entry) error
+	LoadSyncSnapshot(id string) ([]Entry, error)
+	ClearSyncSnapshot(id string) error
+}
+
+// LogFunc is the logger callback for key sync events (start/finish/conflict/delete).
+type LogFunc func(jobID, event, detail string)
+
 // Engine executes sync jobs.
 type Engine struct {
 	onProgress func(jobID string, done, total int)
+	snapshots  SnapshotStore
+	logger     LogFunc
 }
 
 // NewEngine creates the sync engine.
-func NewEngine(onProgress func(jobID string, done, total int)) *Engine {
-	return &Engine{onProgress: onProgress}
+// snapshots and logger are optional (nil-safe); snapshots are required for
+// delete propagation.
+func NewEngine(onProgress func(jobID string, done, total int), opts ...func(*Engine)) *Engine {
+	e := &Engine{onProgress: onProgress}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// WithSnapshotStore sets the snapshot store on the engine.
+func WithSnapshotStore(s SnapshotStore) func(*Engine) {
+	return func(e *Engine) { e.snapshots = s }
+}
+
+// WithLogger sets the logger callback on the engine.
+func WithLogger(fn LogFunc) func(*Engine) {
+	return func(e *Engine) { e.logger = fn }
+}
+
+// log is a nil-safe helper.
+func (e *Engine) log(jobID, event, detail string) {
+	if e.logger != nil {
+		e.logger(jobID, event, detail)
+	}
 }
 
 // Run executes one sync job.
 func (e *Engine) Run(ctx context.Context, cfg Config) error {
+	e.log(cfg.ID, "start", fmt.Sprintf("direction=%s", cfg.Direction))
+	var err error
 	switch cfg.Direction {
 	case "push":
-		return e.push(ctx, cfg)
+		err = e.push(ctx, cfg)
 	case "pull":
-		return e.pull(ctx, cfg)
+		err = e.pull(ctx, cfg)
 	default:
-		return e.twoWay(ctx, cfg)
+		err = e.twoWay(ctx, cfg)
 	}
+	if err != nil {
+		e.log(cfg.ID, "error", err.Error())
+		return err
+	}
+	e.log(cfg.ID, "complete", "ok")
+	return nil
 }
 
 // remoteTree recursively lists all files under remoteDir, preserving the
@@ -156,6 +204,34 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 			e.onProgress(cfg.ID, i+1, total)
 		}
 	}
+
+	// delete propagation: files in the snapshot but absent locally now →
+	// remove them from the remote side.
+	if cfg.DeletePropagation && e.snapshots != nil {
+		snap, _ := e.snapshots.LoadSyncSnapshot(cfg.ID)
+		localByName := map[string]Entry{}
+		for _, l := range local {
+			localByName[l.RemoteName] = l
+		}
+		var toDelete []Entry
+		for _, s := range snap {
+			if _, exists := localByName[s.RemoteName]; !exists {
+				toDelete = append(toDelete, s)
+			}
+		}
+		if len(toDelete) > 0 {
+			if ok := e.guardDelete(cfg.ID, len(toDelete), len(snap)); !ok {
+				// safety threshold exceeded — skip deletions
+			} else {
+				e.propagateRemoteDeletes(ctx, cfg, toDelete)
+			}
+		}
+	}
+
+	// persist the new snapshot of local files for next run's delete detection
+	if e.snapshots != nil {
+		_ = e.snapshots.SaveSyncSnapshot(cfg.ID, local)
+	}
 	return nil
 }
 
@@ -237,6 +313,10 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	remoteByName := map[string]Entry{}
+	for _, r := range remoteFiles {
+		remoteByName[r.RemoteName] = r
+	}
 	total := len(remoteFiles)
 	for i, f := range remoteFiles {
 		select {
@@ -270,6 +350,30 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 			e.onProgress(cfg.ID, i+1, total)
 		}
 	}
+
+	// delete propagation: files in the snapshot but absent on the remote now →
+	// remove them locally.
+	if cfg.DeletePropagation && e.snapshots != nil {
+		snap, _ := e.snapshots.LoadSyncSnapshot(cfg.ID)
+		var toDelete []Entry
+		for _, s := range snap {
+			if _, exists := remoteByName[s.RemoteName]; !exists {
+				toDelete = append(toDelete, s)
+			}
+		}
+		if len(toDelete) > 0 {
+			if ok := e.guardDelete(cfg.ID, len(toDelete), len(snap)); !ok {
+				// safety threshold exceeded — skip deletions
+			} else {
+				e.propagateLocalDeletes(cfg, toDelete)
+			}
+		}
+	}
+
+	// persist the new snapshot of remote files for next run's delete detection
+	if e.snapshots != nil {
+		_ = e.snapshots.SaveSyncSnapshot(cfg.ID, remoteFiles)
+	}
 	return nil
 }
 
@@ -296,10 +400,104 @@ func downloadTo(ctx context.Context, u *model.DownloadURL, path string) error {
 	return dlengine.Download(ctx, opts, u.URL, path, nil)
 }
 
-// TODO: delete propagation (remote→local and local→remote) is not yet
-// implemented. It requires a persisted snapshot of the last sync state to
-// distinguish "file was deleted on one side" from "never existed". This is
-// intentionally out of scope for the minimal fix.
+// guardDelete enforces the safety threshold: if the number of files to
+// delete exceeds 50% of the snapshot total, deletions are cancelled to
+// prevent catastrophic data loss from a transient listing failure.
+func (e *Engine) guardDelete(jobID string, deleteCount, snapTotal int) bool {
+	if snapTotal == 0 {
+		return false
+	}
+	ratio := float64(deleteCount) / float64(snapTotal)
+	if ratio > 0.5 {
+		e.log(jobID, "delete_cancelled", fmt.Sprintf("delete count %d exceeds 50%% of snapshot %d", deleteCount, snapTotal))
+		return false
+	}
+	return true
+}
+
+// propagateRemoteDeletes trashes/deletes the given remote files that no
+// longer exist locally. It uses the drive trash batch for safety.
+func (e *Engine) propagateRemoteDeletes(_ context.Context, cfg Config, toDelete []Entry) {
+	ids := make([]string, 0, len(toDelete))
+	names := make([]string, 0, len(toDelete))
+	for _, d := range toDelete {
+		if d.RemoteID != "" {
+			ids = append(ids, d.RemoteID)
+			names = append(names, d.RemoteName)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	_, err := drive.TrashBatch(cfg.UserID, cfg.DriveID, ids)
+	if err != nil {
+		e.log(cfg.ID, "delete_error", fmt.Sprintf("remote trash failed: %v", err))
+		return
+	}
+	e.log(cfg.ID, "delete", fmt.Sprintf("removed remote files: %v", names))
+}
+
+// propagateLocalDeletes removes local files that no longer exist on the
+// remote side.
+func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) {
+	names := make([]string, 0, len(toDelete))
+	for _, d := range toDelete {
+		localPath := filepath.Join(cfg.LocalDir, filepath.FromSlash(d.RemoteName))
+		if err := os.Remove(localPath); err != nil {
+			continue
+		}
+		names = append(names, d.RemoteName)
+	}
+	if len(names) > 0 {
+		e.log(cfg.ID, "delete", fmt.Sprintf("removed local files: %v", names))
+	}
+}
+
+// StartScheduler launches a background goroutine that periodically runs all
+// enabled sync jobs at the given IntervalMin interval. It blocks until stop
+// is closed. When IntervalMin <= 0 the scheduler is a no-op and returns
+// immediately.
+func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, error)) {
+	// Determine the minimum non-zero interval across all enabled configs; if
+	// none qualify the scheduler does nothing.
+	all, err := configs()
+	if err != nil {
+		return
+	}
+	minInterval := 0
+	for _, c := range all {
+		if c.Enabled && c.IntervalMin > 0 {
+			if minInterval == 0 || c.IntervalMin < minInterval {
+				minInterval = c.IntervalMin
+			}
+		}
+	}
+	if minInterval <= 0 {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(time.Duration(minInterval) * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				runList, err := configs()
+				if err != nil {
+					continue
+				}
+				for _, c := range runList {
+					if !c.Enabled || c.IntervalMin <= 0 {
+						continue
+					}
+					_ = e.Run(context.Background(), c)
+				}
+			}
+		}
+	}()
+}
 
 var _ = time.Now
 var _ = strings.TrimSpace

@@ -140,7 +140,7 @@
 
 1. ✅ **onedrive/dropbox RefreshAccount**：已实现 token 刷新 + 账号信息/配额
 2. ✅ **分享导入 importShare**：pikpak/aliopen/pan123 三个盘已实现
-3. ⚠️ **pikpak API captcha 续接**：登录已用 X-Captcha-Token，业务 API 二次挑战续接仍不完整
+3. ✅ **pikpak API captcha 续接**：业务 API 检测 captcha_required 自动获取新 token 重试(jsonDo/get)
 4. ✅ **aliopen CompleteUpload bug**：已传真实 upload_id
 5. ✅ **s3 目录递归操作**：已实现 listAllUnder + 批量 DeleteObjects + copyRecursive
 6. ✅ **s3 forcePathStyle 可配置**：改为 *bool，支持 sessionToken
@@ -162,8 +162,8 @@
 19. ✅ **onedrive/dropbox 搜索分页**：跟随 nextLink/cursor 分页
 20. ✅ **pikpak batch 操作任务轮询**：waitForTasks 轮询异步任务
 21. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5
-22. ⚠️ **sync 引擎高级特性**：快照持久化 + 定时调度 + 日志 + 删除传播（需快照）
-23. ⚠️ **migrate 高级策略**：stream sink + rapid 秒传路由（需 provider StreamUpload 接口）
+22. ✅ **sync 引擎高级特性**：快照持久化 + 定时调度 + 删除传播(含 50% 阈值保护) + 日志回调
+23. ✅ **migrate 高级策略**：StreamUploader 流式管道 + 秒传路由(哈希匹配) + 任务持久化+重启恢复
 
 ### 🟢 P2（体验优化）
 

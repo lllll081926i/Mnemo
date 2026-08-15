@@ -39,11 +39,11 @@ internal/
   model/                   统一数据模型（文件/账号/分享/任务/设置）
   netx/                    HTTP 客户端/上传/哈希/限速
   store/                   本地持久化（账号/设置/标签/收藏/任务，原子 JSON）
-  transfer/                aria2 引擎 + 上传队列 + 跨盘迁移
+  transfer/                分段下载器 + 上传队列 + 跨盘迁移
   player/                  mpv JSON IPC 桥
   sync/                    双向同步引擎
   preview/                 本地 Range 代理（鉴权流/预览）
-  engine/                  内嵌引擎二进制（aria2c/mpv）释放
+  engine/                  内嵌引擎二进制（mpv）释放
 frontend/                  Vue 3 前端（Wails webview）
 docs/                      架构/加盘指南/设计规范
 ```

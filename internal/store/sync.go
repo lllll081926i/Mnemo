@@ -2,6 +2,7 @@ package store
 
 import (
 	"os"
+	"path/filepath"
 
 	"mnemo-go/internal/sync"
 )
@@ -65,5 +66,42 @@ func (s *Store) DeleteSyncConfig(id string) error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(syncFile, out)
+	if err := s.writeJSON(syncFile, out); err != nil {
+		return err
+	}
+	// clean up any persisted snapshot for this job
+	_ = s.ClearSyncSnapshot(id)
+	return nil
+}
+
+// syncSnapshotFile returns the file name for a given sync job snapshot.
+func syncSnapshotFile(id string) string {
+	return "SyncSnapshot_" + id + ".json"
+}
+
+// SaveSyncSnapshot persists the last-sync file list for a job.
+func (s *Store) SaveSyncSnapshot(id string, entries []sync.Entry) error {
+	return s.writeJSON(syncSnapshotFile(id), entries)
+}
+
+// LoadSyncSnapshot loads the last-sync file list for a job. Returns nil
+// (no error) when the snapshot does not exist yet.
+func (s *Store) LoadSyncSnapshot(id string) ([]sync.Entry, error) {
+	var entries []sync.Entry
+	err := s.readJSON(syncSnapshotFile(id), &entries)
+	if err != nil && os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// ClearSyncSnapshot removes the persisted snapshot for a job.
+func (s *Store) ClearSyncSnapshot(id string) error {
+	if err := os.Remove(filepath.Join(s.dir, syncSnapshotFile(id))); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

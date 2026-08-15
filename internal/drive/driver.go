@@ -6,6 +6,7 @@ package drive
 
 import (
 	"context"
+	"io"
 
 	"mnemo-go/internal/model"
 )
@@ -127,6 +128,17 @@ type ShareImportDriver interface {
 
 // UploadHandler carries a concrete file upload job into the provider.
 type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
+
+// StreamUploader is an optional capability interface that providers implement
+// to accept an upload directly from an io.Reader, avoiding a local temp-file
+// spool. When the target provider does not implement StreamUploader, the
+// migration engine falls back to the spool (temp-file) path.
+//
+// size is the expected content length (-1 when unknown). parentID is the
+// target folder id; name is the destination file name.
+type StreamUploader interface {
+	UploadStream(ctx context.Context, c Context, parentID, name string, size int64, reader io.Reader) error
+}
 
 // Driver is the plugin contract every provider implements.
 // Only List is required; everything else is capability-gated and optional.

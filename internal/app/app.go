@@ -103,6 +103,9 @@ func (a *App) startup(ctx context.Context) {
 		a.emit("transfer:event", ev)
 	})
 
+	// recover interrupted migrate jobs (mark as canceled, aligned with legacy)
+	migrate.NewEngine(st, nil).RecoverUnfinished()
+
 	// extract mpv engine
 	if err := engine.Extract(engineDir); err != nil {
 		// non-fatal: playback will report a clear error on demand.
@@ -396,11 +399,11 @@ func (a *App) Startup(ctx context.Context) { a.startup(ctx) }
 // MigrateFiles copies/moves files across two accounts.
 func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent string, fileIDs []string, move bool) (*migrate.Job, error) {
 	job := &migrate.Job{
-		ID:      "mig-" + fmt.Sprint(time.Now().UnixNano()),
+		ID:       "mig-" + fmt.Sprint(time.Now().UnixNano()),
 		SrcUser: srcUser, SrcDrive: srcDrive, FileIDs: fileIDs,
 		DstUser: dstUser, DstDrive: dstDrive, DstParent: dstParent, Move: move,
 	}
-	eng := migrate.NewEngine(func(j *migrate.Job) {
+	eng := migrate.NewEngine(a.store, func(j *migrate.Job) {
 		a.emit("migrate:progress", j)
 	})
 	go eng.Run(context.Background(), job)

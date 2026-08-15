@@ -36,7 +36,7 @@ internal/netx      HTTP/上传/哈希/限速 工具
 |------|------|
 | 登录 | 前端 → app.Login* → provider.Auth → store.SaveAccount → 事件 account:changed |
 | 列表 | app.ListDir → drive ops → driver.List → model.File[] |
-| 下载 | app.Download → transfer/aria2 → driver.GetDownloadURL → aria2 分片 |
+| 下载 | app.Download → transfer/manager → driver.GetDownloadURL → dlengine 分段下载 |
 | 上传 | app.Upload → transfer/upload → driver.UploadOneFile（queue/direct 按能力） |
 | 播放 | app.Play → player/mpv + driver.GetVideoPreview（鉴权流走 preview 代理） |
 | 迁移 | app.Migrate → transfer/migrate（server/stream/spool 策略） |

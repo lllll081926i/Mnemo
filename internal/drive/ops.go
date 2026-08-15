@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"io"
 	"sort"
 	"strconv"
 
@@ -365,6 +366,23 @@ func QueueUploadHandler(userID, driveID string) (func(ctx context.Context, ui *m
 	}
 	return func(ctx context.Context, ui *model.UploadingUI) error {
 		return d.UploadOneFile(ctx, c, ui)
+	}, nil
+}
+
+// StreamUploadHandler returns a function that streams an upload from an
+// io.Reader into the target provider, or (nil, ErrNotImplemented) when the
+// provider does not implement the StreamUploader capability.
+func StreamUploadHandler(userID, driveID string) (func(ctx context.Context, parentID, name string, size int64, reader io.Reader) error, error) {
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return nil, err
+	}
+	su, ok := d.(StreamUploader)
+	if !ok {
+		return nil, ErrNotImplemented
+	}
+	return func(ctx context.Context, parentID, name string, size int64, reader io.Reader) error {
+		return su.UploadStream(ctx, c, parentID, name, size, reader)
 	}, nil
 }
 
