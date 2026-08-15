@@ -138,31 +138,42 @@
 
 ### 🔴 P0（影响功能正确性）
 
-1. **onedrive/dropbox RefreshAccount**：token 刷新 + 账号信息/配额
-2. **分享导入 importShare**：pikpak/aliopen/pan123 三个盘
-3. **pikpak API captcha 续接**：登录已用 X-Captcha-Token，业务 API 二次挑战续接不完整
-4. **aliopen CompleteUpload bug**：传空 upload_id（`aliopen.go:511`）
-5. **s3 目录递归操作**：Rename/Move/Copy/Delete 不递归目录
-6. **s3 forcePathStyle 可配置**：硬编码 true
-7. **webdav/s3 上传冲突策略**：直接覆盖同名文件
+1. ✅ **onedrive/dropbox RefreshAccount**：已实现 token 刷新 + 账号信息/配额
+2. ✅ **分享导入 importShare**：pikpak/aliopen/pan123 三个盘已实现
+3. ⚠️ **pikpak API captcha 续接**：登录已用 X-Captcha-Token，业务 API 二次挑战续接仍不完整
+4. ✅ **aliopen CompleteUpload bug**：已传真实 upload_id
+5. ✅ **s3 目录递归操作**：已实现 listAllUnder + 批量 DeleteObjects + copyRecursive
+6. ✅ **s3 forcePathStyle 可配置**：改为 *bool，支持 sessionToken
+7. ✅ **webdav/s3 上传冲突策略**：已实现 refuse/rename/overwrite + ConflictPolicy
+8. ✅ **预览服务器安全边界**：会话令牌 + SSRF 防护 + 根目录限制
+9. ✅ **生命周期与异常处理**：OnShutdown + 错误不静默 + panic 防护
+10. ✅ **上传队列重写**：并发槽 + Cancel 真正取消 + Resume + 启动恢复
+11. ✅ **下载设置生效**：并发限制 + 限速 + 代理运行时生效
+12. ✅ **同步引擎语义**：递归子目录 + 嵌套结构 + ModTime 比较 + ctx 传递
+13. ✅ **跨盘迁移**：partial 状态 + 字节进度 + Cancel + 流式预留
 
 ### 🟡 P1（影响健壮性）
 
-8. **上传断点续传持久化**：aliopen/pan123/pan189/onedrive
-9. **能力声明与实现不符**：pikpak/pan123 的 trashPurge/trashClear、pikpak playbackHistory
-10. **哈希能力声明缺失**：ilanzou/onedrive/dropbox/pikpak
-11. **pikpak 离线下载进度/删除**
-12. **pan139 ListPage 分页参数推进**
-13. **onedrive/dropbox 搜索分页**
-14. **pikpak batch 操作任务轮询**
-15. **sync 引擎**：diff 算法 + 快照持久化 + 定时调度 + 日志 + 递归子目录
-16. **migrate 引擎**：stream sink + rapid 秒传策略
+14. ✅ **上传断点续传持久化**：aliopen/pan123/pan189/onedrive 已实现 session 存储
+15. ✅ **能力声明与实现不符**：pikpak/pan123 的 trashPurge/trashClear/playbackHistory 改 false
+16. ✅ **哈希能力声明缺失**：ilanzou/onedrive/dropbox 已声明 SetHashes
+17. ✅ **pikpak 离线下载进度/删除**：RefreshOfflineTasks + DeleteOfflineTask
+18. ✅ **pan139 ListPage 分页参数推进**：pageNum/startNumber 随 marker 递增
+19. ✅ **onedrive/dropbox 搜索分页**：跟随 nextLink/cursor 分页
+20. ✅ **pikpak batch 操作任务轮询**：waitForTasks 轮询异步任务
+21. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5
+22. ⚠️ **sync 引擎高级特性**：快照持久化 + 定时调度 + 日志 + 删除传播（需快照）
+23. ⚠️ **migrate 高级策略**：stream sink + rapid 秒传路由（需 provider StreamUpload 接口）
 
 ### 🟢 P2（体验优化）
 
-17. 限速/重试：aliopen 并发限速、dropbox 429 重试、pikpak 速率限制
-18. 版本历史：onedrive/dropbox revisions
-19. 缩略图：dropbox
+24. ⚠️ 限速/重试：aliopen 并发限速、dropbox 429 重试、pikpak 速率限制
+25. ⚠️ 版本历史：onedrive/dropbox revisions
+26. ⚠️ 缩略图：dropbox get_thumbnail_v2
+27. ⚠️ 账号凭据系统级保护：DPAPI/钥匙串（需平台特定实现）
+28. ⚠️ 前端缺失功能：瀑布流/字幕选择/播放列表/调试设置页
+29. ⚠️ 前端测试框架
+30. ⚠️ 测试覆盖率：9/13 provider 无单测
 20. 上传进度回调：webdav/s3
 21. yike decryptYikeMd5
 22. player 字幕选择 + 播放列表 + 多音轨

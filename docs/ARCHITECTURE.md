@@ -11,7 +11,7 @@ internal/app      绑定层：账号/网盘/传输/播放/同步/设置
 internal/drive    ops 门面（唯一业务入口，禁止中央 if provider）
    ├─ registry / capabilities / meta
    └─ providers/  13 个插件包（pikpak/onedrive/.../webdav/s3）
-internal/transfer  aria2 引擎 · 上传队列 · 跨盘迁移
+internal/transfer  原生 Go 分段下载器 · 上传队列 · 跨盘迁移
 internal/player    mpv JSON IPC
 internal/sync      双向同步
 internal/preview   本地 Range 代理（鉴权流播放/下载回退）
