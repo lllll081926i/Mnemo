@@ -222,3 +222,15 @@ func DownloadDir(st *store.Store) string {
 	}
 	return s.DownloadDir
 }
+
+// Close persists any in-flight job state. The queue has no long-lived worker
+// loop (each job runs in its own goroutine), so there is no channel to close.
+func (q *UploadQueue) Close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, j := range q.jobs {
+		if !j.Upload.IsCompleted && !j.Upload.IsFailed && !j.Upload.IsStop {
+			_ = q.store.SaveUploadTask(j)
+		}
+	}
+}

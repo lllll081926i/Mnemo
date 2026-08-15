@@ -20,6 +20,7 @@ import (
 	"mnemo-go/internal/transfer"
 	"mnemo-go/internal/transfer/dlengine"
 	"mnemo-go/internal/transfer/migrate"
+	"os"
 	"time"
 )
 
@@ -64,22 +65,36 @@ func (a *App) startup(ctx context.Context) {
 		return acc.Token, nil
 	})
 
-	// internal media/preview server
-	a.preview, _ = preview.NewServer()
+	// internal media/preview server. Roots restrict /local/ serving to the
+	// download dir, engine dir and data dir (logs, mpv-config, etc.).
+	dlDir := transfer.DownloadDir(st)
+	engineDir := filepath.Join(dir, "engine")
+	a.preview, err = preview.NewServer(dlDir, engineDir, dir)
+	if err != nil {
+		// preview is not optional for media playback; surface the error instead
+		// of crashing silently on a nil Port access later.
+		panic(fmt.Errorf("preview server: %w", err))
+	}
 
 	// download manager + upload queue
-	a.dl, _ = transfer.NewManager(st, transfer.DownloadDir(st), func(ev transfer.TaskEvent) {
+	a.dl, err = transfer.NewManager(st, dlDir, func(ev transfer.TaskEvent) {
 		a.emit("transfer:event", ev)
 	})
+	if err != nil {
+		panic(fmt.Errorf("download manager: %w", err))
+	}
 	a.uploads = transfer.NewUploadQueue(st, func(ev transfer.TaskEvent) {
 		a.emit("transfer:event", ev)
 	})
 
 	// extract mpv engine
-	_ = engine.Extract(filepath.Join(dir, "engine"))
+	if err := engine.Extract(engineDir); err != nil {
+		// non-fatal: playback will report a clear error on demand.
+		fmt.Fprintf(os.Stderr, "warn: mpv engine extract: %v\n", err)
+	}
 
 	// provider identity dir (pikpak device ids)
-	_ = filepath.Join(dir, "identity")
+	_ = os.MkdirAll(filepath.Join(dir, "identity"), 0o755)
 
 	a.emit("app:ready", map[string]any{"port": a.preview.Port})
 }
@@ -88,6 +103,25 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) emit(name string, data any) {
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, name, data)
+	}
+}
+
+// shutdown is wired to Wails OnShutdown to release long-lived resources:
+// the download manager, preview server and mpv player. Errors are logged to
+// stderr because Wails ignores the returned error and we must not panic on
+// the shutdown path.
+func (a *App) Shutdown(ctx context.Context) {
+	if a.player != nil && a.player.player != nil {
+		_ = a.player.player.Close()
+	}
+	if a.dl != nil {
+		a.dl.Shutdown()
+	}
+	if a.uploads != nil {
+		a.uploads.Close()
+	}
+	if a.preview != nil {
+		_ = a.preview.Close()
 	}
 }
 

@@ -32,6 +32,9 @@ func (a *App) PlayVideo(userID, driveID, fileID string) (*model.VideoPreview, er
 	if err != nil {
 		return nil, err
 	}
+	if len(preview.Qualities) == 0 {
+		return nil, errors.New("该文件无可用播放源")
+	}
 	// pick the best quality
 	quality := preview.Qualities[0]
 	for _, q := range preview.Qualities {
