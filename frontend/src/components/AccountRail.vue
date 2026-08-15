@@ -18,11 +18,11 @@ let enterTimer = null
 let leaveTimer = null
 onBeforeUnmount(() => { clearTimeout(enterTimer); clearTimeout(leaveTimer) })
 
-// 悬停停留 1s 后才展开，避免划过误触；移出后稍延迟收起
+// 悬停快速平滑展开，移出后延迟收起
 function onRailEnter() {
   clearTimeout(leaveTimer)
   clearTimeout(enterTimer)
-  enterTimer = setTimeout(() => { expanded.value = true }, 1000)
+  enterTimer = setTimeout(() => { expanded.value = true }, 220)
 }
 function onRailLeave() {
   clearTimeout(enterTimer)

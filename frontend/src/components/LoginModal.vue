@@ -115,99 +115,103 @@ async function submit() {
 </script>
 
 <template>
-  <div class="modal-mask" @click.self="emit('close')">
-    <div class="modal login-modal">
-      <div class="modal-head">
-        <h3>添加网盘账号</h3>
-        <button class="icon-btn" style="width:28px;height:28px" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
-      </div>
-      <div class="login-body">
-        <div class="login-side">
-          <div
-            v-for="p in providers"
-            :key="p.ID"
-            class="lp-item"
-            :class="{ active: p.ID === providerId }"
-            @click="providerId = p.ID"
-          >
-            <img :src="providerIconUrl(p.Meta)" alt="" />
-            <span>{{ p.Meta.label }}</span>
+  <teleport to="body">
+    <transition name="modal-fade">
+      <div class="modal-mask" @click.self="emit('close')">
+        <div class="modal login-modal">
+          <div class="modal-head">
+            <h3>添加网盘账号</h3>
+            <button class="icon-btn" style="width:28px;height:28px" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
+          </div>
+          <div class="login-body">
+            <div class="login-side">
+              <div
+                v-for="p in providers"
+                :key="p.ID"
+                class="lp-item"
+                :class="{ active: p.ID === providerId }"
+                @click="providerId = p.ID"
+              >
+                <img :src="providerIconUrl(p.Meta)" alt="" />
+                <span>{{ p.Meta.label }}</span>
+              </div>
+            </div>
+
+            <form class="login-form" @submit.prevent="submit">
+              <div class="lf-head" v-if="provider">
+                <img :src="providerIconUrl(provider.Meta)" alt="" />
+                <div>
+                  <div class="lf-title">{{ provider.Meta.label }}</div>
+                  <div class="lf-sub">{{ isMounted ? '挂载存储连接' : isOAuth ? '浏览器 OAuth 授权' : '账号登录' }}</div>
+                </div>
+              </div>
+
+              <!-- 挂载存储（WebDAV / S3） -->
+              <template v-if="isMounted">
+                <div class="field"><label>连接名称</label><input class="input" v-model="mountedForm.name" placeholder="我的 WebDAV / S3" /></div>
+                <div class="field"><label>{{ providerId === 's3' ? 'Endpoint' : 'WebDAV 地址' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.example.com（可选，默认 AWS）' : 'https://dav.example.com'" /></div>
+                <div class="field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
+                <div class="field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><input class="input" type="password" v-model="mountedForm.password" /></div>
+                <template v-if="providerId === 's3'">
+                  <div class="field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
+                  <div class="field"><label>Region（可选）</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
+                </template>
+                <div class="field"><label>挂载路径（可选）</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
+              </template>
+
+              <!-- OAuth 授权 -->
+              <div v-else-if="isOAuth" class="oauth-box">
+                <UiIcon name="external" :size="26" style="color:var(--color-primary)" />
+                <p>点击下方按钮打开浏览器完成授权，<br />授权成功后自动登录。</p>
+              </div>
+
+              <!-- 常规表单 -->
+              <template v-else>
+                <div v-for="f in fields" :key="f.key" class="field">
+                  <label>{{ f.label }}<span v-if="f.required" class="req">*</span></label>
+                  <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
+                  <input v-else class="input" :type="f.type === 'password' ? 'password' : 'text'" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
+                  <div v-if="f.hint" class="hint">{{ f.hint }}</div>
+                  <button
+                    v-if="providerId === 'guangya' && f.key === 'sms_code'"
+                    class="btn sm" style="margin-top:8px" :disabled="smsBusy" type="button" @click="sendSms"
+                  >{{ smsBusy ? '发送中…' : '获取验证码' }}</button>
+                </div>
+                <div v-if="!fields.length" class="hint" style="color:var(--text-tertiary);font-size: 13px">该网盘无需填写表单，直接点击登录。</div>
+              </template>
+
+              <!-- 网盘专属帮助链接 -->
+              <button v-if="providerHelp" type="button" class="login-help" @click="openHelp">
+                <UiIcon name="external" :size="12" /><span>{{ providerHelp.label }}</span>
+              </button>
+
+              <!-- PikPak 滑块安全验证 -->
+              <div v-if="captchaUrl" class="captcha-box">
+                <p>{{ captchaOpened ? '验证窗口已打开，完成滑块后点「完成验证并登录」' : '账号触发了 PikPak 安全验证，需要在浏览器中完成滑块' }}</p>
+                <div class="captcha-actions">
+                  <button class="btn sm" type="button" @click="openCaptcha">{{ captchaOpened ? '重新打开验证页' : '打开验证页' }}</button>
+                  <button v-if="captchaOpened" class="btn primary sm" type="submit" :disabled="busy">完成验证并登录</button>
+                </div>
+              </div>
+
+              <!-- 统一错误提示（带 Shake 抖动动画） -->
+              <div v-if="errorText" class="form-error shake">
+                <UiIcon name="warning" :size="14" /><span>{{ errorText }}</span>
+              </div>
+
+              <div class="modal-actions" style="padding:6px 0 0">
+                <button class="btn" type="button" @click="emit('close')">取消</button>
+                <button class="btn primary" type="submit" :disabled="busy">
+                  <span v-if="busy" class="spin spin-on-primary"></span>
+                  {{ busy ? '处理中…' : isOAuth ? '打开授权页面' : (isMounted ? '保存连接' : '登录') }}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-
-        <form class="login-form" @submit.prevent="submit">
-          <div class="lf-head" v-if="provider">
-            <img :src="providerIconUrl(provider.Meta)" alt="" />
-            <div>
-              <div class="lf-title">{{ provider.Meta.label }}</div>
-              <div class="lf-sub">{{ isMounted ? '挂载存储连接' : isOAuth ? '浏览器 OAuth 授权' : '账号登录' }}</div>
-            </div>
-          </div>
-
-          <!-- 挂载存储（WebDAV / S3） -->
-          <template v-if="isMounted">
-            <div class="field"><label>连接名称</label><input class="input" v-model="mountedForm.name" placeholder="我的 WebDAV / S3" /></div>
-            <div class="field"><label>{{ providerId === 's3' ? 'Endpoint' : 'WebDAV 地址' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.example.com（可选，默认 AWS）' : 'https://dav.example.com'" /></div>
-            <div class="field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
-            <div class="field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><input class="input" type="password" v-model="mountedForm.password" /></div>
-            <template v-if="providerId === 's3'">
-              <div class="field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
-              <div class="field"><label>Region（可选）</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
-            </template>
-            <div class="field"><label>挂载路径（可选）</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
-          </template>
-
-          <!-- OAuth 授权 -->
-          <div v-else-if="isOAuth" class="oauth-box">
-            <UiIcon name="external" :size="26" style="color:var(--color-primary)" />
-            <p>点击下方按钮打开浏览器完成授权，<br />授权成功后自动登录。</p>
-          </div>
-
-          <!-- 常规表单 -->
-          <template v-else>
-            <div v-for="f in fields" :key="f.key" class="field">
-              <label>{{ f.label }}<span v-if="f.required" class="req">*</span></label>
-              <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
-              <input v-else class="input" :type="f.type === 'password' ? 'password' : 'text'" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
-              <div v-if="f.hint" class="hint">{{ f.hint }}</div>
-              <button
-                v-if="providerId === 'guangya' && f.key === 'sms_code'"
-                class="btn sm" style="margin-top:8px" :disabled="smsBusy" type="button" @click="sendSms"
-              >{{ smsBusy ? '发送中…' : '获取验证码' }}</button>
-            </div>
-            <div v-if="!fields.length" class="hint" style="color:var(--text-tertiary);font-size: 13px">该网盘无需填写表单，直接点击登录。</div>
-          </template>
-
-          <!-- 网盘专属帮助链接 -->
-          <button v-if="providerHelp" type="button" class="login-help" @click="openHelp">
-            <UiIcon name="external" :size="12" /><span>{{ providerHelp.label }}</span>
-          </button>
-
-          <!-- PikPak 滑块安全验证 -->
-          <div v-if="captchaUrl" class="captcha-box">
-            <p>{{ captchaOpened ? '验证窗口已打开，完成滑块后点「完成验证并登录」' : '账号触发了 PikPak 安全验证，需要在浏览器中完成滑块' }}</p>
-            <div class="captcha-actions">
-              <button class="btn sm" type="button" @click="openCaptcha">{{ captchaOpened ? '重新打开验证页' : '打开验证页' }}</button>
-              <button v-if="captchaOpened" class="btn primary sm" type="submit" :disabled="busy">完成验证并登录</button>
-            </div>
-          </div>
-
-          <!-- 统一错误提示 -->
-          <div v-if="errorText" class="form-error">
-            <UiIcon name="warning" :size="14" /><span>{{ errorText }}</span>
-          </div>
-
-          <div class="modal-actions" style="padding:6px 0 0">
-            <button class="btn" type="button" @click="emit('close')">取消</button>
-            <button class="btn primary" type="submit" :disabled="busy">
-              <span v-if="busy" class="spin spin-on-primary"></span>
-              {{ busy ? '处理中…' : isOAuth ? '打开授权页面' : (isMounted ? '保存连接' : '登录') }}
-            </button>
-          </div>
-        </form>
       </div>
-    </div>
-  </div>
+    </transition>
+  </teleport>
 </template>
 
 <style scoped>

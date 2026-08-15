@@ -84,22 +84,24 @@ onBeforeUnmount(() => {
       <UiIcon name="chevron-down" :size="12" class="uiselect-arrow" />
     </button>
     <teleport to="body">
-      <div v-if="open" class="uiselect-drop" :style="dropStyle">
-        <div v-if="!options.length" class="uiselect-empty">无可选项</div>
-        <button
-          v-for="o in options"
-          :key="o.value"
-          type="button"
-          class="uiselect-opt"
-          :class="{ active: o.value === modelValue, disabled: o.disabled }"
-          @click="pick(o)"
-        >
-          <img v-if="o.img" :src="o.img" class="uiselect-ico" alt="" />
-          <UiIcon v-else-if="o.icon" :name="o.icon" :size="14" />
-          <span class="uiselect-label">{{ o.label }}</span>
-          <UiIcon v-if="o.value === modelValue" name="check" :size="13" class="uiselect-check" />
-        </button>
-      </div>
+      <transition name="popover-zoom">
+        <div v-if="open" class="uiselect-drop" :style="dropStyle">
+          <div v-if="!options.length" class="uiselect-empty">无可选项</div>
+          <button
+            v-for="o in options"
+            :key="o.value"
+            type="button"
+            class="uiselect-opt"
+            :class="{ active: o.value === modelValue, disabled: o.disabled }"
+            @click="pick(o)"
+          >
+            <img v-if="o.img" :src="o.img" class="uiselect-ico" alt="" />
+            <UiIcon v-else-if="o.icon" :name="o.icon" :size="14" />
+            <span class="uiselect-label">{{ o.label }}</span>
+            <UiIcon v-if="o.value === modelValue" name="check" :size="13" class="uiselect-check" />
+          </button>
+        </div>
+      </transition>
     </teleport>
   </div>
 </template>
@@ -131,7 +133,7 @@ onBeforeUnmount(() => {
   position: fixed; z-index: 400; overflow-y: auto; padding: 4px;
   background: var(--bg-elevated); border: 1px solid var(--border-light);
   border-radius: var(--radius-md); box-shadow: var(--shadow-modal);
-  animation: ctx-in .12s ease;
+  transform-origin: top center;
 }
 .uiselect-opt {
   display: flex; align-items: center; gap: 7px; width: 100%;

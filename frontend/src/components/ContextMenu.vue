@@ -46,20 +46,22 @@ onBeforeUnmount(() => {
 
 <template>
   <teleport to="body">
-    <div class="ctx-menu" :style="pos" @mousedown.stop>
-      <template v-for="(item, i) in items" :key="i">
-        <div v-if="item.sep" class="ctx-sep"></div>
-        <div v-else-if="item.header" class="ctx-header">{{ item.header }}</div>
-        <div
-          v-else
-          class="ctx-item"
-          :class="{ danger: item.danger, disabled: item.disabled }"
-          @click="pick(item)"
-        >
-          <span class="ci"><UiIcon v-if="item.icon" :name="item.icon" :size="15" /></span>
-          <span>{{ item.label }}</span>
-        </div>
-      </template>
-    </div>
+    <transition name="popover-zoom">
+      <div class="ctx-menu" :style="pos" @mousedown.stop>
+        <template v-for="(item, i) in items" :key="i">
+          <div v-if="item.sep" class="ctx-sep"></div>
+          <div v-else-if="item.header" class="ctx-header">{{ item.header }}</div>
+          <div
+            v-else
+            class="ctx-item"
+            :class="{ danger: item.danger, disabled: item.disabled }"
+            @click="pick(item)"
+          >
+            <span class="ci"><UiIcon v-if="item.icon" :name="item.icon" :size="15" /></span>
+            <span>{{ item.label }}</span>
+          </div>
+        </template>
+      </div>
+    </transition>
   </teleport>
 </template>

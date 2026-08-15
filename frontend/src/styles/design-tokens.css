@@ -36,7 +36,9 @@
   --color-error: #e11d48;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-modal: 0 8px 24px -4px rgb(0 0 0 / 0.1), 0 4px 12px -2px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 10px 25px -3px rgb(0 0 0 / 0.1), 0 4px 10px -2px rgb(0 0 0 / 0.05);
+  --shadow-modal: 0 16px 32px -4px rgb(0 0 0 / 0.12), 0 6px 16px -2px rgb(0 0 0 / 0.08);
 
   --listhoverbg: var(--bg-hover);
   --listselectbg: color-mix(in srgb, var(--color-primary) 12%, transparent);
@@ -105,7 +107,9 @@ html.dark {
   --color-error: #fb7185;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
-  --shadow-modal: 0 8px 24px -4px rgb(0 0 0 / 0.55), 0 4px 12px -2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 8px -1px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 25px -3px rgb(0 0 0 / 0.6), 0 4px 10px -2px rgb(0 0 0 / 0.45);
+  --shadow-modal: 0 16px 32px -4px rgb(0 0 0 / 0.65), 0 6px 16px -2px rgb(0 0 0 / 0.5);
 
   --listhoverbg: rgb(255 255 255 / 0.05);
   --listselectbg: color-mix(in srgb, var(--color-primary) 18%, transparent);

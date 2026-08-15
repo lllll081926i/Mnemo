@@ -57,7 +57,12 @@ onMounted(() => load(rootKey))
       </template>
     </div>
     <div style="min-height:180px;max-height:300px;overflow-y:auto;border:1px solid var(--border-lighter);border-radius:var(--radius-md);padding:6px">
-      <div v-if="loading" class="empty" style="padding:40px"><span class="spin"></span></div>
+      <div v-if="loading && !dirs.length" class="skeleton-list">
+        <div v-for="i in 4" :key="i" class="skeleton-row" style="height:34px">
+          <div class="skeleton skeleton-icon" style="width:16px;height:16px"></div>
+          <div class="skeleton skeleton-name" :style="{ width: (40 + (i * 13) % 40) + '%' }"></div>
+        </div>
+      </div>
       <div v-else-if="error" class="empty" style="padding:40px">{{ error }}</div>
       <div v-else-if="!dirs.length" class="empty" style="padding:40px">此目录下没有子文件夹</div>
       <div v-for="d in dirs" :key="d.file_id" class="tree-node" @click="enter(d)">

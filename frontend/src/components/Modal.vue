@@ -16,19 +16,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <teleport to="body">
-    <div class="modal-mask" @click.self="emit('close')">
-      <div class="modal" :style="width ? { width } : {}">
-        <div v-if="title" class="modal-head">
-          <h3>{{ title }}</h3>
-          <button class="icon-btn" style="width:28px;height:28px" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
-        </div>
-        <div :class="bodyClass">
-          <slot />
-        </div>
-        <div v-if="$slots.actions" class="modal-actions">
-          <slot name="actions" />
+    <transition name="modal-fade">
+      <div class="modal-mask" @click.self="emit('close')">
+        <div class="modal" :style="width ? { width } : {}">
+          <div v-if="title" class="modal-head">
+            <h3>{{ title }}</h3>
+            <button class="icon-btn" style="width:28px;height:28px" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
+          </div>
+          <div :class="bodyClass">
+            <slot />
+          </div>
+          <div v-if="$slots.actions" class="modal-actions">
+            <slot name="actions" />
+          </div>
         </div>
       </div>
-    </div>
+    </transition>
   </teleport>
 </template>

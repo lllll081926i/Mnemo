@@ -18,7 +18,7 @@ const avatar = computed(() => tok.value.avatar || '')
 const nick = computed(() => accountName(props.account))
 const providerMeta = computed(() => providerMetaOf(props.account, props.providers))
 const providerIcon = computed(() => providerIconUrl(providerMeta.value))
-const pid = computed(() => providerMeta.value.provider || (props.account ? props.account.user_id : ''))
+const pid = computed(() => providerMeta.value.key || (props.account ? props.account.user_id : ''))
 const providerLabel = computed(() => providerMeta.value.label || pid.value)
 
 const total = computed(() => Math.max(0, Number(tok.value.total_size) || 0))
@@ -49,11 +49,30 @@ const avatarText = computed(() => {
 })
 
 // ---------- 悬停弹窗 ----------
+const rootRef = ref(null)
 const show = ref(false)
+const popStyle = ref({})
 let enterTimer = null, leaveTimer = null
+
+function updatePos() {
+  if (!rootRef.value) return
+  const r = rootRef.value.getBoundingClientRect()
+  const w = 270
+  const right = Math.max(8, window.innerWidth - r.right)
+  const top = r.bottom + 6
+  popStyle.value = {
+    top: top + 'px',
+    right: right + 'px',
+    width: w + 'px',
+  }
+}
+
 function onEnter() {
   clearTimeout(leaveTimer)
-  enterTimer = setTimeout(() => { show.value = true }, 120)
+  enterTimer = setTimeout(() => {
+    updatePos()
+    show.value = true
+  }, 120)
 }
 function onLeave() {
   clearTimeout(enterTimer)
@@ -80,7 +99,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="acc-ava" @mouseenter="onEnter" @mouseleave="onLeave">
+  <div ref="rootRef" class="acc-ava" @mouseenter="onEnter" @mouseleave="onLeave">
     <div class="ava-circle">
       <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
       <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
@@ -89,40 +108,43 @@ onMounted(() => {
     </div>
 
     <teleport to="body">
-      <div
-        v-if="show"
-        class="acc-pop"
-        @mouseenter="onEnter"
-        @mouseleave="onLeave"
-      >
-        <div class="ap-head">
-          <div class="ava-circle sm">
-            <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
-            <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
-            <span v-else class="ava-text">{{ avatarText }}</span>
+      <transition name="popover-zoom">
+        <div
+          v-if="show"
+          class="acc-pop"
+          :style="popStyle"
+          @mouseenter="onEnter"
+          @mouseleave="onLeave"
+        >
+          <div class="ap-head">
+            <div class="ava-circle sm">
+              <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
+              <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
+              <span v-else class="ava-text">{{ avatarText }}</span>
+            </div>
+            <div class="ap-meta">
+              <div class="ap-name">{{ nick }}</div>
+              <div class="ap-provider">{{ providerLabel }}</div>
+              <div v-if="vipName" class="ap-vip"><UiIcon name="star" :size="12" />{{ vipName }}<template v-if="vipExpire"> · {{ vipExpire }}</template></div>
+            </div>
           </div>
-          <div class="ap-meta">
-            <div class="ap-name">{{ nick }}</div>
-            <div class="ap-provider">{{ providerLabel }}</div>
-            <div v-if="vipName" class="ap-vip"><UiIcon name="star" :size="12" />{{ vipName }}<template v-if="vipExpire"> · {{ vipExpire }}</template></div>
+          <div class="ap-quota">
+            <div v-if="hasQuota" class="ap-qrow">
+              <span class="ap-qpct">{{ pct }}%</span>
+              <span class="ap-qhint">已用 / 总容量</span>
+            </div>
+            <div v-if="hasQuota" class="ap-bar">
+              <div class="ap-bar-fill" :class="{ full: pct >= 95 }" :style="{ width: pct + '%' }"></div>
+            </div>
+            <div v-if="hasQuota" class="ap-nums">
+              <div><span class="ap-num-k">已用</span><span class="ap-num-v">{{ formatBytes(used) }}</span></div>
+              <div><span class="ap-num-k">剩余</span><span class="ap-num-v">{{ formatBytes(free) }}</span></div>
+              <div><span class="ap-num-k">总容量</span><span class="ap-num-v">{{ formatBytes(total) }}</span></div>
+            </div>
+            <div v-else class="ap-noquota">该网盘暂未返回容量信息</div>
           </div>
         </div>
-        <div class="ap-quota">
-          <div v-if="hasQuota" class="ap-qrow">
-            <span class="ap-qpct">{{ pct }}%</span>
-            <span class="ap-qhint">已用 / 总容量</span>
-          </div>
-          <div v-if="hasQuota" class="ap-bar">
-            <div class="ap-bar-fill" :class="{ full: pct >= 95 }" :style="{ width: pct + '%' }"></div>
-          </div>
-          <div v-if="hasQuota" class="ap-nums">
-            <div><span class="ap-num-k">已用</span><span class="ap-num-v">{{ formatBytes(used) }}</span></div>
-            <div><span class="ap-num-k">剩余</span><span class="ap-num-v">{{ formatBytes(free) }}</span></div>
-            <div><span class="ap-num-k">总容量</span><span class="ap-num-v">{{ formatBytes(total) }}</span></div>
-          </div>
-          <div v-else class="ap-noquota">该网盘暂未返回容量信息</div>
-        </div>
-      </div>
+      </transition>
     </teleport>
   </div>
 </template>
@@ -146,15 +168,14 @@ onMounted(() => {
 }
 .acc-pop {
   position: fixed; z-index: 9999; min-width: 260px; padding: 12px;
-  background: var(--bg-surface); border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
-  animation: list-in 140ms var(--motion-ease);
+  background: var(--bg-elevated); border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-modal);
 }
 .ap-head { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-lighter); }
 .ap-meta { min-width: 0; }
 .ap-name { font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ap-provider { font-size: 12px; color: var(--text-tertiary); }
-.ap-vip { display: inline-flex; align-items: center; gap: 3px; margin-top: 3px; font-size: 11px; color: #b8860b; }
+.ap-vip { display: inline-flex; align-items: center; gap: 3px; margin-top: 3px; font-size: 11px; color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 12%, transparent); padding: 1px 6px; border-radius: 999px; }
 .ap-quota { padding-top: 10px; }
 .ap-qrow { display: flex; align-items: baseline; justify-content: space-between; }
 .ap-qpct { font-size: 16px; font-weight: 700; color: var(--color-primary); }
