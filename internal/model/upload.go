@@ -14,6 +14,10 @@ type UploadInfo struct {
 	IsMiaoChuan   bool   `json:"isMiaoChuan"` // fingerprint秒传 flag
 	SHA1          string `json:"sha1"`
 	CRC64         string `json:"crc64"`
+
+	// ConflictPolicy controls behavior when the target path already exists.
+	// Supported: "" | "overwrite" (default, legacy) | "refuse" | "rename" | "skip".
+	ConflictPolicy string `json:"conflictPolicy,omitempty"`
 }
 
 // UploadState is the mutable progress/status of an upload job.

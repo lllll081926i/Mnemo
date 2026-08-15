@@ -16,6 +16,26 @@ var tokenResolver TokenResolver
 // startup by the app wiring).
 func SetTokenResolver(fn TokenResolver) { tokenResolver = fn }
 
+// SecretResolver returns the OAuth client credentials for a provider by key
+// (e.g. "onedrive_client_id", "dropbox_app_key"). It is wired by the app
+// layer so providers can read secrets during RefreshAccount without depending
+// on the config package.
+type SecretResolver func(key string) string
+
+var secretResolver SecretResolver
+
+// SetSecretResolver installs the app-backed secret resolver (called once at
+// startup by the app wiring).
+func SetSecretResolver(fn SecretResolver) { secretResolver = fn }
+
+// Secret returns the configured value for key, or "" when unset.
+func Secret(key string) string {
+	if secretResolver == nil {
+		return ""
+	}
+	return secretResolver(key)
+}
+
 // BuildContext resolves the provider + session for an account.
 func BuildContext(userID, driveID, tokenFrom string) (Context, error) {
 	provider := ResolveProvider(userID, driveID, tokenFrom)

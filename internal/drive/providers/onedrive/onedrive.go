@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
+	"time"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
 )
 
 const providerID = model.ProviderOnedrive
@@ -267,6 +271,124 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return cl.rawPut(ctx, target, f)
 	}
 	return cl.sessionUpload(ctx, f, parentID, name, ui)
+}
+
+// oneDriveScope is the OAuth scope used for token refresh.
+const oneDriveScope = "files.readwrite offline_access User.Read"
+
+// refreshOneDriveToken exchanges a refresh_token for a fresh access_token via
+// the Microsoft OAuth2 token endpoint.
+func refreshOneDriveToken(ctx context.Context, clientID, refreshToken string) (*model.TokenInfo, error) {
+	form := url.Values{}
+	form.Set("client_id", clientID)
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("scope", oneDriveScope)
+
+	cl := netx.NewClient(60 * time.Second)
+	var raw struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+	}
+	if err := cl.PostForm(ctx, msTokenURL, nil, form, &raw); err != nil {
+		return nil, err
+	}
+	if raw.AccessToken == "" {
+		return nil, errors.New("onedrive: refresh returned no access_token")
+	}
+	return &model.TokenInfo{
+		AccessToken:  raw.AccessToken,
+		RefreshToken: raw.RefreshToken,
+		ExpiresIn:    raw.ExpiresIn,
+		TokenType:    raw.TokenType,
+	}, nil
+}
+
+// fetchOneDriveProfile queries /me and /me/drive to populate the token's
+// UserName, quota, and drive id.
+func fetchOneDriveProfile(ctx context.Context, accessToken string, tok *model.TokenInfo) {
+	cl := newClient(accessToken)
+
+	// /me — account display name
+	var me struct {
+		ID                string `json:"id"`
+		DisplayName       string `json:"displayName"`
+		UserPrincipalName string `json:"userPrincipalName"`
+	}
+	if err := cl.getJSON(ctx, "/me", &me); err == nil {
+		if me.UserPrincipalName != "" {
+			tok.UserName = me.UserPrincipalName
+		} else if me.DisplayName != "" {
+			tok.UserName = me.DisplayName
+		}
+		if me.DisplayName != "" {
+			tok.NickName = me.DisplayName
+		}
+		if me.ID != "" {
+			tok.ProviderAccountID = me.ID
+		}
+	}
+
+	// /me/drive — quota + drive id
+	var driveInfo struct {
+		ID    string `json:"id"`
+		Quota *struct {
+			Total int64 `json:"total"`
+			Used  int64 `json:"used"`
+	} `json:"quota"`
+	}
+	if err := cl.getJSON(ctx, "/me/drive", &driveInfo); err == nil {
+		if driveInfo.ID != "" {
+			tok.DefaultDriveID = driveInfo.ID
+		}
+		if driveInfo.Quota != nil {
+			tok.TotalSize = driveInfo.Quota.Total
+			tok.UsedSize = driveInfo.Quota.Used
+			if tok.TotalSize > tok.UsedSize {
+				tok.FreeSize = tok.TotalSize - tok.UsedSize
+			}
+		}
+	}
+}
+
+// RefreshAccount renews the OneDrive OAuth access token using the stored
+// refresh_token, then fetches account profile and drive quota to update the
+// token metadata.
+func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
+	if token == nil {
+		return nil, nil
+	}
+	refreshToken := strings.TrimSpace(token.RefreshToken)
+	if refreshToken == "" {
+		return nil, errors.New("onedrive: missing refresh_token")
+	}
+	clientID := strings.TrimSpace(drive.Secret("onedrive_client_id"))
+	if clientID == "" {
+		return nil, errors.New("onedrive: client_id 未配置（secrets.json onedrive_client_id）")
+	}
+
+	fresh, err := refreshOneDriveToken(ctx, clientID, refreshToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// preserve fields not returned by the token endpoint
+	token.AccessToken = fresh.AccessToken
+	if fresh.RefreshToken != "" {
+		token.RefreshToken = fresh.RefreshToken
+	}
+	token.ExpiresIn = fresh.ExpiresIn
+	if fresh.TokenType != "" {
+		token.TokenType = fresh.TokenType
+	}
+	token.TokenFrom = providerID
+
+	// update account info + quota (non-blocking on error)
+	fetchOneDriveProfile(ctx, token.AccessToken, token)
+
+	return token, nil
 }
 
 func mapItems(items []Item, driveID, parentID string) []model.File {

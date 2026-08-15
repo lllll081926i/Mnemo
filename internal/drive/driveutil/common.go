@@ -103,3 +103,22 @@ func JoinPath(parent, name string) string {
 	}
 	return strings.TrimSuffix(parent, "/") + "/" + name
 }
+
+// GenerateConflictName produces a non-conflicting candidate name for rename
+// uploads. It inserts a " (1)" suffix before the extension, e.g.
+// "photo.jpg" -> "photo (1).jpg". Callers should verify uniqueness by checking
+// the remote again (kept simple here: a single attempt with index 1).
+func GenerateConflictName(name string) string {
+	dir := path.Dir(name)
+	base := path.Base(name)
+	if dir == "." {
+		dir = ""
+	}
+	ext := path.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	newBase := stem + " (1)" + ext
+	if dir != "" {
+		return dir + "/" + newBase
+	}
+	return newBase
+}

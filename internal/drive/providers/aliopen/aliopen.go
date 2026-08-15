@@ -493,12 +493,13 @@ func (c *client) RapidUpload(ctx context.Context, scope Scope, parentID, name st
 }
 
 // CreateUploadFile creates an upload entry and returns parts.
-func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, name string, size int64) (string, []struct {
+func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, name string, size int64) (string, string, []struct {
 	PartNumber int    `json:"part_number"`
 	UploadURL  string `json:"upload_url"`
 }, error) {
 	var res struct {
 		FileID       string `json:"file_id"`
+		UploadID     string `json:"upload_id"`
 		PartInfoList []struct {
 			PartNumber int    `json:"part_number"`
 			UploadURL  string `json:"upload_url"`
@@ -512,17 +513,17 @@ func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, na
 		"size":             size,
 		"check_name_mode":  "ignore",
 	}, &res); err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
-	return res.FileID, res.PartInfoList, nil
+	return res.FileID, res.UploadID, res.PartInfoList, nil
 }
 
 // CompleteUpload marks the upload as complete.
-func (c *client) CompleteUpload(ctx context.Context, scope Scope, fileID string) error {
+func (c *client) CompleteUpload(ctx context.Context, scope Scope, fileID, uploadID string) error {
 	return c.apiPost(ctx, "/adrive/v1.0/openFile/complete", map[string]any{
-		"file_id":  fileID,
-		"drive_id": c.scopedDriveID(scope),
-		"upload_id": "",
+		"file_id":   fileID,
+		"drive_id":  c.scopedDriveID(scope),
+		"upload_id": uploadID,
 	}, nil)
 }
 
@@ -853,7 +854,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 	}
 	// Create upload file
-	fileID, parts, err := cl.CreateUploadFile(ctx, ref.Scope, ref.FID, ui.Info.Name, size)
+	fileID, uploadID, parts, err := cl.CreateUploadFile(ctx, ref.Scope, ref.FID, ui.Info.Name, size)
 	if err != nil {
 		return err
 	}
@@ -886,7 +887,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			ui.Upload.DownProcess = int(pos * 100 / size)
 		}
 	}
-	return cl.CompleteUpload(ctx, ref.Scope, fileID)
+	return cl.CompleteUpload(ctx, ref.Scope, fileID, uploadID)
 }
 
 func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req drive.RapidUploadRequest) (*drive.RapidUploadResult, error) {

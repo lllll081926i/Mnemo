@@ -81,12 +81,19 @@ func connOf(c drive.Context) (*conn, error) {
 	if bucket == "" {
 		return nil, errors.New("s3: 缺少 bucket")
 	}
+	// Path-style addressing is the default (MinIO / Aliyun OSS / most S3-compatible
+	// endpoints need it). Users who want virtual-host style (e.g. AWS S3 native)
+	// set ForcePathStyle=false explicitly via a non-nil pointer.
+	usePathStyle := true
+	if cc.ForcePathStyle != nil {
+		usePathStyle = *cc.ForcePathStyle
+	}
 	client := s3.New(s3.Options{
-		Region:        firstNonEmpty(cc.Region, "us-east-1"),
-		BaseEndpoint:  aws.String(endpoint),
-		Credentials:   credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, ""),
-		UsePathStyle:  true, // compatible with minio/aliyun oss style endpoints
-		HTTPClient:    httpClientForS3(),
+		Region:       firstNonEmpty(cc.Region, "us-east-1"),
+		BaseEndpoint: aws.String(endpoint),
+		Credentials:  credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, cc.SessionToken),
+		UsePathStyle: usePathStyle,
+		HTTPClient:   httpClientForS3(),
 	})
 	return &conn{client: client, bucket: bucket, prefix: normalizePrefix(cc.BasePath)}, nil
 }
@@ -312,7 +319,7 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 	}
 	var ok []string
 	for _, ref := range refs {
-		if err := cc.deleteObj(ctx, cc.keyOf(ref.ID)); err == nil {
+		if err := cc.deleteRecursive(ctx, cc.keyOf(ref.ID)); err == nil {
 			ok = append(ok, ref.ID)
 		}
 	}
@@ -325,6 +332,120 @@ func (c *conn) deleteObj(ctx context.Context, key string) error {
 	}
 	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)})
 	return err
+}
+
+// listAllUnder returns every object key under the given prefix (no delimiter),
+// paginating through all results. Used for recursive directory operations.
+func (c *conn) listAllUnder(ctx context.Context, prefix string) ([]string, error) {
+	var out []string
+	var token *string
+	for {
+		resp, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(c.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range resp.Contents {
+			out = append(out, *obj.Key)
+		}
+		if resp.IsTruncated == nil || !*resp.IsTruncated {
+			break
+		}
+		token = resp.NextContinuationToken
+	}
+	return out, nil
+}
+
+// deleteRecursive removes a key and, when it is a directory prefix, every
+// object under it. Deletion is batched (DeleteObjects, 1000 per batch) for
+// efficiency.
+func (c *conn) deleteRecursive(ctx context.Context, key string) error {
+	if key == "" || key == "/" {
+		return nil
+	}
+	// gather the object itself plus everything under key + "/"
+	prefix := strings.TrimPrefix(key, "/")
+	keys := []string{prefix}
+	under, err := c.listAllUnder(ctx, prefix+"/")
+	if err != nil {
+		// fall back to single delete
+		return c.deleteObj(ctx, key)
+	}
+	keys = append(keys, under...)
+	// batch delete (max 1000 per DeleteObjects call)
+	for i := 0; i < len(keys); i += 1000 {
+		end := i + 1000
+		if end > len(keys) {
+			end = len(keys)
+		}
+		var objs []types.ObjectIdentifier
+		for _, k := range keys[i:end] {
+			objs = append(objs, types.ObjectIdentifier{Key: aws.String(k)})
+		}
+		if _, err := c.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(c.bucket),
+			Delete: &types.Delete{Objects: objs, Quiet: aws.Bool(true)},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyRecursive copies a single object (CopyObject) or, when the source is a
+// directory prefix, every object under it to the destination prefix.
+func (c *conn) copyRecursive(ctx context.Context, fromKey, toKey string) error {
+	// try a single CopyObject first; if the key is a prefix it lists and copies
+	// each child, rewriting the prefix.
+	under, err := c.listAllUnder(ctx, fromKey+"/")
+	if err != nil {
+		return c.copyOne(ctx, fromKey, toKey)
+	}
+	if len(under) == 0 {
+		// not a directory: copy the single object
+		return c.copyOne(ctx, fromKey, toKey)
+	}
+	// copy the marker object itself (if any) then each child
+	for _, k := range under {
+		dst := toKey + "/" + strings.TrimPrefix(k, fromKey+"/")
+		if err := c.copyOne(ctx, k, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *conn) copyOne(ctx context.Context, from, to string) error {
+	if from == "" || from == "/" {
+		return nil
+	}
+	_, err := c.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(c.bucket),
+		CopySource: aws.String(c.bucket + "/" + from),
+		Key:        aws.String(to),
+	})
+	return err
+}
+
+// objectExists returns whether an object exists at key. A 404 (or NoSuchKey)
+// reports exists=false,nil. Other errors are returned as-is.
+func (c *conn) objectExists(ctx context.Context, key string) (bool, error) {
+	_, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)})
+	if err == nil {
+		return true, nil
+	}
+	var noKey *types.NoSuchKey
+	if errors.As(err, &noKey) {
+		return false, nil
+	}
+	var re *awshttp.ResponseError
+	if errors.As(err, &re) && re.HTTPStatusCode() == 404 {
+		return false, nil
+	}
+	return false, err
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
@@ -368,22 +489,33 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 }
 
 func (d *Driver) copyObj(ctx context.Context, cc *conn, from, to string) error {
-	_, err := cc.client.CopyObject(ctx, &s3.CopyObjectInput{
-		Bucket:     aws.String(cc.bucket),
-		CopySource: aws.String(cc.bucket + "/" + from),
-		Key:        aws.String(to),
-	})
-	return err
+	return cc.copyRecursive(ctx, from, to)
 }
 
 // UploadOneFile performs a direct upload (single PUT, no multipart for simplicity;
-// large files could use multipart later).
+// large files could use multipart later). It honors ui.Info.ConflictPolicy when
+// the target object already exists: refuse returns an error, rename uploads to
+// a generated non-conflicting key, overwrite (the default) replaces it.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	cc, err := connOf(c)
 	if err != nil {
 		return err
 	}
 	key := cc.keyOf(driveutil.JoinPath(pathOf(ui.Info.ParentFileID), ui.Info.Name))
+
+	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
+	case driveutil.ConflictRefuse:
+		if exists, e := cc.objectExists(ctx, key); e == nil && exists {
+			return errors.New("s3: 目标文件已存在")
+		}
+	case driveutil.ConflictRename:
+		if exists, e := cc.objectExists(ctx, key); e == nil && exists {
+			newName := driveutil.GenerateConflictName(ui.Info.Name)
+			ui.Info.Name = newName
+			key = cc.keyOf(driveutil.JoinPath(pathOf(ui.Info.ParentFileID), newName))
+		}
+	}
+
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
 		return err

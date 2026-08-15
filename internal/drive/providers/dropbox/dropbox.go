@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -531,4 +532,118 @@ func parentOf(path string) string {
 		return parent[:i]
 	}
 	return RootID
+}
+
+// refreshDropboxToken exchanges a refresh_token for a fresh access_token via
+// the Dropbox OAuth2 token endpoint.
+func refreshDropboxToken(ctx context.Context, appKey, refreshToken string) (*model.TokenInfo, error) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", appKey)
+
+	cl := netx.NewClient(60 * time.Second)
+	var raw struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+	}
+	if err := cl.PostForm(ctx, dbTokenURL, nil, form, &raw); err != nil {
+		return nil, err
+	}
+	if raw.AccessToken == "" {
+		return nil, errors.New("dropbox: refresh returned no access_token")
+	}
+	return &model.TokenInfo{
+		AccessToken:  raw.AccessToken,
+		RefreshToken: raw.RefreshToken,
+		ExpiresIn:    raw.ExpiresIn,
+		TokenType:    raw.TokenType,
+	}, nil
+}
+
+// fetchDropboxProfile queries users/get_current_account and
+// users/get_space_usage to populate the token's UserName, avatar, and quota.
+func fetchDropboxProfile(ctx context.Context, accessToken string, tok *model.TokenInfo) {
+	cl := newClient(accessToken)
+
+	// account info
+	var acct struct {
+		AccountID       string `json:"account_id"`
+		Email           string `json:"email"`
+		ProfilePhotoURL string `json:"profile_photo_url"`
+		Name            *struct {
+			DisplayName string `json:"display_name"`
+		} `json:"name"`
+	}
+	if err := cl.rpc(ctx, "/users/get_current_account", nil, &acct); err == nil {
+		if acct.Name != nil && acct.Name.DisplayName != "" {
+			tok.UserName = acct.Name.DisplayName
+			tok.NickName = acct.Name.DisplayName
+		} else if acct.Email != "" {
+			tok.UserName = acct.Email
+		}
+		if acct.ProfilePhotoURL != "" {
+			tok.Avatar = acct.ProfilePhotoURL
+		}
+		if acct.AccountID != "" {
+			tok.ProviderAccountID = acct.AccountID
+		}
+	}
+
+	// space usage
+	var space struct {
+		Used      int64 `json:"used"`
+		Allocation *struct {
+			Allocated int64 `json:"allocated"`
+		} `json:"allocation"`
+	}
+	if err := cl.rpc(ctx, "/users/get_space_usage", nil, &space); err == nil {
+		tok.UsedSize = space.Used
+		if space.Allocation != nil {
+			tok.TotalSize = space.Allocation.Allocated
+			if tok.TotalSize > tok.UsedSize {
+				tok.FreeSize = tok.TotalSize - tok.UsedSize
+			}
+		}
+	}
+}
+
+// RefreshAccount renews the Dropbox OAuth access token using the stored
+// refresh_token, then fetches account profile and space usage to update the
+// token metadata.
+func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
+	if token == nil {
+		return nil, nil
+	}
+	refreshToken := strings.TrimSpace(token.RefreshToken)
+	if refreshToken == "" {
+		return nil, errors.New("dropbox: missing refresh_token")
+	}
+	appKey := strings.TrimSpace(drive.Secret("dropbox_app_key"))
+	if appKey == "" {
+		return nil, errors.New("dropbox: app_key 未配置（secrets.json dropbox_app_key）")
+	}
+
+	fresh, err := refreshDropboxToken(ctx, appKey, refreshToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// preserve fields not returned by the token endpoint
+	token.AccessToken = fresh.AccessToken
+	if fresh.RefreshToken != "" {
+		token.RefreshToken = fresh.RefreshToken
+	}
+	token.ExpiresIn = fresh.ExpiresIn
+	if fresh.TokenType != "" {
+		token.TokenType = fresh.TokenType
+	}
+	token.TokenFrom = providerID
+
+	// update account info + quota (non-blocking on error)
+	fetchDropboxProfile(ctx, token.AccessToken, token)
+
+	return token, nil
 }

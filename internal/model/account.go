@@ -80,13 +80,15 @@ type TokenInfo struct {
 
 // ConnConfig describes a mounted storage connection.
 type ConnConfig struct {
-	Name     string `json:"name,omitempty"`
-	Endpoint string `json:"endpoint,omitempty"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	Region   string `json:"region,omitempty"`
-	Bucket   string `json:"bucket,omitempty"`
-	BasePath string `json:"basePath,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	Region         string `json:"region,omitempty"`
+	Bucket         string `json:"bucket,omitempty"`
+	BasePath       string `json:"basePath,omitempty"`
+	ForcePathStyle *bool  `json:"forcePathStyle,omitempty"`
+	SessionToken   string `json:"sessionToken,omitempty"`
 }
 
 // Account is the persisted session record. UserID is the primary key and is

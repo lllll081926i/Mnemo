@@ -243,13 +243,29 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 	return ok, nil
 }
 
-// UploadOneFile performs a direct PUT upload.
+// UploadOneFile performs a direct PUT upload. It honors ui.Info.ConflictPolicy
+// when the target path already exists: refuse returns an error, rename uploads
+// to a generated non-conflicting name, overwrite (the default) replaces it.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	client, err := clientOf(c)
 	if err != nil {
 		return err
 	}
 	target := driveutil.JoinPath(pathOf(ui.Info.ParentFileID), ui.Info.Name)
+
+	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
+	case driveutil.ConflictRefuse:
+		if _, e := client.Stat(ctx, target); e == nil {
+			return errors.New("webdav: 目标文件已存在")
+		}
+	case driveutil.ConflictRename:
+		if _, e := client.Stat(ctx, target); e == nil {
+			newName := driveutil.GenerateConflictName(ui.Info.Name)
+			ui.Info.Name = newName
+			target = driveutil.JoinPath(pathOf(ui.Info.ParentFileID), newName)
+		}
+	}
+
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
 		return err

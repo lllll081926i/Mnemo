@@ -65,6 +65,17 @@ func (a *App) startup(ctx context.Context) {
 		return acc.Token, nil
 	})
 
+	// secret resolver so providers can read OAuth client ids during refresh
+	drive.SetSecretResolver(func(key string) string {
+		switch key {
+		case "onedrive_client_id":
+			return a.secrets.OnedriveClientID
+		case "dropbox_app_key":
+			return a.secrets.DropboxAppKey
+		}
+		return ""
+	})
+
 	// internal media/preview server. Roots restrict /local/ serving to the
 	// download dir, engine dir and data dir (logs, mpv-config, etc.).
 	dlDir := transfer.DownloadDir(st)
