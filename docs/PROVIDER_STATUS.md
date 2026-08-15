@@ -202,9 +202,9 @@
 | pan189 | ➖ | ✅(md5) | ✅(md5) | ✅ |
 | pan139 | ➖ | ❌(未声明) | ➖ | ➖ |
 | lanzou | ➖ | ❌ | ❌ | ➖ |
-| ilanzou | ➖ | ⚠️(实现有,caps缺) | ⚠️(实现有,caps缺) | ➖ |
-| onedrive | ➖ | ⚠️(映射有,caps缺) | ➖ | ➖ |
-| dropbox | ➖ | ⚠️(映射有,caps缺) | ➖ | ➖ |
+| ilanzou | ➖ | ✅(md5) | ✅(md5) | ➖ |
+| onedrive | ➖ | ✅(sha1/quickXor) | ➖ | ➖ |
+| dropbox | ➖ | ✅(dropbox) | ➖ | ➖ |
 | yike | ➖ | ✅(md5) | ➖ | ➖ |
 | guangya | ➖ | ✅(md5) | ➖ | ✅ |
 | webdav | ➖ | ➖ | ➖ | ➖ |
@@ -218,27 +218,27 @@
 
 ### 🔴 P0 — 影响功能正确性
 
-| # | 差距 | 影响范围 | 详情 |
-|---|------|---------|------|
-| 1 | onedrive/dropbox `RefreshAccount` 完全缺失 | 2 盘 | token 过期后无法续期，登录后不获取账号信息/配额 |
-| 2 | 分享导入 `importShare` 声明未实现 | 3 盘(pikpak/aliopen/pan123) | 能力声明 `true` 但无任何实现代码 |
-| 3 | pikpak API captcha token 续接不完整 | 1 盘 | 登录已用 X-Captcha-Token(`auth.go:204`)，但业务 API 遇到二次挑战后的完整续接体系仍不完整 |
-| 4 | aliopen `CompleteUpload` 传空 `upload_id` | 1 盘 | `aliopen.go:511` 上传完成调用可能失败 |
-| 5 | s3 目录递归操作完全缺失 | 1 盘 | Rename/Move/Copy/Delete 仅处理单对象，不递归目录 |
-| 6 | s3 `forcePathStyle` 硬编码不可配置 | 1 盘 | `s3.go:71` 写死 true，对 AWS 原生 endpoint 可能不兼容 |
+| # | 差距 | 影响范围 | 状态 | 详情 |
+|---|------|---------|:----:|------|
+| 1 | onedrive/dropbox `RefreshAccount` 完全缺失 | 2 盘 | ✅已修复 | 已实现 token 刷新 + 账号信息/配额 |
+| 2 | 分享导入 `importShare` 声明未实现 | 3 盘(pikpak/aliopen/pan123) | ✅已修复 | ShareImportDriver 接口 + 三个盘完整实现 |
+| 3 | pikpak API captcha token 续接不完整 | 1 盘 | ⚠️部分 | 登录已用 X-Captcha-Token，业务 API 二次挑战续接仍不完整 |
+| 4 | aliopen `CompleteUpload` 传空 `upload_id` | 1 盘 | ✅已修复 | 传真实 upload_id |
+| 5 | s3 目录递归操作完全缺失 | 1 盘 | ✅已修复 | listAllUnder + 批量 DeleteObjects + copyRecursive |
+| 6 | s3 `forcePathStyle` 硬编码不可配置 | 1 盘 | ✅已修复 | 改为 *bool 可配置，支持 sessionToken |
 
 ### 🟡 P1 — 影响健壮性
 
-| # | 差距 | 影响范围 | 详情 |
-|---|------|---------|------|
-| 7 | 上传断点续传持久化缺失 | 4 盘 | aliopen/pan123/pan189/onedrive 进程重启后大文件无法恢复 |
-| 8 | webdav/s3 上传冲突策略完全缺失 | 2 盘 | 直接覆盖同名文件，无 refuse/overwrite/rename |
-| 9 | 能力声明与实现不符 | 多盘 | pikpak/pan123 的 trashPurge/trashClear、pikpak 的 playbackHistory |
-| 10 | 哈希能力声明缺失 | 4 盘 | ilanzou/onedrive/dropbox/pikpak 实际有哈希但未声明，跨盘秒传路由失效 |
-| 11 | pikpak 离线下载进度/删除缺失 | 1 盘 | 只能创建和列表，无法查进度或删任务 |
-| 12 | pan139 ListPage 分页参数未推进 | 1 盘 | pageNum/startNumber 固定，多页场景可能失效 |
-| 13 | onedrive/dropbox 搜索无分页 | 2 盘 | 只取第一页结果 |
-| 14 | pikpak batch 操作无任务轮询 | 1 盘 | move/copy/trash 操作未等待完成就返回 |
+| # | 差距 | 影响范围 | 状态 | 详情 |
+|---|------|---------|:----:|------|
+| 7 | 上传断点续传持久化缺失 | 4 盘 | ⚠️未修复 | aliopen/pan123/pan189/onedrive 进程重启后大文件无法恢复 |
+| 8 | webdav/s3 上传冲突策略完全缺失 | 2 盘 | ✅已修复 | refuse/rename/overwrite + ConflictPolicy 字段 |
+| 9 | 能力声明与实现不符 | 多盘 | ✅已修复 | pikpak/pan123 的 trashPurge/trashClear/playbackHistory 改为 false |
+| 10 | 哈希能力声明缺失 | 4 盘 | ✅已修复 | ilanzou/onedrive/dropbox 已声明 SetHashes |
+| 11 | pikpak 离线下载进度/删除缺失 | 1 盘 | ✅已修复 | RefreshOfflineTasks + DeleteOfflineTask 绑定 |
+| 12 | pan139 ListPage 分页参数未推进 | 1 盘 | ✅已修复 | pageNum/startNumber 随 marker 递增 |
+| 13 | onedrive/dropbox 搜索无分页 | 2 盘 | ⚠️未修复 | 只取第一页结果 |
+| 14 | pikpak batch 操作无任务轮询 | 1 盘 | ⚠️未修复 | move/copy/trash 操作未等待完成就返回 |
 
 ### 🟢 P2 — 体验优化
 

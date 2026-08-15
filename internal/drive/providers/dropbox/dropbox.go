@@ -184,25 +184,43 @@ func (c *client) Detail(ctx context.Context, path string) (*Metadata, error) {
 
 // Search uses search_v2 and flattens matches.
 func (c *client) Search(ctx context.Context, query string) ([]Metadata, error) {
-	var resp struct {
-		Matches []struct {
-			Metadata *struct {
-				Metadata Metadata `json:"metadata"`
-			} `json:"metadata"`
-		} `json:"matches"`
-		HasMore bool   `json:"has_more"`
-		Cursor  string `json:"cursor"`
-	}
-	if err := c.rpc(ctx, "/files/search_v2", map[string]any{
-		"query": query, "max_results": 1000, "options": map[string]any{"path": "", "filename_only": false},
-	}, &resp); err != nil {
-		return nil, err
-	}
 	var out []Metadata
-	for _, m := range resp.Matches {
-		if m.Metadata != nil && m.Metadata.Metadata.Tag != "deleted" {
-			out = append(out, m.Metadata.Metadata)
+	var cursor string
+	seen := map[string]bool{}
+	for {
+		var resp struct {
+			Matches []struct {
+				Metadata *struct {
+					Metadata Metadata `json:"metadata"`
+				} `json:"metadata"`
+			} `json:"matches"`
+			HasMore bool   `json:"has_more"`
+			Cursor  string `json:"cursor"`
 		}
+		var err error
+		if cursor == "" {
+			err = c.rpc(ctx, "/files/search_v2", map[string]any{
+				"query": query, "max_results": 1000, "options": map[string]any{"path": "", "filename_only": false},
+			}, &resp)
+		} else {
+			if seen[cursor] {
+				break
+			}
+			seen[cursor] = true
+			err = c.rpc(ctx, "/files/search/continue_v2", map[string]any{"cursor": cursor}, &resp)
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range resp.Matches {
+			if m.Metadata != nil && m.Metadata.Metadata.Tag != "deleted" {
+				out = append(out, m.Metadata.Metadata)
+			}
+		}
+		if !resp.HasMore || resp.Cursor == "" {
+			break
+		}
+		cursor = resp.Cursor
 	}
 	return out, nil
 }

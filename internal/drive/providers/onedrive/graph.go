@@ -236,12 +236,29 @@ func (c *client) Detail(ctx context.Context, fileID string) (*Item, error) {
 
 // Search uses the Graph search endpoint.
 func (c *client) Search(ctx context.Context, keyword string) ([]Item, error) {
-	var resp childrenResp
-	q := url.QueryEscape(keyword)
-	if err := c.getJSON(ctx, "/me/drive/root/search(q='"+q+"')", &resp); err != nil {
-		return nil, err
+	var out []Item
+	target := "/me/drive/root/search(q='" + url.QueryEscape(keyword) + "')"
+	seen := map[string]bool{}
+	for target != "" {
+		if seen[target] {
+			break
+		}
+		seen[target] = true
+		var resp childrenResp
+		if err := c.getJSON(ctx, target, &resp); err != nil {
+			return nil, err
+		}
+		out = append(out, resp.Value...)
+		target = resp.NextLink
+		// NextLink is a full URL; getJSON expects a path. If it's absolute,
+		// extract the path relative to the Graph host.
+		if target != "" && strings.HasPrefix(target, graphHost) {
+			target = strings.TrimPrefix(target, graphHost)
+		} else if target != "" && !strings.HasPrefix(target, "/") {
+			break
+		}
 	}
-	return resp.Value, nil
+	return out, nil
 }
 
 // Mkdir creates a folder (conflictBehavior rename).

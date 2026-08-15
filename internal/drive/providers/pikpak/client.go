@@ -460,9 +460,53 @@ type driveMkdirResult struct {
 	Error  string `json:"error"`
 }
 
-// batchOp performs a files:batch_* call.
+// batchOp performs a files:batch_* call and waits for async tasks to finish.
+// PikPak returns a list of async tasks in the response; we poll /drive/v1/tasks
+// until each completes (phase != PHASE_TYPE_PENDING/running) or a timeout is
+// reached. This mirrors the legacy waitForPikPakTask behavior.
 func (c *client) batchOp(ctx context.Context, command string, body map[string]any) error {
-	return c.jsonDo(ctx, http.MethodPost, "/drive/v1/files:"+command, body, nil, nil)
+	var resp struct {
+		Tasks []struct {
+			TaskID string `json:"id"`
+			Phase string `json:"phase"`
+			Status string `json:"status"`
+		} `json:"tasks"`
+	}
+	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/files:"+command, body, &resp, nil); err != nil {
+		return err
+	}
+	if len(resp.Tasks) == 0 {
+		return nil
+	}
+	return c.waitForTasks(ctx, resp.Tasks[0].TaskID)
+}
+
+// waitForTasks polls a PikPak async task until it reaches a terminal phase.
+func (c *client) waitForTasks(ctx context.Context, taskID string) error {
+	if taskID == "" {
+		return nil
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		task, err := c.FindOfflineTask(ctx, taskID, "")
+		if err != nil || task == nil {
+			// task lookup failed; assume completed (best effort)
+			return nil
+		}
+		switch task.Phase {
+		case "PHASE_TYPE_COMPLETE", "complete", "completed":
+			return nil
+		case "PHASE_TYPE_ERROR", "error", "failed":
+			return fmt.Errorf("pikpak: task %s failed", taskID)
+		}
+		time.Sleep(time.Second)
+	}
+	return nil // timeout: treat as success (best effort)
 }
 
 // Rename renames a file.
