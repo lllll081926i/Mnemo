@@ -112,6 +112,12 @@ func (a *App) startup(ctx context.Context) {
 	// provider identity dir (pikpak device ids)
 	_ = os.MkdirAll(filepath.Join(dir, "identity"), 0o755)
 
+	// apply persisted proxy so providers and the download engine honor it from
+	// the very first request.
+	if s, err := st.GetSettings(); err == nil && s.Proxy != "" {
+		netx.SetGlobalProxy(s.Proxy)
+	}
+
 	a.emit("app:ready", map[string]any{"port": a.preview.Port})
 }
 
