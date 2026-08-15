@@ -56,6 +56,22 @@ func (s *Store) ClearDownloadTasks() error {
 	return s.writeJSON(tasksFile, out)
 }
 
+// DeleteDownloadTask removes a single task record by ID.
+func (s *Store) DeleteDownloadTask(id string) error {
+	list, err := s.ListDownloadTasks()
+	if err != nil {
+		return err
+	}
+	out := list[:0]
+	for i := range list {
+		if list[i].ID == id {
+			continue
+		}
+		out = append(out, list[i])
+	}
+	return s.writeJSON(tasksFile, out)
+}
+
 // ShareHistory persistence.
 const shareHistoryFile = "sharehistory.json"
 
@@ -150,6 +166,7 @@ func (s *Store) DeleteOfflineTask(id string) error {
 	}
 	return s.writeJSON(offlineFile, out)
 }
+
 // Upload tasks persistence.
 const uploadsFile = "uploads.json"
 

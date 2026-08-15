@@ -18,9 +18,9 @@ import (
 	"mnemo-go/internal/preview"
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/transfer"
+	"mnemo-go/internal/transfer/dlengine"
 	"mnemo-go/internal/transfer/migrate"
 	"time"
-	"mnemo-go/internal/transfer/dlengine"
 )
 
 // App is the root Wails-bound struct.
@@ -99,10 +99,10 @@ func (a *App) OpenBrowser(url string) {
 // ProviderInfo is the JSON-safe projection of a provider registration exposed
 // to the frontend (excludes func-typed Factory/Auth).
 type ProviderInfo struct {
-	ID           string               `json:"ID"`
-	Meta         drive.Meta           `json:"Meta"`
-	Capabilities drive.Capabilities   `json:"Capabilities"`
-	Login        drive.LoginConfig    `json:"Login"`
+	ID           string             `json:"ID"`
+	Meta         drive.Meta         `json:"Meta"`
+	Capabilities drive.Capabilities `json:"Capabilities"`
+	Login        drive.LoginConfig  `json:"Login"`
 }
 
 // ---- providers ----
@@ -202,6 +202,29 @@ func (a *App) ListAccounts() []*model.Account {
 	return list
 }
 
+// RefreshAccount silently refreshes an account's quota + profile from the
+// provider, persists the updated token, and returns the refreshed account.
+// Frontend polls this at a low frequency for the avatar/quota popover.
+func (a *App) RefreshAccount(userID string) (*model.Account, error) {
+	acc, err := a.store.GetAccount(userID)
+	if err != nil || acc == nil {
+		return nil, fmt.Errorf("账号不存在")
+	}
+	tok, err := drive.RefreshAccount(userID, acc.DriveID)
+	if err != nil {
+		return acc, nil
+	}
+	if tok != nil {
+		acc.Token = tok
+		if acc.DriveID == "" {
+			acc.DriveID = model.BuildDriveID(tok.TokenFrom, model.StripUserID(tok.TokenFrom, tok.UserID))
+		}
+	}
+	_ = a.store.SaveAccount(acc)
+	a.emit("account:changed", acc)
+	return acc, nil
+}
+
 // RemoveAccount deletes an account.
 func (a *App) RemoveAccount(userID string) error {
 	if err := a.store.DeleteAccount(userID); err != nil {
@@ -245,6 +268,12 @@ func (a *App) ResumeDownload(id string) { a.dl.Resume(id) }
 
 // CancelDownload cancels a task.
 func (a *App) CancelDownload(id string) { a.dl.Cancel(id) }
+
+// RemoveDownload hard-deletes a task record immediately (删除即从列表移除).
+func (a *App) RemoveDownload(id string) { a.dl.Remove(id) }
+
+// PrioritizeDownload boosts one task: pauses others so it gets full bandwidth.
+func (a *App) PrioritizeDownload(id string) { a.dl.Prioritize(id) }
 
 // ClearDownloads removes finished tasks.
 func (a *App) ClearDownloads() { a.dl.ClearCompleted() }
@@ -295,7 +324,7 @@ func (a *App) Startup(ctx context.Context) { a.startup(ctx) }
 // MigrateFiles copies/moves files across two accounts.
 func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent string, fileIDs []string, move bool) (*migrate.Job, error) {
 	job := &migrate.Job{
-		ID: "mig-" + fmt.Sprint(time.Now().UnixNano()),
+		ID:      "mig-" + fmt.Sprint(time.Now().UnixNano()),
 		SrcUser: srcUser, SrcDrive: srcDrive, FileIDs: fileIDs,
 		DstUser: dstUser, DstDrive: dstDrive, DstParent: dstParent, Move: move,
 	}

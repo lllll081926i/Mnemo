@@ -44,6 +44,7 @@ func init() {
 			{Key: "username", Type: "text", Label: "账号（手机/邮箱）", Required: true},
 			{Key: "password", Type: "password", Label: "密码", Required: true},
 		}},
+		Auth:    authSignIn,
 		Factory: func() drive.Driver { return &Driver{} },
 	})
 }
@@ -115,15 +116,31 @@ func isHex(s string) bool {
 
 // initCaptcha requests a captcha token (challenge url may be returned).
 func initCaptcha(ctx context.Context, hc *netx.Client, deviceID, username string, action string) (string, string, error) {
-	meta := loginCaptchaMeta(username)
-	meta.CaptchaSign = captchaSign(deviceID, timestampNow())
-	meta.Timestamp = timestampNow()
+	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, "")
+}
+
+// initCaptchaWithPrev requests a captcha token; previousToken chains a verified
+// slider token so the server registers the result (legacy previousToken retry).
+// signin 动作的 meta 只含 email/phone_number/username 单字段（对齐旧版）。
+func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken string) (string, string, error) {
+	u := strings.TrimSpace(username)
+	meta := map[string]string{}
+	if strings.Contains(u, "@") && strings.Contains(u, ".") {
+		meta["email"] = u
+	} else if isPhone(u) {
+		meta["phone_number"] = strings.ReplaceAll(strings.ReplaceAll(u, " ", ""), "-", "")
+	} else {
+		meta["username"] = u
+	}
 	body := map[string]any{
 		"client_id":    clientID,
 		"action":       action,
 		"device_id":    deviceID,
 		"meta":         meta,
 		"redirect_uri": redirectURI,
+	}
+	if previousToken != "" {
+		body["captcha_token"] = previousToken
 	}
 	var res struct {
 		CaptchaToken string `json:"captcha_token"`
@@ -174,17 +191,20 @@ type AuthResp struct {
 }
 
 // signIn logs in with username+password (+captcha).
+// 字段与旧版 signInPikPak 一致：body 只有 client_id/username/password，
+// captcha_token 走 X-Captcha-Token 头（放 body 会被服务端忽略 → 报 "add captcha"）。
 func signIn(ctx context.Context, hc *netx.Client, deviceID, username, password, captchaToken string) (*AuthResp, error) {
 	body := map[string]any{
-		"client_id":        clientID,
-		"client_version":   clientVersion,
-		"package_name":     packageName,
-		"user_name":        strings.TrimSpace(username),
-		"password":         password,
-		"captcha_token":    captchaToken,
+		"client_id": clientID,
+		"username":  strings.TrimSpace(username),
+		"password":  password,
+	}
+	headers := captchaHeaders(deviceID, "")
+	if captchaToken != "" {
+		headers["X-Captcha-Token"] = captchaToken
 	}
 	var res AuthResp
-	resp, err := hc.Do(ctx, http.MethodPost, userHost+"/v1/auth/signin", captchaHeaders(deviceID, ""), netx.JSONBody(body))
+	resp, err := hc.Do(ctx, http.MethodPost, userHost+"/v1/auth/signin", headers, netx.JSONBody(body))
 	if err != nil {
 		return nil, err
 	}
@@ -242,12 +262,27 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	deviceID := getOrCreateDeviceID(username)
 	hc := netx.NewClient(60 * time.Second)
 
-	captchaToken := ""
-	// captcha init (best-effort; some accounts need interactive slider)
-	if tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin"); err == nil {
-		captchaToken = tok
-		if urlValue != "" && tok == "" {
-			return nil, errors.New("pikpak: 需要滑块验证码，请在浏览器中完成登录")
+	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
+	if captchaToken == "" {
+		// captcha init (best-effort; some accounts need interactive slider)
+		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin")
+		if err == nil {
+			captchaToken = tok
+			if urlValue != "" {
+				// 需要滑块验证：把验证 URL 与 token 带回前端，用户完成后带 token 重试
+				return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
+			}
+		}
+	} else {
+		// 滑块完成后的重试：链式带 previousToken 重发 init，等服务端登记验证结果
+		// （对齐旧版 loginPikPakWithCaptcha 的退避链）
+		if tok, urlValue, err := initCaptchaWithPrev(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken); err == nil {
+			if urlValue != "" {
+				return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
+			}
+			if tok != "" {
+				captchaToken = tok
+			}
 		}
 	}
 

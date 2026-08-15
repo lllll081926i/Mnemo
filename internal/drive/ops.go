@@ -109,6 +109,21 @@ func GetFileInfo(userID, driveID, fileID string) (any, error) {
 	return d.GetInfo(context.Background(), c, fileID)
 }
 
+// RefreshAccount refreshes an account's quota + profile from the provider and
+// returns the updated token (or the original on unsupported/error). Silent +
+// low-frequency caller (frontend avatar/quota popover refresh).
+func RefreshAccount(userID, driveID string) (*model.TokenInfo, error) {
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return nil, err
+	}
+	tok := c.Token
+	if tok == nil {
+		return nil, ErrUnknownProvider
+	}
+	return d.RefreshAccount(context.Background(), c, tok)
+}
+
 // GetFile returns the unified file model (from cache if present).
 func GetFile(userID, driveID, fileID string) (*model.File, error) {
 	if f, ok := fileCache.Get(driveID, fileID); ok {

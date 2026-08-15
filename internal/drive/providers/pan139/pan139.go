@@ -55,6 +55,7 @@ func init() {
 			{Key: "authorization", Type: "text", Label: "Authorization（可选，粘贴直接登录）", Required: false},
 			{Key: "mail_cookies", Type: "text", Label: "mail.10086.cn Cookie（可选，含 RMKEY）", Required: false},
 		}},
+		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },
 	})
 }

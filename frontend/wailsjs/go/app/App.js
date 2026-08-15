@@ -150,12 +150,24 @@ export function OpenBrowser(arg1) {
   return window['go']['app']['App']['OpenBrowser'](arg1);
 }
 
+export function OpenFile(arg1) {
+  return window['go']['app']['App']['OpenFile'](arg1);
+}
+
 export function PauseDownload(arg1) {
   return window['go']['app']['App']['PauseDownload'](arg1);
 }
 
 export function PausePlayer(arg1) {
   return window['go']['app']['App']['PausePlayer'](arg1);
+}
+
+export function PickDirectory(arg1, arg2) {
+  return window['go']['app']['App']['PickDirectory'](arg1, arg2);
+}
+
+export function PickFiles(arg1) {
+  return window['go']['app']['App']['PickFiles'](arg1);
 }
 
 export function PlayVideo(arg1, arg2, arg3) {
@@ -166,12 +178,24 @@ export function PreviewURL(arg1, arg2, arg3) {
   return window['go']['app']['App']['PreviewURL'](arg1, arg2, arg3);
 }
 
+export function PrioritizeDownload(arg1) {
+  return window['go']['app']['App']['PrioritizeDownload'](arg1);
+}
+
 export function ProviderLogin(arg1, arg2) {
   return window['go']['app']['App']['ProviderLogin'](arg1, arg2);
 }
 
+export function RefreshAccount(arg1) {
+  return window['go']['app']['App']['RefreshAccount'](arg1);
+}
+
 export function RemoveAccount(arg1) {
   return window['go']['app']['App']['RemoveAccount'](arg1);
+}
+
+export function RemoveDownload(arg1) {
+  return window['go']['app']['App']['RemoveDownload'](arg1);
 }
 
 export function RemoveFavorite(arg1, arg2, arg3) {
@@ -192,6 +216,10 @@ export function RestoreFiles(arg1, arg2, arg3) {
 
 export function ResumeDownload(arg1) {
   return window['go']['app']['App']['ResumeDownload'](arg1);
+}
+
+export function RevealInFolder(arg1) {
+  return window['go']['app']['App']['RevealInFolder'](arg1);
 }
 
 export function RunSync(arg1) {

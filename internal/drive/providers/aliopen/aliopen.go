@@ -48,7 +48,6 @@ func init() {
 			"permanentDelete": true,
 			"trashView":       false,
 			"trashRestore":    false,
-			"favorite":        true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"sha1"}, []string{"sha1"})
 		}),

@@ -910,11 +910,26 @@ func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*
 // ---- download (legacy download.ts: AList Link 逐行移植) ----
 
 // resolveAListFile reproduces the Link prerequisite: a listed file with
-// S3KeyFlag, from pool → root list → root search.
+// S3KeyFlag. 顺序对齐旧版 resolvePan123AListFile：
+// pool → 父目录重拉 → 根目录重拉 → 按文件名全局搜索。
 func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID string) (*pan123File, error) {
 	fid := toPan123FileID(fileID)
 	if f, ok := poolGet(fid); ok && f.S3KeyFlag != "" {
 		return &f, nil
+	}
+	// 冷启动/池被驱逐：用池里残条的父目录与文件名做线索
+	var parentID, name string
+	if stub, ok := poolGet(fid); ok {
+		parentID, name = stub.ParentFileID, stub.FileName
+	}
+	if parentID != "" && parentID != "0" {
+		if items, err := d.fileListRaw(ctx, c, parentID, false, ""); err == nil {
+			for i := range items {
+				if items[i].FileID == fid && items[i].S3KeyFlag != "" {
+					return &items[i], nil
+				}
+			}
+		}
 	}
 	if items, err := d.fileListRaw(ctx, c, "0", false, ""); err == nil {
 		for i := range items {
@@ -923,7 +938,12 @@ func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID s
 			}
 		}
 	}
-	if items, err := d.fileListRaw(ctx, c, "0", false, fid); err == nil {
+	// 全局搜索兜底：按文件名搜（旧版关键词为文件名，fid 搜不到）
+	kw := name
+	if kw == "" {
+		kw = fid
+	}
+	if items, err := d.fileListRaw(ctx, c, "0", false, kw); err == nil {
 		for i := range items {
 			if items[i].FileID == fid && items[i].S3KeyFlag != "" {
 				return &items[i], nil

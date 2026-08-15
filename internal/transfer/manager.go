@@ -21,7 +21,7 @@ type OnTaskEvent func(ev TaskEvent)
 
 // TaskEvent is pushed to the frontend via events.
 type TaskEvent struct {
-	Kind string            `json:"kind"` // download | upload | offline
+	Kind string             `json:"kind"` // download | upload | offline
 	Task model.DownloadTask `json:"task"`
 }
 
@@ -103,17 +103,17 @@ func (m *Manager) update(t *model.DownloadTask) {
 func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.DownloadTask, error) {
 	provider := drive.ProviderOf(userID, driveID, "")
 	t := &model.DownloadTask{
-		ID:       newID("dl"),
-		UserID:   userID,
-		DriveID:  driveID,
-		Provider: provider,
-		FileID:   f.FileID,
-		Name:     f.Name,
-		Size:     f.Size,
-		Status:   "queued",
+		ID:        newID("dl"),
+		UserID:    userID,
+		DriveID:   driveID,
+		Provider:  provider,
+		FileID:    f.FileID,
+		Name:      f.Name,
+		Size:      f.Size,
+		Status:    "queued",
 		LocalPath: filepath.Join(m.dir, safeName(f.Name)),
-		Created:  time.Now().Unix(),
-		Updated:  time.Now().Unix(),
+		Created:   time.Now().Unix(),
+		Updated:   time.Now().Unix(),
 	}
 	m.update(t)
 	go m.runDownload(t)
@@ -218,6 +218,52 @@ func (m *Manager) Cancel(id string) {
 		m.update(t)
 		_ = os.Remove(t.LocalPath + ".part")
 		_ = os.Remove(t.LocalPath + ".state.json")
+	}
+}
+
+// Remove hard-deletes a task record (from memory and the store) immediately.
+// Used by the “已完成”列表删除：删除即从列表移除，不留下 canceled 记录。
+func (m *Manager) Remove(id string) {
+	if t, ok := m.get(id); ok {
+		// 清理可能残留的分卷临时文件（不删已完成的成品文件）
+		_ = os.Remove(t.LocalPath + ".part")
+		_ = os.Remove(t.LocalPath + ".state.json")
+	}
+	m.mu.Lock()
+	delete(m.tasks, id)
+	m.mu.Unlock()
+	_ = m.store.DeleteDownloadTask(id)
+	if m.onEvent != nil {
+		m.onEvent(TaskEvent{Kind: "download", Task: model.DownloadTask{ID: id, Status: "removed"}})
+	}
+}
+
+// Prioritize boosts one task: pause every other active (downloading/queued)
+// task and (re)start this one so it gets the full bandwidth.
+// 引擎是全并发的（无队列），“优先”即暂停其他任务把带宽让给该任务。
+func (m *Manager) Prioritize(id string) {
+	t, ok := m.get(id)
+	if !ok {
+		return
+	}
+	m.mu.Lock()
+	for oid, o := range m.tasks {
+		if oid != id && (o.Status == "downloading" || o.Status == "queued") {
+			o.Status = "paused"
+			o.Updated = time.Now().Unix()
+			_ = m.store.SaveDownloadTask(o)
+			if m.onEvent != nil {
+				m.onEvent(TaskEvent{Kind: "download", Task: *o})
+			}
+		}
+	}
+	m.mu.Unlock()
+	if t.Status == "paused" || t.Status == "failed" || t.Status == "canceled" {
+		t.Status = "queued"
+		t.Error = ""
+		t.Updated = time.Now().Unix()
+		m.update(t)
+		go m.runDownload(t)
 	}
 }
 

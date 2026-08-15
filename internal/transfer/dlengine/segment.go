@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,9 +81,21 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	partPath := localPath + ".part"
 	statePath := localPath + ".state.json"
 
-	hc := &http.Client{Timeout: 0}
-	if opts.UserAgent != "" {
-		hc.Timeout = 120 * time.Second
+	// 不能用 http.Client.Timeout（它是含 body 读取的总超时，大文件必超时）。
+	// 只限制连接/响应头阶段，body 读取不设总时限（对齐 aria2 的空闲超时语义）。
+	hc := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: 60 * time.Second,
+			TLSHandshakeTimeout:   30 * time.Second,
+			MaxIdleConns:          64,
+			MaxIdleConnsPerHost:   32,
+			IdleConnTimeout:       90 * time.Second,
+		},
 	}
 
 	// Resolve size + range support.

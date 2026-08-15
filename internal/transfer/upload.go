@@ -146,11 +146,28 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 		q.update(j)
 		return
 	}
-	if err := handler(ctx, j); err != nil {
+
+	// 上传中周期推送进度（handler 内只写字段，事件由这里泵出）
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				q.update(j)
+			}
+		}
+	}()
+	handlerErr := handler(ctx, j)
+	close(done)
+	if handlerErr != nil {
 		j.Upload.IsDowning = false
 		j.Upload.IsFailed = true
 		j.Upload.FailedCode = 1
-		j.Upload.FailedMessage = err.Error()
+		j.Upload.FailedMessage = handlerErr.Error()
 		j.Upload.DownState = "failed"
 		q.update(j)
 		return

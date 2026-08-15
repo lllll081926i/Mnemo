@@ -44,6 +44,7 @@ func init() {
 			{Key: "sms_code", Type: "text", Label: "短信验证码", Required: false},
 			{Key: "refresh_token", Type: "text", Label: "Refresh Token（可选，直接登录）", Required: false},
 		}},
+		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },
 	})
 }

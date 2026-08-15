@@ -81,17 +81,29 @@ export function OfflineDownload(arg1:string,arg2:string,arg3:string,arg4:string)
 
 export function OpenBrowser(arg1:string):Promise<void>;
 
+export function OpenFile(arg1:string):Promise<void>;
+
 export function PauseDownload(arg1:string):Promise<void>;
 
 export function PausePlayer(arg1:boolean):Promise<void>;
+
+export function PickDirectory(arg1:string,arg2:string):Promise<string>;
+
+export function PickFiles(arg1:string):Promise<Array<string>>;
 
 export function PlayVideo(arg1:string,arg2:string,arg3:string):Promise<model.VideoPreview>;
 
 export function PreviewURL(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function PrioritizeDownload(arg1:string):Promise<void>;
+
 export function ProviderLogin(arg1:string,arg2:Record<string, string>):Promise<model.Account>;
 
+export function RefreshAccount(arg1:string):Promise<model.Account>;
+
 export function RemoveAccount(arg1:string):Promise<void>;
+
+export function RemoveDownload(arg1:string):Promise<void>;
 
 export function RemoveFavorite(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -102,6 +114,8 @@ export function RenameFile(arg1:string,arg2:string,arg3:string,arg4:string):Prom
 export function RestoreFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
 export function ResumeDownload(arg1:string):Promise<void>;
+
+export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RunSync(arg1:string):Promise<void>;
 

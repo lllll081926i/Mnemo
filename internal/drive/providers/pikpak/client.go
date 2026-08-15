@@ -173,6 +173,13 @@ func parseAPIError(data []byte, status int) error {
 		Code             int    `json:"code"`
 	}
 	_ = json.Unmarshal(data, &e)
+	// 常见错误友好化（对齐旧版 parsePikPakError）
+	switch e.Error {
+	case "invalid_account_or_password":
+		return errors.New("PikPak 账号或密码错误")
+	case "captcha_invalid", "captcha_required":
+		return errors.New("PikPak 验证失败，请重试登录")
+	}
 	msg := e.ErrorDescription
 	if msg == "" {
 		msg = e.Message

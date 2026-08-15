@@ -46,6 +46,7 @@ func init() {
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "cookie", Type: "text", Label: "BDUSS / Cookie", Required: true, Placeholder: "粘贴 BDUSS 或完整 Cookie"},
 		}},
+		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },
 	})
 }
@@ -116,11 +117,26 @@ func (c *client) headers() map[string]string {
 
 // request performs an API call, auto-refreshing bdstoken on first need.
 func (c *client) request(ctx context.Context, method, rawURL string, query url.Values) (json.RawMessage, error) {
+	return c.do(ctx, method, rawURL, query, nil)
+}
+
+// requestForm posts a form-urlencoded body（上传 precreate/create 用，对齐旧版 form 选项）。
+func (c *client) requestForm(ctx context.Context, rawURL string, query url.Values, form url.Values) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodPost, rawURL, query, form)
+}
+
+func (c *client) do(ctx context.Context, method, rawURL string, query, form url.Values) (json.RawMessage, error) {
 	c.throttle()
 	if query != nil {
 		rawURL += "?" + query.Encode()
 	}
-	resp, err := c.http.Do(ctx, method, rawURL, c.headers(), nil)
+	headers := c.headers()
+	var formBody io.Reader
+	if form != nil {
+		headers["content-type"] = "application/x-www-form-urlencoded"
+		formBody = strings.NewReader(form.Encode())
+	}
+	resp, err := c.http.Do(ctx, method, rawURL, headers, formBody)
 	if err != nil {
 		return nil, err
 	}
