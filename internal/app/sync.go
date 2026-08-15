@@ -45,8 +45,10 @@ func (a *App) RunSync(id string) error {
 }
 
 // StartSyncScheduler launches the background scheduler for all enabled,
-// interval-based sync jobs. The returned stop channel closes the scheduler.
-func (a *App) StartSyncScheduler() chan struct{} {
+// interval-based sync jobs. The scheduler runs for the lifetime of the app
+// (stopped by OnShutdown); the method returns an empty string on success
+// so it is serializable through the Wails binding.
+func (a *App) StartSyncScheduler() string {
 	stop := make(chan struct{})
 	eng := sync.NewEngine(nil,
 		sync.WithSnapshotStore(a.store),
@@ -55,7 +57,9 @@ func (a *App) StartSyncScheduler() chan struct{} {
 		}),
 	)
 	eng.StartScheduler(stop, a.store.ListSyncConfigs)
-	return stop
+	// keep the stop channel for Shutdown; a.schedStop is closed on shutdown
+	a.schedStop = stop
+	return ""
 }
 
 var _ = store.Settings{}

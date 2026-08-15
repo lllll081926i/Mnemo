@@ -294,6 +294,10 @@ export function StopPlayer() {
   return window['go']['app']['App']['StopPlayer']();
 }
 
+export function StartSyncScheduler() {
+  return window['go']['app']['App']['StartSyncScheduler']();
+}
+
 export function TrashFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['TrashFiles'](arg1, arg2, arg3);
 }

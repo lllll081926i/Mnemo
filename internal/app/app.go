@@ -12,6 +12,7 @@ import (
 
 	"mnemo-go/internal/config"
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
 	_ "mnemo-go/internal/drive/providers" // register all plugins
 	"mnemo-go/internal/engine"
 	"mnemo-go/internal/model"
@@ -36,6 +37,7 @@ type App struct {
 	dataDir  string
 	player   *playback
 	playerMu sync.Mutex
+	schedStop chan struct{} // sync scheduler stop, closed on Shutdown
 }
 
 // NewApp constructs the app (no side effects; wiring happens in startup).
@@ -120,6 +122,11 @@ func (a *App) startup(ctx context.Context) {
 	if s, err := st.GetSettings(); err == nil && s.Proxy != "" {
 		netx.SetGlobalProxy(s.Proxy)
 	}
+	// wire the upload rate getter so ProgressReader can throttle direct uploads
+	driveutil.SetUploadRateGetter(netx.GlobalUploadRate)
+	if s, err := st.GetSettings(); err == nil {
+		netx.SetGlobalUploadRate(s.MaxUploadSpeed)
+	}
 
 	a.emit("app:ready", map[string]any{"port": a.preview.Port})
 }
@@ -147,6 +154,9 @@ func (a *App) Shutdown(ctx context.Context) {
 	}
 	if a.preview != nil {
 		_ = a.preview.Close()
+	}
+	if a.schedStop != nil {
+		close(a.schedStop)
 	}
 }
 
@@ -314,6 +324,8 @@ func (a *App) SaveSettings(s store.Settings) error {
 	}
 	// apply proxy globally (affects netx clients + download engine)
 	netx.SetGlobalProxy(s.Proxy)
+	// apply upload speed cap at runtime (direct uploads via ProgressReader)
+	netx.SetGlobalUploadRate(s.MaxUploadSpeed)
 	return nil
 }
 

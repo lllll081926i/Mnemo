@@ -41,6 +41,15 @@ func SetGlobalProxy(proxyURL string) { globalProxy = proxyURL }
 // GlobalProxy returns the currently configured global proxy URL.
 func GlobalProxy() string { return globalProxy }
 
+// globalUploadRate is the application-wide upload speed cap (bytes/s, 0=unlimited).
+var globalUploadRate int64
+
+// SetGlobalUploadRate sets the upload speed cap (bytes/s). 0 disables the cap.
+func SetGlobalUploadRate(bytesPerSec int64) { globalUploadRate = bytesPerSec }
+
+// GlobalUploadRate returns the current upload speed cap.
+func GlobalUploadRate() int64 { return globalUploadRate }
+
 // NewClient builds a client with sane defaults.
 func NewClient(timeout time.Duration) *Client {
 	if timeout <= 0 {

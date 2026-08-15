@@ -153,6 +153,8 @@ export function SetPlayerVolume(arg1:number):Promise<void>;
 
 export function StopPlayer():Promise<void>;
 
+export function StartSyncScheduler():Promise<string>;
+
 export function TrashFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
 export function UploadFiles(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<Array<model.UploadingUI>>;

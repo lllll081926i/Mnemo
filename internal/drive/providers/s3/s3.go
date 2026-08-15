@@ -521,10 +521,16 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	defer f.Close()
+	pr := driveutil.NewProgressReader(f, ui.Info.Size, func(read int64) {
+		ui.Upload.DownSize = read
+		if ui.Info.Size > 0 {
+			ui.Upload.DownProcess = int(read * 100 / ui.Info.Size)
+		}
+	})
 	_, err = cc.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(cc.bucket),
 		Key:           aws.String(key),
-		Body:          f,
+		Body:          pr,
 		ContentLength: aws.Int64(ui.Info.Size),
 	})
 	if err != nil {

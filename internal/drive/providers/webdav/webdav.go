@@ -271,8 +271,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	defer f.Close()
-	// TODO: report progress through ui.Upload when wired to the transfer queue.
-	return client.Put(ctx, target, f, ui.Info.Size)
+	// report read progress back to the upload UI
+	pr := driveutil.NewProgressReader(f, ui.Info.Size, func(read int64) {
+		ui.Upload.DownSize = read
+		if ui.Info.Size > 0 {
+			ui.Upload.DownProcess = int(read * 100 / ui.Info.Size)
+		}
+	})
+	return client.Put(ctx, target, pr, ui.Info.Size)
 }
 
 func authHeaders(c drive.Context) map[string]string {
