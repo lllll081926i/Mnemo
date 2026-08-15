@@ -152,6 +152,19 @@ func (a *App) ListShareHistory(userID string) []model.ShareHistoryEntry {
 	return list
 }
 
+// ImportShare parses a share link and returns the file listing + session
+// state for subsequent save. The session must be passed back to
+// SaveImportedShare to transfer selected files.
+func (a *App) ImportShare(userID, driveID, shareURL, password string) (*drive.ShareImportSession, error) {
+	return drive.ImportShare(userID, driveID, shareURL, password)
+}
+
+// SaveImportedShare transfers selected files from a parsed share session
+// into the account's folder toParentID.
+func (a *App) SaveImportedShare(userID, driveID string, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	return drive.SaveImportedShare(userID, driveID, session, fileIDs, toParentID)
+}
+
 // ---- local tags & favorites ----
 
 // ListLocalTags lists local tags for an account.

@@ -3,6 +3,9 @@ package pikpak
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -366,6 +369,159 @@ func mapFiles(items []File, driveID, parentID string) []model.File {
 }
 
 func httpMethodPost() string { return "POST" }
+
+// ---- Share Import (importShare capability) ----
+
+// shareInfoResp is the GET /drive/v1/share response.
+type shareInfoResp struct {
+	ShareStatus    string `json:"share_status"`
+	PassCodeToken  string `json:"pass_code_token"`
+	FileID         string `json:"file_id"`
+	ID             string `json:"id"`
+}
+
+// shareDetailResp is the GET /drive/v1/share/detail response.
+type shareDetailResp struct {
+	Files []File `json:"files"`
+	NextPageToken string `json:"next_page_token"`
+}
+
+// ImportShareSession implements drive.ShareImportDriver.
+func (d *Driver) ImportShareSession(ctx context.Context, c drive.Context, shareURL, password string) (*drive.ShareImportSession, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	shareID, passCode := parsePikPakShareURL(shareURL)
+	if password != "" {
+		passCode = password
+	}
+	if shareID == "" {
+		return nil, errors.New("pikpak: 无效的分享链接")
+	}
+	// Step 1: GET /drive/v1/share → pass_code_token
+	q := url.Values{}
+	q.Set("share_id", shareID)
+	if passCode != "" {
+		q.Set("pass_code", passCode)
+	}
+	var info shareInfoResp
+	if err := cl.get(ctx, "/drive/v1/share", q, &info); err != nil {
+		return nil, err
+	}
+	switch info.ShareStatus {
+	case "PASS_CODE_EMPTY":
+		return nil, errors.New("该分享需要访问密码")
+	case "PASS_CODE_ERROR":
+		return nil, errors.New("访问密码错误")
+	}
+	rootFileID := info.FileID
+	if rootFileID == "" {
+		rootFileID = info.ID
+	}
+	if rootFileID == "" {
+		rootFileID = "root"
+	}
+	// Step 2: GET /drive/v1/share/detail → list files
+	files, err := pikpakShareListAll(ctx, cl, shareID, info.PassCodeToken, rootFileID)
+	if err != nil {
+		return nil, err
+	}
+	return &drive.ShareImportSession{
+		Provider:      providerID,
+		ShareURL:      shareURL,
+		ShareID:       shareID,
+		Password:      passCode,
+		PassCodeToken: info.PassCodeToken,
+		RootFileID:    rootFileID,
+		Files:         files,
+	}, nil
+}
+
+func pikpakShareListAll(ctx context.Context, cl *client, shareID, passCodeToken, parentID string) ([]drive.ShareImportFile, error) {
+	var out []drive.ShareImportFile
+	marker := parentID
+	seen := map[string]bool{}
+	for {
+		q := url.Values{}
+		q.Set("share_id", shareID)
+		q.Set("parent_id", marker)
+		q.Set("pass_code_token", passCodeToken)
+		q.Set("limit", "100")
+		var resp shareDetailResp
+		if err := cl.get(ctx, "/drive/v1/share/detail", q, &resp); err != nil {
+			return nil, err
+		}
+		for i := range resp.Files {
+			f := resp.Files[i]
+			out = append(out, drive.ShareImportFile{
+				FileID: f.ID,
+				Name:   f.Name,
+				Size:   f.Size,
+				IsDir:  strings.Contains(f.Kind, "folder"),
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		if seen[resp.NextPageToken] {
+			break
+		}
+		seen[resp.NextPageToken] = true
+		marker = resp.NextPageToken
+	}
+	return out, nil
+}
+
+// SaveShare implements drive.ShareImportDriver.
+func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	parent := toParentID
+	if parent == "" || parent == "root" || parent == RootID || parent == "*" {
+		parent = ""
+	}
+	body := map[string]any{
+		"share_id":       session.ShareID,
+		"pass_code_token": session.PassCodeToken,
+		"file_ids":        fileIDs,
+		"parent_id":       parent,
+	}
+	if err := cl.jsonDo(ctx, http.MethodPost, "/drive/v1/share/restore", body, nil, nil); err != nil {
+		return nil, err
+	}
+	return fileIDs, nil
+}
+
+// parsePikPakShareURL extracts share_id from a PikPak share URL.
+func parsePikPakShareURL(raw string) (shareID, passCode string) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", ""
+	}
+	// https://mypikpak.com/drive/sharing/share/{shareID}?pass_code=xxx
+	// or https://mypikpak.com/s/{shareID}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, p := range parts {
+		if p == "share" && i+1 < len(parts) {
+			shareID = parts[i+1]
+			break
+		}
+	}
+	if shareID == "" && len(parts) > 0 {
+		last := parts[len(parts)-1]
+		if len(last) > 10 {
+			shareID = last
+		}
+	}
+	passCode = u.Query().Get("pass_code")
+	if passCode == "" {
+		passCode = u.Query().Get("passcode")
+	}
+	return shareID, passCode
+}
 // OfflineCreate submits a cloud offline task (magnet/link) to PikPak servers.
 func (d *Driver) OfflineCreate(ctx context.Context, c drive.Context, url, fileName, parentID string) (taskID, fileID string, err error) {
 	cl, err := clientOf(c)

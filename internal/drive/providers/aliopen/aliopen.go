@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -249,9 +250,19 @@ func (c *client) scopedDriveID(scope Scope) string {
 
 // apiPost calls the Aliyun API with auth and rate limiting.
 func (c *client) apiPost(ctx context.Context, path string, body any, out any) error {
-	resp, err := c.http.Do(ctx, http.MethodPost, apiHost+path,
-		map[string]string{"Authorization": "Bearer " + c.session.AccessToken, "Content-Type": "application/json"},
-		netx.JSONBody(body))
+	return c.apiPostWith(ctx, path, body, out, nil)
+}
+
+// apiPostWith is apiPost with extra headers (e.g. x-share-token).
+func (c *client) apiPostWith(ctx context.Context, path string, body any, out any, extraHeaders map[string]string) error {
+	hdrs := map[string]string{
+		"Authorization": "Bearer " + c.session.AccessToken,
+		"Content-Type": "application/json",
+	}
+	for k, v := range extraHeaders {
+		hdrs[k] = v
+	}
+	resp, err := c.http.Do(ctx, http.MethodPost, apiHost+path, hdrs, netx.JSONBody(body))
 	if err != nil {
 		return err
 	}
@@ -912,6 +923,160 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 		return "", err
 	}
 	return cl.ResolveHash(ctx, ref.Scope, ref.FID), nil
+}
+
+// ---- Share Import (importShare capability) ----
+
+// shareListResp is the aliopen listByShare response.
+type shareListResp struct {
+	Items      []aliFile `json:"items"`
+	NextMarker string   `json:"next_marker"`
+}
+
+// ImportShareSession implements drive.ShareImportDriver.
+func (d *Driver) ImportShareSession(ctx context.Context, c drive.Context, shareURL, password string) (*drive.ShareImportSession, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	shareID, _ := parseAliShareURL(shareURL)
+	if shareID == "" {
+		return nil, errors.New("aliopen: 无效的分享链接")
+	}
+	// Step 1: getShareToken
+	var tokenResp struct {
+		ShareToken string `json:"share_token"`
+	}
+	body := map[string]any{"share_id": shareID}
+	if password != "" {
+		body["share_pwd"] = password
+	}
+	if err := cl.apiPost(ctx, "/adrive/v1.0/openFile/getShareToken", body, &tokenResp); err != nil {
+		return nil, err
+	}
+	if tokenResp.ShareToken == "" {
+		return nil, errors.New("获取分享凭证失败（链接无效、已取消或提取码错误）")
+	}
+	// Step 2: listByShare
+	hdrs := map[string]string{"x-share-token": tokenResp.ShareToken}
+	files, err := aliShareListAll(ctx, cl, shareID, tokenResp.ShareToken, "root", hdrs)
+	if err != nil {
+		return nil, err
+	}
+	return &drive.ShareImportSession{
+		Provider:   providerID,
+		ShareURL:   shareURL,
+		ShareID:    shareID,
+		Password:   password,
+		ShareToken: tokenResp.ShareToken,
+		RootFileID: "root",
+		Files:      files,
+	}, nil
+}
+
+func aliShareListAll(ctx context.Context, cl *client, shareID, shareToken, parentFileID string, hdrs map[string]string) ([]drive.ShareImportFile, error) {
+	var out []drive.ShareImportFile
+	marker := ""
+	for {
+		body := map[string]any{
+			"share_id":       shareID,
+			"parent_file_id": parentFileID,
+			"limit":          100,
+			"order_by":       "name",
+			"order_direction": "ASC",
+		}
+		if marker != "" {
+			body["marker"] = marker
+		}
+		var resp shareListResp
+		if err := cl.apiPostWith(ctx, "/adrive/v1.0/openFile/listByShare", body, &resp, hdrs); err != nil {
+			return nil, err
+		}
+		for i := range resp.Items {
+			item := resp.Items[i]
+			out = append(out, drive.ShareImportFile{
+				FileID: item.FileID,
+				Name:   item.Name,
+				Size:   item.Size,
+				IsDir:  item.Type == "folder",
+			})
+		}
+		if resp.NextMarker == "" {
+			break
+		}
+		marker = resp.NextMarker
+	}
+	return out, nil
+}
+
+// SaveShare implements drive.ShareImportDriver.
+func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	// Determine target drive + parent
+	targetDrive := cl.session.ResourceDriveID
+	if targetDrive == "" {
+		targetDrive = cl.session.DriveID
+	}
+	if targetDrive == "" {
+		return nil, errors.New("aliopen: 缺少目标 drive_id")
+	}
+	parent := toParentID
+	if parent == "" || parent == "root" || parent == "/" || parent == RootID {
+		parent = "root"
+	}
+	ref := parseRef(parent)
+	parent = ref.FID
+	if parent == "" {
+		parent = "root"
+	}
+	// If the target scope's drive_id differs from targetDrive, use the target drive
+	if ref.Scope == ScopeResource && cl.session.ResourceDriveID != "" {
+		targetDrive = cl.session.ResourceDriveID
+	}
+	hdrs := map[string]string{"x-share-token": session.ShareToken}
+	var saved []string
+	for _, fileID := range fileIDs {
+		body := map[string]any{
+			"share_id":         session.ShareID,
+			"file_id":          fileID,
+			"to_drive_id":      targetDrive,
+			"to_parent_file_id": parent,
+			"auto_rename":      true,
+		}
+		if err := cl.apiPostWith(ctx, "/adrive/v1.0/openFile/copy", body, nil, hdrs); err != nil {
+			continue
+		}
+		saved = append(saved, fileID)
+	}
+	return saved, nil
+}
+
+// parseAliShareURL extracts share_id from an Aliyun share URL.
+func parseAliShareURL(raw string) (shareID string, pwd string) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", ""
+	}
+	// https://www.alipan.com/s/{shareID}
+	// https://www.aliyundrive.com/s/{shareID}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) >= 2 && parts[0] == "s" {
+		shareID = parts[1]
+	}
+	if shareID == "" && len(parts) > 0 {
+		last := parts[len(parts)-1]
+		if len(last) > 8 {
+			shareID = last
+		}
+	}
+	pwd = u.Query().Get("p")
+	if pwd == "" {
+		pwd = u.Query().Get("pwd")
+	}
+	return shareID, pwd
 }
 
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {

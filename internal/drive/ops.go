@@ -302,6 +302,37 @@ func QueueUploadHandler(userID, driveID string) (func(ctx context.Context, ui *m
 	}, nil
 }
 
+// ImportShare parses a share link and returns the file listing + session
+// state. The session must be passed back to SaveImportedShare to transfer
+// selected files. Returns ErrNotImplemented when the provider does not
+// support share import.
+func ImportShare(userID, driveID, shareURL, password string) (*ShareImportSession, error) {
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return nil, err
+	}
+	sd, ok := d.(ShareImportDriver)
+	if !ok {
+		return nil, ErrNotImplemented
+	}
+	return sd.ImportShareSession(context.Background(), c, shareURL, password)
+}
+
+// SaveImportedShare transfers selected files from a parsed share session
+// into the account's folder toParentID. Returns the provider-side ids of
+// the saved files.
+func SaveImportedShare(userID, driveID string, session *ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return nil, err
+	}
+	sd, ok := d.(ShareImportDriver)
+	if !ok {
+		return nil, ErrNotImplemented
+	}
+	return sd.SaveShare(context.Background(), c, session, fileIDs, toParentID)
+}
+
 // RootID returns the provider root id for an account.
 func RootID(userID, driveID string) (string, error) {
 	provider := ResolveProvider(userID, driveID, "")

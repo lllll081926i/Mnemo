@@ -87,6 +87,44 @@ type RapidUploadResult struct {
 	Message  string `json:"message,omitempty"`
 }
 
+// ShareImportFile is one entry in a parsed share listing.
+type ShareImportFile struct {
+	FileID string `json:"fileId"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	IsDir  bool   `json:"isDir"`
+}
+
+// ShareImportSession is the parsed state of a share link: the file listing
+// plus provider-specific session tokens needed for the subsequent save
+// (transfer) call. It is created by ImportShareSession and consumed by
+// SaveShare.
+type ShareImportSession struct {
+	Provider       string             `json:"provider"`
+	ShareURL       string             `json:"shareUrl"`
+	ShareID        string             `json:"shareId"`
+	Password       string             `json:"password,omitempty"`
+	PassCodeToken  string             `json:"passCodeToken,omitempty"`  // pikpak
+	ShareToken     string             `json:"shareToken,omitempty"`    // aliopen
+	ShareKey       string             `json:"shareKey,omitempty"`      // pan123
+	RootFileID     string             `json:"rootFileId,omitempty"`
+	Files          []ShareImportFile  `json:"files"`
+	Extra          map[string]string  `json:"extra,omitempty"`
+}
+
+// ShareImportDriver is the optional capability interface for importing
+// (parsing + saving) external share links. Providers implement this when
+// Capabilities.ImportShare is true; callers detect support via a type
+// assertion on the Driver instance.
+type ShareImportDriver interface {
+	// ImportShareSession parses a share link (with optional password) and
+	// returns the file listing plus session state needed for SaveShare.
+	ImportShareSession(ctx context.Context, c Context, shareURL, password string) (*ShareImportSession, error)
+	// SaveShare transfers the selected file ids from a previously parsed
+	// share session into the account's folder toParentID.
+	SaveShare(ctx context.Context, c Context, session *ShareImportSession, fileIDs []string, toParentID string) ([]string, error)
+}
+
 // UploadHandler carries a concrete file upload job into the provider.
 type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
 
