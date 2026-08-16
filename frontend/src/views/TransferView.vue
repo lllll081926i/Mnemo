@@ -4,7 +4,7 @@ import {
   ListDownloads, ListUploads,
   PauseDownload, ResumeDownload, CancelDownload, ClearDownloads,
   RemoveDownload, PrioritizeDownload, OpenFile,
-  CancelUpload, ClearUploads, DownloadURL,
+  CancelUpload, ClearUploads, DownloadURL, resumeUpload,
   ListOfflineTasks, OfflineDownload,
   EventsOn, RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
@@ -537,6 +537,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="downspeed">{{ t.Upload.IsDowning ? upSpeed(t) : '' }}</div>
               <div class="tactions">
+                <button v-if="t.Upload.IsFailed || t.Upload.IsStop" class="btn-circle" title="重试" @click="runAction(() => resumeUpload(t.UploadID), '已重新入队')"><UiIcon name="play" :size="14" /></button>
                 <button class="btn-circle" title="取消" style="color:var(--color-error)" @click="runAction(() => CancelUpload(t.UploadID))"><UiIcon name="x-circle" :size="14" /></button>
               </div>
             </div>

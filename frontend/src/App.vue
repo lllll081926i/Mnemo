@@ -110,7 +110,7 @@ function refresh() {
     } else if (accounts.value.length) {
       current.value = accounts.value[0]
     }
-  })
+  }).catch(() => {})
 }
 
 function select(acc) { current.value = acc }
@@ -173,7 +173,7 @@ function onQuickAction(action) {
 }
 
 onMounted(async () => {
-  listProviders().then((p) => { providers.value = p || [] })
+  listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
   refresh()
   try {
     const s = await GetSettings()
