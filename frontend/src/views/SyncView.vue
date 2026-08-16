@@ -7,6 +7,7 @@ import SegTabs from '../components/SegTabs.vue'
 import SelectDirModal from '../components/SelectDirModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 
 const props = defineProps({
   account: { type: Object, default: null },
@@ -14,6 +15,8 @@ const props = defineProps({
   providers: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['toast'])
+
+const confirmDialog = ref(null)
 
 const jobs = ref([])
 const progress = ref({}) // id -> { done, total }
@@ -147,13 +150,15 @@ async function run(job) {
   progress.value = p
 }
 
-async function remove(job) {
-  if (!confirm(`删除同步任务「${job.name}」？本地与网盘文件不受影响。`)) return
-  try {
-    await DeleteSyncConfig(job.id)
-    refresh()
-    emit('toast', '已删除同步任务', 'success')
-  } catch (e) { emit('toast', String(e), 'error') }
+function remove(job) {
+  confirmDialog.value = { message: `删除同步任务「${job.name}」？本地与网盘文件不受影响。`, onOk: async () => {
+    confirmDialog.value = null
+    try {
+      await DeleteSyncConfig(job.id)
+      refresh()
+      emit('toast', '已删除同步任务', 'success')
+    } catch (e) { emit('toast', String(e), 'error') }
+  }, danger: true, title: '删除同步任务' }
 }
 
 function pct(id) {
@@ -272,6 +277,9 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       :providers="providers"
       @close="showDirPick = false"
       @select="(d) => { form.remote_dir = d.id; form.remote_name = d.name; showDirPick = false }"
+      @toast="emit"
     />
+
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :danger="confirmDialog.danger" @ok="confirmDialog.onOk()" @cancel="confirmDialog = null" />
   </div>
 </template>

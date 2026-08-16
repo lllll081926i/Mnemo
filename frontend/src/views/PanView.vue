@@ -1244,6 +1244,7 @@ onBeforeUnmount(() => {
       :providers="providers"
       @close="modal = null"
       @select="onDirPicked"
+      @toast="emit"
     />
 
     <!-- 迁移目标目录（浏览目标账号） -->
@@ -1254,6 +1255,7 @@ onBeforeUnmount(() => {
       :providers="providers"
       @close="migrateDirPick = false"
       @select="(d) => { migrateDir = d.id; migrateDirName = d.name; migrateDirPick = false }"
+      @toast="emit"
     />
 
     <!-- 预览（支持画廊/翻页/缩放/文本编辑保存） -->

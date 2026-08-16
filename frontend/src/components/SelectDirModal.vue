@@ -1,16 +1,32 @@
 <script setup>
 // 选择网盘目录：在指定账号内浏览文件夹树并选中目标目录。
 import { ref, onMounted } from 'vue'
-import { listDir, providerMetaOf } from '../api'
+import { listDir, providerMetaOf, mkdir } from '../api'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
+
+const newFolderName = ref('')
+const creatingFolder = ref(false)
+async function createFolder() {
+  const name = newFolderName.value.trim()
+  if (!name) return
+  creatingFolder.value = true
+  try {
+    const parentId = crumbs.value[crumbs.value.length - 1].id
+    await mkdir(props.account.user_id, props.account.drive_id, parentId, name)
+    newFolderName.value = ''
+    await load(parentId)
+    emit('toast', '文件夹已创建', 'success')
+  } catch (e) { emit('toast', String(e), 'error') }
+  creatingFolder.value = false
+}
 
 const props = defineProps({
   title: { type: String, default: '选择目录' },
   account: { type: Object, required: true },
   providers: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['close', 'select'])
+const emit = defineEmits(['close', 'select', 'toast'])
 
 const rootKey = providerMetaOf(props.account, props.providers).rootKey || 'root'
 const crumbs = ref([{ id: rootKey, name: providerMetaOf(props.account, props.providers).rootTitle || '根目录' }])
@@ -81,8 +97,19 @@ onMounted(() => load(rootKey))
       </div>
     </div>
     <template #actions>
+      <div class="new-folder-row">
+        <input v-model="newFolderName" class="input" placeholder="新建文件夹..." @keydown.enter="createFolder" :disabled="creatingFolder" />
+        <button class="btn" :disabled="!newFolderName.trim() || creatingFolder" @click="createFolder"><UiIcon name="plus" :size="12" />新建</button>
+      </div>
+      <span style="flex:1"></span>
       <button class="btn" @click="emit('close')">取消</button>
       <button class="btn primary" @click="emit('select', { id: crumbs[crumbs.length - 1].id, name: crumbs[crumbs.length - 1].name })">选择当前目录</button>
     </template>
   </Modal>
 </template>
+
+<style scoped>
+.new-folder-row { display: flex; gap: 6px; align-items: center; }
+.new-folder-row .input { width: 160px; height: 28px; font-size: 12.5px; padding: 0 8px; }
+.new-folder-row .btn { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+</style>
