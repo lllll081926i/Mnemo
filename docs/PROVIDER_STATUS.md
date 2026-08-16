@@ -46,7 +46,7 @@
 | webdav | ➖ | ➖ | 账密 | ➖ | ➖ | ➖ | ➖ | ➖ |
 | s3 | ➖ | ➖ | AK/SK | ➖ | ➖ | ➖ | ➖ | ➖ |
 
-> ⚠️ onedrive/dropbox 的 `RefreshAccount` 完全缺失，token 过期后无法自动续期，登录后也不拉取账号信息与配额。这是两个 OAuth 盘的共性问题。
+> ✅ onedrive/dropbox 的 `RefreshAccount` 已实现：token 自动刷新 + 账号信息/配额拉取。
 
 ---
 
@@ -105,11 +105,11 @@
 | dropbox | ✅ | ✅(8MB session) | ✅(≤150MB) | ➖ | ➖ | ❌(固定add) | ✅ | queue |
 | yike | ✅ | ✅(4MB) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
 | guangya | ✅ | ✅(OSS multipart) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
-| webdav | ✅ | ➖ | ✅(PUT) | ➖ | ➖ | ✅ | ❌**缺** | direct |
-| s3 | ✅ | ✅(PUT) | ✅(PUT) | ➖ | ➖ | ✅ | ❌**缺** | direct |
+| webdav | ✅ | ➖ | ✅(PUT) | ➖ | ➖ | ✅ | ✅ | direct |
+| s3 | ✅ | ✅(PUT) | ✅(PUT) | ➖ | ➖ | ✅ | ✅ | direct |
 
 > ⚠️ 多个 queue 盘缺失断点续传持久化（aliopen/pan123/pan189/onedrive），进程重启后大文件无法恢复。
-> ⚠️ webdav/s3 两个 direct 盘完全缺失冲突策略，上传直接覆盖同名文件。
+> ✅ webdav/s3 的冲突策略与进度回调已实现（ConflictPolicy + ProgressReader）。
 
 ---
 
@@ -129,9 +129,9 @@
 | yike | ✅(建相册) | ✅(仅相册) | ❌(设计) | ❌(设计) | ➖ |
 | guangya | ✅ | ✅ | ✅ | ✅ | ➖ |
 | webdav | ✅ | ✅ | ✅ | ✅ | ➖ |
-| s3 | ✅ | ⚠️(不递归目录) | ⚠️(不递归) | ⚠️(不递归) | ➖ |
+| s3 | ✅ | ✅ | ✅ | ✅ | ➖ |
 
-> ⚠️ s3 的 Rename/Move/Copy/Delete 仅处理单对象，不递归目录子对象；旧版会先 `listAllS3Objects` 再批量操作。
+> ✅ s3 的 Rename/Move/Copy/Delete 均已实现递归处理（listAllUnder + 批量 DeleteObjects + copyRecursive）。
 
 ---
 
@@ -153,7 +153,7 @@
 | webdav | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
 | s3 | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
 
-> ⚠️ 能力声明与实现不符：pikpak/pan123 声明了 `trashPurge:true`/`trashClear:true` 但 Driver 无对应方法。
+> ✅ 能力声明已修正：pikpak/pan123 已将 trashPurge/trashClear 改为不声明。
 > ⚠️ pan189 的 `recycleBin:true` 但只支持删除到回收站 + 清空回收站，无法查看/恢复。
 
 ---
@@ -176,8 +176,8 @@
 | webdav | ➖ | ➖ | ➖ | ➖ | ➖ |
 | s3 | ➖ | ➖ | ➖ | ➖ | ➖ |
 
-> ⚠️ pikpak/aliopen/pan123 三个盘声明了 `importShare:true` 但完全未实现分享导入逻辑，能力声明与实现不符。
-> ⚠️ dropbox 密码分享的 `requested_visibility` 应为 `password` 而非 `public`（潜在 bug）。
+> ✅ pikpak/aliopen/pan123 三个盘均已实现分享导入（ImportShareSession + SaveShare）。
+> ✅ dropbox 密码分享的 `requested_visibility` 已修复为 `password`。
 
 ---
 
@@ -188,7 +188,7 @@
 | pikpak | ✅ | ✅ | ✅ | ✅(RefreshOffline) | ✅(DeleteOffline) |
 | 其余 12 盘 | ❌(设计) | ➖ | ➖ | ➖ | ➖ |
 
-> ⚠️ pikpak 的离线下载只实现了创建和列表，缺进度查询和任务删除，列表 `page_size=100` 可能漏查大量任务。
+> ✅ pikpak 的离线下载已实现进度查询和任务删除（OfflineFind + OfflineDelete），列表 `page_size=100` 可能漏查大量任务。
 
 ---
 
@@ -210,7 +210,7 @@
 | webdav | ➖ | ➖ | ➖ | ➖ |
 | s3 | ➖ | ➖ | ➖ | ➖ |
 
-> ⚠️ 多个盘实际计算了哈希但未在 Capabilities 声明，导致跨盘秒传路由无法识别：ilanzou(md5)、onedrive(sha1/quickXor)、dropbox(content_hash)、pikpak(GCID)。
+> ✅ ilanzou/onedrive/dropbox 已声明 SetHashes，跨盘秒传路由可正常识别。pikpak 通过 GCID 实现秒传但未声明 hash 类型。
 
 ---
 
@@ -247,7 +247,7 @@
 | 15 | 限速/重试缺失 | 多盘 | aliopen 无并发限速、dropbox 上传无 429 重试、pikpak 无速率限制处理 |
 | 16 | 版本历史缺失 | 2 盘 | onedrive/dropbox 旧版有 revisions，新版缺失 |
 | 17 | 缩略图缺失 | 1 盘 | dropbox 旧版有 `get_thumbnail_v2`，新版缺失 |
-| 18 | 上传进度回调缺失 | 2 盘 | webdav/s3 direct 上传无进度回调 |
+| 18 | 上传进度回调已实现 | 2 盘 | ✅ webdav/s3 已实现 ProgressReader + 令牌桶限速（`progress.go:22`） |
 | 19 | yike decryptYikeMd5 缺失 | 1 盘 | 旧版有 md5 解密，新版直接取字段，可能取到错误值 |
 
 ---

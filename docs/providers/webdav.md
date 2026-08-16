@@ -45,8 +45,8 @@ UploadMode: direct
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | direct PUT | ✅ | `webdav.go:196-208` client.Put HTTP PUT Content-Length | 无 |
-| **冲突策略** | ❌ | 无 resolveProviderPathConflictAction | 🔴 直接覆盖同名文件 |
-| **进度回调** | ❌ | TODO 未接线 | 🟡 旧版有 |
+| **冲突策略** | ✅ | `webdav.go:256` ResolveConflictPolicy refuse/rename/overwrite | 无 |
+| **进度回调** | ✅ | `webdav.go:275` NewProgressReader 实时 DownSize/DownProcess | 无 |
 | **递归目录上传** | ❌ | 仅单文件 | 🟡 旧版 uploadWebDavEntry 递归 |
 
 ---
@@ -71,9 +71,10 @@ UploadMode: direct
 
 ## 差距清单
 
-1. 🔴 **上传冲突策略完全缺失**：直接覆盖同名文件，无 refuse/overwrite/rename
-2. 🟡 **rootPath 前缀拼接缺失**
-3. 🟡 上传无进度回调、无递归目录上传
-4. 🟡 Move/Copy 无自嵌套防护
-5. 🟡 URL 路径段不编码
-6. 🟡 无递归列出方法（旧版 listWebDavRecursive 供同步引擎用）
+1. ✅ **上传冲突策略已实现**（`webdav.go:256` ResolveConflictPolicy refuse/rename/overwrite）
+2. ✅ **进度回调已实现**（`webdav.go:275` NewProgressReader + DownSize/DownProcess）
+3. 🟡 **rootPath 前缀拼接缺失**
+4. 🟡 上传无递归目录上传
+5. 🟡 Move/Copy 无自嵌套防护
+6. 🟡 URL 路径段不编码
+7. 🟡 无递归列出方法（旧版 listWebDavRecursive 供同步引擎用）

@@ -28,7 +28,7 @@
 | app（绑定层） | internal/app/ | ✅ | ~95% | 无 TransferBall 独立绑定、无 powerSaveBlocker、无 autoUpdate 逻辑 |
 | drive（契约层） | internal/drive/ | ✅ | ~95% | filecache 无 TTL 过期、无搜索索引 |
 | drive/providers | internal/drive/providers/ | ⚠️ | ~85% | 详见 [PROVIDER_STATUS.md](PROVIDER_STATUS.md) |
-| netx | internal/netx/ | ⚠️ | ~70% | 无统一 Set-Cookie 中继、无上传限速令牌桶、无下载代理穿透(CONNECT/DNS缓存/flow-enc) |
+| netx | internal/netx/ | ✅ | ~80% | 无统一 Set-Cookie 中继、无下载代理穿透(CONNECT/DNS缓存/flow-enc)；上传限速令牌桶已实现（SetGlobalUploadRate + ProgressReader throttle） |
 | store | internal/store/ | ✅ | ~90% | 无加密存储（已废弃加密，符合需求） |
 | transfer | internal/transfer/ | ✅ | ~90% | 原生 Go 分段下载器替代 aria2c；上传历史管理 API 未明确 |
 | player | internal/player/ | ⚠️ | ~60% | 无 texture bridge/overlay，mpv 独立窗口非应用内嵌入 |
@@ -81,7 +81,7 @@
 | pan189 | ~95% | 无（最忠实移植） |
 | pan139 | ~95% | (已修复) |
 | lanzou | ~98% | 无（源码级移植） |
-| ilanzou | ~95% | 秒传 caps 声明缺失 |
+| ilanzou | ~95% | (已修复) |
 | onedrive | ~85% | (已修复) |
 | dropbox | ~85% | (已修复) |
 | yike | ~90% | decryptYikeMd5 缺失 |
@@ -174,9 +174,10 @@
 28. ⚠️ 前端缺失功能：瀑布流/字幕选择/播放列表/调试设置页
 29. ⚠️ 前端测试框架
 30. ⚠️ 测试覆盖率：9/13 provider 无单测
-20. 上传进度回调：webdav/s3
-21. yike decryptYikeMd5
-22. player 字幕选择 + 播放列表 + 多音轨
-23. 前端测试框架搭建
-24. 瀑布流/相册模式
-25. 调试/日志设置页
+31. ✅ **上传进度回调：webdav/s3**：已实现 ProgressReader + 令牌桶限速（`progress.go:22`）
+32. ✅ **MaxUploadSpeed 限速**：已实现 SetGlobalUploadRate + ProgressReader throttle（`app.go:128,328`）
+33. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5
+34. ⚠️ player 字幕选择 + 播放列表 + 多音轨
+35. ⚠️ 前端测试框架搭建
+36. ⚠️ 瀑布流/相册模式
+37. ⚠️ 调试/日志设置页
