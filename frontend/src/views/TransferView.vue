@@ -5,12 +5,13 @@ import {
   PauseDownload, ResumeDownload, CancelDownload, ClearDownloads,
   RemoveDownload, PrioritizeDownload, OpenFile,
   CancelUpload, ClearUploads, DownloadURL, resumeUpload,
-  ListOfflineTasks, OfflineDownload,
+  ListOfflineTasks, OfflineDownload, DeleteOfflineTask,
   EventsOn, RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
 } from '../api'
 import Modal from '../components/Modal.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
@@ -99,8 +100,8 @@ const byKw = (list, nameFn) => {
 const byAccount = (list) => filterUser.value ? list.filter((t) => t.user_id === filterUser.value) : list
 const activeDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
 const doneDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
-const activeUploads = computed(() => uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted))
-const doneUploads = computed(() => uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted))
+const activeUploads = computed(() => byKw(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted), upName))
+const doneUploads = computed(() => byKw(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted), upName))
 
 // 全选（正在下载列表）
 const allActiveSelected = computed(() => activeDownloads.value.length > 0 && activeDownloads.value.every((t) => selectedIds.value.has(t.id)))
@@ -147,7 +148,7 @@ const pauseTask = (t) => runAction(() => PauseDownload(t.id))
 const resumeTask = (t) => runAction(() => ResumeDownload(t.id))
 const cancelTask = (t) => runAction(() => CancelDownload(t.id))
 // 优先下载：暂停其他任务，把带宽让给该任务
-const prioritizeTask = (t) => runAction(() => PrioritizeDownload(t.id), '已优先下载该任务（其他已暂停）')
+const prioritizeTask = (t) => askConfirm('优先下载将暂停其他所有下载任务，是否继续？', () => runAction(() => PrioritizeDownload(t.id), '已优先下载该任务（其他已暂停）'), { okText: '优先下载', title: '优先下载' })
 // 删除记录：硬删除，立即从列表移除
 const removeTask = (t) => runAction(() => RemoveDownload(t.id), '已删除')
 // 用系统默认程序打开文件
@@ -177,6 +178,12 @@ async function copyLink(t) {
 
 // ---------- 右键菜单 ----------
 const ctx = ref({ show: false, x: 0, y: 0, task: null })
+// confirm dialog
+const confirmDialog = ref(null)
+function askConfirm(message, onOk, opts) {
+  confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', danger: opts?.danger || false, title: opts?.title || '确认操作' }
+}
+function closeConfirm() { confirmDialog.value = null }
 function onCtx(e, t) {
   ctx.value = { show: true, x: e.clientX, y: e.clientY, task: t }
 }
@@ -305,6 +312,13 @@ async function submitOffline() {
 }
 const offProgress = (t) => Math.max(0, Math.min(100, Math.round(t.progress || 0)))
 
+async function delOfflineTask(t) {
+  askConfirm(`删除离线任务「${t.file_name || t.url || t.task_id}」？`, async () => {
+    try { await DeleteOfflineTask(offlineUser.value, offlineDriveId.value, t.task_id, true); emit('toast', '已删除', 'success'); refreshOffline() }
+    catch (e) { emit('toast', String(e), 'error') }
+  }, { danger: true, title: '删除离线任务' })
+}
+
 // ---------- 迁移 ----------
 const migrateJobs = ref([])
 function onMigrate(job) {
@@ -382,7 +396,7 @@ onBeforeUnmount(() => {
             <div class="toppanbtn" v-if="!selectedIds.size">
               <button class="tbtn" @click="startAll"><UiIcon name="play" :size="14" />开始全部</button>
               <button class="tbtn" @click="pauseAll"><UiIcon name="pause" :size="14" />暂停全部</button>
-              <button class="tbtn danger" @click="runAction(() => ClearDownloads(), '已清除')"><UiIcon name="trash" :size="14" />清除已完成</button>
+              <button class="tbtn danger" @click="askConfirm('清除所有已完成的下载记录？', () => runAction(() => ClearDownloads(), '已清除'), { danger: true, title: '清除已完成' })"><UiIcon name="trash" :size="14" />清除已完成</button>
             </div>
             <div class="toppanbtn" v-else>
               <button class="tbtn" @click="batch((t) => ResumeDownload(t.id))"><UiIcon name="play" :size="14" />继续</button>
@@ -403,7 +417,7 @@ onBeforeUnmount(() => {
           <div class="toppanarea">
             <div class="sel-all-wrap">
               <button class="btn-circle" :class="{ on: allActiveSelected }" title="全选" @click="toggleSelectAllActive">
-                <UiIcon :name="allActiveSelected ? 'x-circle' : 'check'" :size="15" />
+                <UiIcon :name="allActiveSelected ? 'minus' : 'check'" :size="15" />
               </button>
             </div>
             <div class="selectInfo">{{ selectedIds.size ? `已选 ${selectedIds.size} 项 / ` : '' }}共 {{ activeDownloads.length }} 项</div>
@@ -471,7 +485,7 @@ onBeforeUnmount(() => {
         <template v-else-if="menu === 'downloaded'">
           <div class="toppanbtns">
             <div class="toppanbtn">
-              <button class="tbtn danger" @click="runAction(() => ClearDownloads(), '已清除')"><UiIcon name="trash" :size="14" />清除全部</button>
+              <button class="tbtn danger" @click="askConfirm('清除所有已下载记录？', () => runAction(() => ClearDownloads(), '已清除'), { danger: true, title: '清除全部' })"><UiIcon name="trash" :size="14" />清除全部</button>
             </div>
             <div class="toolbar-spacer"></div>
             <div class="toppanbtn">
@@ -517,6 +531,16 @@ onBeforeUnmount(() => {
 
         <!-- 正在上传 -->
         <template v-else-if="menu === 'uploading'">
+          <div class="toppanbtns">
+            <div class="toolbar-spacer"></div>
+            <div class="toppanbtn">
+              <span class="search-quick-wrap">
+                <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
+                <input class="search-quick" v-model="taskFilterRaw" placeholder="快速筛选" />
+                <button v-if="taskFilterRaw" class="sq-clear" title="清空筛选" @click="taskFilterRaw = ''"><UiIcon name="close" :size="11" /></button>
+              </span>
+            </div>
+          </div>
           <div class="file-list">
             <div v-for="t in activeUploads" :key="t.UploadID" class="taskrow">
               <div class="rangselect"></div>
@@ -552,7 +576,7 @@ onBeforeUnmount(() => {
         <template v-else-if="menu === 'uploaded'">
           <div class="toppanbtns">
             <div class="toppanbtn">
-              <button class="tbtn danger" @click="runAction(() => ClearUploads(), '已清除')"><UiIcon name="trash" :size="14" />清除全部</button>
+              <button class="tbtn danger" @click="askConfirm('清除所有已上传记录？', () => runAction(() => ClearUploads(), '已清除'), { danger: true, title: '清除全部' })"><UiIcon name="trash" :size="14" />清除全部</button>
             </div>
             <div class="toolbar-spacer"></div>
             <div class="toppanbtn"><span class="panel-desc">{{ doneUploads.length }} 条记录</span></div>
@@ -651,7 +675,9 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="downspeed">{{ (j.processed || 0) + '/' + (j.total || 0) }}</div>
-              <div class="tactions"></div>
+              <div class="tactions">
+                <button v-if="j.status === 'completed' || j.status === 'failed' || j.status === 'canceled'" class="btn-circle" title="清除记录" style="color:var(--color-error)" @click="migrateJobs = migrateJobs.filter((x) => x.id !== j.id)"><UiIcon name="trash" :size="14" /></button>
+              </div>
             </div>
             <div v-if="!migrateJobs.length" class="workspace-empty-state">
               <UiIcon name="migrate" :size="36" style="opacity:.4" />
@@ -723,6 +749,8 @@ onBeforeUnmount(() => {
         <button class="btn primary" @click="detailTask = null">关闭</button>
       </template>
     </Modal>
+
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
   </div>
 </template>
 
