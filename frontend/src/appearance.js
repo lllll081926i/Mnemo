@@ -27,10 +27,15 @@ const PREFS_DEFAULTS = {
   viewMode: 'list',       // 网盘默认视图 list | grid
   hoverPreview: true,     // 目录树悬停预览
   transferBall: true,     // 传输悬浮球
+  downloadSound: true,    // 传输完成提示音
   defaultVolume: 50,      // 播放器默认音量 0-100
   defaultSpeed: 1,        // 播放器默认倍速
   seekStep: 10,           // 快进/快退步长（秒）
   autoCloseOnEnd: false,  // 播放到结尾自动收起控制条
+  hardwareDecode: 'auto', // 硬件解码: auto | d3d11va | no
+  autoLoadSubtitles: true,// 自动加载同名字幕
+  defaultSortKey: 'name', // 默认排序键: name | time | size
+  defaultSortAsc: true,   // 默认排序方向: true=升序 | false=降序
   sideWidth: 220,         // 网盘侧边栏宽度（px）
 }
 

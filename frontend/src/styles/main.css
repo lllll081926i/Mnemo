@@ -87,17 +87,17 @@ body {
 /* 页面切换过渡（方向感知） */
 .page-host { flex: 1; display: flex; min-width: 0; position: relative; }
 .page-host > * { flex: 1; display: flex; min-width: 0; }
-/* 页面切换：左右滑动（旧版 app-tab-forward/back 复刻） */
+/* 页面切换：左右滑动 */
 .page-slide-left-enter-active, .page-slide-right-enter-active {
-  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 220ms var(--motion-ease), transform 260ms var(--motion-ease);
 }
 .page-slide-left-leave-active, .page-slide-right-leave-active {
-  transition: opacity 180ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1);
+  transition: opacity 160ms ease, transform 180ms ease;
 }
-.page-slide-left-enter-from { opacity: 0; transform: translateX(12px); }
-.page-slide-left-leave-to { opacity: 0; transform: translateX(-8px); }
-.page-slide-right-enter-from { opacity: 0; transform: translateX(-12px); }
-.page-slide-right-leave-to { opacity: 0; transform: translateX(8px); }
+.page-slide-left-enter-from { opacity: 0; transform: translateX(10px); }
+.page-slide-left-leave-to { opacity: 0; transform: translateX(-6px); }
+.page-slide-right-enter-from { opacity: 0; transform: translateX(-10px); }
+.page-slide-right-leave-to { opacity: 0; transform: translateX(6px); }
 
 /* ============ 账号栏（60px 窄栏，悬停展开 220px，复刻旧版） ============ */
 .account-rail {
@@ -503,6 +503,20 @@ body {
   animation: pulse-anchor 1.4s ease infinite;
   border-color: var(--color-primary);
 }
+
+/* 8. 传输任务列表行平滑进入/退出/重排 (task-list) */
+.task-list-enter-active {
+  transition: opacity 220ms var(--motion-ease), transform 240ms var(--motion-spring);
+}
+.task-list-leave-active {
+  transition: opacity 180ms var(--motion-ease), transform 200ms var(--motion-ease), max-height 220ms var(--motion-ease), margin 220ms var(--motion-ease);
+  overflow: hidden;
+}
+.task-list-move {
+  transition: transform 260ms var(--motion-ease);
+}
+.task-list-enter-from { opacity: 0; transform: translateY(-8px); }
+.task-list-leave-to { opacity: 0; transform: translateX(24px); max-height: 0 !important; margin-top: 0 !important; margin-bottom: 0 !important; }
 
 /* 登录弹窗：左 provider 列表 + 右表单 */
 .login-modal { width: 680px; height: 480px; }
