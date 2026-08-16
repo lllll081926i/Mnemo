@@ -152,7 +152,7 @@ async function loadPreview() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
       const buf = await resp.arrayBuffer()
       if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，不支持在线预览')
-      text.value = new TextDecoder('utf-8').decode(buf)
+      text.value = decodeText(buf)
       editContent.value = text.value
     }
   } catch (e) {
@@ -181,6 +181,32 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   if (activeDragCleanup) activeDragCleanup()
 })
+
+// decodeText tries UTF-8 first; if it produces many replacement characters
+// (U+FFFD), it falls back to GBK which is common for legacy Chinese .srt/.ass
+// subtitle files. This avoids garbled text without requiring a full charset
+// detection library.
+function decodeText(buf) {
+  const u8 = new Uint8Array(buf)
+  // quick BOM check
+  if (u8.length >= 3 && u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) {
+    return new TextDecoder('utf-8').decode(u8.subarray(3))
+  }
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(u8)
+  // count replacement chars; if more than 1% are U+FFFD, assume non-UTF-8
+  let replacements = 0
+  for (let i = 0; i < utf8.length; i++) {
+    if (utf8.charCodeAt(i) === 0xfffd) replacements++
+  }
+  if (replacements > utf8.length / 100) {
+    try {
+      return new TextDecoder('gbk').decode(u8)
+    } catch {
+      // GBK not supported (rare), fall through to UTF-8 result
+    }
+  }
+  return utf8
+}
 </script>
 
 <template>
