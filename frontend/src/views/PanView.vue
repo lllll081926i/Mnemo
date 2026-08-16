@@ -768,7 +768,15 @@ function onKey(e) {
     run(() => trash(uid.value, did.value, selIds()), '已移入回收站'); e.preventDefault()
   }
   else if (e.ctrlKey && e.shiftKey && e.code === 'KeyS' && selected.value.length && caps.value.createShare) { openShareModal(); e.preventDefault() }
-  else if (e.code === 'Enter' && selected.value.length === 1) { onRowOpen(selected.value[0]); e.preventDefault() }
+  else if (e.code === 'Enter') {
+    if (selected.value.length === 1) {
+      onRowOpen(selected.value[0])
+      e.preventDefault()
+    } else if (focusId.value) {
+      const f = listShown.value.find((x) => x.file_id === focusId.value)
+      if (f) { onRowOpen(f); e.preventDefault() }
+    }
+  }
   else if (e.code === 'ArrowDown' || e.code === 'ArrowUp') {
     const list = listShown.value
     if (!list.length) return
@@ -782,10 +790,6 @@ function onKey(e) {
   else if (e.code === 'Space' && focusId.value) {
     const f = listShown.value.find((x) => x.file_id === focusId.value)
     if (f) { toggleSel(f); e.preventDefault() }
-  }
-  else if (e.code === 'Enter' && focusId.value) {
-    const f = listShown.value.find((x) => x.file_id === focusId.value)
-    if (f) { openFile(f); e.preventDefault() }
   }
 }
 

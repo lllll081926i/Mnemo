@@ -172,63 +172,67 @@ async function close() {
 
 <template>
   <teleport to="body">
-    <div class="player-panel">
-      <div class="pp-head">
-        <UiIcon name="video" :size="15" />
-        <span class="pp-title" :title="file.name">{{ file.name }}</span>
-        <button class="icon-btn pp-x" title="停止并关闭" @click="close"><UiIcon name="close" :size="14" /></button>
+    <transition name="popover-zoom">
+      <div class="player-panel">
+        <div class="pp-head">
+          <UiIcon name="video" :size="15" style="color:var(--color-primary)" />
+          <span class="pp-title" :title="file.name">{{ file.name }}</span>
+          <button class="icon-btn pp-x" title="停止并关闭 (Esc)" @click="close"><UiIcon name="close" :size="14" /></button>
+        </div>
+
+        <div v-if="loading" class="pp-state"><span class="spin"></span>正在获取播放地址…</div>
+        <div v-else-if="error" class="pp-state"><div class="form-error" style="margin:0;flex:1"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div></div>
+
+        <template v-else>
+          <div class="pp-bar" :class="{ disabled: duration <= 0 }" title="点击/拖拽跳转" @click="onBarClick" @mousedown="onBarDown">
+            <div class="pp-bar-fill" :style="{ width: pct + '%' }"></div>
+          </div>
+          <div class="pp-controls">
+            <button class="btn-circle" :title="`快退 ${seekStep} 秒`" @click="seekBy(-seekStep)"><UiIcon name="back" :size="14" /></button>
+            <button class="btn-circle pp-play" :title="playing ? '暂停' : '播放'" @click="togglePlay">
+              <UiIcon :name="playing ? 'pause' : 'play'" :size="16" />
+            </button>
+            <button class="btn-circle" :title="`快进 ${seekStep} 秒`" @click="seekBy(seekStep)"><UiIcon name="forward" :size="14" /></button>
+            <span class="pp-time">{{ posText }}<template v-if="duration > 0"> / {{ durText }}</template></span>
+            <div class="pp-spacer"></div>
+            <UiSelect v-model="speed" :options="speedOptions" @update:modelValue="onSpeedChange" class="pp-speed-sel" />
+            <span class="pp-vol">
+              <UiIcon name="volume" :size="14" />
+              <input type="range" min="0" max="100" :value="volume" @input="onVolume" />
+            </span>
+          </div>
+        </template>
       </div>
-
-      <div v-if="loading" class="pp-state"><span class="spin"></span>正在获取播放地址…</div>
-      <div v-else-if="error" class="pp-state"><div class="form-error" style="margin:0;flex:1"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div></div>
-
-      <template v-else>
-        <div class="pp-bar" :class="{ disabled: duration <= 0 }" title="点击/拖拽跳转" @click="onBarClick" @mousedown="onBarDown">
-          <div class="pp-bar-fill" :style="{ width: pct + '%' }"></div>
-        </div>
-        <div class="pp-controls">
-          <button class="btn-circle" :title="`快退 ${seekStep} 秒`" @click="seekBy(-seekStep)"><UiIcon name="back" :size="14" /></button>
-          <button class="btn-circle pp-play" :title="playing ? '暂停' : '播放'" @click="togglePlay">
-            <UiIcon :name="playing ? 'pause' : 'play'" :size="16" />
-          </button>
-          <button class="btn-circle" :title="`快进 ${seekStep} 秒`" @click="seekBy(seekStep)"><UiIcon name="forward" :size="14" /></button>
-          <span class="pp-time">{{ posText }}<template v-if="duration > 0"> / {{ durText }}</template></span>
-          <div class="pp-spacer"></div>
-          <UiSelect v-model="speed" :options="speedOptions" @update:modelValue="onSpeedChange" class="pp-speed-sel" />
-          <span class="pp-vol">
-            <UiIcon name="volume" :size="14" />
-            <input type="range" min="0" max="100" :value="volume" @input="onVolume" />
-          </span>
-        </div>
-      </template>
-    </div>
+    </transition>
   </teleport>
 </template>
 
-<style>
+<style scoped>
 .player-panel {
   position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
-  width: min(520px, calc(100vw - 48px)); z-index: 260;
+  width: min(540px, calc(100vw - 48px)); z-index: 260;
   background: var(--bg-elevated); border: 1px solid var(--border-light);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-modal);
-  padding: 10px 14px 12px; animation: toast-in .2s cubic-bezier(.22, 1, .36, 1);
+  padding: 12px 16px 14px;
 }
 .pp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text-secondary); }
 .pp-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-x { width: 26px; height: 26px; flex-shrink: 0; }
 .pp-state { padding: 14px 0 10px; display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-secondary); }
 .pp-bar {
-  height: 5px; border-radius: 3px; background: var(--bg-subtle);
-  cursor: pointer; overflow: hidden; margin-bottom: 10px;
+  height: 6px; border-radius: 3px; background: var(--bg-subtle);
+  cursor: pointer; overflow: hidden; margin-bottom: 12px;
+  transition: height var(--motion-fast) var(--motion-ease);
 }
+.pp-bar:hover { height: 8px; }
 .pp-bar.disabled { cursor: default; opacity: .5; }
-.pp-bar-fill { height: 100%; background: var(--color-primary); border-radius: 3px; transition: width .5s linear; }
-.pp-bar:hover .pp-bar-fill { box-shadow: 0 0 6px color-mix(in srgb, var(--color-primary) 60%, transparent); }
+.pp-bar-fill { height: 100%; background: var(--color-primary); border-radius: 3px; transition: width .4s linear; }
+.pp-bar:hover .pp-bar-fill { box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 60%, transparent); }
 .pp-controls { display: flex; align-items: center; gap: 8px; }
-.pp-play { width: 32px; height: 32px; color: var(--color-primary); border-color: color-mix(in srgb, var(--color-primary) 40%, transparent); }
+.pp-play { width: 34px; height: 34px; color: var(--color-primary); background: var(--listselectbg); }
+.pp-play:hover { background: color-mix(in srgb, var(--color-primary) 20%, transparent); }
 .pp-time { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-left: 4px; }
 .pp-spacer { flex: 1; }
-.pp-speed { min-width: 42px; justify-content: center; font-variant-numeric: tabular-nums; }
 .pp-vol { display: inline-flex; align-items: center; gap: 6px; color: var(--text-tertiary); }
 .pp-vol input[type="range"] {
   -webkit-appearance: none; appearance: none; width: 80px; height: 4px;

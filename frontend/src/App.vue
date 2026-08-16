@@ -295,18 +295,20 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </div>
     </transition-group>
 
-    <div
-      v-if="ball"
-      class="transfer-ball"
-      :class="{ dragging: isBallDragging }"
-      :style="ballPos ? { left: ballPos.x + 'px', top: ballPos.y + 'px', right: 'auto', bottom: 'auto' } : {}"
-      title="传输中，点击打开传输页 (Alt+2)，可拖动"
-      @pointerdown="onBallPointerDown"
-    >
-      <span class="pulse"></span>
-      <span v-if="ball.down">↓ {{ formatSpeed(ball.down) }}</span>
-      <span v-if="ball.up">↑ {{ formatSpeed(ball.up) }}</span>
-    </div>
+    <transition name="popover-zoom">
+      <div
+        v-if="ball"
+        class="transfer-ball"
+        :class="{ dragging: isBallDragging }"
+        :style="ballPos ? { left: ballPos.x + 'px', top: ballPos.y + 'px', right: 'auto', bottom: 'auto' } : {}"
+        title="传输中，点击打开传输页 (Alt+2)，可拖动"
+        @pointerdown="onBallPointerDown"
+      >
+        <span class="pulse"></span>
+        <span v-if="ball.down">↓ {{ formatSpeed(ball.down) }}</span>
+        <span v-if="ball.up">↑ {{ formatSpeed(ball.up) }}</span>
+      </div>
+    </transition>
 
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
   </div>

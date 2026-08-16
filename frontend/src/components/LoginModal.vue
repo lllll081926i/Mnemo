@@ -189,7 +189,7 @@ async function submit() {
                   <button
                     v-if="providerId === 'guangya' && f.key === 'sms_code'"
                     class="btn sm" style="margin-top:8px" :disabled="smsBusy" type="button" @click="sendSms"
-                  >{{ smsBusy ? '发送中…' : (smsCountdown.value > 0 ? smsCountdown.value + 's 后重发' : '获取验证码') }}</button>
+                  >{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + 's 后重发' : '获取验证码') }}</button>
                 </div>
                 <div v-if="!fields.length" class="hint" style="color:var(--text-tertiary);font-size: 13px">该网盘无需填写表单，直接点击登录。</div>
               </template>

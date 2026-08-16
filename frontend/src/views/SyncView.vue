@@ -277,9 +277,16 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       :providers="providers"
       @close="showDirPick = false"
       @select="(d) => { form.remote_dir = d.id; form.remote_name = d.name; showDirPick = false }"
-      @toast="emit"
+      @toast="(msg, type) => emit('toast', msg, type)"
     />
 
-    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :danger="confirmDialog.danger" @ok="confirmDialog.onOk()" @cancel="confirmDialog = null" />
+    <ConfirmModal
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :danger="confirmDialog.danger"
+      @ok="confirmDialog.onOk(); confirmDialog = null"
+      @cancel="confirmDialog = null"
+    />
   </div>
 </template>

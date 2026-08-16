@@ -201,6 +201,9 @@ body {
 .btn.primary { background: var(--color-primary-strong); border-color: var(--color-primary-strong); color: var(--text-inverse); box-shadow: 0 1px 2px color-mix(in srgb, var(--color-primary) 30%, transparent); }
 .btn.primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
 .btn.primary:active { background: var(--color-primary-active); transform: none; }
+.btn.primary.danger { background: var(--color-error); border-color: var(--color-error); color: var(--text-inverse); box-shadow: 0 1px 2px color-mix(in srgb, var(--color-error) 30%, transparent); }
+.btn.primary.danger:hover { background: color-mix(in srgb, var(--color-error) 88%, black); border-color: color-mix(in srgb, var(--color-error) 88%, black); }
+.btn.primary.danger:active { background: color-mix(in srgb, var(--color-error) 75%, black); transform: none; }
 .btn.danger { color: var(--color-error); }
 .btn.danger:hover { border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, transparent); }
 .btn.sm { padding: 4px 10px; font-size: 13px; }
