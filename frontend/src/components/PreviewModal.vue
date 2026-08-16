@@ -1,11 +1,12 @@
 <script setup>
 // 高级预览弹窗：
 // 1. 图片画廊（缩放/拖拽平移/90度旋转/翻页/胶卷条）
-// 2. 文本与代码（行号/编辑/一键保存回传网盘）
+// 2. 文本与代码专业预览/编辑器（行号与内容滚动同步/智能语言识别/搜索高亮/换行切换/字号缩放/一键复制/Markdown精美排版/Ctrl+S云端回传/状态栏）
 // 3. 音频播放与 PDF 嵌入
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { PreviewURL, openKindOf, formatBytes, saveCloudText } from '../api'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { PreviewURL, openKindOf, formatBytes, saveCloudText, copyText } from '../api'
 import Modal from './Modal.vue'
+import ConfirmModal from './ConfirmModal.vue'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -21,7 +22,6 @@ const kind = computed(() => openKindOf(activeFile.value))
 const url = ref('')
 const text = ref('')
 const editContent = ref('')
-const isEditing = ref(false)
 const saving = ref(false)
 const loading = ref(true)
 const error = ref('')
@@ -100,14 +100,162 @@ function selectImage(img) {
   activeFile.value = img
 }
 
-// ---------- 代码/文本行号 ----------
-const textLines = computed(() => {
-  const raw = isEditing.value ? editContent.value : text.value
-  return raw.split('\n')
+// ---------- 文本与代码专业预览/编辑状态 ----------
+const isMarkdownFile = computed(() => {
+  const name = (activeFile.value.name || '').toLowerCase()
+  return name.endsWith('.md') || name.endsWith('.markdown')
 })
 
-const isModified = computed(() => isEditing.value && editContent.value !== text.value)
+// 文本模式：'preview' (代码/文本预览) | 'markdown' (文档渲染) | 'edit' (在线编辑)
+const textMode = ref('preview')
+const fontSize = ref(13)
+const wordWrap = ref(false)
+const showLineNumbers = ref(true)
+const encoding = ref('UTF-8')
+const copiedFull = ref(false)
+const showSearch = ref(false)
+const searchKw = ref('')
+const searchInputEl = ref(null)
 
+// 光标位置
+const cursorPos = ref({ line: 1, col: 1 })
+const gutterEl = ref(null)
+const viewEl = ref(null)
+const editorEl = ref(null)
+const confirmLeaveDialog = ref(false)
+
+const currentText = computed(() => (textMode.value === 'edit' ? editContent.value : text.value))
+const textLines = computed(() => currentText.value.split('\n'))
+const isModified = computed(() => textMode.value === 'edit' && editContent.value !== text.value)
+
+// 语言标签识别
+const langMeta = computed(() => {
+  const name = (activeFile.value.name || '').toLowerCase()
+  const ext = name.includes('.') ? name.split('.').pop() : ''
+  const map = {
+    js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
+    ts: 'TypeScript', tsx: 'TypeScript React', jsx: 'React JSX',
+    vue: 'Vue Component',
+    json: 'JSON', json5: 'JSON5', jsonc: 'JSON with Comments',
+    html: 'HTML', htm: 'HTML',
+    css: 'CSS', scss: 'SCSS', sass: 'SASS', less: 'LESS',
+    go: 'Go',
+    py: 'Python', pyw: 'Python',
+    rs: 'Rust',
+    java: 'Java', kt: 'Kotlin',
+    c: 'C', cpp: 'C++', cc: 'C++', h: 'C/C++ Header', hpp: 'C++ Header',
+    cs: 'C#',
+    php: 'PHP',
+    rb: 'Ruby',
+    sh: 'Shell Script', bash: 'Bash Script', zsh: 'Zsh Script', ps1: 'PowerShell', bat: 'Batch', cmd: 'Batch',
+    sql: 'SQL Database',
+    yaml: 'YAML', yml: 'YAML',
+    xml: 'XML', svg: 'SVG Image/XML',
+    toml: 'TOML', ini: 'INI Config', conf: 'Config', env: 'Environment',
+    md: 'Markdown', markdown: 'Markdown',
+    txt: 'Plain Text', log: 'Log File',
+  }
+  return map[ext] || (ext ? ext.toUpperCase() : 'Plain Text')
+})
+
+// 滚动同步（行号与内容区 100% 像素级对齐）
+function onContentScroll(e) {
+  if (gutterEl.value) {
+    gutterEl.value.scrollTop = e.target.scrollTop
+  }
+}
+
+// 统计字符数/字数
+const charCount = computed(() => currentText.value.length)
+const lineEnding = computed(() => (currentText.value.includes('\r\n') ? 'CRLF' : 'LF'))
+
+// 搜索匹配拆分
+function searchParts(line) {
+  const kw = searchKw.value.trim()
+  if (!kw) return null
+  const str = String(line || '')
+  const i = str.toLowerCase().indexOf(kw.toLowerCase())
+  if (i < 0) return null
+  return [
+    { text: str.slice(0, i), hit: false },
+    { text: str.slice(i, i + kw.length), hit: true },
+    { text: str.slice(i + kw.length), hit: false },
+  ]
+}
+
+const matchCount = computed(() => {
+  const kw = searchKw.value.trim()
+  if (!kw) return 0
+  let count = 0
+  const kwLower = kw.toLowerCase()
+  for (const line of textLines.value) {
+    let pos = 0
+    const lower = line.toLowerCase()
+    while ((pos = lower.indexOf(kwLower, pos)) !== -1) {
+      count++
+      pos += kwLower.length
+    }
+  }
+  return count
+})
+
+function toggleSearch() {
+  showSearch.value = !showSearch.value
+  if (showSearch.value) {
+    nextTick(() => searchInputEl.value?.focus())
+  } else {
+    searchKw.value = ''
+  }
+}
+
+// 复制全部文本
+async function copyAllText() {
+  const ok = await copyText(currentText.value)
+  if (ok) {
+    copiedFull.value = true
+    emit('toast', '已复制全部文本内容', 'success')
+    setTimeout(() => { copiedFull.value = false }, 1800)
+  } else {
+    emit('toast', '复制失败', 'error')
+  }
+}
+
+// 编辑器光标与按键事件
+function updateCursorPos(e) {
+  const el = e.target
+  if (!el || typeof el.selectionStart !== 'number') return
+  const val = el.value.slice(0, el.selectionStart)
+  const lines = val.split('\n')
+  cursorPos.value = {
+    line: lines.length,
+    col: lines[lines.length - 1].length + 1,
+  }
+}
+
+function onEditorKeyDown(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    const el = e.target
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    const val = editContent.value
+    editContent.value = val.substring(0, start) + '  ' + val.substring(end)
+    nextTick(() => {
+      el.selectionStart = el.selectionEnd = start + 2
+      updateCursorPos(e)
+    })
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.code === 'KeyS')) {
+    e.preventDefault()
+    doSaveText()
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
+    e.preventDefault()
+    toggleSearch()
+  } else {
+    nextTick(() => updateCursorPos(e))
+  }
+}
+
+// 保存修改回传云端
 async function doSaveText() {
   if (saving.value || !isModified.value) return
   saving.value = true
@@ -121,8 +269,7 @@ async function doSaveText() {
       editContent.value
     )
     text.value = editContent.value
-    isEditing.value = false
-    emit('toast', '已保存修改并上传到网盘', 'success')
+    emit('toast', '已保存修改并上传覆盖到网盘', 'success')
     emit('saved')
   } catch (e) {
     emit('toast', '保存失败: ' + String(e), 'error')
@@ -130,6 +277,81 @@ async function doSaveText() {
     saving.value = false
   }
 }
+
+// 关闭前未保存检查
+function handleCloseRequest() {
+  if (isModified.value) {
+    confirmLeaveDialog.value = true
+  } else {
+    emit('close')
+  }
+}
+
+// ---------- 轻量安全 Markdown 解析器 ----------
+function renderMarkdown(src) {
+  if (!src) return ''
+  // 基础 XSS 转义
+  let md = src
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // 代码块 (```lang ... ```)
+  const codeBlocks = []
+  md = md.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length
+    codeBlocks.push(
+      `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || 'code'}</span></div><pre><code>${code.trim()}</code></pre></div>`
+    )
+    return `<!--CODEBLOCK_${idx}-->`
+  })
+
+  // 行内代码 (`code`)
+  md = md.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+
+  // 标题 (# H1 - ###### H6)
+  md = md.replace(/^###### (.*$)/gim, '<h6 class="md-h6">$1</h6>')
+  md = md.replace(/^##### (.*$)/gim, '<h5 class="md-h5">$1</h5>')
+  md = md.replace(/^#### (.*$)/gim, '<h4 class="md-h4">$1</h4>')
+  md = md.replace(/^### (.*$)/gim, '<h3 class="md-h3">$1</h3>')
+  md = md.replace(/^## (.*$)/gim, '<h2 class="md-h2">$1</h2>')
+  md = md.replace(/^# (.*$)/gim, '<h1 class="md-h1">$1</h1>')
+
+  // 分割线
+  md = md.replace(/^---$/gim, '<hr class="md-hr" />')
+
+  // 引用 (> quote)
+  md = md.replace(/^\> (.*$)/gim, '<blockquote class="md-quote">$1</blockquote>')
+
+  // 粗体 / 斜体 / 删除线
+  md = md.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+  md = md.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  md = md.replace(/\*(.*?)\*/g, '<em>$1</em>')
+  md = md.replace(/~~(.*?)~~/g, '<del>$1</del>')
+
+  // 任务列表 (- [ ] / - [x])
+  md = md.replace(/^- \[x\] (.*$)/gim, '<li class="md-task-item"><span class="md-task-box checked">✓</span> <span>$1</span></li>')
+  md = md.replace(/^- \[ \] (.*$)/gim, '<li class="md-task-item"><span class="md-task-box"></span> <span>$1</span></li>')
+
+  // 无序列表
+  md = md.replace(/^[-\*] (.*$)/gim, '<li class="md-list-item">$1</li>')
+
+  // 链接
+  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>')
+
+  // 段落换行
+  md = md.replace(/\n\n/g, '<div class="md-gap"></div>')
+  md = md.replace(/\n/g, '<br />')
+
+  // 还原代码块
+  codeBlocks.forEach((block, idx) => {
+    md = md.replace(`<!--CODEBLOCK_${idx}-->`, block)
+  })
+
+  return md
+}
+
+const renderedMarkdown = computed(() => renderMarkdown(text.value))
 
 // ---------- 加载核心逻辑 ----------
 let loadSeq = 0
@@ -152,8 +374,11 @@ async function loadPreview() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
       const buf = await resp.arrayBuffer()
       if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，不支持在线预览，请下载后查看')
-      text.value = decodeText(buf)
+      const decoded = decodeText(buf)
+      text.value = decoded.text
+      encoding.value = decoded.encoding
       editContent.value = text.value
+      textMode.value = isMarkdownFile.value ? 'markdown' : 'preview'
     }
   } catch (e) {
     if (seq !== loadSeq) return
@@ -166,10 +391,15 @@ async function loadPreview() {
 watch(() => activeFile.value.file_id, loadPreview)
 
 function onKey(e) {
-  if (isEditing.value) return
+  if (textMode.value === 'edit') return
   if (kind.value === 'image') {
     if (e.key === 'ArrowLeft') switchImage(-1)
     else if (e.key === 'ArrowRight') switchImage(1)
+  } else if (kind.value === 'text') {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
+      e.preventDefault()
+      toggleSearch()
+    }
   }
 }
 
@@ -182,30 +412,25 @@ onBeforeUnmount(() => {
   if (activeDragCleanup) activeDragCleanup()
 })
 
-// decodeText tries UTF-8 first; if it produces many replacement characters
-// (U+FFFD), it falls back to GBK which is common for legacy Chinese .srt/.ass
-// subtitle files. This avoids garbled text without requiring a full charset
-// detection library.
+// 文本编码探测 (UTF-8 优先，超标 U+FFFD 回退 GBK，BOM 识别)
 function decodeText(buf) {
   const u8 = new Uint8Array(buf)
-  // quick BOM check
   if (u8.length >= 3 && u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) {
-    return new TextDecoder('utf-8').decode(u8.subarray(3))
+    return { text: new TextDecoder('utf-8').decode(u8.subarray(3)), encoding: 'UTF-8 (BOM)' }
   }
   const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(u8)
-  // count replacement chars; if more than 1% are U+FFFD, assume non-UTF-8
   let replacements = 0
   for (let i = 0; i < utf8.length; i++) {
     if (utf8.charCodeAt(i) === 0xfffd) replacements++
   }
   if (replacements > utf8.length / 100) {
     try {
-      return new TextDecoder('gbk').decode(u8)
+      return { text: new TextDecoder('gbk').decode(u8), encoding: 'GBK' }
     } catch {
-      // GBK not supported (rare), fall through to UTF-8 result
+      // 回退
     }
   }
-  return utf8
+  return { text: utf8, encoding: 'UTF-8' }
 }
 </script>
 
@@ -213,12 +438,13 @@ function decodeText(buf) {
   <Modal
     :title="activeFile.name"
     width=""
-    @close="emit('close')"
+    @close="handleCloseRequest"
     body-class="preview-body"
     class="preview-modal-host"
   >
-    <!-- 顶部悬浮工具条（图片/文本专属工具） -->
+    <!-- 顶部悬浮工具条 -->
     <div class="pv-toolbar">
+      <!-- 1. 图片画廊工具 -->
       <template v-if="kind === 'image'">
         <button class="tbtn xs" :disabled="imageList.length <= 1" title="上一张 (←)" @click="switchImage(-1)">
           <UiIcon name="back" :size="12" />上一张
@@ -235,17 +461,100 @@ function decodeText(buf) {
         <button class="tbtn xs" title="复原" @click="resetImageTransform">重置</button>
       </template>
 
+      <!-- 2. 文本与代码专业工具 -->
       <template v-else-if="kind === 'text'">
-        <button class="tbtn xs" :class="{ active: isEditing }" @click="isEditing = !isEditing">
-          <UiIcon :name="isEditing ? 'play' : 'pencil'" :size="12" />
-          <span>{{ isEditing ? '切换为预览' : '编辑内容' }}</span>
+        <!-- 模式切换分段按钮 -->
+        <div class="pv-mode-seg">
+          <button
+            v-if="isMarkdownFile"
+            class="pv-seg-btn"
+            :class="{ active: textMode === 'markdown' }"
+            @click="textMode = 'markdown'"
+          >
+            <UiIcon name="info" :size="12" /> Markdown 视图
+          </button>
+          <button
+            class="pv-seg-btn"
+            :class="{ active: textMode === 'preview' }"
+            @click="textMode = 'preview'"
+          >
+            <UiIcon name="play" :size="12" /> 代码预览
+          </button>
+          <button
+            class="pv-seg-btn"
+            :class="{ active: textMode === 'edit' }"
+            @click="textMode = 'edit'"
+          >
+            <UiIcon name="pencil" :size="12" /> 在线编辑
+          </button>
+        </div>
+
+        <span class="pv-sep"></span>
+
+        <!-- 语言/格式徽标 -->
+        <span class="pv-lang-badge">{{ langMeta }}</span>
+
+        <!-- 复制全文 -->
+        <button class="tbtn xs" :title="'复制全部文本内容'" @click="copyAllText">
+          <UiIcon v-if="copiedFull" name="check" :size="12" class="icon-check-pop" />
+          <UiIcon v-else name="copy" :size="12" />
+          <span>{{ copiedFull ? '已复制' : '复制全文' }}</span>
         </button>
-        <button v-if="isEditing" class="btn primary sm" :disabled="!isModified || saving" @click="doSaveText">
-          <span v-if="saving" class="spin spin-on-primary"></span>
-          <span>{{ saving ? '保存中…' : '保存回传网盘' }}</span>
+
+        <!-- 自动换行 -->
+        <button
+          v-if="textMode !== 'markdown'"
+          class="tbtn xs"
+          :class="{ active: wordWrap }"
+          :title="wordWrap ? '当前：自动换行' : '当前：单行不换行'"
+          @click="wordWrap = !wordWrap"
+        >
+          <UiIcon name="list" :size="12" />
+          <span>换行: {{ wordWrap ? '开' : '关' }}</span>
         </button>
-        <span class="pv-counter">{{ textLines.length }} 行 · {{ formatBytes(activeFile.size) }}</span>
+
+        <!-- 字号调节 -->
+        <div v-if="textMode !== 'markdown'" class="pv-font-size-group">
+          <button class="tbtn xs icon" title="减小字号" :disabled="fontSize <= 11" @click="fontSize = Math.max(11, fontSize - 1)">A-</button>
+          <span class="pv-fs-val">{{ fontSize }}px</span>
+          <button class="tbtn xs icon" title="加大字号" :disabled="fontSize >= 18" @click="fontSize = Math.min(18, fontSize + 1)">A+</button>
+        </div>
+
+        <!-- 查找搜索按钮 -->
+        <button
+          v-if="textMode !== 'markdown'"
+          class="tbtn xs"
+          :class="{ active: showSearch }"
+          title="文本查找 (Ctrl+F)"
+          @click="toggleSearch"
+        >
+          <UiIcon name="search" :size="12" /> 查找
+        </button>
+
+        <!-- 保存按钮 (编辑模式下) -->
+        <div v-if="textMode === 'edit'" style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <span v-if="isModified" class="pv-modified-hint"><span class="pulse-dot"></span>已修改</span>
+          <button class="btn primary sm" :disabled="!isModified || saving" title="保存修改并上传 (Ctrl+S)" @click="doSaveText">
+            <span v-if="saving" class="spin spin-on-primary"></span>
+            <UiIcon v-else name="check" :size="13" />
+            <span>{{ saving ? '保存上传中…' : '保存修改 (Ctrl+S)' }}</span>
+          </button>
+        </div>
       </template>
+    </div>
+
+    <!-- 文本查找浮层 -->
+    <div v-if="kind === 'text' && showSearch && textMode !== 'markdown'" class="pv-search-bar">
+      <UiIcon name="search" :size="14" style="color:var(--color-primary)" />
+      <input
+        ref="searchInputEl"
+        v-model="searchKw"
+        class="pv-search-input"
+        placeholder="在文本中查找… (Esc 关闭)"
+        @keydown.esc="toggleSearch"
+      />
+      <span class="pv-search-count">{{ matchCount ? `${matchCount} 个匹配` : (searchKw ? '无匹配' : '') }}</span>
+      <button class="btn-circle sm" title="关闭查找" @click="toggleSearch"><UiIcon name="close" :size="12" /></button>
     </div>
 
     <!-- 主展示区 -->
@@ -304,28 +613,99 @@ function decodeText(buf) {
         <audio :src="url" controls autoplay class="pv-audio-player"></audio>
       </div>
 
-      <!-- 4. 文本/代码 -->
-      <div v-else class="pv-code-box">
-        <div class="pv-gutter">
-          <span v-for="n in textLines.length" :key="n">{{ n }}</span>
+      <!-- 4. 文本/代码/Markdown 专业展示区 -->
+      <div v-else class="pv-text-container">
+        <!-- Markdown 渲染视图 -->
+        <div
+          v-if="textMode === 'markdown'"
+          class="pv-markdown-view"
+          v-html="renderedMarkdown"
+        ></div>
+
+        <!-- 代码预览与编辑器双轨容器 -->
+        <div v-else class="pv-code-box">
+          <!-- 智能同步行号槽 -->
+          <div v-if="showLineNumbers" ref="gutterEl" class="pv-gutter" :style="{ fontSize: fontSize + 'px' }">
+            <div v-for="n in textLines.length" :key="n" class="pv-gutter-line">{{ n }}</div>
+          </div>
+
+          <!-- 在线编辑 textarea -->
+          <textarea
+            v-if="textMode === 'edit'"
+            ref="editorEl"
+            v-model="editContent"
+            class="pv-editor-textarea"
+            :class="{ wrap: wordWrap }"
+            :style="{ fontSize: fontSize + 'px' }"
+            spellcheck="false"
+            @scroll="onContentScroll"
+            @click="updateCursorPos"
+            @keyup="updateCursorPos"
+            @keydown="onEditorKeyDown"
+          ></textarea>
+
+          <!-- 查看模式 pre 渲染行 -->
+          <div
+            v-else
+            ref="viewEl"
+            class="pv-code-view"
+            :class="{ wrap: wordWrap }"
+            :style="{ fontSize: fontSize + 'px' }"
+            @scroll="onContentScroll"
+          >
+            <div
+              v-for="(line, idx) in textLines"
+              :key="idx"
+              class="pv-code-line"
+            >
+              <template v-if="searchKw && searchParts(line)">
+                <template v-for="(part, pIdx) in searchParts(line)" :key="pIdx">
+                  <mark v-if="part.hit" class="pv-search-hit">{{ part.text }}</mark>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </template>
+              <template v-else>{{ line || ' ' }}</template>
+            </div>
+          </div>
         </div>
-        <textarea
-          v-if="isEditing"
-          class="pv-editor-textarea"
-          v-model="editContent"
-          spellcheck="false"
-        ></textarea>
-        <pre v-else class="pv-code-view">{{ text }}</pre>
+
+        <!-- 文本视图底部状态栏 (类似 VS Code / Sublime 的专业质感) -->
+        <footer class="pv-statusbar">
+          <div class="pv-sb-section">
+            <span class="pv-sb-item"><UiIcon name="list" :size="12" />{{ textLines.length }} 行</span>
+            <span class="pv-sb-item">{{ charCount }} 字符</span>
+            <span class="pv-sb-item">{{ formatBytes(activeFile.size) }}</span>
+            <span v-if="textMode === 'edit'" class="pv-sb-item pv-sb-pos">Ln {{ cursorPos.line }}, Col {{ cursorPos.col }}</span>
+          </div>
+          <div class="pv-sb-spacer"></div>
+          <div class="pv-sb-section">
+            <span class="pv-sb-item">{{ encoding }}</span>
+            <span class="pv-sb-item">{{ lineEnding }}</span>
+            <span class="pv-sb-item">Spaces: 2</span>
+            <span class="pv-sb-item pv-sb-lang">{{ langMeta }}</span>
+          </div>
+        </footer>
       </div>
     </template>
+
+    <!-- 未保存修改确认弹窗 -->
+    <ConfirmModal
+      v-if="confirmLeaveDialog"
+      title="存在未保存的修改"
+      message="文本内容已发生变更，未保存离开将丢失修改。确定要关闭吗？"
+      ok-text="放弃修改并关闭"
+      :danger="true"
+      @ok="confirmLeaveDialog = false; emit('close')"
+      @cancel="confirmLeaveDialog = false"
+    />
   </Modal>
 </template>
 
 <style scoped>
 :deep(.modal) {
-  width: 900px;
+  width: 960px;
   max-width: 95vw;
-  height: 84vh;
+  height: 86vh;
   display: flex;
   flex-direction: column;
 }
@@ -344,15 +724,277 @@ function decodeText(buf) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 6px 14px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .pv-counter { font-size: 12.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 .pv-sep { width: 1px; height: 16px; background: var(--border-light); margin: 0 4px; }
 .pv-zoom-text { font-size: 12px; color: var(--text-secondary); min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
 .pv-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+/* 模式分段选择器 */
+.pv-mode-seg {
+  display: inline-flex;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.pv-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+.pv-seg-btn:hover { color: var(--text-primary); }
+.pv-seg-btn.active {
+  background: var(--bg-surface);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.pv-lang-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.pv-font-size-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+.pv-fs-val { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-secondary); padding: 0 2px; }
+
+.pv-modified-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--color-warning);
+  font-weight: 500;
+}
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  animation: pulse 1.4s ease infinite;
+}
+
+/* 文本查找栏 */
+.pv-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-light);
+  animation: modal-fade-enter 160ms var(--motion-ease);
+}
+.pv-search-input {
+  flex: 1;
+  max-width: 320px;
+  height: 26px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: 12.5px;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  outline: none;
+}
+.pv-search-input:focus { border-color: var(--border-focus); box-shadow: var(--ring-focus); }
+.pv-search-count { font-size: 12px; color: var(--text-tertiary); }
+.pv-search-hit {
+  background: color-mix(in srgb, var(--color-warning) 50%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* 文本与代码主区容器 */
+.pv-text-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+}
+
+.pv-code-box {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--bg-surface);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Consolas, monospace;
+  line-height: 22px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 行号栏 */
+.pv-gutter {
+  width: 52px;
+  flex-shrink: 0;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border-light);
+  padding: 10px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-right: 10px;
+  color: var(--text-tertiary);
+  user-select: none;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+.pv-gutter-line {
+  height: 22px;
+  line-height: 22px;
+}
+
+/* 查看与编辑内容区 */
+.pv-code-view, .pv-editor-textarea {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 10px 16px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  line-height: 22px;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  user-select: text;
+  white-space: pre;
+  tab-size: 2;
+}
+.pv-code-view.wrap, .pv-editor-textarea.wrap {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.pv-code-line {
+  height: 22px;
+  line-height: 22px;
+}
+.pv-code-view.wrap .pv-code-line {
+  height: auto;
+  min-height: 22px;
+}
+
+/* Markdown 文档渲染视图 */
+.pv-markdown-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 36px 48px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 14.5px;
+  line-height: 1.75;
+  user-select: text;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+:deep(.md-h1) { font-size: 24px; font-weight: 750; margin: 16px 0 12px; border-bottom: 1px solid var(--border-light); padding-bottom: 8px; color: var(--text-primary); }
+:deep(.md-h2) { font-size: 20px; font-weight: 700; margin: 18px 0 10px; border-bottom: 1px solid var(--border-lighter); padding-bottom: 6px; color: var(--text-primary); }
+:deep(.md-h3) { font-size: 17px; font-weight: 650; margin: 14px 0 8px; color: var(--text-primary); }
+:deep(.md-h4) { font-size: 15px; font-weight: 650; margin: 12px 0 6px; color: var(--text-primary); }
+:deep(.md-h5), :deep(.md-h6) { font-size: 14px; font-weight: 600; margin: 10px 0 4px; color: var(--text-secondary); }
+:deep(.md-inline-code) {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  background: var(--bg-subtle);
+  color: var(--color-primary);
+  border: 1px solid var(--border-lighter);
+}
+:deep(.md-code-block) {
+  margin: 12px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+  background: var(--bg-base);
+}
+:deep(.md-code-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-lighter);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+:deep(.md-code-block pre) {
+  padding: 12px 14px;
+  margin: 0;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+:deep(.md-quote) {
+  border-left: 3px solid var(--color-primary);
+  margin: 10px 0;
+  padding: 4px 14px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+:deep(.md-link) { color: var(--color-primary); text-decoration: none; font-weight: 500; }
+:deep(.md-link:hover) { text-decoration: underline; }
+:deep(.md-hr) { border: none; border-top: 1px solid var(--border-light); margin: 20px 0; }
+:deep(.md-list-item) { margin-left: 20px; list-style: disc; margin-bottom: 4px; }
+:deep(.md-task-item) { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+:deep(.md-task-box) { width: 15px; height: 15px; border: 1.5px solid var(--control-border); border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+:deep(.md-task-box.checked) { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+:deep(.md-gap) { height: 10px; }
+
+/* 底部状态栏 (Status bar) */
+.pv-statusbar {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 12px;
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border-light);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.pv-sb-section { display: flex; align-items: center; gap: 12px; }
+.pv-sb-item { display: inline-flex; align-items: center; gap: 4px; }
+.pv-sb-pos { color: var(--text-secondary); font-weight: 500; }
+.pv-sb-spacer { flex: 1; }
+.pv-sb-lang { color: var(--color-primary); font-weight: 600; }
 
 /* 图片画廊 */
 .pv-image-viewport {
@@ -423,48 +1065,4 @@ function decodeText(buf) {
 .pv-audio-disc { width: 96px; height: 96px; border-radius: 50%; background: var(--bg-subtle); border: 2px solid var(--border-light); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
 .pv-audio-name { font-size: 15px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 480px; }
 .pv-audio-player { width: min(440px, 90%); }
-
-/* 代码/文本编辑 */
-.pv-code-box {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  background: var(--bg-surface);
-  font-family: 'Cascadia Code', Consolas, Monaco, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  overflow: hidden;
-}
-.pv-gutter {
-  width: 46px;
-  background: var(--bg-subtle);
-  border-right: 1px solid var(--border-light);
-  padding: 12px 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  padding-right: 8px;
-  color: var(--text-tertiary);
-  user-select: none;
-  overflow: hidden;
-}
-.pv-code-view, .pv-editor-textarea {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  padding: 12px 16px;
-  margin: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  outline: none;
-  resize: none;
-  overflow: auto;
-  user-select: text;
-  white-space: pre;
-  tab-size: 2;
-}
 </style>
