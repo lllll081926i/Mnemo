@@ -34,7 +34,7 @@ function position() {
   const below = window.innerHeight - r.bottom - 8
   const up = below < 120 && r.top > below
   dropStyle.value = {
-    left: Math.min(r.left, window.innerWidth - w - 8) + 'px',
+    left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px',
     width: w + 'px',
     ...(up
       ? { bottom: window.innerHeight - r.top + 4 + 'px', top: 'auto' }

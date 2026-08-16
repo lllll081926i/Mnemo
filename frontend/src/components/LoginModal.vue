@@ -42,7 +42,10 @@ watch(providerId, (v) => {
 
 function onKey(e) { if (e.key === 'Escape') emit('close') }
 onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  if (smsTimer) clearInterval(smsTimer)
+})
 
 // 逐网盘附加帮助（后端 Login.fields 之外的引导）
 const PROVIDER_HELP = {

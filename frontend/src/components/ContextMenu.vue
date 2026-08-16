@@ -14,8 +14,8 @@ const pos = computed(() => {
   const w = 200
   const h = props.items.length * 34 + 12
   return {
-    left: Math.min(props.x, window.innerWidth - w - 8) + 'px',
-    top: Math.min(props.y, window.innerHeight - h - 8) + 'px',
+    left: Math.max(8, Math.min(props.x, window.innerWidth - w - 8)) + 'px',
+    top: Math.max(8, Math.min(props.y, window.innerHeight - h - 8)) + 'px',
   }
 })
 

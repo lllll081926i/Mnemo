@@ -183,7 +183,12 @@ export function iconOf(file) {
   return 'file'
 }
 
-const PREVIEW_TEXT_EXTS = new Set(['txt', 'md', 'json', 'js', 'ts', 'vue', 'go', 'py', 'java', 'c', 'cpp', 'h', 'css', 'html', 'xml', 'yaml', 'yml', 'ini', 'log', 'sh', 'bat', 'srt', 'vtt', 'ass', 'ssa'])
+const PREVIEW_TEXT_EXTS = new Set([
+  'txt', 'md', 'markdown', 'json', 'json5', 'jsonc', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue',
+  'go', 'py', 'pyw', 'rs', 'java', 'kt', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'cs', 'php', 'rb', 'lua', 'swift',
+  'css', 'scss', 'sass', 'less', 'html', 'htm', 'xml', 'svg', 'yaml', 'yml', 'toml', 'ini', 'conf', 'env', 'properties',
+  'log', 'sh', 'bash', 'zsh', 'bat', 'cmd', 'ps1', 'sql', 'diff', 'patch', 'srt', 'vtt', 'ass', 'ssa', 'gitignore', 'dockerfile'
+])
 
 /** 文件打开方式判定：video/audio → 播放，image/text/pdf → 预览，其余 → 下载。 */
 export function openKindOf(file) {
