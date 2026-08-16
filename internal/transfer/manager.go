@@ -70,7 +70,11 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 }
 
 // SetEventSink wires the event callback (used by the app layer).
-func (m *Manager) SetEventSink(fn OnTaskEvent) { m.onEvent = fn }
+func (m *Manager) SetEventSink(fn OnTaskEvent) {
+	m.mu.Lock()
+	m.onEvent = fn
+	m.mu.Unlock()
+}
 
 // SetDir updates the download directory at runtime. Subsequent downloads use
 // the new directory; existing tasks keep their already-assigned LocalPath.

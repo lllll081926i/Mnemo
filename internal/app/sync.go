@@ -1,8 +1,6 @@
 package app
 
 import (
-	"context"
-
 	"mnemo-go/internal/sync"
 	"mnemo-go/internal/store"
 )
@@ -41,7 +39,7 @@ func (a *App) RunSync(id string) error {
 			a.emit("sync:log", map[string]any{"id": jobID, "event": event, "detail": detail})
 		}),
 	)
-	return eng.Run(context.Background(), cfg)
+	return eng.Run(a.ctx, cfg)
 }
 
 // StartSyncScheduler launches the background scheduler for all enabled,

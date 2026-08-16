@@ -422,7 +422,8 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	eng := migrate.NewEngine(a.store, func(j *migrate.Job) {
 		a.emit("migrate:progress", j)
 	})
-	go eng.Run(context.Background(), job)
+	// derive from the app context so migrations are canceled on shutdown
+	go func() { _ = eng.Run(a.ctx, job) }()
 	return job, nil
 }
 

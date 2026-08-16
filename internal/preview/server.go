@@ -31,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,7 @@ type Server struct {
 	Port   int
 	token  string
 	roots  []string // allowed local file roots
+	mu     sync.Mutex // guards roots
 }
 
 // NewServer starts the internal HTTP server on a random port.
@@ -91,6 +93,8 @@ func (s *Server) AddRoot(dir string) {
 	if err != nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, r := range s.roots {
 		if r == abs {
 			return
@@ -210,7 +214,11 @@ func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	info, _ := f.Stat()
+	info, err := f.Stat()
+	if err != nil || info == nil {
+		http.Error(w, "stat failed", http.StatusInternalServerError)
+		return
+	}
 	if info.IsDir() {
 		http.Error(w, "is a directory", http.StatusBadRequest)
 		return
@@ -221,10 +229,13 @@ func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
 
 // isWithinRoots reports whether abs is inside one of the allowed roots.
 func (s *Server) isWithinRoots(abs string) bool {
-	if len(s.roots) == 0 {
+	s.mu.Lock()
+	roots := s.roots
+	s.mu.Unlock()
+	if len(roots) == 0 {
 		return false
 	}
-	for _, root := range s.roots {
+	for _, root := range roots {
 		if abs == root || strings.HasPrefix(abs, root+string(filepath.Separator)) {
 			return true
 		}

@@ -12,6 +12,7 @@ import (
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
 	"mnemo-go/internal/store"
 )
 
@@ -459,15 +460,8 @@ func downloadTo(ctx context.Context, dl *model.DownloadURL, w io.Writer) error {
 // downloadToCounted is like downloadTo but accumulates the byte count into
 // job.ProcessedBytes when job is non-nil.
 func downloadToCounted(ctx context.Context, dl *model.DownloadURL, w io.Writer, job *Job) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dl.URL, nil)
-	if err != nil {
-		return err
-	}
-	for k, v := range dl.Headers {
-		req.Header.Set(k, v)
-	}
-	client := &http.Client{Timeout: 0}
-	resp, err := client.Do(req)
+	hc := netx.NewClient(0) // honors global proxy; no total timeout for large files
+	resp, err := hc.Do(ctx, http.MethodGet, dl.URL, dl.Headers, nil)
 	if err != nil {
 		return err
 	}

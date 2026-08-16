@@ -364,6 +364,9 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 			return rerr
 		}
 	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
 	return nil
 }
 

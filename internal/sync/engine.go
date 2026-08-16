@@ -477,11 +477,14 @@ func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, 
 	}
 
 	go func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		ticker := time.NewTicker(time.Duration(minInterval) * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-stop:
+				cancel()
 				return
 			case <-ticker.C:
 				runList, err := configs()
@@ -492,7 +495,7 @@ func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, 
 					if !c.Enabled || c.IntervalMin <= 0 {
 						continue
 					}
-					_ = e.Run(context.Background(), c)
+					_ = e.Run(ctx, c)
 				}
 			}
 		}
