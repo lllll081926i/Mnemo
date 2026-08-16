@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"net/url"
 	"strings"
 	"time"
@@ -32,23 +33,31 @@ var TestTransportHook http.RoundTripper
 
 // globalProxy is the application-wide proxy URL set by SetGlobalProxy. Every
 // NewClient call picks it up so providers don't each need proxy plumbing.
-var globalProxy string
+var globalProxy atomic.Value // stores string
 
 // SetGlobalProxy configures the proxy used by all subsequently created netx
 // clients (and the download engine). An empty string disables proxying.
-func SetGlobalProxy(proxyURL string) { globalProxy = proxyURL }
+func SetGlobalProxy(proxyURL string) { globalProxy.Store(proxyURL) }
 
 // GlobalProxy returns the currently configured global proxy URL.
-func GlobalProxy() string { return globalProxy }
+func GlobalProxy() string {
+	v := globalProxy.Load()
+	if v == nil {
+		return ""
+	}
+	return v.(string)
+}
 
 // globalUploadRate is the application-wide upload speed cap (bytes/s, 0=unlimited).
-var globalUploadRate int64
+// Accessed atomically because SaveSettings writes it while upload goroutines
+// read it via GlobalUploadRate.
+var globalUploadRate atomic.Int64
 
 // SetGlobalUploadRate sets the upload speed cap (bytes/s). 0 disables the cap.
-func SetGlobalUploadRate(bytesPerSec int64) { globalUploadRate = bytesPerSec }
+func SetGlobalUploadRate(bytesPerSec int64) { globalUploadRate.Store(bytesPerSec) }
 
 // GlobalUploadRate returns the current upload speed cap.
-func GlobalUploadRate() int64 { return globalUploadRate }
+func GlobalUploadRate() int64 { return globalUploadRate.Load() }
 
 // NewClient builds a client with sane defaults.
 func NewClient(timeout time.Duration) *Client {
@@ -60,8 +69,8 @@ func NewClient(timeout time.Duration) *Client {
 		c.HTTP = &http.Client{Timeout: timeout, Transport: TestTransportHook}
 		return c
 	}
-	if globalProxy != "" {
-		return c.WithProxy(globalProxy)
+	if gp := GlobalProxy(); gp != "" {
+		return c.WithProxy(gp)
 	}
 	return c
 }
