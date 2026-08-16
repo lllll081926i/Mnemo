@@ -14,6 +14,7 @@ import (
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
 	_ "mnemo-go/internal/drive/providers" // register all plugins
+	"mnemo-go/internal/drive/providers/pan189"
 	"mnemo-go/internal/engine"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
@@ -184,6 +185,11 @@ func (a *App) ListProviders() []ProviderInfo {
 		out = append(out, ProviderInfo{ID: r.ID, Meta: r.Meta, Capabilities: r.Caps, Login: r.Login})
 	}
 	return out
+}
+
+// GetPan189Captcha returns the latest captcha image data URL for 189 cloud.
+func (a *App) GetPan189Captcha() string {
+	return pan189.LastCaptchaImage
 }
 
 // ProviderLogin performs a login for a provider with form config.

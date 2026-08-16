@@ -55,7 +55,7 @@ const PROVIDER_HELP = {
 const providerHelp = computed(() => PROVIDER_HELP[providerId.value] || null)
 function openHelp() { if (providerHelp.value) OpenBrowser(providerHelp.value.url).catch(() => {}) }
 
-// PikPak 滑块验证：后端报 captcha_required 时拿到 url+token，浏览器完成滑块后带 token 重试
+// PikPak 滑块验证
 const captchaUrl = ref('')
 const captchaOpened = ref(false)
 function parseCaptcha(err) {
@@ -70,10 +70,22 @@ function openCaptcha() {
   captchaOpened.value = true
   OpenBrowser(captchaUrl.value).catch(() => {})
 }
+
+// 天翼云 189 图形验证码
+const pan189Captcha = ref('')
+function parse189Captcha(err) {
+  const m = String(err).match(/captcha_required_189\nimage=(\S+)/)
+  if (!m) return false
+  pan189Captcha.value = m[1]
+  return true
+}
+
 function resetCaptcha() {
   captchaUrl.value = ''
   captchaOpened.value = false
+  pan189Captcha.value = ''
   delete form.value.captcha_token
+  delete form.value.validate_code
 }
 
 async function sendSms() {
@@ -85,15 +97,18 @@ async function sendSms() {
     form.value.verification_id = r.verification_id
     form.value.device_id = r.device_id
     emit('toast', '验证码已发送', 'success')
-  } catch (e) { errorText.value = String(e); return }
-  smsBusy.value = false
-  startSmsCountdown()
+    startSmsCountdown()
+  } catch (e) {
+    errorText.value = String(e)
+  } finally {
+    smsBusy.value = false
+  }
 }
 
 function validate() {
   if (isMounted.value) {
     const m = mountedForm.value
-    if (!m.endpoint.trim()) return providerId.value === 's3' ? '请填写 Endpoint' : '请填写 WebDAV 地址'
+    if (providerId.value === 'webdav' && !m.endpoint.trim()) return '请填写 WebDAV 地址'
     if (!m.username.trim()) return providerId.value === 's3' ? '请填写 Access Key ID' : '请填写用户名'
     if (!m.password) return providerId.value === 's3' ? '请填写 Secret Access Key' : '请填写密码'
     if (providerId.value === 's3' && !m.bucket.trim()) return '请填写 Bucket'
@@ -123,6 +138,8 @@ async function submit() {
   } catch (e) {
     if (providerId.value === 'pikpak' && parseCaptcha(e)) {
       errorText.value = ''
+    } else if (providerId.value === 'pan189' && parse189Captcha(e)) {
+      errorText.value = '请输入图片中的验证码'
     } else {
       errorText.value = String(e)
     }
@@ -166,14 +183,14 @@ async function submit() {
               <!-- 挂载存储（WebDAV / S3） -->
               <template v-if="isMounted">
                 <div class="field"><label>连接名称</label><input class="input" v-model="mountedForm.name" placeholder="我的 WebDAV / S3" /></div>
-                <div class="field"><label>{{ providerId === 's3' ? 'Endpoint' : 'WebDAV 地址' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.example.com（可选，默认 AWS）' : 'https://dav.example.com'" /></div>
+                <div class="field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}<span v-if="providerId !== 's3'" class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
                 <div class="field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
                 <div class="field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><input class="input" type="password" v-model="mountedForm.password" /></div>
                 <template v-if="providerId === 's3'">
                   <div class="field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
-                  <div class="field"><label>Region（可选）</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
+                  <div class="field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
                 </template>
-                <div class="field"><label>挂载路径（可选）</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
+                <div class="field"><label>挂载路径 (可选)</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
               </template>
 
               <!-- OAuth 授权 -->
@@ -208,6 +225,15 @@ async function submit() {
                 <div class="captcha-actions">
                   <button class="btn sm" type="button" @click="openCaptcha">{{ captchaOpened ? '重新打开验证页' : '打开验证页' }}</button>
                   <button v-if="captchaOpened" class="btn primary sm" type="submit" :disabled="busy">完成验证并登录</button>
+                </div>
+              </div>
+
+              <!-- 天翼云 189 图形验证码 -->
+              <div v-if="pan189Captcha" class="captcha-box">
+                <p style="margin-bottom:6px">请输入下图中的验证码：</p>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                  <img :src="pan189Captcha" alt="图形验证码" style="height:36px;border-radius:var(--radius-xs);background:#fff;border:1px solid var(--border-light)" />
+                  <input class="input" style="width:120px" v-model="form.validate_code" placeholder="验证码" autofocus />
                 </div>
               </div>
 

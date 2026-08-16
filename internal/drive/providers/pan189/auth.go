@@ -33,6 +33,9 @@ type CaptchaError struct {
 }
 
 func (e *CaptchaError) Error() string {
+	if e.CaptchaImage != "" {
+		return fmt.Sprintf("captcha_required_189\nimage=%s", e.CaptchaImage)
+	}
 	return "该账号需要图形验证码，请输入图片中的字符后重试"
 }
 

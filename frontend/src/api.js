@@ -5,8 +5,6 @@ import { EventsOn } from '../wailsjs/runtime/runtime'
 // re-export the raw binding surface (used by views directly)
 export * from '../wailsjs/go/app/App'
 
-export const api = App
-
 export function onEvent(name, cb) {
   return EventsOn(name, cb)
 }

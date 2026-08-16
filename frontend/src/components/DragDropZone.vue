@@ -108,8 +108,7 @@ onBeforeUnmount(() => {
 .drag-overlay {
   position: absolute;
   inset: 8px;
-  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
-  backdrop-filter: blur(6px);
+  background: var(--bg-surface);
   border: 2px dashed var(--color-primary);
   border-radius: var(--radius-lg);
   display: flex;

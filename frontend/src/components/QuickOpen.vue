@@ -37,7 +37,7 @@ const baseItems = computed(() => {
   // 网盘账号
   for (const acc of props.accounts) {
     const meta = providerMetaOf(acc, props.providers)
-    const label = meta ? meta.label : acc.user_id
+    const label = (meta && meta.label) || providerOf(acc.user_id) || '网盘'
     items.push({
       id: 'acc-' + acc.user_id,
       group: '网盘账号',
@@ -90,18 +90,22 @@ function execute(item) {
 }
 
 function onKeyDown(e) {
+  const len = filteredItems.value.length
   if (e.key === 'ArrowDown') {
     e.preventDefault()
-    activeIndex.value = (activeIndex.value + 1) % filteredItems.value.length
-    scrollActiveIntoView()
+    if (len > 0) {
+      activeIndex.value = (activeIndex.value + 1) % len
+      scrollActiveIntoView()
+    }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
-    activeIndex.value =
-      (activeIndex.value - 1 + filteredItems.value.length) % filteredItems.value.length
-    scrollActiveIntoView()
+    if (len > 0) {
+      activeIndex.value = (activeIndex.value - 1 + len) % len
+      scrollActiveIntoView()
+    }
   } else if (e.key === 'Enter') {
     e.preventDefault()
-    if (filteredItems.value.length > 0) {
+    if (len > 0 && filteredItems.value[activeIndex.value]) {
       execute(filteredItems.value[activeIndex.value])
     }
   } else if (e.key === 'Escape') {

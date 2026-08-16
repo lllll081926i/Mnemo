@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { listAccounts, listProviders, removeAccount, onEvent, GetSettings, SaveSettings, formatSpeed, providerOf, accountName } from './api'
-import { applyAppearance } from './appearance'
+import { applyAppearance, getPrefs } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
 import ShareView from './views/ShareView.vue'
@@ -53,7 +53,14 @@ function askConfirm(message, onOk, opts) {
   confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', danger: opts?.danger || false, title: opts?.title || '确认操作' }
 }
 function closeConfirm() { confirmDialog.value = null }
+function handleConfirmOk() {
+  if (!confirmDialog.value) return
+  const cb = confirmDialog.value.onOk
+  closeConfirm()
+  if (typeof cb === 'function') cb()
+}
 const ball = ref(null) // { down, up }
+const showTransferBall = computed(() => !!ball.value && getPrefs().transferBall !== false)
 const ballPos = ref(null) // { x, y } 拖动后的固定位置
 const isBallDragging = ref(false)
 
@@ -297,7 +304,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
 
     <transition name="popover-zoom">
       <div
-        v-if="ball"
+        v-if="showTransferBall"
         class="transfer-ball"
         :class="{ dragging: isBallDragging }"
         :style="ballPos ? { left: ballPos.x + 'px', top: ballPos.y + 'px', right: 'auto', bottom: 'auto' } : {}"
@@ -305,11 +312,11 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         @pointerdown="onBallPointerDown"
       >
         <span class="pulse"></span>
-        <span v-if="ball.down">↓ {{ formatSpeed(ball.down) }}</span>
-        <span v-if="ball.up">↑ {{ formatSpeed(ball.up) }}</span>
+        <span v-if="ball && ball.down">↓ {{ formatSpeed(ball.down) }}</span>
+        <span v-if="ball && ball.up">↑ {{ formatSpeed(ball.up) }}</span>
       </div>
     </transition>
 
-    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
   </div>
 </template>

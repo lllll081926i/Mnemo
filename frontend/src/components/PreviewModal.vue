@@ -289,22 +289,40 @@ function handleCloseRequest() {
 }
 
 // ---------- 轻量安全 Markdown 解析器 ----------
-function renderMarkdown(src) {
-  if (!src) return ''
-  let md = src
+function escapeHtml(str) {
+  return String(str || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
 
-  // 代码块 (```lang ... ```)
+function sanitizeUrl(rawUrl) {
+  const trimmed = String(rawUrl || '').trim()
+  if (/^(https?:\/\/|mailto:|\/|\.\/|#)/i.test(trimmed)) {
+    return escapeHtml(trimmed)
+  }
+  return '#'
+}
+
+function renderMarkdown(src) {
+  if (!src) return ''
+
+  // 代码块提取 (```lang ... ```)
   const codeBlocks = []
-  md = md.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+  let md = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
     const idx = codeBlocks.length
+    const safeLang = escapeHtml(lang || 'code')
+    const safeCode = escapeHtml(code.trim())
     codeBlocks.push(
-      `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || 'code'}</span></div><pre><code>${code.trim()}</code></pre></div>`
+      `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${safeLang}</span></div><pre><code>${safeCode}</code></pre></div>`
     )
     return `<!--CODEBLOCK_${idx}-->`
   })
+
+  // 转义 HTML 字符
+  md = escapeHtml(md)
 
   // 行内代码
   md = md.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
@@ -320,8 +338,8 @@ function renderMarkdown(src) {
   // 分割线
   md = md.replace(/^---$/gim, '<hr class="md-hr" />')
 
-  // 引用
-  md = md.replace(/^\> (.*$)/gim, '<blockquote class="md-quote">$1</blockquote>')
+  // 引用块 (转义后为 &gt;)
+  md = md.replace(/^&gt;\s?(.*$)/gim, '<blockquote class="md-quote">$1</blockquote>')
 
   // 格式
   md = md.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -336,8 +354,11 @@ function renderMarkdown(src) {
   // 列表
   md = md.replace(/^[-\*] (.*$)/gim, '<li class="md-list-item">$1</li>')
 
-  // 链接
-  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>')
+  // 链接（严格白名单与 URL 属性清洗）
+  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, link) => {
+    const href = sanitizeUrl(link)
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="md-link">${label}</a>`
+  })
 
   // 段落
   md = md.replace(/\n\n/g, '<div class="md-gap"></div>')
@@ -388,6 +409,7 @@ async function loadPreview() {
   }
 }
 
+watch(() => props.file, (f) => { if (f) activeFile.value = f })
 watch(() => activeFile.value.file_id, loadPreview)
 
 function onKey(e) {
@@ -584,7 +606,7 @@ function decodeText(buf) {
         v-model="searchKw"
         class="pv-search-input"
         placeholder="在文本中查找… (Esc 关闭)"
-        @keydown.esc="toggleSearch"
+        @keydown.esc.stop="toggleSearch"
       />
       <span class="pv-search-count">{{ matchCount ? `${matchCount} 个匹配` : (searchKw ? '无匹配' : '') }}</span>
       <button class="btn-circle sm" title="关闭查找" @click="toggleSearch"><UiIcon name="close" :size="12" /></button>
@@ -1106,8 +1128,7 @@ function decodeText(buf) {
   display: flex;
   gap: 8px;
   padding: 6px 12px;
-  background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-full);
   box-shadow: var(--shadow-md);
@@ -1135,7 +1156,7 @@ function decodeText(buf) {
 .pv-film-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
 /* PDF & Audio */
-.pv-pdf-frame { width: 100%; height: 100%; border: none; background: #525659; }
+.pv-pdf-frame { width: 100%; height: 100%; border: none; background: var(--bg-base); }
 .pv-audio-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 36px; }
 .pv-audio-disc { width: 104px; height: 104px; border-radius: 50%; background: var(--bg-subtle); border: 2px solid var(--border-light); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
 .pv-audio-name { font-size: 16px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 520px; }

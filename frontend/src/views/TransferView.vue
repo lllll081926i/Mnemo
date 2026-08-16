@@ -53,6 +53,7 @@ function accLabel(acc) { return accountName(acc) }
 const downloads = ref([])
 const uploads = ref([])
 const loading = ref(true)
+let refreshSeq = 0
 
 // 下载完成提示音
 let finishAudio = null
@@ -68,11 +69,15 @@ function playFinishSound() {
 }
 
 async function refresh() {
+  const seq = ++refreshSeq
   try {
     const [d, u] = await Promise.all([ListDownloads(), ListUploads()])
+    if (seq !== refreshSeq) return
     downloads.value = d || []
     uploads.value = u || []
-  } catch { /* 静默 */ } finally { loading.value = false }
+  } catch { /* 静默 */ } finally {
+    if (seq === refreshSeq) loading.value = false
+  }
 }
 
 function onTransferEvent(ev) {
@@ -85,8 +90,13 @@ function onTransferEvent(ev) {
       const prev = list[idx]
       if (prev.status !== 'completed' && t.status === 'completed') {
         playFinishSound()
+        // 完成后清理该项已选状态
+        if (selectedIds.value.has(t.id)) {
+          const s = new Set(selectedIds.value)
+          s.delete(t.id)
+          selectedIds.value = s
+        }
       }
-      // 局部增量合并更新，避免大数组整体反序列化和重新挂载
       Object.assign(list[idx], t)
     } else {
       downloads.value.unshift(t)
@@ -116,10 +126,11 @@ const byKw = (list, nameFn) => {
   return list.filter((t) => (nameFn(t) || '').toLowerCase().includes(kw) || String(t.url || '').toLowerCase().includes(kw))
 }
 const byAccount = (list) => filterUser.value ? list.filter((t) => t.user_id === filterUser.value) : list
+const byUploadAccount = (list) => filterUser.value ? list.filter((t) => t.UserID === filterUser.value || (t.Info && t.Info.user_id === filterUser.value)) : list
 const activeDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
 const doneDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
-const activeUploads = computed(() => byKw(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted), upName))
-const doneUploads = computed(() => byKw(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted), upName))
+const activeUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted)), upName))
+const doneUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted)), upName))
 
 // 全选（正在下载列表）
 const allActiveSelected = computed(() => activeDownloads.value.length > 0 && activeDownloads.value.every((t) => selectedIds.value.has(t.id)))
@@ -157,48 +168,78 @@ function onItemClick(e, id) {
 }
 const selectedTasks = computed(() => activeDownloads.value.filter((t) => selectedIds.value.has(t.id)))
 
-// ---------- 核心操作（全部配备即时乐观响应） ----------
+// ---------- 核心操作（全部配备即时乐观响应与回滚） ----------
 
 // 暂停
-function pauseTask(t) {
+async function pauseTask(t) {
+  const orig = t.status
   t.status = 'paused'
-  PauseDownload(t.id)
-  emit('toast', '已暂停', 'warn')
+  try {
+    await PauseDownload(t.id)
+    emit('toast', '已暂停', 'warn')
+  } catch (e) {
+    t.status = orig
+    emit('toast', '操作失败: ' + String(e), 'error')
+  }
 }
 
 // 继续/重试
-function resumeTask(t) {
+async function resumeTask(t) {
+  const orig = t.status
   t.status = 'queued'
-  ResumeDownload(t.id)
-  emit('toast', '已恢复下载', 'success')
+  try {
+    await ResumeDownload(t.id)
+    emit('toast', '已恢复下载', 'success')
+  } catch (e) {
+    t.status = orig
+    emit('toast', '操作失败: ' + String(e), 'error')
+  }
 }
 
 // 取消下载
-function cancelTask(t) {
+async function cancelTask(t) {
+  const orig = t.status
   t.status = 'canceled'
-  CancelDownload(t.id)
-  emit('toast', '已取消下载', 'warn')
+  try {
+    await CancelDownload(t.id)
+    emit('toast', '已取消下载', 'warn')
+  } catch (e) {
+    t.status = orig
+    emit('toast', '操作失败: ' + String(e), 'error')
+  }
 }
 
 // 优先下载
 function prioritizeTask(t) {
-  askConfirm('优先下载将暂停其他所有下载任务，是否继续？', () => {
+  askConfirm('优先下载将暂停其他所有下载任务，是否继续？', async () => {
+    const origMap = new Map(activeDownloads.value.map((x) => [x.id, x.status]))
     activeDownloads.value.forEach((x) => { if (x.id !== t.id && x.status === 'downloading') x.status = 'paused' })
     t.status = 'downloading'
-    PrioritizeDownload(t.id)
-    emit('toast', '已优先下载该任务（其他已暂停）', 'success')
+    try {
+      await PrioritizeDownload(t.id)
+      emit('toast', '已优先下载该任务（其他已暂停）', 'success')
+    } catch (e) {
+      activeDownloads.value.forEach((x) => { if (origMap.has(x.id)) x.status = origMap.get(x.id) })
+      emit('toast', '操作失败: ' + String(e), 'error')
+    }
   }, { okText: '优先下载', title: '优先下载' })
 }
 
 // 删除单条下载记录 (立即乐观移除)
-function removeTask(t) {
+async function removeTask(t) {
   const id = t.id
+  const origList = [...downloads.value]
   downloads.value = downloads.value.filter((x) => x.id !== id)
   const s = new Set(selectedIds.value)
   s.delete(id)
   selectedIds.value = s
-  RemoveDownload(id)
-  emit('toast', '已删除记录', 'success')
+  try {
+    await RemoveDownload(id)
+    emit('toast', '已删除记录', 'success')
+  } catch (e) {
+    downloads.value = origList
+    emit('toast', '删除失败: ' + String(e), 'error')
+  }
 }
 
 // 打开文件 / 定位目录
@@ -255,37 +296,56 @@ function batchRemove() {
   const ids = new Set(selectedTasks.value.map((t) => t.id))
   downloads.value = downloads.value.filter((t) => !ids.has(t.id))
   selectedIds.value = new Set()
-  ids.forEach((id) => RemoveDownload(id))
+  ids.forEach((id) => RemoveDownload(id).catch(() => {}))
   emit('toast', `已删除 ${ids.size} 项记录`, 'success')
 }
 
-// 清除所有已完成下载 (即时乐观清空)
-function clearAllDoneDownloads() {
+// 清除所有已完成下载
+async function clearAllDoneDownloads() {
   downloads.value = downloads.value.filter((t) => t.status !== 'completed')
-  ClearDownloads()
-  emit('toast', '已清除所有已完成记录', 'success')
+  try {
+    await ClearDownloads()
+    emit('toast', '已清除所有已完成记录', 'success')
+  } catch (e) {
+    refresh()
+    emit('toast', '清除失败: ' + String(e), 'error')
+  }
 }
 
-// 清除所有已上传记录 (即时乐观清空)
-function clearAllDoneUploads() {
+// 清除所有已上传记录
+async function clearAllDoneUploads() {
   uploads.value = uploads.value.filter((t) => !t.Upload || !t.Upload.IsCompleted)
-  ClearUploads()
-  emit('toast', '已清除所有已上传记录', 'success')
+  try {
+    await ClearUploads()
+    emit('toast', '已清除所有已上传记录', 'success')
+  } catch (e) {
+    refresh()
+    emit('toast', '清除失败: ' + String(e), 'error')
+  }
 }
 
 // 取消/重试上传
-function cancelUploadTask(t) {
+async function cancelUploadTask(t) {
   const id = t.UploadID
+  const origList = [...uploads.value]
   uploads.value = uploads.value.filter((x) => x.UploadID !== id)
-  CancelUpload(id)
-  emit('toast', '已取消上传', 'warn')
+  try {
+    await CancelUpload(id)
+    emit('toast', '已取消上传', 'warn')
+  } catch (e) {
+    uploads.value = origList
+    emit('toast', '取消失败: ' + String(e), 'error')
+  }
 }
 
-function resumeUploadTask(t) {
-  ResumeUpload(t.UploadID).then(() => {
+async function resumeUploadTask(t) {
+  try {
+    await ResumeUpload(t.UploadID)
     emit('toast', '已重新排队上传', 'success')
     scheduleRefresh(100)
-  }).catch((e) => emit('toast', String(e), 'error'))
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  }
 }
 
 const copiedLinkMap = ref({})
@@ -476,6 +536,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   clearTimeout(refreshTimer)
+  clearTimeout(taskFilterTimer)
   clearInterval(pollTimer)
   clearInterval(offlineTimer)
   offFns.forEach((fn) => { try { fn() } catch { /* 忽略 */ } })

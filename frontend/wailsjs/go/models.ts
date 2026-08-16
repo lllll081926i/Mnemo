@@ -280,6 +280,72 @@ export namespace drive {
 	        this.isDir = source["isDir"];
 	    }
 	}
+	export class ShareImportFile {
+	    fileId: string;
+	    name: string;
+	    size: number;
+	    isDir: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareImportFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fileId = source["fileId"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.isDir = source["isDir"];
+	    }
+	}
+	export class ShareImportSession {
+	    provider: string;
+	    shareUrl: string;
+	    shareId: string;
+	    password?: string;
+	    passCodeToken?: string;
+	    shareToken?: string;
+	    shareKey?: string;
+	    rootFileId?: string;
+	    files: ShareImportFile[];
+	    extra?: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareImportSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.shareUrl = source["shareUrl"];
+	        this.shareId = source["shareId"];
+	        this.password = source["password"];
+	        this.passCodeToken = source["passCodeToken"];
+	        this.shareToken = source["shareToken"];
+	        this.shareKey = source["shareKey"];
+	        this.rootFileId = source["rootFileId"];
+	        this.files = this.convertValues(source["files"], ShareImportFile);
+	        this.extra = source["extra"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ShareParams {
 	    fileIds: string[];
 	    shareName: string;
@@ -296,47 +362,6 @@ export namespace drive {
 	        this.shareName = source["shareName"];
 	        this.expiration = source["expiration"];
 	        this.password = source["password"];
-	    }
-	}
-
-}
-
-export namespace migrate {
-	
-	export class Job {
-	    id: string;
-	    srcUser: string;
-	    srcDrive: string;
-	    fileIDs: string[];
-	    dstUser: string;
-	    dstDrive: string;
-	    dstParent: string;
-	    move: boolean;
-	    total: number;
-	    processed: number;
-	    failed: number;
-	    status: string;
-	    message?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Job(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.srcUser = source["srcUser"];
-	        this.srcDrive = source["srcDrive"];
-	        this.fileIDs = source["fileIDs"];
-	        this.dstUser = source["dstUser"];
-	        this.dstDrive = source["dstDrive"];
-	        this.dstParent = source["dstParent"];
-	        this.move = source["move"];
-	        this.total = source["total"];
-	        this.processed = source["processed"];
-	        this.failed = source["failed"];
-	        this.status = source["status"];
-	        this.message = source["message"];
 	    }
 	}
 
@@ -376,6 +401,8 @@ export namespace model {
 	    region?: string;
 	    bucket?: string;
 	    basePath?: string;
+	    forcePathStyle?: boolean;
+	    sessionToken?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnConfig(source);
@@ -390,6 +417,8 @@ export namespace model {
 	        this.region = source["region"];
 	        this.bucket = source["bucket"];
 	        this.basePath = source["basePath"];
+	        this.forcePathStyle = source["forcePathStyle"];
+	        this.sessionToken = source["sessionToken"];
 	    }
 	}
 	export class TokenInfo {
@@ -685,6 +714,50 @@ export namespace model {
 	        this.user_meta = source["user_meta"];
 	    }
 	}
+	export class MigrateJob {
+	    id: string;
+	    srcUser: string;
+	    srcDrive: string;
+	    fileIDs: string[];
+	    dstUser: string;
+	    dstDrive: string;
+	    dstParent: string;
+	    move: boolean;
+	    total: number;
+	    processed: number;
+	    failed: number;
+	    totalBytes: number;
+	    processedBytes: number;
+	    status: string;
+	    message?: string;
+	    createdAt?: number;
+	    updatedAt?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MigrateJob(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.srcUser = source["srcUser"];
+	        this.srcDrive = source["srcDrive"];
+	        this.fileIDs = source["fileIDs"];
+	        this.dstUser = source["dstUser"];
+	        this.dstDrive = source["dstDrive"];
+	        this.dstParent = source["dstParent"];
+	        this.move = source["move"];
+	        this.total = source["total"];
+	        this.processed = source["processed"];
+	        this.failed = source["failed"];
+	        this.totalBytes = source["totalBytes"];
+	        this.processedBytes = source["processedBytes"];
+	        this.status = source["status"];
+	        this.message = source["message"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class OfflineTask {
 	    id: string;
 	    user_id: string;
@@ -838,6 +911,7 @@ export namespace model {
 	    isMiaoChuan: boolean;
 	    sha1: string;
 	    crc64: string;
+	    conflictPolicy?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UploadInfo(source);
@@ -857,6 +931,7 @@ export namespace model {
 	        this.isMiaoChuan = source["isMiaoChuan"];
 	        this.sha1 = source["sha1"];
 	        this.crc64 = source["crc64"];
+	        this.conflictPolicy = source["conflictPolicy"];
 	    }
 	}
 	export class UploadState {
@@ -903,6 +978,7 @@ export namespace model {
 	}
 	export class UploadingUI {
 	    UploadID: string;
+	    user_id: string;
 	    Info: UploadInfo;
 	    Upload: UploadState;
 	
@@ -913,6 +989,7 @@ export namespace model {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.UploadID = source["UploadID"];
+	        this.user_id = source["user_id"];
 	        this.Info = this.convertValues(source["Info"], UploadInfo);
 	        this.Upload = this.convertValues(source["Upload"], UploadState);
 	    }
@@ -1112,6 +1189,8 @@ export namespace sync {
 	    remote_dir: string;
 	    direction: string;
 	    enabled: boolean;
+	    intervalMin: number;
+	    deletePropagation: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -1127,6 +1206,8 @@ export namespace sync {
 	        this.remote_dir = source["remote_dir"];
 	        this.direction = source["direction"];
 	        this.enabled = source["enabled"];
+	        this.intervalMin = source["intervalMin"];
+	        this.deletePropagation = source["deletePropagation"];
 	    }
 	}
 

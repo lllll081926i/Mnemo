@@ -257,7 +257,7 @@ body {
 
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  padding: 2px 8px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500;
   background: var(--bg-subtle); color: var(--text-secondary); white-space: nowrap;
 }
 .badge.primary { background: var(--listselectbg); color: var(--color-primary); }
@@ -366,7 +366,7 @@ body {
 /* ============ 弹窗 ============ */
 .modal-mask {
   position: fixed; inset: 0; z-index: 100;
-  background: rgb(15 23 42 / .45); backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.5);
   display: flex; align-items: center; justify-content: center;
 }
 .modal {
@@ -612,11 +612,11 @@ body {
   margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border-light);
 }
 
-.switch { position: relative; width: 38px; height: 21px; background: var(--control-border); border-radius: 999px; cursor: pointer; transition: background var(--motion-fast) var(--motion-ease); flex-shrink: 0; }
+.switch { position: relative; width: 38px; height: 21px; background: var(--control-border); border-radius: var(--radius-full); cursor: pointer; transition: background var(--motion-fast) var(--motion-ease); flex-shrink: 0; }
 .switch.on { background: var(--color-primary-strong); }
 .switch::after {
   content: ''; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px;
-  background: var(--text-inverse); border-radius: 999px; box-shadow: var(--shadow-sm);
+  background: var(--text-inverse); border-radius: var(--radius-full); box-shadow: var(--shadow-sm);
   transition: transform var(--motion-fast) var(--motion-ease), width var(--motion-fast) var(--motion-ease);
 }
 .switch.on::after { transform: translateX(17px); }
@@ -661,7 +661,7 @@ body {
   display: flex; align-items: center; gap: 8px;
   height: 34px; padding: 0 14px; max-width: 240px; overflow: hidden; white-space: nowrap;
   background: var(--color-primary-strong); color: var(--text-inverse);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
   box-shadow: var(--shadow-modal); cursor: grab; user-select: none; touch-action: none;
   transition: transform var(--motion-fast) var(--motion-spring), box-shadow var(--motion-fast) var(--motion-ease);
@@ -971,8 +971,8 @@ body {
 .sync-task-main { flex: 1; min-width: 0; }
 .sync-task-name { display: flex; align-items: center; gap: 8px; font-size: 14.5px; }
 .sync-task-name strong { font-weight: 650; }
-.sync-task-direction { font-size: 12px; color: var(--color-primary); background: var(--listselectbg); padding: 1px 7px; border-radius: 999px; }
-.sync-task-warn { font-size: 12px; color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 14%, transparent); padding: 1px 7px; border-radius: 999px; }
+.sync-task-direction { font-size: 12px; color: var(--color-primary); background: var(--listselectbg); padding: 1px 7px; border-radius: var(--radius-full); }
+.sync-task-warn { font-size: 12px; color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 14%, transparent); padding: 1px 7px; border-radius: var(--radius-full); }
 .sync-task-paths { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
 .sync-path { flex: 1; min-width: 0; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--bg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sync-task-meta { display: flex; gap: 14px; margin-top: 8px; font-size: 12.5px; color: var(--text-tertiary); }
@@ -1005,5 +1005,5 @@ body {
 .share-record-link { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 12.5px; color: var(--text-link); overflow: hidden; }
 .share-record-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .share-record-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 0 auto; }
-.share-passcode { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 12%, transparent); padding: 1px 8px; border-radius: 999px; }
+.share-passcode { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 12%, transparent); padding: 1px 8px; border-radius: var(--radius-full); }
 .share-record-actions { display: flex; gap: 2px; }

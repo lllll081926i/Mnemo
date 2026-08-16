@@ -34,12 +34,12 @@ export function DeleteFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteFiles'](arg1, arg2, arg3);
 }
 
-export function DeleteOfflineTask(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['DeleteOfflineTask'](arg1, arg2, arg3, arg4);
-}
-
 export function DeleteLocalTag(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteLocalTag'](arg1, arg2, arg3);
+}
+
+export function DeleteOfflineTask(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DeleteOfflineTask'](arg1, arg2, arg3, arg4);
 }
 
 export function DeleteSyncConfig(arg1) {
@@ -198,6 +198,10 @@ export function RefreshAccount(arg1) {
   return window['go']['app']['App']['RefreshAccount'](arg1);
 }
 
+export function RefreshOfflineTasks(arg1, arg2) {
+  return window['go']['app']['App']['RefreshOfflineTasks'](arg1, arg2);
+}
+
 export function RemoveAccount(arg1) {
   return window['go']['app']['App']['RemoveAccount'](arg1);
 }
@@ -230,10 +234,6 @@ export function ResumeUpload(arg1) {
   return window['go']['app']['App']['ResumeUpload'](arg1);
 }
 
-export function RefreshOfflineTasks(arg1, arg2) {
-  return window['go']['app']['App']['RefreshOfflineTasks'](arg1, arg2);
-}
-
 export function RevealInFolder(arg1) {
   return window['go']['app']['App']['RevealInFolder'](arg1);
 }
@@ -246,16 +246,16 @@ export function SaveCloudTextFile(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['SaveCloudTextFile'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function SaveImportedShare(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SaveImportedShare'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function SaveLocalTag(arg1) {
   return window['go']['app']['App']['SaveLocalTag'](arg1);
 }
 
 export function SaveMountedAccount(arg1, arg2) {
   return window['go']['app']['App']['SaveMountedAccount'](arg1, arg2);
-}
-
-export function SaveImportedShare(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['SaveImportedShare'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SavePlayCursor(arg1, arg2, arg3, arg4) {
@@ -290,12 +290,12 @@ export function SetPlayerVolume(arg1) {
   return window['go']['app']['App']['SetPlayerVolume'](arg1);
 }
 
-export function StopPlayer() {
-  return window['go']['app']['App']['StopPlayer']();
-}
-
 export function StartSyncScheduler() {
   return window['go']['app']['App']['StartSyncScheduler']();
+}
+
+export function StopPlayer() {
+  return window['go']['app']['App']['StopPlayer']();
 }
 
 export function TrashFiles(arg1, arg2, arg3) {

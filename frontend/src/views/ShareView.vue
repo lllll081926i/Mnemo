@@ -24,14 +24,31 @@ onBeforeUnmount(() => clearTimeout(kwTimer))
 const filterProvider = ref('')
 const filterAccount = ref('')
 
+let refreshSeq = 0
 async function refresh() {
+  const seq = ++refreshSeq
   loading.value = true
   try {
-    history.value = (await ListShareHistory('')) || []
+    const list = (await ListShareHistory('')) || []
+    if (seq === refreshSeq) history.value = list
   } catch (e) {
-    emit('toast', String(e), 'error')
+    if (seq === refreshSeq) emit('toast', String(e), 'error')
+  } finally {
+    if (seq === refreshSeq) loading.value = false
   }
-  loading.value = false
+}
+
+watch(() => props.accounts, (list) => {
+  if (filterAccount.value && !list.some((a) => a.user_id === filterAccount.value)) {
+    filterAccount.value = ''
+  }
+  if (filterProvider.value && !props.providers.some((p) => p.ID === filterProvider.value)) {
+    filterProvider.value = ''
+  }
+}, { deep: true })
+
+function itemKey(h, idx) {
+  return `${h.account_id || ''}_${h.share_id || ''}_${h.share_url || ''}_${idx}`
 }
 
 function metaOf(pid) {
@@ -191,7 +208,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <span class="share-group-count">{{ g.items.length }} 条</span>
         </header>
 
-        <div v-for="h in g.items" :key="h.share_id + h.account_id" class="share-record">
+        <div v-for="(h, idx) in g.items" :key="itemKey(h, idx)" class="share-record">
           <div class="share-record-main">
             <div class="share-record-name" :title="h.share_name">{{ h.share_name || '未命名分享' }}</div>
             <div class="share-record-meta">
@@ -203,20 +220,20 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
             <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
             <div class="share-record-actions">
               <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
-              <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接', 'url_' + (h.share_id || '') + h.account_id)">
-                <UiIcon v-if="copiedMap['url_' + (h.share_id || '') + h.account_id]" name="check" :size="13" class="icon-check-pop" />
+              <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接', 'url_' + itemKey(h, idx))">
+                <UiIcon v-if="copiedMap['url_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
                 <UiIcon v-else name="copy" :size="13" />
-                <span>{{ copiedMap['url_' + (h.share_id || '') + h.account_id] ? '已复制' : '链接' }}</span>
+                <span>{{ copiedMap['url_' + itemKey(h, idx)] ? '已复制' : '链接' }}</span>
               </button>
-              <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码', 'pwd_' + (h.share_id || '') + h.account_id)">
-                <UiIcon v-if="copiedMap['pwd_' + (h.share_id || '') + h.account_id]" name="check" :size="13" class="icon-check-pop" />
+              <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码', 'pwd_' + itemKey(h, idx))">
+                <UiIcon v-if="copiedMap['pwd_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
                 <UiIcon v-else name="copy" :size="13" />
-                <span>{{ copiedMap['pwd_' + (h.share_id || '') + h.account_id] ? '已复制' : '提取码' }}</span>
+                <span>{{ copiedMap['pwd_' + itemKey(h, idx)] ? '已复制' : '提取码' }}</span>
               </button>
-              <button class="tbtn" @click="copyAll(h, 'all_' + (h.share_id || '') + h.account_id)">
-                <UiIcon v-if="copiedMap['all_' + (h.share_id || '') + h.account_id]" name="check" :size="13" class="icon-check-pop" />
+              <button class="tbtn" @click="copyAll(h, 'all_' + itemKey(h, idx))">
+                <UiIcon v-if="copiedMap['all_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
                 <UiIcon v-else name="copy" :size="13" />
-                <span>{{ copiedMap['all_' + (h.share_id || '') + h.account_id] ? '已复制' : '全部' }}</span>
+                <span>{{ copiedMap['all_' + itemKey(h, idx)] ? '已复制' : '全部' }}</span>
               </button>
             </div>
           </div>

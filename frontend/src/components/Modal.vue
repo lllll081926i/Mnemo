@@ -1,3 +1,18 @@
+<script>
+// 全局弹窗栈：管理多层弹窗，确保 Esc 按键只关闭最顶层弹窗
+const modalStack = []
+let globalKeydownBound = false
+
+function handleGlobalKeydown(e) {
+  if (e.key === 'Escape' && modalStack.length > 0) {
+    const topHandler = modalStack[modalStack.length - 1]
+    if (typeof topHandler === 'function') {
+      topHandler()
+    }
+  }
+}
+</script>
+
 <script setup>
 import { onMounted, onBeforeUnmount } from 'vue'
 import UiIcon from './UiIcon.vue'
@@ -11,9 +26,24 @@ const props = defineProps({
 })
 const emit = defineEmits(['close'])
 
-function onKey(e) { if (e.key === 'Escape') emit('close') }
-onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+const handleClose = () => emit('close')
+
+onMounted(() => {
+  modalStack.push(handleClose)
+  if (!globalKeydownBound) {
+    window.addEventListener('keydown', handleGlobalKeydown)
+    globalKeydownBound = true
+  }
+})
+
+onBeforeUnmount(() => {
+  const idx = modalStack.lastIndexOf(handleClose)
+  if (idx >= 0) modalStack.splice(idx, 1)
+  if (modalStack.length === 0 && globalKeydownBound) {
+    window.removeEventListener('keydown', handleGlobalKeydown)
+    globalKeydownBound = false
+  }
+})
 </script>
 
 <template>

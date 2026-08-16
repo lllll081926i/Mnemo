@@ -5,7 +5,6 @@ import {drive} from '../models';
 import {model} from '../models';
 import {app} from '../models';
 import {sync} from '../models';
-import {migrate} from '../models';
 
 export function AddFavorite(arg1:string,arg2:string,arg3:store.Favorite):Promise<void>;
 
@@ -23,9 +22,9 @@ export function CreateShare(arg1:string,arg2:string,arg3:drive.ShareParams):Prom
 
 export function DeleteFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
-export function DeleteOfflineTask(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<void>;
-
 export function DeleteLocalTag(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function DeleteOfflineTask(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<void>;
 
 export function DeleteSyncConfig(arg1:string):Promise<void>;
 
@@ -75,7 +74,7 @@ export function LocalPreviewURL(arg1:string):Promise<string>;
 
 export function MediaProxy():Promise<string>;
 
-export function MigrateFiles(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:Array<string>,arg7:boolean):Promise<migrate.Job>;
+export function MigrateFiles(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:Array<string>,arg7:boolean):Promise<model.MigrateJob>;
 
 export function Mkdir(arg1:string,arg2:string,arg3:string,arg4:string):Promise<drive.MkdirResult>;
 
@@ -105,6 +104,8 @@ export function ProviderLogin(arg1:string,arg2:Record<string, string>):Promise<m
 
 export function RefreshAccount(arg1:string):Promise<model.Account>;
 
+export function RefreshOfflineTasks(arg1:string,arg2:string):Promise<Array<model.OfflineTask>>;
+
 export function RemoveAccount(arg1:string):Promise<void>;
 
 export function RemoveDownload(arg1:string):Promise<void>;
@@ -121,19 +122,17 @@ export function ResumeDownload(arg1:string):Promise<void>;
 
 export function ResumeUpload(arg1:string):Promise<void>;
 
-export function RefreshOfflineTasks(arg1:string,arg2:string):Promise<Array<model.OfflineTask>>;
-
 export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RunSync(arg1:string):Promise<void>;
 
 export function SaveCloudTextFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function SaveImportedShare(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<Array<string>>;
+
 export function SaveLocalTag(arg1:store.LocalTag):Promise<void>;
 
 export function SaveMountedAccount(arg1:string,arg2:model.ConnConfig):Promise<model.Account>;
-
-export function SaveImportedShare(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<Array<string>>;
 
 export function SavePlayCursor(arg1:string,arg2:string,arg3:string,arg4:number):Promise<void>;
 
@@ -151,9 +150,9 @@ export function SetPlayerSpeed(arg1:number):Promise<void>;
 
 export function SetPlayerVolume(arg1:number):Promise<void>;
 
-export function StopPlayer():Promise<void>;
-
 export function StartSyncScheduler():Promise<string>;
+
+export function StopPlayer():Promise<void>;
 
 export function TrashFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 

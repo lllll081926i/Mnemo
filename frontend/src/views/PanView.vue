@@ -113,6 +113,12 @@ function askConfirm(message, onOk, opts) {
   confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', danger: opts?.danger || false, title: opts?.title || '确认操作' }
 }
 function closeConfirm() { confirmDialog.value = null }
+function handleConfirmOk() {
+  if (!confirmDialog.value) return
+  const cb = confirmDialog.value.onOk
+  closeConfirm()
+  if (typeof cb === 'function') cb()
+}
 const inputText = ref('')
 const shareForm = ref({ name: '', expiration: '', password: '' })
 const migrateTarget = ref('') // 目标账号 user_id
@@ -172,8 +178,12 @@ async function load(id) {
 
 async function loadFavorites() {
   if (!props.account) { favorites.value = []; return }
-  try { favorites.value = (await ListFavorites(uid.value, did.value)) || [] }
-  catch { favorites.value = [] }
+  const snapUid = uid.value
+  try {
+    const list = (await ListFavorites(snapUid, did.value)) || []
+    if (snapUid === uid.value) favorites.value = list
+  }
+  catch { if (snapUid === uid.value) favorites.value = [] }
 }
 
 const displayFiles = computed(() => {
@@ -243,6 +253,7 @@ function goCrumb(i) {
 function goUp() {
   if (!pathStack.value.length) return
   pathStack.value.pop()
+  selected.value = []
   dirId.value = pathStack.value.length ? pathStack.value[pathStack.value.length - 1].id : rootKey.value
   treeSelected.value = dirId.value
   load(dirId.value)
@@ -310,12 +321,14 @@ function treeChildren(id) { return tree.value[id] || [] }
 async function toggleTree(idOrNode, name) {
   const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
   expanded.value[id] = !expanded.value[id]
+  const snapUid = uid.value
   if (expanded.value[id] && !tree.value[id] && props.account) {
     try {
-      const list = await listDir(uid.value, did.value, id)
+      const list = await listDir(snapUid, did.value, id)
+      if (snapUid !== uid.value) return
       tree.value[id] = (list || []).filter((f) => f.isDir)
       for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
-    } catch { tree.value[id] = [] }
+    } catch { if (snapUid === uid.value) tree.value[id] = [] }
   }
 }
 
@@ -323,12 +336,14 @@ async function toggleTree(idOrNode, name) {
 async function expandTree(id, name) {
   if (expanded.value[id]) return
   expanded.value[id] = true
+  const snapUid = uid.value
   if (!tree.value[id] && props.account) {
     try {
-      const list = await listDir(uid.value, did.value, id)
+      const list = await listDir(snapUid, did.value, id)
+      if (snapUid !== uid.value) return
       tree.value[id] = (list || []).filter((f) => f.isDir)
       for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
-    } catch { tree.value[id] = [] }
+    } catch { if (snapUid === uid.value) tree.value[id] = [] }
   }
 }
 
@@ -418,7 +433,7 @@ function selIds() { return selected.value.map((f) => f.file_id) }
 
 let running = false
 async function run(fn, okMsg) {
-  if (running) return // 防重入：连点/双击不重复提交
+  if (running) return
   running = true
   try {
     await fn()
@@ -428,6 +443,7 @@ async function run(fn, okMsg) {
     loadFavorites()
   } catch (e) {
     emit('toast', String(e), 'error')
+    throw e
   } finally {
     running = false
   }
@@ -718,8 +734,10 @@ function onTreeEnter(e, node) {
   if (!getPrefs().hoverPreview) return
   clearTimeout(hoverTimer)
   const id = node.file_id || node.id
+  const targetEl = e.currentTarget
+  if (!targetEl) return
+  const rect = targetEl.getBoundingClientRect()
   hoverTimer = setTimeout(async () => {
-    const rect = e.currentTarget.getBoundingClientRect()
     const x = Math.min(rect.right + 8, window.innerWidth - 290)
     const y = Math.min(rect.top, window.innerHeight - 320)
     hoverPreview.value = { id, name: node.name, x, y, items: [], loading: true }
@@ -756,8 +774,8 @@ function onKey(e) {
   if (e.ctrlKey && e.code === 'KeyA') { selectAll(); e.preventDefault() }
   else if (e.code === 'F5') { refresh(); e.preventDefault() }
   else if (e.code === 'Backspace' && mode.value === 'list' && pathStack.value.length) { goUp(); e.preventDefault() }
-  else if (e.ctrlKey && e.code === 'KeyF') { document.getElementById('pan-filter')?.focus(); e.preventDefault() }
   else if (e.ctrlKey && e.shiftKey && e.code === 'KeyF') { enterSearch(); e.preventDefault() }
+  else if (e.ctrlKey && e.code === 'KeyF') { document.getElementById('pan-filter')?.focus(); e.preventDefault() }
   else if (e.ctrlKey && e.shiftKey && e.code === 'KeyN' && caps.value.createFolder) { inputText.value = ''; modal.value = 'mkdir'; e.preventDefault() }
   else if (e.ctrlKey && e.code === 'KeyU' && caps.value.upload && mode.value === 'list') { pickUploadFiles(); e.preventDefault() }
   else if (e.ctrlKey && e.code === 'KeyH') { goHome(); e.preventDefault() }
@@ -785,6 +803,10 @@ function onKey(e) {
     const start = cur >= 0 ? cur : (selected.value.length ? list.findIndex((f) => f.file_id === selected.value[selected.value.length - 1].file_id) : 0)
     const next = e.code === 'ArrowDown' ? Math.min(list.length - 1, start + 1) : Math.max(0, start - 1)
     focusId.value = list[next].file_id
+    nextTick(() => {
+      const el = document.querySelector('.fileitem.focus, .griditem.focus')
+      if (el) el.scrollIntoView({ block: 'nearest' })
+    })
     e.preventDefault()
   }
   else if (e.code === 'Space' && focusId.value) {
@@ -798,6 +820,7 @@ watch(() => props.account, (a) => {
   tree.value = {}
   expanded.value = {}
   treeNames.value = {}
+  thumbErrors.value = {}
   goHome()
   loadFavorites()
   expandTree(rootKey.value, rootTitle.value) // 根目录默认展开
@@ -1295,7 +1318,7 @@ onBeforeUnmount(() => {
         <button class="btn primary" @click="modal = null">关闭</button>
       </template>
     </Modal>
-    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
   </div>
 </template>
 

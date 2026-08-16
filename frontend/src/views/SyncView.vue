@@ -93,13 +93,13 @@ async function pickLocalDir() {
   if (dir) form.value.local_dir = dir
 }
 
-let savingEdit = false
+const savingEdit = ref(false)
 async function save() {
-  if (savingEdit) return // 防重入
+  if (savingEdit.value) return
   if (!form.value.name.trim()) { emit('toast', '请填写任务名称', 'error'); return }
   if (!form.value.local_dir.trim()) { emit('toast', '请填写本地文件夹路径', 'error'); return }
   if (!formAccount.value) { emit('toast', '请选择绑定账号', 'error'); return }
-  savingEdit = true
+  savingEdit.value = true
   const id = editingId.value || 'sync-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
   try {
     await SaveSyncConfig({
@@ -116,7 +116,7 @@ async function save() {
     refresh()
     emit('toast', '已保存同步任务', 'success')
   } catch (e) { emit('toast', String(e), 'error') }
-  finally { savingEdit = false }
+  finally { savingEdit.value = false }
 }
 
 async function toggle(job) {
@@ -151,6 +151,10 @@ async function run(job) {
 }
 
 function remove(job) {
+  if (running.value.has(job.id)) {
+    emit('toast', '任务正在同步中，请先等待完成或停止', 'warn')
+    return
+  }
   confirmDialog.value = { message: `删除同步任务「${job.name}」？本地与网盘文件不受影响。`, onOk: async () => {
     confirmDialog.value = null
     try {
@@ -265,8 +269,11 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
         <SegTabs v-model="form.direction" :options="dirOptions" />
       </div>
       <template #actions>
-        <button class="btn" @click="showEdit = false">取消</button>
-        <button class="btn primary" @click="save">保存</button>
+        <button class="btn" :disabled="savingEdit" @click="showEdit = false">取消</button>
+        <button class="btn primary" :disabled="savingEdit" @click="save">
+          <span v-if="savingEdit" class="spin spin-on-primary"></span>
+          <span>{{ savingEdit ? '保存中…' : '保存' }}</span>
+        </button>
       </template>
     </Modal>
 
