@@ -376,6 +376,21 @@ body {
   display: flex; flex-direction: column;
   transform-origin: center center;
 }
+/* 预览大弹窗专用尺寸体系（代码/文本/Markdown/图片画廊） */
+.modal.preview-modal {
+  width: min(1360px, 95vw);
+  max-width: 96vw;
+  height: 88vh;
+  max-height: 92vh;
+  transition: width var(--motion-fast) var(--motion-ease), height var(--motion-fast) var(--motion-ease), max-width var(--motion-fast) var(--motion-ease), max-height var(--motion-fast) var(--motion-ease), border-radius var(--motion-fast) var(--motion-ease);
+}
+.modal.preview-modal.is-maximized {
+  width: 98.5vw;
+  max-width: 98.5vw;
+  height: 96.5vh;
+  max-height: 96.5vh;
+  border-radius: var(--radius-md);
+}
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 0;

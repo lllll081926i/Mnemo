@@ -1,10 +1,10 @@
 <script setup>
 // 高级预览弹窗：
 // 1. 图片画廊（缩放/拖拽平移/90度旋转/翻页/胶卷条）
-// 2. 文本与代码专业预览/编辑器（行号与内容滚动同步/智能语言识别/搜索高亮/换行切换/字号缩放/一键复制/Markdown精美排版/Ctrl+S云端回传/状态栏）
+// 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
 // 3. 音频播放与 PDF 嵌入
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { PreviewURL, openKindOf, formatBytes, saveCloudText, copyText } from '../api'
+import { PreviewURL, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf } from '../api'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import UiIcon from './UiIcon.vue'
@@ -25,6 +25,7 @@ const editContent = ref('')
 const saving = ref(false)
 const loading = ref(true)
 const error = ref('')
+const isMaximized = ref(false) // 窗口最大化/全屏状态
 
 // ---------- 图片画廊状态 ----------
 const imageList = computed(() => {
@@ -108,8 +109,8 @@ const isMarkdownFile = computed(() => {
 
 // 文本模式：'preview' (代码/文本预览) | 'markdown' (文档渲染) | 'edit' (在线编辑)
 const textMode = ref('preview')
-const fontSize = ref(13)
-const wordWrap = ref(false)
+const fontSize = ref(13.5)
+const wordWrap = ref(false) // 默认不自动换行，保持宽敞横向滚动，避免长行频繁被折断
 const showLineNumbers = ref(true)
 const encoding = ref('UTF-8')
 const copiedFull = ref(false)
@@ -189,11 +190,11 @@ const matchCount = computed(() => {
   let count = 0
   const kwLower = kw.toLowerCase()
   for (const line of textLines.value) {
-    let pos = 0
+    let p = 0
     const lower = line.toLowerCase()
-    while ((pos = lower.indexOf(kwLower, pos)) !== -1) {
+    while ((p = lower.indexOf(kwLower, p)) !== -1) {
       count++
-      pos += kwLower.length
+      p += kwLower.length
     }
   }
   return count
@@ -290,7 +291,6 @@ function handleCloseRequest() {
 // ---------- 轻量安全 Markdown 解析器 ----------
 function renderMarkdown(src) {
   if (!src) return ''
-  // 基础 XSS 转义
   let md = src
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -306,10 +306,10 @@ function renderMarkdown(src) {
     return `<!--CODEBLOCK_${idx}-->`
   })
 
-  // 行内代码 (`code`)
+  // 行内代码
   md = md.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
 
-  // 标题 (# H1 - ###### H6)
+  // 标题
   md = md.replace(/^###### (.*$)/gim, '<h6 class="md-h6">$1</h6>')
   md = md.replace(/^##### (.*$)/gim, '<h5 class="md-h5">$1</h5>')
   md = md.replace(/^#### (.*$)/gim, '<h4 class="md-h4">$1</h4>')
@@ -320,26 +320,26 @@ function renderMarkdown(src) {
   // 分割线
   md = md.replace(/^---$/gim, '<hr class="md-hr" />')
 
-  // 引用 (> quote)
+  // 引用
   md = md.replace(/^\> (.*$)/gim, '<blockquote class="md-quote">$1</blockquote>')
 
-  // 粗体 / 斜体 / 删除线
+  // 格式
   md = md.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
   md = md.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
   md = md.replace(/\*(.*?)\*/g, '<em>$1</em>')
   md = md.replace(/~~(.*?)~~/g, '<del>$1</del>')
 
-  // 任务列表 (- [ ] / - [x])
+  // 任务列表
   md = md.replace(/^- \[x\] (.*$)/gim, '<li class="md-task-item"><span class="md-task-box checked">✓</span> <span>$1</span></li>')
   md = md.replace(/^- \[ \] (.*$)/gim, '<li class="md-task-item"><span class="md-task-box"></span> <span>$1</span></li>')
 
-  // 无序列表
+  // 列表
   md = md.replace(/^[-\*] (.*$)/gim, '<li class="md-list-item">$1</li>')
 
   // 链接
   md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>')
 
-  // 段落换行
+  // 段落
   md = md.replace(/\n\n/g, '<div class="md-gap"></div>')
   md = md.replace(/\n/g, '<br />')
 
@@ -412,7 +412,7 @@ onBeforeUnmount(() => {
   if (activeDragCleanup) activeDragCleanup()
 })
 
-// 文本编码探测 (UTF-8 优先，超标 U+FFFD 回退 GBK，BOM 识别)
+// 文本编码探测
 function decodeText(buf) {
   const u8 = new Uint8Array(buf)
   if (u8.length >= 3 && u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) {
@@ -436,12 +436,48 @@ function decodeText(buf) {
 
 <template>
   <Modal
-    :title="activeFile.name"
+    :dialog-class="'preview-modal ' + (isMaximized ? 'is-maximized' : '')"
     width=""
     @close="handleCloseRequest"
     body-class="preview-body"
-    class="preview-modal-host"
   >
+    <!-- 自定义高级弹窗头部 -->
+    <template #head>
+      <div class="pv-head-custom">
+        <div class="pv-head-icon" :class="'ft-' + iconOf(activeFile)">
+          <UiIcon :name="iconOf(activeFile)" :size="20" />
+        </div>
+        <div class="pv-head-meta">
+          <div class="pv-head-title" :title="activeFile.name">
+            <span>{{ activeFile.name }}</span>
+            <span v-if="isModified" class="pv-head-unsaved" title="有未保存的修改">*</span>
+          </div>
+          <div class="pv-head-sub">
+            <span>{{ formatBytes(activeFile.size) }}</span>
+            <span class="pv-head-sep">·</span>
+            <span>修改时间: {{ formatTime(activeFile.time) }}</span>
+            <template v-if="kind === 'text'">
+              <span class="pv-head-sep">·</span>
+              <span class="pv-head-pill">{{ langMeta }}</span>
+              <span class="pv-head-pill">{{ encoding }}</span>
+            </template>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 头部右侧操作扩展（最大化/全屏按钮） -->
+    <template #head-extra>
+      <button
+        class="icon-btn"
+        style="width:28px;height:28px"
+        :title="isMaximized ? '还原窗口' : '最大化窗口'"
+        @click="isMaximized = !isMaximized"
+      >
+        <UiIcon :name="isMaximized ? 'close' : 'plus'" :size="13" />
+      </button>
+    </template>
+
     <!-- 顶部悬浮工具条 -->
     <div class="pv-toolbar">
       <!-- 1. 图片画廊工具 -->
@@ -471,7 +507,7 @@ function decodeText(buf) {
             :class="{ active: textMode === 'markdown' }"
             @click="textMode = 'markdown'"
           >
-            <UiIcon name="info" :size="12" /> Markdown 视图
+            <UiIcon name="info" :size="12" /> Markdown 渲染
           </button>
           <button
             class="pv-seg-btn"
@@ -491,9 +527,6 @@ function decodeText(buf) {
 
         <span class="pv-sep"></span>
 
-        <!-- 语言/格式徽标 -->
-        <span class="pv-lang-badge">{{ langMeta }}</span>
-
         <!-- 复制全文 -->
         <button class="tbtn xs" :title="'复制全部文本内容'" @click="copyAllText">
           <UiIcon v-if="copiedFull" name="check" :size="12" class="icon-check-pop" />
@@ -506,11 +539,11 @@ function decodeText(buf) {
           v-if="textMode !== 'markdown'"
           class="tbtn xs"
           :class="{ active: wordWrap }"
-          :title="wordWrap ? '当前：自动换行' : '当前：单行不换行'"
+          :title="wordWrap ? '当前：自动折行（点击切换为单行连续横向滚动）' : '当前：单行连续横向滚动（点击切换为自动折行）'"
           @click="wordWrap = !wordWrap"
         >
           <UiIcon name="list" :size="12" />
-          <span>换行: {{ wordWrap ? '开' : '关' }}</span>
+          <span>自动换行: {{ wordWrap ? '已开启' : '已关闭' }}</span>
         </button>
 
         <!-- 字号调节 -->
@@ -681,7 +714,7 @@ function decodeText(buf) {
           <div class="pv-sb-section">
             <span class="pv-sb-item">{{ encoding }}</span>
             <span class="pv-sb-item">{{ lineEnding }}</span>
-            <span class="pv-sb-item">Spaces: 2</span>
+            <span class="pv-sb-item">{{ wordWrap ? '自动换行' : '不换行' }}</span>
             <span class="pv-sb-item pv-sb-lang">{{ langMeta }}</span>
           </div>
         </footer>
@@ -702,13 +735,64 @@ function decodeText(buf) {
 </template>
 
 <style scoped>
-:deep(.modal) {
-  width: 960px;
-  max-width: 95vw;
-  height: 86vh;
+/* 弹窗头部自适应高级排布 */
+.pv-head-custom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.pv-head-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+.pv-head-meta {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
 }
+.pv-head-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pv-head-unsaved {
+  color: var(--color-warning);
+  font-weight: 800;
+  font-size: 16px;
+}
+.pv-head-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.pv-head-sep { opacity: 0.6; }
+.pv-head-pill {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .preview-body {
   position: relative;
   flex: 1;
@@ -723,15 +807,15 @@ function decodeText(buf) {
 .pv-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
+  gap: 10px;
+  padding: 8px 18px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
   flex-wrap: wrap;
 }
 .pv-counter { font-size: 12.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-.pv-sep { width: 1px; height: 16px; background: var(--border-light); margin: 0 4px; }
+.pv-sep { width: 1px; height: 18px; background: var(--border-light); margin: 0 4px; }
 .pv-zoom-text { font-size: 12px; color: var(--text-secondary); min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
 .pv-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
@@ -740,19 +824,19 @@ function decodeText(buf) {
   display: inline-flex;
   background: var(--bg-subtle);
   border-radius: var(--radius-sm);
-  padding: 2px;
-  gap: 2px;
+  padding: 2.5px;
+  gap: 3px;
 }
 .pv-seg-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  font-size: 12px;
+  gap: 5px;
+  padding: 4px 11px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   transition: all var(--motion-fast) var(--motion-ease);
 }
@@ -764,15 +848,6 @@ function decodeText(buf) {
   box-shadow: var(--shadow-sm);
 }
 
-.pv-lang-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  color: var(--color-primary);
-}
-
 .pv-font-size-group {
   display: inline-flex;
   align-items: center;
@@ -781,7 +856,7 @@ function decodeText(buf) {
   border-radius: var(--radius-sm);
   padding: 1px 4px;
 }
-.pv-fs-val { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-secondary); padding: 0 2px; }
+.pv-fs-val { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-secondary); padding: 0 3px; }
 
 .pv-modified-hint {
   display: inline-flex;
@@ -804,25 +879,25 @@ function decodeText(buf) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 7px 18px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border-light);
   animation: modal-fade-enter 160ms var(--motion-ease);
 }
 .pv-search-input {
   flex: 1;
-  max-width: 320px;
-  height: 26px;
+  max-width: 360px;
+  height: 28px;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
-  padding: 0 8px;
-  font-size: 12.5px;
+  padding: 0 10px;
+  font-size: 13px;
   background: var(--control-bg);
   color: var(--text-primary);
   outline: none;
 }
 .pv-search-input:focus { border-color: var(--border-focus); box-shadow: var(--ring-focus); }
-.pv-search-count { font-size: 12px; color: var(--text-tertiary); }
+.pv-search-count { font-size: 12.5px; color: var(--text-tertiary); }
 .pv-search-hit {
   background: color-mix(in srgb, var(--color-warning) 50%, transparent);
   color: inherit;
@@ -845,30 +920,30 @@ function decodeText(buf) {
   display: flex;
   background: var(--bg-surface);
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Consolas, monospace;
-  line-height: 22px;
+  line-height: 24px;
   overflow: hidden;
   position: relative;
 }
 
 /* 行号栏 */
 .pv-gutter {
-  width: 52px;
+  width: 56px;
   flex-shrink: 0;
   background: var(--bg-subtle);
   border-right: 1px solid var(--border-light);
-  padding: 10px 0;
+  padding: 12px 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  padding-right: 10px;
+  padding-right: 12px;
   color: var(--text-tertiary);
   user-select: none;
   overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
 .pv-gutter-line {
-  height: 22px;
-  line-height: 22px;
+  height: 24px;
+  line-height: 24px;
 }
 
 /* 查看与编辑内容区 */
@@ -876,13 +951,13 @@ function decodeText(buf) {
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 10px 16px;
+  padding: 12px 20px;
   margin: 0;
   border: none;
   background: transparent;
   color: var(--text-primary);
   font-family: inherit;
-  line-height: 22px;
+  line-height: 24px;
   outline: none;
   resize: none;
   overflow: auto;
@@ -895,12 +970,12 @@ function decodeText(buf) {
   word-break: break-all;
 }
 .pv-code-line {
-  height: 22px;
-  line-height: 22px;
+  height: 24px;
+  line-height: 24px;
 }
 .pv-code-view.wrap .pv-code-line {
   height: auto;
-  min-height: 22px;
+  min-height: 24px;
 }
 
 /* Markdown 文档渲染视图 */
@@ -908,32 +983,32 @@ function decodeText(buf) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px 36px 48px;
+  padding: 28px 48px 64px;
   background: var(--bg-surface);
   color: var(--text-primary);
-  font-size: 14.5px;
-  line-height: 1.75;
+  font-size: 15px;
+  line-height: 1.8;
   user-select: text;
-  max-width: 860px;
+  max-width: 920px;
   margin: 0 auto;
   width: 100%;
 }
-:deep(.md-h1) { font-size: 24px; font-weight: 750; margin: 16px 0 12px; border-bottom: 1px solid var(--border-light); padding-bottom: 8px; color: var(--text-primary); }
-:deep(.md-h2) { font-size: 20px; font-weight: 700; margin: 18px 0 10px; border-bottom: 1px solid var(--border-lighter); padding-bottom: 6px; color: var(--text-primary); }
-:deep(.md-h3) { font-size: 17px; font-weight: 650; margin: 14px 0 8px; color: var(--text-primary); }
-:deep(.md-h4) { font-size: 15px; font-weight: 650; margin: 12px 0 6px; color: var(--text-primary); }
-:deep(.md-h5), :deep(.md-h6) { font-size: 14px; font-weight: 600; margin: 10px 0 4px; color: var(--text-secondary); }
+:deep(.md-h1) { font-size: 26px; font-weight: 750; margin: 18px 0 12px; border-bottom: 1px solid var(--border-light); padding-bottom: 8px; color: var(--text-primary); }
+:deep(.md-h2) { font-size: 21px; font-weight: 700; margin: 20px 0 10px; border-bottom: 1px solid var(--border-lighter); padding-bottom: 6px; color: var(--text-primary); }
+:deep(.md-h3) { font-size: 18px; font-weight: 650; margin: 16px 0 8px; color: var(--text-primary); }
+:deep(.md-h4) { font-size: 16px; font-weight: 650; margin: 14px 0 6px; color: var(--text-primary); }
+:deep(.md-h5), :deep(.md-h6) { font-size: 14.5px; font-weight: 600; margin: 12px 0 4px; color: var(--text-secondary); }
 :deep(.md-inline-code) {
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 13.5px;
   font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
   background: var(--bg-subtle);
   color: var(--color-primary);
   border: 1px solid var(--border-lighter);
 }
 :deep(.md-code-block) {
-  margin: 12px 0;
+  margin: 14px 0;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
   overflow: hidden;
@@ -943,54 +1018,54 @@ function decodeText(buf) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 5px 14px;
   background: var(--bg-subtle);
   border-bottom: 1px solid var(--border-lighter);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-tertiary);
   font-weight: 600;
   text-transform: uppercase;
 }
 :deep(.md-code-block pre) {
-  padding: 12px 14px;
+  padding: 14px 16px;
   margin: 0;
   overflow-x: auto;
   font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.65;
 }
 :deep(.md-quote) {
-  border-left: 3px solid var(--color-primary);
-  margin: 10px 0;
-  padding: 4px 14px;
+  border-left: 3.5px solid var(--color-primary);
+  margin: 12px 0;
+  padding: 6px 16px;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--color-primary) 6%, transparent);
   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 }
 :deep(.md-link) { color: var(--color-primary); text-decoration: none; font-weight: 500; }
 :deep(.md-link:hover) { text-decoration: underline; }
-:deep(.md-hr) { border: none; border-top: 1px solid var(--border-light); margin: 20px 0; }
-:deep(.md-list-item) { margin-left: 20px; list-style: disc; margin-bottom: 4px; }
-:deep(.md-task-item) { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+:deep(.md-hr) { border: none; border-top: 1px solid var(--border-light); margin: 24px 0; }
+:deep(.md-list-item) { margin-left: 22px; list-style: disc; margin-bottom: 5px; }
+:deep(.md-task-item) { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
 :deep(.md-task-box) { width: 15px; height: 15px; border: 1.5px solid var(--control-border); border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
 :deep(.md-task-box.checked) { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
-:deep(.md-gap) { height: 10px; }
+:deep(.md-gap) { height: 12px; }
 
 /* 底部状态栏 (Status bar) */
 .pv-statusbar {
   display: flex;
   align-items: center;
-  height: 24px;
-  padding: 0 12px;
+  height: 26px;
+  padding: 0 14px;
   background: var(--bg-subtle);
   border-top: 1px solid var(--border-light);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-tertiary);
   user-select: none;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
-.pv-sb-section { display: flex; align-items: center; gap: 12px; }
+.pv-sb-section { display: flex; align-items: center; gap: 14px; }
 .pv-sb-item { display: inline-flex; align-items: center; gap: 4px; }
 .pv-sb-pos { color: var(--text-secondary); font-weight: 500; }
 .pv-sb-spacer { flex: 1; }
@@ -1025,12 +1100,12 @@ function decodeText(buf) {
 /* 底部胶卷 */
 .pv-filmstrip {
   position: absolute;
-  bottom: 12px;
+  bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 6px 12px;
   background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-light);
@@ -1042,8 +1117,8 @@ function decodeText(buf) {
 }
 .pv-filmstrip::-webkit-scrollbar { display: none; }
 .pv-film-thumb {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   cursor: pointer;
@@ -1061,8 +1136,8 @@ function decodeText(buf) {
 
 /* PDF & Audio */
 .pv-pdf-frame { width: 100%; height: 100%; border: none; background: #525659; }
-.pv-audio-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px; }
-.pv-audio-disc { width: 96px; height: 96px; border-radius: 50%; background: var(--bg-subtle); border: 2px solid var(--border-light); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
-.pv-audio-name { font-size: 15px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 480px; }
-.pv-audio-player { width: min(440px, 90%); }
+.pv-audio-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 36px; }
+.pv-audio-disc { width: 104px; height: 104px; border-radius: 50%; background: var(--bg-subtle); border: 2px solid var(--border-light); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
+.pv-audio-name { font-size: 16px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 520px; }
+.pv-audio-player { width: min(480px, 90%); }
 </style>
