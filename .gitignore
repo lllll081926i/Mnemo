@@ -10,3 +10,6 @@ secrets.json
 frontend/package.json.md5
 .idea/
 .vscode/
+internal/engine/win32/mpv/mpv.exe
+internal/engine/*/mpv/mpv.exe
+internal/engine/**/*.exe
