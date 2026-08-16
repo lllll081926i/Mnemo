@@ -40,6 +40,13 @@ function enter(d) {
   load(d.file_id)
 }
 
+function goUp() {
+  if (crumbs.value.length > 1) {
+    crumbs.value.pop()
+    load(crumbs.value[crumbs.value.length - 1].id)
+  }
+}
+
 function jump(i) {
   crumbs.value = crumbs.value.slice(0, i + 1)
   load(crumbs.value[i].id)
@@ -65,6 +72,9 @@ onMounted(() => load(rootKey))
       </div>
       <div v-else-if="error" class="empty" style="padding:40px">{{ error }}</div>
       <div v-else-if="!dirs.length" class="empty" style="padding:40px">此目录下没有子文件夹</div>
+      <div v-if="!loading && crumbs.length > 1" class="tree-node" style="color:var(--text-tertiary)" @click="goUp">
+        <UiIcon name="up-level" :size="15" /><span class="tn-label">返回上级</span>
+      </div>
       <div v-for="d in dirs" :key="d.file_id" class="tree-node" @click="enter(d)">
         <UiIcon name="folder" :size="15" /><span class="tn-label">{{ d.name }}</span>
         <span style="margin-left:auto;color:var(--text-tertiary)"><UiIcon name="chevron-right" :size="13" /></span>

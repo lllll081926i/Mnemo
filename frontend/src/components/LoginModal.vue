@@ -11,6 +11,19 @@ const form = ref({})
 const mountedForm = ref({ name: '', endpoint: '', username: '', password: '', bucket: '', region: '', basePath: '' })
 const busy = ref(false)
 const smsBusy = ref(false)
+const smsCountdown = ref(0)
+let smsTimer = null
+function startSmsCountdown() {
+  smsCountdown.value = 60
+  if (smsTimer) clearInterval(smsTimer)
+  smsTimer = setInterval(() => {
+    smsCountdown.value--
+    if (smsCountdown.value <= 0) {
+      clearInterval(smsTimer)
+      smsTimer = null
+    }
+  }, 1000)
+}
 const errorText = ref('')
 
 const provider = computed(() => props.providers.find((p) => p.ID === providerId.value) || props.providers[0])
@@ -69,8 +82,9 @@ async function sendSms() {
     form.value.verification_id = r.verification_id
     form.value.device_id = r.device_id
     emit('toast', '验证码已发送', 'success')
-  } catch (e) { errorText.value = String(e) }
+  } catch (e) { errorText.value = String(e); return }
   smsBusy.value = false
+  startSmsCountdown()
 }
 
 function validate() {
@@ -175,7 +189,7 @@ async function submit() {
                   <button
                     v-if="providerId === 'guangya' && f.key === 'sms_code'"
                     class="btn sm" style="margin-top:8px" :disabled="smsBusy" type="button" @click="sendSms"
-                  >{{ smsBusy ? '发送中…' : '获取验证码' }}</button>
+                  >{{ smsBusy ? '发送中…' : (smsCountdown.value > 0 ? smsCountdown.value + 's 后重发' : '获取验证码') }}</button>
                 </div>
                 <div v-if="!fields.length" class="hint" style="color:var(--text-tertiary);font-size: 13px">该网盘无需填写表单，直接点击登录。</div>
               </template>

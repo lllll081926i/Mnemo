@@ -9,6 +9,7 @@ import {
 } from '../../wailsjs/go/app/App'
 import { getPrefs } from '../appearance'
 import UiIcon from './UiIcon.vue'
+import UiSelect from './UiSelect.vue'
 
 const props = defineProps({
   account: { type: Object, required: true },
@@ -125,11 +126,19 @@ async function cycleSpeed() {
   speed.value = SPEEDS[(i + 1) % SPEEDS.length]
   await SetPlayerSpeed(speed.value).catch((e) => emit('toast', String(e), 'error'))
 }
+const speedOptions = SPEEDS.map((s) => ({ value: s, label: s + 'x' }))
+async function onSpeedChange(v) {
+  speed.value = v
+  await SetPlayerSpeed(v).catch((e) => emit('toast', String(e), 'error'))
+}
 
 async function close() {
   // 保存续播位置（开头/结尾附近不记）
   if (started.value && position.value > 5 && (duration.value <= 0 || position.value < duration.value - 10)) {
     SavePlayCursor(props.account.user_id, props.account.drive_id, props.file.file_id, position.value).catch(() => {})
+  } else if (started.value && duration.value > 0 && position.value >= duration.value - 10) {
+    // finished: clear the resume cursor so next play starts from the beginning
+    SavePlayCursor(props.account.user_id, props.account.drive_id, props.file.file_id, 0).catch(() => {})
   }
   await StopPlayer().catch(() => {})
   emit('close')
@@ -160,7 +169,7 @@ async function close() {
           <button class="btn-circle" :title="`快进 ${seekStep} 秒`" @click="seekBy(seekStep)"><UiIcon name="forward" :size="14" /></button>
           <span class="pp-time">{{ posText }}<template v-if="duration > 0"> / {{ durText }}</template></span>
           <div class="pp-spacer"></div>
-          <button class="tbtn pp-speed" title="切换倍速" @click="cycleSpeed">{{ speed }}x</button>
+          <UiSelect v-model="speed" :options="speedOptions" @update:modelValue="onSpeedChange" class="pp-speed-sel" />
           <span class="pp-vol">
             <UiIcon name="volume" :size="14" />
             <input type="range" min="0" max="100" :value="volume" @input="onVolume" />

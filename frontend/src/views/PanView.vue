@@ -13,6 +13,7 @@ import Modal from '../components/Modal.vue'
 import SelectDirModal from '../components/SelectDirModal.vue'
 import PreviewModal from '../components/PreviewModal.vue'
 import RenameMultiModal from '../components/RenameMultiModal.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import PlayerPanel from '../components/PlayerPanel.vue'
@@ -106,6 +107,12 @@ const treeSelected = ref('root')
 const modal = ref(null) // mkdir | rename | renamemulti | share | upload | offline | migrate | movedir | copydir | preview | detail | download
 const modalBusy = ref(false)
 const modalFile = ref(null)
+// confirm dialog state: { message, okText, danger, onOk }
+const confirmDialog = ref(null)
+function askConfirm(message, onOk, opts) {
+  confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', danger: opts?.danger || false, title: opts?.title || '确认操作' }
+}
+function closeConfirm() { confirmDialog.value = null }
 const inputText = ref('')
 const shareForm = ref({ name: '', expiration: '', password: '' })
 const migrateTarget = ref('') // 目标账号 user_id
@@ -399,7 +406,7 @@ async function openFile(file) {
     modalFile.value = file
     modal.value = 'player'
   } else if (kind === 'download') {
-    emit('toast', '此格式不支持在线预览，请下载后本地打开', 'info')
+    askConfirm(`“${file.name}”不支持在线预览，是否下载到本地？`, () => doDownload([file]), { okText: '下载', title: '无法预览' })
   } else {
     modalFile.value = file
     modal.value = 'preview'
@@ -532,8 +539,7 @@ function onMenuSelect(action) {
     case 'migrate': modalFile.value = list; migrateTarget.value = ''; migrateDir.value = 'root'; migrateDirName.value = '根目录'; migrateDirPick.value = false; modal.value = 'migrate'; break
     case 'trash': run(() => trash(uid.value, did.value, ids), '已移入回收站'); break
     case 'delete':
-      if (!confirm(`彻底删除 ${list.length} 项？删除后无法还原。`)) return
-      run(() => remove(uid.value, did.value, ids), '已彻底删除')
+      askConfirm(`彻底删除 ${list.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
       break
     case 'restore': run(() => restore(uid.value, did.value, ids), '已还原'); break
     case 'copyname': copyText(file.name).then(() => emit('toast', '已复制文件名', 'success')); break
@@ -663,8 +669,7 @@ function openShareModal() {
 
 function confirmDeleteSelected() {
   if (!selected.value.length) return
-  if (!confirm(`彻底删除 ${selected.value.length} 项？删除后无法还原。`)) return
-  run(() => remove(uid.value, did.value, selIds()), '已彻底删除')
+  askConfirm(`彻底删除 ${selected.value.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, selIds()), '已彻底删除'), { danger: true, title: '彻底删除' })
 }
 
 // ---------- 收藏打开 ----------
@@ -762,16 +767,25 @@ function onKey(e) {
   else if (e.code === 'Delete' && selected.value.length && caps.value.recycleBin && mode.value !== 'trash') {
     run(() => trash(uid.value, did.value, selIds()), '已移入回收站'); e.preventDefault()
   }
-  else if (e.ctrlKey && e.code === 'KeyS' && selected.value.length && caps.value.createShare) { openShareModal(); e.preventDefault() }
+  else if (e.ctrlKey && e.shiftKey && e.code === 'KeyS' && selected.value.length && caps.value.createShare) { openShareModal(); e.preventDefault() }
   else if (e.code === 'Enter' && selected.value.length === 1) { onRowOpen(selected.value[0]); e.preventDefault() }
   else if (e.code === 'ArrowDown' || e.code === 'ArrowUp') {
     const list = listShown.value
     if (!list.length) return
-    const cur = selected.value.length ? list.findIndex((f) => f.file_id === selected.value[selected.value.length - 1].file_id) : -1
-    const next = e.code === 'ArrowDown' ? Math.min(list.length - 1, cur + 1) : Math.max(0, cur - 1)
-    selected.value = [list[next]]
+    // move focus only (don't auto-select); Space toggles selection, Enter opens
+    const cur = focusId.value ? list.findIndex((f) => f.file_id === focusId.value) : -1
+    const start = cur >= 0 ? cur : (selected.value.length ? list.findIndex((f) => f.file_id === selected.value[selected.value.length - 1].file_id) : 0)
+    const next = e.code === 'ArrowDown' ? Math.min(list.length - 1, start + 1) : Math.max(0, start - 1)
     focusId.value = list[next].file_id
     e.preventDefault()
+  }
+  else if (e.code === 'Space' && focusId.value) {
+    const f = listShown.value.find((x) => x.file_id === focusId.value)
+    if (f) { toggleSel(f); e.preventDefault() }
+  }
+  else if (e.code === 'Enter' && focusId.value) {
+    const f = listShown.value.find((x) => x.file_id === focusId.value)
+    if (f) { openFile(f); e.preventDefault() }
   }
 }
 
@@ -931,7 +945,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="toppanbtn" v-if="selected.length">
               <button v-if="caps.download" class="tbtn" @click="doDownload()"><UiIcon name="download" :size="15" />下载</button>
-              <button v-if="caps.createShare" class="tbtn" title="分享 (Ctrl+S)" @click="openShareModal"><UiIcon name="share" :size="15" />分享</button>
+              <button v-if="caps.createShare" class="tbtn" title="分享 (Ctrl+Shift+S)" @click="openShareModal"><UiIcon name="share" :size="15" />分享</button>
               <button class="tbtn" @click="toggleFav(selected[0])"><UiIcon name="star" :size="15" />{{ isFav(selected[0]) && selected.length === 1 ? '移出收藏' : '收藏' }}</button>
               <button v-if="caps.move" class="tbtn" @click="modalFile = [...selected]; modal = 'movedir'"><UiIcon name="move" :size="15" />移动</button>
               <button v-if="caps.copy" class="tbtn" @click="modalFile = [...selected]; modal = 'copydir'"><UiIcon name="copy" :size="15" />复制</button>
@@ -1012,7 +1026,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="fileicon" :class="'ft-' + iconOf(f)"><UiIcon :name="iconOf(f)" :size="20" /></div>
               <div class="filename">
-                <div :title="f.name" @click.stop="onRowOpen(f)">
+                <div :title="f.name">
                   <template v-if="hlKeyword && nameParts(f.name)">
                     <template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
                   </template>
@@ -1034,6 +1048,10 @@ onBeforeUnmount(() => {
 
           <!-- 网格视图（旧版 griditem） -->
           <div v-else class="file-list gridlist">
+            <div v-if="mode === 'list' && pathStack.length" class="griditem up-dir" @click="goUp" @contextmenu.prevent>
+              <div class="gridicon ft-folder"><UiIcon name="folder" :size="48" /></div>
+              <div class="gridname" title="返回上级目录">返回上级目录</div>
+            </div>
             <div
               v-for="f in listShown"
               :key="f.file_id"
@@ -1063,7 +1081,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
               <UiIcon name="folder" :size="36" style="opacity:.4" />
-              <span class="wes-title">空目录</span>
+              <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有匹配的文件' : mode === 'favorite' ? '暂无收藏' : '空目录' }}</span>
             </div>
           </div>
         </DragDropZone>
@@ -1271,6 +1289,7 @@ onBeforeUnmount(() => {
         <button class="btn primary" @click="modal = null">关闭</button>
       </template>
     </Modal>
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
   </div>
 </template>
 
