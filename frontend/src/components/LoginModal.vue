@@ -118,6 +118,9 @@ function validate() {
   for (const f of fields.value) {
     if (f.required && !String(form.value[f.key] || '').trim()) return `请填写${f.label}`
   }
+  // 全可选字段的 provider 至少填一项
+  const allOpt = fields.value.length > 0 && fields.value.every((f) => !f.required)
+  if (allOpt && !fields.value.some((f) => String(form.value[f.key] || '').trim())) return '至少填写一个字段'
   return ''
 }
 

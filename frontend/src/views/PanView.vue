@@ -92,7 +92,6 @@ function sideUp() {
   document.body.style.userSelect = ''
   setPref('sideWidth', sideWidth.value)
 }
-if (typeof window !== 'undefined') { /* listeners added in onMounted */ }
 const menu = ref(null)
 const favorites = ref([])
 const favExpanded = ref(false)
@@ -167,6 +166,11 @@ async function load(id) {
     // 时序保护：过期响应（账号/目录已切换或有更新请求）直接丢弃
     if (seq !== loadSeq) return
     files.value = list
+    // 清理当前目录已不存在的缩略图错误标记，避免瞬时失败被永久记住
+    const validIds = new Set(list.map((f) => f.file_id))
+    const nextErr = {}
+    for (const k in thumbErrors.value) if (validIds.has(k)) nextErr[k] = thumbErrors.value[k]
+    thumbErrors.value = nextErr
     cacheDir(ckey, list)
   } catch (e) {
     if (seq !== loadSeq) return
@@ -178,12 +182,12 @@ async function load(id) {
 
 async function loadFavorites() {
   if (!props.account) { favorites.value = []; return }
-  const snapUid = uid.value
+  const snapUid = uid.value, snapDid = did.value
   try {
-    const list = (await ListFavorites(snapUid, did.value)) || []
-    if (snapUid === uid.value) favorites.value = list
+    const list = (await ListFavorites(snapUid, snapDid)) || []
+    if (snapUid === uid.value && snapDid === did.value) favorites.value = list
   }
-  catch { if (snapUid === uid.value) favorites.value = [] }
+  catch { if (snapUid === uid.value && snapDid === did.value) favorites.value = [] }
 }
 
 const displayFiles = computed(() => {
@@ -321,14 +325,14 @@ function treeChildren(id) { return tree.value[id] || [] }
 async function toggleTree(idOrNode, name) {
   const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
   expanded.value[id] = !expanded.value[id]
-  const snapUid = uid.value
+  const snapUid = uid.value, snapDid = did.value
   if (expanded.value[id] && !tree.value[id] && props.account) {
     try {
-      const list = await listDir(snapUid, did.value, id)
-      if (snapUid !== uid.value) return
+      const list = await listDir(snapUid, snapDid, id)
+      if (snapUid !== uid.value || snapDid !== did.value) return
       tree.value[id] = (list || []).filter((f) => f.isDir)
       for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
-    } catch { if (snapUid === uid.value) tree.value[id] = [] }
+    } catch { if (snapUid === uid.value && snapDid === did.value) tree.value[id] = [] }
   }
 }
 
@@ -336,14 +340,14 @@ async function toggleTree(idOrNode, name) {
 async function expandTree(id, name) {
   if (expanded.value[id]) return
   expanded.value[id] = true
-  const snapUid = uid.value
+  const snapUid = uid.value, snapDid = did.value
   if (!tree.value[id] && props.account) {
     try {
-      const list = await listDir(snapUid, did.value, id)
-      if (snapUid !== uid.value) return
+      const list = await listDir(snapUid, snapDid, id)
+      if (snapUid !== uid.value || snapDid !== did.value) return
       tree.value[id] = (list || []).filter((f) => f.isDir)
       for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
-    } catch { if (snapUid === uid.value) tree.value[id] = [] }
+    } catch { if (snapUid === uid.value && snapDid === did.value) tree.value[id] = [] }
   }
 }
 
@@ -433,7 +437,7 @@ function selIds() { return selected.value.map((f) => f.file_id) }
 
 let running = false
 async function run(fn, okMsg) {
-  if (running) return
+  if (running) return false
   running = true
   try {
     await fn()
@@ -441,9 +445,10 @@ async function run(fn, okMsg) {
     invalidateDirCache(uid.value, did.value, mode.value, dirId.value)
     refresh()
     loadFavorites()
+    return true
   } catch (e) {
     emit('toast', String(e), 'error')
-    throw e
+    return false
   } finally {
     running = false
   }
@@ -569,12 +574,13 @@ async function doMkdir() {
   if (!name || modalBusy.value) return
   modalBusy.value = true
   try {
-    await run(async () => {
+    if (await run(async () => {
       const r = await mkdir(uid.value, did.value, dirId.value, name)
       if (r && r.error) throw new Error(r.error)
-    }, '文件夹已创建')
-    modal.value = null
-    inputText.value = ''
+    }, '文件夹已创建')) {
+      modal.value = null
+      inputText.value = ''
+    }
   } finally { modalBusy.value = false }
 }
 
@@ -584,9 +590,10 @@ async function doRename() {
   const file = modalFile.value
   modalBusy.value = true
   try {
-    await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名')
-    modal.value = null
-    inputText.value = ''
+    if (await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名')) {
+      modal.value = null
+      inputText.value = ''
+    }
   } finally { modalBusy.value = false }
 }
 
@@ -604,7 +611,7 @@ async function doShare() {
   if (!list || modalBusy.value) return
   modalBusy.value = true
   try {
-    await run(async () => {
+    if (await run(async () => {
       const item = await createShare(uid.value, did.value, {
         fileIds: list.map((f) => f.file_id),
         shareName: shareForm.value.name,
@@ -617,8 +624,9 @@ async function doShare() {
         await copyText(text)
         emit('toast', '分享链接已复制到剪贴板', 'success')
       }
-    }, null)
-    modal.value = null
+    }, null)) {
+      modal.value = null
+    }
   } finally { modalBusy.value = false }
 }
 
@@ -642,9 +650,10 @@ async function doOffline() {
   if (!url || modalBusy.value) return
   modalBusy.value = true
   try {
-    await run(() => OfflineDownload(uid.value, did.value, url, ''), '已提交云离线任务')
-    modal.value = null
-    inputText.value = ''
+    if (await run(() => OfflineDownload(uid.value, did.value, url, ''), '已提交云离线任务')) {
+      modal.value = null
+      inputText.value = ''
+    }
   } finally { modalBusy.value = false }
 }
 
@@ -668,11 +677,12 @@ async function doMigrate() {
   if (!list || modalBusy.value) return
   modalBusy.value = true
   try {
-    await run(
+    if (await run(
       () => migrateFiles(uid.value, did.value, targetAcc.user_id, targetAcc.drive_id, migrateDir.value || 'root', list.map((f) => f.file_id), false),
       '迁移任务已创建'
-    )
-    modal.value = null
+    )) {
+      modal.value = null
+    }
   } finally { modalBusy.value = false }
 }
 

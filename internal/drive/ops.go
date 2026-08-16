@@ -266,7 +266,7 @@ func RenameBatch(userID, driveID string, fileRefs []FileRef, names []string) ([]
 		name := names[i]
 		r, err := d.Rename(context.Background(), c, ref.ID, name)
 		if err != nil {
-			out = append(out, RenameResult{FileID: ref.ID, ParentFileID: "", Name: name})
+			out = append(out, RenameResult{FileID: "", ParentFileID: "", Name: name})
 			continue
 		}
 		if r != nil {

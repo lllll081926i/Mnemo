@@ -45,6 +45,7 @@ const menus = computed(() => {
 
 watch(hasOffline, (v) => { if (!v && menu.value === 'offline') menu.value = 'downloading' })
 watch(menu, () => { selectedIds.value = new Set(); ctx.value.show = false })
+watch(filterUser, () => { selectedIds.value = new Set() })
 
 function accIcon(acc) { return providerIconUrl(providerMetaOf(acc, props.providers)) }
 function accLabel(acc) { return accountName(acc) }
@@ -248,56 +249,88 @@ const reveal = (t) => { if (t.localPath) RevealInFolder(t.localPath) }
 
 // 全部开始 / 全部暂停
 function startAll() {
-  activeDownloads.value.forEach((t) => {
-    if (t.status === 'paused' || t.status === 'failed') {
-      t.status = 'queued'
-      ResumeDownload(t.id).catch(() => {})
-    }
-  })
-  emit('toast', '已开始全部任务', 'success')
+  const targets = activeDownloads.value.filter((t) => t.status === 'paused' || t.status === 'failed')
+  const orig = new Map(targets.map((t) => [t.id, t.status]))
+  targets.forEach((t) => { t.status = 'queued' })
+  let failed = 0
+  Promise.all(targets.map((t) => ResumeDownload(t.id).catch(() => { failed++; return t })))
+    .then((res) => {
+      res.forEach((t) => { if (t) t.status = orig.get(t.id) })
+      if (failed) { emit('toast', `${failed} 个任务恢复失败`, 'error'); refresh() }
+      else if (targets.length) emit('toast', `已开始全部任务`, 'success')
+    })
 }
 
 function pauseAll() {
-  activeDownloads.value.forEach((t) => {
-    if (t.status === 'downloading' || t.status === 'queued') {
-      t.status = 'paused'
-      PauseDownload(t.id).catch(() => {})
-    }
-  })
-  emit('toast', '已暂停全部任务', 'warn')
+  const targets = activeDownloads.value.filter((t) => t.status === 'downloading' || t.status === 'queued')
+  const orig = new Map(targets.map((t) => [t.id, t.status]))
+  targets.forEach((t) => { t.status = 'paused' })
+  let failed = 0
+  Promise.all(targets.map((t) => PauseDownload(t.id).catch(() => { failed++; return t })))
+    .then((res) => {
+      res.forEach((t) => { if (t) t.status = orig.get(t.id) })
+      if (failed) { emit('toast', `${failed} 个任务暂停失败`, 'error'); refresh() }
+      else if (targets.length) emit('toast', `已暂停全部任务`, 'warn')
+    })
 }
 
 // 批量操作 (继续/暂停/取消/删除)
 function batchResume() {
-  selectedTasks.value.forEach((t) => {
-    t.status = 'queued'
-    ResumeDownload(t.id).catch(() => {})
-  })
-  emit('toast', `已恢复 ${selectedTasks.value.length} 个任务`, 'success')
+  const tasks = [...selectedTasks.value]
+  const orig = new Map(tasks.map((t) => [t.id, t.status]))
+  tasks.forEach((t) => { t.status = 'queued' })
+  let failed = 0
+  Promise.all(tasks.map((t) => ResumeDownload(t.id).catch(() => { failed++; return t })))
+    .then((res) => {
+      res.forEach((t) => { if (t) t.status = orig.get(t.id) })
+      if (failed) { emit('toast', `${failed} 个任务恢复失败`, 'error'); refresh() }
+      else emit('toast', `已恢复 ${tasks.length} 个任务`, 'success')
+    })
 }
 
 function batchPause() {
-  selectedTasks.value.forEach((t) => {
-    t.status = 'paused'
-    PauseDownload(t.id).catch(() => {})
-  })
-  emit('toast', `已暂停 ${selectedTasks.value.length} 个任务`, 'warn')
+  const tasks = [...selectedTasks.value]
+  const orig = new Map(tasks.map((t) => [t.id, t.status]))
+  tasks.forEach((t) => { t.status = 'paused' })
+  let failed = 0
+  Promise.all(tasks.map((t) => PauseDownload(t.id).catch(() => { failed++; return t })))
+    .then((res) => {
+      res.forEach((t) => { if (t) t.status = orig.get(t.id) })
+      if (failed) { emit('toast', `${failed} 个任务暂停失败`, 'error'); refresh() }
+      else emit('toast', `已暂停 ${tasks.length} 个任务`, 'warn')
+    })
 }
 
 function batchCancel() {
-  selectedTasks.value.forEach((t) => {
-    t.status = 'canceled'
-    CancelDownload(t.id).catch(() => {})
-  })
-  emit('toast', `已取消 ${selectedTasks.value.length} 个任务`, 'warn')
+  const tasks = [...selectedTasks.value]
+  const orig = new Map(tasks.map((t) => [t.id, t.status]))
+  tasks.forEach((t) => { t.status = 'canceled' })
+  let failed = 0
+  Promise.all(tasks.map((t) => CancelDownload(t.id).catch(() => { failed++; return t })))
+    .then((res) => {
+      res.forEach((t) => { if (t) t.status = orig.get(t.id) })
+      if (failed) { emit('toast', `${failed} 个任务取消失败`, 'error'); refresh() }
+      else emit('toast', `已取消 ${tasks.length} 个任务`, 'warn')
+    })
 }
 
 function batchRemove() {
-  const ids = new Set(selectedTasks.value.map((t) => t.id))
+  const tasks = [...selectedTasks.value]
+  const ids = new Set(tasks.map((t) => t.id))
+  const origList = [...downloads.value]
   downloads.value = downloads.value.filter((t) => !ids.has(t.id))
   selectedIds.value = new Set()
-  ids.forEach((id) => RemoveDownload(id).catch(() => {}))
-  emit('toast', `已删除 ${ids.size} 项记录`, 'success')
+  let failed = 0
+  Promise.all(Array.from(ids).map((id) => RemoveDownload(id).catch(() => { failed++ })))
+    .then(() => {
+      if (failed) {
+        downloads.value = origList
+        emit('toast', `${failed} 项记录删除失败`, 'error')
+        refresh()
+      } else {
+        emit('toast', `已删除 ${ids.size} 项记录`, 'success')
+      }
+    })
 }
 
 // 清除所有已完成下载
@@ -370,6 +403,12 @@ function askConfirm(message, onOk, opts) {
   confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', danger: opts?.danger || false, title: opts?.title || '确认操作' }
 }
 function closeConfirm() { confirmDialog.value = null }
+function handleConfirmOk() {
+  if (!confirmDialog.value) return
+  const cb = confirmDialog.value.onOk
+  closeConfirm()
+  cb && cb()
+}
 
 function onCtx(e, t) {
   ctx.value = { show: true, x: e.clientX, y: e.clientY, task: t }
@@ -960,7 +999,7 @@ onBeforeUnmount(() => {
       </template>
     </Modal>
 
-    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
   </div>
 </template>
 

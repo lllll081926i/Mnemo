@@ -48,7 +48,7 @@ watch(() => props.accounts, (list) => {
 }, { deep: true })
 
 function itemKey(h, idx) {
-  return `${h.account_id || ''}_${h.share_id || ''}_${h.share_url || ''}_${idx}`
+  return h.share_id || h.share_url || `${h.account_id || ''}_${idx}`
 }
 
 function metaOf(pid) {

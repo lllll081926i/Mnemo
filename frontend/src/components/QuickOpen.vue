@@ -2,7 +2,7 @@
 // 全局快捷命令面板 (Ctrl+P / Command+P)：
 // 支持模块跳转、网盘账号快切、快捷命令（刷新/上传/新建文件夹/明暗切换）
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { accountName, providerIconUrl, providerMetaOf } from '../api'
+import { accountName, providerIconUrl, providerMetaOf, providerOf } from '../api'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({

@@ -66,10 +66,10 @@ async function submit() {
     const refs = props.files.filter((f, i) => preview.value[i].changed).map((f) => ({ id: f.file_id, isDir: f.isDir }))
     const names = changed.map((p) => p.next)
     const results = await RenameBatch(props.account.user_id, props.account.drive_id, refs, names)
-    // RenameResult 无 error 字段：以「结果缺失或名称未变」判定失败
+    // RenameResult 失败路径 FileID 为空，成功时有值（后端约定）
     const list = results || []
     let ok = 0
-    changed.forEach((p, i) => { if (list[i] && list[i].name === p.next) ok++ })
+    changed.forEach((p, i) => { if (list[i] && list[i].file_id) ok++ })
     const failedCount = changed.length - ok
     if (failedCount) emit('toast', `${ok} 成功，${failedCount} 失败`, 'error')
     else emit('toast', `已重命名 ${ok} 项`, 'success')

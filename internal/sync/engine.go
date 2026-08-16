@@ -22,6 +22,7 @@ type Config struct {
 	DriveID           string `json:"drive_id"`
 	LocalDir          string `json:"local_dir"`
 	RemoteDir         string `json:"remote_dir"`
+	RemoteName        string `json:"remote_name"`
 	Direction         string `json:"direction"` // two-way | push | pull
 	Enabled           bool   `json:"enabled"`
 	IntervalMin       int    `json:"intervalMin"`       // scheduler interval in minutes; <=0 means no scheduling

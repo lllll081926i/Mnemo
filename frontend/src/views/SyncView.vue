@@ -71,7 +71,7 @@ function openEdit(job) {
     user_id: job.user_id || '',
     drive_id: job.drive_id || '',
     remote_dir: job.remote_dir || 'root',
-    remote_name: job.remote_dir && job.remote_dir !== 'root' ? job.remote_dir : '根目录',
+    remote_name: job.remote_name || (job.remote_dir && job.remote_dir !== 'root' ? job.remote_dir : '根目录'),
     direction: job.direction || 'two-way',
   }
   showEdit.value = true
@@ -109,6 +109,7 @@ async function save() {
       drive_id: form.value.drive_id,
       local_dir: form.value.local_dir.trim(),
       remote_dir: form.value.remote_dir || 'root',
+      remote_name: form.value.remote_name || '',
       direction: form.value.direction,
       enabled: editingId.value ? (jobs.value.find((j) => j.id === editingId.value) || {}).enabled !== false : true,
     })
@@ -213,7 +214,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <div class="sync-task-paths">
             <span class="sync-path" :title="job.local_dir">本地：{{ job.local_dir }}</span>
             <span style="color:var(--text-tertiary);flex-shrink:0">{{ dirArrow[job.direction] || '⇄' }}</span>
-            <span class="sync-path" :title="job.remote_dir">网盘：{{ accountOf(job) ? accountName(accountOf(job)) + ' / ' : '' }}{{ job.remote_dir === 'root' ? '根目录' : job.remote_dir }}</span>
+            <span class="sync-path" :title="job.remote_name || job.remote_dir">网盘：{{ accountOf(job) ? accountName(accountOf(job)) + ' / ' : '' }}{{ job.remote_name || (job.remote_dir === 'root' ? '根目录' : job.remote_dir) }}</span>
           </div>
           <div v-if="running.has(job.id) && progress[job.id]" class="sync-task-progress">
             <div class="progress-total">

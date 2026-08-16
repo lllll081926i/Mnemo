@@ -84,9 +84,10 @@ onBeforeUnmount(() => { clearTimeout(enterTimer); clearTimeout(leaveTimer); clea
 let refreshTimer = null
 async function silentRefresh() {
   if (!props.account || document.hidden) return
+  const snapUid = props.account.user_id
   try {
-    const acc = await RefreshAccount(props.account.user_id)
-    if (acc && acc.token) tok.value = acc.token
+    const acc = await RefreshAccount(snapUid)
+    if (snapUid === (props.account && props.account.user_id) && acc && acc.token) tok.value = acc.token
   } catch { /* 静默 */ }
 }
 watch(() => props.account && props.account.user_id, (uid) => {

@@ -79,14 +79,20 @@ function onBallPointerDown(e) {
     const y = Math.min(Math.max(ev.clientY - offY, 52), window.innerHeight - rect.height - 4)
     ballPos.value = { x, y }
   }
-  const onUp = () => {
+  const cleanup = () => {
     isBallDragging.value = false
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
+  }
+  const onUp = () => {
+    cleanup()
     if (!moved) switchTab('transfer')
   }
+  const onCancel = cleanup
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onCancel)
 }
 
 const tabs = [
@@ -114,8 +120,11 @@ function updateGlider() {
 }
 watch(tab, () => nextTick(updateGlider))
 
+let refreshEpoch = 0
 function refresh() {
+  const my = ++refreshEpoch
   listAccounts().then((list) => {
+    if (my !== refreshEpoch) return
     accounts.value = list || []
     if (current.value) {
       const found = accounts.value.find((a) => a.user_id === current.value.user_id)
@@ -209,7 +218,12 @@ onMounted(async () => {
       } else if (ev.kind === 'upload' && (t.status === 'uploading' || t.status === 'queued')) {
         ball.value = { down: (ball.value && ball.value.down) || 0, up: t.speed || 0 }
       } else if (t.status === 'completed' || t.status === 'failed' || t.status === 'canceled') {
-        ball.value = null
+        // 并发传输时仅清零当前方向速度，保留对侧；两方向均无活跃才隐藏
+        const cur = ball.value
+        if (!cur) return
+        const down = ev.kind === 'download' ? 0 : cur.down
+        const up = ev.kind === 'upload' ? 0 : cur.up
+        ball.value = (down || up) ? { down, up } : null
       }
     }),
   ]
