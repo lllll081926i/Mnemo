@@ -151,7 +151,7 @@ async function loadPreview() {
       const resp = await fetch(previewUrl)
       if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
       const buf = await resp.arrayBuffer()
-      if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，不支持在线预览')
+      if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，不支持在线预览，请下载后查看')
       text.value = decodeText(buf)
       editContent.value = text.value
     }
@@ -273,6 +273,7 @@ function decodeText(buf) {
             transform: `translate(${pos.x}px, ${pos.y}px) scale(${zoom}) rotate(${rotation}deg)`,
           }"
           draggable="false"
+          @dblclick="resetImageTransform"
         />
 
         <!-- 底部胶卷缩略图条 -->

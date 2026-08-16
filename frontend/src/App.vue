@@ -12,6 +12,7 @@ import UiIcon from './components/UiIcon.vue'
 import Modal from './components/Modal.vue'
 import LoginModal from './components/LoginModal.vue'
 import QuickOpen from './components/QuickOpen.vue'
+import ConfirmModal from './components/ConfirmModal.vue'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -47,6 +48,11 @@ async function saveThemePref() {
   } catch { /* 静默 */ }
 }
 const toasts = ref([])
+const confirmDialog = ref(null)
+function askConfirm(message, onOk, opts) {
+  confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', danger: opts?.danger || false, title: opts?.title || '确认操作' }
+}
+function closeConfirm() { confirmDialog.value = null }
 const ball = ref(null) // { down, up }
 const ballPos = ref(null) // { x, y } 拖动后的固定位置
 const isBallDragging = ref(false)
@@ -125,14 +131,15 @@ function providerLabel(acc) {
   return p ? p.Meta.label : providerOf(acc.user_id)
 }
 
-async function remove(acc) {
-  if (!confirm(`移除账号「${(acc.token && (acc.token.nick_name || acc.token.user_name)) || acc.user_id}」？本地记录将被删除。`)) return
-  try {
-    await removeAccount(acc.user_id)
-    if (current.value && current.value.user_id === acc.user_id) current.value = null
-    refresh()
-    toast('账号已移除', 'success')
-  } catch (e) { toast(String(e), 'error') }
+function remove(acc) {
+  askConfirm(`移除账号「${(acc.token && (acc.token.nick_name || acc.token.user_name)) || acc.user_id}」？本地记录将被删除。`, async () => {
+    try {
+      await removeAccount(acc.user_id)
+      if (current.value && current.value.user_id === acc.user_id) current.value = null
+      refresh()
+      toast('账号已移除', 'success')
+    } catch (e) { toast(String(e), 'error') }
+  }, { danger: true, title: '移除账号' })
 }
 
 function toast(msg, type = '') {
@@ -300,5 +307,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       <span v-if="ball.down">↓ {{ formatSpeed(ball.down) }}</span>
       <span v-if="ball.up">↑ {{ formatSpeed(ball.up) }}</span>
     </div>
+
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="closeConfirm(); confirmDialog.onOk()" @cancel="closeConfirm" />
   </div>
 </template>

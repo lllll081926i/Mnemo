@@ -116,6 +116,31 @@ function onBarClick(e) {
   SeekPlayer(position.value).catch((e2) => emit('toast', String(e2), 'error'))
 }
 
+// progress bar scrubbing: drag to preview position without spamming SeekPlayer
+let scrubbing = false
+function onBarDown(e) {
+  if (!started.value || duration.value <= 0) return
+  scrubbing = true
+  updateScrub(e)
+  window.addEventListener('mousemove', onScrubMove)
+  window.addEventListener('mouseup', onScrubUp)
+}
+function onScrubMove(e) { if (scrubbing) updateScrub(e) }
+function onScrubUp() {
+  if (!scrubbing) return
+  scrubbing = false
+  window.removeEventListener('mousemove', onScrubMove)
+  window.removeEventListener('mouseup', onScrubUp)
+  SeekPlayer(position.value).catch((e2) => emit('toast', String(e2), 'error'))
+}
+function updateScrub(e) {
+  const bar = document.querySelector('.pp-bar')
+  if (!bar) return
+  const r = bar.getBoundingClientRect()
+  const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+  position.value = ratio * duration.value
+}
+
 async function onVolume(e) {
   volume.value = Number(e.target.value)
   await SetPlayerVolume(volume.value).catch(() => {})
@@ -158,7 +183,7 @@ async function close() {
       <div v-else-if="error" class="pp-state"><div class="form-error" style="margin:0;flex:1"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div></div>
 
       <template v-else>
-        <div class="pp-bar" :class="{ disabled: duration <= 0 }" title="点击跳转" @click="onBarClick">
+        <div class="pp-bar" :class="{ disabled: duration <= 0 }" title="点击/拖拽跳转" @click="onBarClick" @mousedown="onBarDown">
           <div class="pp-bar-fill" :style="{ width: pct + '%' }"></div>
         </div>
         <div class="pp-controls">
