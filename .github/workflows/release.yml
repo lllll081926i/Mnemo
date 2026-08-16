@@ -1,0 +1,344 @@
+# Mnemo Release
+# - Trigger: tag v* or manual dispatch
+# - Never deletes existing GitHub Releases / assets (upload with --clobber only replaces same filename)
+# - Builds Windows (x64+arm64 Inno Setup), macOS (arm64), Linux (x64+arm64) in parallel
+
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.25'
+  NODE_VERSION: '20'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            platform: windows/amd64
+            artifact: Mnemo-windows-x64
+            arch: x64
+          - name: Windows arm64
+            os: windows-latest
+            platform: windows/arm64
+            artifact: Mnemo-windows-arm64
+            arch: arm64
+          - name: macOS arm64
+            os: macos-latest
+            platform: darwin/arm64
+            artifact: Mnemo-macos-arm64
+            arch: arm64
+          - name: Linux x64
+            os: ubuntu-22.04
+            platform: linux/amd64
+            artifact: Mnemo-linux-x64
+            arch: x64
+          - name: Linux arm64
+            os: ubuntu-22.04
+            platform: linux/arm64
+            artifact: Mnemo-linux-arm64
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      # ---------- mpv engine: download per-platform via secret URLs ----------
+      - name: Fetch mpv engine (Windows x64)
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        shell: bash
+        env:
+          MPV_WIN_X64_URL: ${{ secrets.MPV_WIN_X64_URL }}
+        run: |
+          set -euo pipefail
+          choco install 7zip -y --no-progress || true
+          export PATH="/c/Program Files/7-Zip:$PATH"
+          mkdir -p internal/engine/win32/mpv
+          url="${MPV_WIN_X64_URL}"
+          if [[ -z "${url}" ]]; then echo "MPV_WIN_X64_URL secret not set" >&2; exit 1; fi
+          curl -L --retry 5 -o mpv.7z "${url}"
+          7z x mpv.7z -ompv-extract -y
+          find mpv-extract -name "mpv.exe" -exec cp {} internal/engine/win32/mpv/mpv.exe \;
+          find mpv-extract -name "d3dcompiler_43.dll" -exec cp {} internal/engine/win32/mpv/ \; || true
+          test -f internal/engine/win32/mpv/mpv.exe && echo "mpv.exe OK" || { echo "mpv.exe missing"; exit 1; }
+
+      - name: Fetch mpv engine (Windows arm64)
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
+        shell: bash
+        env:
+          MPV_WIN_ARM64_URL: ${{ secrets.MPV_WIN_ARM64_URL }}
+        run: |
+          set -euo pipefail
+          choco install 7zip -y --no-progress || true
+          export PATH="/c/Program Files/7-Zip:$PATH"
+          mkdir -p internal/engine/win32/mpv
+          url="${MPV_WIN_ARM64_URL}"
+          if [[ -z "${url}" ]]; then echo "MPV_WIN_ARM64_URL secret not set" >&2; exit 1; fi
+          curl -L --retry 5 -o mpv.7z "${url}"
+          7z x mpv.7z -ompv-extract -y
+          find mpv-extract -name "mpv.exe" -exec cp {} internal/engine/win32/mpv/mpv.exe \;
+          test -f internal/engine/win32/mpv/mpv.exe && echo "mpv.exe OK" || { echo "mpv.exe missing"; exit 1; }
+
+      - name: Fetch mpv engine (macOS arm64)
+        if: runner.os == 'macOS'
+        env:
+          MPV_MAC_ARM64_URL: ${{ secrets.MPV_MAC_ARM64_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p internal/engine/darwin/mpv
+          url="${MPV_MAC_ARM64_URL}"
+          if [[ -z "${url}" ]]; then
+            brew install mpv
+            cp "$(which mpv)" internal/engine/darwin/mpv/mpv
+          else
+            curl -L --retry 5 -o mpv.tar.gz "${url}"
+            tar xzf mpv.tar.gz -C internal/engine/darwin/mpv --strip-components=1
+          fi
+          chmod +x internal/engine/darwin/mpv/mpv
+          test -f internal/engine/darwin/mpv/mpv && echo "mpv OK" || { echo "mpv missing"; exit 1; }
+
+      - name: Fetch mpv engine (Linux x64)
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
+        run: |
+          set -euo pipefail
+          mkdir -p internal/engine/linux/mpv
+          sudo apt-get update && sudo apt-get install -y mpv
+          cp "$(which mpv)" internal/engine/linux/mpv/mpv
+          chmod +x internal/engine/linux/mpv/mpv
+          test -f internal/engine/linux/mpv/mpv && echo "mpv OK" || { echo "mpv missing"; exit 1; }
+
+      - name: Fetch mpv engine (Linux arm64)
+        if: runner.os == 'Linux' && matrix.arch == 'arm64'
+        run: |
+          set -euo pipefail
+          mkdir -p internal/engine/linux/mpv
+          sudo apt-get update
+          sudo apt-get install -y mpv
+          cp "$(which mpv)" internal/engine/linux/mpv/mpv
+          chmod +x internal/engine/linux/mpv/mpv
+          test -f internal/engine/linux/mpv/mpv && echo "mpv OK" || { echo "mpv missing"; exit 1; }
+
+      # ---------- secrets.json: inject OAuth credentials ----------
+      - name: Generate secrets.json
+        shell: bash
+        env:
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ONEDRIVE_CLIENT_ID}" || -n "${DROPBOX_APP_KEY}" ]]; then
+            cat > secrets.json <<EOF
+          {
+            "onedrive_client_id": "${ONEDRIVE_CLIENT_ID}",
+            "dropbox_app_key": "${DROPBOX_APP_KEY}"
+          }
+          EOF
+            echo "secrets.json generated"
+          else
+            echo "no OAuth secrets provided, building without secrets.json"
+          fi
+
+      # ---------- build ----------
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build with Wails
+        shell: bash
+        run: wails build -platform ${{ matrix.platform }} -clean
+
+      # ---------- package ----------
+      - name: Create Inno Setup installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$ISCC" ]; then
+            choco install innosetup -y --no-progress
+            ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          fi
+          "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss || "$ISCC" build/windows/installer.iss
+
+      - name: Rename installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p build/installer
+          if [ -f build/installer/MnemoSetup.exe ]; then
+            mv build/installer/MnemoSetup.exe "build/installer/${{ matrix.artifact }}-Setup.exe"
+          fi
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd build/bin
+          7z a "../../${{ matrix.artifact }}.zip" *
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build/bin
+          tar czf "../../${{ matrix.artifact }}.tar.gz" *
+
+      - name: Package (Linux — multi-format parallel)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          cd build/bin
+          # 1. tar.gz (always)
+          tar czf "../../${{ matrix.artifact }}.tar.gz" * &
+          # 2. install nfpm for deb + rpm
+          curl -fsSL https://nfpm.goreleaser.com/static.php -o /tmp/nfpm
+          chmod +x /tmp/nfpm
+          arch="$(dpkg --print-architecture)"
+          # nfpm config uses {{.Arch}} placeholder; substitute
+          sed "s/{{.Arch}}/${arch}/" ../../build/linux/nfpm.yaml > /tmp/nfpm.yaml
+          /tmp/nfpm pkg --packager deb --config /tmp/nfpm.yaml --target "../../${{ matrix.artifact }}.deb" &
+          /tmp/nfpm pkg --packager rpm --config /tmp/nfpm.yaml --target "../../${{ matrix.artifact }}.rpm" &
+          wait
+          ls -la ../../${{ matrix.artifact }}.*
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          arch="amd64"
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then arch="aarch64"; fi
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${arch}.AppImage -O /tmp/linuxdeploy
+          wget -q https://github.com/linuxdeploy/appimagetool/releases/download/continuous/appimagetool-${arch}.AppImage -O /tmp/appimagetool
+          chmod +x /tmp/linuxdeploy /tmp/appimagetool
+          mkdir -p AppDir/usr/bin AppDir/usr/share/mnemo
+          cp build/bin/mnemo-go AppDir/usr/bin/mnemo
+          cp -r build/bin/* AppDir/usr/share/mnemo/ || true
+          cat > AppDir/mnemo.desktop <<EOF
+          [Desktop Entry]
+          Name=Mnemo
+          Exec=mnemo
+          Icon=mnemo
+          Type=Application
+          Categories=Utility;
+          EOF
+          wget -q https://raw.githubusercontent.com/lllll081926i/mnemo-go/master/frontend/src/assets/logo.svg -O AppDir/mnemo.svg || true
+          cat > AppDir/AppRun <<EOF
+          #!/bin/sh
+          exec \$APPDIR/usr/bin/mnemo \$@
+          EOF
+          chmod +x AppDir/AppRun
+          DEPLOY_GTK_VERSION=3 /tmp/linuxdeploy --appdir AppDir --desktop-file AppDir/mnemo.desktop --icon-file AppDir/mnemo.svg || true
+          /tmp/appimagetool AppDir "${{ matrix.artifact }}.AppImage" || echo "AppImage build skipped (optional)"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.ref_name }}
+          path: |
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.deb
+            ${{ matrix.artifact }}.rpm
+            ${{ matrix.artifact }}.AppImage
+            build/installer/${{ matrix.artifact }}-Setup.exe
+          if-no-files-found: warn
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Mnemo-*-${{ github.ref_name }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release-assets -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          release_doc="docs/releases/${GITHUB_REF_NAME}.md"
+          if [[ -f "${release_doc}" ]]; then
+            cp "${release_doc}" release-notes.md
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${GITHUB_REF_NAME}" \
+              --jq .body > release-notes.md || echo "Mnemo ${GITHUB_REF_NAME}" > release-notes.md
+          fi
+
+          is_prerelease='false'
+          if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
+            is_prerelease='true'
+          fi
+
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            if [[ "${is_prerelease}" == 'true' ]]; then
+              gh release create "${tag}" --verify-tag --title="Mnemo ${tag}" --notes-file=release-notes.md --prerelease
+            else
+              gh release create "${tag}" --verify-tag --title="Mnemo ${tag}" --notes-file=release-notes.md --latest
+            fi
+          else
+            release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -f name="Mnemo ${tag}" \
+              -F body=@release-notes.md \
+              -f draft=false \
+              -f prerelease="${is_prerelease}" \
+              -f make_latest="$([[ "${is_prerelease}" == 'true' ]] && echo false || echo true)" >/dev/null
+          fi
+
+          find release-assets -maxdepth 1 -type f -print0 \
+            | xargs -0 gh release upload "${tag}" --clobber

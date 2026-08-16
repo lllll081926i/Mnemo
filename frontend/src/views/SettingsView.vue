@@ -7,7 +7,7 @@ import SegTabs from '../components/SegTabs.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 
-const emit = defineEmits(['toast', 'theme'])
+const emit = defineEmits(['toast', 'theme', 'update'])
 
 const defaults = {
   theme: 'system',
@@ -36,7 +36,6 @@ const groups = [
   { id: 'transfer', label: '传输', icon: 'download' },
   { id: 'player', label: '播放器', icon: 'play' },
   { id: 'network', label: '网络', icon: 'cloud-down' },
-  { id: 'about', label: '关于', icon: 'info' },
 ]
 
 // 纯前端偏好
@@ -272,6 +271,15 @@ function setUploadLimitPreset(kb) {
               <div class="switch" :class="{ on: settings.confirmUpdate }" @click="toggle('confirmUpdate')"></div>
             </div>
           </div>
+
+          <div class="sg-row">
+            <span class="sg-label">检查更新</span>
+            <div class="sg-control">
+              <button class="btn sm" @click="emit('update')">
+                <UiIcon name="refresh" :size="13" />立即检查
+              </button>
+            </div>
+          </div>
         </section>
 
         <!-- 2. 网盘 -->
@@ -501,23 +509,7 @@ function setUploadLimitPreset(kb) {
           </div>
         </section>
 
-        <!-- 6. 关于 -->
-        <section class="settings-group" id="sg-about">
-          <header class="sg-heading"><h2>关于</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">应用版本</span>
-            <div class="sg-control"><span class="sg-value" style="font-weight:600">Mnemo-Go 0.1.0-preview</span></div>
-          </div>
-          <div class="sg-row">
-            <span class="sg-label">技术架构</span>
-            <div class="sg-control"><span class="sg-value">Go 1.22+ / Wails v2 / Vue 3</span></div>
-          </div>
-          <div class="sg-row">
-            <span class="sg-label">开源协议</span>
-            <div class="sg-control"><span class="sg-value">GNU GPL-3.0</span></div>
-          </div>
-        </section>
+        <!-- 6. 关于已移除 -->
 
         <div class="settings-foot">
           <span style="font-size:12px;color:var(--text-tertiary)">修改即时自动保存</span>

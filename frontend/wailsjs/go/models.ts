@@ -1,5 +1,25 @@
 export namespace app {
 	
+	export class CheckUpdateResult {
+	    available: boolean;
+	    version: string;
+	    url: string;
+	    size: number;
+	    notes: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CheckUpdateResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.version = source["version"];
+	        this.url = source["url"];
+	        this.size = source["size"];
+	        this.notes = source["notes"];
+	    }
+	}
 	export class ProviderInfo {
 	    ID: string;
 	    Meta: drive.Meta;
@@ -1187,6 +1207,7 @@ export namespace sync {
 	    drive_id: string;
 	    local_dir: string;
 	    remote_dir: string;
+	    remote_name: string;
 	    direction: string;
 	    enabled: boolean;
 	    intervalMin: number;
@@ -1204,6 +1225,7 @@ export namespace sync {
 	        this.drive_id = source["drive_id"];
 	        this.local_dir = source["local_dir"];
 	        this.remote_dir = source["remote_dir"];
+	        this.remote_name = source["remote_name"];
 	        this.direction = source["direction"];
 	        this.enabled = source["enabled"];
 	        this.intervalMin = source["intervalMin"];

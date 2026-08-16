@@ -13,6 +13,8 @@ import Modal from './components/Modal.vue'
 import LoginModal from './components/LoginModal.vue'
 import QuickOpen from './components/QuickOpen.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
+import UpdateModal from './components/UpdateModal.vue'
+import { CheckUpdate } from './api'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -30,6 +32,7 @@ const providers = ref([])
 const current = ref(null)
 const showLogin = ref(false)
 const showQuickOpen = ref(false)
+const showUpdate = ref(false)
 const infoAcc = ref(null)
 const curTheme = ref('system')
 const isDark = ref(false)
@@ -203,6 +206,10 @@ onMounted(async () => {
     // 颜色模式默认跟随系统；顶栏可手动切换（不出现在设置页）
     if (s) applyTheme(s.theme || 'system')
   } catch { /* 默认跟随系统 */ }
+  // 启动后延迟检查更新（静默，仅发现有新版时弹窗）
+  setTimeout(() => {
+    CheckUpdate().then((r) => { if (r && r.available) showUpdate.value = true }).catch(() => {})
+  }, 3000)
   window.addEventListener('keydown', onKey)
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => applyAppearance(curTheme.value)
@@ -276,7 +283,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
           <TransferView v-else-if="tab === 'transfer'" :key="'transfer'" :accounts="accounts" :providers="providers" @toast="toast" />
           <SyncView v-else-if="tab === 'sync'" :key="'sync'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" />
           <ShareView v-else-if="tab === 'share'" :key="'share'" :accounts="accounts" :providers="providers" @toast="toast" />
-          <SettingsView v-else :key="'settings'" @toast="toast" @theme="applyTheme" />
+          <SettingsView v-else :key="'settings'" @toast="toast" @theme="applyTheme" @update="showUpdate = true" />
         </transition>
       </main>
     </div>
@@ -332,5 +339,6 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
     </transition>
 
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
+    <UpdateModal v-if="showUpdate" @close="showUpdate = false" />
   </div>
 </template>

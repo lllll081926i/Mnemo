@@ -6,12 +6,20 @@ export function AddFavorite(arg1, arg2, arg3) {
   return window['go']['app']['App']['AddFavorite'](arg1, arg2, arg3);
 }
 
+export function ApplyUpdate(arg1) {
+  return window['go']['app']['App']['ApplyUpdate'](arg1);
+}
+
 export function CancelDownload(arg1) {
   return window['go']['app']['App']['CancelDownload'](arg1);
 }
 
 export function CancelUpload(arg1) {
   return window['go']['app']['App']['CancelUpload'](arg1);
+}
+
+export function CheckUpdate() {
+  return window['go']['app']['App']['CheckUpdate']();
 }
 
 export function ClearDownloads() {
@@ -54,6 +62,10 @@ export function DownloadURL(arg1, arg2, arg3) {
   return window['go']['app']['App']['DownloadURL'](arg1, arg2, arg3);
 }
 
+export function DownloadUpdate(arg1) {
+  return window['go']['app']['App']['DownloadUpdate'](arg1);
+}
+
 export function FavoriteFiles(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['FavoriteFiles'](arg1, arg2, arg3, arg4);
 }
@@ -64,6 +76,10 @@ export function GetDownloadURL(arg1, arg2, arg3) {
 
 export function GetFileDetail(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetFileDetail'](arg1, arg2, arg3);
+}
+
+export function GetPan189Captcha() {
+  return window['go']['app']['App']['GetPan189Captcha']();
 }
 
 export function GetPlayCursor(arg1, arg2, arg3) {

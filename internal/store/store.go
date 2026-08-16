@@ -13,9 +13,12 @@ import (
 )
 
 // Store is the local persistence root.
+// Most files live in dir; accountsDir overrides the location of
+// accounts.json only (login credentials persist across installs).
 type Store struct {
-	dir string
-	mu  sync.Mutex
+	dir         string
+	accountsDir string
+	mu          sync.Mutex
 }
 
 // Open creates (if needed) and opens the store directory.
@@ -26,12 +29,29 @@ func Open(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// SetAccountsDir overrides the directory for accounts.json (login data).
+func (s *Store) SetAccountsDir(d string) {
+	if d != "" {
+		_ = os.MkdirAll(d, 0o755)
+		s.accountsDir = d
+	}
+}
+
 // Dir returns the backing directory.
 func (s *Store) Dir() string { return s.dir }
 
+// path returns the full path for a collection file, honoring accountsDir
+// override for accounts.json.
+func (s *Store) path(name string) string {
+	if name == "accounts.json" && s.accountsDir != "" {
+		return filepath.Join(s.accountsDir, name)
+	}
+	return filepath.Join(s.dir, name)
+}
+
 // readJSON loads a collection file; returns os.ErrNotExist when missing.
 func (s *Store) readJSON(name string, v any) error {
-	b, err := os.ReadFile(filepath.Join(s.dir, name))
+	b, err := os.ReadFile(s.path(name))
 	if err != nil {
 		return err
 	}
@@ -49,11 +69,11 @@ func (s *Store) writeJSON(name string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(s.dir, name+".tmp")
+	tmp := s.path(name + ".tmp")
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return renameWithRetry(tmp, filepath.Join(s.dir, name))
+	return renameWithRetry(tmp, s.path(name))
 }
 
 // renameWithRetry wraps os.Rename with a short retry loop. On Windows the

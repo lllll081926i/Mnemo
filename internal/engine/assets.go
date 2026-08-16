@@ -11,7 +11,7 @@ import (
 	"runtime"
 )
 
-//go:embed all:win32
+//go:embed all:win32 all:darwin all:linux
 var assets embed.FS
 
 // Extract ensures engine files for the current platform exist under dir.
@@ -55,10 +55,11 @@ func Extract(dir string) error {
 	})
 }
 
-// MpvPath returns the extracted mpv executable path (win32 only for now).
+// MpvPath returns the extracted mpv executable path for the current platform.
 func MpvPath(dir string) string {
+	name := "mpv"
 	if runtime.GOOS == "windows" {
-		return filepath.Join(dir, "mpv", "mpv.exe")
+		name = "mpv.exe"
 	}
-	return ""
+	return filepath.Join(dir, "mpv", name)
 }

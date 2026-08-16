@@ -47,18 +47,26 @@ func NewApp() *App { return &App{} }
 // startup initializes persistence, providers and transfer engines.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	dir, err := config.UserDataDir("Mnemo-Go")
+	// Login credentials (accounts.json) live in the system user config dir
+	// so they persist across installs and are independent of install path.
+	configDir, err := config.UserConfigDir("Mnemo")
 	if err != nil {
-		dir = "."
+		configDir = "."
 	}
-	a.dataDir = dir
-	a.secrets = config.LoadSecrets(dir)
+	// All other data (settings/tags/favorites/tasks/shares/sync/engine/…)
+	// is co-located with the executable under ./data so it moves with the app.
+	dataDir, err := config.DataDir("Mnemo", configDir)
+	if err != nil {
+		dataDir = "."
+	}
+	a.dataDir = dataDir
+	a.secrets = config.LoadSecrets(dataDir)
 
-	st, err := store.Open(dir)
+	st, err := store.Open(dataDir)
 	if err != nil {
 		panic(err)
 	}
-	a.store = st
+	st.SetAccountsDir(configDir)
 
 	// token resolver so drive ops can load sessions
 	drive.SetTokenResolver(func(userID, driveID string) (*model.TokenInfo, error) {
@@ -81,14 +89,14 @@ func (a *App) startup(ctx context.Context) {
 	})
 
 	// upload session persistence so providers can resume interrupted uploads
-	store.InitUploadSessions(dir)
+	store.InitUploadSessions(dataDir)
 	drive.SetUploadSessionStore(uploadSessionAdapter{})
 
 	// internal media/preview server. Roots restrict /local/ serving to the
 	// download dir, engine dir and data dir (logs, mpv-config, etc.).
 	dlDir := transfer.DownloadDir(st)
-	engineDir := filepath.Join(dir, "engine")
-	a.preview, err = preview.NewServer(dlDir, engineDir, dir)
+	engineDir := filepath.Join(dataDir, "engine")
+	a.preview, err = preview.NewServer(dlDir, engineDir, dataDir)
 	if err != nil {
 		// preview is not optional for media playback; surface the error instead
 		// of crashing silently on a nil Port access later.
@@ -116,7 +124,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	// provider identity dir (pikpak device ids)
-	_ = os.MkdirAll(filepath.Join(dir, "identity"), 0o755)
+	_ = os.MkdirAll(filepath.Join(dataDir, "identity"), 0o755)
 
 	// apply persisted proxy so providers and the download engine honor it from
 	// the very first request.

@@ -1,0 +1,22 @@
+name: mnemo
+arch: {{.Arch}}
+platform: linux
+version: 0.1.0
+section: utils
+priority: optional
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+maintainer: Mnemo
+description: |
+  多网盘桌面文件管理器 — 支持 13 个网盘的文件管理、传输、播放与同步。
+homepage: https://github.com/lllll081926i/mnemo-go
+license: GPL-3.0
+contents:
+  - src: build/bin/mnemo-go
+    dst: /usr/bin/mnemo
+  - src: build/bin/
+    dst: /usr/share/mnemo
+scripts:
+  postinstall: build/linux/postinstall.sh
+  postrm: build/linux/postrm.sh
