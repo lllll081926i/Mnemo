@@ -378,6 +378,7 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File) erro
 		return err
 	}
 	subParent := dir.FileID
+	_ = subParent // retained for future recursive sub-job parent tracking
 	targetParent := job.DstParent
 	if mk != nil && mk.FileID != "" {
 		targetParent = mk.FileID
@@ -410,7 +411,6 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File) erro
 				}
 			}
 			job.Processed++
-			_ = subParent
 			e.emit(job)
 		}
 	}
@@ -421,9 +421,6 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File) erro
 		isDir := true
 		if _, err := drive.DeleteBatch(job.SrcUser, job.SrcDrive, []drive.FileRef{{ID: dir.FileID, IsDir: &isDir}}); err != nil {
 			msg := fmt.Sprintf("move: source folder migrated but delete failed for %q: %v", dir.Name, err)
-			if dirPartial {
-				return partialError(msg)
-			}
 			return partialError(msg)
 		}
 	}
@@ -438,8 +435,6 @@ func (e *Engine) emit(job *Job) {
 		e.onProgress(job)
 	}
 }
-
-func boolPtr(v bool) *bool { return &v }
 
 // partialError marks an error whose cause is a post-migration source-delete
 // failure. The file was copied successfully but the move is incomplete.

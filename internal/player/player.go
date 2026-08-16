@@ -144,7 +144,10 @@ func (p *Player) send(cmd Command) (Event, error) {
 	p.mu.Unlock()
 
 	b, _ := json.Marshal(cmd)
-	if _, err := p.conn.Write(append(b, '\n')); err != nil {
+	p.mu.Lock()
+	_, err := p.conn.Write(append(b, '\n'))
+	p.mu.Unlock()
+	if err != nil {
 		return Event{}, err
 	}
 	select {

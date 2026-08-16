@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Store is the local persistence root.
@@ -52,7 +53,21 @@ func (s *Store) writeJSON(name string, v any) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(s.dir, name))
+	return renameWithRetry(tmp, filepath.Join(s.dir, name))
+}
+
+// renameWithRetry wraps os.Rename with a short retry loop. On Windows the
+// target may be briefly locked by antivirus/indexing; a few retries with
+// backoff avoid spurious persistence failures.
+func renameWithRetry(src, dst string) error {
+	var err error
+	for i := 0; i < 3; i++ {
+		if err = os.Rename(src, dst); err == nil {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }
 
 // listFiles returns collection file names matching the prefix/suffix.
