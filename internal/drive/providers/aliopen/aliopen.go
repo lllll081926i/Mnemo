@@ -1140,6 +1140,9 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 }
 
 func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.ShareParams) (*model.ShareItem, error) {
+	if len(params.FileIDs) == 0 {
+		return nil, errors.New("aliopen: 创建分享至少选择一个文件")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
@@ -1153,7 +1156,14 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 		ref := parseRef(id)
 		fids = append(fids, ref.FID)
 	}
-	return cl.CreateShare(ctx, scope, fids, params.ShareName, params.Expiration, params.Password)
+	item, err := cl.CreateShare(ctx, scope, fids, params.ShareName, params.Expiration, params.Password)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil || (item.ShareID == "" && item.ShareURL == "" && item.ShareMsg == "" && item.FullShareMsg == "") {
+		return nil, errors.New("aliopen: 创建分享未返回链接")
+	}
+	return item, nil
 }
 
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
@@ -1528,6 +1538,13 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 
 // parseAliShareURL extracts share_id from an Aliyun share URL.
 func parseAliShareURL(raw string) (shareID string, pwd string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "//") {
+		raw = "https://" + raw
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", ""

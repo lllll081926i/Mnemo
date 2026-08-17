@@ -124,6 +124,8 @@ func (s *Store) SaveShareHistory(e model.ShareHistoryEntry) error {
 
 // ListShareHistory returns share history of an account.
 func (s *Store) ListShareHistory(userID string) ([]model.ShareHistoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []model.ShareHistoryEntry
 	err := s.readJSON(shareHistoryFile, &list)
 	if err != nil && !os.IsNotExist(err) {

@@ -13,7 +13,7 @@
 |------|:----:|------|
 | 后端核心架构 | ~85% | drive/transfer/store/preview/player/netx/config 已迁移；迁移策略和同步引擎为简化版 |
 | 后端 Provider | ~85% | 13 个 provider 全部已移植且可注册，但深度不一 |
-| 前端视图与组件 | ~70% | 5 视图 + 16 组件完整，缺瀑布流/分享导入/字幕选择/播放列表 |
+| 前端视图与组件 | ~72% | 5 视图 + 16 组件完整，缺瀑布流/字幕选择/播放列表 |
 | 设计系统 | ~90% | 令牌系统更系统化，但移除多色包 |
 | 文档 | ~65% | 3 核心文档 + 发版记录，旧 8 份辅助文档缺失（现已新增 PROVIDER_STATUS + 13 网盘详情） |
 | 测试 | ~60% | 后端 provider 单测与 mock/e2e 已覆盖关键登录、刷新、列表、上传、下载链路；前端暂无测试框架，未覆盖真实云端账号 |
@@ -54,7 +54,7 @@
 | 功能 | 状态 | 说明 |
 |------|:----:|------|
 | 瀑布流/相册模式 | ❌ | 旧 PanRight 相册盘瀑布流，新 PanView 无 |
-| 分享导入 UI | ❌ | 旧 ShareImportPanel，新项目无 |
+| 分享导入 UI | ✅ | 分享页按 importShare 能力筛选目标账号，支持解析、文件选择和目录转存 |
 | 播放器字幕选择 | ❌ | 旧 CloudSubtitlePickerModal，新项目无 |
 | 播放列表 | ❌ | 旧 MpvPlaylistPanel，新项目无 |
 | 多音轨 | ❌ | 旧 MpvSettingsPanel，新项目无 |
@@ -139,7 +139,7 @@
 ### 🔴 P0（影响功能正确性）
 
 1. ✅ **onedrive/dropbox RefreshAccount**：已实现 token 刷新 + 账号信息/配额
-2. ✅ **分享导入 importShare**：pikpak/aliopen/pan123 三个盘已实现
+2. ✅ **分享导入 importShare**：pikpak/aliopen/pan123 三个盘已实现，分享页导入 UI 已接通
 3. ✅ **pikpak API captcha 续接**：业务 API 检测 captcha_required 自动获取新 token 重试(jsonDo/get)
 4. ✅ **aliopen CompleteUpload bug**：已传真实 upload_id
 5. ✅ **s3 目录递归操作**：已实现 listAllUnder + 批量 DeleteObjects + copyRecursive

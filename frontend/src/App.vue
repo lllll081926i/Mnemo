@@ -228,6 +228,9 @@ onMounted(async () => {
   const offFns = [
     onEvent('account:changed', refresh),
     onEvent('app:ready', refresh),
+    onEvent('share:history-error', (ev) => {
+      toast(`分享已创建，但本地历史保存失败：${ev?.error || '未知错误'}`, 'warn')
+    }),
     onEvent('transfer:event', (ev) => {
       if (!ev || !ev.task) return
       const t = ev.task

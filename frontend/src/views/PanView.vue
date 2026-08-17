@@ -692,11 +692,14 @@ async function doShare() {
         expiration: shareExpireAt(shareForm.value.expiration),
         password: shareForm.value.password || undefined,
       })
-      const url = item && (item.share_url || item.share_msg)
+      const url = item && (item.share_url || item.share_msg || item.full_share_msg)
+      const password = item && (item.share_pwd || shareForm.value.password)
       if (url) {
-        const text = shareForm.value.password ? `${url}\n提取码: ${shareForm.value.password}` : url
-        await copyText(text)
-        emit('toast', '分享链接已复制到剪贴板', 'success')
+        const text = password ? `${url}\n提取码: ${password}` : url
+        const copied = await copyText(text)
+        emit('toast', copied ? '分享链接已复制到剪贴板' : '分享已创建，但复制到剪贴板失败', copied ? 'success' : 'warn')
+      } else {
+        emit('toast', '分享已创建，但服务端未返回可复制链接', 'warn')
       }
     }, null)) {
       modal.value = null

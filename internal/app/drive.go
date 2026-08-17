@@ -148,14 +148,15 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 	if err == nil && item != nil {
 		st, storeErr := a.storeOrError()
 		if storeErr != nil {
-			return item, storeErr
+			a.emit("share:history-error", map[string]string{"error": storeErr.Error()})
+			return item, nil
 		}
 		if storeErr = st.SaveShareHistory(model.ShareHistoryEntry{
 			ShareID: item.ShareID, AccountID: userID, DriveID: driveID,
 			FileID: firstFileID(params.FileIDs), ShareURL: item.ShareURL,
 			SharePwd: item.SharePwd, ShareName: item.ShareName, Provider: drive.ProviderOf(userID, driveID, ""),
 		}); storeErr != nil {
-			return item, storeErr
+			a.emit("share:history-error", map[string]string{"error": storeErr.Error()})
 		}
 	}
 	return item, err

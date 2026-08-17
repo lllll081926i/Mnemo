@@ -1,9 +1,11 @@
 <script setup>
 // 分享记录页：聚合全部账号的分享历史，按网盘 + 账号分组展示。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, formatTime, copyText } from '../api'
+import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare } from '../api'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
+import Modal from '../components/Modal.vue'
+import SelectDirModal from '../components/SelectDirModal.vue'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -23,6 +25,128 @@ watch(kwRaw, (v) => {
 onBeforeUnmount(() => clearTimeout(kwTimer))
 const filterProvider = ref('')
 const filterAccount = ref('')
+
+// 分享导入始终绑定一个明确的目标账号，避免多账号之间串用会话或目录。
+const importOpen = ref(false)
+const importStep = ref('form')
+const importBusy = ref(false)
+const importTargetId = ref('')
+const importForm = ref({ url: '', password: '' })
+const importSession = ref(null)
+const importSelected = ref([])
+const importDirPick = ref(false)
+const importDir = ref({ id: 'root', name: '根目录' })
+
+const importAccounts = computed(() => (props.accounts || []).filter((account) => capsOf(account, props.providers).importShare))
+const importTarget = computed(() => importAccounts.value.find((account) => account.user_id === importTargetId.value) || null)
+const importDirRoot = computed(() => {
+  const meta = providerMetaOf(importTarget.value, props.providers)
+  return { id: meta.rootKey || 'root', name: meta.rootTitle || '根目录' }
+})
+const importAccountOptions = computed(() => importAccounts.value.map((account) => ({
+  value: account.user_id,
+  label: `${providerMetaOf(account, props.providers).label || providerOf(account.user_id)} · ${accountName(account)}`,
+})))
+
+function formatSize(size) {
+  const value = Number(size) || 0
+  if (value <= 0) return '0 B'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+watch(importAccounts, (list) => {
+  if (!list.some((account) => account.user_id === importTargetId.value)) {
+    importTargetId.value = list[0]?.user_id || ''
+  }
+}, { immediate: true })
+
+function openImport() {
+  if (!importAccounts.value.length) {
+    emit('toast', '当前没有支持导入分享的网盘账号', 'warn')
+    return
+  }
+  importOpen.value = true
+  importStep.value = 'form'
+  importSession.value = null
+  importSelected.value = []
+  importDir.value = importDirRoot.value
+}
+
+function closeImport() {
+  if (importBusy.value) return
+  importOpen.value = false
+  importDirPick.value = false
+  importSession.value = null
+  importSelected.value = []
+}
+
+async function parseImport() {
+  const url = importForm.value.url.trim()
+  if (!url || !importTarget.value || importBusy.value) return
+  importBusy.value = true
+  try {
+    const session = await importShare(importTarget.value.user_id, importTarget.value.drive_id, url, importForm.value.password.trim())
+    if (!session || !Array.isArray(session.files) || !session.files.length) {
+      throw new Error('分享中没有可导入的文件')
+    }
+    importSession.value = session
+    importSelected.value = []
+    importDir.value = importDirRoot.value
+    importStep.value = 'files'
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  } finally {
+    importBusy.value = false
+  }
+}
+
+function toggleImportFile(file) {
+  const id = file && file.fileId
+  if (!id) return
+  const next = new Set(importSelected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  importSelected.value = [...next]
+}
+
+function toggleAllImportFiles() {
+  const files = importSession.value?.files || []
+  importSelected.value = importSelected.value.length === files.length ? [] : files.map((file) => file.fileId).filter(Boolean)
+}
+
+function backToImportForm() {
+  if (importBusy.value) return
+  importStep.value = 'form'
+  importSession.value = null
+  importSelected.value = []
+}
+
+async function saveImport() {
+  if (!importTarget.value || !importSession.value || !importSelected.value.length || importBusy.value) return
+  importBusy.value = true
+  try {
+    const saved = await saveImportedShare(
+      importTarget.value.user_id,
+      importTarget.value.drive_id,
+      importSession.value,
+      importSelected.value,
+      importDir.value.id,
+    )
+    const count = Array.isArray(saved) ? saved.length : importSelected.value.length
+    emit('toast', `已导入 ${count} 个项目`, 'success')
+    importOpen.value = false
+    importDirPick.value = false
+    importSession.value = null
+    importSelected.value = []
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  } finally {
+    importBusy.value = false
+  }
+}
 
 let refreshSeq = 0
 async function refresh() {
@@ -176,6 +300,9 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
         :options="[{ value: '', label: '全部账号' }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]"
       />
       <div style="flex:1"></div>
+      <button v-if="importAccounts.length" class="tbtn" @click="openImport">
+        <UiIcon name="download" :size="14" />导入分享
+      </button>
       <button class="tbtn" :disabled="loading" @click="refresh">
         <span v-if="loading" class="spin"></span><template v-else><UiIcon name="refresh" :size="14" />刷新</template>
       </button>
@@ -241,4 +368,86 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       </section>
     </div>
   </div>
+
+  <Modal v-if="importOpen" title="导入分享" width="620px" @close="closeImport">
+    <template v-if="importStep === 'form'">
+      <div class="field">
+        <label>目标网盘账号</label>
+        <UiSelect v-model="importTargetId" block :disabled="importBusy" :options="importAccountOptions" placeholder="选择账号" />
+        <div class="hint">分享内容将解析并保存到这个账号，不会使用其他账号的会话。</div>
+      </div>
+      <div class="field">
+        <label>分享链接</label>
+        <input v-model="importForm.url" class="input" placeholder="粘贴分享链接" :disabled="importBusy" @keydown.enter="parseImport" autofocus />
+      </div>
+      <div class="field">
+        <label>提取码（可选）</label>
+        <input v-model="importForm.password" class="input" placeholder="没有提取码可留空" :disabled="importBusy" @keydown.enter="parseImport" />
+      </div>
+    </template>
+
+    <template v-else>
+      <div class="import-summary">
+        <div><strong>{{ importSession?.shareUrl || importForm.url }}</strong></div>
+        <span>{{ importSession?.files?.length || 0 }} 个项目 · 已选 {{ importSelected.length }} 个</span>
+      </div>
+      <div class="import-file-toolbar">
+        <button class="tbtn xs" @click="toggleAllImportFiles">{{ importSelected.length === importSession?.files?.length ? '取消全选' : '全选' }}</button>
+        <span class="hint">选择要保存到目标账号的文件或文件夹</span>
+      </div>
+      <div class="import-file-list">
+        <label v-for="file in importSession.files" :key="file.fileId" class="import-file-row">
+          <input type="checkbox" :checked="importSelected.includes(file.fileId)" @change="toggleImportFile(file)" />
+          <UiIcon :name="file.isDir ? 'folder' : 'file'" :size="16" />
+          <span class="import-file-name" :title="file.name">{{ file.name }}</span>
+          <span class="import-file-size">{{ file.isDir ? '文件夹' : formatSize(file.size) }}</span>
+        </label>
+      </div>
+      <div class="field import-target-dir">
+        <label>保存到</label>
+        <div class="import-dir-row">
+          <input class="input" :value="importDir.name" readonly />
+          <button class="btn" :disabled="importBusy || !importTarget" @click="importDirPick = true">选择目录</button>
+        </div>
+      </div>
+    </template>
+
+    <template #actions>
+      <button class="btn" :disabled="importBusy" @click="closeImport">取消</button>
+      <template v-if="importStep === 'form'">
+        <button class="btn primary" :disabled="importBusy || !importForm.url.trim() || !importTarget" @click="parseImport">
+          <span v-if="importBusy" class="spin spin-on-primary"></span>{{ importBusy ? '解析中…' : '解析分享' }}
+        </button>
+      </template>
+      <template v-else>
+        <button class="btn" :disabled="importBusy" @click="backToImportForm">返回</button>
+        <button class="btn primary" :disabled="importBusy || !importSelected.length" @click="saveImport">
+          <span v-if="importBusy" class="spin spin-on-primary"></span>{{ importBusy ? '导入中…' : '导入所选项目' }}
+        </button>
+      </template>
+    </template>
+  </Modal>
+
+  <SelectDirModal
+    v-if="importDirPick && importTarget"
+    title="选择分享保存目录"
+    :account="importTarget"
+    :providers="providers"
+    @close="importDirPick = false"
+    @select="(dir) => { importDir = dir; importDirPick = false }"
+    @toast="(message, type) => emit('toast', message, type)"
+  />
 </template>
+
+<style scoped>
+.import-summary { display:flex; flex-direction:column; gap:4px; padding:9px 10px; margin-bottom:10px; border:1px solid var(--border-lighter); border-radius:var(--radius-md); color:var(--text-secondary); font-size:12px; }
+.import-summary strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); font-weight:600; }
+.import-file-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.import-file-list { max-height:260px; overflow-y:auto; border:1px solid var(--border-lighter); border-radius:var(--radius-md); padding:4px; }
+.import-file-row { display:flex; align-items:center; gap:8px; min-height:34px; padding:4px 7px; border-radius:var(--radius-sm); cursor:pointer; }
+.import-file-row:hover { background:var(--surface-hover); }
+.import-file-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.import-file-size { flex:0 0 auto; color:var(--text-tertiary); font-size:12px; }
+.import-dir-row { display:flex; gap:6px; }
+.import-dir-row .input { flex:1; }
+</style>

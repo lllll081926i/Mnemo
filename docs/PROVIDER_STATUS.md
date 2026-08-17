@@ -177,6 +177,7 @@
 | s3 | ➖ | ➖ | ➖ | ➖ | ➖ |
 
 > ✅ pikpak/aliopen/pan123 三个盘均已实现分享导入（ImportShareSession + SaveShare）。
+> ✅ 分享页已接入导入入口：仅展示声明 importShare 的账号，解析会话、文件选择和保存目录均绑定目标账号；不支持导入的网盘不会显示入口。
 > ✅ dropbox 密码分享的 `requested_visibility` 已修复为 `password`。
 
 ---

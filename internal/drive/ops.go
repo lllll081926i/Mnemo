@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 
 	"mnemo-go/internal/model"
 )
@@ -481,6 +482,14 @@ func FavoriteBatch(userID, driveID string, favorite bool, fileIDs []string) (ids
 
 // CreateShare creates a share.
 func CreateShare(userID, driveID string, params ShareParams) (share *model.ShareItem, err error) {
+	if len(params.FileIDs) == 0 {
+		return nil, errors.New("drive: 创建分享至少选择一个文件")
+	}
+	for _, fileID := range params.FileIDs {
+		if strings.TrimSpace(fileID) == "" {
+			return nil, errors.New("drive: 分享文件 ID 不能为空")
+		}
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -545,6 +554,9 @@ func StreamUploadHandler(userID, driveID string) (func(ctx context.Context, pare
 // selected files. Returns ErrNotImplemented when the provider does not
 // support share import.
 func ImportShare(userID, driveID, shareURL, password string) (session *ShareImportSession, err error) {
+	if strings.TrimSpace(shareURL) == "" {
+		return nil, errors.New("drive: 分享链接不能为空")
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -561,6 +573,17 @@ func ImportShare(userID, driveID, shareURL, password string) (session *ShareImpo
 // into the account's folder toParentID. Returns the provider-side ids of
 // the saved files.
 func SaveImportedShare(userID, driveID string, session *ShareImportSession, fileIDs []string, toParentID string) (ids []string, err error) {
+	if session == nil || strings.TrimSpace(session.Provider) == "" {
+		return nil, errors.New("drive: 分享会话无效")
+	}
+	if len(fileIDs) == 0 {
+		return nil, errors.New("drive: 至少选择一个分享文件")
+	}
+	for _, fileID := range fileIDs {
+		if strings.TrimSpace(fileID) == "" {
+			return nil, errors.New("drive: 分享文件 ID 不能为空")
+		}
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -569,6 +592,20 @@ func SaveImportedShare(userID, driveID string, session *ShareImportSession, file
 	sd, ok := d.(ShareImportDriver)
 	if !ok {
 		return nil, ErrNotImplemented
+	}
+	if session.Provider != c.TokenFrom {
+		return nil, fmt.Errorf("drive: 分享来源网盘与目标账号不匹配")
+	}
+	allowed := make(map[string]struct{}, len(session.Files))
+	for _, file := range session.Files {
+		if file.FileID != "" {
+			allowed[file.FileID] = struct{}{}
+		}
+	}
+	for _, fileID := range fileIDs {
+		if _, exists := allowed[fileID]; !exists {
+			return nil, fmt.Errorf("drive: 分享文件不属于当前分享会话: %s", fileID)
+		}
 	}
 	return sd.SaveShare(context.Background(), c, session, fileIDs, toParentID)
 }

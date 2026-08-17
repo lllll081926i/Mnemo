@@ -1589,7 +1589,7 @@ func pan123ShareList(ctx context.Context, d *Driver, c drive.Context, shareKey, 
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
-	if session == nil || session.ShareKey == "" {
+	if session == nil || (session.Provider != "" && session.Provider != providerID) || strings.TrimSpace(session.ShareKey) == "" {
 		return nil, errors.New("123: 分享会话无效")
 	}
 	if len(fileIDs) == 0 {
@@ -1615,6 +1615,13 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 
 // parsePan123ShareURL extracts shareKey from a 123 pan share URL.
 func parsePan123ShareURL(raw string) (shareKey, sharePwd string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "//") {
+		raw = "https://" + raw
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", ""

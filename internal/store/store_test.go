@@ -205,3 +205,42 @@ func TestTaskSavesKeepConcurrentRecords(t *testing.T) {
 		t.Fatalf("concurrent task saves kept %d records, want 20", len(list))
 	}
 }
+
+func TestShareHistoryReadsDuringConcurrentSaves(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			entry := model.ShareHistoryEntry{
+				ShareID: fmt.Sprintf("share-%d", i), AccountID: "pikpak-account",
+				DriveID: "pikpak-drive", ShareURL: fmt.Sprintf("https://example/%d", i),
+				ShareName: "share",
+			}
+			if err := st.SaveShareHistory(entry); err != nil {
+				t.Errorf("SaveShareHistory(%d): %v", i, err)
+			}
+		}(i)
+	}
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := st.ListShareHistory("pikpak-account"); err != nil {
+				t.Errorf("ListShareHistory: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	list, err := st.ListShareHistory("pikpak-account")
+	if err != nil {
+		t.Fatalf("ListShareHistory(final): %v", err)
+	}
+	if len(list) != 20 {
+		t.Fatalf("concurrent share history saves kept %d records, want 20", len(list))
+	}
+}

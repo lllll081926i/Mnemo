@@ -644,7 +644,7 @@ func pikpakShareListAll(ctx context.Context, cl *client, shareID, passCodeToken,
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
-	if session == nil || strings.TrimSpace(session.ShareID) == "" {
+	if session == nil || (session.Provider != "" && session.Provider != providerID) || strings.TrimSpace(session.ShareID) == "" || strings.TrimSpace(session.PassCodeToken) == "" {
 		return nil, errors.New("pikpak: 分享会话无效")
 	}
 	if len(fileIDs) == 0 {
