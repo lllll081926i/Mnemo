@@ -290,6 +290,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return err
 	}
+	ui.Info.Size = info.Size()
 	name := ui.Info.Name
 	if strings.TrimSpace(name) == "" {
 		return errors.New("OneDrive: 上传文件名为空")
@@ -306,7 +307,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return putErr
 		}
 		ui.Upload.FileID = fileID
-		ui.Info.Size = info.Size()
 		return nil
 	}
 	sessionErr := cl.sessionUpload(ctx, c, f, parentID, name, ui, behavior)
@@ -343,7 +343,11 @@ func isGraphConflict(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "http 409") || strings.Contains(msg, "namealreadyexists") || strings.Contains(msg, "conflict")
+	return strings.Contains(msg, "http 409") ||
+		strings.Contains(msg, "namealreadyexists") ||
+		strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "same name") ||
+		strings.Contains(msg, "conflict")
 }
 
 // oneDriveScope is the OAuth scope used for token refresh.
@@ -379,6 +383,7 @@ func refreshOneDriveToken(ctx context.Context, clientID, clientSecret, refreshTo
 		RefreshToken: raw.RefreshToken,
 		ExpiresIn:    raw.ExpiresIn,
 		TokenType:    raw.TokenType,
+		ExpireTime:   time.Now().Add(time.Duration(raw.ExpiresIn) * time.Second).UTC().Format(time.RFC3339),
 	}, nil
 }
 
@@ -460,9 +465,15 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	if fresh.RefreshToken != "" {
 		token.RefreshToken = fresh.RefreshToken
 	}
-	if fresh.ExpiresIn > 0 {
-		token.ExpiresIn = fresh.ExpiresIn
+	expiresIn := fresh.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = token.ExpiresIn
 	}
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	token.ExpiresIn = expiresIn
+	token.ExpireTime = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
 	if fresh.TokenType != "" {
 		token.TokenType = fresh.TokenType
 	}

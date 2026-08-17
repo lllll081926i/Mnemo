@@ -24,7 +24,7 @@ SetHashes(["sha1", "quickxorhash"], nil)
 | 本地回调 | ✅ | `auth.go` 127.0.0.1:0 + state/来源校验 + 10min 超时 | Go 版内置回调服务器 |
 | Token 交换 | ✅ | `auth.go` POST msTokenURL | 按实际凭据传递 `client_secret`，同时发送 `code_verifier` |
 | client_id / secret | ✅ | 请求配置、release secrets 或内置 rclone 凭据 | 自定义 client_id 只在同时提供 secret 时使用 secret |
-| **Token 刷新** | ✅ | `onedrive.go` 的 `RefreshAccount` 调 `refreshOneDriveToken` | 缺省 `expires_in` 时保留旧过期时间 |
+| **Token 刷新** | ✅ | `onedrive.go` 的 `RefreshAccount` 调 `refreshOneDriveToken` | 登录与刷新都会写入新的绝对 `expire_time` |
 | **账号信息/配额** | ✅ | `onedrive.go:386-414` 获取 /me 和 /me/drive 配额 | 无 |
 
 默认使用与旧版及 `Example/rclone` 一致的 OneDrive OAuth `client_id/client_secret`；发行版可通过 `secrets.json` 覆盖 client_id。登录后账号 ID 来自 Graph `/me`，默认 drive ID 使用 `onedrive:<drive-id>` 命名空间，避免多账号串用。
@@ -66,11 +66,11 @@ SetHashes(["sha1", "quickxorhash"], nil)
 |--------|:----:|---------|------|
 | 小文件 PUT ≤4MB | ✅ | `upload.go:43-56` rawPut /content | 无 |
 | 大文件 session | ✅ | `upload.go:59-110` CreateUploadSession + 10MB chunked PUT + Content-Range | 无 |
-| **断点续传** | ✅ | `upload.go:65-128` UploadSessionKey + LoadUploadSession + SaveUploadSession + querySessionPosition 恢复 | 无 |
+| **断点续传** | ✅ | `upload.go:65-128` UploadSessionKey + LoadUploadSession + SaveUploadSession + querySessionPosition 恢复 | 会话键包含文件指纹与冲突策略，避免同名同大小文件串会话 |
 | **416 处理** | ✅ | `upload.go:67-72` querySessionPosition 查询实际位置跳过已传 | 无 |
 | **会话取消** | ✅ | `upload.go:128` ClearUploadSession | 无 |
-| 冲突策略 | ⚠️ | 硬编码 rename | 🟡 旧版 fail/replace/rename |
-| **ignore 模式** | ❌ | 无 | 🟡 旧版先删同名再 overwrite |
+| 冲突策略 | ✅ | `onedrive.go:319-347` 映射 refuse/skip/rename/overwrite；Graph 冲突码可识别 | 无 |
+| **ignore/skip 模式** | ✅ | Graph `nameAlreadyExists`/同名错误返回成功跳过 | 与统一 `ConflictPolicy=skip` 对齐 |
 
 ---
 
@@ -138,12 +138,12 @@ SetHashes(["sha1", "quickxorhash"], nil)
 
 ## P0 差距清单
 
-1. ✅ **Token 刷新已实现**（`onedrive.go` 的 `RefreshAccount`），刷新响应缺少 `expires_in` 时保留旧值
+1. ✅ **Token 刷新已实现**（`onedrive.go` 的 `RefreshAccount`），登录与刷新都会写入新的绝对 `expire_time`
 2. ✅ **账号信息/配额已实现**（`onedrive.go:386-414`）
 3. ✅ **上传断点续传已实现**（`upload.go:65-128` UploadSession + querySessionPosition + ClearUploadSession）
 4. ✅ **ProvideHashes 已声明**（`onedrive.go:30` SetHashes）
 5. ✅ **搜索分页已实现**（`graph.go:238-261` 跟随 nextLink）
-6. 🟡 上传冲突策略单一（仅 rename）
+6. ✅ 上传冲突策略已覆盖 overwrite/refuse/rename/skip，并校验上传响应的文件 ID
 7. 🟡 搜索无缩略图；关键词的 OData 单引号和 URL 路径转义已修复
 8. 🟡 版本历史完全缺失
 9. ✅ **OAuth 默认凭据与 client_secret**（`auth.go`）：沿用旧版/rclone，登录与刷新均使用同一组凭据；登录会显示账号选择。

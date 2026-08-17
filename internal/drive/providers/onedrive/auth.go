@@ -215,12 +215,16 @@ func exchangeToken(ctx context.Context, clientID, clientSecret, code, redirectUR
 	if strings.TrimSpace(raw.RefreshToken) == "" {
 		return nil, errors.New("onedrive: token response missing refresh_token")
 	}
+	if raw.ExpiresIn <= 0 {
+		raw.ExpiresIn = 3600
+	}
 	return &model.TokenInfo{
 		TokenFrom:    providerID,
 		AccessToken:  raw.AccessToken,
 		RefreshToken: raw.RefreshToken,
 		ExpiresIn:    raw.ExpiresIn,
 		TokenType:    raw.TokenType,
+		ExpireTime:   time.Now().Add(time.Duration(raw.ExpiresIn) * time.Second).UTC().Format(time.RFC3339),
 	}, nil
 }
 

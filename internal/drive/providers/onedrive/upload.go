@@ -51,6 +51,9 @@ func (c *client) rawPut(ctx context.Context, target string, body io.Reader) (str
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(data, &item)
+	if strings.TrimSpace(item.ID) == "" {
+		return "", errors.New("onedrive: upload response missing file id")
+	}
 	return item.ID, nil
 }
 
@@ -66,7 +69,14 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 	}
 	size := info.Size()
 
-	sessionKey := drive.UploadSessionKey(dc.UserID, dc.DriveID, parentID, name, size)
+	identity := strings.TrimSpace(ui.Info.SHA1)
+	if identity == "" {
+		identity = fmt.Sprintf("mtime:%d", info.ModTime().UnixNano())
+	}
+	// Include content identity and conflict behavior so a same-size replacement
+	// or a changed policy cannot resume an unrelated Graph session.
+	sessionName := name + "\x00" + conflictBehavior + "\x00" + identity
+	sessionKey := drive.UploadSessionKey(dc.UserID, dc.DriveID, parentID, sessionName, size)
 	// Reuse the remote session when its URL is still alive. A byte offset alone
 	// is not enough because a newly-created Graph session has no uploaded data.
 	savedSessionID, _ := drive.LoadUploadSessionState(sessionKey)

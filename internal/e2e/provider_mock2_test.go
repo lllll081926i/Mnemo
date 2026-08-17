@@ -322,6 +322,60 @@ func TestOneDriveSearchEscapesODataKeyword(t *testing.T) {
 	}
 }
 
+func TestOneDriveUploadConflictSkipAndResponseValidation(t *testing.T) {
+	phase := 0
+	mock := MockAPI(t, "graph.microsoft.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/v1.0/me/drive/root:/same.txt:/content" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if got := r.URL.Query().Get("@microsoft.graph.conflictBehavior"); got != "fail" && phase == 0 {
+			t.Errorf("conflict behavior = %q, want fail", got)
+		}
+		if phase == 0 {
+			phase++
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{
+					"code":    "nameAlreadyExists",
+					"message": "An item with the same name already exists.",
+				},
+			})
+			return
+		}
+		// A 2xx response without an item id must not be reported as a completed
+		// upload: the queue needs the id to refresh its file state.
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+
+	uid, did, _ := SeedAccount(t, "onedrive", &model.TokenInfo{
+		TokenFrom: "onedrive", AccessToken: "onedrive-upload-access", RefreshToken: "upload-refresh",
+		UserID: "onedrive_upload_test", DefaultDriveID: "onedrive:upload-drive",
+	})
+	path := filepath.Join(t.TempDir(), "same.txt")
+	if err := os.WriteFile(path, []byte("upload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := drive.Context{UserID: uid, DriveID: did, Token: &model.TokenInfo{AccessToken: "onedrive-upload-access"}}
+	driver := drive.New("onedrive")
+
+	skip := &model.UploadingUI{Info: model.UploadInfo{
+		LocalFilePath: path, ParentFileID: "onedrive_root", DriveID: did, Name: "same.txt", ConflictPolicy: "skip",
+	}}
+	if err := driver.UploadOneFile(context.Background(), ctx, skip); err != nil {
+		t.Fatalf("skip conflict should succeed: %v", err)
+	}
+
+	overwrite := &model.UploadingUI{Info: model.UploadInfo{
+		LocalFilePath: path, ParentFileID: "onedrive_root", DriveID: did, Name: "same.txt", ConflictPolicy: "overwrite",
+	}}
+	if err := driver.UploadOneFile(context.Background(), ctx, overwrite); err == nil || !strings.Contains(err.Error(), "missing file id") {
+		t.Fatalf("missing upload id should fail explicitly, got %v", err)
+	}
+	_ = mock
+}
+
 func TestDropboxLoginMock(t *testing.T) {
 	tokenForms := make(chan url.Values, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

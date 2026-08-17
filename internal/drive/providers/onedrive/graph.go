@@ -162,13 +162,19 @@ func (c *client) rawDo(ctx context.Context, method, target string, body any, hea
 func graphError(body []byte, status int) error {
 	var g struct {
 		Error *struct {
+			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &g)
 	msg := "onedrive: http " + fmt.Sprint(status)
-	if g.Error != nil && g.Error.Message != "" {
-		msg += ": " + g.Error.Message
+	if g.Error != nil {
+		if g.Error.Code != "" {
+			msg += ": " + g.Error.Code
+		}
+		if g.Error.Message != "" {
+			msg += ": " + g.Error.Message
+		}
 	}
 	return errors.New(msg)
 }
