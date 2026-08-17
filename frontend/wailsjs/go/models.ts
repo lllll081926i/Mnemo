@@ -418,6 +418,7 @@ export namespace model {
 	    endpoint?: string;
 	    username?: string;
 	    password?: string;
+	    rootPath?: string;
 	    region?: string;
 	    bucket?: string;
 	    basePath?: string;
@@ -434,6 +435,7 @@ export namespace model {
 	        this.endpoint = source["endpoint"];
 	        this.username = source["username"];
 	        this.password = source["password"];
+	        this.rootPath = source["rootPath"];
 	        this.region = source["region"];
 	        this.bucket = source["bucket"];
 	        this.basePath = source["basePath"];
@@ -783,10 +785,15 @@ export namespace model {
 	    user_id: string;
 	    drive_id: string;
 	    task_id?: string;
+	    file_id?: string;
 	    url?: string;
 	    file_name?: string;
 	    status: string;
 	    progress: number;
+	    message?: string;
+	    file_size?: number;
+	    created_time?: string;
+	    updated_time?: string;
 	    created: number;
 	
 	    static createFrom(source: any = {}) {
@@ -799,10 +806,15 @@ export namespace model {
 	        this.user_id = source["user_id"];
 	        this.drive_id = source["drive_id"];
 	        this.task_id = source["task_id"];
+	        this.file_id = source["file_id"];
 	        this.url = source["url"];
 	        this.file_name = source["file_name"];
 	        this.status = source["status"];
 	        this.progress = source["progress"];
+	        this.message = source["message"];
+	        this.file_size = source["file_size"];
+	        this.created_time = source["created_time"];
+	        this.updated_time = source["updated_time"];
 	        this.created = source["created"];
 	    }
 	}

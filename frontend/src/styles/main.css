@@ -624,20 +624,36 @@ body {
 .switch.on:active::after { transform: translateX(14px); }
 
 /* ============ Toast ============ */
-.toast-wrap { position: fixed; top: 60px; right: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; width: 360px; max-width: calc(100vw - 32px); }
+.toast-wrap { position: fixed; top: 60px; right: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; width: 380px; max-width: calc(100vw - 32px); }
 .toast {
   display: flex; align-items: flex-start; gap: 8px;
   background: var(--bg-elevated); border: 1px solid var(--border-light);
   border-radius: var(--radius-md); box-shadow: var(--shadow-modal);
-  padding: 10px 14px; border-left: 3px solid var(--color-primary);
-  font-size: 14px; width: 100%; word-break: break-all; user-select: text;
+  padding: 11px 10px 11px 14px; border-left: 3px solid var(--color-primary);
+  font-size: 14px; line-height: 1.55; width: 100%; word-break: break-word; user-select: text;
   pointer-events: auto;
 }
 .toast.error { border-left-color: var(--color-error); }
 .toast.success { border-left-color: var(--color-success); }
-.toast .t-icon { flex-shrink: 0; display: inline-flex; margin-top: 1px; }
+.toast.warn { border-left-color: var(--color-warning, #c88719); }
+.toast.info { border-left-color: var(--color-primary); }
+.toast .t-icon { flex-shrink: 0; display: inline-flex; margin-top: 2px; }
 .toast.error .t-icon { color: var(--color-error); }
 .toast.success .t-icon { color: var(--color-success); }
+.toast.warn .t-icon { color: var(--color-warning, #c88719); }
+.toast.info .t-icon { color: var(--color-primary); }
+.toast .t-message { min-width: 0; flex: 1; white-space: pre-wrap; }
+.toast-close {
+  flex: 0 0 24px; width: 24px; height: 24px; margin: -2px -4px 0 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-xs); background: transparent;
+  color: var(--text-tertiary); cursor: pointer;
+}
+.toast-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+.toast-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+@media (max-width: 560px) {
+  .toast-wrap { top: 52px; right: 10px; left: 10px; width: auto; max-width: none; }
+}
 
 /* ---- 统一错误提示（表单/面板内联错误） ---- */
 .form-error {
@@ -925,6 +941,7 @@ body {
 .progress-current.active { background: var(--color-primary); }
 .progress-current.succeed { background: var(--color-success); }
 .progress-current.error { background: var(--color-error); }
+.progress-current.warning { background: var(--color-warning, #c88719); }
 
 /* 传输页左侧菜单选中态：柔和流动色块（不再用线条指示） */
 .down-menu-item { position: relative; border-radius: var(--radius-md); }

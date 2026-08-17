@@ -6,6 +6,7 @@ import {
   RemoveDownload, PrioritizeDownload, OpenFile,
   CancelUpload, ClearUploads, DownloadURL, ResumeUpload,
   ListOfflineTasks, OfflineDownload, DeleteOfflineTask,
+  ListMigrateJobs, CancelMigrate, DeleteMigrateJob, ClearMigrateJobs,
   EventsOn, RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
@@ -547,30 +548,89 @@ async function delOfflineTask(t) {
 
 // ---------- 迁移 ----------
 const migrateJobs = ref([])
+const migrateLoading = ref(false)
+let migrateRefreshSeq = 0
 function onMigrate(job) {
   if (!job || !job.id) return
   const i = migrateJobs.value.findIndex((j) => j.id === job.id)
   if (i >= 0) migrateJobs.value.splice(i, 1, job)
   else migrateJobs.value.unshift(job)
 }
+async function refreshMigrateJobs() {
+  const seq = ++migrateRefreshSeq
+  migrateLoading.value = true
+  try {
+    const list = await ListMigrateJobs()
+    if (seq === migrateRefreshSeq) migrateJobs.value = Array.isArray(list) ? list : []
+  } catch (e) {
+    if (seq === migrateRefreshSeq && !migrateJobs.value.length) emit('toast', '迁移任务加载失败: ' + String(e), 'error')
+  } finally {
+    if (seq === migrateRefreshSeq) migrateLoading.value = false
+  }
+}
+async function cancelMigrateJob(job) {
+  if (!job || !job.id || !['pending', 'running'].includes(job.status)) return
+  try {
+    await CancelMigrate(job.id)
+    job.message = '正在取消…'
+    emit('toast', '已请求取消迁移', 'warn')
+    setTimeout(refreshMigrateJobs, 120)
+  } catch (e) {
+    emit('toast', '取消迁移失败: ' + String(e), 'error')
+  }
+}
+async function removeMigrateJob(job) {
+  if (!job || !job.id || ['pending', 'running'].includes(job.status)) return
+  const original = migrateJobs.value
+  migrateJobs.value = original.filter((x) => x.id !== job.id)
+  try {
+    await DeleteMigrateJob(job.id)
+    emit('toast', '已删除迁移记录', 'success')
+  } catch (e) {
+    migrateJobs.value = original
+    emit('toast', '删除迁移记录失败: ' + String(e), 'error')
+  }
+}
+async function clearMigrateHistory() {
+  const original = migrateJobs.value
+  migrateJobs.value = original.filter((x) => ['pending', 'running'].includes(x.status))
+  try {
+    await ClearMigrateJobs()
+    emit('toast', '已清除迁移历史', 'success')
+  } catch (e) {
+    migrateJobs.value = original
+    emit('toast', '清除迁移历史失败: ' + String(e), 'error')
+  }
+}
 const migName = (uid) => {
   const acc = props.accounts.find((a) => a.user_id === uid)
   return acc ? accountName(acc) : uid
 }
 const migBadge = (s) => ({ completed: 'success', failed: 'error', running: 'primary' }[s] || 'warn')
-const migStatusText = (s) => ({ pending: '等待中', running: '迁移中', completed: '已完成', failed: '失败', canceled: '已取消' }[s] || s)
-const migProgress = (j) => j.total ? Math.round(((j.processed || 0) / j.total) * 100) : 0
+const migStatusText = (s) => ({ pending: '等待中', running: '迁移中', completed: '已完成', partial: '部分完成', failed: '失败', canceled: '已取消' }[s] || s)
+const migProgress = (j) => j.totalBytes > 0
+  ? Math.min(100, Math.round(((j.processedBytes || 0) / j.totalBytes) * 100))
+  : (j.total ? Math.min(100, Math.round(((j.processed || 0) / j.total) * 100)) : 0)
+const migProgressText = (j) => j.totalBytes > 0
+  ? `${formatBytes(j.processedBytes || 0)} / ${formatBytes(j.totalBytes || 0)}`
+  : `${j.processed || 0} / ${j.total || 0} 个文件`
 
 // ---------- 生命周期 ----------
 let pollTimer = null
 const offFns = []
 onMounted(() => {
   refresh()
+  refreshMigrateJobs()
   const off1 = EventsOn('transfer:event', onTransferEvent)
   const off2 = EventsOn('migrate:progress', onMigrate)
   if (typeof off1 === 'function') offFns.push(off1)
   if (typeof off2 === 'function') offFns.push(off2)
-  pollTimer = setInterval(() => { if (!document.hidden) refresh() }, 2500)
+  pollTimer = setInterval(() => {
+    if (!document.hidden) {
+      refresh()
+      if (menu.value === 'migrate') refreshMigrateJobs()
+    }
+  }, 2500)
   offlineTimer = setInterval(() => { if (!document.hidden && menu.value === 'offline') refreshOffline() }, 8000)
 })
 onBeforeUnmount(() => {
@@ -903,6 +963,13 @@ onBeforeUnmount(() => {
 
         <!-- 迁移 -->
         <template v-else-if="menu === 'migrate'">
+          <div class="toppanbtns">
+            <div class="toppanbtn">
+              <button class="tbtn danger" :disabled="!migrateJobs.some((j) => ['completed', 'partial', 'failed', 'canceled'].includes(j.status))" @click="askConfirm('清除所有已结束的迁移记录？', clearMigrateHistory, { danger: true, title: '清除迁移历史' })"><UiIcon name="trash" :size="14" />清除历史</button>
+            </div>
+            <div class="toolbar-spacer"></div>
+            <div v-if="migrateLoading" class="toppanbtn"><span class="spin"></span></div>
+          </div>
           <div class="file-list">
             <transition-group name="task-list">
               <div v-for="j in migrateJobs" :key="j.id" class="taskrow">
@@ -917,14 +984,15 @@ onBeforeUnmount(() => {
                   <div class="transfering-state">
                     <p class="text-state"><span class="badge" :class="migBadge(j.status)">{{ migStatusText(j.status) }}</span><span>{{ migProgress(j) }}%</span></p>
                     <div class="progress-total">
-                      <div :class="j.status === 'completed' ? 'progress-current succeed' : j.status === 'failed' ? 'progress-current error' : 'progress-current active'" :style="{ width: migProgress(j) + '%' }"></div>
+                      <div :class="j.status === 'completed' ? 'progress-current succeed' : j.status === 'failed' ? 'progress-current error' : j.status === 'partial' ? 'progress-current warning' : 'progress-current active'" :style="{ width: migProgress(j) + '%' }"></div>
                     </div>
                     <p v-if="j.message" class="text-error" :title="j.message">{{ j.message }}</p>
                   </div>
                 </div>
-                <div class="downspeed">{{ (j.processed || 0) + '/' + (j.total || 0) }}</div>
+                <div class="downspeed">{{ migProgressText(j) }}</div>
                 <div class="tactions">
-                  <button v-if="j.status === 'completed' || j.status === 'failed' || j.status === 'canceled'" class="btn-circle" title="清除记录" style="color:var(--color-error)" @click="migrateJobs = migrateJobs.filter((x) => x.id !== j.id)"><UiIcon name="trash" :size="14" /></button>
+                  <button v-if="j.status === 'pending' || j.status === 'running'" class="btn-circle" title="取消迁移" style="color:var(--color-error)" @click="cancelMigrateJob(j)"><UiIcon name="x-circle" :size="14" /></button>
+                  <button v-else class="btn-circle" title="清除记录" style="color:var(--color-error)" @click="removeMigrateJob(j)"><UiIcon name="trash" :size="14" /></button>
                 </div>
               </div>
             </transition-group>

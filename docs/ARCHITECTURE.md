@@ -14,7 +14,7 @@ internal/drive    ops 门面（唯一业务入口，禁止中央 if provider）
 internal/transfer  原生 Go 分段下载器 · 上传队列 · 跨盘迁移
 internal/player    mpv JSON IPC
 internal/sync      双向同步
-internal/preview   本地 Range 代理（鉴权流播放/下载回退）
+internal/preview   本地 Range 代理（鉴权流播放与媒体预览）
 internal/store     本地持久化（原子 JSON，多集合）
 internal/netx      HTTP/上传/哈希/限速 工具
 ```
@@ -38,7 +38,7 @@ internal/netx      HTTP/上传/哈希/限速 工具
 | 列表 | app.ListDir → drive ops → driver.List → model.File[] |
 | 下载 | app.Download → transfer/manager → driver.GetDownloadURL → dlengine 分段下载 |
 | 上传 | app.Upload → transfer/upload → driver.UploadOneFile（queue/direct 按能力） |
-| 播放 | app.Play → player/mpv + driver.GetVideoPreview（鉴权流走 preview 代理） |
+| 播放 | app.PlayVideo → driver.GetVideoPreview → preview Range 代理 → 随包 mpv JSON IPC；视频不回退到 HTML5 或系统播放器 |
 | 迁移 | app.Migrate → transfer/migrate（server/stream/spool 策略） |
 
 ## 依赖方向

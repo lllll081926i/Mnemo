@@ -8,7 +8,7 @@ const emit = defineEmits(['close', 'toast'])
 
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 const form = ref({})
-const mountedForm = ref({ name: '', endpoint: '', username: '', password: '', bucket: '', region: '', basePath: '' })
+const mountedForm = ref({ name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true })
 const busy = ref(false)
 const smsBusy = ref(false)
 const smsCountdown = ref(0)
@@ -31,14 +31,26 @@ const fields = computed(() => (provider.value && provider.value.Login && provide
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuth = computed(() => fields.value.some((f) => f.type === 'oauth'))
 const isLongText = (key) => /cookie|token|bduss|secret/i.test(key)
+const isPan139DirectLogin = computed(() => providerId.value === 'pan139' && String(form.value.authorization || '').trim() !== '')
+function isFieldRequired(field) {
+  if (isPan139DirectLogin.value && (field.key === 'username' || field.key === 'password')) return false
+  return field.required
+}
 
 watch(providerId, (v) => {
   localStorage.setItem('login_provider', v)
   form.value = {}
-  mountedForm.value = { name: '', endpoint: '', username: '', password: '', bucket: '', region: '', basePath: '' }
+  mountedForm.value = { name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true }
   errorText.value = ''
   resetCaptcha()
 })
+
+// A provider removed from a migrated config must not remain selectable by its
+// stale localStorage id while the panel visually falls back to the first item.
+watch(() => props.providers, (list) => {
+  if (!list.length) return
+  if (!list.some((p) => p.ID === providerId.value)) providerId.value = list[0].ID
+}, { immediate: true })
 
 function onKey(e) { if (e.key === 'Escape') emit('close') }
 onMounted(() => window.addEventListener('keydown', onKey))
@@ -96,6 +108,7 @@ async function sendSms() {
     const r = await SendGuangyaSms(form.value.phone)
     form.value.verification_id = r.verification_id
     form.value.device_id = r.device_id
+    form.value.captcha_token = r.captcha_token || ''
     emit('toast', '验证码已发送', 'success')
     startSmsCountdown()
   } catch (e) {
@@ -116,7 +129,7 @@ function validate() {
   }
   if (isOAuth.value) return '' // OAuth 无表单校验
   for (const f of fields.value) {
-    if (f.required && !String(form.value[f.key] || '').trim()) return `请填写${f.label}`
+    if (isFieldRequired(f) && !String(form.value[f.key] || '').trim()) return `请填写${f.label}`
   }
   // 全可选字段的 provider 至少填一项
   const allOpt = fields.value.length > 0 && fields.value.every((f) => !f.required)
@@ -192,8 +205,11 @@ async function submit() {
                 <template v-if="providerId === 's3'">
                   <div class="field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
                   <div class="field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
+                  <div class="field"><label>Session Token (可选)</label><input class="input" type="password" v-model="mountedForm.sessionToken" /></div>
+                  <div class="field"><label>路径风格</label><div class="switch" :class="{ on: mountedForm.forcePathStyle }" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></div><div class="hint">开启用于 MinIO、OSS 等兼容服务；AWS S3 可关闭</div></div>
                 </template>
-                <div class="field"><label>挂载路径 (可选)</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
+                <div v-if="providerId === 'webdav'" class="field"><label>根目录 (可选)</label><input class="input" v-model="mountedForm.rootPath" placeholder="/" /></div>
+                <div v-else class="field"><label>挂载路径 (可选)</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
               </template>
 
               <!-- OAuth 授权 -->
@@ -205,7 +221,7 @@ async function submit() {
               <!-- 常规表单 -->
               <template v-else>
                 <div v-for="f in fields" :key="f.key" class="field">
-                  <label>{{ f.label }}<span v-if="f.required" class="req">*</span></label>
+                  <label>{{ f.label }}<span v-if="isFieldRequired(f)" class="req">*</span></label>
                   <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                   <input v-else class="input" :type="f.type === 'password' ? 'password' : 'text'" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
                   <div v-if="f.hint" class="hint">{{ f.hint }}</div>

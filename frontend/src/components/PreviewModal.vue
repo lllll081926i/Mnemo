@@ -4,7 +4,7 @@
 // 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
 // 3. 音频播放与 PDF 嵌入
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { PreviewURL, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf } from '../api'
+import { PreviewURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf } from '../api'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import UiIcon from './UiIcon.vue'
@@ -383,6 +383,11 @@ async function loadPreview() {
   url.value = ''
   resetImageTransform()
   try {
+    await PinFileSnapshot(
+      props.account.user_id,
+      props.account.drive_id,
+      activeFile.value
+    )
     const previewUrl = await PreviewURL(
       props.account.user_id,
       props.account.drive_id,
