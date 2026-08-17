@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/model"
 )
 
 // HTTP clients: normal follows redirects, manual returns the 3xx response
@@ -208,24 +209,14 @@ func (d *Driver) doupload(ctx context.Context, c drive.Context, form url.Values)
 	}
 	zt := numOf(j["zt"])
 	if zt == 9 {
-		cr := parseLanzouCred(tokenRefresh(c))
-		if cr != nil && cr.Type == "account" && cr.Account != "" && cr.Password != "" {
-			if newCookie, lerr := lanzouAccountLogin(ctx, cr.Account, cr.Password); lerr == nil {
-				nu, nv := lanzouGetVeiAndUid(ctx, newCookie, baseURL)
-				if nu == "" {
-					nu = cr.UID
-				}
-				if nv == "" {
-					nv = cr.VEI
-				}
-				if j2, err2 := douploadRaw(ctx, newCookie, nu, nv, baseURL, form); err2 == nil {
-					zt2 := numOf(j2["zt"])
-					if zt2 != 9 {
-						if zt2 != 1 && zt2 != 2 && zt2 != 4 {
-							return nil, errors.New(infOf(j2))
-						}
-						return j2, nil
+		if newCookie, nu, nv, lerr := d.reloginAccount(ctx, c, baseURL); lerr == nil {
+			if j2, err2 := douploadRaw(ctx, newCookie, nu, nv, baseURL, form); err2 == nil {
+				zt2 := numOf(j2["zt"])
+				if zt2 != 9 {
+					if zt2 != 1 && zt2 != 2 && zt2 != 4 {
+						return nil, errors.New(infOf(j2))
 					}
+					return j2, nil
 				}
 			}
 		}
@@ -287,6 +278,47 @@ func lanzouAccountLogin(ctx context.Context, account, password string) (string, 
 		return "", errors.New("蓝奏登录未返回 Cookie")
 	}
 	return cookie, nil
+}
+
+// reloginAccount refreshes an account-backed cookie after the provider returns
+// zt=9 and updates the in-memory token so drive.ops can persist it.
+func (d *Driver) reloginAccount(ctx context.Context, c drive.Context, baseURL string) (cookie, uid, vei string, err error) {
+	cr := parseLanzouCred(tokenRefresh(c))
+	if cr == nil || cr.Type != "account" || cr.Account == "" || cr.Password == "" {
+		return "", "", "", errors.New("蓝奏 Cookie 已过期，请重新登录")
+	}
+	cookie, err = lanzouAccountLogin(ctx, cr.Account, cr.Password)
+	if err != nil {
+		return "", "", "", err
+	}
+	uid, vei = lanzouGetVeiAndUid(ctx, cookie, baseURL)
+	if uid == "" {
+		uid = cr.UID
+	}
+	if vei == "" {
+		vei = cr.VEI
+	}
+	cr.Cookie = cookie
+	cr.UID = uid
+	cr.VEI = vei
+	applyLanzouSession(c.Token, cr, cookie, uid, vei)
+	return cookie, uid, vei, nil
+}
+
+func applyLanzouSession(token *model.TokenInfo, cr *cred, cookie, uid, vei string) {
+	if token == nil {
+		return
+	}
+	token.AccessToken = cookie
+	if uid != "" {
+		token.UserID = model.BuildUserID(model.ProviderLanzou, uid)
+		token.ProviderAccountID = uid
+		token.DefaultDriveID = model.BuildDriveID(model.ProviderLanzou, uid)
+	}
+	if vei != "" {
+		token.DeviceID = vei
+	}
+	token.RefreshToken = mustJSON(cr)
 }
 
 // relaySetCookiesToCookieHeader flattens Set-Cookie lines into a Cookie

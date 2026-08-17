@@ -42,6 +42,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if size > maxLanzouUploadSize {
 		return errors.New("蓝奏单文件上传暂限 200MB（接口不支持分片），请用网页端上传超大文件")
 	}
+	ui.Info.Size = size
+	ui.Info.SizeStr = model.FormatBytes(size)
 	buff := make([]byte, size)
 	if _, err := io.ReadFull(f, buff); err != nil && err != io.EOF {
 		return err
@@ -70,23 +72,23 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 
-	rawURL := strings.TrimSuffix(baseURL, "/") + "/html5up.php"
-	res, err := fetchText(ctx, http.MethodPost, rawURL, map[string]string{
-		"referer":      "https://pc.woozooo.com",
-		"user-agent":   LANZOU_DEFAULT.UserAgent,
-		"content-type": mw.FormDataContentType(),
-	}, body.Bytes(), cookie, false)
+	contentType := mw.FormDataContentType()
+	j, err := uploadLanzouRaw(ctx, cookie, baseURL, contentType, body.Bytes())
 	if err != nil {
 		return err
 	}
-	if res.status >= 400 {
-		return fmt.Errorf("上传失败 HTTP %d", res.status)
-	}
-	var j map[string]any
-	if err := json.Unmarshal([]byte(res.text), &j); err != nil {
-		return fmt.Errorf("上传失败: %s", truncate(res.text, 120))
-	}
 	zt := numOf(j["zt"])
+	if zt == 9 {
+		newCookie, _, _, reloginErr := d.reloginAccount(ctx, c, baseURL)
+		if reloginErr != nil {
+			return reloginErr
+		}
+		j, err = uploadLanzouRaw(ctx, newCookie, baseURL, contentType, body.Bytes())
+		if err != nil {
+			return err
+		}
+		zt = numOf(j["zt"])
+	}
 	if zt != 1 && zt != 2 && zt != 4 {
 		msg := strOf(j["info"])
 		if msg == "" {
@@ -103,4 +105,24 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Upload.IsCompleted = true
 	ui.Upload.DownState = "completed"
 	return nil
+}
+
+func uploadLanzouRaw(ctx context.Context, cookie, baseURL, contentType string, body []byte) (map[string]any, error) {
+	rawURL := strings.TrimSuffix(baseURL, "/") + "/html5up.php"
+	res, err := fetchText(ctx, http.MethodPost, rawURL, map[string]string{
+		"referer":      "https://pc.woozooo.com",
+		"user-agent":   LANZOU_DEFAULT.UserAgent,
+		"content-type": contentType,
+	}, body, cookie, false)
+	if err != nil {
+		return nil, err
+	}
+	if res.status >= 400 {
+		return nil, fmt.Errorf("上传失败 HTTP %d", res.status)
+	}
+	var j map[string]any
+	if err := json.Unmarshal([]byte(res.text), &j); err != nil {
+		return nil, fmt.Errorf("上传失败: %s", truncate(res.text, 120))
+	}
+	return j, nil
 }

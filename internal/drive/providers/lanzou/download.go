@@ -211,16 +211,15 @@ func (d *Driver) downloadInfo(ctx context.Context, c drive.Context, fileID strin
 	if fid == "" {
 		return downloadInfo{Error: "无法获取分享信息"}
 	}
-	cookie := ""
-	if c.Token != nil {
-		cookie = c.Token.AccessToken
-	}
+	size := lanzouSizeOf(firstOf(info, "size", "file_size", "filesize", "f_size"))
+	cookie, _, _, _ := sessionOf(c)
 	res, err := lanzouResolveShareDownload(ctx, fid, pwd, isnewd, cookie)
 	if err != nil {
 		return downloadInfo{Error: err.Error()}
 	}
 	return downloadInfo{
-		URL: res.url,
+		URL:  res.url,
+		Size: size,
 		Headers: map[string]string{
 			"User-Agent":      LANZOU_DEFAULT.UserAgent,
 			"Accept-Language": "zh-CN,zh;q=0.9",

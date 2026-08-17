@@ -72,3 +72,10 @@ func parseSizeToBytes(sizeStr string) int64 {
 		return int64(n)
 	}
 }
+
+func lanzouSizeOf(v any) int64 {
+	if v == nil {
+		return 0
+	}
+	return parseSizeToBytes(strOf(v))
+}

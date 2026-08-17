@@ -3,6 +3,7 @@ package lanzou
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
@@ -170,6 +171,7 @@ func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) (
 // kind from the ref, the meta cache, or a file-first fallback like the legacy.
 func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
 		isDir := false
 		known := false
@@ -182,6 +184,7 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		}
 		if known {
 			if err := d.removeItem(ctx, c, ref.ID, isDir); err != nil {
+				failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err))
 				continue
 			}
 			ok = append(ok, ref.ID)
@@ -189,12 +192,13 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		}
 		if err := d.removeItem(ctx, c, ref.ID, false); err != nil {
 			if err2 := d.removeItem(ctx, c, ref.ID, true); err2 != nil {
+				failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err2))
 				continue
 			}
 		}
 		ok = append(ok, ref.ID)
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 // Move moves files only (蓝奏 cannot move folders; AList parity).
@@ -205,7 +209,13 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 	}
 	var ok []string
 	for _, ref := range refs {
-		if ref.IsDir != nil && *ref.IsDir {
+		isDir := false
+		if ref.IsDir != nil {
+			isDir = *ref.IsDir
+		} else if cachedDir, known := drive.Lookup(c.DriveID, ref.ID); known {
+			isDir = cachedDir
+		}
+		if isDir {
 			return nil, errors.New("蓝奏暂不支持移动文件夹")
 		}
 		if err := d.moveFile(ctx, c, ref.ID, target); err != nil {
@@ -245,20 +255,9 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	if cr == nil || cr.Type != "account" || cr.Account == "" || cr.Password == "" {
 		return nil, errors.New("蓝奏 Cookie 已失效")
 	}
-	newCookie, err := lanzouAccountLogin(ctx, cr.Account, cr.Password)
+	_, _, _, err := d.reloginAccount(ctx, c, baseURL)
 	if err != nil {
 		return nil, err
 	}
-	nu, nv := lanzouGetVeiAndUid(ctx, newCookie, baseURL)
-	cr.Cookie = newCookie
-	if nu != "" {
-		cr.UID = nu
-	}
-	if nv != "" {
-		cr.VEI = nv
-	}
-	token.AccessToken = newCookie
-	token.DeviceID = cr.VEI
-	token.RefreshToken = mustJSON(cr)
 	return token, nil
 }
