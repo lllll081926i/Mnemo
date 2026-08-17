@@ -28,11 +28,11 @@ const (
 // credentials are persisted verbatim. Extra unknown fields are preserved in
 // Raw so refresh flows always round-trip the original payload.
 type TokenInfo struct {
-	TokenFrom   string `json:"tokenfrom"`
-	AccessToken string `json:"access_token"`
+	TokenFrom    string `json:"tokenfrom"`
+	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
 
 	// Open API (alist-style) segment.
 	OpenAPITokenType    string `json:"open_api_token_type"`
@@ -53,11 +53,11 @@ type TokenInfo struct {
 	ExpireTime string `json:"expire_time,omitempty"`
 	SpuID      string `json:"spu_id,omitempty"`
 
-	DefaultDriveID    string `json:"default_drive_id,omitempty"`
-	ResourceDriveID   string `json:"resource_drive_id,omitempty"`
-	BackupDriveID     string `json:"backup_drive_id,omitempty"`
-	SboxDriveID       string `json:"sbox_drive_id,omitempty"`
-	PicDriveID        string `json:"pic_drive_id,omitempty"`
+	DefaultDriveID     string `json:"default_drive_id,omitempty"`
+	ResourceDriveID    string `json:"resource_drive_id,omitempty"`
+	BackupDriveID      string `json:"backup_drive_id,omitempty"`
+	SboxDriveID        string `json:"sbox_drive_id,omitempty"`
+	PicDriveID         string `json:"pic_drive_id,omitempty"`
 	DefaultSboxDriveID string `json:"default_sbox_drive_id,omitempty"`
 
 	ProviderAccountID string `json:"provider_account_id,omitempty"`
@@ -67,9 +67,9 @@ type TokenInfo struct {
 	TotalSize int64 `json:"total_size,omitempty"`
 	FreeSize  int64 `json:"free_size,omitempty"`
 
-	VIPName    string `json:"vipname,omitempty"`
-	VIPIcon    string `json:"vipIcon,omitempty"`
-	VIPExpire  string `json:"vipexpire,omitempty"`
+	VIPName   string `json:"vipname,omitempty"`
+	VIPIcon   string `json:"vipIcon,omitempty"`
+	VIPExpire string `json:"vipexpire,omitempty"`
 
 	// Raw preserves the original JSON document for opaque providers.
 	Raw json.RawMessage `json:"-"`
@@ -81,9 +81,10 @@ type TokenInfo struct {
 // ConnConfig describes a mounted storage connection.
 type ConnConfig struct {
 	Name           string `json:"name,omitempty"`
-	Endpoint      string `json:"endpoint,omitempty"`
-	Username      string `json:"username,omitempty"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	Username       string `json:"username,omitempty"`
 	Password       string `json:"password,omitempty"`
+	RootPath       string `json:"rootPath,omitempty"`
 	Region         string `json:"region,omitempty"`
 	Bucket         string `json:"bucket,omitempty"`
 	BasePath       string `json:"basePath,omitempty"`

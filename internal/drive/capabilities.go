@@ -8,43 +8,43 @@ type Capabilities struct {
 
 	MountedStorage bool `json:"mountedStorage"`
 
-	Download       bool `json:"download"`
-	OfflineDownload bool `json:"offlineDownload"`
-	Search         bool `json:"search"`
-	Upload         bool `json:"upload"`
-	UploadMode     string `json:"uploadMode"` // queue | direct | none
+	Download        bool   `json:"download"`
+	OfflineDownload bool   `json:"offlineDownload"`
+	Search          bool   `json:"search"`
+	Upload          bool   `json:"upload"`
+	UploadMode      string `json:"uploadMode"` // queue | direct | none
 
-	CreateFolder   bool `json:"createFolder"`
+	CreateFolder     bool `json:"createFolder"`
 	CreateDateFolder bool `json:"createDateFolder"`
-	CreateTextFile bool `json:"createTextFile"`
+	CreateTextFile   bool `json:"createTextFile"`
 
-	Rename       bool `json:"rename"`
-	Move         bool `json:"move"`
-	Copy         bool `json:"copy"`
-	RecycleBin   bool `json:"recycleBin"`
+	Rename          bool `json:"rename"`
+	Move            bool `json:"move"`
+	Copy            bool `json:"copy"`
+	RecycleBin      bool `json:"recycleBin"`
 	PermanentDelete bool `json:"permanentDelete"`
-	TrashView    bool `json:"trashView"`
-	TrashRestore bool `json:"trashRestore"`
-	TrashPurge   bool `json:"trashPurge"`
-	TrashClear   bool `json:"trashClear"`
+	TrashView       bool `json:"trashView"`
+	TrashRestore    bool `json:"trashRestore"`
+	TrashPurge      bool `json:"trashPurge"`
+	TrashClear      bool `json:"trashClear"`
 
-	CreateShare       bool `json:"createShare"`
-	ShareExpiration   bool `json:"shareExpiration"`
-	SharePassword     bool `json:"sharePassword"`
-	CombinedShare     bool `json:"combinedShare"`
-	ImportShare       bool `json:"importShare"`
-	ManageCreatedShares bool `json:"manageCreatedShares"`
-	EditCreatedShares bool `json:"editCreatedShares"`
-	CancelCreatedShares bool `json:"cancelCreatedShares"`
+	CreateShare          bool `json:"createShare"`
+	ShareExpiration      bool `json:"shareExpiration"`
+	SharePassword        bool `json:"sharePassword"`
+	CombinedShare        bool `json:"combinedShare"`
+	ImportShare          bool `json:"importShare"`
+	ManageCreatedShares  bool `json:"manageCreatedShares"`
+	EditCreatedShares    bool `json:"editCreatedShares"`
+	CancelCreatedShares  bool `json:"cancelCreatedShares"`
 	ManageImportedShares bool `json:"manageImportedShares"`
-	ShareHistory      bool `json:"shareHistory"`
+	ShareHistory         bool `json:"shareHistory"`
 
-	QuickTransfer bool `json:"quickTransfer"`
-	Favorite      bool `json:"favorite"`
-	Encryption    bool `json:"encryption"`
+	QuickTransfer   bool `json:"quickTransfer"`
+	Favorite        bool `json:"favorite"`
+	Encryption      bool `json:"encryption"`
 	PlaybackHistory bool `json:"playbackHistory"`
-	CopyTree      bool `json:"copyTree"`
-	PhotoAlbum    bool `json:"photoAlbum"`
+	CopyTree        bool `json:"copyTree"`
+	PhotoAlbum      bool `json:"photoAlbum"`
 
 	// ProvideHashes lists content fingerprints the source can provide.
 	ProvideHashes []string `json:"provideHashes"`
@@ -63,25 +63,27 @@ const (
 // noCaps is the all-disabled baseline.
 func noCaps() Capabilities {
 	return Capabilities{
-		Provider:                "",
-		UploadMode:              UploadModeNone,
-		UploadConflictPolicies:  []string{"rename", "skip", "overwrite"},
+		Provider:               "",
+		UploadMode:             UploadModeNone,
+		UploadConflictPolicies: []string{"rename", "skip", "overwrite"},
 	}
 }
 
 // standardFileCaps is the common file-management baseline most drives share.
 func standardFileCaps() Capabilities {
 	return Capabilities{
-		Download:     true,
-		Upload:       true,
-		UploadMode:   UploadModeQueue,
-		CreateFolder: true,
-		CreateTextFile: true,
+		Download:         true,
+		Upload:           true,
+		UploadMode:       UploadModeQueue,
+		CreateFolder:     true,
+		CreateTextFile:   true,
 		CreateDateFolder: true,
-		Rename:       true,
-		Move:         true,
-		Copy:         true,
-		RecycleBin:   true,
+		Rename:           true,
+		Move:             true,
+		Copy:             true,
+		// Recycle-bin semantics vary by provider. Each provider must opt in
+		// explicitly so a permanent-delete API is never shown as "trash".
+		RecycleBin: false,
 	}
 }
 
@@ -91,53 +93,106 @@ func NewCapabilities(provider string, overrides map[string]bool, extra func(*Cap
 	caps := noCaps()
 	std := standardFileCaps()
 	merge := func(src Capabilities) {
-		if src.Download { caps.Download = true }
-		if src.Upload { caps.Upload = true }
-		if src.UploadMode != UploadModeNone { caps.UploadMode = src.UploadMode }
-		if src.CreateFolder { caps.CreateFolder = true }
-		if src.CreateTextFile { caps.CreateTextFile = true }
-		if src.CreateDateFolder { caps.CreateDateFolder = true }
-		if src.Rename { caps.Rename = true }
-		if src.Move { caps.Move = true }
-		if src.Copy { caps.Copy = true }
-		if src.RecycleBin { caps.RecycleBin = true }
+		if src.Download {
+			caps.Download = true
+		}
+		if src.Upload {
+			caps.Upload = true
+		}
+		if src.UploadMode != UploadModeNone {
+			caps.UploadMode = src.UploadMode
+		}
+		if src.CreateFolder {
+			caps.CreateFolder = true
+		}
+		if src.CreateTextFile {
+			caps.CreateTextFile = true
+		}
+		if src.CreateDateFolder {
+			caps.CreateDateFolder = true
+		}
+		if src.Rename {
+			caps.Rename = true
+		}
+		if src.Move {
+			caps.Move = true
+		}
+		if src.Copy {
+			caps.Copy = true
+		}
+		if src.RecycleBin {
+			caps.RecycleBin = true
+		}
 	}
 	merge(std)
 	for k, v := range overrides {
 		switch k {
-		case "mountedStorage": caps.MountedStorage = v
-		case "download": caps.Download = v
-		case "offlineDownload": caps.OfflineDownload = v
-		case "search": caps.Search = v
-		case "upload": caps.Upload = v
-		case "createFolder": caps.CreateFolder = v
-		case "createDateFolder": caps.CreateDateFolder = v
-		case "createTextFile": caps.CreateTextFile = v
-		case "rename": caps.Rename = v
-		case "move": caps.Move = v
-		case "copy": caps.Copy = v
-		case "recycleBin": caps.RecycleBin = v
-		case "permanentDelete": caps.PermanentDelete = v
-		case "trashView": caps.TrashView = v
-		case "trashRestore": caps.TrashRestore = v
-		case "trashPurge": caps.TrashPurge = v
-		case "trashClear": caps.TrashClear = v
-		case "createShare": caps.CreateShare = v
-		case "shareExpiration": caps.ShareExpiration = v
-		case "sharePassword": caps.SharePassword = v
-		case "combinedShare": caps.CombinedShare = v
-		case "importShare": caps.ImportShare = v
-		case "manageCreatedShares": caps.ManageCreatedShares = v
-		case "editCreatedShares": caps.EditCreatedShares = v
-		case "cancelCreatedShares": caps.CancelCreatedShares = v
-		case "manageImportedShares": caps.ManageImportedShares = v
-		case "shareHistory": caps.ShareHistory = v
-		case "quickTransfer": caps.QuickTransfer = v
-		case "favorite": caps.Favorite = v
-		case "encryption": caps.Encryption = v
-		case "playbackHistory": caps.PlaybackHistory = v
-		case "copyTree": caps.CopyTree = v
-		case "photoAlbum": caps.PhotoAlbum = v
+		case "mountedStorage":
+			caps.MountedStorage = v
+		case "download":
+			caps.Download = v
+		case "offlineDownload":
+			caps.OfflineDownload = v
+		case "search":
+			caps.Search = v
+		case "upload":
+			caps.Upload = v
+		case "createFolder":
+			caps.CreateFolder = v
+		case "createDateFolder":
+			caps.CreateDateFolder = v
+		case "createTextFile":
+			caps.CreateTextFile = v
+		case "rename":
+			caps.Rename = v
+		case "move":
+			caps.Move = v
+		case "copy":
+			caps.Copy = v
+		case "recycleBin":
+			caps.RecycleBin = v
+		case "permanentDelete":
+			caps.PermanentDelete = v
+		case "trashView":
+			caps.TrashView = v
+		case "trashRestore":
+			caps.TrashRestore = v
+		case "trashPurge":
+			caps.TrashPurge = v
+		case "trashClear":
+			caps.TrashClear = v
+		case "createShare":
+			caps.CreateShare = v
+		case "shareExpiration":
+			caps.ShareExpiration = v
+		case "sharePassword":
+			caps.SharePassword = v
+		case "combinedShare":
+			caps.CombinedShare = v
+		case "importShare":
+			caps.ImportShare = v
+		case "manageCreatedShares":
+			caps.ManageCreatedShares = v
+		case "editCreatedShares":
+			caps.EditCreatedShares = v
+		case "cancelCreatedShares":
+			caps.CancelCreatedShares = v
+		case "manageImportedShares":
+			caps.ManageImportedShares = v
+		case "shareHistory":
+			caps.ShareHistory = v
+		case "quickTransfer":
+			caps.QuickTransfer = v
+		case "favorite":
+			caps.Favorite = v
+		case "encryption":
+			caps.Encryption = v
+		case "playbackHistory":
+			caps.PlaybackHistory = v
+		case "copyTree":
+			caps.CopyTree = v
+		case "photoAlbum":
+			caps.PhotoAlbum = v
 		}
 	}
 	if extra != nil {

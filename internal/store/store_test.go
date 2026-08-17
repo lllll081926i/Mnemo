@@ -1,8 +1,10 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"mnemo-go/internal/model"
@@ -176,5 +178,30 @@ func TestDirectoryCacheIsolationAndClear(t *testing.T) {
 	}
 	if _, err := st.GetSettings(); err != nil {
 		t.Fatalf("ClearCache removed settings: %v", err)
+	}
+}
+
+func TestTaskSavesKeepConcurrentRecords(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := st.SaveDownloadTask(&model.DownloadTask{ID: fmt.Sprintf("dl-%d", i), Name: "file"}); err != nil {
+				t.Errorf("SaveDownloadTask(%d): %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	list, err := st.ListDownloadTasks()
+	if err != nil {
+		t.Fatalf("ListDownloadTasks: %v", err)
+	}
+	if len(list) != 20 {
+		t.Fatalf("concurrent task saves kept %d records, want 20", len(list))
 	}
 }

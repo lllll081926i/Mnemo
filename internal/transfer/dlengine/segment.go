@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,10 +71,10 @@ type Progress struct {
 
 // state is the persisted resume state.
 type state struct {
-	URL      string   `json:"url"`
-	Total    int64    `json:"total"`
-	Chunk    int64    `json:"chunk"`
-	Done     []bool   `json:"done"`
+	URL          string `json:"url"`
+	Total        int64  `json:"total"`
+	Chunk        int64  `json:"chunk"`
+	Done         []bool `json:"done"`
 	LastModified string `json:"last_modified,omitempty"`
 }
 
@@ -116,7 +117,8 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	// Resume from state if it matches.
 	if b, err := os.ReadFile(statePath); err == nil {
 		var prev state
-		if json.Unmarshal(b, &prev) == nil && prev.URL == url && prev.Total == total && prev.Chunk == opts.ChunkSize {
+		if json.Unmarshal(b, &prev) == nil && prev.URL == url && prev.Total == total && prev.Chunk == opts.ChunkSize &&
+			(prev.LastModified == "" || lastModified == "" || prev.LastModified == lastModified) {
 			st = &prev
 		}
 	}
@@ -170,8 +172,10 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 				if err == nil {
 					mu.Lock()
 					st.Done[chunkIdx] = true
-					mu.Unlock()
+					// Persist while holding the same lock that protects st.Done;
+					// otherwise parallel chunks can overwrite each other's state.
 					_ = persistState(statePath, st)
+					mu.Unlock()
 					return nil
 				}
 				if gctx.Err() != nil {
@@ -223,8 +227,8 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	if downloaded.Load() != total {
 		return fmt.Errorf("dlengine: downloaded %d != total %d", downloaded.Load(), total)
 	}
-	// commit: rename part → final
-	if err := os.Rename(partPath, localPath); err != nil {
+	// commit: rename part -> final
+	if err := commitPart(partPath, localPath); err != nil {
 		return err
 	}
 	_ = os.Remove(statePath)
@@ -248,7 +252,9 @@ func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int6
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-	acceptRanges := strings.EqualFold(resp.Header.Get("Accept-Ranges"), "bytes") || resp.StatusCode == http.StatusPartialContent
+	// A server advertising Accept-Ranges can still ignore a particular probe.
+	// Only a real 206 response proves that segmented requests are usable.
+	acceptRanges := resp.StatusCode == http.StatusPartialContent
 	lastModified := resp.Header.Get("Last-Modified")
 	var total int64
 	switch {
@@ -279,6 +285,9 @@ func parseContentRangeTotal(cr string) int64 {
 
 // fetchRange GETs one range and writes it at the file offset.
 func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, start, length int64, f *os.File, limiter *speedLimiter, account func(int64)) error {
+	if length <= 0 {
+		return errors.New("dlengine: invalid range length")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -293,8 +302,19 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("dlengine: range http %d", resp.StatusCode)
 	}
+	if resp.StatusCode == http.StatusOK {
+		return errors.New("dlengine: server ignored range request")
+	}
 	buf := make([]byte, 256<<10)
 	written := int64(0)
+	committed := false
+	defer func() {
+		if !committed && written > 0 && account != nil {
+			// A retry overwrites the same range. Roll back bytes reported by a
+			// failed attempt so progress reflects committed content only.
+			account(-written)
+		}
+	}()
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
@@ -303,7 +323,9 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 				return werr
 			}
 			written += int64(n)
-			account(int64(n))
+			if account != nil {
+				account(int64(n))
+			}
 		}
 		if err == io.EOF {
 			break
@@ -315,6 +337,7 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	if written != length {
 		return fmt.Errorf("dlengine: short read %d != %d", written, length)
 	}
+	committed = true
 	return nil
 }
 
@@ -332,7 +355,8 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("dlengine: http %d", resp.StatusCode)
 	}
-	f, err := os.Create(localPath)
+	partPath := localPath + ".part"
+	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
@@ -367,6 +391,55 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	if err := f.Sync(); err != nil {
 		return err
 	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if total > 0 && written != total {
+		return fmt.Errorf("dlengine: downloaded %d != total %d", written, total)
+	}
+	if err := commitPart(partPath, localPath); err != nil {
+		return err
+	}
+	_ = os.Remove(localPath + ".state.json")
+	if onProgress != nil {
+		onProgress(Progress{Downloaded: written, Total: total, Speed: 0, Percent: percent(written, total)})
+	}
+	return nil
+}
+
+// commitPart replaces the destination on every platform. Windows refuses to
+// rename over an existing file, so move the old destination aside first and
+// restore it if the commit fails.
+func commitPart(partPath, localPath string) error {
+	if err := os.Rename(partPath, localPath); err == nil {
+		return nil
+	} else if runtime.GOOS != "windows" {
+		return err
+	}
+
+	if _, err := os.Stat(localPath); err != nil {
+		return err
+	}
+	backup, err := os.CreateTemp(filepath.Dir(localPath), ".mnemo-replace-*")
+	if err != nil {
+		return err
+	}
+	backupPath := backup.Name()
+	if err := backup.Close(); err != nil {
+		_ = os.Remove(backupPath)
+		return err
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return err
+	}
+	if err := os.Rename(localPath, backupPath); err != nil {
+		return err
+	}
+	if err := os.Rename(partPath, localPath); err != nil {
+		_ = os.Rename(backupPath, localPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
 	return nil
 }
 
@@ -385,9 +458,17 @@ func ensureFile(path string, size int64) error {
 		return err
 	}
 	defer f.Close()
+	if size < 0 {
+		return errors.New("dlengine: negative file size")
+	}
 	cur, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
 		return err
+	}
+	if cur != size {
+		if err := f.Truncate(size); err != nil {
+			return err
+		}
 	}
 	if cur < size {
 		if _, err := f.Seek(size-1, io.SeekStart); err != nil {

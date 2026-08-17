@@ -1,9 +1,33 @@
 package dlengine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestCommitPartReplacesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	part := filepath.Join(dir, "file.part")
+	dest := filepath.Join(dir, "file.bin")
+	if err := os.WriteFile(part, []byte("new"), 0o644); err != nil {
+		t.Fatalf("write part: %v", err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write destination: %v", err)
+	}
+	if err := commitPart(part, dest); err != nil {
+		t.Fatalf("commitPart: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read destination: %v", err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("destination = %q, want new", got)
+	}
+}
 
 func TestSpeedLimiterUnlimited(t *testing.T) {
 	l := newSpeedLimiter(0)

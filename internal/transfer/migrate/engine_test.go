@@ -3,6 +3,8 @@ package migrate
 import (
 	"context"
 	"testing"
+
+	"mnemo-go/internal/model"
 )
 
 func TestCommonHashMethod(t *testing.T) {
@@ -23,6 +25,18 @@ func TestCommonHashMethod(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: commonHashMethod(%v,%v) = %q, want %q", c.name, c.src, c.dst, got, c.want)
 		}
+	}
+}
+
+func TestRapidUploadAllowedExcludesYike(t *testing.T) {
+	if rapidUploadAllowed(model.ProviderYike, "pan123") {
+		t.Fatal("yike must not be used as a rapid-upload source")
+	}
+	if rapidUploadAllowed("pan123", model.ProviderYike) {
+		t.Fatal("yike must not be used as a rapid-upload target")
+	}
+	if !rapidUploadAllowed("pan123", "pan189") {
+		t.Fatal("compatible providers should remain eligible")
 	}
 }
 

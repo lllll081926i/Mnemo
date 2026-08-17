@@ -119,3 +119,17 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestSafeNameIsCrossPlatform(t *testing.T) {
+	cases := map[string]string{
+		"report.txt": "report.txt",
+		"CON.txt":    "_CON.txt",
+		"name. ":     "name",
+		"../":        "download",
+	}
+	for input, want := range cases {
+		if got := safeName(input); got != want {
+			t.Errorf("safeName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

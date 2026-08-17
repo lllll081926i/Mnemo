@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/providers/pikpak"
@@ -16,14 +17,24 @@ import (
 
 // SaveCloudTextFile writes text content to a temporary file and triggers an upload back to the cloud.
 func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content string) error {
+	name := filepath.Base(strings.TrimSpace(fileName))
+	if name == "." || name == "" || name == string(filepath.Separator) {
+		return fmt.Errorf("文件名无效")
+	}
 	tmpDir := filepath.Join(os.TempDir(), "mnemo_edit")
 	_ = os.MkdirAll(tmpDir, 0o755)
-	tmpPath := filepath.Join(tmpDir, fileName)
+	tmpPath := filepath.Join(tmpDir, name)
 	if err := os.WriteFile(tmpPath, []byte(content), 0o644); err != nil {
 		return err
 	}
-	if a.uploads != nil {
-		a.uploads.AddFiles(userID, driveID, parentID, []string{tmpPath})
+	uploads := a.uploadQueue()
+	if uploads == nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("上传服务未启动")
+	}
+	if created := uploads.AddFiles(userID, driveID, parentID, []string{tmpPath}); len(created) == 0 {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("文件未能加入上传队列")
 	}
 	return nil
 }
@@ -32,7 +43,7 @@ func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content str
 func (a *App) ListDir(userID, driveID, dirID string) ([]model.File, error) {
 	files, err := drive.ListDir(userID, driveID, dirID, nil)
 	if err == nil {
-		drive.RememberListedFiles(driveID, dirID, files)
+		drive.RememberListedFiles(userID, driveID, dirID, files)
 	}
 	return files, err
 }
@@ -135,18 +146,28 @@ func (a *App) FavoriteFiles(userID, driveID string, favorite bool, fileIDs []str
 func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*model.ShareItem, error) {
 	item, err := drive.CreateShare(userID, driveID, params)
 	if err == nil && item != nil {
-		_ = a.store.SaveShareHistory(model.ShareHistoryEntry{
+		st, storeErr := a.storeOrError()
+		if storeErr != nil {
+			return item, storeErr
+		}
+		if storeErr = st.SaveShareHistory(model.ShareHistoryEntry{
 			ShareID: item.ShareID, AccountID: userID, DriveID: driveID,
 			FileID: firstFileID(params.FileIDs), ShareURL: item.ShareURL,
 			SharePwd: item.SharePwd, ShareName: item.ShareName, Provider: drive.ProviderOf(userID, driveID, ""),
-		})
+		}); storeErr != nil {
+			return item, storeErr
+		}
 	}
 	return item, err
 }
 
 // ListShareHistory lists persisted share history.
 func (a *App) ListShareHistory(userID string) []model.ShareHistoryEntry {
-	list, err := a.store.ListShareHistory(userID)
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil
+	}
+	list, err := st.ListShareHistory(userID)
 	if err != nil {
 		return nil
 	}
@@ -170,7 +191,11 @@ func (a *App) SaveImportedShare(userID, driveID string, session *drive.ShareImpo
 
 // ListLocalTags lists local tags for an account.
 func (a *App) ListLocalTags(userID, driveID string) []store.LocalTag {
-	list, err := a.store.ListLocalTags(userID, driveID)
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil
+	}
+	list, err := st.ListLocalTags(userID, driveID)
 	if err != nil {
 		return nil
 	}
@@ -179,17 +204,29 @@ func (a *App) ListLocalTags(userID, driveID string) []store.LocalTag {
 
 // SaveLocalTag upserts a local tag.
 func (a *App) SaveLocalTag(t store.LocalTag) error {
-	return a.store.UpsertLocalTag(t)
+	st, err := a.storeOrError()
+	if err != nil {
+		return err
+	}
+	return st.UpsertLocalTag(t)
 }
 
 // DeleteLocalTag removes a local tag.
 func (a *App) DeleteLocalTag(userID, driveID, fileID string) error {
-	return a.store.DeleteLocalTag(userID, driveID, fileID)
+	st, err := a.storeOrError()
+	if err != nil {
+		return err
+	}
+	return st.DeleteLocalTag(userID, driveID, fileID)
 }
 
 // ListFavorites lists local favorites.
 func (a *App) ListFavorites(userID, driveID string) []store.Favorite {
-	list, err := a.store.ListFavorites(userID, driveID)
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil
+	}
+	list, err := st.ListFavorites(userID, driveID)
 	if err != nil {
 		return nil
 	}
@@ -198,12 +235,20 @@ func (a *App) ListFavorites(userID, driveID string) []store.Favorite {
 
 // AddFavorite adds a favorite.
 func (a *App) AddFavorite(userID, driveID string, f store.Favorite) error {
-	return a.store.AddFavorite(f)
+	st, err := a.storeOrError()
+	if err != nil {
+		return err
+	}
+	return st.AddFavorite(f)
 }
 
 // RemoveFavorite removes a favorite.
 func (a *App) RemoveFavorite(userID, driveID, fileID string) error {
-	return a.store.RemoveFavorite(userID, driveID, fileID)
+	st, err := a.storeOrError()
+	if err != nil {
+		return err
+	}
+	return st.RemoveFavorite(userID, driveID, fileID)
 }
 
 // ---- offline download (PikPak cloud) ----
@@ -235,21 +280,35 @@ func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.Offli
 	if err != nil {
 		return nil, err
 	}
+	localID := taskID
+	if localID == "" {
+		localID = fileID
+	}
 	t := &model.OfflineTask{
-		ID: taskID, UserID: userID, DriveID: driveID,
-		TaskID: taskID, URL: url, FileName: fileName,
+		ID: localID, UserID: userID, DriveID: driveID,
+		TaskID: taskID, FileID: fileID, URL: url, FileName: fileName,
 		Status: "running",
 	}
-	if fileID != "" {
-		t.FileName = fileID
+	if t.ID == "" {
+		return nil, fmt.Errorf("云离线任务响应缺少任务或文件 ID")
 	}
-	_ = a.store.SaveOfflineTask(t)
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
+	if err := st.SaveOfflineTask(t); err != nil {
+		return nil, err
+	}
 	return t, nil
 }
 
 // ListOfflineTasks lists offline tasks.
 func (a *App) ListOfflineTasks(userID string) []model.OfflineTask {
-	list, err := a.store.ListOfflineTasks()
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil
+	}
+	list, err := st.ListOfflineTasks()
 	if err != nil {
 		return nil
 	}
@@ -285,17 +344,41 @@ func (a *App) RefreshOfflineTasks(userID, driveID string) ([]model.OfflineTask, 
 	if err != nil {
 		return nil, err
 	}
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
 	var out []model.OfflineTask
 	for _, t := range tasks {
-		ot := model.OfflineTask{
-			ID: t.TaskID, UserID: userID, DriveID: driveID,
-			TaskID: t.TaskID, FileName: t.Name,
-			Status: t.Phase, Progress: t.Progress,
+		localID := t.TaskID
+		if localID == "" {
+			localID = t.FileID
 		}
-		_ = a.store.SaveOfflineTask(&ot)
+		ot := model.OfflineTask{
+			ID: localID, UserID: userID, DriveID: driveID,
+			TaskID: t.TaskID, FileID: t.FileID, URL: t.URL, FileName: t.Name,
+			Status: firstNonEmptyOfflineStatus(t.Phase, t.Status), Progress: t.Progress,
+			Message: t.Message, FileSize: t.FileSize,
+			CreatedTime: t.CreatedTime, UpdatedTime: t.UpdatedTime,
+		}
+		if ot.ID == "" {
+			continue
+		}
+		if err := st.SaveOfflineTask(&ot); err != nil {
+			return nil, err
+		}
 		out = append(out, ot)
 	}
 	return out, nil
+}
+
+func firstNonEmptyOfflineStatus(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return "unknown"
 }
 
 // DeleteOfflineTask cancels and removes a PikPak cloud offline task.
@@ -319,8 +402,11 @@ func (a *App) DeleteOfflineTask(userID, driveID, taskID string, deleteFiles bool
 	if err := del.OfflineDelete(ctx, c, []string{taskID}, deleteFiles); err != nil {
 		return err
 	}
-	_ = a.store.DeleteOfflineTask(taskID)
-	return nil
+	st, err := a.storeOrError()
+	if err != nil {
+		return err
+	}
+	return st.DeleteOfflineTask(taskID)
 }
 
 func firstFileID(ids []string) string {
@@ -334,15 +420,12 @@ var _ = context.Background
 
 // SendGuangyaSms requests a SMS verification code (guangya provider).
 func (a *App) SendGuangyaSms(phone string) (map[string]string, error) {
-	reg, ok := drive.Get(model.ProviderGuangya)
-	if !ok {
+	if !drive.IsRegistered(model.ProviderGuangya) {
 		return nil, fmt.Errorf("光鸭云盘未注册")
 	}
 	type sender interface {
 		SendSms(ctx context.Context, phone string) (verificationID, deviceID, captchaToken string, err error)
 	}
-	// The guangya package exposes SendSms as a package function; wrap via driver instance.
-	_ = reg
 	d := drive.New(model.ProviderGuangya)
 	if s, ok := d.(sender); ok {
 		vid, dev, capTok, err := s.SendSms(context.Background(), phone)
@@ -351,8 +434,5 @@ func (a *App) SendGuangyaSms(phone string) (map[string]string, error) {
 		}
 		return map[string]string{"verification_id": vid, "device_id": dev, "captcha_token": capTok}, nil
 	}
-	// fallback: package-level helper
-	type pkgSender interface{}
-	_ = pkgSender(nil)
 	return nil, fmt.Errorf("光鸭云盘不支持发送验证码")
 }

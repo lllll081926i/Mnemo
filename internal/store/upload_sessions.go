@@ -17,7 +17,8 @@ const uploadSessionDir = "upload_sessions"
 // UploadSessionRecord stores the set of uploaded part numbers for a single
 // resumable upload. The key is a stable hash of userID:driveID:parentID:name:size.
 type UploadSessionRecord struct {
-	Key                string `json:"key"`
+	Key                 string `json:"key"`
+	SessionID           string `json:"sessionId,omitempty"`
 	UploadedPartNumbers []int  `json:"uploadedPartNumbers"`
 }
 
@@ -48,6 +49,12 @@ func UploadSessionKey(userID, driveID, parentID, name string, size int64) string
 
 // SaveUploadSession persists the uploaded part numbers for a session key.
 func SaveUploadSession(key string, partNumbers []int) error {
+	return SaveUploadSessionState(key, "", partNumbers)
+}
+
+// SaveUploadSessionState persists a provider session id with completed parts.
+// The id prevents parts from one remote session being applied to a new one.
+func SaveUploadSessionState(key, sessionID string, partNumbers []int) error {
 	usMu.Lock()
 	dir := usStoreDir
 	usMu.Unlock()
@@ -58,7 +65,8 @@ func SaveUploadSession(key string, partNumbers []int) error {
 		_ = os.MkdirAll(dir, 0o755)
 	}
 	rec := UploadSessionRecord{
-		Key:                key,
+		Key:                 key,
+		SessionID:           sessionID,
 		UploadedPartNumbers: partNumbers,
 	}
 	path := filepath.Join(dir, key+".json")
@@ -76,21 +84,27 @@ func SaveUploadSession(key string, partNumbers []int) error {
 // LoadUploadSession returns the persisted uploaded part numbers for a key,
 // or nil if no session exists.
 func LoadUploadSession(key string) []int {
+	_, parts := LoadUploadSessionState(key)
+	return parts
+}
+
+// LoadUploadSessionState returns the provider session id and completed parts.
+func LoadUploadSessionState(key string) (string, []int) {
 	usMu.Lock()
 	dir := usStoreDir
 	usMu.Unlock()
 	if dir == "" {
-		return nil
+		return "", nil
 	}
 	b, err := os.ReadFile(filepath.Join(dir, key+".json"))
 	if err != nil {
-		return nil
+		return "", nil
 	}
 	var rec UploadSessionRecord
 	if err := json.Unmarshal(b, &rec); err != nil {
-		return nil
+		return "", nil
 	}
-	return rec.UploadedPartNumbers
+	return rec.SessionID, rec.UploadedPartNumbers
 }
 
 // ClearUploadSession removes the persisted session for a key.

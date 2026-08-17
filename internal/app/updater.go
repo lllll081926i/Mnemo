@@ -44,7 +44,7 @@ func (a *App) DownloadUpdate(url string) (string, error) {
 		}
 		url = info.URL
 	}
-	dest := filepath.Join(updater.DownloadDir(a.dataDir), "mnemo-update")
+	dest := filepath.Join(updater.DownloadDir(a.dataDirectory()), "mnemo-update")
 	go func() {
 		_, err := updater.Download(context.Background(), url, dest, func(p updater.Progress) {
 			a.emit("update:progress", p)

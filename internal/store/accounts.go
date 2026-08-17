@@ -13,6 +13,12 @@ const accountsFile = "accounts.json"
 
 // readAccounts reads the encrypted accounts file from the accounts dir.
 func (s *Store) readAccounts() ([]*model.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readAccountsUnlocked()
+}
+
+func (s *Store) readAccountsUnlocked() ([]*model.Account, error) {
 	p := s.path(accountsFile)
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -35,19 +41,39 @@ func (s *Store) readAccounts() ([]*model.Account, error) {
 		if err := json.Unmarshal(plain, &list); err != nil {
 			return nil, err
 		}
-		return list, nil
+		return compactAccounts(list), nil
 	}
 	// legacy plaintext migration
 	if err := json.Unmarshal(b, &list); err != nil {
 		return nil, err
 	}
-	return list, nil
+	return compactAccounts(list), nil
+}
+
+// compactAccounts tolerates partially written or hand-edited legacy account
+// files. A JSON null entry must not make the Wails account binding panic while
+// sorting or looking up accounts.
+func compactAccounts(list []*model.Account) []*model.Account {
+	if len(list) == 0 {
+		return list
+	}
+	out := make([]*model.Account, 0, len(list))
+	for _, account := range list {
+		if account != nil {
+			out = append(out, account)
+		}
+	}
+	return out
 }
 
 // writeAccounts encrypts and writes the accounts list.
 func (s *Store) writeAccounts(list []*model.Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.writeAccountsUnlocked(list)
+}
+
+func (s *Store) writeAccountsUnlocked(list []*model.Account) error {
 	b, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		return err
@@ -102,7 +128,9 @@ func (s *Store) SaveAccount(account *model.Account) error {
 	if account == nil || account.UserID == "" {
 		return errInvalid("account user_id is empty")
 	}
-	list, err := s.readAccounts()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.readAccountsUnlocked()
 	if err != nil {
 		return err
 	}
@@ -120,12 +148,14 @@ func (s *Store) SaveAccount(account *model.Account) error {
 		}
 		list = append(list, account)
 	}
-	return s.writeAccounts(list)
+	return s.writeAccountsUnlocked(list)
 }
 
 // DeleteAccount removes an account by user id.
 func (s *Store) DeleteAccount(userID string) error {
-	list, err := s.readAccounts()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.readAccountsUnlocked()
 	if err != nil {
 		return err
 	}
@@ -135,15 +165,22 @@ func (s *Store) DeleteAccount(userID string) error {
 			out = append(out, a)
 		}
 	}
-	return s.writeAccounts(out)
+	return s.writeAccountsUnlocked(out)
 }
 
 // UpdateAccountToken refreshes the token of an account.
 func (s *Store) UpdateAccountToken(userID string, token *model.TokenInfo) error {
-	a, err := s.GetAccount(userID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.readAccountsUnlocked()
 	if err != nil {
 		return err
 	}
-	a.Token = token
-	return s.SaveAccount(a)
+	for _, a := range list {
+		if a.UserID == userID {
+			a.Token = token
+			return s.writeAccountsUnlocked(list)
+		}
+	}
+	return os.ErrNotExist
 }

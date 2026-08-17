@@ -395,9 +395,10 @@ func TestLanzouShareDownloadAndVideoPreview(t *testing.T) {
 }
 
 func TestLanzouMoveRejectsCachedFolder(t *testing.T) {
+	const userID = "lanzou_move-cache-test"
 	const driveID = "lanzou:move-cache-test"
-	drive.RememberFile(driveID, model.File{DriveID: driveID, FileID: "folder-1", IsDir: true})
-	_, err := (&Driver{}).Move(context.Background(), drive.Context{DriveID: driveID}, []drive.FileRef{{ID: "folder-1"}}, "target", "")
+	drive.RememberFile(userID, driveID, model.File{DriveID: driveID, FileID: "folder-1", IsDir: true})
+	_, err := (&Driver{}).Move(context.Background(), drive.Context{UserID: userID, DriveID: driveID}, []drive.FileRef{{ID: "folder-1"}}, "target", "")
 	if err == nil || !strings.Contains(err.Error(), "不支持移动文件夹") {
 		t.Fatalf("move folder error = %v", err)
 	}

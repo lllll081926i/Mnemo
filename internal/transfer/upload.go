@@ -3,6 +3,7 @@ package transfer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,14 +18,17 @@ import (
 
 // UploadQueue manages upload jobs for queue-mode providers.
 type UploadQueue struct {
-	store   *store.Store
-	mu      sync.Mutex
-	jobs    map[string]*model.UploadingUI
-	onEvent OnTaskEvent
-	ctx     context.Context // root context, canceled on Close
-	cancel  context.CancelFunc
-	sem     chan struct{}    // global concurrency slot
-	cancels map[string]context.CancelFunc
+	store     *store.Store
+	mu        sync.Mutex
+	dirMu     sync.Mutex
+	jobs      map[string]*model.UploadingUI
+	dirIDs    map[string]string
+	onEvent   OnTaskEvent
+	ctx       context.Context // root context, canceled on Close
+	cancel    context.CancelFunc
+	sem       chan struct{} // global concurrency slot
+	cancels   map[string]context.CancelFunc
+	persistMu sync.Mutex
 }
 
 // NewUploadQueue creates the upload queue and restores persisted jobs.
@@ -38,6 +42,7 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 	q := &UploadQueue{
 		store:   st,
 		jobs:    map[string]*model.UploadingUI{},
+		dirIDs:  map[string]string{},
 		onEvent: onEvent,
 		ctx:     rootCtx,
 		cancel:  rootCancel,
@@ -77,16 +82,22 @@ func (q *UploadQueue) get(id string) (*model.UploadingUI, bool) {
 }
 
 func (q *UploadQueue) update(j *model.UploadingUI) {
+	if j == nil || j.UploadID == "" {
+		return
+	}
 	q.mu.Lock()
 	q.jobs[j.UploadID] = j
+	snapshot := *j
 	q.mu.Unlock()
-	_ = q.store.SaveUploadTask(j)
+	q.persistMu.Lock()
+	_ = q.store.SaveUploadTask(&snapshot)
+	q.persistMu.Unlock()
 	if q.onEvent != nil {
 		t := model.DownloadTask{
-			ID: j.UploadID, Name: j.Info.Name, Size: j.Info.Size,
-			Downloaded: j.Upload.DownSize, Speed: j.Upload.DownSpeed,
-			Progress: j.Upload.DownProcess, Status: uploadStatus(j.Upload),
-			Created: j.Upload.DownTime, Updated: time.Now().Unix(),
+			ID: snapshot.UploadID, Name: snapshot.Info.Name, Size: snapshot.Info.Size,
+			Downloaded: snapshot.Upload.DownSize, Speed: snapshot.Upload.DownSpeed,
+			Progress: snapshot.Upload.DownProcess, Status: uploadStatus(snapshot.Upload),
+			Created: snapshot.Upload.DownTime, Updated: time.Now().Unix(),
 		}
 		q.onEvent(TaskEvent{Kind: "upload", Task: t})
 	}
@@ -138,12 +149,16 @@ func (q *UploadQueue) AddFiles(userID, driveID, parentID string, localPaths []st
 }
 
 func (q *UploadQueue) enqueue(userID, driveID, parentID, localPath, name string, size int64) *model.UploadingUI {
+	relative := normalizeUploadPath(name)
+	if relative == "" {
+		relative = normalizeUploadPath(filepath.Base(localPath))
+	}
 	j := &model.UploadingUI{
 		UploadID: newID("up"),
 		UserID:   userID,
 		Info: model.UploadInfo{
 			LocalFilePath: localPath, ParentFileID: parentID,
-			DriveID: driveID, Name: name, Size: size,
+			DriveID: driveID, Path: relative, Name: uploadLeaf(relative), Size: size,
 			SizeStr: model.FormatBytes(size),
 			IsDir:   false,
 		},
@@ -154,6 +169,83 @@ func (q *UploadQueue) enqueue(userID, driveID, parentID, localPath, name string,
 	q.update(j)
 	go q.runUpload(userID, driveID, j)
 	return j
+}
+
+// normalizeUploadPath keeps the relative path captured by a directory walk
+// portable and rejects traversal segments before they can become remote
+// directory names.
+func normalizeUploadPath(raw string) string {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	parts := strings.Split(strings.Trim(raw, "/"), "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return ""
+		}
+		out = append(out, part)
+	}
+	return strings.Join(out, "/")
+}
+
+func uploadLeaf(relative string) string {
+	if i := strings.LastIndex(relative, "/"); i >= 0 {
+		return relative[i+1:]
+	}
+	return relative
+}
+
+// ensureRemoteParent creates or reuses every directory in a walked local
+// path. The cache is scoped by account, drive and initial remote parent, so
+// switching accounts or mounted drives cannot reuse another account's ids.
+func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, baseParent, relative string) (string, error) {
+	relative = normalizeUploadPath(relative)
+	parts := strings.Split(relative, "/")
+	if relative == "" || len(parts) <= 1 {
+		return baseParent, nil
+	}
+
+	q.dirMu.Lock()
+	defer q.dirMu.Unlock()
+	current := baseParent
+	for _, segment := range parts[:len(parts)-1] {
+		key := strings.Join([]string{userID, driveID, baseParent, current, segment}, "\x00")
+		if id := q.dirIDs[key]; id != "" {
+			current = id
+			continue
+		}
+
+		items, err := drive.ListDir(userID, driveID, current, nil)
+		if err != nil {
+			return "", fmt.Errorf("查找远端目录 %q 失败: %w", segment, err)
+		}
+		found := ""
+		for _, item := range items {
+			if item.IsDir && item.Name == segment {
+				found = item.FileID
+				break
+			}
+		}
+		if found == "" {
+			result, mkdirErr := drive.Mkdir(userID, driveID, current, segment)
+			if mkdirErr != nil {
+				return "", fmt.Errorf("创建远端目录 %q 失败: %w", segment, mkdirErr)
+			}
+			if result == nil || result.FileID == "" {
+				if result != nil && result.Error != "" {
+					return "", fmt.Errorf("创建远端目录 %q 失败: %s", segment, result.Error)
+				}
+				return "", fmt.Errorf("创建远端目录 %q 未返回目录 id", segment)
+			}
+			found = result.FileID
+		}
+		q.dirIDs[key] = found
+		current = found
+	}
+	return current, nil
 }
 
 // runUpload executes one job through the provider's UploadOneFile. It waits
@@ -190,6 +282,41 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	q.mu.Unlock()
 	q.update(j)
 
+	// Directory uploads are queued as files, but remote providers generally do
+	// not interpret a slash in the file name as an implicit mkdir. Resolve the
+	// path before invoking the provider and pass only the leaf name onward.
+	relative := j.Info.Path
+	if relative == "" {
+		relative = j.Info.Name
+	}
+	relative = normalizeUploadPath(relative)
+	if relative == "" {
+		j.Upload.IsDowning = false
+		j.Upload.IsFailed = true
+		j.Upload.DownState = "failed"
+		j.Upload.FailedMessage = "上传路径无效"
+		q.update(j)
+		return
+	}
+	j.Info.Path = relative
+	j.Info.Name = uploadLeaf(relative)
+	parentID, parentErr := q.ensureRemoteParent(ctx, userID, driveID, j.Info.ParentFileID, relative)
+	if parentErr != nil {
+		j.Upload.IsDowning = false
+		if errors.Is(ctx.Err(), context.Canceled) {
+			j.Upload.IsStop = true
+			j.Upload.DownState = "stopped"
+		} else {
+			j.Upload.IsFailed = true
+			j.Upload.DownState = "failed"
+		}
+		j.Upload.FailedMessage = parentErr.Error()
+		q.update(j)
+		return
+	}
+	j.Info.ParentFileID = parentID
+	q.update(j)
+
 	// compute hash for providers that support 秒传 (optional, best-effort)
 	if method := rapidMethod2(drive.ProviderOf(userID, driveID, "")); method != "" {
 		if h, err := netx.HashFile(j.Info.LocalFilePath, netx.HashKind(method)); err == nil {
@@ -222,9 +349,12 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	}()
 	handlerErr := handler(ctx, j)
 	close(done)
+	q.mu.Lock()
+	wasStopped := j.Upload.IsStop || ctx.Err() != nil
+	q.mu.Unlock()
 	if handlerErr != nil {
 		j.Upload.IsDowning = false
-		if errors.Is(ctx.Err(), context.Canceled) {
+		if wasStopped || errors.Is(ctx.Err(), context.Canceled) {
 			j.Upload.IsStop = true
 			j.Upload.DownState = "stopped"
 		} else {
@@ -233,6 +363,12 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 			j.Upload.FailedMessage = handlerErr.Error()
 			j.Upload.DownState = "failed"
 		}
+		q.update(j)
+		return
+	}
+	if wasStopped {
+		j.Upload.IsDowning = false
+		j.Upload.DownState = "stopped"
 		q.update(j)
 		return
 	}
@@ -263,11 +399,13 @@ func (q *UploadQueue) Cancel(id string) {
 		delete(q.cancels, id)
 	}
 	j, ok := q.jobs[id]
-	q.mu.Unlock()
 	if ok {
 		j.Upload.IsStop = true
 		j.Upload.IsDowning = false
 		j.Upload.DownState = "stopped"
+	}
+	q.mu.Unlock()
+	if ok {
 		q.update(j)
 	}
 }
@@ -310,7 +448,9 @@ func (q *UploadQueue) ClearCompleted() {
 		}
 	}
 	q.mu.Unlock()
+	q.persistMu.Lock()
 	_ = q.store.ClearUploadTasks()
+	q.persistMu.Unlock()
 }
 
 // DownloadDir returns the configured download dir (helper).
@@ -329,13 +469,20 @@ func (q *UploadQueue) Close() {
 		q.cancel()
 	}
 	q.mu.Lock()
+	var pending []*model.UploadingUI
 	for _, c := range q.cancels {
 		c()
 	}
 	for _, j := range q.jobs {
 		if !j.Upload.IsCompleted && !j.Upload.IsFailed && !j.Upload.IsStop {
-			_ = q.store.SaveUploadTask(j)
+			snapshot := *j
+			pending = append(pending, &snapshot)
 		}
 	}
 	q.mu.Unlock()
+	q.persistMu.Lock()
+	for _, j := range pending {
+		_ = q.store.SaveUploadTask(j)
+	}
+	q.persistMu.Unlock()
 }

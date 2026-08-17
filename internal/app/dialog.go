@@ -22,7 +22,11 @@ func (a *App) PickDirectory(title, defaultDir string) string {
 			opts.DefaultDirectory = defaultDir
 		}
 	}
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, opts)
+	ctx, ok := a.wailsContext()
+	if !ok {
+		return ""
+	}
+	dir, err := runtime.OpenDirectoryDialog(ctx, opts)
 	if err != nil {
 		return ""
 	}
@@ -32,7 +36,11 @@ func (a *App) PickDirectory(title, defaultDir string) string {
 // PickFiles opens the native OS multi-file picker and returns chosen paths.
 // Returns nil when the user cancels.
 func (a *App) PickFiles(title string) []string {
-	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{Title: title})
+	ctx, ok := a.wailsContext()
+	if !ok {
+		return nil
+	}
+	files, err := runtime.OpenMultipleFilesDialog(ctx, runtime.OpenDialogOptions{Title: title})
 	if err != nil {
 		return nil
 	}

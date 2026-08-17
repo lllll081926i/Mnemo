@@ -50,55 +50,60 @@ type UploadingUI struct {
 
 // DownloadTask is a transfer-center download task.
 type DownloadTask struct {
-	ID         string `json:"id"`
-	UserID     string `json:"user_id"`
-	DriveID    string `json:"drive_id"`
-	Provider   string `json:"provider"`
-	FileID     string `json:"file_id"`
-	Name       string `json:"name"`
-	Size       int64  `json:"size"`
-	Downloaded int64  `json:"downloaded"`
-	Speed      int64  `json:"speed"`
-	Progress   int    `json:"progress"`
-	Status     string `json:"status"` // queued|downloading|paused|completed|failed|canceled
-	LocalPath  string `json:"localPath"`
-	URL        string `json:"url,omitempty"`
-	Error      string `json:"error,omitempty"`
-	Created    int64  `json:"created"`
-	Updated    int64  `json:"updated"`
-	Concurrency int   `json:"concurrency,omitempty"`
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	DriveID     string `json:"drive_id"`
+	Provider    string `json:"provider"`
+	FileID      string `json:"file_id"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	Downloaded  int64  `json:"downloaded"`
+	Speed       int64  `json:"speed"`
+	Progress    int    `json:"progress"`
+	Status      string `json:"status"` // queued|downloading|paused|completed|failed|canceled
+	LocalPath   string `json:"localPath"`
+	URL         string `json:"url,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Created     int64  `json:"created"`
+	Updated     int64  `json:"updated"`
+	Concurrency int    `json:"concurrency,omitempty"`
 }
 
 // OfflineTask is a provider-side (cloud) offline download task (PikPak).
 type OfflineTask struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	DriveID   string `json:"drive_id"`
-	TaskID    string `json:"task_id,omitempty"`
-	URL       string `json:"url,omitempty"`
-	FileName  string `json:"file_name,omitempty"`
-	Status    string `json:"status"`
-	Progress  int    `json:"progress"`
-	Created   int64  `json:"created"`
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	DriveID     string `json:"drive_id"`
+	TaskID      string `json:"task_id,omitempty"`
+	FileID      string `json:"file_id,omitempty"`
+	URL         string `json:"url,omitempty"`
+	FileName    string `json:"file_name,omitempty"`
+	Status      string `json:"status"`
+	Progress    int    `json:"progress"`
+	Message     string `json:"message,omitempty"`
+	FileSize    int64  `json:"file_size,omitempty"`
+	CreatedTime string `json:"created_time,omitempty"`
+	UpdatedTime string `json:"updated_time,omitempty"`
+	Created     int64  `json:"created"`
 }
 
 // MigrateJob is one cross-drive migration request.
 type MigrateJob struct {
-	ID       string   `json:"id"`
-	SrcUser  string   `json:"srcUser"`
-	SrcDrive string   `json:"srcDrive"`
-	FileIDs  []string `json:"fileIDs"`
-	DstUser  string   `json:"dstUser"`
-	DstDrive string   `json:"dstDrive"`
-	DstParent string  `json:"dstParent"`
-	Move     bool     `json:"move"`
+	ID        string   `json:"id"`
+	SrcUser   string   `json:"srcUser"`
+	SrcDrive  string   `json:"srcDrive"`
+	FileIDs   []string `json:"fileIDs"`
+	DstUser   string   `json:"dstUser"`
+	DstDrive  string   `json:"dstDrive"`
+	DstParent string   `json:"dstParent"`
+	Move      bool     `json:"move"`
 	// Live progress
 	Total     int64 `json:"total"`
 	Processed int64 `json:"processed"`
 	Failed    int64 `json:"failed"`
 	// Byte-level progress (accumulated across files).
-	TotalBytes     int64 `json:"totalBytes"`
-	ProcessedBytes int64 `json:"processedBytes"`
+	TotalBytes     int64  `json:"totalBytes"`
+	ProcessedBytes int64  `json:"processedBytes"`
 	Status         string `json:"status"`
 	Message        string `json:"message,omitempty"`
 	// Timestamps for persistence.

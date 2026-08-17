@@ -79,7 +79,7 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 	if isRootSentinel(fileID) {
 		return *rootFile(c), nil
 	}
-	if f, ok := drive.CachedFile(c.DriveID, fileID); ok {
+	if f, ok := drive.CachedFile(c.UserID, c.DriveID, fileID); ok {
 		return f, nil
 	}
 	f, err := d.GetFile(ctx, c, fileID)
@@ -128,7 +128,7 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	}
 	size := info.Size
 	if size == 0 {
-		if cached, ok := drive.CachedFile(c.DriveID, fileID); ok {
+		if cached, ok := drive.CachedFile(c.UserID, c.DriveID, fileID); ok {
 			size = cached.Size
 		}
 	}
@@ -166,7 +166,7 @@ func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name stri
 // Rename uses the meta cache for the kind when available, otherwise tries a
 // file rename then falls back to a folder rename (legacy resolveKinds).
 func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name string) (*drive.RenameResult, error) {
-	if isDir, ok := drive.Lookup(c.DriveID, fileID); ok {
+	if isDir, ok := drive.Lookup(c.UserID, c.DriveID, fileID); ok {
 		if err := d.rename(ctx, c, fileID, name, isDir); err != nil {
 			return nil, err
 		}
@@ -194,7 +194,7 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 			known = append(known, ref)
 			continue
 		}
-		if isDir, ok := drive.Lookup(c.DriveID, ref.ID); ok {
+		if isDir, ok := drive.Lookup(c.UserID, c.DriveID, ref.ID); ok {
 			known = append(known, drive.FileRef{ID: ref.ID, IsDir: &isDir})
 			continue
 		}
@@ -259,7 +259,7 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 			known = append(known, ref)
 			continue
 		}
-		if isDir, ok := drive.Lookup(c.DriveID, ref.ID); ok {
+		if isDir, ok := drive.Lookup(c.UserID, c.DriveID, ref.ID); ok {
 			known = append(known, drive.FileRef{ID: ref.ID, IsDir: &isDir})
 			continue
 		}

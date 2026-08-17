@@ -39,6 +39,9 @@ func startWebDAV(t *testing.T, dir string) (url string, stop func()) {
 // through the real drive facade against a live local WebDAV server.
 func TestWebDAVEndToEnd(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "mounted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	url, stop := startWebDAV(t, dir)
 	defer stop()
 
@@ -52,7 +55,7 @@ func TestWebDAVEndToEnd(t *testing.T) {
 		TokenFrom: model.ProviderWebdav,
 		UserID:    uid,
 		UserName:  "e2e",
-		Conn:      &model.ConnConfig{Endpoint: url},
+		Conn:      &model.ConnConfig{Endpoint: url, RootPath: "/mounted"},
 	}
 	driveID := model.BuildDriveID("webdav", "e2e")
 	acc := &model.Account{UserID: uid, DriveID: driveID, Token: tok}
@@ -116,6 +119,23 @@ func TestWebDAVEndToEnd(t *testing.T) {
 		t.Fatalf("size mismatch: %d", files[0].Size)
 	}
 
+	// Names containing URL control characters and Unicode must remain one path segment.
+	specialName := "space # 中.txt"
+	specialUI := &model.UploadingUI{
+		UploadID: "up-special",
+		Info: model.UploadInfo{
+			LocalFilePath: upPath, ParentFileID: mk.FileID,
+			DriveID: driveID, Name: specialName, Size: int64(len(payload)),
+		},
+	}
+	if err := handler(context.Background(), specialUI); err != nil {
+		t.Fatalf("special-name upload: %v", err)
+	}
+	files, err = drive.ListDir(uid, driveID, mk.FileID, nil)
+	if err != nil || !hasFile(files, specialName) {
+		t.Fatalf("special-name list: err=%v files=%+v", err, files)
+	}
+
 	// 6. download URL + fetch content
 	dl, err := drive.GetDownloadURL(uid, driveID, files[0].FileID, 60)
 	if err != nil {
@@ -137,18 +157,23 @@ func TestWebDAVEndToEnd(t *testing.T) {
 		t.Fatalf("rename: %v", err)
 	}
 	files, _ = drive.ListDir(uid, driveID, mk.FileID, nil)
-	if len(files) != 1 || files[0].Name != "renamed.txt" {
+	if !hasFile(files, "renamed.txt") {
 		t.Fatalf("rename failed: %+v", files)
 	}
+	renamedID := fileIDByName(files, "renamed.txt")
 
 	// 8. move to root
 	rid, _ := drive.RootID(uid, driveID)
-	if _, err := drive.MoveBatch(uid, driveID, []drive.FileRef{{ID: files[0].FileID}}, rid, ""); err != nil {
+	if _, err := drive.MoveBatch(uid, driveID, []drive.FileRef{{ID: renamedID}}, rid, ""); err != nil {
 		t.Fatalf("move: %v", err)
 	}
 	rootFiles, _ := drive.ListDir(uid, driveID, "/", nil)
 	if !hasFile(rootFiles, "renamed.txt") {
 		t.Fatalf("move failed, renamed.txt missing from root: %+v", names(rootFiles))
+	}
+	isDir := true
+	if _, err := drive.MoveBatch(uid, driveID, []drive.FileRef{{ID: mk.FileID, IsDir: &isDir}}, mk.FileID, ""); err == nil {
+		t.Fatal("moving a directory into itself must fail before the server request")
 	}
 
 	// 9. copy
@@ -159,9 +184,10 @@ func TestWebDAVEndToEnd(t *testing.T) {
 	if !hasFile(subFiles, "renamed.txt") {
 		t.Fatalf("copy failed: %+v", names(subFiles))
 	}
+	copiedID := fileIDByName(subFiles, "renamed.txt")
 
 	// 10. delete both
-	if _, err := drive.DeleteBatch(uid, driveID, []drive.FileRef{{ID: rootFiles[0].FileID}, {ID: subFiles[0].FileID}}); err != nil {
+	if _, err := drive.DeleteBatch(uid, driveID, []drive.FileRef{{ID: rootFiles[0].FileID}, {ID: copiedID}}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	rootFiles, _ = drive.ListDir(uid, driveID, "/", nil)
@@ -178,6 +204,15 @@ func hasFile(files []model.File, name string) bool {
 		}
 	}
 	return false
+}
+
+func fileIDByName(files []model.File, name string) string {
+	for _, f := range files {
+		if f.Name == name {
+			return f.FileID
+		}
+	}
+	return ""
 }
 
 func names(files []model.File) []string {

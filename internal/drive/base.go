@@ -12,10 +12,10 @@ import (
 // type (List is the minimum contract).
 type BaseDriver struct{}
 
-func (BaseDriver) ID() string { return "" }
-func (BaseDriver) Meta() Meta { return Meta{} }
+func (BaseDriver) ID() string                 { return "" }
+func (BaseDriver) Meta() Meta                 { return Meta{} }
 func (BaseDriver) Capabilities() Capabilities { return Capabilities{} }
-func (BaseDriver) RootID() string { return "root" }
+func (BaseDriver) RootID() string             { return "root" }
 
 func (BaseDriver) ListPaged(ctx context.Context, c Context, dirID, marker string, opts *ListOptions) (*DirPage, error) {
 	return nil, NotSupported("listPaged")
@@ -61,4 +61,8 @@ func (BaseDriver) ResolveTransferHash(ctx context.Context, c Context, fileID, me
 }
 func (BaseDriver) RefreshAccount(ctx context.Context, c Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	return nil, nil
+}
+
+func (BaseDriver) ValidateConnection(ctx context.Context, conn *model.ConnConfig) error {
+	return NotSupported("validateConnection")
 }

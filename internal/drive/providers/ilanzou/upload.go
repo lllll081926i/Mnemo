@@ -87,7 +87,7 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 	if !strings.EqualFold(strings.TrimSpace(method), "md5") {
 		return "", nil
 	}
-	if cached, ok := drive.CachedFile(c.DriveID, fileID); ok {
+	if cached, ok := drive.CachedFile(c.UserID, c.DriveID, fileID); ok {
 		if strings.EqualFold(strings.TrimSpace(cached.ContentHashName), "md5") {
 			hash := strings.ToLower(strings.TrimSpace(cached.ContentHash))
 			if len(hash) == md5.Size*2 {

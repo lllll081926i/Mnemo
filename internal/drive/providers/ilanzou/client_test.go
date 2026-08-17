@@ -237,7 +237,7 @@ func TestDownloadAndVideoPreviewAutoReloginAndUseCachedSize(t *testing.T) {
 	ILANZOU_CONF.Base = srv.URL
 
 	driveID := "ilanzou:42"
-	drive.RememberFile(driveID, model.File{DriveID: driveID, FileID: "8", Name: "movie.mp4", Size: 4096})
+	drive.RememberFile("ilanzou_42", driveID, model.File{DriveID: driveID, FileID: "8", Name: "movie.mp4", Size: 4096})
 	tok := &model.TokenInfo{
 		TokenFrom: model.ProviderIlanzou, AccessToken: "old-token", DeviceID: "uuid-old",
 		UserID: "ilanzou_42", ProviderAccountID: "42", DefaultDriveID: driveID,

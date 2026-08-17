@@ -279,7 +279,7 @@ func TestResolveAListFileUsesCachedDescription(t *testing.T) {
 		Etag:      "etag-cached",
 		S3KeyFlag: "s3-key-cached",
 	}
-	drive.RememberListedFiles(c.DriveID, "0", []model.File{mapFile(listed, c.DriveID, "0")})
+	drive.RememberListedFiles(c.UserID, c.DriveID, "0", []model.File{mapFile(listed, c.DriveID, "0")})
 
 	got, err := (&Driver{}).resolveAListFile(context.Background(), c, listed.FileID)
 	if err != nil {
@@ -297,12 +297,12 @@ func TestResolveAListFileCachedDescriptionIsolatedByDrive(t *testing.T) {
 	drive.ClearFileMetaCache()
 	t.Cleanup(drive.ClearFileMetaCache)
 
-	first := drive.Context{DriveID: "pan123:account-a"}
-	second := drive.Context{DriveID: "pan123:account-b"}
+	first := drive.Context{UserID: "pan123:account-a", DriveID: "pan123:account-a"}
+	second := drive.Context{UserID: "pan123:account-b", DriveID: "pan123:account-b"}
 	firstFile := pan123File{FileID: "654321", FileName: "a.mp4", Etag: "etag-a", S3KeyFlag: "key-a"}
 	secondFile := pan123File{FileID: "654321", FileName: "b.mp4", Etag: "etag-b", S3KeyFlag: "key-b"}
-	drive.RememberListedFiles(first.DriveID, "0", []model.File{mapFile(firstFile, first.DriveID, "0")})
-	drive.RememberListedFiles(second.DriveID, "0", []model.File{mapFile(secondFile, second.DriveID, "0")})
+	drive.RememberListedFiles(first.UserID, first.DriveID, "0", []model.File{mapFile(firstFile, first.DriveID, "0")})
+	drive.RememberListedFiles(second.UserID, second.DriveID, "0", []model.File{mapFile(secondFile, second.DriveID, "0")})
 
 	a, err := (&Driver{}).resolveAListFile(context.Background(), first, firstFile.FileID)
 	if err != nil {
@@ -327,7 +327,7 @@ func TestPan123VideoPreviewUsesCachedDescription(t *testing.T) {
 		Token:   &model.TokenInfo{AccessToken: "access-token"},
 	}
 	listed := pan123File{FileID: "777", FileName: "movie.mp4", Size: 4096, Etag: "etag-preview", S3KeyFlag: "key-preview"}
-	drive.RememberListedFiles(c.DriveID, "0", []model.File{mapFile(listed, c.DriveID, "0")})
+	drive.RememberListedFiles(c.UserID, c.DriveID, "0", []model.File{mapFile(listed, c.DriveID, "0")})
 	var redirectServer *httptest.Server
 	redirectServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/redirect" {

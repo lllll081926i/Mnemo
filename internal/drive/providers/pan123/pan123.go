@@ -1033,7 +1033,7 @@ func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID s
 	// A download/preview may be triggered from a cached frontend row after
 	// the provider's in-memory pool has been evicted. Prefer that exact row
 	// snapshot so the list-only S3KeyFlag survives the transition.
-	if cached, ok := drive.CachedFile(c.DriveID, fid); ok {
+	if cached, ok := drive.CachedFile(c.UserID, c.DriveID, fid); ok {
 		if restored, ok := pan123FileFromModel(cached); ok {
 			pinned := putPool(c, restored)
 			return &pinned, nil

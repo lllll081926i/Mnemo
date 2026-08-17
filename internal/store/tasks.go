@@ -21,7 +21,16 @@ func (s *Store) ListDownloadTasks() ([]model.DownloadTask, error) {
 
 // SaveDownloadTask upserts a download task.
 func (s *Store) SaveDownloadTask(t *model.DownloadTask) error {
-	list, err := s.ListDownloadTasks()
+	if t == nil || t.ID == "" {
+		return errInvalid("download task id is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.DownloadTask
+	err := s.readJSON(tasksFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -36,12 +45,18 @@ func (s *Store) SaveDownloadTask(t *model.DownloadTask) error {
 	if !replaced {
 		list = append(list, *t)
 	}
-	return s.writeJSON(tasksFile, list)
+	return s.writeJSONUnlocked(tasksFile, list)
 }
 
 // ClearDownloadTasks removes finished tasks (completed/canceled/failed).
 func (s *Store) ClearDownloadTasks() error {
-	list, err := s.ListDownloadTasks()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.DownloadTask
+	err := s.readJSON(tasksFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -53,12 +68,18 @@ func (s *Store) ClearDownloadTasks() error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(tasksFile, out)
+	return s.writeJSONUnlocked(tasksFile, out)
 }
 
 // DeleteDownloadTask removes a single task record by ID.
 func (s *Store) DeleteDownloadTask(id string) error {
-	list, err := s.ListDownloadTasks()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.DownloadTask
+	err := s.readJSON(tasksFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -69,7 +90,7 @@ func (s *Store) DeleteDownloadTask(id string) error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(tasksFile, out)
+	return s.writeJSONUnlocked(tasksFile, out)
 }
 
 // ShareHistory persistence.
@@ -77,6 +98,8 @@ const shareHistoryFile = "sharehistory.json"
 
 // SaveShareHistory persists a share history entry.
 func (s *Store) SaveShareHistory(e model.ShareHistoryEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []model.ShareHistoryEntry
 	err := s.readJSON(shareHistoryFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -96,7 +119,7 @@ func (s *Store) SaveShareHistory(e model.ShareHistoryEntry) error {
 	if !replaced {
 		list = append(list, e)
 	}
-	return s.writeJSON(shareHistoryFile, list)
+	return s.writeJSONUnlocked(shareHistoryFile, list)
 }
 
 // ListShareHistory returns share history of an account.
@@ -130,7 +153,16 @@ func (s *Store) ListOfflineTasks() ([]model.OfflineTask, error) {
 
 // SaveOfflineTask upserts an offline task.
 func (s *Store) SaveOfflineTask(t *model.OfflineTask) error {
-	list, err := s.ListOfflineTasks()
+	if t == nil || t.ID == "" {
+		return errInvalid("offline task id is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.OfflineTask
+	err := s.readJSON(offlineFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -148,12 +180,18 @@ func (s *Store) SaveOfflineTask(t *model.OfflineTask) error {
 		}
 		list = append(list, *t)
 	}
-	return s.writeJSON(offlineFile, list)
+	return s.writeJSONUnlocked(offlineFile, list)
 }
 
 // DeleteOfflineTask removes an offline task.
 func (s *Store) DeleteOfflineTask(id string) error {
-	list, err := s.ListOfflineTasks()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.OfflineTask
+	err := s.readJSON(offlineFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -164,7 +202,7 @@ func (s *Store) DeleteOfflineTask(id string) error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(offlineFile, out)
+	return s.writeJSONUnlocked(offlineFile, out)
 }
 
 // Upload tasks persistence.
@@ -182,7 +220,16 @@ func (s *Store) ListUploadTasks() ([]model.UploadingUI, error) {
 
 // SaveUploadTask upserts an upload job.
 func (s *Store) SaveUploadTask(j *model.UploadingUI) error {
-	list, err := s.ListUploadTasks()
+	if j == nil || j.UploadID == "" {
+		return errInvalid("upload task id is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.UploadingUI
+	err := s.readJSON(uploadsFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -197,12 +244,18 @@ func (s *Store) SaveUploadTask(j *model.UploadingUI) error {
 	if !replaced {
 		list = append(list, *j)
 	}
-	return s.writeJSON(uploadsFile, list)
+	return s.writeJSONUnlocked(uploadsFile, list)
 }
 
 // ClearUploadTasks removes finished upload jobs.
 func (s *Store) ClearUploadTasks() error {
-	list, err := s.ListUploadTasks()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.UploadingUI
+	err := s.readJSON(uploadsFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -213,5 +266,5 @@ func (s *Store) ClearUploadTasks() error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(uploadsFile, out)
+	return s.writeJSONUnlocked(uploadsFile, out)
 }

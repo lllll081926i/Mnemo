@@ -29,16 +29,19 @@ type TaskEvent struct {
 
 // Manager owns the active download queue.
 type Manager struct {
-	store   *store.Store
-	mu      sync.Mutex
-	tasks   map[string]*model.DownloadTask
-	cancels map[string]context.CancelFunc
-	onEvent OnTaskEvent
-	dir     string
-	stop    chan struct{}
-	ctx     context.Context // root context for all downloads, canceled on Shutdown
-	cancel  context.CancelFunc
-	sem     chan struct{}    // concurrency semaphore (cap = MaxConcurrentDownloads)
+	store        *store.Store
+	mu           sync.Mutex
+	persistMu    sync.Mutex
+	tasks        map[string]*model.DownloadTask
+	cancels      map[string]context.CancelFunc
+	removed      map[string]bool
+	onEvent      OnTaskEvent
+	dir          string
+	stop         chan struct{}
+	ctx          context.Context // root context for all downloads, canceled on Shutdown
+	cancel       context.CancelFunc
+	sem          chan struct{} // concurrency semaphore (cap = MaxConcurrentDownloads)
+	shutdownOnce sync.Once
 }
 
 // NewManager creates a download manager.
@@ -57,6 +60,7 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		store:   st,
 		tasks:   map[string]*model.DownloadTask{},
 		cancels: map[string]context.CancelFunc{},
+		removed: map[string]bool{},
 		onEvent: onEvent,
 		dir:     downloadDir,
 		stop:    make(chan struct{}),
@@ -134,18 +138,35 @@ func (m *Manager) get(id string) (*model.DownloadTask, bool) {
 }
 
 func (m *Manager) update(t *model.DownloadTask) {
+	if t == nil {
+		return
+	}
 	m.mu.Lock()
+	if m.removed[t.ID] {
+		m.mu.Unlock()
+		return
+	}
 	m.tasks[t.ID] = t
+	snapshot := *t
+	event := m.onEvent
 	m.mu.Unlock()
-	_ = m.store.SaveDownloadTask(t)
-	if m.onEvent != nil {
-		m.onEvent(TaskEvent{Kind: "download", Task: *t})
+	// Store methods read-modify-write one JSON file. Serialize the whole
+	// operation so concurrent task progress cannot lose another task's update.
+	m.persistMu.Lock()
+	_ = m.store.SaveDownloadTask(&snapshot)
+	m.persistMu.Unlock()
+	if event != nil {
+		event(TaskEvent{Kind: "download", Task: snapshot})
 	}
 }
 
 // AddDownload enqueues a download from a drive file.
 func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.DownloadTask, error) {
 	provider := drive.ProviderOf(userID, driveID, "")
+	// Keep the exact list-row snapshot available until the provider resolves
+	// its authenticated URL. Some providers need metadata that is not present
+	// in a later detail response.
+	drive.RememberFile(userID, driveID, f)
 	t := &model.DownloadTask{
 		ID:        newID("dl"),
 		UserID:    userID,
@@ -182,28 +203,49 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
 	// wait for a concurrency slot before doing any work
+	m.mu.Lock()
+	sem := m.sem
+	m.mu.Unlock()
 	select {
-	case m.sem <- struct{}{}:
-		defer func() { <-m.sem }()
+	case sem <- struct{}{}:
+		defer func() { <-sem }()
 	case <-m.ctx.Done():
 		// app shutting down before the task could start
 		m.mu.Lock()
-		t.Status = "paused"
-		t.Updated = time.Now().Unix()
+		if !m.removed[t.ID] && m.tasks[t.ID] == t {
+			t.Status = "paused"
+			t.Updated = time.Now().Unix()
+		}
 		m.mu.Unlock()
 		m.update(t)
 		return
 	}
 
-	ctx, cancel := context.WithCancel(m.ctx)
 	m.mu.Lock()
+	if m.removed[t.ID] || m.tasks[t.ID] != t || t.Status != "queued" || m.ctx.Err() != nil {
+		m.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancels[t.ID] = cancel
+	t.Status = "downloading"
+	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
 		delete(m.cancels, t.ID)
+		removed := m.removed[t.ID]
+		cleanup := removed || t.Status == "canceled"
+		if removed {
+			delete(m.removed, t.ID)
+		}
 		m.mu.Unlock()
+		if cleanup {
+			removeDownloadTemp(t)
+		}
 	}()
+
+	m.update(t)
 
 	url := t.URL
 	var headers map[string]string
@@ -216,8 +258,21 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		u, err := drive.GetDownloadURL(t.UserID, t.DriveID, t.FileID, 14400)
 		if err != nil {
 			m.mu.Lock()
-			t.Status = "failed"
-			t.Error = err.Error()
+			if !m.removed[t.ID] && t.Status != "canceled" && t.Status != "paused" {
+				t.Status = "failed"
+				t.Error = err.Error()
+			}
+			t.Updated = time.Now().Unix()
+			m.mu.Unlock()
+			m.update(t)
+			return
+		}
+		if u == nil {
+			m.mu.Lock()
+			if !m.removed[t.ID] && t.Status != "canceled" && t.Status != "paused" {
+				t.Status = "failed"
+				t.Error = "下载地址为空"
+			}
 			t.Updated = time.Now().Unix()
 			m.mu.Unlock()
 			m.update(t)
@@ -225,9 +280,11 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		}
 		url = u.URL
 		headers = u.Headers
+		m.mu.Lock()
 		if t.Size == 0 {
 			t.Size = u.Size
 		}
+		m.mu.Unlock()
 		if u.ForceLocalProxy || u.DownloadMode == "proxy" {
 			opts.Concurrency = 1
 			if u.Concurrency > 1 {
@@ -237,8 +294,10 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	}
 	if url == "" {
 		m.mu.Lock()
-		t.Status = "failed"
-		t.Error = "无法获取下载地址"
+		if !m.removed[t.ID] && t.Status != "canceled" && t.Status != "paused" {
+			t.Status = "failed"
+			t.Error = "无法获取下载地址"
+		}
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
@@ -246,14 +305,17 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	}
 
 	m.mu.Lock()
+	if t.Status == "canceled" || t.Status == "paused" || m.removed[t.ID] {
+		m.mu.Unlock()
+		return
+	}
 	t.URL = url
-	t.Status = "downloading"
 	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
 	opts.Headers = headers
 	m.update(t)
 
-	err := dlengine.Download(ctx, opts, url, t.LocalPath, func(p dlengine.Progress) {
+	progress := func(p dlengine.Progress) {
 		m.mu.Lock()
 		t.Downloaded = p.Downloaded
 		t.Speed = p.Speed
@@ -261,27 +323,65 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
-	})
+	}
+	err := dlengine.Download(ctx, opts, url, t.LocalPath, progress)
+	// Signed URLs from provider APIs can expire while a long download is
+	// running. Re-resolve once for account-backed tasks and reuse the .part
+	// file; direct URL tasks have no provider context and remain unchanged.
+	if err != nil && t.UserID != "" && isExpiredDownloadError(err) && ctx.Err() == nil {
+		if fresh, refreshErr := drive.GetDownloadURL(t.UserID, t.DriveID, t.FileID, 14400); refreshErr == nil && fresh != nil && fresh.URL != "" {
+			url = fresh.URL
+			opts.Headers = fresh.Headers
+			m.mu.Lock()
+			t.URL = url
+			if fresh.Size > 0 {
+				t.Size = fresh.Size
+			}
+			m.mu.Unlock()
+			if fresh.ForceLocalProxy || fresh.DownloadMode == "proxy" {
+				opts.Concurrency = 1
+				if fresh.Concurrency > 1 {
+					opts.Concurrency = fresh.Concurrency
+				}
+			}
+			m.update(t)
+			err = dlengine.Download(ctx, opts, url, t.LocalPath, progress)
+		}
+	}
 
 	m.mu.Lock()
+	removed := m.removed[t.ID]
 	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) || strings.Contains(err.Error(), "canceled") {
+		if t.Status == "canceled" {
+			// Cancel has already set the terminal state.
+		} else if errors.Is(ctx.Err(), context.Canceled) || strings.Contains(err.Error(), "canceled") {
 			// user paused or canceled
-			if t.Status != "canceled" {
+			if t.Status != "canceled" && !removed {
 				t.Status = "paused"
 			}
-		} else {
+		} else if !removed {
 			t.Status = "failed"
 			t.Error = err.Error()
 		}
 	} else {
-		t.Status = "completed"
-		t.Downloaded = t.Size
-		t.Progress = 100
+		if !removed && t.Status != "canceled" && t.Status != "paused" {
+			t.Status = "completed"
+			t.Downloaded = t.Size
+			t.Progress = 100
+		}
 	}
 	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
 	m.update(t)
+}
+
+func isExpiredDownloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "http 401") || strings.Contains(msg, "http 403") ||
+		strings.Contains(msg, "range http 401") || strings.Contains(msg, "range http 403")
 }
 
 // Pause marks a task paused and cancels active download immediately.
@@ -305,7 +405,8 @@ func (m *Manager) Pause(id string) {
 func (m *Manager) Resume(id string) {
 	m.mu.Lock()
 	t, ok := m.tasks[id]
-	if ok && (t.Status == "paused" || t.Status == "failed") {
+	_, active := m.cancels[id]
+	if ok && !active && (t.Status == "paused" || t.Status == "failed") {
 		t.Status = "queued"
 		t.Error = ""
 		t.Updated = time.Now().Unix()
@@ -320,6 +421,7 @@ func (m *Manager) Resume(id string) {
 // Cancel stops and removes a task.
 func (m *Manager) Cancel(id string) {
 	m.mu.Lock()
+	_, active := m.cancels[id]
 	if cancel, ok := m.cancels[id]; ok {
 		cancel()
 	}
@@ -329,8 +431,9 @@ func (m *Manager) Cancel(id string) {
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
-		_ = os.Remove(t.LocalPath + ".part")
-		_ = os.Remove(t.LocalPath + ".state.json")
+		if !active {
+			removeDownloadTemp(t)
+		}
 		return
 	}
 	m.mu.Unlock()
@@ -339,17 +442,18 @@ func (m *Manager) Cancel(id string) {
 // Remove hard-deletes a task record (from memory and the store) immediately.
 func (m *Manager) Remove(id string) {
 	m.mu.Lock()
+	m.removed[id] = true
 	if cancel, ok := m.cancels[id]; ok {
 		cancel()
 	}
 	t, ok := m.tasks[id]
-	if ok {
-		_ = os.Remove(t.LocalPath + ".part")
-		_ = os.Remove(t.LocalPath + ".state.json")
-	}
+	_, active := m.cancels[id]
 	delete(m.tasks, id)
 	m.mu.Unlock()
 	_ = m.store.DeleteDownloadTask(id)
+	if ok && !active {
+		removeDownloadTemp(t)
+	}
 	if m.onEvent != nil {
 		m.onEvent(TaskEvent{Kind: "download", Task: model.DownloadTask{ID: id, Status: "removed"}})
 	}
@@ -359,6 +463,7 @@ func (m *Manager) Remove(id string) {
 // task and (re)start this one so it gets the full bandwidth.
 func (m *Manager) Prioritize(id string) {
 	m.mu.Lock()
+	var paused []*model.DownloadTask
 	for oid, o := range m.tasks {
 		if oid != id && (o.Status == "downloading" || o.Status == "queued") {
 			if cancel, ok := m.cancels[oid]; ok {
@@ -366,10 +471,7 @@ func (m *Manager) Prioritize(id string) {
 			}
 			o.Status = "paused"
 			o.Updated = time.Now().Unix()
-			_ = m.store.SaveDownloadTask(o)
-			if m.onEvent != nil {
-				m.onEvent(TaskEvent{Kind: "download", Task: *o})
-			}
+			paused = append(paused, o)
 		}
 	}
 	t, ok := m.tasks[id]
@@ -378,13 +480,16 @@ func (m *Manager) Prioritize(id string) {
 		return
 	}
 	start := false
-	if t.Status == "paused" || t.Status == "failed" || t.Status == "canceled" {
+	if _, active := m.cancels[id]; !active && (t.Status == "paused" || t.Status == "failed" || t.Status == "canceled") {
 		t.Status = "queued"
 		t.Error = ""
 		t.Updated = time.Now().Unix()
 		start = true
 	}
 	m.mu.Unlock()
+	for _, p := range paused {
+		m.update(p)
+	}
 	m.update(t)
 	if start {
 		go m.runDownload(t)
@@ -405,17 +510,27 @@ func (m *Manager) ClearCompleted() {
 
 // Shutdown stops background work.
 func (m *Manager) Shutdown() {
-	// cancel the root context so goroutines waiting on m.sem or m.ctx.Done()
-	// unblock immediately, in addition to any in-flight task contexts.
-	if m.cancel != nil {
-		m.cancel()
+	m.shutdownOnce.Do(func() {
+		// cancel the root context so goroutines waiting on m.sem or m.ctx.Done()
+		// unblock immediately, in addition to any in-flight task contexts.
+		if m.cancel != nil {
+			m.cancel()
+		}
+		m.mu.Lock()
+		for _, c := range m.cancels {
+			c()
+		}
+		m.mu.Unlock()
+		close(m.stop)
+	})
+}
+
+func removeDownloadTemp(t *model.DownloadTask) {
+	if t == nil {
+		return
 	}
-	m.mu.Lock()
-	for _, c := range m.cancels {
-		c()
-	}
-	m.mu.Unlock()
-	close(m.stop)
+	_ = os.Remove(t.LocalPath + ".part")
+	_ = os.Remove(t.LocalPath + ".state.json")
 }
 
 func newID(prefix string) string {
@@ -435,9 +550,19 @@ func safeName(name string) string {
 			out = append(out, r)
 		}
 	}
-	res := string(out)
+	res := strings.TrimRight(string(out), " .")
 	if res == "" || res == "." || res == ".." {
 		return "download"
+	}
+	// Keep names valid on Windows even when the same download is later moved
+	// between platforms. Device names remain reserved with an extension.
+	stem := res
+	if dot := strings.IndexByte(stem, '.'); dot >= 0 {
+		stem = stem[:dot]
+	}
+	switch strings.ToUpper(stem) {
+	case "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return "_" + res
 	}
 	return res
 }

@@ -17,6 +17,9 @@ type Context struct {
 	DriveID   string           `json:"driveId"`
 	TokenFrom string           `json:"tokenfrom,omitempty"`
 	Token     *model.TokenInfo `json:"token,omitempty"`
+	// TokenSnapshot is kept outside JSON and lets the facade persist only real
+	// session changes made during a provider operation.
+	TokenSnapshot *model.TokenInfo `json:"-"`
 }
 
 // Account returns the context's account id (provider-namespace stripped).
@@ -101,16 +104,16 @@ type ShareImportFile struct {
 // (transfer) call. It is created by ImportShareSession and consumed by
 // SaveShare.
 type ShareImportSession struct {
-	Provider       string             `json:"provider"`
-	ShareURL       string             `json:"shareUrl"`
-	ShareID        string             `json:"shareId"`
-	Password       string             `json:"password,omitempty"`
-	PassCodeToken  string             `json:"passCodeToken,omitempty"`  // pikpak
-	ShareToken     string             `json:"shareToken,omitempty"`    // aliopen
-	ShareKey       string             `json:"shareKey,omitempty"`      // pan123
-	RootFileID     string             `json:"rootFileId,omitempty"`
-	Files          []ShareImportFile  `json:"files"`
-	Extra          map[string]string  `json:"extra,omitempty"`
+	Provider      string            `json:"provider"`
+	ShareURL      string            `json:"shareUrl"`
+	ShareID       string            `json:"shareId"`
+	Password      string            `json:"password,omitempty"`
+	PassCodeToken string            `json:"passCodeToken,omitempty"` // pikpak
+	ShareToken    string            `json:"shareToken,omitempty"`    // aliopen
+	ShareKey      string            `json:"shareKey,omitempty"`      // pan123
+	RootFileID    string            `json:"rootFileId,omitempty"`
+	Files         []ShareImportFile `json:"files"`
+	Extra         map[string]string `json:"extra,omitempty"`
 }
 
 // ShareImportDriver is the optional capability interface for importing
@@ -138,6 +141,12 @@ type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
 // target folder id; name is the destination file name.
 type StreamUploader interface {
 	UploadStream(ctx context.Context, c Context, parentID, name string, size int64, reader io.Reader) error
+}
+
+// ConnectionValidator is an optional provider hook used by mounted-storage
+// accounts to verify configuration before it is persisted.
+type ConnectionValidator interface {
+	ValidateConnection(ctx context.Context, conn *model.ConnConfig) error
 }
 
 // Driver is the plugin contract every provider implements.

@@ -178,7 +178,7 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		if ref.IsDir != nil {
 			isDir = *ref.IsDir
 			known = true
-		} else if k, kk := drive.Lookup(c.DriveID, ref.ID); kk {
+		} else if k, kk := drive.Lookup(c.UserID, c.DriveID, ref.ID); kk {
 			isDir = k
 			known = true
 		}
@@ -212,7 +212,7 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 		isDir := false
 		if ref.IsDir != nil {
 			isDir = *ref.IsDir
-		} else if cachedDir, known := drive.Lookup(c.DriveID, ref.ID); known {
+		} else if cachedDir, known := drive.Lookup(c.UserID, c.DriveID, ref.ID); known {
 			isDir = cachedDir
 		}
 		if isDir {
