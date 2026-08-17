@@ -2,6 +2,7 @@
 package aliopen
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -12,7 +13,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -29,9 +33,80 @@ const (
 	ResourceRoot = "resource_root"
 
 	partSize = 10 * 1024 * 1024 // 10 MiB upload parts
+
+	defaultDownloadExpireSec = 14400
 )
 
 const providerID = model.ProviderAliopen
+
+// aliOpenRateLimiter mirrors the legacy provider limiter: at most two
+// in-flight API calls and a small spacing between requests to reduce
+// wind-control responses from the Open API.
+type aliOpenRateLimiter struct {
+	mu           sync.Mutex
+	last         time.Time
+	blockedUntil time.Time
+	slots        chan struct{}
+	interval     time.Duration
+}
+
+func newAliOpenRateLimiter(concurrency int, interval time.Duration) *aliOpenRateLimiter {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	return &aliOpenRateLimiter{
+		slots:    make(chan struct{}, concurrency),
+		interval: interval,
+	}
+}
+
+func (r *aliOpenRateLimiter) run(ctx context.Context, fn func() error) error {
+	select {
+	case r.slots <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-r.slots }()
+
+	for {
+		r.mu.Lock()
+		now := time.Now()
+		wait := r.interval - now.Sub(r.last)
+		if blockedWait := r.blockedUntil.Sub(now); blockedWait > wait {
+			wait = blockedWait
+		}
+		if wait <= 0 {
+			r.last = now
+			r.mu.Unlock()
+			return fn()
+		}
+		r.mu.Unlock()
+
+		timer := time.NewTimer(wait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		}
+	}
+}
+
+func (r *aliOpenRateLimiter) penalize(delay time.Duration) {
+	if delay <= 0 {
+		return
+	}
+	r.mu.Lock()
+	until := time.Now().Add(delay)
+	if until.After(r.blockedUntil) {
+		r.blockedUntil = until
+	}
+	r.mu.Unlock()
+}
+
+var aliOpenLimiter = newAliOpenRateLimiter(2, 220*time.Millisecond)
 
 func init() {
 	drive.Register(drive.Registration{
@@ -128,25 +203,26 @@ func wrapRef(scope Scope, fid string) string {
 
 // aliFile is a raw API file item.
 type aliFile struct {
-	FileID         string `json:"file_id"`
-	Name           string `json:"name"`
-	ParentFileID   string `json:"parent_file_id"`
-	Type           string `json:"type"`
-	Size           int64  `json:"size"`
-	UpdatedAt      string `json:"updated_at"`
-	CreatedAt      string `json:"created_at"`
-	ContentHash    string `json:"content_hash"`
+	FileID          string `json:"file_id"`
+	Name            string `json:"name"`
+	ParentFileID    string `json:"parent_file_id"`
+	Type            string `json:"type"`
+	Size            int64  `json:"size"`
+	UpdatedAt       string `json:"updated_at"`
+	CreatedAt       string `json:"created_at"`
+	ContentHash     string `json:"content_hash"`
 	ContentHashName string `json:"content_hash_name"`
-	Thumbnail      string `json:"thumbnail"`
-	Category       string `json:"category"`
-	Status         string `json:"status"`
-	DownloadURL    string `json:"download_url"`
+	Thumbnail       string `json:"thumbnail"`
+	Category        string `json:"category"`
+	Status          string `json:"status"`
+	DownloadURL     string `json:"download_url"`
 }
 
 // client is an authenticated aliopen session.
 type client struct {
 	http    *netx.Client
 	session *Session
+	token   *model.TokenInfo
 }
 
 func clientOf(c drive.Context) (*client, error) {
@@ -157,12 +233,18 @@ func clientOf(c drive.Context) (*client, error) {
 	if sess == nil {
 		return nil, errors.New("aliopen: invalid session")
 	}
-	cl := &client{http: netx.NewClient(60 * time.Second), session: sess}
+	cl := &client{http: netx.NewClient(60 * time.Second), session: sess, token: c.Token}
 	if sess.AccessToken == "" {
 		if err := cl.refresh(context.Background(), c.UserID); err != nil {
 			return nil, err
 		}
 	}
+	if sess.DriveID == "" {
+		if err := cl.ensureDrive(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	cl.persistSession()
 	return cl, nil
 }
 
@@ -180,7 +262,15 @@ func parseSession(tok *model.TokenInfo) *Session {
 			if sess.AccessToken == "" && tok.AccessToken != "" {
 				sess.AccessToken = tok.AccessToken
 			}
+			if sess.RefreshToken == "" && tok.OpenAPIRefreshToken != "" {
+				sess.RefreshToken = tok.OpenAPIRefreshToken
+			}
 			return &sess
+		}
+		// Older builds persisted the refresh token itself instead of the JSON
+		// session. Keep those accounts refreshable after migration.
+		if len(strings.TrimSpace(raw)) > 20 {
+			return &Session{AccessToken: tok.AccessToken, RefreshToken: strings.TrimSpace(raw)}
 		}
 	}
 	if tok.AccessToken != "" {
@@ -189,7 +279,33 @@ func parseSession(tok *model.TokenInfo) *Session {
 	return nil
 }
 
-func (c *client) refresh(ctx context.Context, userID string) error {
+func (c *client) persistSession() {
+	if c == nil || c.token == nil || c.session == nil {
+		return
+	}
+	c.token.AccessToken = c.session.AccessToken
+	c.token.RefreshToken = mustJSON(c.session)
+	c.token.OpenAPIAccessToken = c.session.AccessToken
+	c.token.OpenAPIRefreshToken = c.session.RefreshToken
+}
+
+func (c *client) refresh(ctx context.Context, _ string) error {
+	if err := c.refreshToken(ctx); err != nil {
+		return err
+	}
+	if c.session.DriveID == "" {
+		if err := c.ensureDrive(ctx); err != nil {
+			return err
+		}
+	}
+	c.persistSession()
+	return nil
+}
+
+func (c *client) refreshToken(ctx context.Context) error {
+	if strings.TrimSpace(c.session.RefreshToken) == "" {
+		return errors.New("aliopen: refresh_token 缺失")
+	}
 	url := c.session.OAuthTokenURL
 	if c.session.ClientID != "" {
 		url = apiHost + "/oauth/access_token"
@@ -204,40 +320,70 @@ func (c *client) refresh(ctx context.Context, userID string) error {
 			body["client_secret"] = c.session.ClientSecret
 		}
 	}
-	var res struct {
-		AccessToken string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-	}
-	if err := c.http.PostJSON(ctx, url, nil, body, &res); err != nil {
+	var resp *http.Response
+	if err := aliOpenLimiter.run(ctx, func() error {
+		var err error
+		resp, err = c.http.Do(ctx, http.MethodPost, url, map[string]string{
+			"Content-Type": "application/json",
+			"Accept":       "application/json",
+		}, netx.JSONBody(body))
+		return err
+	}); err != nil {
 		return err
 	}
+	data, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		aliOpenLimiter.penalize(aliOpenRetryAfter(resp, 8*time.Second))
+	}
+	if resp.StatusCode >= 400 {
+		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+	}
+	var res struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(data, &res); err != nil {
+		return fmt.Errorf("aliopen: refresh response: %w", err)
+	}
 	if res.AccessToken == "" {
-		return errors.New("aliopen: refresh token failed")
+		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
 	}
 	c.session.AccessToken = res.AccessToken
 	if res.RefreshToken != "" {
 		c.session.RefreshToken = res.RefreshToken
 	}
-	// Ensure drive IDs
-	if c.session.DriveID == "" {
-		_ = c.ensureDrive(ctx)
-	}
+	c.persistSession()
 	return nil
 }
 
 func (c *client) ensureDrive(ctx context.Context) error {
 	type driveInfo struct {
-		DefaultDriveID   string `json:"default_drive_id"`
-		ResourceDriveID  string `json:"resource_drive_id"`
-		BackupDriveID    string `json:"backup_drive_id"`
+		DefaultDriveID  string `json:"default_drive_id"`
+		ResourceDriveID string `json:"resource_drive_id"`
+		BackupDriveID   string `json:"backup_drive_id"`
 	}
 	var info driveInfo
 	if err := c.apiPost(ctx, "/adrive/v1.0/user/getDriveInfo", map[string]any{}, &info); err != nil {
 		return err
 	}
-	c.session.DriveID = info.DefaultDriveID
-	c.session.ResourceDriveID = info.ResourceDriveID
-	c.session.BackupDriveID = info.BackupDriveID
+	driveID := strings.TrimSpace(info.DefaultDriveID)
+	if driveID == "" {
+		driveID = strings.TrimSpace(info.ResourceDriveID)
+	}
+	if driveID == "" {
+		driveID = strings.TrimSpace(info.BackupDriveID)
+	}
+	if driveID == "" {
+		return errors.New("aliopen: 获取 drive_id 失败")
+	}
+	c.session.DriveID = driveID
+	c.session.ResourceDriveID = strings.TrimSpace(info.ResourceDriveID)
+	c.session.BackupDriveID = strings.TrimSpace(info.BackupDriveID)
+	c.persistSession()
 	return nil
 }
 
@@ -255,29 +401,56 @@ func (c *client) apiPost(ctx context.Context, path string, body any, out any) er
 
 // apiPostWith is apiPost with extra headers (e.g. x-share-token).
 func (c *client) apiPostWith(ctx context.Context, path string, body any, out any, extraHeaders map[string]string) error {
+	return c.apiPostWithRetry(ctx, path, body, out, extraHeaders, true)
+}
+
+func (c *client) apiPostWithRetry(ctx context.Context, path string, body any, out any, extraHeaders map[string]string, allowRefresh bool) error {
 	hdrs := map[string]string{
 		"Authorization": "Bearer " + c.session.AccessToken,
-		"Content-Type": "application/json",
+		"Content-Type":  "application/json",
+		"Accept":        "application/json",
 	}
 	for k, v := range extraHeaders {
+		switch strings.ToLower(k) {
+		case "authorization", "content-type", "accept":
+			continue
+		}
 		hdrs[k] = v
 	}
-	resp, err := c.http.Do(ctx, http.MethodPost, apiHost+path, hdrs, netx.JSONBody(body))
+	var resp *http.Response
+	if err := aliOpenLimiter.run(ctx, func() error {
+		var err error
+		resp, err = c.http.Do(ctx, http.MethodPost, apiHost+path, hdrs, netx.JSONBody(body))
+		return err
+	}); err != nil {
+		return err
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
+	if aliOpenAuthResponse(resp.StatusCode, data) {
+		if !allowRefresh {
+			return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+		}
+		if err := c.refreshToken(ctx); err != nil {
+			return err
+		}
+		return c.apiPostWithRetry(ctx, path, body, out, extraHeaders, false)
+	}
+	if aliOpenRateLimitResponse(resp.StatusCode, data) {
+		fallback := 5 * time.Second
+		if resp.StatusCode == http.StatusTooManyRequests {
+			fallback = 5 * time.Second
+		}
+		aliOpenLimiter.penalize(aliOpenRetryAfter(resp, fallback))
+	}
 	if resp.StatusCode >= 400 {
-		var errBody struct {
-			Message string `json:"message"`
-		}
-		_ = json.Unmarshal(data, &errBody)
-		msg := errBody.Message
-		if msg == "" {
-			msg = fmt.Sprintf("aliopen: http %d", resp.StatusCode)
-		}
-		return errors.New(msg)
+		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+	}
+	if aliOpenAPIError(data) {
+		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
 	}
 	if out == nil {
 		return nil
@@ -285,10 +458,76 @@ func (c *client) apiPostWith(ctx context.Context, path string, body any, out any
 	return json.Unmarshal(data, out)
 }
 
+type aliOpenErrorBody struct {
+	Code             string `json:"code"`
+	Message          string `json:"message"`
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
+func aliOpenErrorBodyOf(data []byte) aliOpenErrorBody {
+	var body aliOpenErrorBody
+	_ = json.Unmarshal(data, &body)
+	return body
+}
+
+func aliOpenAuthResponse(status int, data []byte) bool {
+	if status == http.StatusUnauthorized {
+		return true
+	}
+	body := aliOpenErrorBodyOf(data)
+	code := strings.ToLower(strings.TrimSpace(body.Code))
+	return strings.Contains(code, "accesstoken") ||
+		strings.Contains(code, "tokenexpired") ||
+		strings.Contains(code, "invalid_token") ||
+		code == "unauthorized"
+}
+
+func aliOpenRateLimitResponse(status int, data []byte) bool {
+	if status == http.StatusTooManyRequests {
+		return true
+	}
+	body := aliOpenErrorBodyOf(data)
+	text := strings.ToLower(body.Code + " " + body.Message + " " + body.Error)
+	return strings.Contains(text, "limit") ||
+		strings.Contains(text, "toomany") ||
+		strings.Contains(text, "frequency") ||
+		strings.Contains(text, "429")
+}
+
+func aliOpenAPIError(data []byte) bool {
+	body := aliOpenErrorBodyOf(data)
+	return strings.TrimSpace(body.Code) != "" && !strings.EqualFold(strings.TrimSpace(body.Code), "success")
+}
+
+func aliOpenErrorMessage(data []byte, status int) string {
+	body := aliOpenErrorBodyOf(data)
+	for _, msg := range []string{body.Message, body.ErrorDescription, body.Error, body.Code} {
+		if strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+	}
+	if status > 0 {
+		return fmt.Sprintf("aliopen: http %d", status)
+	}
+	return "aliopen: request failed"
+}
+
+func aliOpenRetryAfter(resp *http.Response, fallback time.Duration) time.Duration {
+	if resp != nil {
+		if raw := strings.TrimSpace(resp.Header.Get("Retry-After")); raw != "" {
+			if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
+				return time.Duration(seconds) * time.Second
+			}
+		}
+	}
+	return fallback
+}
+
 // listResp is the paginated listing response.
 type listResp struct {
-	Items []aliFile `json:"items"`
-	Marker string   `json:"next_marker"`
+	Items  []aliFile `json:"items"`
+	Marker string    `json:"next_marker"`
 }
 
 // ListPage returns one page of a directory.
@@ -314,6 +553,7 @@ func (c *client) ListPage(ctx context.Context, scope Scope, parentID, marker str
 func (c *client) List(ctx context.Context, scope Scope, parentID string) ([]aliFile, error) {
 	var out []aliFile
 	marker := ""
+	seenMarkers := map[string]bool{}
 	for {
 		items, next, err := c.ListPage(ctx, scope, parentID, marker)
 		if err != nil {
@@ -323,6 +563,10 @@ func (c *client) List(ctx context.Context, scope Scope, parentID string) ([]aliF
 		if next == "" {
 			break
 		}
+		if seenMarkers[next] {
+			return nil, errors.New("aliopen: duplicate list cursor")
+		}
+		seenMarkers[next] = true
 		marker = next
 	}
 	return out, nil
@@ -343,13 +587,13 @@ func (c *client) Detail(ctx context.Context, scope Scope, fileID string) (*aliFi
 // Search searches across a drive.
 func (c *client) Search(ctx context.Context, scope Scope, keyword string) ([]aliFile, error) {
 	var resp struct {
-		Items []aliFile `json:"items"`
-		Marker string   `json:"next_marker"`
+		Items  []aliFile `json:"items"`
+		Marker string    `json:"next_marker"`
 	}
 	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/search", map[string]any{
-		"drive_id":  c.scopedDriveID(scope),
-		"query":     "name match \"" + keyword + "\"",
-		"limit":     200,
+		"drive_id":                c.scopedDriveID(scope),
+		"query":                   "name match \"" + keyword + "\"",
+		"limit":                   200,
 		"image_thumbnail_process": "image/resize,w_256/format,jpeg",
 	}, &resp); err != nil {
 		return nil, err
@@ -358,20 +602,31 @@ func (c *client) Search(ctx context.Context, scope Scope, keyword string) ([]ali
 }
 
 // DownloadInfo gets the download URL and headers.
-func (c *client) DownloadInfo(ctx context.Context, scope Scope, fileID string) (string, int64, map[string]string, error) {
+func (c *client) DownloadInfo(ctx context.Context, scope Scope, fileID string, expireSec int) (string, int64, map[string]string, int64, error) {
 	var resp struct {
-		URL     string            `json:"url"`
-		Size    int64             `json:"size"`
-		Headers map[string]string `json:"headers"`
-		Expiration string        `json:"expiration"`
+		URL        string            `json:"url"`
+		Size       int64             `json:"size"`
+		Headers    map[string]string `json:"headers"`
+		Expiration string            `json:"expiration"`
+	}
+	if expireSec <= 0 {
+		expireSec = defaultDownloadExpireSec
 	}
 	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/getDownloadUrl", map[string]any{
-		"file_id":  fileID,
-		"drive_id": c.scopedDriveID(scope),
+		"file_id":    fileID,
+		"drive_id":   c.scopedDriveID(scope),
+		"expire_sec": expireSec,
 	}, &resp); err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, 0, err
 	}
-	return resp.URL, resp.Size, resp.Headers, nil
+	if strings.TrimSpace(resp.URL) == "" {
+		return "", 0, nil, 0, errors.New("aliopen: 获取下载地址失败")
+	}
+	expireTime := parseAliOpenExpiration(resp.Expiration)
+	if expireTime == 0 {
+		expireTime = driveutil.GetExpiresTime(resp.URL)
+	}
+	return resp.URL, resp.Size, resp.Headers, expireTime, nil
 }
 
 // Mkdir creates a folder.
@@ -380,10 +635,10 @@ func (c *client) Mkdir(ctx context.Context, scope Scope, parentID, name string) 
 		FileID string `json:"file_id"`
 	}
 	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/create", map[string]any{
-		"name":           name,
-		"parent_file_id": parentID,
-		"drive_id":       c.scopedDriveID(scope),
-		"type":           "folder",
+		"name":            name,
+		"parent_file_id":  parentID,
+		"drive_id":        c.scopedDriveID(scope),
+		"type":            "folder",
 		"check_name_mode": "refuse",
 	}, &res); err != nil {
 		return &drive.MkdirResult{Error: err.Error()}, nil
@@ -429,8 +684,8 @@ func (c *client) Delete(ctx context.Context, scope Scope, fileIDs ...string) err
 // Move moves files.
 func (c *client) Move(ctx context.Context, scope Scope, fileID, toParentID string) error {
 	return c.apiPost(ctx, "/adrive/v1.0/openFile/move", map[string]any{
-		"file_id":       fileID,
-		"drive_id":      c.scopedDriveID(scope),
+		"file_id":           fileID,
+		"drive_id":          c.scopedDriveID(scope),
 		"to_parent_file_id": toParentID,
 	}, nil)
 }
@@ -438,30 +693,30 @@ func (c *client) Move(ctx context.Context, scope Scope, fileID, toParentID strin
 // Copy copies files.
 func (c *client) Copy(ctx context.Context, scope Scope, fileID, toParentID, toDriveID string) error {
 	return c.apiPost(ctx, "/adrive/v1.0/openFile/copy", map[string]any{
-		"file_id":       fileID,
-		"drive_id":      c.scopedDriveID(scope),
+		"file_id":           fileID,
+		"drive_id":          c.scopedDriveID(scope),
 		"to_parent_file_id": toParentID,
-		"to_drive_id":      toDriveID,
+		"to_drive_id":       toDriveID,
 	}, nil)
 }
 
 // CreateShare creates a share link.
 func (c *client) CreateShare(ctx context.Context, scope Scope, fileIDs []string, shareName, expiration, password string) (*model.ShareItem, error) {
 	body := map[string]any{
-		"drive_id":  c.scopedDriveID(scope),
+		"drive_id":     c.scopedDriveID(scope),
 		"file_id_list": fileIDs,
-		"share_name":  shareName,
-		"share_pwd":   password,
-		"expiration":  expiration,
-		"description": shareName,
+		"share_name":   shareName,
+		"share_pwd":    password,
+		"expiration":   expiration,
+		"description":  shareName,
 	}
 	var share struct {
-		ShareID  string `json:"share_id"`
-		ShareURL string `json:"share_url"`
-		ShareMsg string `json:"share_msg"`
+		ShareID    string `json:"share_id"`
+		ShareURL   string `json:"share_url"`
+		ShareMsg   string `json:"share_msg"`
 		Expiration string `json:"expiration"`
-		Status   string `json:"status"`
-		DriveID  string `json:"drive_id"`
+		Status     string `json:"status"`
+		DriveID    string `json:"drive_id"`
 	}
 	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/createShareLink", body, &share); err != nil {
 		return nil, err
@@ -482,25 +737,33 @@ func (c *client) RapidUpload(ctx context.Context, scope Scope, parentID, name st
 			PartNumber int    `json:"part_number"`
 			UploadURL  string `json:"upload_url"`
 		} `json:"part_info_list"`
-		Exist bool `json:"exist"`
+		Exist bool   `json:"exist"`
 		Error string `json:"error"`
 	}
 	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/create", map[string]any{
-		"name":             name,
-		"parent_file_id":   parentID,
-		"drive_id":         c.scopedDriveID(scope),
-		"type":             "file",
-		"size":             size,
-		"content_hash":     sha1Str,
+		"name":              name,
+		"parent_file_id":    parentID,
+		"drive_id":          c.scopedDriveID(scope),
+		"type":              "file",
+		"size":              size,
+		"content_hash":      sha1Str,
 		"content_hash_name": "sha1",
-		"check_name_mode":  "ignore",
+		"check_name_mode":   "ignore",
 	}, &res); err != nil {
 		return nil, err
 	}
-	if res.RapidUpload || res.FileID != "" {
+	// A miss still returns file_id for the pending upload object. Only the
+	// explicit rapid_upload flag means the remote file is already complete.
+	if res.RapidUpload {
+		if strings.TrimSpace(res.FileID) == "" {
+			return &drive.RapidUploadResult{Reuse: false, Message: "秒传响应缺少 file_id"}, nil
+		}
 		return &drive.RapidUploadResult{Reuse: true, FileID: res.FileID}, nil
 	}
-	return &drive.RapidUploadResult{Reuse: false, FileID: res.FileID, Message: "秒传未命中，需要上传"}, nil
+	// Do not expose the pending file id: the migration layer treats a file id
+	// as an accepted transfer for compatibility with providers that return one
+	// on a successful probe.
+	return &drive.RapidUploadResult{Reuse: false, Message: "秒传未命中，需要上传"}, nil
 }
 
 // CreateUploadFile creates an upload entry and returns parts.
@@ -508,6 +771,14 @@ func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, na
 	PartNumber int    `json:"part_number"`
 	UploadURL  string `json:"upload_url"`
 }, error) {
+	partCount := int(size / int64(partSize))
+	if size%int64(partSize) != 0 || partCount == 0 {
+		partCount++
+	}
+	partInfoList := make([]map[string]int, partCount)
+	for i := range partInfoList {
+		partInfoList[i] = map[string]int{"part_number": i + 1}
+	}
 	var res struct {
 		FileID       string `json:"file_id"`
 		UploadID     string `json:"upload_id"`
@@ -517,12 +788,13 @@ func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, na
 		} `json:"part_info_list"`
 	}
 	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/create", map[string]any{
-		"name":             name,
-		"parent_file_id":   parentID,
-		"drive_id":         c.scopedDriveID(scope),
-		"type":             "file",
-		"size":             size,
-		"check_name_mode":  "ignore",
+		"name":            name,
+		"parent_file_id":  parentID,
+		"drive_id":        c.scopedDriveID(scope),
+		"type":            "file",
+		"size":            size,
+		"check_name_mode": "ignore",
+		"part_info_list":  partInfoList,
 	}, &res); err != nil {
 		return "", "", nil, err
 	}
@@ -652,14 +924,19 @@ func (d *Driver) Search(ctx context.Context, c drive.Context, keyword string) ([
 		scopes = append(scopes, ScopeResource)
 	}
 	var out []model.File
+	var searchErrs []error
 	for _, sc := range scopes {
 		items, err := cl.Search(ctx, sc, keyword)
 		if err != nil {
+			searchErrs = append(searchErrs, fmt.Errorf("%s: %w", sc, err))
 			continue
 		}
 		for i := range items {
 			out = append(out, mapFile(&items[i], c.DriveID, wrapRef(sc, items[i].ParentFileID), string(sc)))
 		}
+	}
+	if len(out) == 0 && len(searchErrs) > 0 {
+		return nil, errors.Join(searchErrs...)
 	}
 	return out, nil
 }
@@ -695,19 +972,20 @@ func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*
 	return &f, nil
 }
 
-func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID string, _ int) (*model.DownloadURL, error) {
+func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID string, expireSec int) (*model.DownloadURL, error) {
 	ref := parseRef(fileID)
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
 	}
-	url, size, headers, err := cl.DownloadInfo(ctx, ref.Scope, ref.FID)
+	url, size, headers, expireTime, err := cl.DownloadInfo(ctx, ref.Scope, ref.FID, expireSec)
 	if err != nil {
 		return nil, err
 	}
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID, URL: url, Size: size,
-		Headers: headers, DownloadMode: "redirect",
+		ExpireTime: expireTime,
+		Headers:    headers, DownloadMode: "redirect",
 	}, nil
 }
 
@@ -722,6 +1000,27 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 			Quality: "origin", Label: "原画", Value: "origin", URL: u.URL, Headers: u.Headers, ForceProxy: true,
 		}},
 	}, nil
+}
+
+func parseAliOpenExpiration(raw string) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if value, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if value > 0 && value < 10_000_000_000 {
+			return value * 1000
+		}
+		if value >= 10_000_000_000 {
+			return value
+		}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UnixMilli()
+		}
+	}
+	return 0
 }
 
 func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name string) (*drive.MkdirResult, error) {
@@ -750,16 +1049,21 @@ func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) (
 	if err != nil {
 		return nil, err
 	}
-	groups := groupByScope(fileIDs)
+	scope, err := sameAliOpenScopeIDs(fileIDs...)
+	if err != nil {
+		return nil, err
+	}
 	var ok []string
-	for sc, ids := range groups {
-		for _, id := range ids {
-			if err := cl.Trash(ctx, sc, id); err == nil {
-				ok = append(ok, wrapRef(sc, id))
-			}
+	var failed []error
+	for _, id := range fileIDs {
+		ref := parseRef(id)
+		if err := cl.Trash(ctx, scope, ref.FID); err == nil {
+			ok = append(ok, wrapRef(scope, ref.FID))
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", wrapRef(scope, ref.FID), err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
@@ -767,20 +1071,21 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 	if err != nil {
 		return nil, err
 	}
-	groups := make(map[Scope][]string)
-	for _, r := range refs {
-		ref := parseRef(r.ID)
-		groups[ref.Scope] = append(groups[ref.Scope], ref.FID)
+	scope, err := sameAliOpenRefScope(refs, "")
+	if err != nil {
+		return nil, err
 	}
 	var ok []string
-	for sc, ids := range groups {
-		for _, id := range ids {
-			if err := cl.Delete(ctx, sc, id); err == nil {
-				ok = append(ok, wrapRef(sc, id))
-			}
+	var failed []error
+	for _, r := range refs {
+		ref := parseRef(r.ID)
+		if err := cl.Delete(ctx, scope, ref.FID); err == nil {
+			ok = append(ok, wrapRef(scope, ref.FID))
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", wrapRef(scope, ref.FID), err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
@@ -793,17 +1098,21 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 		return nil, err
 	}
 	target := parseRef(toParentID)
+	scope, err := sameAliOpenRefScope(refs, toParentID)
+	if err != nil {
+		return nil, err
+	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		ref := parseRef(r.ID)
-		if ref.Scope != target.Scope {
-			continue
-		}
-		if err := cl.Move(ctx, ref.Scope, ref.FID, target.FID); err == nil {
+		if err := cl.Move(ctx, scope, ref.FID, target.FID); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
@@ -812,19 +1121,30 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 		return nil, err
 	}
 	target := parseRef(toParentID)
+	scope, err := sameAliOpenRefScope(refs, toParentID)
+	if err != nil {
+		return nil, err
+	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		ref := parseRef(r.ID)
-		toDrive := cl.scopedDriveID(target.Scope)
-		if err := cl.Copy(ctx, ref.Scope, ref.FID, target.FID, toDrive); err == nil {
+		toDrive := cl.scopedDriveID(scope)
+		if err := cl.Copy(ctx, scope, ref.FID, target.FID, toDrive); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.ShareParams) (*model.ShareItem, error) {
 	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := sameAliOpenScopeIDs(params.FileIDs...)
 	if err != nil {
 		return nil, err
 	}
@@ -833,15 +1153,13 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 		ref := parseRef(id)
 		fids = append(fids, ref.FID)
 	}
-	scope := ScopeBackup
-	if len(fids) > 0 {
-		ref := parseRef(params.FileIDs[0])
-		scope = ref.Scope
-	}
 	return cl.CreateShare(ctx, scope, fids, params.ShareName, params.Expiration, params.Password)
 }
 
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
+		return errors.New("aliopen: 上传文件路径为空")
+	}
 	ref := parseRef(ui.Info.ParentFileID)
 	cl, err := clientOf(c)
 	if err != nil {
@@ -857,6 +1175,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return errors.New("aliopen: stat file failed")
 	}
 	size := info.Size()
+	ui.Info.Size = size
 	// Try rapid upload by sha1
 	if ui.Info.SHA1 != "" {
 		res, err := cl.RapidUpload(ctx, ref.Scope, ref.FID, ui.Info.Name, size, ui.Info.SHA1)
@@ -871,19 +1190,83 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	// Resume: load previously uploaded part numbers
 	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
+	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)
 	uploadedSet := make(map[int]bool)
-	for _, pn := range drive.LoadUploadSession(sessionKey) {
-		uploadedSet[pn] = true
+	if savedSessionID == uploadID {
+		for _, pn := range savedParts {
+			uploadedSet[pn] = true
+		}
 	}
 	// Upload parts
 	buf := make([]byte, partSize)
 	var pos int64
-	if len(parts) == 0 {
-		parts = append(parts, struct {
-			PartNumber int    `json:"part_number"`
-			UploadURL  string `json:"upload_url"`
-		}{PartNumber: 1, UploadURL: ""})
+	partCount := int(size / int64(partSize))
+	if size%int64(partSize) != 0 || partCount == 0 {
+		partCount++
 	}
+	if len(parts) == 0 {
+		for partNumber := 1; partNumber <= partCount; partNumber++ {
+			parts = append(parts, struct {
+				PartNumber int    `json:"part_number"`
+				UploadURL  string `json:"upload_url"`
+			}{PartNumber: partNumber})
+		}
+	} else {
+		knownParts := make(map[int]bool, len(parts))
+		for _, part := range parts {
+			knownParts[part.PartNumber] = true
+		}
+		for partNumber := 1; partNumber <= partCount; partNumber++ {
+			if !knownParts[partNumber] {
+				parts = append(parts, struct {
+					PartNumber int    `json:"part_number"`
+					UploadURL  string `json:"upload_url"`
+				}{PartNumber: partNumber})
+			}
+		}
+	}
+	sort.SliceStable(parts, func(i, j int) bool { return parts[i].PartNumber < parts[j].PartNumber })
+	missingParts := make([]map[string]int, 0)
+	for _, part := range parts {
+		if !uploadedSet[part.PartNumber] && strings.TrimSpace(part.UploadURL) == "" {
+			missingParts = append(missingParts, map[string]int{"part_number": part.PartNumber})
+		}
+	}
+	for start := 0; start < len(missingParts); start += 100 {
+		end := start + 100
+		if end > len(missingParts) {
+			end = len(missingParts)
+		}
+		var refreshed struct {
+			PartInfoList []struct {
+				PartNumber int    `json:"part_number"`
+				UploadURL  string `json:"upload_url"`
+			} `json:"part_info_list"`
+		}
+		if err := cl.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
+			"drive_id":       cl.scopedDriveID(ref.Scope),
+			"file_id":        fileID,
+			"upload_id":      uploadID,
+			"part_info_list": missingParts[start:end],
+		}, &refreshed); err != nil {
+			return err
+		}
+		urls := make(map[int]string, len(refreshed.PartInfoList))
+		for _, part := range refreshed.PartInfoList {
+			urls[part.PartNumber] = strings.TrimSpace(part.UploadURL)
+		}
+		for i := range parts {
+			if url := urls[parts[i].PartNumber]; url != "" {
+				parts[i].UploadURL = url
+			}
+		}
+	}
+	for _, part := range parts {
+		if !uploadedSet[part.PartNumber] && strings.TrimSpace(part.UploadURL) == "" {
+			return fmt.Errorf("aliopen: 分片 %d 无上传地址", part.PartNumber)
+		}
+	}
+	lastURLRefresh := time.Now()
 	for _, part := range parts {
 		n, err := f.ReadAt(buf, pos)
 		if err != nil && err != io.EOF {
@@ -891,22 +1274,86 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		chunk := buf[:n]
 		if !uploadedSet[part.PartNumber] && part.UploadURL != "" {
-			req, _ := http.NewRequestWithContext(ctx, http.MethodPut, part.UploadURL, strings.NewReader(string(chunk)))
-			resp, err2 := cl.http.HTTP.Do(req)
-			if err2 != nil {
-				return err2
+			if time.Since(lastURLRefresh) >= 50*time.Minute {
+				var refreshed struct {
+					PartInfoList []struct {
+						PartNumber int    `json:"part_number"`
+						UploadURL  string `json:"upload_url"`
+					} `json:"part_info_list"`
+				}
+				if refreshErr := cl.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
+					"drive_id":       cl.scopedDriveID(ref.Scope),
+					"file_id":        fileID,
+					"upload_id":      uploadID,
+					"part_info_list": []map[string]int{{"part_number": part.PartNumber}},
+				}, &refreshed); refreshErr != nil || len(refreshed.PartInfoList) == 0 || refreshed.PartInfoList[0].UploadURL == "" {
+					if refreshErr != nil {
+						return refreshErr
+					}
+					return fmt.Errorf("aliopen: 分片 %d 刷新上传地址失败", part.PartNumber)
+				}
+				part.UploadURL = refreshed.PartInfoList[0].UploadURL
+				lastURLRefresh = time.Now()
 			}
-			resp.Body.Close()
+			putPart := func(uploadURL string) (int, error) {
+				req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(chunk))
+				if err != nil {
+					return 0, err
+				}
+				req.Header.Set("Content-Length", strconv.FormatInt(int64(len(chunk)), 10))
+				resp, err := cl.http.HTTP.Do(req)
+				if err != nil {
+					return 0, err
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				status := resp.StatusCode
+				resp.Body.Close()
+				return status, nil
+			}
+			status, err := putPart(part.UploadURL)
+			if err != nil {
+				return err
+			}
+			if (status == http.StatusUnauthorized || status == http.StatusForbidden) && status >= 400 {
+				// A persisted session can contain expired pre-signed URLs. Refresh
+				// only the current part so a recoverable expiry does not discard the
+				// whole upload session.
+				var refreshed struct {
+					PartInfoList []struct {
+						PartNumber int    `json:"part_number"`
+						UploadURL  string `json:"upload_url"`
+					} `json:"part_info_list"`
+				}
+				if refreshErr := cl.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
+					"drive_id":       cl.scopedDriveID(ref.Scope),
+					"file_id":        fileID,
+					"upload_id":      uploadID,
+					"part_info_list": []map[string]int{{"part_number": part.PartNumber}},
+				}, &refreshed); refreshErr == nil && len(refreshed.PartInfoList) > 0 && refreshed.PartInfoList[0].UploadURL != "" {
+					part.UploadURL = refreshed.PartInfoList[0].UploadURL
+					status, err = putPart(part.UploadURL)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			if status < 200 || status >= 300 {
+				return fmt.Errorf("aliopen: 分片上传失败 HTTP %d", status)
+			}
 		}
 		// Persist uploaded part number incrementally
 		if !uploadedSet[part.PartNumber] {
 			uploadedSet[part.PartNumber] = true
-			_ = drive.SaveUploadSession(sessionKey, drive.SortedUniqueParts(uploadedSet))
+			_ = drive.SaveUploadSessionState(sessionKey, uploadID, drive.SortedUniqueParts(uploadedSet))
 		}
 		pos += int64(n)
 		if ui != nil {
 			ui.Upload.DownSize = pos
-			ui.Upload.DownProcess = int(pos * 100 / size)
+			if size > 0 {
+				ui.Upload.DownProcess = int(pos * 100 / size)
+			} else {
+				ui.Upload.DownProcess = 100
+			}
 		}
 	}
 	err = cl.CompleteUpload(ctx, ref.Scope, fileID, uploadID)
@@ -945,7 +1392,7 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 // shareListResp is the aliopen listByShare response.
 type shareListResp struct {
 	Items      []aliFile `json:"items"`
-	NextMarker string   `json:"next_marker"`
+	NextMarker string    `json:"next_marker"`
 }
 
 // ImportShareSession implements drive.ShareImportDriver.
@@ -992,12 +1439,13 @@ func (d *Driver) ImportShareSession(ctx context.Context, c drive.Context, shareU
 func aliShareListAll(ctx context.Context, cl *client, shareID, shareToken, parentFileID string, hdrs map[string]string) ([]drive.ShareImportFile, error) {
 	var out []drive.ShareImportFile
 	marker := ""
+	seenMarkers := map[string]bool{}
 	for {
 		body := map[string]any{
-			"share_id":       shareID,
-			"parent_file_id": parentFileID,
-			"limit":          100,
-			"order_by":       "name",
+			"share_id":        shareID,
+			"parent_file_id":  parentFileID,
+			"limit":           100,
+			"order_by":        "name",
 			"order_direction": "ASC",
 		}
 		if marker != "" {
@@ -1019,6 +1467,10 @@ func aliShareListAll(ctx context.Context, cl *client, shareID, shareToken, paren
 		if resp.NextMarker == "" {
 			break
 		}
+		if seenMarkers[resp.NextMarker] {
+			return nil, errors.New("aliopen: duplicate share list cursor")
+		}
+		seenMarkers[resp.NextMarker] = true
 		marker = resp.NextMarker
 	}
 	return out, nil
@@ -1026,6 +1478,9 @@ func aliShareListAll(ctx context.Context, cl *client, shareID, shareToken, paren
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	if session == nil || session.Provider != providerID || strings.TrimSpace(session.ShareID) == "" || strings.TrimSpace(session.ShareToken) == "" {
+		return nil, errors.New("aliopen: 分享会话无效或已过期")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
@@ -1053,20 +1508,22 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 	}
 	hdrs := map[string]string{"x-share-token": session.ShareToken}
 	var saved []string
+	var failed []error
 	for _, fileID := range fileIDs {
 		body := map[string]any{
-			"share_id":         session.ShareID,
-			"file_id":          fileID,
-			"to_drive_id":      targetDrive,
+			"share_id":          session.ShareID,
+			"file_id":           fileID,
+			"to_drive_id":       targetDrive,
 			"to_parent_file_id": parent,
-			"auto_rename":      true,
+			"auto_rename":       true,
 		}
 		if err := cl.apiPostWith(ctx, "/adrive/v1.0/openFile/copy", body, nil, hdrs); err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", fileID, err))
 			continue
 		}
 		saved = append(saved, fileID)
 	}
-	return saved, nil
+	return saved, errors.Join(failed...)
 }
 
 // parseAliShareURL extracts share_id from an Aliyun share URL.
@@ -1097,9 +1554,9 @@ func parseAliShareURL(raw string) (shareID string, pwd string) {
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	sess := parseSession(token)
 	if sess == nil {
-		return nil, nil
+		return nil, errors.New("aliopen: 会话不存在，请重新登录")
 	}
-	cl := &client{http: netx.NewClient(60 * time.Second), session: sess}
+	cl := &client{http: netx.NewClient(60 * time.Second), session: sess, token: token}
 	if err := cl.refresh(ctx, c.UserID); err != nil {
 		return nil, err
 	}
@@ -1131,13 +1588,28 @@ func mapFiles(items []aliFile, driveID, parentID string, scope Scope) []model.Fi
 	return out
 }
 
-func groupByScope(fileIDs []string) map[Scope][]string {
-	m := map[Scope][]string{}
-	for _, id := range fileIDs {
-		ref := parseRef(id)
-		m[ref.Scope] = append(m[ref.Scope], ref.FID)
+func sameAliOpenScopeIDs(ids ...string) (Scope, error) {
+	if len(ids) == 0 {
+		return ScopeBackup, nil
 	}
-	return m
+	scope := parseRef(ids[0]).Scope
+	for _, id := range ids[1:] {
+		if parseRef(id).Scope != scope {
+			return "", errors.New("aliopen: 不能跨备份盘与资源盘操作")
+		}
+	}
+	return scope, nil
+}
+
+func sameAliOpenRefScope(refs []drive.FileRef, targetID string) (Scope, error) {
+	ids := make([]string, 0, len(refs)+1)
+	for _, ref := range refs {
+		ids = append(ids, ref.ID)
+	}
+	if targetID != "" {
+		ids = append(ids, targetID)
+	}
+	return sameAliOpenScopeIDs(ids...)
 }
 
 func mustJSON(v any) string {
@@ -1163,12 +1635,9 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 	if err := cl.refresh(ctx, ""); err != nil {
 		return nil, err
 	}
-	if err := cl.ensureDrive(ctx); err != nil {
-		return nil, err
-	}
-	uid := sess.DriveID
+	uid := strings.TrimSpace(sess.DriveID)
 	if uid == "" {
-		uid = "ali"
+		return nil, errors.New("aliopen: 登录成功但未返回 drive_id")
 	}
 	name := "阿里云盘 " + uid[:min(8, len(uid))]
 	used, total := cl.GetSpaceInfo(ctx)
