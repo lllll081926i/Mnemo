@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -38,10 +39,19 @@ type Driver struct {
 	drive.BaseDriver
 }
 
-func (d *Driver) ID() string                 { return providerID }
-func (d *Driver) Meta() drive.Meta           { return drive.GetMeta(providerID) }
+func (d *Driver) ID() string                       { return providerID }
+func (d *Driver) Meta() drive.Meta                 { return drive.GetMeta(providerID) }
 func (d *Driver) Capabilities() drive.Capabilities { return drive.RegistryCaps(providerID) }
-func (d *Driver) RootID() string             { return "/" }
+func (d *Driver) RootID() string                   { return "/" }
+
+func (d *Driver) ValidateConnection(ctx context.Context, conn *model.ConnConfig) error {
+	client, err := wc.New(conn, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	_, err = client.Stat(ctx, "/")
+	return err
+}
 
 func clientOf(c drive.Context) (*wc.Client, error) {
 	if c.Token == nil || c.Token.Conn == nil {
@@ -124,10 +134,14 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if entry.IsDir {
 		return nil, errors.New("文件夹不能直接下载")
 	}
+	downloadURL, err := client.DownloadURL(p)
+	if err != nil {
+		return nil, err
+	}
 	return &model.DownloadURL{
 		DriveID:      c.DriveID,
 		FileID:       fileID,
-		URL:          client.DownloadURL(p),
+		URL:          downloadURL,
 		Size:         entry.Size,
 		Headers:      authHeaders(c),
 		DownloadMode: "redirect",
@@ -152,6 +166,9 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 }
 
 func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name string) (*drive.MkdirResult, error) {
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	client, err := clientOf(c)
 	if err != nil {
 		return nil, err
@@ -164,6 +181,9 @@ func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name stri
 }
 
 func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name string) (*drive.RenameResult, error) {
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	client, err := clientOf(c)
 	if err != nil {
 		return nil, err
@@ -191,12 +211,15 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
 		if err := client.Delete(ctx, pathOf(ref.ID)); err == nil {
 			ok = append(ok, ref.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
@@ -210,17 +233,25 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 	}
 	targetParent := pathOf(toParentID)
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
+		source := pathOf(ref.ID)
+		if davPathContains(source, targetParent) {
+			failed = append(failed, fmt.Errorf("%s: webdav: 不能将目录移动到自身或子目录", ref.ID))
+			continue
+		}
 		base := ref.ID
 		if i := strings.LastIndex(base, "/"); i >= 0 {
 			base = base[i+1:]
 		}
 		to := driveutil.JoinPath(targetParent, base)
-		if err := client.Move(ctx, pathOf(ref.ID), to); err == nil {
+		if err := client.Move(ctx, source, to); err == nil {
 			ok = append(ok, ref.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
@@ -230,23 +261,37 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 	}
 	targetParent := pathOf(toParentID)
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
+		source := pathOf(ref.ID)
+		if davPathContains(source, targetParent) {
+			failed = append(failed, fmt.Errorf("%s: webdav: 不能将目录复制到自身或子目录", ref.ID))
+			continue
+		}
 		base := ref.ID
 		if i := strings.LastIndex(base, "/"); i >= 0 {
 			base = base[i+1:]
 		}
 		to := driveutil.JoinPath(targetParent, base)
-		if err := client.Copy(ctx, pathOf(ref.ID), to); err == nil {
+		if err := client.Copy(ctx, source, to); err == nil {
 			ok = append(ok, ref.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 // UploadOneFile performs a direct PUT upload. It honors ui.Info.ConflictPolicy
 // when the target path already exists: refuse returns an error, rename uploads
 // to a generated non-conflicting name, overwrite (the default) replaces it.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || ui.Info.LocalFilePath == "" {
+		return errors.New("webdav: 上传文件路径为空")
+	}
+	if err := validateName(ui.Info.Name); err != nil {
+		return err
+	}
 	client, err := clientOf(c)
 	if err != nil {
 		return err
@@ -255,14 +300,29 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 
 	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
 	case driveutil.ConflictRefuse:
-		if _, e := client.Stat(ctx, target); e == nil {
+		_, e := client.Stat(ctx, target)
+		if e == nil {
 			return errors.New("webdav: 目标文件已存在")
 		}
+		if !isNotFound(e) {
+			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
+		}
 	case driveutil.ConflictRename:
-		if _, e := client.Stat(ctx, target); e == nil {
+		_, e := client.Stat(ctx, target)
+		if e == nil {
 			newName := driveutil.GenerateConflictName(ui.Info.Name)
 			ui.Info.Name = newName
 			target = driveutil.JoinPath(pathOf(ui.Info.ParentFileID), newName)
+		} else if !isNotFound(e) {
+			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
+		}
+	case driveutil.ConflictSkip:
+		_, e := client.Stat(ctx, target)
+		if e == nil {
+			return nil
+		}
+		if !isNotFound(e) {
+			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
 		}
 	}
 
@@ -271,14 +331,20 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	ui.Info.Size = size
 	// report read progress back to the upload UI
-	pr := driveutil.NewProgressReader(f, ui.Info.Size, func(read int64) {
+	pr := driveutil.NewProgressReader(f, size, func(read int64) {
 		ui.Upload.DownSize = read
-		if ui.Info.Size > 0 {
-			ui.Upload.DownProcess = int(read * 100 / ui.Info.Size)
+		if size > 0 {
+			ui.Upload.DownProcess = int(read * 100 / size)
 		}
 	})
-	return client.Put(ctx, target, pr, ui.Info.Size)
+	return client.Put(ctx, target, pr, size)
 }
 
 func authHeaders(c drive.Context) map[string]string {
@@ -309,4 +375,34 @@ func parentPath(p string) string {
 		return p[:i]
 	}
 	return "/"
+}
+
+func davPathContains(source, targetParent string) bool {
+	source = strings.TrimRight(pathOf(source), "/")
+	targetParent = strings.TrimRight(pathOf(targetParent), "/")
+	if source == "" {
+		return false
+	}
+	if targetParent == "" {
+		targetParent = "/"
+	}
+	return targetParent == source || strings.HasPrefix(targetParent, source+"/")
+}
+
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") || strings.Contains(msg, " 404")
+}
+
+func validateName(name string) error {
+	if strings.TrimSpace(name) == "" || name == "." || name == ".." {
+		return errors.New("webdav: 名称为空或无效")
+	}
+	if strings.ContainsAny(name, "/\\") || strings.IndexFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return errors.New("webdav: 名称不能包含路径分隔符或控制字符")
+	}
+	return nil
 }

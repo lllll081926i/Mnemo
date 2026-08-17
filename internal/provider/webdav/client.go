@@ -28,6 +28,8 @@ type Client struct {
 	Username string
 	Password string
 	UA       string
+	base     *url.URL
+	rootPath string
 }
 
 // New builds a client from a connection config.
@@ -35,21 +37,55 @@ func New(conn *model.ConnConfig, timeout time.Duration) (*Client, error) {
 	if conn == nil || conn.Endpoint == "" {
 		return nil, errors.New("webdav: missing endpoint")
 	}
-	endpoint := strings.TrimRight(conn.Endpoint, "/")
+	rawEndpoint := strings.TrimSpace(conn.Endpoint)
+	if !strings.Contains(rawEndpoint, "://") {
+		rawEndpoint = "https://" + rawEndpoint
+	}
+	base, err := url.Parse(rawEndpoint)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return nil, errors.New("webdav: endpoint must be a valid http(s) URL")
+	}
+	if !strings.EqualFold(base.Scheme, "http") && !strings.EqualFold(base.Scheme, "https") {
+		return nil, errors.New("webdav: endpoint scheme must be http or https")
+	}
+	if base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, errors.New("webdav: endpoint must not contain credentials, query, or fragment")
+	}
+	basePath, err := normalizeDAVPath(base.Path)
+	if err != nil {
+		return nil, fmt.Errorf("webdav: invalid endpoint path: %w", err)
+	}
+	base.Path = basePath
+	base.RawPath = ""
+	configuredRootPath := strings.TrimSpace(conn.RootPath)
+	if configuredRootPath == "" {
+		// Older Mnemo-Go builds used BasePath for both mounted providers.
+		// Keep those persisted WebDAV accounts on the same visible subtree.
+		configuredRootPath = conn.BasePath
+	}
+	rootPath, err := normalizeDAVPath(configuredRootPath)
+	if err != nil {
+		return nil, fmt.Errorf("webdav: invalid root path: %w", err)
+	}
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
 	return &Client{
 		HTTP:     &http.Client{Timeout: timeout},
-		Endpoint: endpoint,
+		Endpoint: strings.TrimRight(base.String(), "/"),
 		Username: conn.Username,
 		Password: conn.Password,
 		UA:       netx.DefaultUA,
+		base:     base,
+		rootPath: rootPath,
 	}, nil
 }
 
 func (c *Client) newReq(ctx context.Context, method, href string, body io.Reader, headers map[string]string) (*http.Request, error) {
-	rawURL := c.resolve(href)
+	rawURL, err := c.resolve(href)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		return nil, err
@@ -64,17 +100,180 @@ func (c *Client) newReq(ctx context.Context, method, href string, body io.Reader
 	return req, nil
 }
 
-func (c *Client) resolve(href string) string {
-	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
-		return href
+func (c *Client) resolve(href string) (string, error) {
+	if c == nil || c.base == nil {
+		return "", errors.New("webdav: client is not initialized")
 	}
-	if href == "" {
-		href = "/"
+	raw := strings.TrimSpace(href)
+	var resource string
+	if raw != "" {
+		if u, err := url.Parse(raw); err == nil && u.IsAbs() {
+			if !sameOrigin(c.base, u) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+				return "", errors.New("webdav: resource href points outside the configured endpoint")
+			}
+			resource = u.Path
+		} else if strings.HasPrefix(raw, "//") {
+			return "", errors.New("webdav: protocol-relative resource href is not allowed")
+		} else {
+			resource = raw
+		}
 	}
-	if !strings.HasPrefix(href, "/") {
-		href = "/" + href
+	resource, err := normalizeDAVPath(resource)
+	if err != nil {
+		return "", err
 	}
-	return c.Endpoint + href
+	resource = c.withEndpointPath(resource)
+	target := *c.base
+	target.Path = resource
+	encoded, err := escapeDAVPath(resource)
+	if err != nil {
+		return "", err
+	}
+	target.RawPath = encoded
+	target.RawQuery = ""
+	target.Fragment = ""
+	return target.String(), nil
+}
+
+func sameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) && a.Port() == b.Port()
+}
+
+func normalizeDAVPath(raw string) (string, error) {
+	if raw == "" || raw == "root" || raw == "/" {
+		return "/", nil
+	}
+	if strings.IndexByte(raw, 0) >= 0 || strings.ContainsRune(raw, '\\') {
+		return "", errors.New("webdav: invalid path")
+	}
+	if !strings.HasPrefix(raw, "/") {
+		raw = "/" + raw
+	}
+	trailing := strings.HasSuffix(raw, "/")
+	parts := make([]string, 0, strings.Count(raw, "/"))
+	for _, part := range strings.Split(raw, "/") {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			return "", errors.New("webdav: path traversal is not allowed")
+		default:
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "/", nil
+	}
+	clean := "/" + strings.Join(parts, "/")
+	if trailing {
+		clean += "/"
+	}
+	return clean, nil
+}
+
+// escapeDAVPath encodes each path segment independently. Encoding the whole
+// path would turn separators into data; leaving it unescaped makes names such
+// as "#" and "?" become URL fragments or queries.
+func escapeDAVPath(raw string) (string, error) {
+	normalized, err := normalizeDAVPath(raw)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "/" {
+		return "/", nil
+	}
+	trailing := strings.HasSuffix(normalized, "/")
+	parts := strings.Split(strings.Trim(normalized, "/"), "/")
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	encoded := "/" + strings.Join(parts, "/")
+	if trailing {
+		encoded += "/"
+	}
+	return encoded, nil
+}
+
+func (c *Client) endpointPath() string {
+	if c == nil || c.base == nil || c.base.Path == "" {
+		if c == nil || c.rootPath == "" || c.rootPath == "/" {
+			return "/"
+		}
+		return strings.TrimRight(c.rootPath, "/")
+	}
+	base := strings.TrimRight(c.base.Path, "/")
+	if c.rootPath == "" || c.rootPath == "/" {
+		return base
+	}
+	return base + "/" + strings.Trim(c.rootPath, "/")
+}
+
+func (c *Client) withEndpointPath(resource string) string {
+	base := c.endpointPath()
+	if base == "/" {
+		return strings.TrimRight(resource, "/")
+	}
+	resource = strings.TrimRight(resource, "/")
+	if resource == "" {
+		return base
+	}
+	if resource == base || strings.HasPrefix(resource, base+"/") {
+		return resource
+	}
+	return base + resource
+}
+
+// logicalPath converts a server href to the provider's endpoint-relative id.
+// WebDAV servers may return either an absolute URL or a path including the
+// configured collection prefix.
+func (c *Client) logicalPath(href string) (string, error) {
+	raw := strings.TrimSpace(href)
+	if raw == "" {
+		return "/", nil
+	}
+	if u, err := url.Parse(raw); err == nil && u.IsAbs() {
+		if !sameOrigin(c.base, u) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return "", errors.New("webdav: resource href points outside the configured endpoint")
+		}
+		raw = u.EscapedPath()
+	} else if strings.HasPrefix(raw, "//") {
+		return "", errors.New("webdav: protocol-relative resource href is not allowed")
+	}
+	var err error
+	raw, err = unescapeDAVPath(raw)
+	if err != nil {
+		return "", fmt.Errorf("webdav: invalid resource href: %w", err)
+	}
+	p, err := normalizeDAVPath(raw)
+	if err != nil {
+		return "", err
+	}
+	base := c.endpointPath()
+	if base != "/" {
+		if p == base {
+			return "/", nil
+		}
+		if strings.HasPrefix(p, base+"/") {
+			p = strings.TrimPrefix(p, base)
+		}
+	}
+	if p == "" {
+		return "/", nil
+	}
+	return p, nil
+}
+
+func unescapeDAVPath(raw string) (string, error) {
+	parts := strings.Split(raw, "/")
+	for i, part := range parts {
+		decoded, err := url.PathUnescape(part)
+		if err != nil {
+			return "", err
+		}
+		parts[i] = decoded
+	}
+	return strings.Join(parts, "/"), nil
 }
 
 // Entry is a normalized directory listing entry.
@@ -193,20 +392,16 @@ func (c *Client) List(ctx context.Context, href string) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("webdav: PROPFIND decode: %w", err)
 	}
-	base := href
-	if !strings.HasPrefix(base, "/") {
-		base = "/" + base
+	base, err := c.logicalPath(href)
+	if err != nil {
+		return nil, err
 	}
 	base = strings.TrimRight(base, "/") + "/"
 	var out []Entry
 	for _, r := range entries {
-		p := r.Href
-		if u, err := url.Parse(p); err == nil && u.Path != "" {
-			p = u.Path
-		}
-		decoded, err := url.PathUnescape(p)
-		if err == nil {
-			p = decoded
+		p, err := c.logicalPath(r.Href)
+		if err != nil {
+			return nil, err
 		}
 		if strings.TrimRight(p, "/") == strings.TrimRight(base, "/") {
 			continue
@@ -258,13 +453,17 @@ func (c *Client) Stat(ctx context.Context, href string) (*Entry, error) {
 		return nil, errors.New("webdav: empty PROPFIND response")
 	}
 	r := entries[0]
-	p := r.Href
-	if u, err := url.Parse(p); err == nil && u.Path != "" {
-		p = u.Path
+	p, err := c.logicalPath(r.Href)
+	if err != nil {
+		return nil, err
 	}
 	isDir := r.davBool("resourcetype", "collection")
 	size, _ := strconv.ParseInt(strings.TrimSpace(r.davValue("getcontentlength")), 10, 64)
-	return &Entry{Name: path.Base(strings.TrimRight(p, "/")), Path: p, IsDir: isDir, Size: size}, nil
+	var mod time.Time
+	if s := strings.TrimSpace(r.davValue("getlastmodified")); s != "" {
+		mod, _ = time.Parse(http.TimeFormat, s)
+	}
+	return &Entry{Name: path.Base(strings.TrimRight(p, "/")), Path: p, IsDir: isDir, Size: size, Modified: mod}, nil
 }
 
 // Mkcol creates a directory.
@@ -303,8 +502,12 @@ func (c *Client) Delete(ctx context.Context, href string) error {
 
 // Move renames/moves a resource.
 func (c *Client) Move(ctx context.Context, from, to string) error {
+	destination, err := c.resolve(to)
+	if err != nil {
+		return err
+	}
 	req, err := c.newReq(ctx, "MOVE", from, nil, map[string]string{
-		"Destination": c.resolve(to),
+		"Destination": destination,
 		"Overwrite":   "T",
 	})
 	if err != nil {
@@ -323,8 +526,12 @@ func (c *Client) Move(ctx context.Context, from, to string) error {
 
 // Copy copies a resource to a destination.
 func (c *Client) Copy(ctx context.Context, from, to string) error {
+	destination, err := c.resolve(to)
+	if err != nil {
+		return err
+	}
 	req, err := c.newReq(ctx, "COPY", from, nil, map[string]string{
-		"Destination": c.resolve(to),
+		"Destination": destination,
 		"Overwrite":   "T",
 	})
 	if err != nil {
@@ -349,7 +556,7 @@ func (c *Client) Put(ctx context.Context, href string, body io.Reader, size int6
 	if err != nil {
 		return err
 	}
-	if size > 0 {
+	if size >= 0 {
 		req.ContentLength = size
 	}
 	resp, err := c.HTTP.Do(req)
@@ -364,7 +571,7 @@ func (c *Client) Put(ctx context.Context, href string, body io.Reader, size int6
 }
 
 // DownloadURL returns the direct URL for a resource.
-func (c *Client) DownloadURL(href string) string { return c.resolve(href) }
+func (c *Client) DownloadURL(href string) (string, error) { return c.resolve(href) }
 
 const propfindAllBody = `<?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>`
