@@ -3,11 +3,15 @@
 package s3
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
@@ -23,6 +28,13 @@ import (
 )
 
 const providerID = model.ProviderS3
+
+const (
+	s3MultipartThreshold = 64 * 1024 * 1024
+	s3MultipartPartSize  = 16 * 1024 * 1024
+	s3CopyCutoff         = 5*1024*1024*1024 - 64*1024*1024
+	s3CopyPartSize       = 64 * 1024 * 1024
+)
 
 func init() {
 	drive.Register(drive.Registration{
@@ -50,6 +62,21 @@ func (d *Driver) Meta() drive.Meta                 { return drive.GetMeta(provid
 func (d *Driver) Capabilities() drive.Capabilities { return drive.RegistryCaps(providerID) }
 func (d *Driver) RootID() string                   { return "/" }
 
+func (d *Driver) ValidateConnection(ctx context.Context, cfg *model.ConnConfig) error {
+	if cfg == nil {
+		return errors.New("s3: 连接配置为空")
+	}
+	c, err := connOf(drive.Context{Token: &model.TokenInfo{Conn: cfg}})
+	if err != nil {
+		return err
+	}
+	_, err = c.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(c.bucket)})
+	if err != nil {
+		return fmt.Errorf("s3: bucket 校验失败: %w", err)
+	}
+	return nil
+}
+
 type conn struct {
 	client *s3.Client
 	bucket string
@@ -69,15 +96,22 @@ func httpClientForS3() *http.Client {
 
 func connOf(c drive.Context) (*conn, error) {
 	cfg := c.Token
-	if cfg == nil || cfg.Conn == nil || cfg.Conn.Endpoint == "" {
+	if cfg == nil || cfg.Conn == nil {
 		return nil, errors.New("s3: 连接不存在，请重新连接")
 	}
 	cc := cfg.Conn
-	endpoint := cc.Endpoint
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		endpoint = "https://" + endpoint
+	endpoint, err := normalizeEndpoint(cc.Endpoint)
+	if err != nil {
+		return nil, err
 	}
-	bucket := cc.Bucket
+	bucket := strings.TrimSpace(cc.Bucket)
+	if err := validateBucket(bucket); err != nil {
+		return nil, err
+	}
+	prefix, err := normalizePrefix(cc.BasePath)
+	if err != nil {
+		return nil, err
+	}
 	if bucket == "" {
 		return nil, errors.New("s3: 缺少 bucket")
 	}
@@ -88,14 +122,19 @@ func connOf(c drive.Context) (*conn, error) {
 	if cc.ForcePathStyle != nil {
 		usePathStyle = *cc.ForcePathStyle
 	}
-	client := s3.New(s3.Options{
+	options := s3.Options{
 		Region:       firstNonEmpty(cc.Region, "us-east-1"),
-		BaseEndpoint: aws.String(endpoint),
 		Credentials:  credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, cc.SessionToken),
 		UsePathStyle: usePathStyle,
 		HTTPClient:   httpClientForS3(),
-	})
-	return &conn{client: client, bucket: bucket, prefix: normalizePrefix(cc.BasePath)}, nil
+	}
+	// An empty endpoint means the AWS SDK's regional endpoint. Custom S3
+	// compatible services still provide their endpoint explicitly.
+	if endpoint != "" {
+		options.BaseEndpoint = aws.String(endpoint)
+	}
+	client := s3.New(options)
+	return &conn{client: client, bucket: bucket, prefix: prefix}, nil
 }
 
 func (c *conn) keyOf(id string) string {
@@ -117,12 +156,71 @@ func pathOf(id string) string {
 	return id
 }
 
-func normalizePrefix(p string) string {
+func normalizePrefix(p string) (string, error) {
 	p = strings.Trim(strings.TrimSpace(p), "/")
 	if p == "" {
-		return ""
+		return "", nil
 	}
-	return p + "/"
+	if strings.ContainsRune(p, '\\') || strings.IndexFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return "", errors.New("s3: base path 含有非法字符")
+	}
+	parts := make([]string, 0, strings.Count(p, "/")+1)
+	for _, part := range strings.Split(p, "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return "", errors.New("s3: base path 不允许路径穿越")
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return strings.Join(parts, "/") + "/", nil
+}
+
+func normalizeEndpoint(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", errors.New("s3: endpoint 必须是有效的主机地址")
+	}
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
+		return "", errors.New("s3: endpoint scheme 必须是 http 或 https")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("s3: endpoint 不能包含账号、查询参数或片段")
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func validateBucket(bucket string) error {
+	if bucket == "" {
+		return errors.New("s3: 缺少 bucket")
+	}
+	if strings.ContainsAny(bucket, "/\\") || strings.IndexFunc(bucket, func(r rune) bool { return r < 0x20 || r == 0x7f || r == ' ' }) >= 0 {
+		return errors.New("s3: bucket 名称无效")
+	}
+	return nil
+}
+
+func validateName(name string) error {
+	if strings.TrimSpace(name) == "" || name == "." || name == ".." {
+		return errors.New("s3: 名称为空或无效")
+	}
+	if strings.ContainsAny(name, "/\\") || strings.IndexFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return errors.New("s3: 名称不能包含路径分隔符或控制字符")
+	}
+	return nil
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -145,7 +243,19 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 	}
 	var out []model.File
 	var token *string
+	seenTokens := map[string]struct{}{}
 	for {
+		requestToken := ""
+		if token != nil {
+			requestToken = aws.ToString(token)
+			if requestToken == "" {
+				return nil, errors.New("s3: 列表分页返回空游标")
+			}
+			if _, exists := seenTokens[requestToken]; exists {
+				return nil, errors.New("s3: 列表分页游标重复")
+			}
+			seenTokens[requestToken] = struct{}{}
+		}
 		resp, err := cc.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket:            aws.String(cc.bucket),
 			Prefix:            aws.String(prefix),
@@ -156,12 +266,25 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 			return nil, fmt.Errorf("s3: list: %w", err)
 		}
 		for _, p := range resp.CommonPrefixes {
+			if p.Prefix == nil {
+				continue
+			}
 			key := strings.TrimSuffix(*p.Prefix, "/")
+			if key == "" {
+				continue
+			}
 			name := baseOf(key)
 			out = append(out, driveutil.NewFile(c.DriveID, cc.idOf(key), dirID, name, true, 0, 0))
 		}
 		for _, o := range resp.Contents {
+			if o.Key == nil {
+				continue
+			}
 			key := *o.Key
+			// A directory marker is an implementation detail, not a child file.
+			if key == strings.TrimSuffix(prefix, "/") || key == prefix || strings.HasSuffix(key, "/") {
+				continue
+			}
 			name := baseOf(key)
 			size := int64(0)
 			if o.Size != nil {
@@ -176,7 +299,11 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 		if resp.IsTruncated == nil || !*resp.IsTruncated {
 			break
 		}
-		token = resp.NextContinuationToken
+		nextToken := aws.ToString(resp.NextContinuationToken)
+		if nextToken == "" {
+			return nil, errors.New("s3: 列表分页缺少下一页游标")
+		}
+		token = aws.String(nextToken)
 	}
 	return out, nil
 }
@@ -193,13 +320,17 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 	key := cc.keyOf(p)
 	head, err := cc.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(cc.bucket), Key: aws.String(key)})
 	if err != nil {
-		var noKey *types.NoSuchKey
-		if errors.As(err, &noKey) {
-			return nil, drive.ErrNotFound
+		if !isNotFoundError(err) {
+			return nil, fmt.Errorf("s3: 获取对象信息失败: %w", err)
 		}
 		// maybe it's a folder prefix
-		ls, lerr := cc.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(cc.bucket), Prefix: aws.String(key + "/"), MaxKeys: aws.Int32(1)})
-		if lerr == nil && len(ls.Contents) > 0 {
+		ls, lerr := cc.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(cc.bucket), Prefix: aws.String(key + "/"), MaxKeys: aws.Int32(1),
+		})
+		if lerr != nil {
+			return nil, fmt.Errorf("s3: 检查目录失败: %w", lerr)
+		}
+		if len(ls.Contents) > 0 || len(ls.CommonPrefixes) > 0 {
 			return driveutil.NewFile(c.DriveID, cc.idOf(key), parentOf(p), baseOf(key), true, 0, 0), nil
 		}
 		return nil, drive.ErrNotFound
@@ -208,7 +339,11 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 	if head.ContentLength != nil {
 		size = *head.ContentLength
 	}
-	return driveutil.NewFile(c.DriveID, cc.idOf(key), parentOf(p), baseOf(key), false, size, head.LastModified.Unix()), nil
+	var modified int64
+	if head.LastModified != nil {
+		modified = head.LastModified.Unix()
+	}
+	return driveutil.NewFile(c.DriveID, cc.idOf(key), parentOf(p), baseOf(key), false, size, modified), nil
 }
 
 func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*model.File, error) {
@@ -233,7 +368,10 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if err != nil {
 		return nil, err
 	}
-	f := info.(model.File)
+	f, ok := info.(model.File)
+	if !ok {
+		return nil, drive.ErrNotFound
+	}
 	if f.IsDir {
 		return nil, errors.New("文件夹不能直接下载")
 	}
@@ -253,7 +391,7 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	return &model.DownloadURL{
 		DriveID:      c.DriveID,
 		FileID:       fileID,
-		ExpireTime:   time.Now().Add(time.Duration(expireSec) * time.Second).Unix(),
+		ExpireTime:   time.Now().Add(time.Duration(expireSec) * time.Second).UnixMilli(),
 		URL:          req.URL,
 		Size:         f.Size,
 		DownloadMode: "redirect",
@@ -277,6 +415,9 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 }
 
 func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name string) (*drive.MkdirResult, error) {
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	cc, err := connOf(c)
 	if err != nil {
 		return nil, err
@@ -290,6 +431,9 @@ func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name stri
 }
 
 func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name string) (*drive.RenameResult, error) {
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	cc, err := connOf(c)
 	if err != nil {
 		return nil, err
@@ -299,12 +443,17 @@ func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name strin
 	if err != nil {
 		return nil, err
 	}
-	f := info.(model.File)
+	f, ok := info.(model.File)
+	if !ok {
+		return nil, drive.ErrNotFound
+	}
 	to := driveutil.JoinPath(parentOf(p), name)
 	if err := d.copyObj(ctx, cc, cc.keyOf(p), cc.keyOf(to)); err != nil {
 		return nil, err
 	}
-	_ = cc.deleteObj(ctx, cc.keyOf(p))
+	if err := cc.deleteRecursive(ctx, cc.keyOf(p)); err != nil {
+		return nil, fmt.Errorf("s3: 重命名后删除源对象失败: %w", err)
+	}
 	return &drive.RenameResult{FileID: cc.idOf(strings.TrimPrefix(cc.keyOf(to), cc.prefix)), ParentFileID: parentOf(to), Name: name, IsDir: f.IsDir}, nil
 }
 
@@ -318,12 +467,15 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
 		if err := cc.deleteRecursive(ctx, cc.keyOf(ref.ID)); err == nil {
 			ok = append(ok, ref.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (c *conn) deleteObj(ctx context.Context, key string) error {
@@ -339,7 +491,19 @@ func (c *conn) deleteObj(ctx context.Context, key string) error {
 func (c *conn) listAllUnder(ctx context.Context, prefix string) ([]string, error) {
 	var out []string
 	var token *string
+	seenTokens := map[string]struct{}{}
 	for {
+		requestToken := ""
+		if token != nil {
+			requestToken = aws.ToString(token)
+			if requestToken == "" {
+				return nil, errors.New("s3: 对象分页返回空游标")
+			}
+			if _, exists := seenTokens[requestToken]; exists {
+				return nil, errors.New("s3: 对象分页游标重复")
+			}
+			seenTokens[requestToken] = struct{}{}
+		}
 		resp, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket:            aws.String(c.bucket),
 			Prefix:            aws.String(prefix),
@@ -349,12 +513,18 @@ func (c *conn) listAllUnder(ctx context.Context, prefix string) ([]string, error
 			return nil, err
 		}
 		for _, obj := range resp.Contents {
-			out = append(out, *obj.Key)
+			if obj.Key != nil {
+				out = append(out, *obj.Key)
+			}
 		}
 		if resp.IsTruncated == nil || !*resp.IsTruncated {
 			break
 		}
-		token = resp.NextContinuationToken
+		nextToken := aws.ToString(resp.NextContinuationToken)
+		if nextToken == "" {
+			return nil, errors.New("s3: 对象分页缺少下一页游标")
+		}
+		token = aws.String(nextToken)
 	}
 	return out, nil
 }
@@ -371,7 +541,12 @@ func (c *conn) deleteRecursive(ctx context.Context, key string) error {
 	keys := []string{prefix}
 	under, err := c.listAllUnder(ctx, prefix+"/")
 	if err != nil {
-		// fall back to single delete
+		// Listing may fail for a plain object on a restricted-compatible
+		// service; only fall back when HEAD confirms that exact object exists.
+		exists, headErr := c.objectExists(ctx, prefix)
+		if headErr != nil || !exists {
+			return err
+		}
 		return c.deleteObj(ctx, key)
 	}
 	keys = append(keys, under...)
@@ -385,11 +560,15 @@ func (c *conn) deleteRecursive(ctx context.Context, key string) error {
 		for _, k := range keys[i:end] {
 			objs = append(objs, types.ObjectIdentifier{Key: aws.String(k)})
 		}
-		if _, err := c.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		out, err := c.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 			Bucket: aws.String(c.bucket),
 			Delete: &types.Delete{Objects: objs, Quiet: aws.Bool(true)},
-		}); err != nil {
+		})
+		if err != nil {
 			return err
+		}
+		if len(out.Errors) > 0 {
+			return fmt.Errorf("s3: 批量删除失败: %s", deleteErrors(out.Errors))
 		}
 	}
 	return nil
@@ -398,17 +577,36 @@ func (c *conn) deleteRecursive(ctx context.Context, key string) error {
 // copyRecursive copies a single object (CopyObject) or, when the source is a
 // directory prefix, every object under it to the destination prefix.
 func (c *conn) copyRecursive(ctx context.Context, fromKey, toKey string) error {
-	// try a single CopyObject first; if the key is a prefix it lists and copies
-	// each child, rewriting the prefix.
+	fromKey = strings.TrimSuffix(strings.TrimPrefix(fromKey, "/"), "/")
+	toKey = strings.TrimSuffix(strings.TrimPrefix(toKey, "/"), "/")
+	if fromKey == "" || toKey == "" {
+		return errors.New("s3: 不允许复制根目录")
+	}
+	if fromKey == toKey || strings.HasPrefix(toKey, fromKey+"/") {
+		return errors.New("s3: 不能复制到自身或子目录")
+	}
+	marker, err := c.objectExists(ctx, fromKey)
+	if err != nil {
+		return err
+	}
 	under, err := c.listAllUnder(ctx, fromKey+"/")
 	if err != nil {
+		if !marker {
+			return err
+		}
 		return c.copyOne(ctx, fromKey, toKey)
 	}
-	if len(under) == 0 {
-		// not a directory: copy the single object
+	if len(under) == 0 && marker {
 		return c.copyOne(ctx, fromKey, toKey)
 	}
-	// copy the marker object itself (if any) then each child
+	if !marker && len(under) == 0 {
+		return errors.New("s3: 源对象不存在")
+	}
+	if marker {
+		if err := c.copyOne(ctx, fromKey, toKey); err != nil {
+			return err
+		}
+	}
 	for _, k := range under {
 		dst := toKey + "/" + strings.TrimPrefix(k, fromKey+"/")
 		if err := c.copyOne(ctx, k, dst); err != nil {
@@ -422,12 +620,104 @@ func (c *conn) copyOne(ctx context.Context, from, to string) error {
 	if from == "" || from == "/" {
 		return nil
 	}
-	_, err := c.client.CopyObject(ctx, &s3.CopyObjectInput{
+	head, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(from),
+	})
+	if err != nil {
+		if isNotFoundError(err) {
+			return drive.ErrNotFound
+		}
+		return err
+	}
+	if head.ContentLength != nil && *head.ContentLength > s3CopyCutoff {
+		return c.copyMultipart(ctx, from, to, *head.ContentLength)
+	}
+	_, err = c.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(c.bucket),
-		CopySource: aws.String(c.bucket + "/" + from),
+		CopySource: aws.String(copySource(c.bucket, from)),
 		Key:        aws.String(to),
 	})
 	return err
+}
+
+func (c *conn) copyMultipart(ctx context.Context, from, to string, size int64) (err error) {
+	created, err := c.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(to),
+	})
+	if err != nil {
+		return err
+	}
+	if created.UploadId == nil || *created.UploadId == "" {
+		return errors.New("multipart copy: 服务端未返回 upload id")
+	}
+	uploadID := *created.UploadId
+	completed := false
+	defer func() {
+		if !completed {
+			_, _ = c.client.AbortMultipartUpload(context.Background(), &s3.AbortMultipartUploadInput{
+				Bucket: aws.String(c.bucket), Key: aws.String(to), UploadId: aws.String(uploadID),
+			})
+		}
+	}()
+
+	partSize := int64(s3CopyPartSize)
+	if size > partSize*10000 {
+		partSize = (size + 9999) / 10000
+		const minPartSize = int64(5 * 1024 * 1024)
+		partSize = ((partSize + minPartSize - 1) / minPartSize) * minPartSize
+	}
+	parts := make([]types.CompletedPart, 0, int((size+partSize-1)/partSize))
+	for partNumber, offset := int32(1), int64(0); offset < size; partNumber, offset = partNumber+1, offset+partSize {
+		end := offset + partSize
+		if end > size {
+			end = size
+		}
+		copied, copyErr := c.client.UploadPartCopy(ctx, &s3.UploadPartCopyInput{
+			Bucket:          aws.String(c.bucket),
+			Key:             aws.String(to),
+			UploadId:        aws.String(uploadID),
+			PartNumber:      aws.Int32(partNumber),
+			CopySource:      aws.String(copySource(c.bucket, from)),
+			CopySourceRange: aws.String(fmt.Sprintf("bytes=%d-%d", offset, end-1)),
+		})
+		if copyErr != nil {
+			return copyErr
+		}
+		if copied.CopyPartResult == nil || copied.CopyPartResult.ETag == nil || *copied.CopyPartResult.ETag == "" {
+			return fmt.Errorf("multipart copy: part %d 未返回 etag", partNumber)
+		}
+		parts = append(parts, types.CompletedPart{
+			PartNumber: aws.Int32(partNumber), ETag: copied.CopyPartResult.ETag,
+		})
+	}
+	_, err = c.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(to), UploadId: aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
+	})
+	if err != nil {
+		return err
+	}
+	completed = true
+	return nil
+}
+
+func copySource(bucket, key string) string {
+	return (&url.URL{Path: "/" + bucket + "/" + strings.TrimPrefix(key, "/")}).EscapedPath()
+}
+
+func deleteErrors(items []types.Error) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		code, msg := "", ""
+		if item.Code != nil {
+			code = *item.Code
+		}
+		if item.Message != nil {
+			msg = *item.Message
+		}
+		parts = append(parts, strings.TrimSpace(code+" "+msg))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // objectExists returns whether an object exists at key. A 404 (or NoSuchKey)
@@ -437,15 +727,49 @@ func (c *conn) objectExists(ctx context.Context, key string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	var noKey *types.NoSuchKey
-	if errors.As(err, &noKey) {
-		return false, nil
-	}
-	var re *awshttp.ResponseError
-	if errors.As(err, &re) && re.HTTPStatusCode() == 404 {
+	if isNotFoundError(err) {
 		return false, nil
 	}
 	return false, err
+}
+
+// objectState distinguishes a plain object from a virtual directory. A
+// directory may have no marker object, so HEAD alone is not sufficient for
+// upload conflict handling.
+func (c *conn) objectState(ctx context.Context, key string) (exists, isDir bool, err error) {
+	if _, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(key),
+	}); err == nil {
+		return true, false, nil
+	} else if !isNotFoundError(err) {
+		return false, false, err
+	}
+
+	listing, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(c.bucket), Prefix: aws.String(key + "/"), MaxKeys: aws.Int32(1),
+	})
+	if err != nil {
+		return false, false, err
+	}
+	found := len(listing.Contents) > 0 || len(listing.CommonPrefixes) > 0
+	return found, found, nil
+}
+
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch strings.ToLower(apiErr.ErrorCode()) {
+		case "nosuchkey", "notfound", "nosuchobject":
+			return true
+		case "nosuchbucket":
+			return false
+		}
+	}
+	var responseErr *awshttp.ResponseError
+	return errors.As(err, &responseErr) && responseErr.HTTPStatusCode() == http.StatusNotFound
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
@@ -459,16 +783,21 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 	}
 	targetParent := pathOf(toParentID)
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
 		base := baseOf(ref.ID)
 		to := driveutil.JoinPath(targetParent, base)
 		if err := d.copyObj(ctx, cc, cc.keyOf(ref.ID), cc.keyOf(to)); err != nil {
+			failed = append(failed, fmt.Errorf("%s: 复制阶段失败: %w", ref.ID, err))
 			continue
 		}
-		_ = cc.deleteObj(ctx, cc.keyOf(ref.ID))
+		if err := cc.deleteRecursive(ctx, cc.keyOf(ref.ID)); err != nil {
+			failed = append(failed, fmt.Errorf("%s: 删除源对象失败: %w", ref.ID, err))
+			continue
+		}
 		ok = append(ok, ref.ID)
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
@@ -478,41 +807,74 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 	}
 	targetParent := pathOf(toParentID)
 	var ok []string
+	var failed []error
 	for _, ref := range refs {
 		base := baseOf(ref.ID)
 		to := driveutil.JoinPath(targetParent, base)
 		if err := d.copyObj(ctx, cc, cc.keyOf(ref.ID), cc.keyOf(to)); err == nil {
 			ok = append(ok, ref.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", ref.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) copyObj(ctx context.Context, cc *conn, from, to string) error {
 	return cc.copyRecursive(ctx, from, to)
 }
 
-// UploadOneFile performs a direct upload (single PUT, no multipart for simplicity;
-// large files could use multipart later). It honors ui.Info.ConflictPolicy when
-// the target object already exists: refuse returns an error, rename uploads to
-// a generated non-conflicting key, overwrite (the default) replaces it.
+// UploadOneFile performs a direct upload. Small files use PUT; larger files
+// use multipart upload with cleanup on failure. It honors ui.Info.ConflictPolicy
+// when the target object already exists.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || ui.Info.LocalFilePath == "" {
+		return errors.New("s3: 上传文件路径为空")
+	}
+	if err := validateName(ui.Info.Name); err != nil {
+		return err
+	}
 	cc, err := connOf(c)
 	if err != nil {
 		return err
 	}
 	key := cc.keyOf(driveutil.JoinPath(pathOf(ui.Info.ParentFileID), ui.Info.Name))
 
-	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
-	case driveutil.ConflictRefuse:
-		if exists, e := cc.objectExists(ctx, key); e == nil && exists {
+	policy := driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy)
+	exists, isDir, err := cc.objectState(ctx, key)
+	if err != nil {
+		return fmt.Errorf("s3: 检查目标文件失败: %w", err)
+	}
+	if exists {
+		switch policy {
+		case driveutil.ConflictRefuse:
 			return errors.New("s3: 目标文件已存在")
-		}
-	case driveutil.ConflictRename:
-		if exists, e := cc.objectExists(ctx, key); e == nil && exists {
-			newName := driveutil.GenerateConflictName(ui.Info.Name)
-			ui.Info.Name = newName
-			key = cc.keyOf(driveutil.JoinPath(pathOf(ui.Info.ParentFileID), newName))
+		case driveutil.ConflictSkip:
+			return nil
+		case driveutil.ConflictRename:
+			for index := 1; index <= 9999; index++ {
+				newName := s3ConflictName(ui.Info.Name, index)
+				candidate := cc.keyOf(driveutil.JoinPath(pathOf(ui.Info.ParentFileID), newName))
+				candidateExists, _, candidateErr := cc.objectState(ctx, candidate)
+				if candidateErr != nil {
+					return fmt.Errorf("s3: 检查重命名目标失败: %w", candidateErr)
+				}
+				if !candidateExists {
+					ui.Info.Name = newName
+					key = candidate
+					exists = false
+					break
+				}
+				if index == 9999 {
+					return errors.New("s3: 无法生成不重复的文件名")
+				}
+			}
+		case driveutil.ConflictOverwrite:
+			if isDir {
+				if err := cc.deleteRecursive(ctx, key); err != nil {
+					return fmt.Errorf("s3: 覆盖目录失败: %w", err)
+				}
+			}
 		}
 	}
 
@@ -521,22 +883,129 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	defer f.Close()
-	pr := driveutil.NewProgressReader(f, ui.Info.Size, func(read int64) {
-		ui.Upload.DownSize = read
-		if ui.Info.Size > 0 {
-			ui.Upload.DownProcess = int(read * 100 / ui.Info.Size)
-		}
-	})
-	_, err = cc.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(cc.bucket),
-		Key:           aws.String(key),
-		Body:          pr,
-		ContentLength: aws.Int64(ui.Info.Size),
-	})
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	ui.Info.Size = size
+	if size < s3MultipartThreshold {
+		pr := driveutil.NewProgressReader(f, size, func(read int64) {
+			updateUploadProgress(ui, read)
+		})
+		_, err = cc.client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:        aws.String(cc.bucket),
+			Key:           aws.String(key),
+			Body:          pr,
+			ContentLength: aws.Int64(size),
+		})
+	} else {
+		err = uploadMultipart(ctx, cc, key, f, ui)
+	}
 	if err != nil {
 		return fmt.Errorf("s3: upload: %w", err)
 	}
 	return nil
+}
+
+func s3ConflictName(name string, index int) string {
+	ext := path.Ext(name)
+	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), index, ext)
+}
+
+func updateUploadProgress(ui *model.UploadingUI, read int64) {
+	ui.Upload.DownSize = read
+	if ui.Info.Size > 0 {
+		ui.Upload.DownProcess = int(read * 100 / ui.Info.Size)
+	}
+}
+
+func uploadMultipart(ctx context.Context, cc *conn, key string, f *os.File, ui *model.UploadingUI) (err error) {
+	created, err := cc.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(cc.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return err
+	}
+	if created.UploadId == nil || *created.UploadId == "" {
+		return errors.New("multipart upload: 服务端未返回 upload id")
+	}
+	uploadID := *created.UploadId
+	completed := false
+	defer func() {
+		if !completed {
+			_, _ = cc.client.AbortMultipartUpload(context.Background(), &s3.AbortMultipartUploadInput{
+				Bucket: aws.String(cc.bucket), Key: aws.String(key), UploadId: aws.String(uploadID),
+			})
+		}
+	}()
+
+	partSize := multipartPartSize(ui.Info.Size)
+	capacity := int((ui.Info.Size + partSize - 1) / partSize)
+	if capacity < 1 {
+		capacity = 1
+	}
+	parts := make([]types.CompletedPart, 0, capacity)
+	buf := make([]byte, int(partSize))
+	var total int64
+	var partNumber int32 = 1
+	for {
+		n, readErr := io.ReadFull(f, buf)
+		if readErr == io.EOF && n == 0 {
+			break
+		}
+		if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+			return readErr
+		}
+		if n == 0 {
+			break
+		}
+		part := append([]byte(nil), buf[:n]...)
+		out, err := cc.client.UploadPart(ctx, &s3.UploadPartInput{
+			Bucket:        aws.String(cc.bucket),
+			Key:           aws.String(key),
+			UploadId:      aws.String(uploadID),
+			PartNumber:    aws.Int32(partNumber),
+			Body:          bytes.NewReader(part),
+			ContentLength: aws.Int64(int64(n)),
+		})
+		if err != nil {
+			return err
+		}
+		if out.ETag == nil || *out.ETag == "" {
+			return fmt.Errorf("multipart upload: part %d 未返回 etag", partNumber)
+		}
+		parts = append(parts, types.CompletedPart{PartNumber: aws.Int32(partNumber), ETag: out.ETag})
+		total += int64(n)
+		updateUploadProgress(ui, total)
+		partNumber++
+		if readErr == io.ErrUnexpectedEOF || readErr == io.EOF {
+			break
+		}
+	}
+	_, err = cc.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:          aws.String(cc.bucket),
+		Key:             aws.String(key),
+		UploadId:        aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
+	})
+	if err != nil {
+		return err
+	}
+	completed = true
+	return nil
+}
+
+func multipartPartSize(size int64) int64 {
+	partSize := int64(s3MultipartPartSize)
+	const maxParts = int64(10000)
+	if size > partSize*maxParts {
+		partSize = (size + maxParts - 1) / maxParts
+		const minPart = int64(5 * 1024 * 1024)
+		partSize = ((partSize + minPart - 1) / minPart) * minPart
+	}
+	return partSize
 }
 
 func baseOf(key string) string {
