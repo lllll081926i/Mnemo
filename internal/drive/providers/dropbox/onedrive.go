@@ -111,7 +111,6 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 		URL:          lnk,
 		Size:         size,
 		DownloadMode: "redirect",
-		Headers:      map[string]string{"Authorization": "Bearer " + c.Token.AccessToken},
 	}, nil
 }
 
@@ -280,7 +279,12 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	size := info.Size()
 	ui.Info.Size = size
 	if size <= uploadSingleLimit {
-		return cl.UploadSmall(ctx, target, f, size, policy)
+		fileID, err := cl.UploadSmall(ctx, target, f, size, policy)
+		if err != nil {
+			return err
+		}
+		ui.Upload.FileID = fileID
+		return nil
 	}
 	return cl.UploadSession(ctx, c, f, target, size, ui, policy)
 }

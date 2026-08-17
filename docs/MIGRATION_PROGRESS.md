@@ -82,8 +82,8 @@
 | pan139 | ~95% | (已修复) |
 | lanzou | ~98% | 无（源码级移植） |
 | ilanzou | ~100% | (已修复；登录续期、下载/视频预览、七牛上传与跨盘 MD5 秒传已闭环) |
-| onedrive | ~90% | (已修复；rclone OAuth 凭据、账号选择与刷新链路已覆盖 e2e) |
-| dropbox | ~90% | (已修复；rclone OAuth 凭据、刷新保留与账号隔离已覆盖 e2e) |
+| onedrive | ~95% | (已修复；rclone OAuth 凭据、账号选择、刷新、上传响应和预签名预览链路已覆盖定向回归) |
+| dropbox | ~95% | (已修复；rclone OAuth 凭据、刷新保留、账号隔离、分享分页、上传 ID 校验和预签名预览链路已覆盖定向回归) |
 | yike | ~90% | (已修复；按需求不参与跨盘秒传) |
 | guangya | ~98% | 无 |
 | webdav | ~95% | 递归目录上传、路径段编码、自嵌套移动/复制保护已完成；分享/搜索为设计不支持 |
@@ -154,7 +154,7 @@
 
 ### 🟡 P1（影响健壮性）
 
-14. ✅ **上传断点续传持久化**：aliopen/pan123/pan189/onedrive 已实现 session 存储
+14. ✅ **上传断点续传持久化**：aliopen/pan123/pan189/onedrive/dropbox 已实现 session 存储与身份隔离
 15. ✅ **能力声明与实现不符**：pikpak/pan123 的 trashPurge/trashClear/playbackHistory 改 false
 16. ✅ **哈希能力声明缺失**：ilanzou/onedrive/dropbox 已声明 SetHashes
 17. ✅ **pikpak 离线下载进度/删除**：RefreshOfflineTasks + DeleteOfflineTask

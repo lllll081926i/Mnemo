@@ -139,13 +139,21 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if item.Folder != nil {
 		return nil, errors.New("文件夹不能直接下载")
 	}
+	var headers map[string]string
+	// Graph's downloadUrl/content.downloadUrl are pre-signed URLs. They do
+	// not need the Graph Bearer token, and forwarding it to another host is
+	// both unnecessary and a credential-leak risk. Keep the token only for
+	// the authenticated /content fallback.
+	if item.DownloadURL == "" && item.ContentDownloadURL == "" {
+		headers = map[string]string{"Authorization": "Bearer " + c.Token.AccessToken}
+	}
 	return &model.DownloadURL{
 		DriveID:      c.DriveID,
 		FileID:       fileID,
 		URL:          cl.DownloadURL(item),
 		Size:         item.Size,
 		DownloadMode: "redirect",
-		Headers:      map[string]string{"Authorization": "Bearer " + c.Token.AccessToken},
+		Headers:      headers,
 	}, nil
 }
 

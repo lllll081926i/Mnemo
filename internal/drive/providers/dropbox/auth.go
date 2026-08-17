@@ -109,6 +109,7 @@ func authPKCE(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, err
 		RefreshToken: raw.RefreshToken,
 		ExpiresIn:    raw.ExpiresIn,
 		TokenType:    raw.TokenType,
+		ExpireTime:   time.Now().Add(time.Duration(raw.ExpiresIn) * time.Second).UTC().Format(time.RFC3339),
 	}
 	fetchDropboxProfile(ctx, tok.AccessToken, tok)
 	applyDropboxIdentity(tok)

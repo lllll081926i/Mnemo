@@ -2,7 +2,7 @@
 
 > 调研范围：`internal/drive/providers/dropbox/`（onedrive.go 驱动, auth.go, dropbox.go 客户端, util.go）
 > 对照旧版：`../Mnemo/src/dropbox/` + `src/drive/providers/dropbox.ts`
-> 整体完成度：✅ ~90%
+> 整体完成度：✅ ~95%（已迁移范围内的登录、列表、下载、预览、上传、分享主链路已收口）
 
 ---
 
@@ -49,13 +49,13 @@ SetHashes(["dropbox"], nil)
 |--------|:----:|---------|------|
 | GetDownloadURL | ✅ | `onedrive.go:103-117` TemporaryLink /files/get_temporary_link | 无 |
 | 过期时间 | ✅ | 4h | Go 版更完善 |
-| Authorization | ✅ | Bearer | 无 |
+| Authorization | ✅ | `/files/get_temporary_link` 返回的签名 URL 不携带 Bearer | 防止把访问令牌转发到预签名地址 |
 
 ---
 
 ## 4. 视频预览（onedrive.go）
 
-✅ `onedrive.go:119-131` 复用 GetDownloadURL origin。Go 新增。
+✅ `onedrive.go` 复用 GetDownloadURL origin，并统一经过本地 Range 代理交给 mpv；Dropbox/OneDrive 预签名地址不携带 Bearer。
 
 ---
 
@@ -63,9 +63,11 @@ SetHashes(["dropbox"], nil)
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| 小文件 ≤150MB | ✅ | `dropbox.go:354-373` UploadSmall /files/upload | 🟡 旧版阈值 8MB（Go 版更接近 API 上限） |
+| 小文件 ≤150MB | ✅ | UploadSmall `/files/upload`，校验返回 metadata 的 `id` 并写入上传任务 | 🟡 旧版阈值 8MB（Go 版更接近 API 上限） |
 | Session upload | ✅ | `dropbox.go:375-410` start + append_v2 + finish | 无 |
 | chunk 8MB | ✅ | `dropbox.go:17` | 无 |
+| 完成结果校验 | ✅ | session finish 同样必须返回 metadata `id` | 空响应不会被标记为成功 |
+| 断点隔离 | ✅ | 会话键包含用户/账号、路径、大小、内容 SHA1 或 mtime、冲突策略 | 同名同大小替换文件不会串用旧会话 |
 | **429 重试** | ✅ | `dropbox.go:530-560` 按 Retry-After/退避重试 | 无 |
 | **暂停支持** | ✅ | `dropbox.go:429-432` 大文件分片前检查 IsStop | 小文件由任务 context 取消 |
 | 冲突策略 | ✅ | `dropbox.go:258-270` refuse/rename/skip/overwrite | 无 |
@@ -101,7 +103,7 @@ SetHashes(["dropbox"], nil)
 |--------|:----:|---------|------|
 | CreateShare | ✅ | `dropbox.go:255-289` /sharing/create_shared_link_with_settings | 无 |
 | 过期/密码 | ✅ | settings.expires / link_password | 无 |
-| 已存在链接处理 | ✅ | `dropbox.go:268-284` list_shared_links + modify | 无 |
+| 已存在链接处理 | ✅ | list_shared_links 返回对象按 `links` 解码，并跟随 cursor 分页后 modify | 无 |
 | **visibility 逻辑** | ✅ | `dropbox.go:306-312` 有密码时 `requested_visibility`="password" | 无 |
 | **list 分页** | ✅ | 跟随 has_more + cursor 循环 | 无 |
 | **settings_error 处理** | ❌ | 不区分 | 🟡 旧版友好提示 |
@@ -152,4 +154,4 @@ SetHashes(["dropbox"], nil)
 8. 🟡 搜索无过滤器、file_status
 9. 🟡 分享 list settings_error 无友好提示
 10. ✅ move/copy 已支持 shared folder 参数
-11. 🟡 版本历史、缩略图完全缺失
+11. 🟡 版本历史、缩略图仍未迁移（按当前范围保留为已知边界）
