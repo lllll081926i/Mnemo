@@ -1,18 +1,19 @@
 # 阿里云盘（aliopen）功能详情
 
-> 调研范围：`internal/drive/providers/aliopen/aliopen.go`（单文件，~810 行）
+> 调研范围：`internal/drive/providers/aliopen/aliopen.go`（单文件，约 2000 行）
 > 对照旧版：`../Mnemo/src/aliopen/`（10 文件）+ `src/drive/providers/aliopen.ts`
-> 整体完成度：✅ ~90%
+> 整体完成度：✅ ~95%
 
 ---
 
-## 能力声明（aliopen.go:39-53）
+## 能力声明（`init` 注册）
 
 ```
 search, createShare, shareExpiration, sharePassword, shareHistory, importShare: true
 copy, recycleBin, permanentDelete: true
 trashView, trashRestore: false
 SetHashes(["sha1"], ["sha1"])
+SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 ```
 
 ---
@@ -21,11 +22,11 @@ SetHashes(["sha1"], ["sha1"])
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| refresh_token 粘贴 | ✅ | `aliopen.go:756-809` authRefreshToken | 无 |
-| client_id/client_secret | ✅ | LoginConfig `aliopen.go:34-37`，client_id 可选走 AList 公共换票 | 无 |
-| token 刷新 | ✅ | `aliopen.go:286-356` client.refresh/refreshToken | 已覆盖旋转 refresh_token、429 退避、401/业务码自动刷新并重试一次 |
-| ensureDrive | ✅ | `aliopen.go:224-238` getDriveInfo | 无 |
-| **限速/重试** | ✅ | `aliopen.go:45-105` 限速器 + `apiPostWithRetry` | concurrency:2、最小间隔 220ms、429 退避、401/AccessTokenInvalid 重试一次 |
+| refresh_token 粘贴 | ✅ | `authRefreshToken` | 无 |
+| client_id/client_secret | ✅ | `LoginConfig`，client_id 可选走 AList 公共换票 | 无 |
+| token 刷新 | ✅ | `client.refresh`/`refreshToken` | 已覆盖旋转 refresh_token、429 退避、401/业务码自动刷新并重试一次 |
+| ensureDrive | ✅ | `ensureDrive`/`getDriveInfo` | 无 |
+| **限速/重试** | ✅ | `aliOpenRateLimiter` + `apiPostWithRetry` | concurrency:2、最小间隔 220ms、429 退避、401/AccessTokenInvalid 重试一次 |
 
 ---
 
@@ -33,9 +34,9 @@ SetHashes(["sha1"], ["sha1"])
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| 双盘作用域 | ✅ | `aliopen.go:109-143` parseRef/wrapRef，b:/r: 前缀 | 无 |
-| 根目录虚拟盘入口 | ✅ | `aliopen.go:654-672` 备份盘+资源盘 | 无 |
-| ListPage | ✅ | `aliopen.go:269-285` `/adrive/v1.0/openFile/list` limit=200 | 无重复游标死循环 |
+| 双盘作用域 | ✅ | `parseRef`/`wrapRef`，b:/r: 前缀 | 无 |
+| 根目录虚拟盘入口 | ✅ | `Driver.List` 备份盘+资源盘 | 无 |
+| ListPage | ✅ | `ListPage` 调用 `/adrive/v1.0/openFile/list` limit=200 | 无重复游标死循环 |
 
 ---
 
@@ -43,9 +44,9 @@ SetHashes(["sha1"], ["sha1"])
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| GetDownloadURL | ✅ | `aliopen.go:602-632` getDownloadUrl | 无 |
-| DownloadMode | redirect | `aliopen.go:967-981` | 无 |
-| **`.livp` 回退** | ❌ | 无 | 🟡 旧版 `.livp` 回退 streamsUrl.jpeg/mov |
+| GetDownloadURL | ✅ | `DownloadInfo` 调用 `getDownloadUrl` | 无 |
+| DownloadMode | redirect | `GetDownloadURL` | 无 |
+| **`.livp`/Live Photo 流回退** | ✅ | `DownloadInfo` 同时兼容 `streamsUrl`/`streams_url`，优先 `mov`、其次 `jpeg` | API 未提供流地址时回退普通 `url` |
 | **expire_sec** | ✅ | `DownloadInfo` 传入调用方时长，`0` 默认 14400 秒 | 与旧版 4 小时默认值一致 |
 | **过期时间回填** | ✅ | 解析 API `expiration`，缺失时从签名 URL 推导 | 统一返回 Unix 毫秒 |
 
@@ -53,8 +54,8 @@ SetHashes(["sha1"], ["sha1"])
 
 ## 4. 视频预览（aliopen.go）
 
-⚠️ `aliopen.go:702-712` 直接调用 GetDownloadURL 返回单一 origin 原画，无转码清晰度。
-> Go 和 TS 均未实现真正的转码视频预览（阿里有 `/adrive/v1.0/openFile/getVideoPreviewPlayInfo` 接口但未调用）。
+✅ `GetVideoPreview` 复用 `DownloadInfo` 返回的原画或 Live Photo `mov` 流，交给统一本地预览代理和随包 `mpv` 播放。
+> 阿里 Open 的真正转码清晰度接口 `/adrive/v1.0/openFile/getVideoPreviewPlayInfo` 仍未接入；当前产品约束是视频默认统一走 `mpv`，不设置播放器回退。
 
 ---
 
@@ -62,16 +63,16 @@ SetHashes(["sha1"], ["sha1"])
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| SHA1 秒传 | ✅ | `aliopen.go:731-765` 仅以 `rapid_upload=true` 判定命中 | 未命中时返回的 pending `file_id` 不视为已完成 |
-| CreateUploadFile | ✅ | `aliopen.go:483-505` `/adrive/v1.0/openFile/create` | 🔴 未传 pre_hash/content_hash/proof_code/local_modified_at |
-| 分片上传 | ✅ | 固定 partSize=10MiB | 🟡 旧版 calPartSize 8 档(20MB-5GB) |
-| **CompleteUpload** | ✅ | `aliopen.go:533-540` 传真实 uploadID (`aliopen.go:912`) | 无 |
-| **断点续传** | ✅ | `aliopen.go:873-914` UploadSession（LoadUploadSession + SaveUploadSession + ClearUploadSession） | 无 |
-| **pre_hash 探测** | ❌ | 无 | 🟡 旧版前 1KB SHA1 探测提升秒传命中率 |
-| **proof_code** | ❌ | 无 | 🟡 旧版 calProofCode |
-| **分片地址过期刷新** | ✅ | `aliopen.go:925-965` 每 50min 刷新当前分片，`401/403` 立即重取并重试 | 无 |
+| SHA1 秒传 | ✅ | `UploadOneFile`/`RapidUpload` 严格以 `rapid_upload` 或 `exist` 命中 | 未命中时返回的 pending `file_id` 不视为已完成 |
+| CreateUploadFile | ✅ | `/adrive/v1.0/openFile/create` 传 `content_hash`、`pre_hash`、本地时间和冲突模式 | 无 |
+| 分片上传 | ✅ | `aliOpenPartSize` 动态选择 20 MiB-5 GiB，并使用 `SectionReader` 流式 PUT | 无 |
+| **CompleteUpload** | ✅ | `CompleteUpload` 传真实 `upload_id` | 无 |
+| **断点续传** | ✅ | 先加载远端 `file_id/upload_id` 和已完成分片，再创建新任务；预签名地址按需重取 | 无 |
+| **pre_hash 探测** | ✅ | `aliOpenPreHash` 读取前 1 KiB SHA1 | 无 |
+| **proof_code** | ✅ | pre-hash 命中或创建响应不完整时按 access token 定位并读取 proof 区间 | 无 |
+| **分片地址过期刷新** | ✅ | 每 50min 刷新当前分片，`401/403` 立即重取并重试 | 无 |
 | **缺失分片地址补齐** | ✅ | `UploadOneFile` 在 create 返回空地址时按 100 片一批调用 `getUploadUrl` | 无 |
-| **同名冲突** | ❌ | 固定 check_name_mode:ignore | 🟡 旧版 refuse/ignore/overwrite |
+| **同名冲突** | ✅ | `ConflictPolicy` 映射 `fail`/`auto_rename`/`ignore`；`skip` 上传前列目录确认 | `skip` 与远端并发创建之间仍由 `fail` 防止覆盖 |
 
 ---
 
@@ -79,8 +80,8 @@ SetHashes(["sha1"], ["sha1"])
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| RapidUploadByHash | ✅ | `aliopen.go:1355-1365` 校验 sha1；`RapidUpload` 严格检查 `rapid_upload` | 未命中时继续普通分片上传 |
-| ResolveTransferHash | ✅ | `aliopen.go:805-815` Detail 读 content_hash | 🟡 无 SHA1 格式校验 |
+| RapidUploadByHash | ✅ | 校验 sha1；`RapidUpload` 严格检查 `rapid_upload`/`exist` | 未命中时继续普通分片上传 |
+| ResolveTransferHash | ✅ | `Detail` 读取 `content_hash` | 🟡 无 SHA1 格式校验 |
 
 ---
 
@@ -128,11 +129,11 @@ SetHashes(["sha1"], ["sha1"])
 
 ## P0 差距清单
 
-1. ✅ **CompleteUpload 传真实 upload_id**（`aliopen.go:912`）：已修复
-2. ✅ **分享导入已实现**（`aliopen.go:952-1055` ImportShareSession + SaveShare）
-3. ✅ **上传断点续传已实现**（`aliopen.go:873-914` UploadSession）
-4. 🟡 上传无 pre_hash/proof_code：秒传命中率降低
-5. ✅ API 统一 401/AccessTokenInvalid 自动刷新、并发限速与 429 退避
-6. 🟡 上传分片大小固定 10MB（大文件可能超 10000 片限制）
-7. 🟡 `.livp` 下载无 streamsUrl 回退
+1. ✅ **CompleteUpload 传真实 `upload_id`**：已修复
+2. ✅ **分享导入已实现**：`ImportShareSession` + `SaveShare`
+3. ✅ **上传断点续传已实现**：在创建新任务前加载并复用远端会话
+4. ✅ **上传秒传探测已对齐旧版**：`pre_hash`、`proof_code`、`content_hash` 和本地时间字段
+5. ✅ **API 统一 401/AccessTokenInvalid 自动刷新、并发限速与 429 退避**
+6. ✅ **动态分片与流式上传**：20 MiB-5 GiB，避免大文件一次性分配整片内存
+7. ✅ **Live Photo 下载/预览流回退**：兼容 `streamsUrl` 和 `streams_url`
 8. ✅ 双盘批量操作与分享混选会明确拒绝，避免把文件路由到错误作用域

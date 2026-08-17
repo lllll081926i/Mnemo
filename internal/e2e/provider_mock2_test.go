@@ -922,7 +922,11 @@ func TestAliOpenDownloadPassesExpiryAndMapsExpiration(t *testing.T) {
 		}
 		expireSecs = append(expireSecs, int(secs))
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"url":        "https://cdn.example.test/aliopen.mp4?expire=1999999999",
+			"url": "https://cdn.example.test/aliopen-origin.mp4?expire=1999999999",
+			"streamsUrl": map[string]string{
+				"mov":  "https://cdn.example.test/aliopen-live.mov?expire=1999999999",
+				"jpeg": "https://cdn.example.test/aliopen-live.jpeg?expire=1999999999",
+			},
 			"size":       42,
 			"expiration": expiration,
 		})
@@ -938,7 +942,7 @@ func TestAliOpenDownloadPassesExpiryAndMapsExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("aliopen download: %v", err)
 	}
-	if download.URL == "" || download.Size != 42 {
+	if download.URL != "https://cdn.example.test/aliopen-live.mov?expire=1999999999" || download.Size != 42 {
 		t.Fatalf("aliopen download = %#v", download)
 	}
 	wantExpiration, err := time.Parse(time.RFC3339, expiration)
@@ -962,6 +966,19 @@ func TestAliOpenDownloadPassesExpiryAndMapsExpiration(t *testing.T) {
 }
 
 func TestAliOpenUploadFetchesMissingPartURLs(t *testing.T) {
+	policies := drive.RegistryCaps("aliopen").UploadConflictPolicies
+	for _, want := range []string{"refuse", "rename", "skip", "overwrite"} {
+		found := false
+		for _, policy := range policies {
+			if policy == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("aliopen conflict policies = %v, missing %q", policies, want)
+		}
+	}
 	var paths []string
 	mock := MockAPI(t, "openapi.alipan.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
@@ -973,6 +990,22 @@ func TestAliOpenUploadFetchesMissingPartURLs(t *testing.T) {
 			}
 			if _, ok := body["part_info_list"]; !ok {
 				t.Fatalf("create body missing part_info_list: %#v", body)
+			}
+			if body["check_name_mode"] != "fail" {
+				t.Fatalf("create check_name_mode = %#v, want fail", body["check_name_mode"])
+			}
+			wantHash := strings.ToUpper(netx.SHA1Hex([]byte("hello aliopen")))
+			if body["content_hash"] != wantHash || body["content_hash_name"] != "sha1" {
+				t.Fatalf("create content hash = %#v/%#v, want %s/sha1", body["content_hash"], body["content_hash_name"], wantHash)
+			}
+			if body["pre_hash"] != wantHash {
+				t.Fatalf("create pre_hash = %#v, want %s", body["pre_hash"], wantHash)
+			}
+			if _, ok := body["local_modified_at"].(string); !ok {
+				t.Fatalf("create missing local_modified_at: %#v", body)
+			}
+			if _, ok := body["local_created_at"].(string); !ok {
+				t.Fatalf("create missing local_created_at: %#v", body)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"file_id": "ali-upload-file", "upload_id": "ali-upload-session",
@@ -1012,7 +1045,7 @@ func TestAliOpenUploadFetchesMissingPartURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	ui := &model.UploadingUI{Info: model.UploadInfo{
-		LocalFilePath: path, ParentFileID: "b:root", DriveID: did, Name: "hello.txt",
+		LocalFilePath: path, ParentFileID: "b:root", DriveID: did, Name: "hello.txt", ConflictPolicy: "refuse",
 	}}
 	if err := handler(context.Background(), ui); err != nil {
 		t.Fatalf("AliOpen UploadOneFile: %v", err)

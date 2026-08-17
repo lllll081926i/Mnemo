@@ -11,7 +11,7 @@
 | # | Provider | 登录方式 | 文件数 | Go 测试 | 整体完成度 |
 |---|----------|---------|--------|---------|-----------|
 | 1 | pikpak | 账密 + 验证码 | 5 | ✅(mock/e2e) | ✅ ~96% |
-| 2 | aliopen（阿里云盘） | refresh_token | 1 | ✅(mock/e2e) | ✅ ~90% |
+| 2 | aliopen（阿里云盘） | refresh_token | 1 | ✅(mock/e2e) | ✅ ~95% |
 | 3 | pan123（123 云盘） | 账密 | 2 | ✅ | ✅ ~90% |
 | 4 | pan189（天翼云盘） | 账密 + 验证码 | 11 | ✅ | ✅ ~95% |
 | 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | 1 | ✅(e2e) | ✅ ~92% |
@@ -75,7 +75,7 @@
 | Provider | GetDownloadURL | 下载模式 | 并发 | 视频预览 | 转码清晰度 | VIP/会员检测 | 链接过期检测 |
 |----------|:--------------:|:--------:|:----:|:--------:|:----------:|:------------:|:------------:|
 | pikpak | ✅ | redirect | ➖ | ✅ | ✅ | ✅(10m缓存) | ✅(提前60s) |
-| aliopen | ✅ | redirect | ➖ | ⚠️(仅原画) | ❌ | ➖ | ➖ |
+| aliopen | ✅ | redirect | ➖ | ✅(原画/Live Photo流) | ❌(设计未接转码) | ➖ | ✅(API expiration) |
 | pan123 | ✅ | proxy | 1 | ✅ | ➖ | ➖ | ✅ |
 | pan189 | ✅ | proxy | ➖ | ✅(伪预览) | ❌ | ➖ | ✅ |
 | pan139 | ✅ | proxy | 1 | ✅ | ➖ | ➖ | ➖ |
@@ -95,7 +95,7 @@
 | Provider | UploadOneFile | 分片上传 | 整包上传 | 断点续传 | 秒传 | 冲突策略 | 进度回调 | 上传模式 |
 |----------|:-------------:|:--------:|:--------:|:--------:|:----:|:--------:|:--------:|:--------:|
 | pikpak | ✅ | ➖ | ✅(OSS PUT) | ✅ | ✅(GCID) | ✅(refuse/skip/rename/overwrite) | ✅ | queue |
-| aliopen | ✅ | ✅(10MB) | ➖ | ✅ | ✅(SHA1) | ❌(固定ignore) | ✅ | queue |
+| aliopen | ✅ | ✅(动态20MiB-5GiB) | ➖ | ✅ | ✅(SHA1/pre_hash) | ✅(refuse/rename/skip/overwrite) | ✅ | queue |
 | pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ✅(1/2 映射) | ✅ | queue |
 | pan189 | ✅ | ✅(10/20MB) | ➖ | ✅ | ✅(MD5) | ➖ | ✅ | queue |
 | pan139 | ✅ | ✅(100/200MB预签名) | ➖ | ✅ | ✅(SHA-256) | ⚠️(服务端auto_rename) | ✅ | queue |

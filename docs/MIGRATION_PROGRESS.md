@@ -76,7 +76,7 @@
 | Provider | 完成度 | P0 差距 |
 |----------|:------:|---------|
 | pikpak | ~98% | 主要迁移链路已完成；真实云端验证码、长时上传和大文件传输仍需发布前按账号验证 |
-| aliopen | ~90% | (已修复) |
+| aliopen | ~95% | (上传秒传探测、动态分片、断点复用、Live Photo 流回退已修复；转码清晰度仍按设计未接入) |
 | pan123 | ~95% | (已修复；下载/预览点击快照与 `pan123meta` 恢复已补齐) |
 | pan189 | ~95% | 无（最忠实移植） |
 | pan139 | ~95% | (已修复) |
@@ -141,7 +141,7 @@
 1. ✅ **onedrive/dropbox RefreshAccount**：已实现 token 刷新 + 账号信息/配额
 2. ✅ **分享导入 importShare**：pikpak/aliopen/pan123 三个盘已实现，分享页导入 UI 已接通
 3. ✅ **pikpak API captcha 续接**：业务 API 检测 captcha_required 自动获取新 token 重试(jsonDo/get)
-4. ✅ **aliopen CompleteUpload bug**：已传真实 upload_id
+4. ✅ **aliopen 上传兼容**：真实 upload_id、pre_hash/proof_code、动态分片、断点会话复用和冲突策略已补齐
 5. ✅ **s3 目录递归操作**：已实现 listAllUnder + 批量 DeleteObjects + copyRecursive
 6. ✅ **s3 forcePathStyle 可配置**：改为 *bool，支持 sessionToken
 7. ✅ **webdav/s3 上传冲突策略**：已实现 refuse/rename/overwrite + ConflictPolicy

@@ -2,10 +2,8 @@
 package aliopen
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,9 +29,12 @@ const (
 	BackupRoot   = "backup_root"
 	ResourceRoot = "resource_root"
 
-	partSize = 10 * 1024 * 1024 // 10 MiB upload parts
-
 	defaultDownloadExpireSec = 14400
+)
+
+const (
+	aliOpenMiB = int64(1024 * 1024)
+	aliOpenGiB = int64(1024 * 1024 * 1024)
 )
 
 const providerID = model.ProviderAliopen
@@ -125,7 +125,7 @@ func init() {
 			"trashView":       false,
 			"trashRestore":    false,
 		}, func(c *drive.Capabilities) {
-			c.SetHashes([]string{"sha1"}, []string{"sha1"})
+			c.SetHashes([]string{"sha1"}, []string{"sha1"}).SetConflictPolicies("refuse", "rename", "skip", "overwrite")
 		}),
 		Auth: authRefreshToken,
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
@@ -216,6 +216,15 @@ type aliFile struct {
 	Category        string `json:"category"`
 	Status          string `json:"status"`
 	DownloadURL     string `json:"download_url"`
+}
+
+type aliOpenDownloadResponse struct {
+	URL             string            `json:"url"`
+	Size            int64             `json:"size"`
+	Headers         map[string]string `json:"headers"`
+	Expiration      string            `json:"expiration"`
+	StreamsURL      map[string]any    `json:"streamsUrl"`
+	StreamsURLSnake map[string]any    `json:"streams_url"`
 }
 
 // client is an authenticated aliopen session.
@@ -603,12 +612,7 @@ func (c *client) Search(ctx context.Context, scope Scope, keyword string) ([]ali
 
 // DownloadInfo gets the download URL and headers.
 func (c *client) DownloadInfo(ctx context.Context, scope Scope, fileID string, expireSec int) (string, int64, map[string]string, int64, error) {
-	var resp struct {
-		URL        string            `json:"url"`
-		Size       int64             `json:"size"`
-		Headers    map[string]string `json:"headers"`
-		Expiration string            `json:"expiration"`
-	}
+	var resp aliOpenDownloadResponse
 	if expireSec <= 0 {
 		expireSec = defaultDownloadExpireSec
 	}
@@ -619,14 +623,42 @@ func (c *client) DownloadInfo(ctx context.Context, scope Scope, fileID string, e
 	}, &resp); err != nil {
 		return "", 0, nil, 0, err
 	}
-	if strings.TrimSpace(resp.URL) == "" {
+	// Live Photo files can expose only streamsUrl/streams_url. Prefer the
+	// playable MOV stream, then JPEG, and keep the normal URL as fallback.
+	url := strings.TrimSpace(resp.URL)
+	for _, streams := range []map[string]any{resp.StreamsURL, resp.StreamsURLSnake} {
+		for _, key := range []string{"mov", "jpeg"} {
+			if stream := aliOpenStreamURL(streams, key); stream != "" {
+				url = stream
+				break
+			}
+		}
+		if url != strings.TrimSpace(resp.URL) {
+			break
+		}
+	}
+	if url == "" {
 		return "", 0, nil, 0, errors.New("aliopen: 获取下载地址失败")
 	}
 	expireTime := parseAliOpenExpiration(resp.Expiration)
 	if expireTime == 0 {
-		expireTime = driveutil.GetExpiresTime(resp.URL)
+		expireTime = driveutil.GetExpiresTime(url)
 	}
-	return resp.URL, resp.Size, resp.Headers, expireTime, nil
+	return url, resp.Size, resp.Headers, expireTime, nil
+}
+
+func aliOpenStreamURL(streams map[string]any, key string) string {
+	if len(streams) == 0 {
+		return ""
+	}
+	value, ok := streams[key]
+	if !ok {
+		return ""
+	}
+	if raw, ok := value.(string); ok {
+		return strings.TrimSpace(raw)
+	}
+	return ""
 }
 
 // Mkdir creates a folder.
@@ -728,8 +760,100 @@ func (c *client) CreateShare(ctx context.Context, scope Scope, fileIDs []string,
 	}, nil
 }
 
+type aliOpenUploadPart struct {
+	PartNumber int    `json:"part_number"`
+	UploadURL  string `json:"upload_url"`
+}
+
+type aliOpenUploadCreateOptions struct {
+	PartSize        int64
+	ContentHash     string
+	PreHash         string
+	ProofCode       string
+	CheckNameMode   string
+	LocalModifiedAt string
+	LocalCreatedAt  string
+}
+
+type aliOpenUploadCreateResult struct {
+	FileID       string              `json:"file_id"`
+	UploadID     string              `json:"upload_id"`
+	PartInfoList []aliOpenUploadPart `json:"part_info_list"`
+	RapidUpload  bool                `json:"rapid_upload"`
+	Exist        bool                `json:"exist"`
+}
+
+func aliOpenPartSize(size int64) int64 {
+	switch {
+	case size > 1024*aliOpenGiB:
+		return 5 * aliOpenGiB
+	case size > 768*aliOpenGiB:
+		return 109951163
+	case size > 512*aliOpenGiB:
+		return 82463373
+	case size > 384*aliOpenGiB:
+		return 54975582
+	case size > 256*aliOpenGiB:
+		return 41231687
+	case size > 128*aliOpenGiB:
+		return 27487791
+	default:
+		return 20 * aliOpenMiB
+	}
+}
+
+func aliOpenPartCount(size, partSize int64) int {
+	if size <= 0 || partSize <= 0 {
+		return 1
+	}
+	return int((size-1)/partSize + 1)
+}
+
+func aliOpenCheckNameMode(policy string) string {
+	switch driveutil.ResolveConflictPolicy(policy) {
+	case driveutil.ConflictRefuse:
+		return "fail"
+	case driveutil.ConflictRename:
+		return "auto_rename"
+	case driveutil.ConflictSkip:
+		// Skip is checked before create. Keep the API conservative if a
+		// concurrent writer creates the same name between those two calls.
+		return "fail"
+	default:
+		return "ignore"
+	}
+}
+
+func aliOpenCheckNameModeForDuplicate(duplicate int) string {
+	switch duplicate {
+	case 2:
+		return "ignore"
+	case 1:
+		return "fail"
+	default:
+		return "auto_rename"
+	}
+}
+
+func (c *client) hasNamedFile(ctx context.Context, scope Scope, parentID, name string) (bool, error) {
+	items, err := c.List(ctx, scope, parentID)
+	if err != nil {
+		return false, err
+	}
+	for _, item := range items {
+		if item.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // RapidUpload attempts sha1-based rapid upload (秒传).
 func (c *client) RapidUpload(ctx context.Context, scope Scope, parentID, name string, size int64, sha1Str string) (*drive.RapidUploadResult, error) {
+	return c.rapidUploadWithMode(ctx, scope, parentID, name, size, sha1Str, "ignore")
+}
+
+func (c *client) rapidUploadWithMode(ctx context.Context, scope Scope, parentID, name string, size int64, sha1Str, checkNameMode string) (*drive.RapidUploadResult, error) {
 	var res struct {
 		FileID       string `json:"file_id"`
 		RapidUpload  bool   `json:"rapid_upload"`
@@ -748,13 +872,13 @@ func (c *client) RapidUpload(ctx context.Context, scope Scope, parentID, name st
 		"size":              size,
 		"content_hash":      sha1Str,
 		"content_hash_name": "sha1",
-		"check_name_mode":   "ignore",
+		"check_name_mode":   checkNameMode,
 	}, &res); err != nil {
 		return nil, err
 	}
 	// A miss still returns file_id for the pending upload object. Only the
 	// explicit rapid_upload flag means the remote file is already complete.
-	if res.RapidUpload {
+	if res.RapidUpload || res.Exist {
 		if strings.TrimSpace(res.FileID) == "" {
 			return &drive.RapidUploadResult{Reuse: false, Message: "秒传响应缺少 file_id"}, nil
 		}
@@ -767,38 +891,163 @@ func (c *client) RapidUpload(ctx context.Context, scope Scope, parentID, name st
 }
 
 // CreateUploadFile creates an upload entry and returns parts.
-func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, name string, size int64) (string, string, []struct {
-	PartNumber int    `json:"part_number"`
-	UploadURL  string `json:"upload_url"`
-}, error) {
-	partCount := int(size / int64(partSize))
-	if size%int64(partSize) != 0 || partCount == 0 {
-		partCount++
+func (c *client) CreateUploadFile(ctx context.Context, scope Scope, parentID, name string, size int64, options aliOpenUploadCreateOptions) (aliOpenUploadCreateResult, error) {
+	partSize := options.PartSize
+	if partSize <= 0 {
+		partSize = aliOpenPartSize(size)
 	}
+	partCount := aliOpenPartCount(size, partSize)
 	partInfoList := make([]map[string]int, partCount)
 	for i := range partInfoList {
 		partInfoList[i] = map[string]int{"part_number": i + 1}
 	}
-	var res struct {
-		FileID       string `json:"file_id"`
-		UploadID     string `json:"upload_id"`
-		PartInfoList []struct {
-			PartNumber int    `json:"part_number"`
-			UploadURL  string `json:"upload_url"`
-		} `json:"part_info_list"`
+	mode := strings.TrimSpace(options.CheckNameMode)
+	if mode == "" {
+		mode = "ignore"
 	}
-	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/create", map[string]any{
+	body := map[string]any{
 		"name":            name,
 		"parent_file_id":  parentID,
 		"drive_id":        c.scopedDriveID(scope),
 		"type":            "file",
 		"size":            size,
-		"check_name_mode": "ignore",
+		"check_name_mode": mode,
 		"part_info_list":  partInfoList,
-	}, &res); err != nil {
-		return "", "", nil, err
 	}
-	return res.FileID, res.UploadID, res.PartInfoList, nil
+	if hash := strings.TrimSpace(options.ContentHash); hash != "" {
+		body["content_hash"] = strings.ToUpper(hash)
+		body["content_hash_name"] = "sha1"
+	}
+	if preHash := strings.TrimSpace(options.PreHash); preHash != "" {
+		body["pre_hash"] = strings.ToUpper(preHash)
+	}
+	if proof := strings.TrimSpace(options.ProofCode); proof != "" {
+		body["proof_version"] = "v1"
+		body["proof_code"] = proof
+	}
+	if value := strings.TrimSpace(options.LocalModifiedAt); value != "" {
+		body["local_modified_at"] = value
+	}
+	if value := strings.TrimSpace(options.LocalCreatedAt); value != "" {
+		body["local_created_at"] = value
+	}
+	var result aliOpenUploadCreateResult
+	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/create", body, &result); err != nil {
+		return aliOpenUploadCreateResult{}, err
+	}
+	return result, nil
+}
+
+func (c *client) fillUploadURLs(ctx context.Context, scope Scope, fileID, uploadID string, parts []aliOpenUploadPart, uploaded map[int]bool) error {
+	missing := make([]map[string]int, 0, len(parts))
+	for _, part := range parts {
+		if !uploaded[part.PartNumber] && strings.TrimSpace(part.UploadURL) == "" {
+			missing = append(missing, map[string]int{"part_number": part.PartNumber})
+		}
+	}
+	for start := 0; start < len(missing); start += 100 {
+		end := start + 100
+		if end > len(missing) {
+			end = len(missing)
+		}
+		var refreshed struct {
+			PartInfoList []aliOpenUploadPart `json:"part_info_list"`
+		}
+		if err := c.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
+			"drive_id":       c.scopedDriveID(scope),
+			"file_id":        fileID,
+			"upload_id":      uploadID,
+			"part_info_list": missing[start:end],
+		}, &refreshed); err != nil {
+			return err
+		}
+		urls := make(map[int]string, len(refreshed.PartInfoList))
+		for _, part := range refreshed.PartInfoList {
+			urls[part.PartNumber] = strings.TrimSpace(part.UploadURL)
+		}
+		for i := range parts {
+			if url := urls[parts[i].PartNumber]; url != "" {
+				parts[i].UploadURL = url
+			}
+		}
+	}
+	for _, part := range parts {
+		if !uploaded[part.PartNumber] && strings.TrimSpace(part.UploadURL) == "" {
+			return fmt.Errorf("aliopen: 分片 %d 无上传地址", part.PartNumber)
+		}
+	}
+	return nil
+}
+
+func aliOpenPreHash(f *os.File, size int64) (string, error) {
+	if f == nil || size <= 0 {
+		return "", nil
+	}
+	length := size
+	if length > 1024 {
+		length = 1024
+	}
+	buf := make([]byte, int(length))
+	n, err := f.ReadAt(buf, 0)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.ToUpper(netx.SHA1Hex(buf[:n])), nil
+}
+
+func aliOpenProofCode(f *os.File, accessToken string, size int64) (string, error) {
+	if f == nil || strings.TrimSpace(accessToken) == "" || size <= 0 {
+		return "", nil
+	}
+	digest := netx.MD5Hex([]byte(accessToken))
+	position, err := strconv.ParseUint(digest[:16], 16, 64)
+	if err != nil {
+		return "", err
+	}
+	start := int64(position % uint64(size))
+	length := int64(8)
+	if remain := size - start; remain < length {
+		length = remain
+	}
+	buf := make([]byte, int(length))
+	n, err := f.ReadAt(buf, start)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(buf[:n]), nil
+}
+
+func aliOpenLocalFileTime(info os.FileInfo) string {
+	if info == nil || info.ModTime().IsZero() {
+		return ""
+	}
+	return info.ModTime().UTC().Format(time.RFC3339Nano)
+}
+
+func aliOpenIsPreHashMatched(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "prehashmatched") || strings.Contains(message, "pre_hash_matched")
+}
+
+func encodeAliOpenUploadSession(uploadID, fileID string) string {
+	b, _ := json.Marshal(map[string]string{"upload_id": uploadID, "file_id": fileID})
+	return string(b)
+}
+
+func decodeAliOpenUploadSession(raw string) (uploadID, fileID string) {
+	var state struct {
+		UploadID string `json:"upload_id"`
+		FileID   string `json:"file_id"`
+	}
+	if json.Unmarshal([]byte(raw), &state) == nil {
+		return strings.TrimSpace(state.UploadID), strings.TrimSpace(state.FileID)
+	}
+	// Older builds persisted only upload_id. It cannot be completed without
+	// file_id, so the caller will discard that stale state and create anew.
+	return strings.TrimSpace(raw), ""
 }
 
 // CompleteUpload marks the upload as complete.
@@ -1186,110 +1435,149 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	size := info.Size()
 	ui.Info.Size = size
-	// Try rapid upload by sha1
-	if ui.Info.SHA1 != "" {
-		res, err := cl.RapidUpload(ctx, ref.Scope, ref.FID, ui.Info.Name, size, ui.Info.SHA1)
-		if err == nil && res.Reuse {
+	policy := driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy)
+	if policy == driveutil.ConflictSkip {
+		exists, err := cl.hasNamedFile(ctx, ref.Scope, ref.FID, ui.Info.Name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			ui.Upload.DownSize = size
+			ui.Upload.DownProcess = 100
 			return nil
 		}
 	}
-	// Create upload file
-	fileID, uploadID, parts, err := cl.CreateUploadFile(ctx, ref.Scope, ref.FID, ui.Info.Name, size)
-	if err != nil {
-		return err
+
+	contentHash := strings.ToUpper(strings.TrimSpace(ui.Info.SHA1))
+	if contentHash == "" {
+		contentHash, err = netx.HashFile(ui.Info.LocalFilePath, netx.HashSHA1)
+		if err != nil {
+			return fmt.Errorf("aliopen: 计算文件 SHA1 失败: %w", err)
+		}
+		contentHash = strings.ToUpper(contentHash)
+		ui.Info.SHA1 = contentHash
 	}
-	// Resume: load previously uploaded part numbers
+	partSize := aliOpenPartSize(size)
+	partCount := aliOpenPartCount(size, partSize)
 	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
 	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)
 	uploadedSet := make(map[int]bool)
-	if savedSessionID == uploadID {
-		for _, pn := range savedParts {
-			uploadedSet[pn] = true
-		}
-	}
-	// Upload parts
-	buf := make([]byte, partSize)
-	var pos int64
-	partCount := int(size / int64(partSize))
-	if size%int64(partSize) != 0 || partCount == 0 {
-		partCount++
-	}
-	if len(parts) == 0 {
-		for partNumber := 1; partNumber <= partCount; partNumber++ {
-			parts = append(parts, struct {
-				PartNumber int    `json:"part_number"`
-				UploadURL  string `json:"upload_url"`
-			}{PartNumber: partNumber})
-		}
+	fileID, uploadID := decodeAliOpenUploadSession(savedSessionID)
+	if fileID == "" || uploadID == "" {
+		fileID, uploadID = "", ""
 	} else {
-		knownParts := make(map[int]bool, len(parts))
-		for _, part := range parts {
-			knownParts[part.PartNumber] = true
-		}
-		for partNumber := 1; partNumber <= partCount; partNumber++ {
-			if !knownParts[partNumber] {
-				parts = append(parts, struct {
-					PartNumber int    `json:"part_number"`
-					UploadURL  string `json:"upload_url"`
-				}{PartNumber: partNumber})
+		for _, pn := range savedParts {
+			if pn >= 1 && pn <= partCount {
+				uploadedSet[pn] = true
 			}
 		}
 	}
-	sort.SliceStable(parts, func(i, j int) bool { return parts[i].PartNumber < parts[j].PartNumber })
-	missingParts := make([]map[string]int, 0)
-	for _, part := range parts {
-		if !uploadedSet[part.PartNumber] && strings.TrimSpace(part.UploadURL) == "" {
-			missingParts = append(missingParts, map[string]int{"part_number": part.PartNumber})
-		}
+
+	parts := make([]aliOpenUploadPart, partCount)
+	for i := range parts {
+		parts[i].PartNumber = i + 1
 	}
-	for start := 0; start < len(missingParts); start += 100 {
-		end := start + 100
-		if end > len(missingParts) {
-			end = len(missingParts)
+	if fileID == "" || uploadID == "" {
+		preHash, preHashErr := aliOpenPreHash(f, size)
+		if preHashErr != nil {
+			return fmt.Errorf("aliopen: 计算 pre_hash 失败: %w", preHashErr)
 		}
-		var refreshed struct {
-			PartInfoList []struct {
-				PartNumber int    `json:"part_number"`
-				UploadURL  string `json:"upload_url"`
-			} `json:"part_info_list"`
+		localTime := aliOpenLocalFileTime(info)
+		options := aliOpenUploadCreateOptions{
+			PartSize:        partSize,
+			ContentHash:     contentHash,
+			PreHash:         preHash,
+			CheckNameMode:   aliOpenCheckNameMode(ui.Info.ConflictPolicy),
+			LocalModifiedAt: localTime,
+			LocalCreatedAt:  localTime,
 		}
-		if err := cl.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
-			"drive_id":       cl.scopedDriveID(ref.Scope),
-			"file_id":        fileID,
-			"upload_id":      uploadID,
-			"part_info_list": missingParts[start:end],
-		}, &refreshed); err != nil {
-			return err
+		created, createErr := cl.CreateUploadFile(ctx, ref.Scope, ref.FID, ui.Info.Name, size, options)
+		if createErr != nil && !aliOpenIsPreHashMatched(createErr) {
+			return createErr
 		}
-		urls := make(map[int]string, len(refreshed.PartInfoList))
-		for _, part := range refreshed.PartInfoList {
-			urls[part.PartNumber] = strings.TrimSpace(part.UploadURL)
-		}
-		for i := range parts {
-			if url := urls[parts[i].PartNumber]; url != "" {
-				parts[i].UploadURL = url
+		if createErr != nil || ((!created.RapidUpload && !created.Exist) && (created.FileID == "" || created.UploadID == "")) {
+			proofCode, proofErr := aliOpenProofCode(f, cl.session.AccessToken, size)
+			if proofErr != nil {
+				return fmt.Errorf("aliopen: 计算 proof_code 失败: %w", proofErr)
+			}
+			options.PreHash = ""
+			options.ProofCode = proofCode
+			created, createErr = cl.CreateUploadFile(ctx, ref.Scope, ref.FID, ui.Info.Name, size, options)
+			if createErr != nil {
+				return createErr
 			}
 		}
+		if created.RapidUpload || created.Exist {
+			if strings.TrimSpace(created.FileID) == "" {
+				return errors.New("aliopen: 秒传响应缺少 file_id")
+			}
+			ui.Upload.FileID = created.FileID
+			ui.Upload.DownSize = size
+			ui.Upload.DownProcess = 100
+			return nil
+		}
+		fileID, uploadID = strings.TrimSpace(created.FileID), strings.TrimSpace(created.UploadID)
+		if fileID == "" || uploadID == "" {
+			return errors.New("aliopen: 创建上传任务未返回 file_id 或 upload_id")
+		}
+		parts = created.PartInfoList
 	}
+
+	// The persisted record stores only the remote session id and completed
+	// parts. Rebuild part metadata on resume because pre-signed URLs expire.
+	byNumber := make(map[int]aliOpenUploadPart, len(parts))
 	for _, part := range parts {
-		if !uploadedSet[part.PartNumber] && strings.TrimSpace(part.UploadURL) == "" {
-			return fmt.Errorf("aliopen: 分片 %d 无上传地址", part.PartNumber)
+		if part.PartNumber >= 1 && part.PartNumber <= partCount {
+			byNumber[part.PartNumber] = part
 		}
 	}
+	parts = make([]aliOpenUploadPart, partCount)
+	for i := range parts {
+		parts[i].PartNumber = i + 1
+		if part, ok := byNumber[i+1]; ok {
+			parts[i].UploadURL = part.UploadURL
+		}
+	}
+	// Persist the remote session before requesting pre-signed URLs so a
+	// transient URL request failure can still resume the same upload task.
+	_ = drive.SaveUploadSessionState(sessionKey, encodeAliOpenUploadSession(uploadID, fileID), drive.SortedUniqueParts(uploadedSet))
+	if err := cl.fillUploadURLs(ctx, ref.Scope, fileID, uploadID, parts, uploadedSet); err != nil {
+		return err
+	}
+	ui.Upload.FileID = fileID
+
+	var uploadedSize int64
+	for partNumber := range uploadedSet {
+		start := int64(partNumber-1) * partSize
+		if start >= size {
+			continue
+		}
+		length := partSize
+		if remain := size - start; remain < length {
+			length = remain
+		}
+		uploadedSize += length
+	}
+	ui.Upload.DownSize = uploadedSize
+	if size > 0 {
+		ui.Upload.DownProcess = int(uploadedSize * 100 / size)
+	}
+
 	lastURLRefresh := time.Now()
-	for _, part := range parts {
-		n, err := f.ReadAt(buf, pos)
-		if err != nil && err != io.EOF {
-			return err
+	for i := range parts {
+		part := &parts[i]
+		start := int64(part.PartNumber-1) * partSize
+		length := int64(0)
+		if start < size {
+			length = partSize
+			if remain := size - start; remain < length {
+				length = remain
+			}
 		}
-		chunk := buf[:n]
 		if !uploadedSet[part.PartNumber] && part.UploadURL != "" {
 			if time.Since(lastURLRefresh) >= 50*time.Minute {
 				var refreshed struct {
-					PartInfoList []struct {
-						PartNumber int    `json:"part_number"`
-						UploadURL  string `json:"upload_url"`
-					} `json:"part_info_list"`
+					PartInfoList []aliOpenUploadPart `json:"part_info_list"`
 				}
 				if refreshErr := cl.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
 					"drive_id":       cl.scopedDriveID(ref.Scope),
@@ -1302,15 +1590,17 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 					}
 					return fmt.Errorf("aliopen: 分片 %d 刷新上传地址失败", part.PartNumber)
 				}
-				part.UploadURL = refreshed.PartInfoList[0].UploadURL
+				part.UploadURL = strings.TrimSpace(refreshed.PartInfoList[0].UploadURL)
 				lastURLRefresh = time.Now()
 			}
 			putPart := func(uploadURL string) (int, error) {
-				req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(chunk))
+				body := io.NewSectionReader(f, start, length)
+				req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, body)
 				if err != nil {
 					return 0, err
 				}
-				req.Header.Set("Content-Length", strconv.FormatInt(int64(len(chunk)), 10))
+				req.ContentLength = length
+				req.Header.Set("Content-Length", strconv.FormatInt(length, 10))
 				resp, err := cl.http.HTTP.Do(req)
 				if err != nil {
 					return 0, err
@@ -1329,10 +1619,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				// only the current part so a recoverable expiry does not discard the
 				// whole upload session.
 				var refreshed struct {
-					PartInfoList []struct {
-						PartNumber int    `json:"part_number"`
-						UploadURL  string `json:"upload_url"`
-					} `json:"part_info_list"`
+					PartInfoList []aliOpenUploadPart `json:"part_info_list"`
 				}
 				if refreshErr := cl.apiPost(ctx, "/adrive/v1.0/openFile/getUploadUrl", map[string]any{
 					"drive_id":       cl.scopedDriveID(ref.Scope),
@@ -1340,7 +1627,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 					"upload_id":      uploadID,
 					"part_info_list": []map[string]int{{"part_number": part.PartNumber}},
 				}, &refreshed); refreshErr == nil && len(refreshed.PartInfoList) > 0 && refreshed.PartInfoList[0].UploadURL != "" {
-					part.UploadURL = refreshed.PartInfoList[0].UploadURL
+					part.UploadURL = strings.TrimSpace(refreshed.PartInfoList[0].UploadURL)
 					status, err = putPart(part.UploadURL)
 					if err != nil {
 						return err
@@ -1354,13 +1641,13 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		// Persist uploaded part number incrementally
 		if !uploadedSet[part.PartNumber] {
 			uploadedSet[part.PartNumber] = true
-			_ = drive.SaveUploadSessionState(sessionKey, uploadID, drive.SortedUniqueParts(uploadedSet))
+			_ = drive.SaveUploadSessionState(sessionKey, encodeAliOpenUploadSession(uploadID, fileID), drive.SortedUniqueParts(uploadedSet))
 		}
-		pos += int64(n)
+		uploadedSize += length
 		if ui != nil {
-			ui.Upload.DownSize = pos
+			ui.Upload.DownSize = uploadedSize
 			if size > 0 {
-				ui.Upload.DownProcess = int(pos * 100 / size)
+				ui.Upload.DownProcess = int(uploadedSize * 100 / size)
 			} else {
 				ui.Upload.DownProcess = 100
 			}
@@ -1382,7 +1669,16 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	if err != nil {
 		return nil, err
 	}
-	return cl.RapidUpload(ctx, ref.Scope, ref.FID, req.FileName, req.Size, req.Hash)
+	if req.Duplicate == 1 {
+		exists, err := cl.hasNamedFile(ctx, ref.Scope, ref.FID, req.FileName)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return &drive.RapidUploadResult{Reuse: true, Message: "目标文件已存在，已跳过"}, nil
+		}
+	}
+	return cl.rapidUploadWithMode(ctx, ref.Scope, ref.FID, req.FileName, req.Size, req.Hash, aliOpenCheckNameModeForDuplicate(req.Duplicate))
 }
 
 func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, _ bool) (string, error) {
@@ -1688,6 +1984,4 @@ func min(a, b int) int {
 	return b
 }
 
-var _ = hex.EncodeToString
-var _ = sha1.New
 var _ = json.NewDecoder
