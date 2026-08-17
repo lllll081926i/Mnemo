@@ -12,11 +12,17 @@ export function ApplyUpdate(arg1:string):Promise<void>;
 
 export function CancelDownload(arg1:string):Promise<void>;
 
+export function CancelMigrate(arg1:string):Promise<void>;
+
 export function CancelUpload(arg1:string):Promise<void>;
 
 export function CheckUpdate():Promise<app.CheckUpdateResult>;
 
+export function ClearCache():Promise<void>;
+
 export function ClearDownloads():Promise<void>;
+
+export function ClearMigrateJobs():Promise<void>;
 
 export function ClearUploads():Promise<void>;
 
@@ -24,9 +30,13 @@ export function CopyFiles(arg1:string,arg2:string,arg3:Array<string>,arg4:string
 
 export function CreateShare(arg1:string,arg2:string,arg3:drive.ShareParams):Promise<model.ShareItem>;
 
+export function DeleteDirectoryCache(arg1:string):Promise<void>;
+
 export function DeleteFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
 export function DeleteLocalTag(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function DeleteMigrateJob(arg1:string):Promise<void>;
 
 export function DeleteOfflineTask(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<void>;
 
@@ -40,6 +50,8 @@ export function DownloadUpdate(arg1:string):Promise<string>;
 
 export function FavoriteFiles(arg1:string,arg2:string,arg3:boolean,arg4:Array<string>):Promise<Array<string>>;
 
+export function GetDirectoryCache(arg1:string):Promise<Array<model.File>>;
+
 export function GetDownloadURL(arg1:string,arg2:string,arg3:string):Promise<model.DownloadURL>;
 
 export function GetFileDetail(arg1:string,arg2:string,arg3:string):Promise<model.File>;
@@ -47,6 +59,8 @@ export function GetFileDetail(arg1:string,arg2:string,arg3:string):Promise<model
 export function GetPan189Captcha():Promise<string>;
 
 export function GetPlayCursor(arg1:string,arg2:string,arg3:string):Promise<number>;
+
+export function GetPlayerState():Promise<Record<string, number>>;
 
 export function GetSettings():Promise<store.Settings>;
 
@@ -65,6 +79,8 @@ export function ListDownloads():Promise<Array<model.DownloadTask>>;
 export function ListFavorites(arg1:string,arg2:string):Promise<Array<store.Favorite>>;
 
 export function ListLocalTags(arg1:string,arg2:string):Promise<Array<store.LocalTag>>;
+
+export function ListMigrateJobs():Promise<Array<model.MigrateJob>>;
 
 export function ListOfflineTasks(arg1:string):Promise<Array<model.OfflineTask>>;
 
@@ -102,7 +118,11 @@ export function PickDirectory(arg1:string,arg2:string):Promise<string>;
 
 export function PickFiles(arg1:string):Promise<Array<string>>;
 
+export function PinFileSnapshot(arg1:string,arg2:string,arg3:model.File):Promise<void>;
+
 export function PlayVideo(arg1:string,arg2:string,arg3:string):Promise<model.VideoPreview>;
+
+export function PlayVideoQuality(arg1:string,arg2:string,arg3:string,arg4:string):Promise<model.VideoPreview>;
 
 export function PreviewURL(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -135,6 +155,8 @@ export function RevealInFolder(arg1:string):Promise<void>;
 export function RunSync(arg1:string):Promise<void>;
 
 export function SaveCloudTextFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function SaveDirectoryCache(arg1:string,arg2:Array<model.File>):Promise<void>;
 
 export function SaveImportedShare(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<Array<string>>;
 

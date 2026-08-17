@@ -101,6 +101,7 @@ export function previewUrl(userId, driveId, fileId) { return App.PreviewURL(user
 export function localPreviewUrl(path) { return App.LocalPreviewURL(path) }
 export function mediaProxy() { return App.MediaProxy() }
 export function playVideo(userId, driveId, fileId) { return App.PlayVideo(userId, driveId, fileId) }
+export function playVideoQuality(userId, driveId, fileId, quality) { return App.PlayVideoQuality(userId, driveId, fileId, quality) }
 export function pausePlayer(paused) { return App.PausePlayer(paused) }
 export function seekPlayer(sec) { return App.SeekPlayer(sec) }
 export function setPlayerVolume(v) { return App.SetPlayerVolume(v) }

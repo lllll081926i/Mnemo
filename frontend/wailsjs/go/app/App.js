@@ -14,6 +14,10 @@ export function CancelDownload(arg1) {
   return window['go']['app']['App']['CancelDownload'](arg1);
 }
 
+export function CancelMigrate(arg1) {
+  return window['go']['app']['App']['CancelMigrate'](arg1);
+}
+
 export function CancelUpload(arg1) {
   return window['go']['app']['App']['CancelUpload'](arg1);
 }
@@ -22,8 +26,16 @@ export function CheckUpdate() {
   return window['go']['app']['App']['CheckUpdate']();
 }
 
+export function ClearCache() {
+  return window['go']['app']['App']['ClearCache']();
+}
+
 export function ClearDownloads() {
   return window['go']['app']['App']['ClearDownloads']();
+}
+
+export function ClearMigrateJobs() {
+  return window['go']['app']['App']['ClearMigrateJobs']();
 }
 
 export function ClearUploads() {
@@ -38,12 +50,20 @@ export function CreateShare(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateShare'](arg1, arg2, arg3);
 }
 
+export function DeleteDirectoryCache(arg1) {
+  return window['go']['app']['App']['DeleteDirectoryCache'](arg1);
+}
+
 export function DeleteFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteFiles'](arg1, arg2, arg3);
 }
 
 export function DeleteLocalTag(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteLocalTag'](arg1, arg2, arg3);
+}
+
+export function DeleteMigrateJob(arg1) {
+  return window['go']['app']['App']['DeleteMigrateJob'](arg1);
 }
 
 export function DeleteOfflineTask(arg1, arg2, arg3, arg4) {
@@ -70,6 +90,10 @@ export function FavoriteFiles(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['FavoriteFiles'](arg1, arg2, arg3, arg4);
 }
 
+export function GetDirectoryCache(arg1) {
+  return window['go']['app']['App']['GetDirectoryCache'](arg1);
+}
+
 export function GetDownloadURL(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetDownloadURL'](arg1, arg2, arg3);
 }
@@ -84,6 +108,10 @@ export function GetPan189Captcha() {
 
 export function GetPlayCursor(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetPlayCursor'](arg1, arg2, arg3);
+}
+
+export function GetPlayerState() {
+  return window['go']['app']['App']['GetPlayerState']();
 }
 
 export function GetSettings() {
@@ -120,6 +148,10 @@ export function ListFavorites(arg1, arg2) {
 
 export function ListLocalTags(arg1, arg2) {
   return window['go']['app']['App']['ListLocalTags'](arg1, arg2);
+}
+
+export function ListMigrateJobs() {
+  return window['go']['app']['App']['ListMigrateJobs']();
 }
 
 export function ListOfflineTasks(arg1) {
@@ -194,8 +226,16 @@ export function PickFiles(arg1) {
   return window['go']['app']['App']['PickFiles'](arg1);
 }
 
+export function PinFileSnapshot(arg1, arg2, arg3) {
+  return window['go']['app']['App']['PinFileSnapshot'](arg1, arg2, arg3);
+}
+
 export function PlayVideo(arg1, arg2, arg3) {
   return window['go']['app']['App']['PlayVideo'](arg1, arg2, arg3);
+}
+
+export function PlayVideoQuality(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['PlayVideoQuality'](arg1, arg2, arg3, arg4);
 }
 
 export function PreviewURL(arg1, arg2, arg3) {
@@ -260,6 +300,10 @@ export function RunSync(arg1) {
 
 export function SaveCloudTextFile(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['SaveCloudTextFile'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SaveDirectoryCache(arg1, arg2) {
+  return window['go']['app']['App']['SaveDirectoryCache'](arg1, arg2);
 }
 
 export function SaveImportedShare(arg1, arg2, arg3, arg4, arg5) {

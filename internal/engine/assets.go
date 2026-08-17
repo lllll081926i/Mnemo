@@ -164,5 +164,9 @@ func MpvEnv(dir string) []string {
 	if info, err := os.Stat(libDir); err != nil || !info.IsDir() {
 		return nil
 	}
-	return []string{"LD_LIBRARY_PATH=" + libDir + string(os.PathListSeparator) + os.Getenv("LD_LIBRARY_PATH")}
+	paths := []string{libDir}
+	if inherited := strings.TrimSpace(os.Getenv("LD_LIBRARY_PATH")); inherited != "" {
+		paths = append(paths, inherited)
+	}
+	return []string{"LD_LIBRARY_PATH=" + strings.Join(paths, string(os.PathListSeparator))}
 }
