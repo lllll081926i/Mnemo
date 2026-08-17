@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -41,7 +42,19 @@ func (e *CaptchaError) Error() string {
 
 // LastCaptchaImage holds the most recent captcha image as a base64 data URL,
 // exposed for the login panel to render when a login fails with CaptchaError.
-var LastCaptchaImage string
+var (
+	loginStateMu  sync.Mutex
+	pendingLogins = map[string]*pan189LoginState{}
+	lastCaptcha   string
+)
+
+// CaptchaImage returns the latest captcha image for UI integrations that do
+// not carry the username through the login form.
+func CaptchaImage() string {
+	loginStateMu.Lock()
+	defer loginStateMu.Unlock()
+	return lastCaptcha
+}
 
 // pan189LoginState mirrors the pending login parameters that must be reused
 // between fetching the captcha image and submitting the code.
@@ -57,8 +70,6 @@ type pan189LoginState struct {
 }
 
 // pendingLogin caches the params of an in-progress login awaiting a captcha.
-var pendingLogin *pan189LoginState
-
 // loginWithCreds runs the 189 account+password login flow. validateCode is the
 // graphical captcha text when retrying after a CaptchaError.
 func loginWithCreds(ctx context.Context, username, password, validateCode string) (*Session, error) {
@@ -67,11 +78,28 @@ func loginWithCreds(ctx context.Context, username, password, validateCode string
 	if user == "" || pass == "" {
 		return nil, errors.New("请输入天翼云盘账号和密码")
 	}
-	return doLogin(ctx, user, pass, validateCode)
+	session, err := doLogin(ctx, user, pass, validateCode)
+	if err != nil {
+		return nil, err
+	}
+	return attachLoginCredentials(session, user, pass), nil
+}
+
+// attachLoginCredentials keeps the credentials required for the final silent
+// re-login when the provider's open token can no longer refresh a session.
+func attachLoginCredentials(session *Session, username, password string) *Session {
+	if session == nil {
+		return nil
+	}
+	session.Username = strings.TrimSpace(username)
+	session.Password = password
+	return session
 }
 
 func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, error) {
-	state := pendingLogin
+	loginStateMu.Lock()
+	state := pendingLogins[user]
+	loginStateMu.Unlock()
 	if state == nil || state.User != user || state.Pass != pass || validateCode == "" {
 		var err error
 		state, err = prepareLoginParam(ctx, user, pass)
@@ -79,7 +107,9 @@ func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, er
 			return nil, err
 		}
 	}
-	pendingLogin = nil
+	loginStateMu.Lock()
+	delete(pendingLogins, user)
+	loginStateMu.Unlock()
 
 	// needcaptcha: anything other than "0" requires a graphical captcha.
 	if validateCode == "" {
@@ -92,8 +122,10 @@ func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, er
 			if err != nil {
 				return nil, err
 			}
-			LastCaptchaImage = image
-			pendingLogin = state
+			loginStateMu.Lock()
+			lastCaptcha = image
+			pendingLogins[user] = state
+			loginStateMu.Unlock()
 			return nil, &CaptchaError{CaptchaImage: image}
 		}
 	}

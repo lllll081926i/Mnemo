@@ -19,11 +19,11 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	}
 	sess, err := sessionOf(token)
 	if err != nil {
-		return token, nil
+		return nil, err
 	}
 	next, err := d.refreshSession(ctx, token, sess)
 	if err != nil {
-		return token, nil // 刷新失败不阻塞账号展示
+		return nil, err
 	}
 	saveSession(token, next)
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
 )
 
@@ -157,6 +158,31 @@ func TestParseSession(t *testing.T) {
 	// missing secret → invalid
 	if ParseSession(`{"sessionKey":"k"}`) != nil {
 		t.Fatal("session without secret must be invalid")
+	}
+}
+
+func TestAttachLoginCredentials(t *testing.T) {
+	session := attachLoginCredentials(&Session{SessionKey: "k", SessionSecret: "s"}, "  user@example.com  ", "password")
+	if session.Username != "user@example.com" || session.Password != "password" {
+		t.Fatalf("login credentials were not attached: %+v", session)
+	}
+	parsed := ParseSession(mustJSON(session))
+	if parsed == nil || parsed.Username != "user@example.com" || parsed.Password != "password" {
+		t.Fatalf("login credentials were not persisted: %+v", parsed)
+	}
+}
+
+func TestPan189UploadSessionState(t *testing.T) {
+	c := drive.Context{UserID: "pan189:user", DriveID: "pan189:user"}
+	first := pan189UploadSessionKey(c, "-11", "movie.mp4", 100, "abc")
+	second := pan189UploadSessionKey(c, "-11", "movie.mp4", 100, "def")
+	if first == second {
+		t.Fatal("upload session key must include the file hash")
+	}
+
+	id, completed := restorePan189UploadState(" upload-1 ", []int{0, 1, 2, 4}, 3)
+	if id != "upload-1" || !completed[1] || !completed[2] || completed[4] || completed[0] {
+		t.Fatalf("restored upload state is invalid: id=%q parts=%v", id, completed)
 	}
 }
 

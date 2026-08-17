@@ -28,6 +28,7 @@ func init() {
 			"copy":            true,
 			"recycleBin":      true,
 			"permanentDelete": true,
+			"trashRestore":    false,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"md5"}, []string{"md5"})
 		}),

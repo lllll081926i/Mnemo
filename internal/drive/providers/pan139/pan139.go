@@ -9,15 +9,18 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,11 +34,14 @@ import (
 )
 
 const (
-	routeURL = "https://api.mail.10086.cn/h5/short/long/url"
-	refreshURL = "https://api.mail.10086.cn/mcloud/accessToken"
-	ua       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	RootID   = "pan139_root"
-	chunkSize = 5 * 1024 * 1024 // upload chunk
+	routeURL                   = "https://user-njs.yun.139.com/user/route/qryRoutePolicy"
+	refreshURL                 = "https://aas.caiyun.feixin.10086.cn:443/tellin/authTokenRefresh.do"
+	ua                         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	RootID                     = "pan139_root"
+	pan139UploadPartSize       = int64(100 * 1024 * 1024)
+	pan139LargePartSize        = int64(200 * 1024 * 1024)
+	pan139LargeUploadThreshold = int64(30 * 1024 * 1024 * 1024)
+	pan139MaxPartsPerRequest   = 100
 )
 
 const providerID = model.ProviderPan139
@@ -48,8 +54,9 @@ func init() {
 			"copy":            true,
 			"recycleBin":      true,
 			"permanentDelete": true,
-			"trashRestore":    true,
-		}, nil),
+		}, func(c *drive.Capabilities) {
+			c.SetHashes([]string{"sha256"}, []string{"sha256"})
+		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "username", Type: "text", Label: "手机号/邮箱", Required: true},
 			{Key: "password", Type: "password", Label: "密码", Required: true},
@@ -209,9 +216,21 @@ func formatTs() string {
 	return time.Now().Format("2006-01-02 15:04:05")
 }
 
+// normalizeAuthorization removes an optional case-insensitive Basic scheme.
+func normalizeAuthorization(authorization string) string {
+	authorization = strings.TrimSpace(authorization)
+	if len(authorization) > len("Basic") && strings.EqualFold(authorization[:len("Basic")], "Basic") {
+		separator := authorization[len("Basic")]
+		if separator == ' ' || separator == '\t' {
+			return strings.TrimSpace(authorization[len("Basic"):])
+		}
+	}
+	return authorization
+}
+
 // decodeAuthorization parses Basic base64(user:account:token|...|expiration).
 func decodeAuthorization(authorization string) (raw, account, tokenPart, splits0 string, expiration int64, err error) {
-	authorization = strings.TrimSpace(strings.TrimPrefix(authorization, "Basic "))
+	authorization = normalizeAuthorization(authorization)
 	decoded, err := base64.StdEncoding.DecodeString(authorization)
 	if err != nil {
 		return "", "", "", "", 0, errors.New("pan139: authorization 无效")
@@ -226,7 +245,9 @@ func decodeAuthorization(authorization string) (raw, account, tokenPart, splits0
 	if len(strs) < 4 {
 		return "", "", "", "", 0, errors.New("pan139: authorization token 无效")
 	}
-	fmt.Sscanf(strs[3], "%d", &expiration)
+	if _, err := fmt.Sscanf(strs[len(strs)-1], "%d", &expiration); err != nil || expiration <= 0 {
+		return "", "", "", "", 0, errors.New("pan139: authorization expiration 无效")
+	}
 	return authorization, account, tokenPart, splits[0], expiration, nil
 }
 
@@ -279,7 +300,7 @@ func loadCred(hc *netx.Client, tok *model.TokenInfo) (*cred, error) {
 	if tok == nil {
 		return nil, errors.New("139 云盘未登录")
 	}
-	auth := strings.TrimSpace(strings.TrimPrefix(tok.AccessToken, "Basic "))
+	auth := normalizeAuthorization(tok.AccessToken)
 	var stored struct {
 		Authorization     string `json:"authorization"`
 		Account           string `json:"account"`
@@ -287,19 +308,26 @@ func loadCred(hc *netx.Client, tok *model.TokenInfo) (*cred, error) {
 	}
 	_ = json.Unmarshal([]byte(tok.RefreshToken), &stored)
 	if auth == "" {
-		auth = strings.TrimSpace(strings.TrimPrefix(stored.Authorization, "Basic "))
+		auth = normalizeAuthorization(stored.Authorization)
 	}
 	if auth == "" {
 		return nil, errors.New("139 云盘未登录")
 	}
 	account := stored.Account
-	if dec, _, acc, _, _, err := decodeAuthorization(auth); err == nil {
-		account = acc
-		_ = dec
-		if next, err2 := refreshAuthorization(hc, auth); err2 == nil && next != auth {
-			auth = next
-			tok.AccessToken = next
-		}
+	authChanged := false
+	_, _, acc, _, _, err := decodeAuthorization(auth)
+	if err != nil {
+		return nil, err
+	}
+	account = acc
+	next, err := refreshAuthorization(hc, auth)
+	if err != nil {
+		return nil, err
+	}
+	if next != auth {
+		auth = next
+		tok.AccessToken = next
+		authChanged = true
 	}
 	host := strings.TrimSuffix(stored.PersonalCloudHost, "/")
 	if host == "" {
@@ -309,7 +337,11 @@ func loadCred(hc *netx.Client, tok *model.TokenInfo) (*cred, error) {
 		}
 		host = h
 		stored.PersonalCloudHost = host
+	}
+	if authChanged || stored.Authorization != auth || stored.Account != account || stored.PersonalCloudHost != host {
 		stored.Authorization = auth
+		stored.Account = account
+		stored.PersonalCloudHost = host
 		tok.RefreshToken = mustJSON(stored)
 	}
 	return &cred{authorization: auth, account: account, host: host}, nil
@@ -331,7 +363,7 @@ func ensureHost(hc *netx.Client, authorization, account string) (string, error) 
 	ts := formatTs()
 	sign := calSign(string(bodyStr), ts, randStr)
 	var res struct {
-		Success bool `json:"success"`
+		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
 			RoutePolicyList []struct {
@@ -357,17 +389,32 @@ func ensureHost(hc *netx.Client, authorization, account string) (string, error) 
 
 func mcloudHeaders(authorization, ts, randStr, sign string) map[string]string {
 	return map[string]string{
-		"Authorization":      "Basic " + authorization,
-		"Mcloud-Channel":     "1000101",
-		"Mcloud-Client":      "10701",
-		"Mcloud-Sign":        fmt.Sprintf("%s,%s,%s", ts, randStr, sign),
-		"Mcloud-Version":     "7.14.0",
-		"X-Yun-Api-Version":  "v1",
-		"X-Yun-App-Channel":  "10000034",
-		"X-Yun-Svc-Type":     "1",
-		"Origin":             "https://yun.139.com",
-		"Referer":            "https://yun.139.com/w/",
-		"User-Agent":         ua,
+		"Accept":                 "application/json, text/plain, */*",
+		"Authorization":          "Basic " + authorization,
+		"CMS-DEVICE":             "default",
+		"Caller":                 "web",
+		"Inner-Hcy-Router-Https": "1",
+		"Mcloud-Channel":         "1000101",
+		"Mcloud-Client":          "10701",
+		"Mcloud-Route":           "001",
+		"Mcloud-Sign":            fmt.Sprintf("%s,%s,%s", ts, randStr, sign),
+		"Mcloud-Version":         "7.14.0",
+		"X-Yun-Api-Version":      "v1",
+		"X-Yun-App-Channel":      "10000034",
+		"X-Yun-Svc-Type":         "1",
+		"x-DeviceInfo":           "||9|7.14.0|chrome|120.0.0.0|||windows 10||zh-CN|||",
+		"x-huawei-channelSrc":    "10000034",
+		"x-inner-ntwk":           "2",
+		"x-m4c-caller":           "PC",
+		"x-m4c-src":              "10002",
+		"x-SvcType":              "1",
+		"x-yun-channel-source":   "10000034",
+		"x-yun-client-info":      "||9|7.14.0|chrome|120.0.0.0|||windows 10||zh-CN|||dW5kZWZpbmVk||",
+		"x-yun-module-type":      "100",
+		"x-yun-svc-type":         "1",
+		"Origin":                 "https://yun.139.com",
+		"Referer":                "https://yun.139.com/w/",
+		"User-Agent":             ua,
 	}
 }
 
@@ -384,158 +431,320 @@ func (d *Driver) personalPost(ctx context.Context, c drive.Context, pathname str
 	sign := calSign(string(bodyStr), ts, randStr)
 	url := cr.host + "/" + strings.TrimPrefix(pathname, "/")
 	headers := mcloudHeaders(cr.authorization, ts, randStr, sign)
-	headers["Content-Type"] = "application/json"
+	headers["Content-Type"] = "application/json;charset=UTF-8"
 	resp, err := hc.Do(ctx, http.MethodPost, url, headers, strings.NewReader(string(bodyStr)))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("pan139: API HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
 	var wrapper struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
+		Success *bool           `json:"success"`
+		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &wrapper); err != nil {
 		return nil, err
 	}
-	if !wrapper.Success {
-		return nil, errors.New(wrapper.Message)
+	if wrapper.Success != nil && !*wrapper.Success {
+		message := strings.TrimSpace(wrapper.Message)
+		if message == "" {
+			message = "139 云盘 API 返回失败"
+		}
+		return nil, errors.New(message)
 	}
 	return wrapper.Data, nil
 }
 
 // file139 is a raw 139 file entry.
 type file139 struct {
-	FileID        string `json:"fileId"`
-	Name          string `json:"name"`
-	CatalogID     string `json:"catalogId"`
-	ParentCatalogID string `json:"parentCatalogId"`
-	Size          int64  `json:"size"`
-	UpdateTime    string `json:"updateTime"`
-	CreateTime    string `json:"createTime"`
-	ContentType   string `json:"contentType"`
-	Path          string `json:"path"`
-	Star          int    `json:"star"`
-	IsDir         bool   `json:"-"`
+	FileID          pan139FlexString `json:"fileId"`
+	Name            string           `json:"name"`
+	CatalogID       pan139FlexString `json:"catalogId"`
+	ParentCatalogID pan139FlexString `json:"parentCatalogId"`
+	ParentFileID    pan139FlexString `json:"parentFileId"`
+	Size            pan139FlexInt64  `json:"size"`
+	UpdateTime      string           `json:"updateTime"`
+	CreateTime      string           `json:"createTime"`
+	UpdatedAt       any              `json:"updatedAt"`
+	CreatedAt       any              `json:"createdAt"`
+	ContentType     string           `json:"contentType"`
+	Type            string           `json:"type"`
+	CatalogName     string           `json:"catalogName"`
+	ContentHash     string           `json:"contentHash"`
+	ContentHashAlg  string           `json:"contentHashAlgorithm"`
+	Path            string           `json:"path"`
+	Star            int              `json:"star"`
+	IsDir           bool             `json:"-"`
 }
 
 // listData is the list response data.
 type listData struct {
-	Items []file139 `json:"dataList"`
-	NextPageCursor string `json:"nextPageCursor"`
+	Items          []file139 `json:"items"`
+	LegacyItems    []file139 `json:"dataList"`
+	NextPageCursor string    `json:"nextPageCursor"`
+}
+
+// pan139FlexString accepts provider ids returned as either JSON strings or numbers.
+type pan139FlexString string
+
+func (s *pan139FlexString) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*s = ""
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err == nil {
+		*s = pan139FlexString(value)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+	*s = pan139FlexString(number.String())
+	return nil
+}
+
+func (s pan139FlexString) String() string { return string(s) }
+
+// pan139FlexInt64 accepts file sizes returned as JSON numbers or strings.
+type pan139FlexInt64 int64
+
+func (n *pan139FlexInt64) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*n = 0
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err == nil {
+		value, err := strconv.ParseInt(number.String(), 10, 64)
+		if err == nil {
+			*n = pan139FlexInt64(value)
+			return nil
+		}
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return err
+	}
+	*n = pan139FlexInt64(parsed)
+	return nil
+}
+
+type pan139CreateData struct {
+	FileID    pan139FlexString `json:"fileId"`
+	CatalogID pan139FlexString `json:"catalogId"`
+	Name      string           `json:"name"`
+}
+
+type pan139UploadPart struct {
+	ParallelHashCtx struct {
+		PartOffset int64 `json:"partOffset"`
+	} `json:"parallelHashCtx"`
+	PartNumber int   `json:"partNumber"`
+	PartSize   int64 `json:"partSize"`
+}
+
+type pan139UploadPartURL struct {
+	PartNumber int    `json:"partNumber"`
+	UploadURL  string `json:"uploadUrl"`
+}
+
+type pan139UploadCreateData struct {
+	FileID      pan139FlexString      `json:"fileId"`
+	FileName    string                `json:"fileName"`
+	UploadID    string                `json:"uploadId"`
+	PartInfos   []pan139UploadPartURL `json:"partInfos"`
+	RapidUpload bool                  `json:"rapidUpload"`
+	Exist       bool                  `json:"exist"`
+}
+
+type pan139UploadURLsData struct {
+	FileID    pan139FlexString      `json:"fileId"`
+	UploadID  string                `json:"uploadId"`
+	PartInfos []pan139UploadPartURL `json:"partInfos"`
+}
+
+type pan139UploadSession struct {
+	FileID      string `json:"fileId"`
+	UploadID    string `json:"uploadId"`
+	ContentHash string `json:"contentHash"`
 }
 
 // ListPage lists one page.
 func (d *Driver) ListPage(ctx context.Context, c drive.Context, parentID, marker string) ([]model.File, string, error) {
-	pageNum := 1
-	startNumber := 0
-	if marker != "" {
-		// marker encodes the next page number and start offset as "page:start"
-		if parts := strings.SplitN(marker, ":", 2); len(parts) == 2 {
-			if n, err := strconv.Atoi(parts[0]); err == nil {
-				pageNum = n
-			}
-			if n, err := strconv.Atoi(parts[1]); err == nil {
-				startNumber = n
-			}
-		}
-	}
 	raw, err := d.personalPost(ctx, c, "/file/list", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"catalogID":         toID(parentID),
-		"contentCategory":   1,
-		"orderBy":           "updateTime",
-		"pageNum":           pageNum,
-		"pageSize":          100,
-		"sortDirection":     "desc",
-		"sortType":          1,
-		"searchName":        "",
-		"startNumber":       startNumber,
+		"imageThumbnailStyleList": []string{"Small", "Large"},
+		"orderBy":                 "updated_at",
+		"orderDirection":          "DESC",
+		"pageInfo": map[string]any{
+			"pageCursor": marker,
+			"pageSize":   100,
+		},
+		"parentFileId": uploadParentID(parentID),
 	})
 	if err != nil {
 		return nil, "", err
 	}
 	var data listData
-	_ = json.Unmarshal(raw, &data)
-	items := make([]model.File, 0, len(data.Items))
-	for _, it := range data.Items {
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, "", fmt.Errorf("pan139: 文件列表响应无效: %w", err)
+	}
+	entries := data.Items
+	if entries == nil {
+		entries = data.LegacyItems
+	}
+	items := make([]model.File, 0, len(entries))
+	for _, it := range entries {
 		items = append(items, mapFile(it, c.DriveID, parentID))
 	}
-	nextMarker := ""
-	if len(data.Items) >= 100 {
-		nextMarker = strconv.Itoa(pageNum+1) + ":" + strconv.Itoa(startNumber+len(data.Items))
+	nextMarker := strings.TrimSpace(data.NextPageCursor)
+	if nextMarker == marker {
+		nextMarker = ""
 	}
 	return items, nextMarker, nil
 }
 
 func accountOf(c drive.Context) string {
+	if c.Token == nil {
+		return ""
+	}
 	var stored struct {
-		Account string `json:"account"`
+		Authorization string `json:"authorization"`
+		Account       string `json:"account"`
 	}
 	_ = json.Unmarshal([]byte(c.Token.RefreshToken), &stored)
-	return stored.Account
+	if stored.Account != "" {
+		return stored.Account
+	}
+	for _, authorization := range []string{c.Token.AccessToken, stored.Authorization} {
+		if _, account, _, _, _, err := decodeAuthorization(authorization); err == nil && account != "" {
+			return account
+		}
+	}
+	return ""
 }
 
-func toID(id string) string {
+func normalizePan139IDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func containsPan139Root(ids []string) bool {
+	for _, id := range ids {
+		if id == "" || id == "/" || id == "root" || id == RootID || id == "0" {
+			return true
+		}
+	}
+	return false
+}
+
+// uploadParentID is the root representation used by the newer personal-cloud
+// upload API. The legacy list API uses "root", while /file/create expects "/".
+func uploadParentID(id string) string {
 	if id == "" || id == "root" || id == "/" || id == RootID {
-		return "root"
+		return "/"
 	}
 	return id
 }
 
+func fileRequestID(id string) string {
+	return uploadParentID(id)
+}
+
 // Detail returns one file.
 func (d *Driver) Detail(ctx context.Context, c drive.Context, fileID string) (*file139, error) {
-	raw, err := d.personalPost(ctx, c, "/file/getInfo", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileId":            toID(fileID),
-	})
+	raw, err := d.personalPost(ctx, c, "/file/get", map[string]any{"fileId": fileRequestID(fileID)})
 	if err != nil {
 		return nil, err
 	}
 	var it file139
-	_ = json.Unmarshal(raw, &it)
+	if err := json.Unmarshal(raw, &it); err != nil {
+		return nil, fmt.Errorf("pan139: 文件详情响应无效: %w", err)
+	}
+	if it.FileID.String() == "" && it.CatalogID.String() == "" {
+		return nil, errors.New("pan139: 文件详情缺少 fileId")
+	}
 	return &it, nil
 }
 
 // DownloadInfo returns the download URL.
 func (d *Driver) DownloadInfo(ctx context.Context, c drive.Context, fileID string) (string, int64, error) {
-	raw, err := d.personalPost(ctx, c, "/file/getDownloadUrl", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileId":            toID(fileID),
-	})
+	raw, err := d.personalPost(ctx, c, "/file/getDownloadUrl", map[string]any{"fileId": fileRequestID(fileID)})
 	if err != nil {
 		return "", 0, err
 	}
 	var res struct {
-		URL  string `json:"url"`
-		Size int64  `json:"size"`
+		CDNURL   string          `json:"cdnUrl"`
+		URL      string          `json:"url"`
+		FileName string          `json:"fileName"`
+		Size     pan139FlexInt64 `json:"size"`
 	}
-	_ = json.Unmarshal(raw, &res)
-	return res.URL, res.Size, nil
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", 0, fmt.Errorf("pan139: 下载地址响应无效: %w", err)
+	}
+	if strings.TrimSpace(res.CDNURL) == "" && strings.TrimSpace(res.URL) == "" {
+		return "", 0, errors.New("pan139: 下载地址为空")
+	}
+	if strings.TrimSpace(res.CDNURL) != "" {
+		return res.CDNURL, int64(res.Size), nil
+	}
+	return res.URL, int64(res.Size), nil
 }
 
 func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name string) (*drive.MkdirResult, error) {
-	raw, err := d.personalPost(ctx, c, "/file/createCatalog", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"parentCatalogId":   toID(parentID),
-		"catalogName":       name,
+	raw, err := d.personalPost(ctx, c, "/file/create", map[string]any{
+		"parentFileId":   uploadParentID(parentID),
+		"name":           name,
+		"description":    "",
+		"type":           "folder",
+		"fileRenameMode": "force_rename",
 	})
 	if err != nil {
 		return &drive.MkdirResult{Error: err.Error()}, nil
 	}
-	var res struct {
-		CatalogID string `json:"catalogId"`
+	var res pan139CreateData
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return &drive.MkdirResult{Error: fmt.Sprintf("pan139: 创建文件夹响应无效: %v", err)}, nil
 	}
-	_ = json.Unmarshal(raw, &res)
-	return &drive.MkdirResult{FileID: res.CatalogID}, nil
+	fileID := res.FileID.String()
+	if fileID == "" {
+		fileID = res.CatalogID.String()
+	}
+	if fileID == "" {
+		return &drive.MkdirResult{Error: "pan139: 创建文件夹未返回 fileId"}, nil
+	}
+	return &drive.MkdirResult{FileID: fileID}, nil
 }
 
 func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name string) (*drive.RenameResult, error) {
-	_, err := d.personalPost(ctx, c, "/file/rename", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileId":            toID(fileID),
-		"newName":           name,
+	_, err := d.personalPost(ctx, c, "/file/update", map[string]any{
+		"fileId":      fileRequestID(fileID),
+		"name":        name,
+		"description": "",
 	})
 	if err != nil {
 		return nil, err
@@ -576,11 +785,21 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 }
 
 func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*model.File, error) {
+	if fileID == RootID || fileID == "/" || fileID == "root" {
+		return &model.File{DriveID: c.DriveID, FileID: RootID, Name: "139 云盘", NameSearch: "139", IsDir: true, Icon: "iconfile-folder"}, nil
+	}
 	it, err := d.Detail(ctx, c, fileID)
 	if err != nil {
 		return nil, err
 	}
-	f := mapFile(*it, c.DriveID, it.ParentCatalogID)
+	parentID := it.ParentFileID.String()
+	if parentID == "" {
+		parentID = it.ParentCatalogID.String()
+	}
+	if parentID == "/" || parentID == "root" {
+		parentID = RootID
+	}
+	f := mapFile(*it, c.DriveID, parentID)
 	return &f, nil
 }
 
@@ -591,7 +810,12 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	}
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID, URL: u, Size: size,
-		Headers: map[string]string{"Referer": "https://yun.139.com/"}, DownloadMode: "proxy", Concurrency: 1,
+		Headers: map[string]string{
+			"Referer":    "https://yun.139.com/",
+			"Origin":     "https://yun.139.com",
+			"User-Agent": ua,
+		},
+		DownloadMode: "proxy", Concurrency: 1,
 	}, nil
 }
 
@@ -611,25 +835,34 @@ func (d *Driver) MkdirR(ctx context.Context, c drive.Context, parentID, name str
 }
 
 func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
-	_, err := d.personalPost(ctx, c, "/file/trash", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileIdList":        fileIDs,
-	})
+	ids := normalizePan139IDs(fileIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if containsPan139Root(ids) {
+		return nil, errors.New("pan139: 根目录不支持移入回收站")
+	}
+	_, err := d.personalPost(ctx, c, "/recyclebin/batchTrash", map[string]any{"fileIds": ids})
 	if err != nil {
 		return nil, err
 	}
-	return fileIDs, nil
+	return ids, nil
 }
 
 func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
 	ids := make([]string, 0, len(refs))
 	for _, r := range refs {
-		ids = append(ids, r.ID)
+		if id := strings.TrimSpace(r.ID); id != "" {
+			ids = append(ids, id)
+		}
 	}
-	_, err := d.personalPost(ctx, c, "/file/delete", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileIdList":        ids,
-	})
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if containsPan139Root(ids) {
+		return nil, errors.New("pan139: 根目录不支持永久删除")
+	}
+	_, err := d.personalPost(ctx, c, "/file/batchDelete", map[string]any{"fileIds": ids})
 	if err != nil {
 		return nil, err
 	}
@@ -637,25 +870,25 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
-	_, err := d.personalPost(ctx, c, "/file/restore", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileIdList":        fileIDs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return fileIDs, nil
+	return nil, drive.NotSupported("pan139 recycle restore")
 }
 
 func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
 	ids := make([]string, 0, len(refs))
 	for _, r := range refs {
-		ids = append(ids, r.ID)
+		if id := strings.TrimSpace(r.ID); id != "" {
+			ids = append(ids, id)
+		}
 	}
-	_, err := d.personalPost(ctx, c, "/file/move", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileIdList":        ids,
-		"toCatalogId":       toID(toParentID),
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if containsPan139Root(ids) {
+		return nil, errors.New("pan139: 根目录不支持移动")
+	}
+	_, err := d.personalPost(ctx, c, "/file/batchMove", map[string]any{
+		"fileIds":        ids,
+		"toParentFileId": uploadParentID(toParentID),
 	})
 	if err != nil {
 		return nil, err
@@ -666,12 +899,19 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
 	ids := make([]string, 0, len(refs))
 	for _, r := range refs {
-		ids = append(ids, r.ID)
+		if id := strings.TrimSpace(r.ID); id != "" {
+			ids = append(ids, id)
+		}
 	}
-	_, err := d.personalPost(ctx, c, "/file/copy", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileIdList":        ids,
-		"toCatalogId":       toID(toParentID),
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if containsPan139Root(ids) {
+		return nil, errors.New("pan139: 根目录不支持复制")
+	}
+	_, err := d.personalPost(ctx, c, "/file/batchCopy", map[string]any{
+		"fileIds":        ids,
+		"toParentFileId": uploadParentID(toParentID),
 	})
 	if err != nil {
 		return nil, err
@@ -679,95 +919,487 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 	return ids, nil
 }
 
-// UploadOneFile uploads a single file in chunks.
+// pan139UploadParts builds the part description expected by /file/create and
+// /file/getUploadUrl. The root API accepts at most 100 part descriptions per
+// URL request; the caller fetches additional batches as needed.
+func pan139UploadParts(size int64) []pan139UploadPart {
+	if size < 0 {
+		size = 0
+	}
+	partSize := pan139UploadPartSize
+	if size > pan139LargeUploadThreshold {
+		partSize = pan139LargePartSize
+	}
+	partCount := size / partSize
+	if size%partSize != 0 {
+		partCount++
+	}
+	if partCount == 0 {
+		partCount = 1
+	}
+	parts := make([]pan139UploadPart, 0, int(partCount))
+	for i := int64(0); i < partCount; i++ {
+		offset := i * partSize
+		length := size - offset
+		if length > partSize {
+			length = partSize
+		}
+		if length < 0 {
+			length = 0
+		}
+		part := pan139UploadPart{PartNumber: int(i + 1), PartSize: length}
+		part.ParallelHashCtx.PartOffset = offset
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+func pan139ContentType(name string) string {
+	contentType := mime.TypeByExtension(strings.ToLower(strings.TrimSpace(filepath.Ext(name))))
+	if contentType == "" {
+		return "application/octet-stream"
+	}
+	return contentType
+}
+
+func hashPan139File(ctx context.Context, f *os.File) (string, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	buf := make([]byte, 1024*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, err := f.Read(buf)
+		if n > 0 {
+			if _, writeErr := h.Write(buf[:n]); writeErr != nil {
+				return "", writeErr
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func encodePan139UploadSession(session pan139UploadSession) string {
+	b, _ := json.Marshal(session)
+	return string(b)
+}
+
+func decodePan139UploadSession(raw string) (pan139UploadSession, bool) {
+	var session pan139UploadSession
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &session) != nil {
+		return pan139UploadSession{}, false
+	}
+	if strings.TrimSpace(session.FileID) == "" || strings.TrimSpace(session.UploadID) == "" {
+		return pan139UploadSession{}, false
+	}
+	return session, true
+}
+
+func mergePan139UploadURLs(urls map[int]string, parts []pan139UploadPartURL) {
+	for _, part := range parts {
+		if part.PartNumber > 0 && strings.TrimSpace(part.UploadURL) != "" {
+			urls[part.PartNumber] = strings.TrimSpace(part.UploadURL)
+		}
+	}
+}
+
+func (d *Driver) getPan139UploadURLs(ctx context.Context, c drive.Context, fileID, uploadID string, parts []pan139UploadPart) (map[int]string, error) {
+	urls := make(map[int]string, len(parts))
+	for start := 0; start < len(parts); start += pan139MaxPartsPerRequest {
+		end := start + pan139MaxPartsPerRequest
+		if end > len(parts) {
+			end = len(parts)
+		}
+		var response pan139UploadURLsData
+		raw, err := d.personalPost(ctx, c, "/file/getUploadUrl", map[string]any{
+			"fileId":    fileID,
+			"uploadId":  uploadID,
+			"partInfos": parts[start:end],
+			"commonAccountInfo": map[string]any{
+				"account":     accountOf(c),
+				"accountType": 1,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &response); err != nil {
+			return nil, fmt.Errorf("pan139: 上传地址响应无效: %w", err)
+		}
+		if response.FileID.String() != "" && response.FileID.String() != fileID {
+			return nil, errors.New("pan139: 上传地址返回了错误的 fileId")
+		}
+		if response.UploadID != "" && response.UploadID != uploadID {
+			return nil, errors.New("pan139: 上传地址返回了错误的 uploadId")
+		}
+		mergePan139UploadURLs(urls, response.PartInfos)
+	}
+	return urls, nil
+}
+
+func putPan139UploadPart(ctx context.Context, hc *netx.Client, f *os.File, part pan139UploadPart, uploadURL string) error {
+	body := io.NewSectionReader(f, part.ParallelHashCtx.PartOffset, part.PartSize)
+	req, err := hc.Req(ctx, http.MethodPut, uploadURL, body)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = part.PartSize
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Origin", "https://yun.139.com")
+	req.Header.Set("Referer", "https://yun.139.com/")
+	resp, err := hc.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("pan139: 分片 %d 上传失败 HTTP %d", part.PartNumber, resp.StatusCode)
+	}
+	return nil
+}
+
+// UploadOneFile uploads a file through 139's SHA-256 precreate protocol.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
+		return errors.New("pan139: 上传文件路径为空")
+	}
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	info, _ := f.Stat()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
 	size := info.Size()
-	buf := make([]byte, chunkSize)
-	var offset int64
-	var uploadID string
-	for offset < size {
-		n, err := f.ReadAt(buf, offset)
-		if err != nil && err != io.EOF {
-			return err
+	ui.Info.Size = size
+	contentHash, err := hashPan139File(ctx, f)
+	if err != nil {
+		return err
+	}
+	parts := pan139UploadParts(size)
+	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
+	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)
+	session, resumed := decodePan139UploadSession(savedSessionID)
+	if !resumed || !strings.EqualFold(session.ContentHash, contentHash) {
+		resumed = false
+		session = pan139UploadSession{}
+		savedParts = nil
+	}
+
+	created := pan139UploadCreateData{}
+	if resumed {
+		created.FileID = pan139FlexString(session.FileID)
+		created.UploadID = session.UploadID
+	} else {
+		initialParts := parts
+		if len(initialParts) > pan139MaxPartsPerRequest {
+			initialParts = initialParts[:pan139MaxPartsPerRequest]
 		}
-		chunk := buf[:n]
-		uploadID, err = d.uploadChunk(ctx, c, ui.Info.Name, toID(ui.Info.ParentFileID), uploadID, offset, size, chunk)
+		raw, err := d.personalPost(ctx, c, "/file/create", map[string]any{
+			"contentHash":          contentHash,
+			"contentHashAlgorithm": "SHA256",
+			"contentType":          pan139ContentType(ui.Info.Name),
+			"fileRenameMode":       "auto_rename",
+			"name":                 ui.Info.Name,
+			"parallelUpload":       false,
+			"parentFileId":         uploadParentID(ui.Info.ParentFileID),
+			"partInfos":            initialParts,
+			"size":                 size,
+			"type":                 "file",
+		})
 		if err != nil {
 			return err
 		}
-		offset += int64(n)
-		if ui != nil {
-			ui.Upload.DownSize = offset
-			ui.Upload.DownProcess = int(offset * 100 / size)
+		if err := json.Unmarshal(raw, &created); err != nil {
+			return fmt.Errorf("pan139: 上传初始化响应无效: %w", err)
+		}
+		if created.Exist || created.RapidUpload {
+			ui.Upload.DownSize = size
+			ui.Upload.DownProcess = 100
+			drive.ClearUploadSession(sessionKey)
+			return nil
+		}
+		session = pan139UploadSession{
+			FileID:      created.FileID.String(),
+			UploadID:    created.UploadID,
+			ContentHash: contentHash,
+		}
+		if session.FileID == "" || session.UploadID == "" {
+			return errors.New("pan139: 上传初始化未返回 fileId 或 uploadId")
+		}
+		_ = drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), nil)
+	}
+
+	if session.FileID == "" {
+		session.FileID = created.FileID.String()
+	}
+	if session.UploadID == "" {
+		session.UploadID = created.UploadID
+	}
+	if session.FileID == "" || session.UploadID == "" {
+		return errors.New("pan139: 上传会话缺少 fileId 或 uploadId")
+	}
+	uploadedSet := make(map[int]bool, len(savedParts))
+	for _, partNumber := range savedParts {
+		if partNumber >= 1 && partNumber <= len(parts) {
+			uploadedSet[partNumber] = true
 		}
 	}
+	uploaded := int64(0)
+	for _, part := range parts {
+		if uploadedSet[part.PartNumber] {
+			uploaded += part.PartSize
+		}
+	}
+	ui.Upload.DownSize = uploaded
+	if size > 0 {
+		ui.Upload.DownProcess = int(uploaded * 100 / size)
+	}
+
+	urls := make(map[int]string, len(created.PartInfos))
+	mergePan139UploadURLs(urls, created.PartInfos)
+	pending := make([]pan139UploadPart, 0, len(parts)-len(uploadedSet))
+	for _, part := range parts {
+		if size > 0 && !uploadedSet[part.PartNumber] && strings.TrimSpace(urls[part.PartNumber]) == "" {
+			pending = append(pending, part)
+		}
+	}
+	if len(pending) > 0 {
+		moreURLs, err := d.getPan139UploadURLs(ctx, c, session.FileID, session.UploadID, pending)
+		if err != nil {
+			return err
+		}
+		for partNumber, uploadURL := range moreURLs {
+			urls[partNumber] = uploadURL
+		}
+	}
+
+	hc := netx.NewClient(10 * time.Minute)
+	for _, part := range parts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if uploadedSet[part.PartNumber] {
+			continue
+		}
+		if size > 0 && strings.TrimSpace(urls[part.PartNumber]) == "" {
+			return fmt.Errorf("pan139: 第 %d 个分片未返回上传地址", part.PartNumber)
+		}
+		if part.PartSize > 0 {
+			if err := putPan139UploadPart(ctx, hc, f, part, urls[part.PartNumber]); err != nil {
+				return err
+			}
+		}
+		uploadedSet[part.PartNumber] = true
+		uploaded += part.PartSize
+		_ = drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), drive.SortedUniqueParts(uploadedSet))
+		ui.Upload.DownSize = uploaded
+		if size > 0 {
+			ui.Upload.DownProcess = int(uploaded * 100 / size)
+		} else {
+			ui.Upload.DownProcess = 100
+		}
+	}
+
+	if _, err := d.personalPost(ctx, c, "/file/complete", map[string]any{
+		"contentHash":          contentHash,
+		"contentHashAlgorithm": "SHA256",
+		"fileId":               session.FileID,
+		"uploadId":             session.UploadID,
+	}); err != nil {
+		return err
+	}
+	drive.ClearUploadSession(sessionKey)
+	ui.Upload.DownSize = size
+	ui.Upload.DownProcess = 100
 	return nil
 }
 
-func (d *Driver) uploadChunk(ctx context.Context, c drive.Context, name, parentID, uploadID string, offset, total int64, chunk []byte) (string, error) {
-	raw, err := d.personalPost(ctx, c, "/file/upload", map[string]any{
-		"commonAccountInfo": map[string]any{"account": accountOf(c), "accountType": 1},
-		"fileName":          name,
-		"parentId":          parentID,
-		"fileSize":          total,
-		"uploadId":          uploadID,
-		"chunkOffset":       offset,
-		"chunkSize":         int64(len(chunk)),
-		"chunkTotal":        (total + int64(chunkSize) - 1) / int64(chunkSize),
-		"chunkData":         base64.StdEncoding.EncodeToString(chunk),
-		"sortType":          1,
+// RapidUploadByHash probes/commits 139's SHA-256 precreate path. A miss is
+// reported as Reuse=false so the migration engine can fall back to a normal
+// download and upload; the provider API owns any temporary precreate session.
+func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req drive.RapidUploadRequest) (*drive.RapidUploadResult, error) {
+	if !strings.EqualFold(strings.TrimSpace(req.Method), "sha256") {
+		return &drive.RapidUploadResult{Reuse: false, Message: "139 云盘仅支持 SHA-256 秒传"}, nil
+	}
+	hashValue := strings.ToLower(strings.TrimSpace(req.Hash))
+	if len(hashValue) != sha256.Size*2 {
+		return &drive.RapidUploadResult{Reuse: false, Message: "无效的 SHA-256 指纹"}, nil
+	}
+	if _, err := hex.DecodeString(hashValue); err != nil {
+		return &drive.RapidUploadResult{Reuse: false, Message: "无效的 SHA-256 指纹"}, nil
+	}
+	if req.Size < 0 {
+		return nil, errors.New("pan139: 文件大小不能为负数")
+	}
+	parts := pan139UploadParts(req.Size)
+	if len(parts) > pan139MaxPartsPerRequest {
+		parts = parts[:pan139MaxPartsPerRequest]
+	}
+	raw, err := d.personalPost(ctx, c, "/file/create", map[string]any{
+		"contentHash":          hashValue,
+		"contentHashAlgorithm": "SHA256",
+		"contentType":          pan139ContentType(req.FileName),
+		"fileRenameMode":       "auto_rename",
+		"name":                 req.FileName,
+		"parallelUpload":       false,
+		"parentFileId":         uploadParentID(req.ParentID),
+		"partInfos":            parts,
+		"size":                 req.Size,
+		"type":                 "file",
 	})
-	if err != nil {
-		return "", err
-	}
-	var res struct {
-		UploadID string `json:"uploadId"`
-	}
-	_ = json.Unmarshal(raw, &res)
-	return res.UploadID, nil
-}
-
-func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
-	hc := netx.NewClient(60 * time.Second)
-	cr, err := loadCred(hc, token)
 	if err != nil {
 		return nil, err
 	}
-	// quota
-	raw, err := d.personalPost(ctx, c, "/file/getDiskInfo", map[string]any{
-		"commonAccountInfo": map[string]any{"account": cr.account, "accountType": 1},
-	})
-	if err == nil {
-		var disk struct {
-			UsedSize  string `json:"usedSize"`
-			TotalSize string `json:"totalSize"`
+	var created pan139UploadCreateData
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return nil, fmt.Errorf("pan139: 秒传响应无效: %w", err)
+	}
+	if !created.Exist && !created.RapidUpload {
+		if created.FileID.String() != "" && created.UploadID != "" {
+			key := drive.UploadSessionKey(c.UserID, c.DriveID, req.ParentID, req.FileName, req.Size)
+			_ = drive.SaveUploadSessionState(key, encodePan139UploadSession(pan139UploadSession{
+				FileID: created.FileID.String(), UploadID: created.UploadID, ContentHash: hashValue,
+			}), nil)
 		}
-		_ = json.Unmarshal(raw, &disk)
-		fmt.Sscanf(disk.UsedSize, "%d", &token.UsedSize)
-		fmt.Sscanf(disk.TotalSize, "%d", &token.TotalSize)
+		return &drive.RapidUploadResult{Reuse: false, ParentID: req.ParentID, Message: "未命中秒传"}, nil
+	}
+	if created.FileID.String() != "" {
+		key := drive.UploadSessionKey(c.UserID, c.DriveID, req.ParentID, req.FileName, req.Size)
+		drive.ClearUploadSession(key)
+	}
+	return &drive.RapidUploadResult{
+		Reuse:    true,
+		FileID:   created.FileID.String(),
+		ParentID: req.ParentID,
+		Message:  "秒传命中",
+	}, nil
+}
+
+// ResolveTransferHash reads the SHA-256 content fingerprint exposed by the
+// newer /file/get endpoint for cross-drive migration.
+func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, _ bool) (string, error) {
+	if !strings.EqualFold(strings.TrimSpace(method), "sha256") {
+		return "", nil
+	}
+	raw, err := d.personalPost(ctx, c, "/file/get", map[string]any{"fileId": fileRequestID(fileID)})
+	if err != nil {
+		return "", err
+	}
+	var detail struct {
+		ContentHash          string `json:"contentHash"`
+		ContentHashAlgorithm string `json:"contentHashAlgorithm"`
+	}
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return "", fmt.Errorf("pan139: 文件指纹响应无效: %w", err)
+	}
+	if detail.ContentHashAlgorithm != "" && !strings.EqualFold(detail.ContentHashAlgorithm, "sha256") {
+		return "", nil
+	}
+	hashValue := strings.ToLower(strings.TrimSpace(detail.ContentHash))
+	if len(hashValue) != sha256.Size*2 {
+		return "", nil
+	}
+	if _, err := hex.DecodeString(hashValue); err != nil {
+		return "", nil
+	}
+	return hashValue, nil
+}
+
+func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
+	if token == nil {
+		return nil, errors.New("139 云盘未登录")
+	}
+	hc := netx.NewClient(60 * time.Second)
+	// The migrated personal-cloud API has no verified quota endpoint. Keep
+	// RefreshAccount focused on renewing authorization and the resolved host;
+	// do not call the removed legacy /file/getDiskInfo endpoint or silently
+	// report stale quota values as fresh data.
+	if _, err := loadCred(hc, token); err != nil {
+		return nil, err
 	}
 	return token, nil
 }
 
 // mapFile converts a 139 entry to the unified model.
 func mapFile(it file139, driveID, parentID string) model.File {
-	isDir := it.ContentType == "folder" || (it.Size == 0 && it.Path == "")
-	timeUnix := int64(0)
-	if parsed, err := time.Parse("2006-01-02 15:04:05", it.UpdateTime); err == nil {
-		timeUnix = parsed.Unix()
+	fileID := it.FileID.String()
+	if fileID == "" {
+		fileID = it.CatalogID.String()
 	}
-	f := driveutil.NewFile(driveID, it.FileID, parentID, it.Name, isDir, it.Size, timeUnix)
+	name := strings.TrimSpace(it.Name)
+	if name == "" {
+		name = strings.TrimSpace(it.CatalogName)
+	}
+	isDir := strings.EqualFold(strings.TrimSpace(it.Type), "folder") ||
+		strings.EqualFold(strings.TrimSpace(it.ContentType), "folder") ||
+		(fileID == it.CatalogID.String() && it.CatalogID.String() != "")
+	timeUnix := parsePan139Time(it.UpdateTime, it.UpdatedAt)
+	f := driveutil.NewFile(driveID, fileID, parentID, name, isDir, int64(it.Size), timeUnix)
 	f.Path = it.Path
 	if it.Star != 0 {
 		f.Starred = true
 	}
+	if strings.TrimSpace(it.ContentHash) != "" {
+		f.ContentHash = strings.TrimSpace(it.ContentHash)
+		f.ContentHashName = strings.ToLower(strings.TrimSpace(it.ContentHashAlg))
+		if f.ContentHashName == "" {
+			f.ContentHashName = "sha256"
+		}
+	}
 	return f
+}
+
+func parsePan139Time(primary string, fallback any) int64 {
+	for _, value := range []any{primary, fallback} {
+		switch v := value.(type) {
+		case string:
+			value := strings.TrimSpace(v)
+			if value == "" {
+				continue
+			}
+			for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+				if parsed, err := time.Parse(layout, value); err == nil {
+					return parsed.Unix()
+				}
+			}
+			if millis, err := strconv.ParseInt(value, 10, 64); err == nil {
+				return pan139UnixValue(millis)
+			}
+		case float64:
+			return pan139UnixValue(int64(v))
+		case json.Number:
+			if number, err := strconv.ParseInt(v.String(), 10, 64); err == nil {
+				return pan139UnixValue(number)
+			}
+		}
+	}
+	return 0
+}
+
+func pan139UnixValue(value int64) int64 {
+	if value > 0 && value < 1_000_000_000_000 {
+		return value
+	}
+	if value > 0 {
+		return time.UnixMilli(value).Unix()
+	}
+	return 0
 }
 
 // authLogin handles username/password or authorization login.
@@ -785,7 +1417,7 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 			return nil, err
 		}
 	}
-	_, account, _, _, _, err := decodeAuthorization(strings.TrimPrefix(authorization, "Basic "))
+	_, account, _, _, _, err := decodeAuthorization(authorization)
 	if err != nil {
 		return nil, err
 	}
@@ -796,11 +1428,14 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 	}
 	host, err := ensureHost(hc, next, account)
 	if err != nil {
-		host = ""
+		return nil, err
 	}
 	uid := account
 	if uid == "" {
-		uid = next[:16]
+		uid = next
+		if len(uid) > 16 {
+			uid = uid[:16]
+		}
 	}
 	name := "139 " + uid
 	stored := map[string]any{"authorization": next, "account": account, "personalCloudHost": host}
@@ -810,14 +1445,14 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 		stored["account"] = account
 	}
 	tok := &model.TokenInfo{
-		TokenFrom:    providerID,
-		AccessToken:  next,
-		RefreshToken: mustJSON(stored),
-		TokenType:    "Basic",
-		UserID:       model.BuildUserID(providerID, uid),
-		UserName:     name,
-		NickName:     name,
-		Name:         name,
+		TokenFrom:         providerID,
+		AccessToken:       next,
+		RefreshToken:      mustJSON(stored),
+		TokenType:         "Basic",
+		UserID:            model.BuildUserID(providerID, uid),
+		UserName:          name,
+		NickName:          name,
+		Name:              name,
 		ProviderAccountID: account,
 		ProviderRootID:    "/",
 	}

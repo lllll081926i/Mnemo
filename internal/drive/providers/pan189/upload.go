@@ -234,6 +234,40 @@ func fileMD5Of(r io.ReaderAt, size, slice int64, count int) (string, []string, [
 	return strings.ToUpper(hexEncode(fileSum.Sum(nil))), sliceHexs, partInfos, nil
 }
 
+// pan189UploadSessionKey includes the content hash so replacing a local file
+// with another file of the same name and size cannot reuse the old remote
+// upload session.
+func pan189UploadSessionKey(c drive.Context, parentID, name string, size int64, fileMD5 string) string {
+	nameWithHash := strings.TrimSpace(name) + "\x00" + strings.ToUpper(strings.TrimSpace(fileMD5))
+	return drive.UploadSessionKey(c.UserID, c.DriveID, parentID, nameWithHash, size)
+}
+
+func restorePan189UploadState(sessionID string, partNumbers []int, totalParts int) (string, map[int]bool) {
+	completed := make(map[int]bool, len(partNumbers))
+	for _, partNumber := range partNumbers {
+		if partNumber >= 1 && partNumber <= totalParts {
+			completed[partNumber] = true
+		}
+	}
+	return strings.TrimSpace(sessionID), completed
+}
+
+func pan189UploadedBytes(size, slice int64, completed map[int]bool) int64 {
+	var uploaded int64
+	for partNumber := range completed {
+		start := (int64(partNumber) - 1) * slice
+		if start < 0 || start >= size {
+			continue
+		}
+		partSize := slice
+		if remain := size - start; remain < partSize {
+			partSize = remain
+		}
+		uploaded += partSize
+	}
+	return uploaded
+}
+
 // UploadOneFile uploads a single file in slices
 // (initMultiUpload → getMultiUploadUrls → PUT → commitMultiUploadFile).
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
@@ -283,32 +317,39 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 
-	initRes, err := d.initMultiUpload(ctx, c, base, parentFolderID, fileName, size, slice, count, fileMD5Hex, sliceMD5Hex)
-	if err != nil {
-		return err
-	}
-	uploadFileID := initRes.UploadFileID
+	// Resume before initializing a new remote session. The service creates a
+	// new uploadFileId on every init request, so loading state afterwards can
+	// never resume the saved session.
+	sessionKey := pan189UploadSessionKey(c, parentFolderID, fileName, size, fileMD5Hex)
+	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)
+	uploadFileID, uploadedSet := restorePan189UploadState(savedSessionID, savedParts, count)
 	if uploadFileID == "" {
-		return errors.New("初始化上传失败")
-	}
-	setUploadState(ui, 0, size)
-	if initRes.FileDataExists == 1 {
-		// 服务端按 MD5 命中已存在文件，免上传提交。
-		fileID, err := d.commitMultiUploadFile(ctx, c, base, uploadFileID, fileMD5Hex, sliceMD5Hex, false)
+		initRes, err := d.initMultiUpload(ctx, c, base, parentFolderID, fileName, size, slice, count, fileMD5Hex, sliceMD5Hex)
 		if err != nil {
 			return err
 		}
-		ui.Upload.FileID = fileID
-		setUploadState(ui, size, size)
-		return nil
+		uploadFileID = initRes.UploadFileID
+		if uploadFileID == "" {
+			return errors.New("初始化上传失败")
+		}
+		if initRes.FileDataExists == 1 {
+			// 服务端按 MD5 命中已存在文件，免上传提交。
+			fileID, err := d.commitMultiUploadFile(ctx, c, base, uploadFileID, fileMD5Hex, sliceMD5Hex, false)
+			if err != nil {
+				return err
+			}
+			drive.ClearUploadSession(sessionKey)
+			ui.Upload.FileID = fileID
+			setUploadState(ui, size, size)
+			return nil
+		}
+		// Persist the remote session immediately so a stop or process exit
+		// before the first part still has something to resume.
+		_ = drive.SaveUploadSessionState(sessionKey, uploadFileID, nil)
 	}
 
-	// Resume: load previously uploaded part numbers
-	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
-	uploadedSet := make(map[int]bool)
-	for _, pn := range drive.LoadUploadSession(sessionKey) {
-		uploadedSet[pn] = true
-	}
+	uploaded := pan189UploadedBytes(size, slice, uploadedSet)
+	setUploadState(ui, uploaded, size)
 
 	for i := 1; i <= count; i++ {
 		partInfo := partInfos[i-1]
@@ -319,7 +360,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		// Skip already-uploaded parts (resume)
 		if uploadedSet[i] {
-			setUploadState(ui, start+cur, size)
 			continue
 		}
 		uploadURLStr, headers, err := d.getUploadURLs(ctx, c, base, uploadFileID, partInfo, i)
@@ -334,8 +374,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return err
 		}
 		uploadedSet[i] = true
-		_ = drive.SaveUploadSession(sessionKey, drive.SortedUniqueParts(uploadedSet))
-		setUploadState(ui, start+cur, size)
+		_ = drive.SaveUploadSessionState(sessionKey, uploadFileID, drive.SortedUniqueParts(uploadedSet))
+		uploaded += cur
+		setUploadState(ui, uploaded, size)
 	}
 
 	fileID, err := d.commitMultiUploadFile(ctx, c, base, uploadFileID, fileMD5Hex, sliceMD5Hex, false)
