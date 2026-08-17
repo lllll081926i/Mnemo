@@ -3,9 +3,12 @@ package dropbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 )
 
@@ -156,12 +159,15 @@ func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) (
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, id := range fileIDs {
 		if err := cl.Delete(ctx, id); err == nil {
 			ok = append(ok, id)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", id, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
@@ -170,12 +176,15 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		if err := cl.Delete(ctx, r.ID); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
@@ -188,12 +197,15 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		if err := cl.Move(ctx, r.ID, toParentID); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
@@ -202,12 +214,15 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		if err := cl.Copy(ctx, r.ID, toParentID); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.ShareParams) (*model.ShareItem, error) {
@@ -223,6 +238,9 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 
 // UploadOneFile uploads one file.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || ui.Info.LocalFilePath == "" {
+		return errors.New("Dropbox: 上传文件路径为空")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return err
@@ -237,15 +255,34 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if path != "" {
 		target = path + "/" + ui.Info.Name
 	}
+	policy := uploadPolicy{mode: "overwrite"}
+	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
+	case driveutil.ConflictRefuse:
+		policy = uploadPolicy{mode: "add", strictConflict: true}
+	case driveutil.ConflictRename:
+		policy = uploadPolicy{mode: "add", autorename: true}
+	case driveutil.ConflictSkip:
+		if _, err := cl.Detail(ctx, target); err == nil {
+			return nil
+		} else if !strings.Contains(strings.ToLower(err.Error()), "not_found") {
+			return err
+		}
+	}
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if ui.Info.Size <= uploadSingleLimit {
-		return cl.UploadSmall(ctx, target, f, ui.Info.Size)
+	info, err := f.Stat()
+	if err != nil {
+		return err
 	}
-	return cl.UploadSession(ctx, f, target, ui.Info.Size, ui)
+	size := info.Size()
+	ui.Info.Size = size
+	if size <= uploadSingleLimit {
+		return cl.UploadSmall(ctx, target, f, size, policy)
+	}
+	return cl.UploadSession(ctx, c, f, target, size, ui, policy)
 }
 
 func mapItems(items []Metadata, driveID, parentID string) []model.File {

@@ -2,7 +2,10 @@
 package dropbox
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,11 +24,11 @@ import (
 )
 
 const (
-	apiHost    = "https://api.dropboxapi.com/2"
-	contentHost = "https://content.dropboxapi.com/2"
-	RootID     = "dropbox_root"
+	apiHost           = "https://api.dropboxapi.com/2"
+	contentHost       = "https://content.dropboxapi.com/2"
+	RootID            = "dropbox_root"
 	uploadSingleLimit = 150 * 1024 * 1024 // Dropbox single upload cap
-	sessionChunkSize = 8 * 1024 * 1024
+	sessionChunkSize  = 8 * 1024 * 1024
 )
 
 const providerID = model.ProviderDropbox
@@ -39,6 +43,7 @@ func init() {
 			"shareExpiration": true,
 			"sharePassword":   true,
 			"shareHistory":    true,
+			"recycleBin":      true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"dropbox"}, nil)
 		}),
@@ -52,15 +57,15 @@ func init() {
 
 // Metadata is a raw Dropbox file/folder entry.
 type Metadata struct {
-	Tag           string `json:".tag"`
-	Name          string `json:"name"`
-	ID            string `json:"id"`
-	PathLower     string `json:"path_lower"`
-	PathDisplay   string `json:"path_display"`
-	Rev           string `json:"rev"`
-	Size          int64  `json:"size"`
+	Tag            string `json:".tag"`
+	Name           string `json:"name"`
+	ID             string `json:"id"`
+	PathLower      string `json:"path_lower"`
+	PathDisplay    string `json:"path_display"`
+	Rev            string `json:"rev"`
+	Size           int64  `json:"size"`
 	ServerModified string `json:"server_modified"`
-	ContentHash   string `json:"content_hash"`
+	ContentHash    string `json:"content_hash"`
 }
 
 // client is an authenticated Dropbox session.
@@ -319,12 +324,24 @@ func (c *client) CreateSharedLink(ctx context.Context, path, expiration, passwor
 		var existing []sharedLinkMetadata
 		if err2 := c.rpc(ctx, "/sharing/list_shared_links", map[string]any{"path": path}, &existing); err2 == nil && len(existing) > 0 {
 			link = existing[0]
+			if link.URL == "" {
+				return nil, err
+			}
 			if expiration != "" || password != "" {
-				mod := map[string]any{"url": link.URL}
+				settings := map[string]any{}
 				if expiration != "" {
-					mod["settings"] = map[string]any{"expires": expiration}
+					settings["expires"] = expiration
 				}
-				_ = c.rpc(ctx, "/sharing/modify_shared_link_settings", mod, &link)
+				if password != "" {
+					settings["requested_visibility"] = "password"
+					settings["link_password"] = password
+				} else {
+					settings["requested_visibility"] = "public"
+				}
+				mod := map[string]any{"url": link.URL, "settings": settings}
+				if modifyErr := c.rpc(ctx, "/sharing/modify_shared_link_settings", mod, &link); modifyErr != nil {
+					return nil, fmt.Errorf("dropbox: 修改已有分享设置失败: %w", modifyErr)
+				}
 			}
 			return mapSharedLink(link, path, password), nil
 		}
@@ -348,72 +365,156 @@ func mapSharedLink(l sharedLinkMetadata, path, pwd string) *model.ShareItem {
 // ---- content upload ----
 
 // UploadSmall PUTs a file ≤150MB.
-func (c *client) UploadSmall(ctx context.Context, path string, r io.Reader, size int64) error {
+func (c *client) UploadSmall(ctx context.Context, path string, r io.Reader, size int64, policy uploadPolicy) error {
 	arg, _ := json.Marshal(map[string]any{
-		"path": path, "mode": "add", "autorename": true, "mute": false,
-		"strict_conflict": false,
+		"path": path, "mode": policy.mode, "autorename": policy.autorename, "mute": false,
+		"strict_conflict": policy.strictConflict,
 	})
-	resp, err := c.http.Do(ctx, http.MethodPost, contentHost+"/files/upload",
-		map[string]string{
-			"Authorization":  "Bearer " + c.token,
-			"Content-Type":   "application/octet-stream",
-			"Dropbox-API-Arg": string(arg),
-		}, r)
-	if err != nil {
-		return err
+	headers := map[string]string{
+		"Authorization":   "Bearer " + c.token,
+		"Content-Type":    "application/octet-stream",
+		"Dropbox-API-Arg": string(arg),
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("dropbox: upload http %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			if seeker, ok := r.(io.Seeker); ok {
+				if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+					return err
+				}
+			}
+		}
+		resp, err := c.http.Do(ctx, http.MethodPost, contentHost+"/files/upload", headers, r)
+		if err != nil {
+			return err
+		}
+		data, _ := io.ReadAll(resp.Body)
+		status := resp.StatusCode
+		delay := retryAfter(resp, attempt)
+		resp.Body.Close()
+		if status < 400 {
+			return nil
+		}
+		if !retryableUploadStatus(status) || attempt == 2 {
+			return fmt.Errorf("dropbox: upload http %d: %s", status, strings.TrimSpace(string(data)))
+		}
+		if err := waitRetry(ctx, delay); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// UploadSession streams a file >150MB via upload session chunks.
-func (c *client) UploadSession(ctx context.Context, f *os.File, path string, size int64, ui *model.UploadingUI) error {
-	var sessID string
-	buf := make([]byte, sessionChunkSize)
-	var pos int64
-	// start + append (skip last chunk, finish separately)
-	for pos < size {
-		n, err := f.ReadAt(buf, pos)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if n == 0 {
-			break
-		}
-		chunk := buf[:n]
-		isLast := pos+int64(n) >= size
-		if sessID == "" {
-			sessID, err = c.sessionStart(ctx, chunk)
-			if err != nil {
-				return err
-			}
-		} else if !isLast {
-			if err := c.sessionAppend(ctx, sessID, pos, chunk); err != nil {
-				return err
-			}
-		}
-		pos += int64(n)
-		if isLast {
-			return c.sessionFinish(ctx, sessID, pos-int64(n), chunk, path)
-		}
-		if ui != nil {
-			ui.Upload.DownSize = pos
-			ui.Upload.DownProcess = int(pos * 100 / size)
+// UploadSession streams a file >150MB via upload session chunks. The session
+// id and acknowledged byte offset are persisted so a process restart can
+// continue the same remote session instead of duplicating data.
+func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File, path string, size int64, ui *model.UploadingUI, policy uploadPolicy) error {
+	if size <= 0 {
+		return errors.New("dropbox: upload session empty")
+	}
+	key := drive.UploadSessionKey(dc.UserID, dc.DriveID, "", path, size)
+	savedID, savedParts := drive.LoadUploadSessionState(key)
+	startOffset := int64(0)
+	if savedID != "" && len(savedParts) > 0 && savedParts[0] >= 0 {
+		startOffset = int64(savedParts[0])
+		if startOffset > size {
+			startOffset = 0
+			savedID = ""
 		}
 	}
-	return errors.New("dropbox: upload session empty")
+
+	for attempt := 0; attempt < 2; attempt++ {
+		sessID := savedID
+		pos := startOffset
+		buf := make([]byte, sessionChunkSize)
+		for pos < size {
+			if ui != nil && ui.Upload.IsStop {
+				return errors.New("已暂停")
+			}
+			n, err := f.ReadAt(buf, pos)
+			if err != nil && err != io.EOF {
+				if attempt == 0 && savedID != "" {
+					break
+				}
+				return err
+			}
+			if n == 0 {
+				return errors.New("dropbox: upload session ended before file completion")
+			}
+			chunk := buf[:n]
+			isLast := pos+int64(n) >= size
+			if sessID == "" {
+				sessID, err = c.sessionStart(ctx, chunk)
+				if err != nil {
+					if attempt == 0 && savedID != "" {
+						break
+					}
+					return err
+				}
+				_ = drive.SaveUploadSessionState(key, sessID, []int{int(pos + int64(n))})
+			} else if isLast {
+				err = c.sessionFinish(ctx, sessID, pos, chunk, path, policy)
+				if err == nil {
+					if ui != nil {
+						ui.Upload.DownSize = size
+						ui.Upload.DownProcess = 100
+					}
+					drive.ClearUploadSession(key)
+					return nil
+				}
+				if attempt == 0 && savedID != "" {
+					break
+				}
+				return err
+			} else {
+				err = c.sessionAppend(ctx, sessID, pos, chunk)
+				if err != nil {
+					if attempt == 0 && savedID != "" {
+						break
+					}
+					return err
+				}
+			}
+			pos += int64(n)
+			if ui != nil {
+				ui.Upload.DownSize = pos
+				ui.Upload.DownProcess = int(pos * 100 / size)
+			}
+			_ = drive.SaveUploadSessionState(key, sessID, []int{int(pos)})
+			if isLast {
+				if err := c.sessionFinish(ctx, sessID, pos-int64(n), chunk, path, policy); err != nil {
+					if attempt == 0 && savedID != "" {
+						break
+					}
+					return err
+				}
+				if ui != nil {
+					ui.Upload.DownSize = size
+					ui.Upload.DownProcess = 100
+				}
+				drive.ClearUploadSession(key)
+				return nil
+			}
+		}
+		if attempt == 0 && savedID != "" {
+			drive.ClearUploadSession(key)
+			savedID = ""
+			startOffset = 0
+			continue
+		}
+	}
+	return errors.New("dropbox: upload session failed")
 }
 
 func (c *client) sessionStart(ctx context.Context, chunk []byte) (string, error) {
 	var resp struct {
 		SessionID string `json:"session_id"`
 	}
-	if err := c.contentJSON(ctx, "/files/upload_session/start", nil, chunk, &resp); err != nil {
+	arg, _ := json.Marshal(map[string]any{"close": false})
+	if err := c.contentJSON(ctx, "/files/upload_session/start", arg, chunk, &resp); err != nil {
 		return "", err
+	}
+	if strings.TrimSpace(resp.SessionID) == "" {
+		return "", errors.New("dropbox: upload session response missing session_id")
 	}
 	return resp.SessionID, nil
 }
@@ -425,10 +526,10 @@ func (c *client) sessionAppend(ctx context.Context, sessID string, offset int64,
 	return c.contentJSON(ctx, "/files/upload_session/append_v2", arg, chunk, nil)
 }
 
-func (c *client) sessionFinish(ctx context.Context, sessID string, offset int64, chunk []byte, path string) error {
+func (c *client) sessionFinish(ctx context.Context, sessID string, offset int64, chunk []byte, path string, policy uploadPolicy) error {
 	arg, _ := json.Marshal(map[string]any{
 		"cursor": map[string]any{"session_id": sessID, "offset": offset},
-		"commit": map[string]any{"path": path, "mode": "add", "autorename": true, "mute": false, "strict_conflict": false},
+		"commit": map[string]any{"path": path, "mode": policy.mode, "autorename": policy.autorename, "mute": false, "strict_conflict": policy.strictConflict},
 	})
 	return c.contentJSON(ctx, "/files/upload_session/finish", arg, chunk, nil)
 }
@@ -441,20 +542,62 @@ func (c *client) contentJSON(ctx context.Context, endpoint string, apiArg []byte
 	if apiArg != nil {
 		headers["Dropbox-API-Arg"] = string(apiArg)
 	}
-	resp, err := c.http.Do(ctx, http.MethodPost, contentHost+endpoint, headers, strings.NewReader(string(chunk)))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("dropbox: %s http %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	if out != nil {
-		return json.Unmarshal(data, out)
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, err := c.http.Do(ctx, http.MethodPost, contentHost+endpoint, headers, bytesReader(chunk))
+		if err != nil {
+			return err
+		}
+		data, _ := io.ReadAll(resp.Body)
+		status := resp.StatusCode
+		delay := retryAfter(resp, attempt)
+		resp.Body.Close()
+		if status < 400 {
+			if out != nil {
+				return json.Unmarshal(data, out)
+			}
+			return nil
+		}
+		if !retryableUploadStatus(status) || attempt == 2 {
+			return fmt.Errorf("dropbox: %s http %d: %s", endpoint, status, strings.TrimSpace(string(data)))
+		}
+		if err := waitRetry(ctx, delay); err != nil {
+			return err
+		}
 	}
 	return nil
 }
+
+type uploadPolicy struct {
+	mode           string
+	autorename     bool
+	strictConflict bool
+}
+
+func retryableUploadStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= 500
+}
+
+func retryAfter(resp *http.Response, attempt int) time.Duration {
+	if raw := strings.TrimSpace(resp.Header.Get("Retry-After")); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return time.Duration(1<<attempt) * 500 * time.Millisecond
+}
+
+func waitRetry(ctx context.Context, delay time.Duration) error {
+	t := time.NewTimer(delay)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
 
 // ---- helpers ----
 
@@ -557,11 +700,14 @@ func parentOf(path string) string {
 
 // refreshDropboxToken exchanges a refresh_token for a fresh access_token via
 // the Dropbox OAuth2 token endpoint.
-func refreshDropboxToken(ctx context.Context, appKey, refreshToken string) (*model.TokenInfo, error) {
+func refreshDropboxToken(ctx context.Context, appKey, appSecret, refreshToken string) (*model.TokenInfo, error) {
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 	form.Set("client_id", appKey)
+	if appSecret != "" {
+		form.Set("client_secret", appSecret)
+	}
 
 	cl := netx.NewClient(60 * time.Second)
 	var raw struct {
@@ -615,7 +761,7 @@ func fetchDropboxProfile(ctx context.Context, accessToken string, tok *model.Tok
 
 	// space usage
 	var space struct {
-		Used      int64 `json:"used"`
+		Used       int64 `json:"used"`
 		Allocation *struct {
 			Allocated int64 `json:"allocated"`
 		} `json:"allocation"`
@@ -636,18 +782,20 @@ func fetchDropboxProfile(ctx context.Context, accessToken string, tok *model.Tok
 // token metadata.
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	if token == nil {
-		return nil, nil
+		return nil, errors.New("Dropbox 未登录")
 	}
 	refreshToken := strings.TrimSpace(token.RefreshToken)
 	if refreshToken == "" {
 		return nil, errors.New("dropbox: missing refresh_token")
 	}
-	appKey := strings.TrimSpace(drive.Secret("dropbox_app_key"))
+	configuredKey := strings.TrimSpace(drive.Secret("dropbox_app_key"))
+	appKey := strings.TrimSpace(token.DeviceID)
 	if appKey == "" {
-		return nil, errors.New("dropbox: app_key 未配置（secrets.json dropbox_app_key）")
+		appKey = configuredKey
 	}
+	appKey, appSecret := resolveCredentials(appKey, "", configuredKey, "")
 
-	fresh, err := refreshDropboxToken(ctx, appKey, refreshToken)
+	fresh, err := refreshDropboxToken(ctx, appKey, appSecret, refreshToken)
 	if err != nil {
 		return nil, err
 	}
@@ -657,14 +805,56 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	if fresh.RefreshToken != "" {
 		token.RefreshToken = fresh.RefreshToken
 	}
-	token.ExpiresIn = fresh.ExpiresIn
+	if fresh.ExpiresIn > 0 {
+		token.ExpiresIn = fresh.ExpiresIn
+	} else if token.ExpiresIn <= 0 {
+		token.ExpiresIn = 14400
+	}
 	if fresh.TokenType != "" {
 		token.TokenType = fresh.TokenType
 	}
 	token.TokenFrom = providerID
+	token.DeviceID = appKey
 
 	// update account info + quota (non-blocking on error)
 	fetchDropboxProfile(ctx, token.AccessToken, token)
+	applyDropboxIdentity(token)
 
 	return token, nil
+}
+
+// ResolveTransferHash returns Dropbox's content hash from metadata. Dropbox
+// hashes are provider-specific, so this is useful only to a target declaring
+// the same "dropbox" fingerprint type.
+func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, _ bool) (string, error) {
+	if method != "dropbox" {
+		return "", nil
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return "", err
+	}
+	item, err := cl.Detail(ctx, fileID)
+	if err != nil {
+		return "", err
+	}
+	return item.ContentHash, nil
+}
+
+// applyDropboxIdentity keeps multiple Dropbox accounts isolated by the
+// provider account_id, with a stable fallback for a temporary profile error.
+func applyDropboxIdentity(tok *model.TokenInfo) {
+	if tok == nil {
+		return
+	}
+	id := strings.TrimSpace(tok.ProviderAccountID)
+	if id == "" {
+		sum := sha256.Sum256([]byte(tok.RefreshToken + "|" + tok.AccessToken))
+		id = hex.EncodeToString(sum[:8])
+	}
+	tok.ProviderAccountID = id
+	tok.UserID = model.BuildUserID(providerID, id)
+	if strings.TrimSpace(tok.DefaultDriveID) == "" {
+		tok.DefaultDriveID = model.BuildDriveID(providerID, id)
+	}
 }

@@ -20,13 +20,15 @@ SetHashes(["dropbox"], nil)
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| OAuth PKCE S256 | ✅ | `auth.go:27-57` 始终用 PKCE | 🟡 旧版条件性 PKCE（有 secret 时不传 challenge） |
-| 本地回调 | ✅ | `auth.go:59-115` net.Listen + state 校验 | Go 版内置 |
-| Token 交换 | ✅ | `auth.go:74-96` POST dbTokenURL code_verifier | 🟡 旧版有 secret 时用 client_secret |
+| OAuth PKCE S256 | ✅ | `auth.go` 无 secret 时发送 verifier/challenge | 内置 rclone confidential client 按旧版约定不发送 PKCE |
+| 本地回调 | ✅ | `auth.go` 127.0.0.1:0 + state/来源校验 + 10min 超时 | Go 版内置 |
+| Token 交换 | ✅ | `auth.go` POST dbTokenURL | 有 secret 发送 `client_secret`，无 secret 才发送 `code_verifier` |
 | token_access_type=offline | ✅ | `auth.go:45` | 无 |
-| app_key | ✅ | `auth.go:30-34` req.Config 或 dropbox_app_key | 🟡 无内置 fallback |
+| app_key / secret | ✅ | 请求配置、release secrets 或内置 rclone 凭据 | 登录与刷新复用同一组凭据 |
 | **Token 刷新** | ✅ | `dropbox.go:637-670` RefreshAccount 调 refreshDropboxToken | 无 |
 | **账号信息/配额** | ✅ | `dropbox.go:650-670` 获取 get_current_account / get_space_usage | 无 |
+
+默认使用与旧版及 `Example/rclone` 一致的 Dropbox app key/secret。登录后账号 ID 来自 `get_current_account.account_id`，并转换为 `dropbox_<account-id>` 与 `dropbox:<account-id>`，多个账号互不覆盖。刷新响应省略 `refresh_token` 或 `expires_in` 时分别保留旧 refresh token 和旧过期时间。
 
 ---
 
@@ -64,10 +66,10 @@ SetHashes(["dropbox"], nil)
 | 小文件 ≤150MB | ✅ | `dropbox.go:354-373` UploadSmall /files/upload | 🟡 旧版阈值 8MB（Go 版更接近 API 上限） |
 | Session upload | ✅ | `dropbox.go:375-410` start + append_v2 + finish | 无 |
 | chunk 8MB | ✅ | `dropbox.go:17` | 无 |
-| **429 重试** | ❌ | 无 Retry-After 处理 | 🟡 旧版 uploadBufferWithRetry 3 次重试 + 指数退避 |
-| **暂停支持** | ❌ | 无 | 🟡 旧版 IsRunning 监控 100ms |
-| 冲突策略 | ⚠️ | 硬编码 mode:add autorename:true | 🟡 旧版 add/overwrite + autorename |
-| **父目录解析** | ⚠️ | 直接用 ParentFileID 作路径 | 🟡 旧版 resolveDropboxUploadParentPath 调 get_metadata |
+| **429 重试** | ✅ | `dropbox.go:530-560` 按 Retry-After/退避重试 | 无 |
+| **暂停支持** | ✅ | `dropbox.go:429-432` 大文件分片前检查 IsStop | 小文件由任务 context 取消 |
+| 冲突策略 | ✅ | `dropbox.go:258-270` refuse/rename/skip/overwrite | 无 |
+| **父目录解析** | ✅ | Driver 统一使用 Dropbox path/id | 无 |
 
 ---
 
@@ -145,8 +147,8 @@ SetHashes(["dropbox"], nil)
 3. ✅ **分享 visibility 逻辑已修复**（`dropbox.go:306-312` 有密码时为 password）
 4. ✅ **ProvideHashes 已声明**（`dropbox.go:43` SetHashes）
 5. ✅ **搜索分页已实现**（`dropbox.go:162-194` 跟随 cursor）
-6. 🟡 上传无 429 重试/暂停支持
-7. 🟡 上传冲突策略单一
+6. ✅ 上传具备 429 重试、Retry-After 和大文件暂停
+7. ✅ 上传冲突策略已按统一 ConflictPolicy 处理
 8. 🟡 搜索无过滤器、file_status
 9. 🟡 分享 list settings_error 无友好提示
 10. 🟡 move/copy 缺 allow_shared_folder
