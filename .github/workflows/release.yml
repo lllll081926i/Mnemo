@@ -55,8 +55,8 @@ jobs:
             artifact: Mnemo-macos-arm64
             arch: arm64
           - name: Linux x64
-            # Wails v2.14 links against WebKitGTK 4.0, provided by Ubuntu 22.04.
-            os: ubuntu-22.04
+            # mpv v0.41.0 needs FFmpeg 6; Ubuntu 24.04 also provides WebKitGTK 4.1.
+            os: ubuntu-24.04
             platform: linux/amd64
             artifact: Mnemo-linux-x64
             arch: x64
@@ -64,7 +64,7 @@ jobs:
             # Build on a native arm64 runner. Installing mpv on an x64
             # runner and copying it into an arm64 package silently produces
             # an unusable player binary.
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
             platform: linux/arm64
             artifact: Mnemo-linux-arm64
             arch: arm64
@@ -261,12 +261,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
-          pkg-config --modversion webkit2gtk-4.0
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          pkg-config --modversion webkit2gtk-4.1
 
       - name: Build with Wails
         shell: bash
-        run: wails build -platform ${{ matrix.platform }} -clean
+        run: |
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            wails build -platform "${{ matrix.platform }}" -clean -tags webkit2_41
+          else
+            wails build -platform "${{ matrix.platform }}" -clean
+          fi
 
       # DataDir reads runtime configuration next to the executable. Keep the
       # generated OAuth file in that exact location for every package layout;
