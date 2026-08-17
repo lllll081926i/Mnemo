@@ -15,7 +15,7 @@ internal/transfer  原生 Go 分段下载器 · 上传队列 · 跨盘迁移
 internal/player    mpv JSON IPC
 internal/sync      双向同步
 internal/preview   本地 Range 代理（鉴权流播放与媒体预览）
-internal/store     本地持久化（原子 JSON，多集合）
+internal/store     本地持久化（原子 JSON，多集合；读改写由 Store 互斥保护）
 internal/netx      HTTP/上传/哈希/限速 工具
 ```
 

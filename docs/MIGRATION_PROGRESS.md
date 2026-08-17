@@ -2,7 +2,7 @@
 
 > 旧项目：`../Mnemo`（Electron + Vue3 + TypeScript + aria2c + mpv）
 > 新项目：`Mnemo-Go`（Go + Wails v2 + Vue3 JS + 原生 Go 下载引擎 + mpv JSON IPC）
-> 最近更新：2026-08-17（全量源码调研 + 旧版对照 + 迁移回归验证）
+> 最近更新：2026-08-17（全量源码调研 + 旧版对照 + 迁移回归验证 + 跨平台构建复核）
 > 废弃说明：`gofile`、`gdrive`、`encryption` 已按需求移除/不再支持
 
 ---
@@ -29,7 +29,7 @@
 | drive（契约层） | internal/drive/ | ✅ | ~95% | filecache 无 TTL 过期、无搜索索引 |
 | drive/providers | internal/drive/providers/ | ⚠️ | ~85% | 详见 [PROVIDER_STATUS.md](PROVIDER_STATUS.md) |
 | netx | internal/netx/ | ✅ | ~80% | 无统一 Set-Cookie 中继、无下载代理穿透(CONNECT/DNS缓存/flow-enc)；上传限速令牌桶已实现（SetGlobalUploadRate + ProgressReader throttle） |
-| store | internal/store/ | ✅ | ~90% | 无加密存储（已废弃加密，符合需求） |
+| store | internal/store/ | ✅ | ~90% | 原子 JSON；同一进程内读改写由 Store 互斥保护；无加密存储（已废弃加密，符合需求） |
 | transfer | internal/transfer/ | ✅ | ~90% | 原生 Go 分段下载器替代 aria2c；上传历史管理 API 未明确 |
 | player | internal/player/ | ✅ | ~95% | Windows/macOS/Linux 均由 CI 注入同版本随包 mpv，使用平台原生 JSON IPC；保留独立窗口设计，不做 texture bridge/overlay |
 | preview | internal/preview/ | ✅ | ~85% | 无 CONNECT 隧道/DNS 缓存/123 CDN 路由/proxyAccessToken |
