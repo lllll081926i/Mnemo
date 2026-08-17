@@ -20,6 +20,7 @@ env:
   NODE_VERSION: "20"
   MPV_VERSION: "v0.41.0"
   MPV_SOURCE_SHA256: "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209"
+  MESON_VERSION: "1.3.2"
   LINUXDEPLOY_VERSION: "1-alpha-20251107-1"
   APPIMAGETOOL_VERSION: "1.9.1"
   NFPM_VERSION: "v2.47.0"
@@ -168,13 +169,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential ca-certificates curl meson ninja-build pkg-config \
-            pax-utils patchelf \
+            pax-utils patchelf python3-venv \
             libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev libplacebo-dev libass-dev \
             libx11-dev libxext-dev libxpresent-dev libxrandr-dev libxss-dev \
             libxv-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libdrm-dev libgbm-dev libegl1-mesa-dev libgl-dev libpipewire-0.3-dev \
             libpulse-dev libasound2-dev libva-dev libvulkan-dev
+          python3 -m venv --clear /tmp/mnemo-meson-venv
+          /tmp/mnemo-meson-venv/bin/python -m pip install \
+            --disable-pip-version-check --no-input --retries 5 --timeout 120 \
+            "meson==${MESON_VERSION}"
+          export PATH="/tmp/mnemo-meson-venv/bin:${PATH}"
+          test "$(meson --version)" = "${MESON_VERSION}"
           expected_arch="amd64"
           if [[ "${{ matrix.arch }}" == "arm64" ]]; then expected_arch="arm64"; fi
           test "$(dpkg --print-architecture)" = "${expected_arch}"
