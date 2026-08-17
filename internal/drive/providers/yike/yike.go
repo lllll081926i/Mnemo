@@ -3,6 +3,8 @@ package yike
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,13 +38,14 @@ func init() {
 		ID:   providerID,
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
-			"createFolder":    true,
+			"createFolder":     true,
 			"createDateFolder": false,
-			"photoAlbum":      true,
-			"permanentDelete": true,
-		}, func(c *drive.Capabilities) {
-			c.SetHashes([]string{"md5"}, nil)
-		}),
+			"photoAlbum":       true,
+			"recycleBin":       false,
+			"permanentDelete":  true,
+			"move":             false,
+			"copy":             false,
+		}, nil),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "cookie", Type: "text", Label: "BDUSS / Cookie", Required: true, Placeholder: "粘贴 BDUSS 或完整 Cookie"},
 		}},
@@ -143,8 +146,8 @@ func (c *client) do(ctx context.Context, method, rawURL string, query, form url.
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	var wrapper struct {
-		Errno  int    `json:"errno"`
-		Errmsg string `json:"errmsg"`
+		Errno    int    `json:"errno"`
+		Errmsg   string `json:"errmsg"`
 		ErrorMsg string `json:"error_msg"`
 	}
 	_ = json.Unmarshal(body, &wrapper)
@@ -240,8 +243,8 @@ func (c *client) listRoot(ctx context.Context) ([]File, error) {
 			return nil, err
 		}
 		var r struct {
-			List    []map[string]any `json:"list"`
-			Cursor  string           `json:"cursor"`
+			List   []map[string]any `json:"list"`
+			Cursor string           `json:"cursor"`
 		}
 		_ = json.Unmarshal(body, &r)
 		for _, a := range r.List {
@@ -357,6 +360,7 @@ func (c *client) RenameAlbum(ctx context.Context, albumID, name string) error {
 func (c *client) Delete(ctx context.Context, fileIDs []string) error {
 	fsids := make([]string, 0, len(fileIDs))
 	albumIDs := make([]string, 0, len(fileIDs))
+	var errs []error
 	for _, id := range fileIDs {
 		if strings.HasPrefix(id, "album:") {
 			albumIDs = append(albumIDs, strings.TrimPrefix(id, "album:"))
@@ -370,14 +374,18 @@ func (c *client) Delete(ctx context.Context, fileIDs []string) error {
 	if len(fsids) > 0 {
 		q := url.Values{}
 		q.Set("fsids", strings.Join(fsids, ","))
-		_, _ = c.request(ctx, http.MethodPost, fileV1+"/delete", q)
+		if _, err := c.request(ctx, http.MethodPost, fileV1+"/delete", q); err != nil {
+			errs = append(errs, fmt.Errorf("删除照片失败: %w", err))
+		}
 	}
 	for _, a := range albumIDs {
 		q := url.Values{}
 		q.Set("album_id", a)
-		_, _ = c.request(ctx, http.MethodPost, albumAPI+"/delete", q)
+		if _, err := c.request(ctx, http.MethodPost, albumAPI+"/delete", q); err != nil {
+			errs = append(errs, fmt.Errorf("删除相册 %s 失败: %w", a, err))
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // DownloadInfo returns a dlink.
@@ -534,7 +542,7 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	}
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID, URL: u,
-		Headers: map[string]string{"User-Agent": ua, "Referer": "https://photo.baidu.com/"},
+		Headers:      map[string]string{"User-Agent": ua, "Referer": "https://photo.baidu.com/"},
 		DownloadMode: "proxy", Concurrency: 1,
 	}, nil
 }
@@ -603,10 +611,6 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 	return nil, drive.NotSupported("copy")
 }
 
-func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, _ bool) (string, error) {
-	return "", nil
-}
-
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	cl, err := clientOf(c)
 	if err != nil {
@@ -614,6 +618,18 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	}
 	if err := cl.getuinfo(ctx); err != nil {
 		return nil, err
+	}
+	// bdstoken is only needed by some upload endpoints. The legacy client
+	// deliberately allowed browsing/login when pan.baidu.com did not return it.
+	_ = cl.getBdstoken(ctx)
+	if token != nil {
+		token.AccessToken = cl.sess.Cookie
+		token.RefreshToken = mustJSON(cl.sess)
+		if cl.sess.UK != "" {
+			token.ProviderAccountID = cl.sess.UK
+			token.UserID = model.BuildUserID(providerID, cl.sess.UK)
+			token.DefaultDriveID = model.BuildDriveID(providerID, cl.sess.UK)
+		}
 	}
 	return token, nil
 }
@@ -628,20 +644,23 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 	if err := cl.getuinfo(ctx); err != nil {
 		return nil, err
 	}
+	// RefreshAccount must keep a valid BDUSS session even when the optional
+	// Baidu template-variable endpoint is temporarily unavailable.
 	_ = cl.getBdstoken(ctx)
 	uid := cl.sess.UK
 	if uid == "" {
-		uid = "yike"
+		sum := sha256.Sum256([]byte(cookie))
+		uid = "cookie_" + hex.EncodeToString(sum[:6])
 	}
 	name := "一刻相册 " + uid[:min(8, len(uid))]
 	return &model.TokenInfo{
-		TokenFrom:    providerID,
-		AccessToken:  cookie,
-		RefreshToken: mustJSON(cl.sess),
-		UserID:       model.BuildUserID(providerID, uid),
-		UserName:     name,
-		NickName:     name,
-		Name:         name,
+		TokenFrom:         providerID,
+		AccessToken:       cookie,
+		RefreshToken:      mustJSON(cl.sess),
+		UserID:            model.BuildUserID(providerID, uid),
+		UserName:          name,
+		NickName:          name,
+		Name:              name,
 		ProviderAccountID: uid,
 		ProviderRootID:    RootID,
 	}, nil

@@ -49,8 +49,8 @@ func md5Hex(b []byte) string {
 
 // UploadOneFile mirrors legacy YikeUploadDisk.UploadOneFile.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
-	if ui.Info.Size <= 0 {
-		return errors.New("不能上传 0 字节文件")
+	if ui == nil || ui.Info.LocalFilePath == "" {
+		return errors.New("一刻相册：上传文件路径为空")
 	}
 	cl, err := clientOf(c)
 	if err != nil {
@@ -62,8 +62,15 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return errors.New("打开文件失败: " + err.Error())
 	}
 	defer f.Close()
-
-	size := ui.Info.Size
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	if size <= 0 {
+		return errors.New("不能上传 0 字节文件")
+	}
+	ui.Info.Size = size
 	count := (size + yikeUploadPart - 1) / yikeUploadPart
 	if count < 1 {
 		count = 1

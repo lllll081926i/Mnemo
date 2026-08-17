@@ -6,12 +6,12 @@
 
 ---
 
-## 能力声明（yike.go:38-44）
+## 能力声明（yike.go:38-48）
 
 ```
 createFolder, photoAlbum, permanentDelete: true
 createDateFolder: false
-SetHashes(["md5"], nil)  // 仅 ProvideHashes，无 RapidUploadHashes
+不声明 ProvideHashes/RapidUploadHashes  // 按需求不参与跨盘秒传
 ```
 
 ---
@@ -21,7 +21,7 @@ SetHashes(["md5"], nil)  // 仅 ProvideHashes，无 RapidUploadHashes
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | BDUSS/Cookie | ✅ | `yike.go:631-656` authLogin normalizeCookie 自动补 BDUSS= | 无 |
-| getuinfo + getBdstoken | ✅ | 登录后调用 | 无 |
+| getuinfo + getBdstoken | ✅ | 登录后调用；getuinfo 必需，bdstoken 获取失败可继续登录 | 无 |
 
 ---
 
@@ -84,7 +84,7 @@ SetHashes(["md5"], nil)  // 仅 ProvideHashes，无 RapidUploadHashes
 
 ## 9. ProvideHashes
 
-✅ `yike.go:44` SetHashes(["md5"], nil)。mapFile `yike.go:665` `hash := decryptYikeMd5(item.MD5)` → f.ContentHash。
+✅ `mapFile` 仍会通过 `decryptYikeMd5` 解析文件 MD5 并填入 `ContentHash`；能力位按需求不声明，因此不参与跨盘秒传路由。
 
 ---
 
