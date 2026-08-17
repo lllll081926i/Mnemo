@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mnemo-go/internal/model"
+	syncmodel "mnemo-go/internal/sync"
 )
 
 func TestOpenAndSettings(t *testing.T) {
@@ -203,6 +204,32 @@ func TestTaskSavesKeepConcurrentRecords(t *testing.T) {
 	}
 	if len(list) != 20 {
 		t.Fatalf("concurrent task saves kept %d records, want 20", len(list))
+	}
+}
+
+func TestSyncConfigSavesKeepConcurrentRecords(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cfg := syncmodel.Config{ID: fmt.Sprintf("sync-%d", i), Name: "job"}
+			if err := st.SaveSyncConfig(cfg); err != nil {
+				t.Errorf("SaveSyncConfig(%d): %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	list, err := st.ListSyncConfigs()
+	if err != nil {
+		t.Fatalf("ListSyncConfigs: %v", err)
+	}
+	if len(list) != 20 {
+		t.Fatalf("concurrent sync config saves kept %d records, want 20", len(list))
 	}
 }
 

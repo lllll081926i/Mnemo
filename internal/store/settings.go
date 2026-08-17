@@ -18,29 +18,31 @@ type Settings struct {
 	MaxDownloadSpeed       int64 `json:"maxDownloadSpeed"` // bytes/s, 0 = unlimited
 	MaxUploadSpeed         int64 `json:"maxUploadSpeed"`
 
-	AutoUpdate  bool `json:"autoUpdate"`
-	ConfirmUpdate bool `json:"confirmUpdate"`
+	AutoUpdate     bool `json:"autoUpdate"`
+	ConfirmUpdate  bool `json:"confirmUpdate"`
 	PlaybackResume bool `json:"playbackResume"`
-	KeepTasks   bool `json:"keepTasks"`
+	KeepTasks      bool `json:"keepTasks"`
 }
 
 // DefaultSettings returns sane defaults.
 func DefaultSettings() Settings {
 	return Settings{
-		Theme:                   "dark",
-		DefaultTab:              "pan",
-		MaxConcurrentDownloads:  3,
-		MaxDownloadSpeed:        0,
-		MaxUploadSpeed:          0,
-		AutoUpdate:              true,
-		ConfirmUpdate:           true,
-		PlaybackResume:          true,
-		KeepTasks:               true,
+		Theme:                  "dark",
+		DefaultTab:             "pan",
+		MaxConcurrentDownloads: 3,
+		MaxDownloadSpeed:       0,
+		MaxUploadSpeed:         0,
+		AutoUpdate:             true,
+		ConfirmUpdate:          true,
+		PlaybackResume:         true,
+		KeepTasks:              true,
 	}
 }
 
 // GetSettings loads settings, falling back to defaults.
 func (s *Store) GetSettings() (Settings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	st := DefaultSettings()
 	err := s.readJSON(settingsFile, &st)
 	if err != nil && !os.IsNotExist(err) {
@@ -56,13 +58,13 @@ func (s *Store) SetSettings(st Settings) error {
 
 // LocalTag is a user-defined colored label attached to a file path locally.
 type LocalTag struct {
-	UserID   string `json:"user_id"`
-	DriveID  string `json:"drive_id"`
-	FileID   string `json:"file_id"`
-	Name     string `json:"name"`
-	Color    string `json:"color"`
-	TagID    string `json:"tag_id"`
-	Created  int64  `json:"created"`
+	UserID  string `json:"user_id"`
+	DriveID string `json:"drive_id"`
+	FileID  string `json:"file_id"`
+	Name    string `json:"name"`
+	Color   string `json:"color"`
+	TagID   string `json:"tag_id"`
+	Created int64  `json:"created"`
 }
 
 // TagDef is the tag palette definition (name + color).
@@ -75,7 +77,7 @@ type TagDef struct {
 const tagsFile = "tags.json"
 
 type tagsDoc struct {
-	Defs []TagDef `json:"defs"`
+	Defs  []TagDef   `json:"defs"`
 	Marks []LocalTag `json:"marks"`
 }
 
@@ -90,12 +92,14 @@ func (s *Store) ListTags() ([]TagDef, error) {
 
 // SaveTags replaces the tag palette.
 func (s *Store) SaveTags(defs []TagDef) error {
-	doc, err := s.loadTags()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadTagsUnlocked()
 	if err != nil {
 		return err
 	}
 	doc.Defs = defs
-	return s.writeJSON(tagsFile, doc)
+	return s.writeJSONUnlocked(tagsFile, doc)
 }
 
 // ListLocalTags returns local marks for an account.
@@ -115,7 +119,9 @@ func (s *Store) ListLocalTags(userID, driveID string) ([]LocalTag, error) {
 
 // UpsertLocalTag adds or updates a local mark.
 func (s *Store) UpsertLocalTag(t LocalTag) error {
-	doc, err := s.loadTags()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadTagsUnlocked()
 	if err != nil {
 		return err
 	}
@@ -133,12 +139,14 @@ func (s *Store) UpsertLocalTag(t LocalTag) error {
 		}
 		doc.Marks = append(doc.Marks, t)
 	}
-	return s.writeJSON(tagsFile, doc)
+	return s.writeJSONUnlocked(tagsFile, doc)
 }
 
 // DeleteLocalTag removes a local mark.
 func (s *Store) DeleteLocalTag(userID, driveID, fileID string) error {
-	doc, err := s.loadTags()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadTagsUnlocked()
 	if err != nil {
 		return err
 	}
@@ -150,12 +158,14 @@ func (s *Store) DeleteLocalTag(userID, driveID, fileID string) error {
 		out = append(out, m)
 	}
 	doc.Marks = out
-	return s.writeJSON(tagsFile, doc)
+	return s.writeJSONUnlocked(tagsFile, doc)
 }
 
 // CleanupLocalTags removes marks referencing deleted files.
 func (s *Store) CleanupLocalTags(userID, driveID string, alive map[string]bool) error {
-	doc, err := s.loadTags()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadTagsUnlocked()
 	if err != nil {
 		return err
 	}
@@ -169,10 +179,16 @@ func (s *Store) CleanupLocalTags(userID, driveID string, alive map[string]bool) 
 		out = append(out, m)
 	}
 	doc.Marks = out
-	return s.writeJSON(tagsFile, doc)
+	return s.writeJSONUnlocked(tagsFile, doc)
 }
 
 func (s *Store) loadTags() (tagsDoc, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadTagsUnlocked()
+}
+
+func (s *Store) loadTagsUnlocked() (tagsDoc, error) {
 	var doc tagsDoc
 	err := s.readJSON(tagsFile, &doc)
 	if err != nil && !os.IsNotExist(err) {
@@ -195,6 +211,8 @@ const favoritesFile = "favorites.json"
 
 // ListFavorites returns favorites of an account.
 func (s *Store) ListFavorites(userID, driveID string) ([]Favorite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []Favorite
 	err := s.readJSON(favoritesFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -211,6 +229,8 @@ func (s *Store) ListFavorites(userID, driveID string) ([]Favorite, error) {
 
 // AddFavorite records a favorite.
 func (s *Store) AddFavorite(f Favorite) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []Favorite
 	err := s.readJSON(favoritesFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -219,18 +239,20 @@ func (s *Store) AddFavorite(f Favorite) error {
 	for i, x := range list {
 		if x.UserID == f.UserID && x.DriveID == f.DriveID && x.FileID == f.FileID {
 			list[i] = f
-			return s.writeJSON(favoritesFile, list)
+			return s.writeJSONUnlocked(favoritesFile, list)
 		}
 	}
 	if f.Added == 0 {
 		f.Added = time.Now().Unix()
 	}
 	list = append(list, f)
-	return s.writeJSON(favoritesFile, list)
+	return s.writeJSONUnlocked(favoritesFile, list)
 }
 
 // RemoveFavorite removes a favorite.
 func (s *Store) RemoveFavorite(userID, driveID, fileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []Favorite
 	err := s.readJSON(favoritesFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -243,22 +265,24 @@ func (s *Store) RemoveFavorite(userID, driveID, fileID string) error {
 		}
 		out = append(out, x)
 	}
-	return s.writeJSON(favoritesFile, out)
+	return s.writeJSONUnlocked(favoritesFile, out)
 }
 
 // LocalPlayCursor stores per-file playback progress for resume.
 type PlayCursor struct {
-	UserID  string `json:"user_id"`
-	DriveID string `json:"drive_id"`
-	FileID  string `json:"file_id"`
+	UserID  string  `json:"user_id"`
+	DriveID string  `json:"drive_id"`
+	FileID  string  `json:"file_id"`
 	Seconds float64 `json:"seconds"`
-	Updated int64  `json:"updated"`
+	Updated int64   `json:"updated"`
 }
 
 const cursorFile = "playcursor.json"
 
 // GetPlayCursor returns the saved cursor.
 func (s *Store) GetPlayCursor(userID, driveID, fileID string) (float64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []PlayCursor
 	err := s.readJSON(cursorFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -274,6 +298,8 @@ func (s *Store) GetPlayCursor(userID, driveID, fileID string) (float64, error) {
 
 // SavePlayCursor persists playback progress.
 func (s *Store) SavePlayCursor(c PlayCursor) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []PlayCursor
 	err := s.readJSON(cursorFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -282,12 +308,12 @@ func (s *Store) SavePlayCursor(c PlayCursor) error {
 	for i, x := range list {
 		if x.UserID == c.UserID && x.DriveID == c.DriveID && x.FileID == c.FileID {
 			list[i] = c
-			return s.writeJSON(cursorFile, list)
+			return s.writeJSONUnlocked(cursorFile, list)
 		}
 	}
 	if c.Updated == 0 {
 		c.Updated = time.Now().Unix()
 	}
 	list = append(list, c)
-	return s.writeJSON(cursorFile, list)
+	return s.writeJSONUnlocked(cursorFile, list)
 }

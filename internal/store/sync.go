@@ -11,6 +11,8 @@ const syncFile = "sync.json"
 
 // ListSyncConfigs returns all sync jobs.
 func (s *Store) ListSyncConfigs() ([]sync.Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []sync.Config
 	err := s.readJSON(syncFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -35,7 +37,13 @@ func (s *Store) GetSyncConfig(id string) (sync.Config, error) {
 
 // SaveSyncConfig upserts a sync job.
 func (s *Store) SaveSyncConfig(cfg sync.Config) error {
-	list, err := s.ListSyncConfigs()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []sync.Config
+	err := s.readJSON(syncFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -50,12 +58,18 @@ func (s *Store) SaveSyncConfig(cfg sync.Config) error {
 	if !replaced {
 		list = append(list, cfg)
 	}
-	return s.writeJSON(syncFile, list)
+	return s.writeJSONUnlocked(syncFile, list)
 }
 
 // DeleteSyncConfig removes a sync job.
 func (s *Store) DeleteSyncConfig(id string) error {
-	list, err := s.ListSyncConfigs()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []sync.Config
+	err := s.readJSON(syncFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -66,11 +80,11 @@ func (s *Store) DeleteSyncConfig(id string) error {
 		}
 		out = append(out, list[i])
 	}
-	if err := s.writeJSON(syncFile, out); err != nil {
+	if err := s.writeJSONUnlocked(syncFile, out); err != nil {
 		return err
 	}
 	// clean up any persisted snapshot for this job
-	_ = s.ClearSyncSnapshot(id)
+	_ = os.Remove(filepath.Join(s.dir, syncSnapshotFile(id)))
 	return nil
 }
 
@@ -87,6 +101,8 @@ func (s *Store) SaveSyncSnapshot(id string, entries []sync.Entry) error {
 // LoadSyncSnapshot loads the last-sync file list for a job. Returns nil
 // (no error) when the snapshot does not exist yet.
 func (s *Store) LoadSyncSnapshot(id string) ([]sync.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var entries []sync.Entry
 	err := s.readJSON(syncSnapshotFile(id), &entries)
 	if err != nil && os.IsNotExist(err) {
@@ -100,6 +116,8 @@ func (s *Store) LoadSyncSnapshot(id string) ([]sync.Entry, error) {
 
 // ClearSyncSnapshot removes the persisted snapshot for a job.
 func (s *Store) ClearSyncSnapshot(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := os.Remove(filepath.Join(s.dir, syncSnapshotFile(id))); err != nil && !os.IsNotExist(err) {
 		return err
 	}

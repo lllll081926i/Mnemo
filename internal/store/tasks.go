@@ -11,6 +11,8 @@ const tasksFile = "tasks.json"
 
 // ListDownloadTasks loads persisted download tasks.
 func (s *Store) ListDownloadTasks() ([]model.DownloadTask, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []model.DownloadTask
 	err := s.readJSON(tasksFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -145,6 +147,8 @@ const offlineFile = "offline.json"
 
 // ListOfflineTasks loads offline tasks.
 func (s *Store) ListOfflineTasks() ([]model.OfflineTask, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []model.OfflineTask
 	err := s.readJSON(offlineFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -212,6 +216,8 @@ const uploadsFile = "uploads.json"
 
 // ListUploadTasks loads persisted upload jobs.
 func (s *Store) ListUploadTasks() ([]model.UploadingUI, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []model.UploadingUI
 	err := s.readJSON(uploadsFile, &list)
 	if err != nil && !os.IsNotExist(err) {
