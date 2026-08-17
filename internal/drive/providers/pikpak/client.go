@@ -415,7 +415,7 @@ type listResp struct {
 // ListPage lists one page.
 func (c *client) ListPage(ctx context.Context, parentID, pageToken string, trashed bool) ([]File, string, error) {
 	q := url.Values{}
-	q.Set("page_size", "100")
+	q.Set("limit", "100")
 	q.Set("thumbnail_size", "SIZE_LARGE")
 	q.Set("with_audit", "false")
 	if trashed {

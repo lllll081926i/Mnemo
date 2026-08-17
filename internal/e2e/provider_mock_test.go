@@ -258,7 +258,9 @@ func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
 }
 
 func TestPikPakListUsesCompleteAndTrashFilters(t *testing.T) {
-	var normalQuery, trashQuery string
+	var normalFilters, normalParents, normalLimits, normalPageSizes, normalTokens []string
+	var trashQuery, trashLimit, trashPageSize string
+	var normalCalls int
 	mock := MockAPI(t, "api-drive.mypikpak.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/drive/v1/files" {
 			w.WriteHeader(http.StatusNotFound)
@@ -266,10 +268,21 @@ func TestPikPakListUsesCompleteAndTrashFilters(t *testing.T) {
 		}
 		if r.URL.Query().Get("parent_id") == "*" {
 			trashQuery = r.URL.Query().Get("filters") + "|parent=" + r.URL.Query().Get("parent_id")
+			trashLimit = r.URL.Query().Get("limit")
+			trashPageSize = r.URL.Query().Get("page_size")
 		} else {
-			normalQuery = r.URL.Query().Get("filters") + "|parent=" + r.URL.Query().Get("parent_id")
+			normalCalls++
+			normalFilters = append(normalFilters, r.URL.Query().Get("filters"))
+			normalParents = append(normalParents, r.URL.Query().Get("parent_id"))
+			normalLimits = append(normalLimits, r.URL.Query().Get("limit"))
+			normalPageSizes = append(normalPageSizes, r.URL.Query().Get("page_size"))
+			normalTokens = append(normalTokens, r.URL.Query().Get("page_token"))
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{}, "next_page_token": ""})
+		next := ""
+		if r.URL.Query().Get("parent_id") != "*" && normalCalls == 1 {
+			next = "normal-next"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{}, "next_page_token": next})
 	}))
 	_ = mock
 	uid, did, _ := SeedAccount(t, "pikpak", &model.TokenInfo{
@@ -282,14 +295,28 @@ func TestPikPakListUsesCompleteAndTrashFilters(t *testing.T) {
 	if _, err := drive.ListTrash(uid, did, nil); err != nil {
 		t.Fatalf("ListTrash: %v", err)
 	}
-	if !strings.Contains(normalQuery, `"phase":{"eq":"PHASE_TYPE_COMPLETE"}`) || !strings.Contains(normalQuery, `"trashed":{"eq":false}`) {
-		t.Fatalf("normal query = %s", normalQuery)
+	if len(normalFilters) != 2 {
+		t.Fatalf("normal request count = %d, want 2", len(normalFilters))
 	}
-	if strings.Contains(normalQuery, "parent_id=") {
-		t.Fatalf("root list should not send parent_id: %s", normalQuery)
+	if !strings.Contains(normalFilters[0], `"phase":{"eq":"PHASE_TYPE_COMPLETE"}`) || !strings.Contains(normalFilters[0], `"trashed":{"eq":false}`) {
+		t.Fatalf("normal filters = %s", normalFilters[0])
+	}
+	for i := range normalFilters {
+		if normalLimits[i] != "100" || normalPageSizes[i] != "" {
+			t.Fatalf("normal pagination query %d: limit=%q page_size=%q", i, normalLimits[i], normalPageSizes[i])
+		}
+		if normalParents[i] != "" {
+			t.Fatalf("root list should not send parent_id: %q", normalParents[i])
+		}
+	}
+	if normalTokens[0] != "" || normalTokens[1] != "normal-next" {
+		t.Fatalf("normal page tokens = %v", normalTokens)
 	}
 	if !strings.Contains(trashQuery, `"trashed":{"eq":true}`) || !strings.Contains(trashQuery, "parent=*") {
 		t.Fatalf("trash query = %s", trashQuery)
+	}
+	if trashLimit != "100" || trashPageSize != "" {
+		t.Fatalf("trash pagination query: limit=%q page_size=%q", trashLimit, trashPageSize)
 	}
 }
 

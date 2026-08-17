@@ -41,7 +41,7 @@
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | List 全量分页 | ✅ | `client.go:147-163` 循环 ListPage + seen 去重 | 无 |
-| ListPaged 单页 | ✅ | `pikpak.go:46-55` → `client.go:136-146` page_size=100 | 无 |
+| ListPaged 单页 | ✅ | `pikpak.go:58-68` → `client.go:416-437` limit=100 + page_token | 无 |
 | **phase 过滤** | ✅ | `client.go:ListPage` 正常列表使用 `trashed.eq=false + phase.eq=PHASE_TYPE_COMPLETE` | 回收站使用 `parent_id=* + trashed.eq=true` |
 
 ---
@@ -108,7 +108,7 @@
 | Trash | ✅ | `client.go` POST `/drive/v1/files:batchTrash` | 异步任务统一等待完成 |
 | Delete | ✅ | `client.go` POST `/drive/v1/files:batchDelete` | 异步任务统一等待完成 |
 | Restore | ✅ | `client.go` POST `/drive/v1/files:batchUntrash` | 异步任务统一等待完成 |
-| ListTrash | ✅ | `pikpak.go:58-63` listPages(trashed=true) | ⚠️ filters `{"trashed":true}` 旧版 `{"trashed":{"eq":true},"parent_id":"*"}`，可能列不正确 |
+| ListTrash | ✅ | `pikpak.go:79-85` → `client.go:416-437` parent_id=* + `trashed.eq=true` + limit 分页 | 无 |
 | TrashPurge | — | 声明已移除（auth.go Caps 不再声明） | — |
 | TrashClear | — | 声明已移除（auth.go Caps 不再声明） | — |
 
