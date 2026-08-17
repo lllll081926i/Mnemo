@@ -1,7 +1,7 @@
 # Mnemo Release
 # - Trigger: tag v* or manual dispatch
 # - Never deletes existing GitHub Releases / assets (upload with --clobber only replaces same filename)
-# - Builds Windows (x64+arm64 Inno Setup), macOS (arm64+Intel), Linux (x64+arm64) in parallel
+# - Builds Windows (x64+arm64 Inno Setup), macOS (arm64), Linux (x64+arm64) in parallel
 
 name: Release
 
@@ -50,12 +50,6 @@ jobs:
             platform: darwin/arm64
             artifact: Mnemo-macos-arm64
             arch: arm64
-          - name: macOS x64
-            # Intel builds use the official macOS 15 Intel mpv bundle.
-            os: macos-13
-            platform: darwin/amd64
-            artifact: Mnemo-macos-x64
-            arch: x64
           - name: Linux x64
             os: ubuntu-24.04
             platform: linux/amd64
@@ -137,22 +131,9 @@ jobs:
           rm -rf mpv-extract
           mkdir mpv-extract
           ditto -x -k mpv.zip mpv-extract
-          mpv_app="$(find mpv-extract -type d -name 'mpv.app' -print -quit)"
-          test -n "${mpv_app}"
-          ditto "${mpv_app}" internal/engine/darwin/mpv/mpv.app
-          test -x internal/engine/darwin/mpv/mpv.app/Contents/MacOS/mpv
-
-      - name: Fetch mpv engine (macOS x64)
-        if: runner.os == 'macOS' && matrix.arch == 'x64'
-        run: |
-          set -euo pipefail
-          mkdir -p internal/engine/darwin/mpv
-          url="https://github.com/mpv-player/mpv/releases/download/${MPV_VERSION}/mpv-${MPV_VERSION}-macos-15-intel.zip"
-          curl -fsSL --retry 5 --retry-all-errors -o mpv.zip "${url}"
-          printf '%s  mpv.zip\n' '41003617ab4f7784394b5ddea7ce51b3e0838e8cfc8166ad1a378b2eda3b583c' | shasum -a 256 -c -
-          rm -rf mpv-extract
-          mkdir mpv-extract
-          ditto -x -k mpv.zip mpv-extract
+          mpv_archive="$(find mpv-extract -type f -name 'mpv.tar.gz' -print -quit)"
+          test -n "${mpv_archive}"
+          tar -xzf "${mpv_archive}" -C mpv-extract
           mpv_app="$(find mpv-extract -type d -name 'mpv.app' -print -quit)"
           test -n "${mpv_app}"
           ditto "${mpv_app}" internal/engine/darwin/mpv/mpv.app
@@ -168,7 +149,7 @@ jobs:
             pax-utils patchelf \
             libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev libplacebo-dev libass-dev \
-            libx11-dev libxext-dev libxpresent-dev libxrandr-dev libxscrnsaver-dev \
+            libx11-dev libxext-dev libxpresent-dev libxrandr-dev libxss-dev \
             libxv-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libdrm-dev libgbm-dev libegl1-mesa-dev libgl-dev libpipewire-0.3-dev \
             libpulse-dev libasound2-dev libva-dev libvulkan-dev
@@ -322,7 +303,7 @@ jobs:
             choco install innosetup -y --no-progress
           fi
           test -f "$ISCC"
-          "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss
+          MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" build/windows/installer.iss
 
       - name: Rename installer (Windows)
         if: runner.os == 'Windows'

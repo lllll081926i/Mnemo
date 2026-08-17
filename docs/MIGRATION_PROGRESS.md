@@ -31,7 +31,7 @@
 | netx | internal/netx/ | ✅ | ~80% | 无统一 Set-Cookie 中继、无下载代理穿透(CONNECT/DNS缓存/flow-enc)；上传限速令牌桶已实现（SetGlobalUploadRate + ProgressReader throttle） |
 | store | internal/store/ | ✅ | ~90% | 原子 JSON；同一进程内读改写由 Store 互斥保护；无加密存储（已废弃加密，符合需求） |
 | transfer | internal/transfer/ | ✅ | ~90% | 原生 Go 分段下载器替代 aria2c；上传历史管理 API 未明确 |
-| player | internal/player/ | ✅ | ~95% | Windows/macOS/Linux 均由 CI 注入同版本随包 mpv，使用平台原生 JSON IPC；保留独立窗口设计，不做 texture bridge/overlay |
+| player | internal/player/ | ✅ | ~95% | Windows、macOS arm64、Linux 均由 CI 注入同版本随包 mpv，使用平台原生 JSON IPC；保留独立窗口设计，不做 texture bridge/overlay |
 | preview | internal/preview/ | ✅ | ~85% | 无 CONNECT 隧道/DNS 缓存/123 CDN 路由/proxyAccessToken |
 | sync | internal/sync/ | ✅ | ~85% | 已支持递归目录、大小/修改时间比较、快照、删除传播阈值保护、日志与定时调度；高级冲突合并仍有限 |
 | migrate（跨盘迁移） | internal/transfer/migrate/ | ✅ | ~85% | 已按秒传 → 流式 → 临时文件降级并持久化任务状态；Yike 明确不走跨盘秒传，源端清理失败会标记为部分完成 |
