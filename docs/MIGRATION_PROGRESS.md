@@ -34,7 +34,7 @@
 | player | internal/player/ | ✅ | ~95% | Windows/macOS/Linux 均由 CI 注入同版本随包 mpv，使用平台原生 JSON IPC；保留独立窗口设计，不做 texture bridge/overlay |
 | preview | internal/preview/ | ✅ | ~85% | 无 CONNECT 隧道/DNS 缓存/123 CDN 路由/proxyAccessToken |
 | sync | internal/sync/ | ✅ | ~85% | 已支持递归目录、大小/修改时间比较、快照、删除传播阈值保护、日志与定时调度；高级冲突合并仍有限 |
-| migrate（跨盘迁移） | internal/transfer/migrate/ | ✅ | ~85% | 已按秒传 → 流式 → 临时文件降级，并持久化任务状态；真实云端长时间传输仍需发布前验证 |
+| migrate（跨盘迁移） | internal/transfer/migrate/ | ✅ | ~85% | 已按秒传 → 流式 → 临时文件降级并持久化任务状态；Yike 明确不走跨盘秒传，源端清理失败会标记为部分完成 |
 | config/engine/e2e | — | ✅ | ~90% | 多个 provider 有 mock/e2e；真实云端账号验证仍需发布前按平台执行 |
 
 ---
@@ -150,7 +150,7 @@
 10. ✅ **上传队列重写**：并发槽 + Cancel 真正取消 + Resume + 启动恢复
 11. ✅ **下载设置生效**：并发限制 + 限速 + 代理运行时生效
 12. ✅ **同步引擎语义**：递归子目录 + 嵌套结构 + ModTime 比较 + ctx 传递
-13. ✅ **跨盘迁移**：partial 状态 + 字节进度 + Cancel + 流式预留
+13. ✅ **跨盘迁移**：partial 状态 + 字节进度 + Cancel + 流式预留；秒传只使用源/目标共同声明的指纹能力，Yike 排除
 
 ### 🟡 P1（影响健壮性）
 

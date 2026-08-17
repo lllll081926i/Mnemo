@@ -69,3 +69,13 @@ func TestJobProcessedBytesTracking(t *testing.T) {
 		t.Error("Failed not set")
 	}
 }
+
+func TestPartialMigrationErrorUnwrapsThroughMigrationError(t *testing.T) {
+	err := newMigrationError(partialError("source cleanup failed"), 1)
+	if !isPartialError(err) {
+		t.Fatal("partial cleanup errors must remain identifiable after wrapping")
+	}
+	if failureCount(err) != 1 {
+		t.Fatalf("failure count = %d, want 1", failureCount(err))
+	}
+}

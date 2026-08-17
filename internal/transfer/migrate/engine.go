@@ -155,6 +155,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	e.saveJob(job)
 	e.emit(job)
 	succeeded := int64(0)
+	partial := false
 	for _, fileID := range job.FileIDs {
 		if ctx.Err() != nil {
 			return e.finishCanceled(job, ctx.Err())
@@ -165,6 +166,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 				return e.finishCanceled(job, ctx.Err())
 			}
 			job.Failed += failureCount(err)
+			partial = partial || isPartialError(err)
 			job.Message = err.Error()
 		} else {
 			succeeded++
@@ -176,7 +178,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	}
 	if job.Failed == 0 {
 		job.Status = "completed"
-	} else if succeeded > 0 {
+	} else if succeeded > 0 || partial {
 		job.Status = "partial"
 	} else {
 		job.Status = "failed"
@@ -288,8 +290,11 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 	// resolve the source file's hash (allowStream=true lets the provider
 	// download+hash when no precomputed fingerprint exists).
 	hash, err := drive.ResolveTransferHash(job.SrcUser, job.SrcDrive, srcFile.FileID, method, true)
-	if err != nil || hash == "" {
+	if err != nil {
 		return true, fmt.Errorf("rapid: resolve hash %s failed: %w", method, err)
+	}
+	if strings.TrimSpace(hash) == "" {
+		return true, fmt.Errorf("rapid: resolve hash %s returned empty hash", method)
 	}
 
 	// attempt秒传 on the target.
