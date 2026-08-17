@@ -1,6 +1,6 @@
 # 网盘功能支持矩阵（Provider Status）
 
-> 数据来源：对 `internal/drive/providers/*` 全量源码调研 + 旧版 `../Mnemo/src/drive/providers/*` 对照（2025-08）。
+> 数据来源：对 `internal/drive/providers/*` 全量源码调研 + 旧版 `../Mnemo/src/drive/providers/*` 对照（最近更新：2026-08-17）。
 > 废弃说明：`gofile`、`gdrive` 已按需求移除；`encryption`（加密文件名/加密流）不再支持，相关能力位不再纳入矩阵。
 > 图示：✅ 已实现 · ⚠️ 部分/有差距 · ❌ 缺失/不支持 · ➖ 设计上不适用
 
@@ -10,19 +10,19 @@
 
 | # | Provider | 登录方式 | 文件数 | Go 测试 | 整体完成度 |
 |---|----------|---------|--------|---------|-----------|
-| 1 | pikpak | 账密 + 验证码 | 5 | ❌ | ⚠️ ~75% |
-| 2 | aliopen（阿里云盘） | refresh_token | 1 | ❌ | ⚠️ ~70% |
-| 3 | pan123（123 云盘） | 账密 | 2 | ✅ | ⚠️ ~80% |
+| 1 | pikpak | 账密 + 验证码 | 5 | ✅(mock/e2e) | ✅ ~96% |
+| 2 | aliopen（阿里云盘） | refresh_token | 1 | ✅(mock/e2e) | ✅ ~90% |
+| 3 | pan123（123 云盘） | 账密 | 2 | ✅ | ✅ ~90% |
 | 4 | pan189（天翼云盘） | 账密 + 验证码 | 11 | ✅ | ✅ ~95% |
-| 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | 1 | ❌ | ✅ ~90% |
+| 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | 1 | ✅(e2e) | ✅ ~92% |
 | 6 | lanzou（蓝奏云） | Cookie / 账密 | 12 | ✅ | ✅ ~98% |
-| 7 | ilanzou（优享版蓝奏云） | 账密 | 8 | ✅ | ✅ ~95% |
-| 8 | onedrive | OAuth PKCE | 4 | ❌ | ⚠️ ~70% |
-| 9 | dropbox | OAuth PKCE | 4 | ❌ | ⚠️ ~70% |
-| 10 | yike（一刻相册） | BDUSS / Cookie | 2 | ❌ | ✅ ~90% |
-| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | 2 | ❌ | ✅ ~98% |
-| 12 | webdav | URL + 账密 | 1 | ✅(e2e) | ⚠️ ~75% |
-| 13 | s3 | endpoint + AK/SK | 1 | ❌ | ⚠️ ~70% |
+| 7 | ilanzou（优享版蓝奏云） | 账密 | 12 | ✅ | ✅ ~100% |
+| 8 | onedrive | OAuth PKCE | 4 | ✅(e2e) | ✅ ~90% |
+| 9 | dropbox | OAuth PKCE | 4 | ✅(e2e) | ✅ ~90% |
+| 10 | yike（一刻相册） | BDUSS / Cookie | 2 | ✅(mock/e2e) | ✅ ~90% |
+| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | 2 | ✅(mock/e2e) | ✅ ~98% |
+| 12 | webdav | URL + 账密 | 1 | ✅(e2e) | ✅ ~95% |
+| 13 | s3 | endpoint + AK/SK | 1 | ✅(mock/e2e) | ✅ ~95% |
 
 ---
 
@@ -36,7 +36,7 @@
 | aliopen | ➖ | ➖ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
 | pan123 | ✅ | ➖ | refresh_token | ➖ | ➖ | ✅(401重登) | ✅ | ✅ |
 | pan189 | ✅ | ➖ | session | ➖ | ✅ | ✅ | ✅ | ✅ |
-| pan139 | ✅ | ➖ | Authorization | ➖ | ➖ | ✅ | ✅ | ✅ |
+| pan139 | ✅ | ➖ | Authorization | ➖ | ➖ | ✅ | ✅ | ➖ |
 | lanzou | ✅ | ➖ | ✅ | ➖ | ➖ | ✅(内联) | ✅ | ➖ |
 | ilanzou | ✅ | ➖ | session | ➖ | ➖ | ✅(内联) | ✅ | ➖ |
 | onedrive | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
@@ -56,9 +56,9 @@
 |----------|:----:|:---------:|:--------:|:--------:|:------------:|:------------:|
 | pikpak | ✅ | ✅ | ✅ | ✅ | ❌(设计) | 由 ops 兜底 |
 | aliopen | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| pan123 | ✅ | ⚠️(marker未用) | ❌ | ❌ | ✅ | — |
+| pan123 | ✅ | ✅ | ❌(数字页码) | ✅ | ✅ | — |
 | pan189 | ✅ | ✅ | ✅ | ➖ | ❌(设计) | — |
-| pan139 | ✅ | ✅ | ⚠️(参数未推进) | ❌ | ❌(设计) | — |
+| pan139 | ✅ | ✅ | ✅ | ❌ | ❌(设计) | — |
 | lanzou | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
 | ilanzou | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
 | onedrive | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -74,7 +74,7 @@
 
 | Provider | GetDownloadURL | 下载模式 | 并发 | 视频预览 | 转码清晰度 | VIP/会员检测 | 链接过期检测 |
 |----------|:--------------:|:--------:|:----:|:--------:|:----------:|:------------:|:------------:|
-| pikpak | ✅ | redirect | ➖ | ✅ | ✅ | ✅(无缓存) | ❌**缺** |
+| pikpak | ✅ | redirect | ➖ | ✅ | ✅ | ✅(10m缓存) | ✅(提前60s) |
 | aliopen | ✅ | redirect | ➖ | ⚠️(仅原画) | ❌ | ➖ | ➖ |
 | pan123 | ✅ | proxy | 1 | ✅ | ➖ | ➖ | ✅ |
 | pan189 | ✅ | proxy | ➖ | ✅(伪预览) | ❌ | ➖ | ✅ |
@@ -86,7 +86,7 @@
 | yike | ✅ | proxy | ➖ | ➖ | ➖ | ➖ | ➖ |
 | guangya | ✅ | proxy | ➖ | ✅ | ➖ | ➖ | ➖ |
 | webdav | ✅ | redirect | ➖ | ➖ | ➖ | ➖ | ➖ |
-| s3 | ✅ | redirect | ➖ | ➖ | ➖ | ➖ | ✅(4h预签名) |
+| s3 | ✅ | redirect | ➖ | ✅(原画/mpv) | ➖ | ➖ | ✅(4h预签名) |
 
 ---
 
@@ -94,11 +94,11 @@
 
 | Provider | UploadOneFile | 分片上传 | 整包上传 | 断点续传 | 秒传 | 冲突策略 | 进度回调 | 上传模式 |
 |----------|:-------------:|:--------:|:--------:|:--------:|:----:|:--------:|:--------:|:--------:|
-| pikpak | ✅ | ➖ | ✅(OSS PUT) | ✅ | ✅(GCID) | ❌(设计) | ⚠️(仅完成) | queue |
+| pikpak | ✅ | ➖ | ✅(OSS PUT) | ✅ | ✅(GCID) | ✅(refuse/skip/rename/overwrite) | ✅ | queue |
 | aliopen | ✅ | ✅(10MB) | ➖ | ✅ | ✅(SHA1) | ❌(固定ignore) | ✅ | queue |
 | pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ⚠️(duplicate) | ✅ | queue |
 | pan189 | ✅ | ✅(10/20MB) | ➖ | ✅ | ✅(MD5) | ➖ | ✅ | queue |
-| pan139 | ✅ | ✅(5MB base64) | ➖ | ➖ | ➖ | ➖ | ✅ | queue |
+| pan139 | ✅ | ✅(100/200MB预签名) | ➖ | ✅ | ✅(SHA-256) | ⚠️(服务端auto_rename) | ✅ | queue |
 | lanzou | ✅ | ➖ | ✅(≤200MB) | ➖ | ➖ | ➖ | ➖ | queue |
 | ilanzou | ✅ | ✅(8MB) | ✅(≤8MB) | ➖ | ✅(MD5) | ➖ | ✅ | queue |
 | onedrive | ✅ | ✅(10MB session) | ✅(≤4MB) | ✅ | ➖ | ❌(固定rename) | ✅ | queue |
@@ -106,10 +106,10 @@
 | yike | ✅ | ✅(4MB) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
 | guangya | ✅ | ✅(OSS multipart) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
 | webdav | ✅ | ➖ | ✅(PUT) | ➖ | ➖ | ✅ | ✅ | direct |
-| s3 | ✅ | ✅(PUT) | ✅(PUT) | ➖ | ➖ | ✅ | ✅ | direct |
+| s3 | ✅ | ✅(16MB multipart) | ✅(<64MiB PUT) | ➖ | ➖ | ✅ | ✅ | direct |
 
-> ⚠️ 多个 queue 盘缺失断点续传持久化（aliopen/pan123/pan189/onedrive），进程重启后大文件无法恢复。
-> ✅ webdav/s3 的冲突策略与进度回调已实现（ConflictPolicy + ProgressReader）。
+> ✅ aliopen/pan123/pan189/onedrive 已持久化上传会话；Dropbox 也保存远端 session 与已确认偏移。
+> ✅ webdav/s3 的冲突策略与进度回调已实现（ConflictPolicy + ProgressReader）；S3 64MiB 以上上传自动使用 multipart，重名策略包含 `skip`。
 
 ---
 
@@ -131,7 +131,7 @@
 | webdav | ✅ | ✅ | ✅ | ✅ | ➖ |
 | s3 | ✅ | ✅ | ✅ | ✅ | ➖ |
 
-> ✅ s3 的 Rename/Move/Copy/Delete 均已实现递归处理（listAllUnder + 批量 DeleteObjects + copyRecursive）。
+> ✅ s3 的 Rename/Move/Copy/Delete 均已实现递归处理（listAllUnder + 批量 DeleteObjects + copyRecursive）；大对象复制使用 multipart copy，CopySource 按路径段编码。
 
 ---
 
@@ -143,7 +143,7 @@
 | aliopen | ✅ | ✅ | ❌(设计) | ❌(设计) | ➖ | ➖ |
 | pan123 | ✅ | ✅ | ✅ | ✅ | ❌(声明已移除) | ❌(声明已移除) |
 | pan189 | ✅ | ✅(清空回收站) | ❌**缺** | ❌(设计禁用) | ✅(Delete内联) | ✅(Delete内联) |
-| pan139 | ✅ | ✅ | ✅ | ❌(设计) | ➖ | ➖ |
+| pan139 | ✅ | ✅ | ➖(新版接口未验证) | ❌(设计) | ➖ | ➖ |
 | lanzou | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
 | ilanzou | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
 | onedrive | ➖ | ✅(永久) | ➖ | ➖ | ➖ | ➖ |
@@ -188,7 +188,7 @@
 | pikpak | ✅ | ✅ | ✅ | ✅(RefreshOffline) | ✅(DeleteOffline) |
 | 其余 12 盘 | ❌(设计) | ➖ | ➖ | ➖ | ➖ |
 
-> ✅ pikpak 的离线下载已实现进度查询和任务删除（OfflineFind + OfflineDelete），列表 `page_size=100` 可能漏查大量任务。
+> ✅ pikpak 的离线下载已实现进度查询和任务删除（OfflineFind + OfflineDelete）；列表使用 `limit=10000`、phase 过滤和 `page_token` 分页，不会因固定 100 条上限漏查任务。
 
 ---
 
@@ -200,9 +200,9 @@
 | aliopen | ➖ | ✅(sha1) | ✅(sha1) | ✅ |
 | pan123 | ➖ | ✅(md5) | ✅(md5) | ✅ |
 | pan189 | ➖ | ✅(md5) | ✅(md5) | ✅ |
-| pan139 | ➖ | ❌(未声明) | ➖ | ➖ |
+| pan139 | ➖ | ✅(sha256) | ✅(sha256) | ✅ |
 | lanzou | ➖ | ❌ | ❌ | ➖ |
-| ilanzou | ➖ | ✅(md5) | ✅(md5) | ➖ |
+| ilanzou | ➖ | ✅(md5) | ✅(md5) | ✅ |
 | onedrive | ➖ | ✅(sha1/quickXor) | ➖ | ➖ |
 | dropbox | ➖ | ✅(dropbox) | ➖ | ➖ |
 | yike | ➖ | ✅(md5) | ➖ | ➖ |
@@ -210,7 +210,7 @@
 | webdav | ➖ | ➖ | ➖ | ➖ |
 | s3 | ➖ | ➖ | ➖ | ➖ |
 
-> ✅ ilanzou/onedrive/dropbox 已声明 SetHashes，跨盘秒传路由可正常识别。pikpak 通过 GCID 实现秒传但未声明 hash 类型。
+> ✅ ilanzou 已实现 `RapidUploadByHash` + `ResolveTransferHash`，并与 onedrive/dropbox 的哈希声明一起纳入跨盘秒传能力；pikpak 通过 GCID 实现秒传但未声明 hash 类型。
 
 ---
 
@@ -220,9 +220,9 @@
 
 | # | 差距 | 影响范围 | 状态 | 详情 |
 |---|------|---------|:----:|------|
-| 1 | onedrive/dropbox `RefreshAccount` 完全缺失 | 2 盘 | ✅已修复 | 已实现 token 刷新 + 账号信息/配额 |
+| 1 | onedrive/dropbox `RefreshAccount` 完全缺失 | 2 盘 | ✅已修复 | 已实现 token 刷新 + 账号信息/配额；缺省 `expires_in` 时保留旧值 |
 | 2 | 分享导入 `importShare` 声明未实现 | 3 盘(pikpak/aliopen/pan123) | ✅已修复 | ShareImportDriver 接口 + 三个盘完整实现 |
-| 3 | pikpak API captcha token 续接不完整 | 1 盘 | ⚠️部分 | 登录已用 X-Captcha-Token，业务 API 二次挑战续接仍不完整 |
+| 3 | pikpak API captcha token 续接不完整 | 1 盘 | ✅已修复 | 按设备/账号/action 缓存 token，失败时 previousToken 换发并自动重试 |
 | 4 | aliopen `CompleteUpload` 传空 `upload_id` | 1 盘 | ✅已修复 | 传真实 upload_id |
 | 5 | s3 目录递归操作完全缺失 | 1 盘 | ✅已修复 | listAllUnder + 批量 DeleteObjects + copyRecursive |
 | 6 | s3 `forcePathStyle` 硬编码不可配置 | 1 盘 | ✅已修复 | 改为 *bool 可配置，支持 sessionToken |
@@ -236,7 +236,7 @@
 | 9 | 能力声明与实现不符 | 多盘 | ✅已修复 | pikpak/pan123 的 trashPurge/trashClear/playbackHistory 改为 false |
 | 10 | 哈希能力声明缺失 | 4 盘 | ✅已修复 | ilanzou/onedrive/dropbox 已声明 SetHashes |
 | 11 | pikpak 离线下载进度/删除缺失 | 1 盘 | ✅已修复 | RefreshOfflineTasks + DeleteOfflineTask 绑定 |
-| 12 | pan139 ListPage 分页参数未推进 | 1 盘 | ✅已修复 | pageNum/startNumber 随 marker 递增 |
+| 12 | pan139 ListPage 分页参数未推进 | 1 盘 | ✅已修复 | 改用新版 `pageInfo.pageCursor`，并防重复游标 |
 | 13 | onedrive/dropbox 搜索无分页 | 2 盘 | ✅已修复 | 跟随 nextLink/cursor 分页 |
 | 14 | pikpak batch 操作无任务轮询 | 1 盘 | ✅已修复 | waitForTasks 60s 超时轮询 |
 
@@ -244,11 +244,11 @@
 
 | # | 差距 | 影响范围 | 详情 |
 |---|------|---------|------|
-| 15 | 限速/重试缺失 | 多盘 | aliopen 无并发限速、dropbox 上传无 429 重试、pikpak 无速率限制处理 |
+| 15 | 限速/重试缺失 | 多盘 | aliopen 已覆盖并发限速、401 刷新和 429 退避；pikpak 已覆盖登录/API 429 冷却识别；Dropbox 已支持 429/Retry-After |
 | 16 | 版本历史缺失 | 2 盘 | onedrive/dropbox 旧版有 revisions，新版缺失 |
 | 17 | 缩略图缺失 | 1 盘 | dropbox 旧版有 `get_thumbnail_v2`，新版缺失 |
 | 18 | 上传进度回调已实现 | 2 盘 | ✅ webdav/s3 已实现 ProgressReader + 令牌桶限速（`progress.go:22`） |
-| 19 | yike decryptYikeMd5 缺失 | 1 盘 | 旧版有 md5 解密，新版直接取字段，可能取到错误值 |
+| 19 | yike decryptYikeMd5 | 1 盘 | ✅已实现；yike 按需求不参与跨盘秒传能力路由 |
 
 ---
 

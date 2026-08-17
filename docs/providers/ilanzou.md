@@ -1,8 +1,8 @@
 # 优享版蓝奏云（ilanzou）功能详情
 
-> 调研范围：`internal/drive/providers/ilanzou/`（8 文件）
+> 调研范围：`internal/drive/providers/ilanzou/`（12 文件）
 > 对照旧版：`../Mnemo/src/ilanzou/` + `src/drive/providers/ilanzou.ts`
-> 整体完成度：✅ ~95%
+> 整体完成度：✅ 100%（源码级迁移链路）
 
 ---
 
@@ -25,6 +25,7 @@ search, createShare, copy, recycleBin, trashView: false
 | RefreshAccount | ✅ | `client.go:391-415` account/map 校验，过期自动重登 | 无（比旧版更完整） |
 | 请求级自动重登 | ✅ | `client.go:86-130` request code -1/-2 或 token 空时重登重放 | 无 |
 | 风控限速 | ✅ | `client.go:22-38` throttle 260ms | 无 |
+| 自动重登持久化 | ✅ | `client.go` 重登成功后更新当前 `TokenInfo`，由 facade 统一落库 | 已覆盖请求级回归测试 |
 
 ---
 
@@ -38,17 +39,18 @@ search, createShare, copy, recycleBin, trashView: false
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| GetDownloadURL | ✅ | `ilanzou.go:97-112` proxy | 无 |
+| GetDownloadURL | ✅ | `ilanzou.go:97-112` proxy；过期 401/403 自动重登后重试 | 无 |
 | Referer | ✅ | `download.go:51` | 无 |
 | Concurrency:1 | ✅ | `ilanzou.go:110` | 无 |
 | 签名 URL 构建 | ✅ | `client.go:343-363` buildILanzouDownloadUrl AES 加密 downloadId+auth | 无 |
 | 3xx Location 跟随 | ✅ | `download.go:53-56` manualClient 不跟随取 Location | 无 |
+| 列表大小回填 | ✅ | `ilanzou.go` 优先使用已缓存的文件大小 | 无 |
 
 ---
 
 ## 4. 视频预览（ilanzou.go）
 
-✅ `ilanzou.go:115-126` 复用 GetDownloadURL origin 原画。
+✅ `ilanzou.go:115-126` 复用 GetDownloadURL origin 原画并标记 `ForceProxy`；应用层统一交给本地 mpv 预览代理。
 
 ---
 
@@ -60,7 +62,7 @@ search, createShare, copy, recycleBin, trashView: false
 | getUpToken 秒传 | ✅ | `upload.go:62-81` POST /7n/getUpToken MD5 命中返回 fileId | 无 |
 | 整包上传 ≤8MB | ✅ | `upload.go:93-119` multipart → upload.qiniup.com | 无 |
 | 分片上传 >8MB | ✅ | `upload.go:121-161` initUpload → 逐片 PUT → complete（七牛分片） | 无 |
-| 上传确认轮询 | ✅ | `upload.go:167-180` POST /7n/results 最多 10 次每秒 | 无 |
+| 上传确认轮询 | ✅ | `upload.go` POST /7n/results 最多 10 次每秒，支持上下文取消并回写实际文件大小/文件 ID | 无 |
 
 > ilanzou 是蓝奏系中唯一支持秒传 + 分片上传的。
 
@@ -90,11 +92,13 @@ search, createShare, copy, recycleBin, trashView: false
 
 `ilanzou.go:26` SetHashes(["md5"], ["md5"]) — ProvideHashes 和 RapidUploadHashes 均已声明。
 
-`upload.go:62-81` 实际计算 MD5 并通过 getUpToken 秒传判定，与 caps 声明一致。
+`upload.go` 的 `UploadOneFile` 与 `RapidUploadByHash` 都通过 `/7n/getUpToken` 判定 MD5 秒传；`ResolveTransferHash` 在没有服务端指纹时按迁移请求流式读取下载源计算 MD5，与 caps 声明一致。
 
 ---
 
 ## 差距清单
 
-1. ✅ **秒传 caps 已声明**（`ilanzou.go:26` SetHashes(["md5"], ["md5"])）：跨盘秒传路由正常工作
-2. 其余功能与旧版对齐，无重大缺失
+1. ✅ **跨盘秒传已闭环**：`RapidUploadByHash` 命中 `/7n/getUpToken`，源端 `ResolveTransferHash` 可从缓存或下载流提供 MD5。
+2. ✅ **请求级重登会持久化新 session**：普通列表/文件操作遇到过期 token 时，重登后的 `appToken/uuid` 不再只在局部返回值中丢失。
+3. ✅ **下载/预览会话续期**：下载重定向遇到 401/403 会按当前账号账密重登并重试，视频质量固定为原画代理源。
+4. 其余功能与旧版对齐，无重大缺失

@@ -1,6 +1,7 @@
 package ilanzou
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -55,5 +56,18 @@ func TestMapILanzouItem(t *testing.T) {
 	want, _ := time.ParseInLocation("2006-01-02 15:04:05", "2024-05-01 12:30:00", time.Local)
 	if mapped.Time != want.Unix() {
 		t.Errorf("time = %d, want %d", mapped.Time, want.Unix())
+	}
+}
+
+func TestListItemAcceptsStringNumericFields(t *testing.T) {
+	var item listItem
+	if err := json.Unmarshal([]byte(`{"fileType":"0","fileId":"8","fileSize":"2","folderId":"9","parentId":"0","fileName":"movie.mp4"}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.FileType != 0 || item.FileID != 8 || item.FileSize != 2 || item.FolderID != 9 || item.ParentID != 0 {
+		t.Fatalf("decoded item = %+v", item)
+	}
+	if item.FileName != "movie.mp4" {
+		t.Fatalf("file name = %q", item.FileName)
 	}
 }

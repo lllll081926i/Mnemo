@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -30,6 +31,101 @@ func fileMD5(path string) (string, error) {
 	defer f.Close()
 	h := md5.New()
 	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// RapidUploadByHash probes the same /7n/getUpToken endpoint used by normal
+// uploads. A response without an upToken and with a file id means the server
+// already has the content and has created the remote entry.
+func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req drive.RapidUploadRequest) (*drive.RapidUploadResult, error) {
+	if !strings.EqualFold(strings.TrimSpace(req.Method), "md5") {
+		return &drive.RapidUploadResult{Message: "优享版蓝奏云仅支持 MD5 秒传"}, nil
+	}
+	hash := strings.ToLower(strings.TrimSpace(req.Hash))
+	if len(hash) != md5.Size*2 {
+		return &drive.RapidUploadResult{Message: "无效的 MD5 指纹"}, nil
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return &drive.RapidUploadResult{Message: "无效的 MD5 指纹"}, nil
+	}
+	if req.Size < 0 || strings.TrimSpace(req.FileName) == "" {
+		return &drive.RapidUploadResult{Message: "秒传参数无效"}, nil
+	}
+	up, _, err := d.request(ctx, c, "/7n/getUpToken", requestOptions{
+		method: http.MethodPost,
+		body: map[string]any{
+			"fileId":   "",
+			"fileName": req.FileName,
+			"fileSize": req.Size/1024 + 1,
+			"folderId": ToILanzouFolderId(req.ParentID),
+			"md5":      hash,
+			"type":     1,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	fileID := responseString(up, "fileId")
+	if fileID == "" {
+		fileID = responseString(up, "id")
+	}
+	if responseString(up, "upToken") == "" && fileID != "" {
+		return &drive.RapidUploadResult{
+			Reuse: true, FileID: fileID, ParentID: req.ParentID, Message: "秒传命中",
+		}, nil
+	}
+	return &drive.RapidUploadResult{ParentID: req.ParentID, Message: "未命中秒传"}, nil
+}
+
+// ResolveTransferHash returns an MD5 exposed by the metadata cache, or hashes
+// the authenticated download stream when the provider does not expose one in
+// its listing response. The latter is only performed when migration permits
+// streaming because it intentionally consumes the full source file once.
+func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, allowStream bool) (string, error) {
+	if !strings.EqualFold(strings.TrimSpace(method), "md5") {
+		return "", nil
+	}
+	if cached, ok := drive.CachedFile(c.DriveID, fileID); ok {
+		if strings.EqualFold(strings.TrimSpace(cached.ContentHashName), "md5") {
+			hash := strings.ToLower(strings.TrimSpace(cached.ContentHash))
+			if len(hash) == md5.Size*2 {
+				if _, err := hex.DecodeString(hash); err == nil {
+					return hash, nil
+				}
+			}
+		}
+	}
+	if !allowStream {
+		return "", nil
+	}
+	download, err := d.GetDownloadURL(ctx, c, fileID, 0)
+	if err != nil {
+		return "", err
+	}
+	if download == nil || download.URL == "" {
+		return "", errors.New("无法获取文件下载地址以计算 MD5")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, download.URL, nil)
+	if err != nil {
+		return "", err
+	}
+	for key, value := range download.Headers {
+		req.Header.Set(key, value)
+	}
+	client := *httpClient
+	client.Timeout = 0
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("计算 MD5 下载失败 HTTP %d", resp.StatusCode)
+	}
+	h := md5.New()
+	if _, err := io.Copy(h, resp.Body); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -64,7 +160,10 @@ func qiniuJSON(ctx context.Context, method, rawURL, upToken string, body any) (m
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	text, _ := io.ReadAll(resp.Body)
+	text, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
 	if resp.StatusCode >= 400 {
 		return nil, resp.StatusCode, nil
 	}
@@ -88,13 +187,16 @@ func qiniuPut(ctx context.Context, rawURL, upToken string, data []byte) (map[str
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	text, _ := io.ReadAll(resp.Body)
+	text, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
 	if resp.StatusCode >= 400 {
 		return nil, resp.StatusCode, nil
 	}
 	var j map[string]any
 	if err := json.Unmarshal(text, &j); err != nil {
-		return nil, resp.StatusCode, nil
+		return nil, resp.StatusCode, fmt.Errorf("七牛响应异常: %s", truncate(string(text), 200))
 	}
 	return j, resp.StatusCode, nil
 }
@@ -121,10 +223,13 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if md5hex == "" {
 		return errors.New("计算 MD5 失败")
 	}
-	size := ui.Info.Size
-	if stat, err := os.Stat(ui.Info.LocalFilePath); err == nil {
-		size = stat.Size()
+	stat, err := os.Stat(ui.Info.LocalFilePath)
+	if err != nil {
+		return err
 	}
+	size := stat.Size()
+	ui.Info.Size = size
+	ui.Info.SizeStr = model.FormatBytes(size)
 	folderID := ToILanzouFolderId(firstNonEmpty(ui.Info.ParentFileID, "0"))
 	up, _, err := d.request(ctx, c, "/7n/getUpToken", requestOptions{
 		method: http.MethodPost,
@@ -210,7 +315,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
 			return errors.New("上传失败: 七牛响应异常")
 		}
-		commitToken = strOf(j["token"])
+		commitToken = responseString(j, "token")
 		ui.Upload.DownSize = size
 	} else {
 		initURL := fmt.Sprintf("https://upload.qiniup.com/buckets/%s/objects/%s/uploads", ILANZOU_CONF.Bucket, keyB64)
@@ -221,7 +326,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if status >= 400 {
 			return fmt.Errorf("初始化分片上传失败 HTTP %d", status)
 		}
-		uploadID := strOf(j["uploadId"])
+		uploadID := responseString(j, "uploadId")
 		if uploadID == "" {
 			return errors.New("初始化分片上传失败")
 		}
@@ -245,7 +350,11 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			if status >= 400 {
 				return fmt.Errorf("分片上传失败 %d", status)
 			}
-			parts = append(parts, qiniuPart{PartNumber: i, Etag: strOf(pj["etag"])})
+			etag := responseString(pj, "etag")
+			if etag == "" {
+				return errors.New("分片上传未返回 etag")
+			}
+			parts = append(parts, qiniuPart{PartNumber: i, Etag: etag})
 			ui.Upload.DownSize = start + cur
 			if size > 0 {
 				ui.Upload.DownProcess = int(100 * (start + cur) / size)
@@ -262,7 +371,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if status >= 400 {
 			return fmt.Errorf("完成分片上传失败 HTTP %d", status)
 		}
-		commitToken = strOf(fj["token"])
+		commitToken = responseString(fj, "token")
 	}
 	if commitToken == "" {
 		return errors.New("上传完成令牌为空")
@@ -270,6 +379,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Upload.DownProcess = 100
 
 	for i := 0; i < 10; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		results, _, err := d.request(ctx, c, "/7n/results", requestOptions{
 			method:   http.MethodPost,
 			unproved: true,
@@ -281,11 +393,22 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if err != nil {
 			return err
 		}
-		if row := firstRow(results["list"]); row != nil && numOf(row["status"]) == 1 {
-			markUploadDone(ui, size, "")
+		if row := firstResultRow(results); row != nil && numOf(row["status"]) == 1 {
+			markUploadDone(ui, size, responseString(row, "fileId"))
 			return nil
 		}
-		time.Sleep(time.Second)
+		if i == 9 {
+			break
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return errors.New("上传确认超时")
 }
@@ -299,6 +422,24 @@ func firstRow(v any) map[string]any {
 		return m
 	}
 	return nil
+}
+
+func firstResultRow(j map[string]any) map[string]any {
+	if row := firstRow(j["list"]); row != nil {
+		return row
+	}
+	if data := mapVal(j, "data"); data != nil {
+		return firstRow(data["list"])
+	}
+	return nil
+}
+
+func responseString(j map[string]any, key string) string {
+	value := strOf(j[key])
+	if data := mapVal(j, "data"); data != nil {
+		value = firstNonEmpty(value, strOf(data[key]))
+	}
+	return value
 }
 
 func firstOf(m map[string]any, keys ...string) any {

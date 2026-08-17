@@ -2,7 +2,7 @@
 
 > 旧项目：`../Mnemo`（Electron + Vue3 + TypeScript + aria2c + mpv）
 > 新项目：`Mnemo-Go`（Go + Wails v2 + Vue3 JS + 原生 Go 下载引擎 + mpv JSON IPC）
-> 调研日期：2025-08（全量源码调研 + 旧版对照）
+> 最近更新：2026-08-17（全量源码调研 + 旧版对照 + 迁移回归验证）
 > 废弃说明：`gofile`、`gdrive`、`encryption` 已按需求移除/不再支持
 
 ---
@@ -16,7 +16,7 @@
 | 前端视图与组件 | ~70% | 5 视图 + 16 组件完整，缺瀑布流/分享导入/字幕选择/播放列表 |
 | 设计系统 | ~90% | 令牌系统更系统化，但移除多色包 |
 | 文档 | ~65% | 3 核心文档 + 发版记录，旧 8 份辅助文档缺失（现已新增 PROVIDER_STATUS + 13 网盘详情） |
-| 测试 | ~50% | 后端 21 个 Go 测试含 e2e；前端零测试 |
+| 测试 | ~60% | 后端 provider 单测与 mock/e2e 已覆盖关键登录、刷新、列表、上传、下载链路；前端暂无测试框架，未覆盖真实云端账号 |
 | **综合** | **~75%** | 核心功能链路可用，多处深度功能缺失 |
 
 ---
@@ -31,11 +31,11 @@
 | netx | internal/netx/ | ✅ | ~80% | 无统一 Set-Cookie 中继、无下载代理穿透(CONNECT/DNS缓存/flow-enc)；上传限速令牌桶已实现（SetGlobalUploadRate + ProgressReader throttle） |
 | store | internal/store/ | ✅ | ~90% | 无加密存储（已废弃加密，符合需求） |
 | transfer | internal/transfer/ | ✅ | ~90% | 原生 Go 分段下载器替代 aria2c；上传历史管理 API 未明确 |
-| player | internal/player/ | ⚠️ | ~60% | 无 texture bridge/overlay，mpv 独立窗口非应用内嵌入 |
+| player | internal/player/ | ✅ | ~90% | Windows/macOS/Linux 均使用随包 mpv + 平台原生 JSON IPC；保留独立窗口设计，不做 texture bridge/overlay |
 | preview | internal/preview/ | ✅ | ~85% | 无 CONNECT 隧道/DNS 缓存/123 CDN 路由/proxyAccessToken |
-| sync | internal/sync/ | ⚠️ | ~50% | 无 hash/timestamp diff、无快照持久化、无定时调度、无日志、pull 不递归子目录 |
-| migrate（跨盘迁移） | internal/transfer/migrate/ | ⚠️ | ~40% | 仅 spool 临时文件中转，缺 server/stream/rapid 三级策略 |
-| config/engine/e2e | — | ✅ | ~90% | 4 个 provider 有 e2e，9 个无 |
+| sync | internal/sync/ | ✅ | ~85% | 已支持递归目录、大小/修改时间比较、快照、删除传播阈值保护、日志与定时调度；高级冲突合并仍有限 |
+| migrate（跨盘迁移） | internal/transfer/migrate/ | ✅ | ~85% | 已按秒传 → 流式 → 临时文件降级，并持久化任务状态；真实云端长时间传输仍需发布前验证 |
+| config/engine/e2e | — | ✅ | ~90% | 多个 provider 有 mock/e2e；真实云端账号验证仍需发布前按平台执行 |
 
 ---
 
@@ -75,19 +75,19 @@
 
 | Provider | 完成度 | P0 差距 |
 |----------|:------:|---------|
-| pikpak | ~85% | API captcha 续接(部分) |
-| aliopen | ~85% | (已修复) |
-| pan123 | ~90% | (已修复) |
+| pikpak | ~98% | 主要迁移链路已完成；真实云端验证码、长时上传和大文件传输仍需发布前按账号验证 |
+| aliopen | ~90% | (已修复) |
+| pan123 | ~95% | (已修复；下载/预览点击快照与 `pan123meta` 恢复已补齐) |
 | pan189 | ~95% | 无（最忠实移植） |
 | pan139 | ~95% | (已修复) |
 | lanzou | ~98% | 无（源码级移植） |
-| ilanzou | ~95% | (已修复) |
-| onedrive | ~85% | (已修复) |
-| dropbox | ~85% | (已修复) |
-| yike | ~90% | decryptYikeMd5 缺失 |
+| ilanzou | ~100% | (已修复；登录续期、下载/视频预览、七牛上传与跨盘 MD5 秒传已闭环) |
+| onedrive | ~90% | (已修复；rclone OAuth 凭据、账号选择与刷新链路已覆盖 e2e) |
+| dropbox | ~90% | (已修复；rclone OAuth 凭据、刷新保留与账号隔离已覆盖 e2e) |
+| yike | ~90% | (已修复；按需求不参与跨盘秒传) |
 | guangya | ~98% | 无 |
-| webdav | ~85% | rootPath 缺失 |
-| s3 | ~85% | (已修复) |
+| webdav | ~95% | 递归目录上传、路径段编码、自嵌套移动/复制保护已完成；分享/搜索为设计不支持 |
+| s3 | ~95% | 目录操作、multipart 上传/复制、冲突策略和兼容 404 判断已完成；分享/搜索/回收站为设计不支持 |
 
 ---
 
@@ -167,13 +167,13 @@
 
 ### 🟢 P2（体验优化）
 
-24. ⚠️ 限速/重试：aliopen 并发限速、dropbox 429 重试、pikpak 速率限制
+24. ⚠️ 限速/重试：✅ aliopen 并发限速/401 刷新/429 退避；✅ pikpak 登录/API 429 冷却识别；✅ dropbox 429 重试
 25. ⚠️ 版本历史：onedrive/dropbox revisions
 26. ⚠️ 缩略图：dropbox get_thumbnail_v2
 27. ⚠️ 账号凭据系统级保护：DPAPI/钥匙串（需平台特定实现）
 28. ⚠️ 前端缺失功能：瀑布流/字幕选择/播放列表/调试设置页
 29. ⚠️ 前端测试框架
-30. ⚠️ 测试覆盖率：9/13 provider 无单测
+30. ⚠️ 测试覆盖率：provider 深度覆盖仍不均衡，当前主要是 mock/e2e 关键链路，未覆盖真实云端账号
 31. ✅ **上传进度回调：webdav/s3**：已实现 ProgressReader + 令牌桶限速（`progress.go:22`）
 32. ✅ **MaxUploadSpeed 限速**：已实现 SetGlobalUploadRate + ProgressReader throttle（`app.go:128,328`）
 33. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5

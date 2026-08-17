@@ -4,6 +4,8 @@
 // qiniu multipart upload path.
 package ilanzou
 
+import "encoding/json"
+
 // ILANZOU_ROOT is the provider root folder id surfaced to the frontend.
 const ILANZOU_ROOT = "ilanzou_root"
 
@@ -36,6 +38,26 @@ type listItem struct {
 	FileSize   int64  `json:"fileSize"`
 	UpdTime    string `json:"updTime"`
 	ParentID   int64  `json:"parentId"`
+}
+
+// UnmarshalJSON accepts both numeric and quoted numeric fields. The legacy
+// API has returned both shapes across different endpoints and deployments;
+// decoding directly into int64 would silently drop the whole row on the
+// quoted form.
+func (i *listItem) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	i.FileType = int(numOf(raw["fileType"]))
+	i.FileID = numOf(raw["fileId"])
+	i.FolderID = numOf(raw["folderId"])
+	i.FileName = strOf(raw["fileName"])
+	i.FolderName = strOf(raw["folderName"])
+	i.FileSize = numOf(raw["fileSize"])
+	i.UpdTime = strOf(raw["updTime"])
+	i.ParentID = numOf(raw["parentId"])
+	return nil
 }
 
 // ToILanzouFolderId maps a user-facing folder id to the API folder id

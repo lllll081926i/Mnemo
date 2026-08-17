@@ -143,17 +143,20 @@ func (d *Driver) request(ctx context.Context, c drive.Context, pathName string, 
 	}
 	code := numOf(j["code"])
 	if proved && (code == -1 || code == -2 || token == "") && cr != nil && cr.Username != "" && cr.Password != "" {
-		if login, lerr := ilanzouLogin(ctx, cr.Username, cr.Password, cr.UUID); lerr == nil {
-			token = login.token
-			uuid = login.uuid
-			if j2, err2 := doOnce(token); err2 == nil {
-				j = j2
-			} else {
-				return nil, nil, err2
-			}
-			if numOf(j["code"]) == 200 {
-				return j, login, nil
-			}
+		login, lerr := ilanzouLogin(ctx, cr.Username, cr.Password, cr.UUID)
+		if lerr != nil {
+			return nil, nil, fmt.Errorf("优享版蓝奏云自动登录失败: %w", lerr)
+		}
+		token = login.token
+		uuid = login.uuid
+		if j2, err2 := doOnce(token); err2 == nil {
+			j = j2
+		} else {
+			return nil, nil, err2
+		}
+		if numOf(j["code"]) == 200 {
+			applyLoginSession(c.Token, login)
+			return j, login, nil
 		}
 	}
 	if numOf(j["code"]) != 200 {
@@ -400,17 +403,27 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 		return nil, err
 	}
 	if login != nil {
-		cr := parseCred(token.RefreshToken)
-		if cr == nil {
-			cr = &cred{}
-		}
-		cr.UUID = login.uuid
-		cr.Token = login.token
-		cr.UserID = login.userId
-		cr.Account = login.account
-		token.AccessToken = login.token
-		token.DeviceID = login.uuid
-		token.RefreshToken = mustJSON(cr)
+		applyLoginSession(token, login)
 	}
 	return token, nil
+}
+
+// applyLoginSession updates only credentials that rotate during an automatic
+// re-login. The account identity remains unchanged so a transient mapping
+// response cannot move an existing account into a new storage namespace.
+func applyLoginSession(token *model.TokenInfo, login *loginResult) {
+	if token == nil || login == nil {
+		return
+	}
+	cr := parseCred(token.RefreshToken)
+	if cr == nil {
+		cr = &cred{}
+	}
+	cr.UUID = login.uuid
+	cr.Token = login.token
+	cr.UserID = login.userId
+	cr.Account = login.account
+	token.AccessToken = login.token
+	token.DeviceID = login.uuid
+	token.RefreshToken = mustJSON(cr)
 }

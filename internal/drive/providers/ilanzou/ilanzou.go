@@ -79,6 +79,9 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 	if isRootSentinel(fileID) {
 		return *rootFile(c), nil
 	}
+	if f, ok := drive.CachedFile(c.DriveID, fileID); ok {
+		return f, nil
+	}
 	f, err := d.GetFile(ctx, c, fileID)
 	if err != nil {
 		return nil, err
@@ -123,12 +126,18 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if info.URL == "" {
 		return nil, errors.New("获取下载地址失败")
 	}
+	size := info.Size
+	if size == 0 {
+		if cached, ok := drive.CachedFile(c.DriveID, fileID); ok {
+			size = cached.Size
+		}
+	}
 	return &model.DownloadURL{
 		DriveID:      c.DriveID,
 		FileID:       fileID,
 		ExpireTime:   driveutil.GetExpiresTime(info.URL),
 		URL:          info.URL,
-		Size:         info.Size,
+		Size:         size,
 		Headers:      info.Headers,
 		DownloadMode: "proxy",
 		Concurrency:  1,
@@ -192,33 +201,40 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 		unknown = append(unknown, ref)
 	}
 	var ok []string
+	var failed []error
 	if len(known) > 0 {
 		deleted, err := d.deleteBatch(ctx, c, known)
 		if err != nil {
-			return nil, err
+			failed = append(failed, err)
+		} else {
+			ok = append(ok, deleted...)
 		}
-		ok = append(ok, deleted...)
 	}
 	if len(unknown) > 0 {
-		deleted := d.deleteWithFallback(ctx, c, unknown)
-		ok = append(ok, deleted...)
+		deleted, err := d.deleteWithFallback(ctx, c, unknown)
+		if err != nil {
+			failed = append(failed, err)
+		} else {
+			ok = append(ok, deleted...)
+		}
 	}
-	if len(ok) == 0 {
+	if len(ok) == 0 && len(failed) == 0 {
 		ids := make([]string, 0, len(refs))
 		for _, r := range refs {
 			ids = append(ids, r.ID)
 		}
 		return ids, nil
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 // deleteWithFallback tries the batch as files, then as folders.
-func (d *Driver) deleteWithFallback(ctx context.Context, c drive.Context, refs []drive.FileRef) []string {
+func (d *Driver) deleteWithFallback(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
 	deleted, err := d.deleteBatch(ctx, c, refs)
 	if err == nil {
-		return deleted
+		return deleted, nil
 	}
+	fileErr := err
 	folders := make([]drive.FileRef, len(refs))
 	dir := true
 	for i, r := range refs {
@@ -226,9 +242,9 @@ func (d *Driver) deleteWithFallback(ctx context.Context, c drive.Context, refs [
 	}
 	deleted, err = d.deleteBatch(ctx, c, folders)
 	if err != nil {
-		return nil
+		return nil, errors.Join(fileErr, err)
 	}
-	return deleted
+	return deleted, nil
 }
 
 // Move moves files/folders in batches with kind resolution + fallback.
@@ -250,32 +266,39 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 		unknown = append(unknown, ref)
 	}
 	var ok []string
+	var failed []error
 	if len(known) > 0 {
 		moved, err := d.moveBatch(ctx, c, known, target)
 		if err != nil {
-			return nil, err
+			failed = append(failed, err)
+		} else {
+			ok = append(ok, moved...)
 		}
-		ok = append(ok, moved...)
 	}
 	if len(unknown) > 0 {
-		moved := d.moveWithFallback(ctx, c, unknown, target)
-		ok = append(ok, moved...)
+		moved, err := d.moveWithFallback(ctx, c, unknown, target)
+		if err != nil {
+			failed = append(failed, err)
+		} else {
+			ok = append(ok, moved...)
+		}
 	}
-	if len(ok) == 0 {
+	if len(ok) == 0 && len(failed) == 0 {
 		ids := make([]string, 0, len(refs))
 		for _, r := range refs {
 			ids = append(ids, r.ID)
 		}
 		return ids, nil
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
-func (d *Driver) moveWithFallback(ctx context.Context, c drive.Context, refs []drive.FileRef, target string) []string {
+func (d *Driver) moveWithFallback(ctx context.Context, c drive.Context, refs []drive.FileRef, target string) ([]string, error) {
 	moved, err := d.moveBatch(ctx, c, refs, target)
 	if err == nil {
-		return moved
+		return moved, nil
 	}
+	fileErr := err
 	folders := make([]drive.FileRef, len(refs))
 	dir := true
 	for i, r := range refs {
@@ -283,9 +306,9 @@ func (d *Driver) moveWithFallback(ctx context.Context, c drive.Context, refs []d
 	}
 	moved, err = d.moveBatch(ctx, c, folders, target)
 	if err != nil {
-		return nil
+		return nil, errors.Join(fileErr, err)
 	}
-	return moved
+	return moved, nil
 }
 
 // Copy: 优享版蓝奏云 API 不支持服务端复制（legacy 返回空数组）。
