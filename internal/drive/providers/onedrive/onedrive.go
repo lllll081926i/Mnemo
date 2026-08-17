@@ -3,13 +3,14 @@ package onedrive
 import (
 	"context"
 	"errors"
-	"net/http"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
@@ -21,11 +22,15 @@ func init() {
 		ID:   providerID,
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
-			"search":        true,
-			"createShare":   true,
+			"search":          true,
+			"createShare":     true,
 			"shareExpiration": true,
-			"sharePassword": true,
-			"shareHistory":  true,
+			"sharePassword":   true,
+			"shareHistory":    true,
+			// Graph DELETE moves an item to the recycle bin. This provider does
+			// not expose a permanent-delete endpoint through the current API.
+			"recycleBin":      true,
+			"permanentDelete": false,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"sha1", "quickxorhash"}, nil)
 		}),
@@ -190,12 +195,15 @@ func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) (
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, id := range fileIDs {
 		if err := cl.Delete(ctx, id); err == nil {
 			ok = append(ok, id)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", id, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
@@ -217,12 +225,15 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		if err := cl.Move(ctx, r.ID, toParentID); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
@@ -231,17 +242,23 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 		return nil, err
 	}
 	var ok []string
+	var failed []error
 	for _, r := range refs {
 		// fetch name for the copy target
 		name := ""
 		if item, err := cl.Detail(ctx, r.ID); err == nil {
 			name = item.Name
+		} else {
+			failed = append(failed, fmt.Errorf("%s: 获取文件信息失败: %w", r.ID, err))
+			continue
 		}
 		if err := cl.Copy(ctx, r.ID, toParentID, name); err == nil {
 			ok = append(ok, r.ID)
+		} else {
+			failed = append(failed, fmt.Errorf("%s: %w", r.ID, err))
 		}
 	}
-	return ok, nil
+	return ok, errors.Join(failed...)
 }
 
 func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.ShareParams) (*model.ShareItem, error) {
@@ -257,6 +274,9 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 
 // UploadOneFile uploads one file (simple PUT for small, upload session for large).
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
+		return errors.New("OneDrive: 上传文件路径为空")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return err
@@ -266,25 +286,79 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	defer f.Close()
-	name := ui.Info.Name
-	parentID := ui.Info.ParentFileID
-	if ui.Info.Size <= smallUploadLimit {
-		target := graphHost + smallUploadPath(parentID, name)
-		return cl.rawPut(ctx, target, f)
+	info, err := f.Stat()
+	if err != nil {
+		return err
 	}
-	return cl.sessionUpload(ctx, c, f, parentID, name, ui)
+	name := ui.Info.Name
+	if strings.TrimSpace(name) == "" {
+		return errors.New("OneDrive: 上传文件名为空")
+	}
+	parentID := ui.Info.ParentFileID
+	behavior := oneDriveConflictBehavior(ui.Info.ConflictPolicy)
+	if info.Size() <= smallUploadLimit {
+		target := graphUploadTarget(graphHost+smallUploadPath(parentID, name), behavior)
+		fileID, putErr := cl.rawPut(ctx, target, f)
+		if putErr != nil {
+			if driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) == driveutil.ConflictSkip && isGraphConflict(putErr) {
+				return nil
+			}
+			return putErr
+		}
+		ui.Upload.FileID = fileID
+		ui.Info.Size = info.Size()
+		return nil
+	}
+	sessionErr := cl.sessionUpload(ctx, c, f, parentID, name, ui, behavior)
+	if sessionErr != nil && driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) == driveutil.ConflictSkip && isGraphConflict(sessionErr) {
+		return nil
+	}
+	return sessionErr
+}
+
+func oneDriveConflictBehavior(policy string) string {
+	switch driveutil.ResolveConflictPolicy(policy) {
+	case driveutil.ConflictRefuse, driveutil.ConflictSkip:
+		return "fail"
+	case driveutil.ConflictRename:
+		return "rename"
+	default:
+		return "replace"
+	}
+}
+
+func graphUploadTarget(raw, behavior string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	q.Set("@microsoft.graph.conflictBehavior", behavior)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func isGraphConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "http 409") || strings.Contains(msg, "namealreadyexists") || strings.Contains(msg, "conflict")
 }
 
 // oneDriveScope is the OAuth scope used for token refresh.
-const oneDriveScope = "files.readwrite offline_access User.Read"
+const oneDriveScope = "Files.ReadWrite offline_access User.Read"
 
 // refreshOneDriveToken exchanges a refresh_token for a fresh access_token via
 // the Microsoft OAuth2 token endpoint.
-func refreshOneDriveToken(ctx context.Context, clientID, refreshToken string) (*model.TokenInfo, error) {
+func refreshOneDriveToken(ctx context.Context, clientID, clientSecret, refreshToken string) (*model.TokenInfo, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
+	if clientSecret != "" {
+		form.Set("client_secret", clientSecret)
+	}
 	form.Set("scope", oneDriveScope)
 
 	cl := netx.NewClient(60 * time.Second)
@@ -339,11 +413,11 @@ func fetchOneDriveProfile(ctx context.Context, accessToken string, tok *model.To
 		Quota *struct {
 			Total int64 `json:"total"`
 			Used  int64 `json:"used"`
-	} `json:"quota"`
+		} `json:"quota"`
 	}
 	if err := cl.getJSON(ctx, "/me/drive", &driveInfo); err == nil {
 		if driveInfo.ID != "" {
-			tok.DefaultDriveID = driveInfo.ID
+			tok.DefaultDriveID = model.BuildDriveID(providerID, driveInfo.ID)
 		}
 		if driveInfo.Quota != nil {
 			tok.TotalSize = driveInfo.Quota.Total
@@ -360,18 +434,23 @@ func fetchOneDriveProfile(ctx context.Context, accessToken string, tok *model.To
 // token metadata.
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	if token == nil {
-		return nil, nil
+		return nil, errors.New("OneDrive 未登录")
 	}
 	refreshToken := strings.TrimSpace(token.RefreshToken)
 	if refreshToken == "" {
 		return nil, errors.New("onedrive: missing refresh_token")
 	}
-	clientID := strings.TrimSpace(drive.Secret("onedrive_client_id"))
-	if clientID == "" {
-		return nil, errors.New("onedrive: client_id 未配置（secrets.json onedrive_client_id）")
+	configuredID := strings.TrimSpace(drive.Secret("onedrive_client_id"))
+	clientID := strings.TrimSpace(token.DeviceID)
+	// Older builds stored the literal "mnemo" instead of the client id.
+	// Treat it as unset so existing accounts fall back to the configured or
+	// bundled rclone-compatible application.
+	if clientID == "" || clientID == "mnemo" {
+		clientID = configuredID
 	}
+	clientID, clientSecret := resolveCredentials(clientID, "", configuredID, "")
 
-	fresh, err := refreshOneDriveToken(ctx, clientID, refreshToken)
+	fresh, err := refreshOneDriveToken(ctx, clientID, clientSecret, refreshToken)
 	if err != nil {
 		return nil, err
 	}
@@ -381,16 +460,40 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	if fresh.RefreshToken != "" {
 		token.RefreshToken = fresh.RefreshToken
 	}
-	token.ExpiresIn = fresh.ExpiresIn
+	if fresh.ExpiresIn > 0 {
+		token.ExpiresIn = fresh.ExpiresIn
+	}
 	if fresh.TokenType != "" {
 		token.TokenType = fresh.TokenType
 	}
 	token.TokenFrom = providerID
+	token.DeviceID = clientID
 
 	// update account info + quota (non-blocking on error)
 	fetchOneDriveProfile(ctx, token.AccessToken, token)
+	applyOneDriveIdentity(token)
 
 	return token, nil
+}
+
+// ResolveTransferHash returns a hash already exposed by Microsoft Graph.
+// It is used only when the migration target supports the same fingerprint.
+func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, _ bool) (string, error) {
+	if method != "sha1" && method != "quickxorhash" {
+		return "", nil
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return "", err
+	}
+	item, err := cl.Detail(ctx, fileID)
+	if err != nil || item.File == nil || item.File.Hashes == nil {
+		return "", err
+	}
+	if method == "sha1" {
+		return item.File.Hashes.SHA1Hash, nil
+	}
+	return item.File.Hashes.QuickXorHash, nil
 }
 
 func mapItems(items []Item, driveID, parentID string) []model.File {
@@ -411,5 +514,3 @@ func driveutil_file(driveID, fileID, name string) model.File {
 		NameSearch: name, Category: "folder", IsDir: true, Icon: "iconfile-folder",
 	}
 }
-
-var _ = http.MethodGet

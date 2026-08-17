@@ -20,12 +20,14 @@ SetHashes(["sha1", "quickxorhash"], nil)
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| OAuth PKCE S256 | ✅ | `auth.go:27-64` verifier+challenge | 无 |
-| 本地回调 | ✅ | `auth.go:66-113` net.Listen 127.0.0.1:0 随机端口 + state 校验 + 10min 超时 | Go 版内置回调服务器 |
-| Token 交换 | ✅ | `auth.go:134-166` POST msTokenURL | 🟡 缺 client_secret 传递 |
-| client_id | ✅ | `auth.go:30-34` req.Config 或 onedrive_client_id | 🟡 无内置 fallback client_id |
-| **Token 刷新** | ✅ | `onedrive.go:361-414` RefreshAccount 调 refreshOneDriveToken | 无 |
+| OAuth PKCE S256 | ✅ | `auth.go` verifier+challenge | 包含 `prompt=select_account`，便于多账号登录 |
+| 本地回调 | ✅ | `auth.go` 127.0.0.1:0 + state/来源校验 + 10min 超时 | Go 版内置回调服务器 |
+| Token 交换 | ✅ | `auth.go` POST msTokenURL | 按实际凭据传递 `client_secret`，同时发送 `code_verifier` |
+| client_id / secret | ✅ | 请求配置、release secrets 或内置 rclone 凭据 | 自定义 client_id 只在同时提供 secret 时使用 secret |
+| **Token 刷新** | ✅ | `onedrive.go` 的 `RefreshAccount` 调 `refreshOneDriveToken` | 缺省 `expires_in` 时保留旧过期时间 |
 | **账号信息/配额** | ✅ | `onedrive.go:386-414` 获取 /me 和 /me/drive 配额 | 无 |
+
+默认使用与旧版及 `Example/rclone` 一致的 OneDrive OAuth `client_id/client_secret`；发行版可通过 `secrets.json` 覆盖 client_id。登录后账号 ID 来自 Graph `/me`，默认 drive ID 使用 `onedrive:<drive-id>` 命名空间，避免多账号串用。
 
 ---
 
@@ -136,7 +138,7 @@ SetHashes(["sha1", "quickxorhash"], nil)
 
 ## P0 差距清单
 
-1. ✅ **Token 刷新已实现**（`onedrive.go:361-414` RefreshAccount）
+1. ✅ **Token 刷新已实现**（`onedrive.go` 的 `RefreshAccount`），刷新响应缺少 `expires_in` 时保留旧值
 2. ✅ **账号信息/配额已实现**（`onedrive.go:386-414`）
 3. ✅ **上传断点续传已实现**（`upload.go:65-128` UploadSession + querySessionPosition + ClearUploadSession）
 4. ✅ **ProvideHashes 已声明**（`onedrive.go:30` SetHashes）
@@ -144,4 +146,4 @@ SetHashes(["sha1", "quickxorhash"], nil)
 6. 🟡 上传冲突策略单一（仅 rename）
 7. 🟡 搜索无缩略图、引号转义可能错误
 8. 🟡 版本历史完全缺失
-9. 🟡 client_secret 不传递、无内置 fallback client_id
+9. ✅ **OAuth 默认凭据与 client_secret**（`auth.go`）：沿用旧版/rclone，登录与刷新均使用同一组凭据；登录会显示账号选择。

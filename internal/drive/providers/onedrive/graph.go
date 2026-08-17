@@ -25,14 +25,14 @@ const RootID = "onedrive_root"
 
 // Item is a raw Microsoft Graph driveItem.
 type Item struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	Size               int64  `json:"size"`
-	CreatedDateTime    string `json:"createdDateTime"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Size                 int64  `json:"size"`
+	CreatedDateTime      string `json:"createdDateTime"`
 	LastModifiedDateTime string `json:"lastModifiedDateTime"`
-	DownloadURL        string `json:"@microsoft.graph.downloadUrl"`
-	ContentDownloadURL string `json:"@content.downloadUrl"`
-	ParentReference    *struct {
+	DownloadURL          string `json:"@microsoft.graph.downloadUrl"`
+	ContentDownloadURL   string `json:"@content.downloadUrl"`
+	ParentReference      *struct {
 		ID      string `json:"id"`
 		DriveID string `json:"driveId"`
 		Path    string `json:"path"`
@@ -52,8 +52,8 @@ type Item struct {
 		Height int `json:"height"`
 	} `json:"image"`
 	Video *struct {
-		Width    int `json:"width"`
-		Height   int `json:"height"`
+		Width    int   `json:"width"`
+		Height   int   `json:"height"`
 		Duration int64 `json:"duration"`
 	} `json:"video"`
 	Thumbnails []struct {
@@ -250,13 +250,9 @@ func (c *client) Search(ctx context.Context, keyword string) ([]Item, error) {
 		}
 		out = append(out, resp.Value...)
 		target = resp.NextLink
-		// NextLink is a full URL; getJSON expects a path. If it's absolute,
-		// extract the path relative to the Graph host.
-		if target != "" && strings.HasPrefix(target, graphHost) {
-			target = strings.TrimPrefix(target, graphHost)
-		} else if target != "" && !strings.HasPrefix(target, "/") {
-			break
-		}
+		// getJSON validates and accepts both Graph-relative and trusted
+		// absolute next links. SharePoint-backed drives may return a host other
+		// than graph.microsoft.com, so do not discard those cursors here.
 	}
 	return out, nil
 }
@@ -269,8 +265,8 @@ func (c *client) Mkdir(ctx context.Context, parentID, name string) (*drive.Mkdir
 	}
 	var item Item
 	err := c.jsonDo(ctx, http.MethodPost, "/me/drive/"+parent+"/children", map[string]any{
-		"name":                       name,
-		"folder":                     map[string]any{},
+		"name":                              name,
+		"folder":                            map[string]any{},
 		"@microsoft.graph.conflictBehavior": "rename",
 	}, &item)
 	if err != nil {
@@ -333,7 +329,13 @@ func (c *client) Copy(ctx context.Context, fileID, targetParentID, name string) 
 	}
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
-		time.Sleep(time.Second)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 		status, err := c.pollCopy(ctx, monitorURL)
 		if err != nil {
 			return err
@@ -357,7 +359,9 @@ func (c *client) pollCopy(ctx context.Context, monitorURL string) (string, error
 	}
 	if resp.StatusCode >= 400 {
 		var g struct {
-			Error *struct{ Message string `json:"message"` } `json:"error"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
 		}
 		_ = json.Unmarshal(body, &g)
 		if g.Error != nil {
@@ -388,9 +392,9 @@ func (c *client) CreateLink(ctx context.Context, fileID, expiration, password st
 		body["expirationDateTime"] = expiration
 	}
 	var perm struct {
-		ID               string `json:"id"`
+		ID                 string `json:"id"`
 		ExpirationDateTime string `json:"expirationDateTime"`
-		Link             *struct {
+		Link               *struct {
 			Type   string `json:"type"`
 			Scope  string `json:"scope"`
 			WebURL string `json:"webUrl"`
@@ -403,12 +407,12 @@ func (c *client) CreateLink(ctx context.Context, fileID, expiration, password st
 		return nil, errors.New("onedrive: no share url returned")
 	}
 	return &model.ShareItem{
-		ShareID:    perm.ID,
-		ShareURL:   perm.Link.WebURL,
+		ShareID:     perm.ID,
+		ShareURL:    perm.Link.WebURL,
 		SharePolicy: perm.Link.Scope,
-		ShareName:  "OneDrive 分享链接",
-		Expiration: perm.ExpirationDateTime,
-		SharePwd:   password,
+		ShareName:   "OneDrive 分享链接",
+		Expiration:  perm.ExpirationDateTime,
+		SharePwd:    password,
 	}, nil
 }
 
@@ -425,26 +429,32 @@ func (c *client) DownloadURL(item *Item) string {
 
 // UploadSessionItem is a createUploadSession response.
 type UploadSessionItem struct {
-	UploadURL string `json:"uploadUrl"`
+	UploadURL          string `json:"uploadUrl"`
 	ExpirationDateTime string `json:"expirationDateTime"`
 }
 
 // CreateUploadSession starts a resumable upload session.
-func (c *client) CreateUploadSession(ctx context.Context, parentID, name string) (*UploadSessionItem, error) {
+func (c *client) CreateUploadSession(ctx context.Context, parentID, name, conflictBehavior string) (*UploadSessionItem, error) {
 	parent := "root"
 	if parentID != "" && parentID != RootID {
 		parent = "items/" + url.PathEscape(parentID)
 	}
 	var out UploadSessionItem
+	if conflictBehavior == "" {
+		conflictBehavior = "replace"
+	}
 	if err := c.jsonDo(ctx, http.MethodPost,
 		"/me/drive/"+parent+":/"+url.PathEscape(name)+":/createUploadSession",
 		map[string]any{
 			"item": map[string]any{
-				"@microsoft.graph.conflictBehavior": "rename",
+				"@microsoft.graph.conflictBehavior": conflictBehavior,
 				"name":                              name,
 			},
 		}, &out); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(out.UploadURL) == "" {
+		return nil, errors.New("onedrive: upload session url missing")
 	}
 	return &out, nil
 }
@@ -479,7 +489,7 @@ func mapItem(item *Item, driveID, parentID string) model.File {
 		if item.File.Hashes.SHA1Hash != "" {
 			hash, hashName = item.File.Hashes.SHA1Hash, "sha1"
 		} else if item.File.Hashes.QuickXorHash != "" {
-			hash, hashName = item.File.Hashes.QuickXorHash, "quickxor"
+			hash, hashName = item.File.Hashes.QuickXorHash, "quickxorhash"
 		}
 	}
 	f := driveutil.NewFile(driveID, item.ID, parentID, name, isDir, size, timeUnix)
