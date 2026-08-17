@@ -1,4 +1,4 @@
-// Package player controls an external mpv process via JSON IPC over TCP.
+// Package player controls an external mpv process via platform-native JSON IPC.
 package player
 
 import (
@@ -8,9 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
+	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,57 +17,70 @@ import (
 
 // Command is a JSON IPC command.
 type Command struct {
-	Command   []any  `json:"command"`
-	RequestID int    `json:"request_id,omitempty"`
+	Command   []any `json:"command"`
+	RequestID int   `json:"request_id,omitempty"`
 }
 
 // Event is a JSON IPC event from mpv.
 type Event struct {
-	Event   string          `json:"event"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	RequestID int          `json:"request_id,omitempty"`
+	Event     string          `json:"event"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	RequestID int             `json:"request_id,omitempty"`
 }
 
 // Player controls an mpv process.
 type Player struct {
-	cmd    *exec.Cmd
-	conn   net.Conn
-	reader *bufio.Reader
-	mu     sync.Mutex
-	port   int
-	ready  chan struct{}
-	reqID  int
-	pending map[int]chan Event
+	cmd          *exec.Cmd
+	conn         io.ReadWriteCloser
+	reader       *bufio.Reader
+	mu           sync.Mutex
+	ctx          context.Context
+	ipcCleanup   func()
+	ready        chan struct{}
+	closed       chan struct{}
+	closeOnce    sync.Once
+	disconnected bool
+	reqID        int
+	pending      map[int]chan Event
 	// callbacks
 	OnEvent func(Event)
 }
 
 // Options carries mpv binary path and user data dir.
 type Options struct {
-	MpvPath    string
-	ConfigDir  string
-	ExtraArgs  []string
+	MpvPath   string
+	ConfigDir string
+	ExtraArgs []string
+	Env       []string
 }
 
-// Start launches mpv with JSON IPC on a random port.
+// Start launches mpv with JSON IPC on a private platform-specific endpoint.
 func Start(ctx context.Context, opts Options) (*Player, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
+	if strings.TrimSpace(opts.MpvPath) == "" {
+		return nil, errors.New("player: mpv path is empty")
+	}
+	if opts.ConfigDir != "" {
+		if err := os.MkdirAll(opts.ConfigDir, 0o755); err != nil {
+			return nil, fmt.Errorf("player: create config dir: %w", err)
+		}
+	}
+	ipcAddress, cleanup := newIPCAddress()
 
 	p := &Player{
-		port:    port,
-		ready:   make(chan struct{}),
-		pending: map[int]chan Event{},
+		ctx:        ctx,
+		ipcCleanup: cleanup,
+		ready:      make(chan struct{}),
+		closed:     make(chan struct{}),
+		pending:    map[int]chan Event{},
 	}
 	args := []string{
 		"--no-terminal",
 		"--idle",
-		"--input-ipc-server=127.0.0.1:" + strconv.Itoa(port),
+		"--input-ipc-server=" + ipcAddress,
 		"--keep-open=yes",
 		"--volume=50",
 	}
@@ -78,11 +90,16 @@ func Start(ctx context.Context, opts Options) (*Player, error) {
 	args = append(args, opts.ExtraArgs...)
 
 	p.cmd = exec.CommandContext(ctx, opts.MpvPath, args...)
+	if len(opts.Env) > 0 {
+		p.cmd.Env = mergeEnv(os.Environ(), opts.Env)
+	}
 	stderr, err := p.cmd.StderrPipe()
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
 	if err := p.cmd.Start(); err != nil {
+		cleanup()
 		return nil, err
 	}
 
@@ -91,15 +108,45 @@ func Start(ctx context.Context, opts Options) (*Player, error) {
 		// discard stderr (mpv logs)
 		_, _ = io.Copy(io.Discard, stderr)
 	}()
+	go func() {
+		if err := p.cmd.Wait(); err != nil {
+			p.disconnect(fmt.Errorf("player: mpv exited: %w", err))
+		} else {
+			p.disconnect(errors.New("player: mpv exited"))
+		}
+	}()
 
-	// connect to IPC
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 5*time.Second)
-	if err != nil {
-		_ = p.cmd.Process.Kill()
-		return nil, fmt.Errorf("player: connect %w", err)
+	// mpv creates the platform-specific IPC endpoint after process startup.
+	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var conn io.ReadWriteCloser
+	for {
+		conn, err = dialIPC(connectCtx, ipcAddress)
+		if err == nil {
+			break
+		}
+		select {
+		case <-connectCtx.Done():
+			_ = p.cmd.Process.Kill()
+			p.disconnect(fmt.Errorf("player: connect IPC: %w", err))
+			if errors.Is(connectCtx.Err(), context.DeadlineExceeded) {
+				return nil, fmt.Errorf("player: connect IPC: %w", err)
+			}
+			return nil, connectCtx.Err()
+		case <-p.closed:
+			return nil, errors.New("player: mpv exited before IPC was ready")
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	p.mu.Lock()
+	if p.disconnected {
+		p.mu.Unlock()
+		_ = conn.Close()
+		return nil, errors.New("player: mpv exited before IPC was ready")
 	}
 	p.conn = conn
 	p.reader = bufio.NewReader(conn)
+	p.mu.Unlock()
 	close(p.ready)
 
 	go p.readLoop()
@@ -110,6 +157,7 @@ func (p *Player) readLoop() {
 	for {
 		line, err := p.reader.ReadString('\n')
 		if err != nil {
+			p.disconnect(fmt.Errorf("player: IPC disconnected: %w", err))
 			return
 		}
 		ev := Event{}
@@ -134,20 +182,52 @@ func (p *Player) readLoop() {
 }
 
 // send writes a JSON command and returns the response.
-func (p *Player) send(cmd Command) (Event, error) {
-	<-p.ready
+func (p *Player) send(ctx context.Context, cmd Command) (Event, error) {
+	if p == nil {
+		return Event{}, errors.New("player: nil player")
+	}
+	if ctx == nil {
+		ctx = p.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+	}
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return Event{}, ctx.Err()
+	case <-p.closed:
+		return Event{}, errors.New("player: closed")
+	}
 	p.mu.Lock()
+	if p.disconnected || p.conn == nil {
+		p.mu.Unlock()
+		return Event{}, errors.New("player: IPC disconnected")
+	}
 	p.reqID++
 	cmd.RequestID = p.reqID
 	ch := make(chan Event, 1)
-	p.pending[p.reqID] = ch
+	id := p.reqID
+	p.pending[id] = ch
 	p.mu.Unlock()
 
-	b, _ := json.Marshal(cmd)
+	b, err := json.Marshal(cmd)
+	if err != nil {
+		p.removePending(id)
+		return Event{}, err
+	}
 	p.mu.Lock()
-	_, err := p.conn.Write(append(b, '\n'))
+	conn := p.conn
+	if p.disconnected || conn == nil {
+		p.mu.Unlock()
+		p.removePending(id)
+		return Event{}, errors.New("player: IPC disconnected")
+	}
+	_, err = conn.Write(append(b, '\n'))
 	p.mu.Unlock()
 	if err != nil {
+		p.removePending(id)
+		p.disconnect(err)
 		return Event{}, err
 	}
 	select {
@@ -156,44 +236,48 @@ func (p *Player) send(cmd Command) (Event, error) {
 			return ev, errors.New(ev.Error)
 		}
 		return ev, nil
+	case <-ctx.Done():
+		p.removePending(id)
+		return Event{}, ctx.Err()
 	case <-time.After(30 * time.Second):
+		p.removePending(id)
 		return Event{}, errors.New("player: command timeout")
 	}
 }
 
 // LoadFile loads a URL or file path.
 func (p *Player) LoadFile(ctx context.Context, url string) error {
-	_, err := p.send(Command{Command: []any{"loadfile", url, "replace"}})
+	_, err := p.send(ctx, Command{Command: []any{"loadfile", url, "replace"}})
 	return err
 }
 
 // Pause toggles pause.
 func (p *Player) Pause(val bool) error {
-	_, err := p.send(Command{Command: []any{"set_property", "pause", val}})
+	_, err := p.send(nil, Command{Command: []any{"set_property", "pause", val}})
 	return err
 }
 
 // Seek seeks to a position in seconds.
 func (p *Player) Seek(seconds float64) error {
-	_, err := p.send(Command{Command: []any{"seek", seconds, "absolute"}})
+	_, err := p.send(nil, Command{Command: []any{"seek", seconds, "absolute"}})
 	return err
 }
 
 // SetVolume sets volume 0-100.
 func (p *Player) SetVolume(v int) error {
-	_, err := p.send(Command{Command: []any{"set_property", "volume", v}})
+	_, err := p.send(nil, Command{Command: []any{"set_property", "volume", v}})
 	return err
 }
 
 // SetSpeed sets playback speed.
 func (p *Player) SetSpeed(speed float64) error {
-	_, err := p.send(Command{Command: []any{"set_property", "speed", speed}})
+	_, err := p.send(nil, Command{Command: []any{"set_property", "speed", speed}})
 	return err
 }
 
 // GetProperty returns an mpv property value.
 func (p *Player) GetProperty(name string) (any, error) {
-	ev, err := p.send(Command{Command: []any{"get_property", name}})
+	ev, err := p.send(nil, Command{Command: []any{"get_property", name}})
 	if err != nil {
 		return nil, err
 	}
@@ -207,11 +291,79 @@ func (p *Player) GetProperty(name string) (any, error) {
 
 // Close stops mpv.
 func (p *Player) Close() error {
-	if p.conn != nil {
-		_ = p.conn.Close()
+	if p == nil {
+		return nil
 	}
+	p.disconnect(errors.New("player: closed"))
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
 	return nil
+}
+
+func (p *Player) removePending(id int) {
+	p.mu.Lock()
+	delete(p.pending, id)
+	p.mu.Unlock()
+}
+
+func (p *Player) disconnect(err error) {
+	p.closeOnce.Do(func() {
+		close(p.closed)
+		p.mu.Lock()
+		p.disconnected = true
+		conn := p.conn
+		p.conn = nil
+		cleanup := p.ipcCleanup
+		p.ipcCleanup = nil
+		pending := p.pending
+		p.pending = map[int]chan Event{}
+		p.mu.Unlock()
+		if conn != nil {
+			_ = conn.Close()
+		}
+		if cleanup != nil {
+			cleanup()
+		}
+		message := "player: closed"
+		if err != nil && err.Error() != "" {
+			message = err.Error()
+		}
+		for _, ch := range pending {
+			select {
+			case ch <- Event{Error: message}:
+			default:
+			}
+		}
+	})
+}
+
+// Alive reports whether the IPC connection is still usable.
+func (p *Player) Alive() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.disconnected && p.conn != nil
+}
+
+func mergeEnv(base, overrides []string) []string {
+	values := make(map[string]string, len(base)+len(overrides))
+	order := make([]string, 0, len(base)+len(overrides))
+	for _, item := range append(append([]string(nil), base...), overrides...) {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, key+"="+values[key])
+	}
+	return out
 }

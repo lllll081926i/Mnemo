@@ -1,7 +1,7 @@
 # Mnemo Release
 # - Trigger: tag v* or manual dispatch
 # - Never deletes existing GitHub Releases / assets (upload with --clobber only replaces same filename)
-# - Builds Windows (x64+arm64 Inno Setup), macOS (arm64), Linux (x64+arm64) in parallel
+# - Builds Windows (x64+arm64 Inno Setup), macOS (arm64+Intel), Linux (x64+arm64) in parallel
 
 name: Release
 
@@ -9,15 +9,20 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
-  GO_VERSION: '1.25'
-  NODE_VERSION: '20'
+  GO_VERSION: "1.25"
+  NODE_VERSION: "20"
+  MPV_VERSION: "v0.41.0"
+  MPV_SOURCE_SHA256: "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209"
+  LINUXDEPLOY_VERSION: "1-alpha-20251107-1"
+  APPIMAGETOOL_VERSION: "1.9.1"
+  NFPM_VERSION: "v2.47.0"
 
 permissions:
   contents: read
@@ -40,17 +45,27 @@ jobs:
             artifact: Mnemo-windows-arm64
             arch: arm64
           - name: macOS arm64
-            os: macos-latest
+            # Keep the runner aligned with the official macOS 14 arm bundle.
+            os: macos-14
             platform: darwin/arm64
             artifact: Mnemo-macos-arm64
             arch: arm64
+          - name: macOS x64
+            # Intel builds use the official macOS 15 Intel mpv bundle.
+            os: macos-13
+            platform: darwin/amd64
+            artifact: Mnemo-macos-x64
+            arch: x64
           - name: Linux x64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             platform: linux/amd64
             artifact: Mnemo-linux-x64
             arch: x64
           - name: Linux arm64
-            os: ubuntu-22.04
+            # Build on a native arm64 runner. Installing mpv on an x64
+            # runner and copying it into an arm64 package silently produces
+            # an unusable player binary.
+            os: ubuntu-24.04-arm
             platform: linux/arm64
             artifact: Mnemo-linux-arm64
             arch: arm64
@@ -70,86 +85,144 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install
+        run: npm ci
 
-      # ---------- mpv engine: download per-platform via secret URLs ----------
+      # ---------- mpv engine: fixed official release, checked by SHA-256 ----------
       - name: Fetch mpv engine (Windows x64)
         if: runner.os == 'Windows' && matrix.arch == 'x64'
         shell: bash
-        env:
-          MPV_WIN_X64_URL: ${{ secrets.MPV_WIN_X64_URL }}
         run: |
           set -euo pipefail
-          choco install 7zip -y --no-progress || true
+          choco install 7zip -y --no-progress
           export PATH="/c/Program Files/7-Zip:$PATH"
           mkdir -p internal/engine/win32/mpv
-          url="${MPV_WIN_X64_URL}"
-          if [[ -z "${url}" ]]; then echo "MPV_WIN_X64_URL secret not set" >&2; exit 1; fi
-          curl -L --retry 5 -o mpv.7z "${url}"
-          7z x mpv.7z -ompv-extract -y
-          find mpv-extract -name "mpv.exe" -exec cp {} internal/engine/win32/mpv/mpv.exe \;
-          find mpv-extract -name "d3dcompiler_43.dll" -exec cp {} internal/engine/win32/mpv/ \; || true
-          test -f internal/engine/win32/mpv/mpv.exe && echo "mpv.exe OK" || { echo "mpv.exe missing"; exit 1; }
+          url="https://github.com/mpv-player/mpv/releases/download/${MPV_VERSION}/mpv-${MPV_VERSION}-x86_64-pc-windows-msvc.zip"
+          curl -fsSL --retry 5 --retry-all-errors -o mpv.zip "${url}"
+          printf '%s  mpv.zip\n' '4e197f729f5071c6772f35fffd96e0f36e3e8a044bd9479b136bb09b7c6a80ff' | sha256sum -c -
+          7z x mpv.zip -ompv-extract -y
+          mpv_bin="$(find mpv-extract -type f -name 'mpv.exe' -print -quit)"
+          test -n "${mpv_bin}"
+          cp -a "$(dirname "${mpv_bin}")"/. internal/engine/win32/mpv/
+          test -f internal/engine/win32/mpv/mpv.exe
 
       - name: Fetch mpv engine (Windows arm64)
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         shell: bash
-        env:
-          MPV_WIN_ARM64_URL: ${{ secrets.MPV_WIN_ARM64_URL }}
         run: |
           set -euo pipefail
-          choco install 7zip -y --no-progress || true
+          choco install 7zip -y --no-progress
           export PATH="/c/Program Files/7-Zip:$PATH"
           mkdir -p internal/engine/win32/mpv
-          url="${MPV_WIN_ARM64_URL}"
-          if [[ -z "${url}" ]]; then echo "MPV_WIN_ARM64_URL secret not set" >&2; exit 1; fi
-          curl -L --retry 5 -o mpv.7z "${url}"
-          7z x mpv.7z -ompv-extract -y
-          find mpv-extract -name "mpv.exe" -exec cp {} internal/engine/win32/mpv/mpv.exe \;
-          test -f internal/engine/win32/mpv/mpv.exe && echo "mpv.exe OK" || { echo "mpv.exe missing"; exit 1; }
+          url="https://github.com/mpv-player/mpv/releases/download/${MPV_VERSION}/mpv-${MPV_VERSION}-aarch64-pc-windows-msvc.zip"
+          curl -fsSL --retry 5 --retry-all-errors -o mpv.zip "${url}"
+          printf '%s  mpv.zip\n' 'a822abeffd0ac88951f4084f3425f949842aa17d616f880637ebe9041e482e97' | sha256sum -c -
+          7z x mpv.zip -ompv-extract -y
+          mpv_bin="$(find mpv-extract -type f -name 'mpv.exe' -print -quit)"
+          test -n "${mpv_bin}"
+          cp -a "$(dirname "${mpv_bin}")"/. internal/engine/win32/mpv/
+          test -f internal/engine/win32/mpv/mpv.exe
 
       - name: Fetch mpv engine (macOS arm64)
-        if: runner.os == 'macOS'
-        env:
-          MPV_MAC_ARM64_URL: ${{ secrets.MPV_MAC_ARM64_URL }}
+        if: runner.os == 'macOS' && matrix.arch == 'arm64'
         run: |
           set -euo pipefail
           mkdir -p internal/engine/darwin/mpv
-          url="${MPV_MAC_ARM64_URL}"
-          if [[ -z "${url}" ]]; then
-            brew install mpv
-            cp "$(which mpv)" internal/engine/darwin/mpv/mpv
-          else
-            curl -L --retry 5 -o mpv.tar.gz "${url}"
-            tar xzf mpv.tar.gz -C internal/engine/darwin/mpv --strip-components=1
-          fi
-          chmod +x internal/engine/darwin/mpv/mpv
-          test -f internal/engine/darwin/mpv/mpv && echo "mpv OK" || { echo "mpv missing"; exit 1; }
+          url="https://github.com/mpv-player/mpv/releases/download/${MPV_VERSION}/mpv-${MPV_VERSION}-macos-14-arm.zip"
+          curl -fsSL --retry 5 --retry-all-errors -o mpv.zip "${url}"
+          printf '%s  mpv.zip\n' '5c96f9b21355fc0a11d2e2161ad65f33031070e9fb3f6bd9865fb459b94587e6' | shasum -a 256 -c -
+          rm -rf mpv-extract
+          mkdir mpv-extract
+          ditto -x -k mpv.zip mpv-extract
+          mpv_app="$(find mpv-extract -type d -name 'mpv.app' -print -quit)"
+          test -n "${mpv_app}"
+          ditto "${mpv_app}" internal/engine/darwin/mpv/mpv.app
+          test -x internal/engine/darwin/mpv/mpv.app/Contents/MacOS/mpv
 
-      - name: Fetch mpv engine (Linux x64)
-        if: runner.os == 'Linux' && matrix.arch == 'x64'
+      - name: Fetch mpv engine (macOS x64)
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: |
           set -euo pipefail
-          mkdir -p internal/engine/linux/mpv
-          sudo apt-get update && sudo apt-get install -y mpv
-          cp "$(which mpv)" internal/engine/linux/mpv/mpv
-          chmod +x internal/engine/linux/mpv/mpv
-          test -f internal/engine/linux/mpv/mpv && echo "mpv OK" || { echo "mpv missing"; exit 1; }
+          mkdir -p internal/engine/darwin/mpv
+          url="https://github.com/mpv-player/mpv/releases/download/${MPV_VERSION}/mpv-${MPV_VERSION}-macos-15-intel.zip"
+          curl -fsSL --retry 5 --retry-all-errors -o mpv.zip "${url}"
+          printf '%s  mpv.zip\n' '41003617ab4f7784394b5ddea7ce51b3e0838e8cfc8166ad1a378b2eda3b583c' | shasum -a 256 -c -
+          rm -rf mpv-extract
+          mkdir mpv-extract
+          ditto -x -k mpv.zip mpv-extract
+          mpv_app="$(find mpv-extract -type d -name 'mpv.app' -print -quit)"
+          test -n "${mpv_app}"
+          ditto "${mpv_app}" internal/engine/darwin/mpv/mpv.app
+          test -x internal/engine/darwin/mpv/mpv.app/Contents/MacOS/mpv
 
-      - name: Fetch mpv engine (Linux arm64)
-        if: runner.os == 'Linux' && matrix.arch == 'arm64'
+      - name: Build mpv engine (Linux, pinned source tag)
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          mkdir -p internal/engine/linux/mpv
           sudo apt-get update
-          sudo apt-get install -y mpv
-          cp "$(which mpv)" internal/engine/linux/mpv/mpv
+          sudo apt-get install -y \
+            build-essential ca-certificates curl meson ninja-build pkg-config \
+            pax-utils patchelf \
+            libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
+            libswresample-dev libswscale-dev libplacebo-dev libass-dev \
+            libx11-dev libxext-dev libxpresent-dev libxrandr-dev libxscrnsaver-dev \
+            libxv-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgl-dev libpipewire-0.3-dev \
+            libpulse-dev libasound2-dev libva-dev libvulkan-dev
+          expected_arch="amd64"
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then expected_arch="arm64"; fi
+          test "$(dpkg --print-architecture)" = "${expected_arch}"
+          rm -rf /tmp/mnemo-mpv-src /tmp/mnemo-mpv-build
+          mkdir -p /tmp/mnemo-mpv-src
+          curl -fsSL --retry 5 --retry-all-errors \
+            "https://github.com/mpv-player/mpv/archive/refs/tags/${MPV_VERSION}.tar.gz" \
+            -o /tmp/mnemo-mpv.tar.gz
+          printf '%s  /tmp/mnemo-mpv.tar.gz\n' "${MPV_SOURCE_SHA256}" | sha256sum -c -
+          tar xzf /tmp/mnemo-mpv.tar.gz --strip-components=1 -C /tmp/mnemo-mpv-src
+          meson setup /tmp/mnemo-mpv-build /tmp/mnemo-mpv-src \
+            --buildtype=release \
+            -Dbuild-date=false \
+            -Dcplayer=true -Dlibmpv=false -Dtests=false \
+            -Dmanpage-build=disabled -Dhtml-build=disabled -Dpdf-build=disabled \
+            -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+            -Dlibarchive=disabled -Dlibbluray=disabled -Dvapoursynth=disabled \
+            -Duchardet=disabled -Dzimg=disabled -Drubberband=disabled \
+            -Ddvbin=disabled -Dcdda=disabled -Ddvdnav=disabled \
+            -Djack=disabled -Dopenal=disabled -Dsndio=disabled \
+            -Dsdl2-audio=disabled -Dsdl2-video=disabled -Dx11=enabled \
+            -Dwayland=enabled -Dpipewire=enabled -Dpulse=enabled -Dalsa=enabled \
+            -Dvaapi=enabled -Dvulkan=enabled
+          meson compile -C /tmp/mnemo-mpv-build
+          mkdir -p internal/engine/linux/mpv/lib
+          cp /tmp/mnemo-mpv-build/mpv internal/engine/linux/mpv/mpv
           chmod +x internal/engine/linux/mpv/mpv
-          test -f internal/engine/linux/mpv/mpv && echo "mpv OK" || { echo "mpv missing"; exit 1; }
+          # Embed codec and text-rendering libraries so the bundled player does
+          # not drift with the host distribution. Desktop/GPU/audio drivers and
+          # glibc stay host-provided for hardware compatibility.
+          lddtree -l internal/engine/linux/mpv/mpv | while IFS= read -r dep; do
+            case "${dep}" in
+              /lib/*|/usr/lib/*)
+                base="$(basename "${dep}")"
+                case "${base}" in
+                  libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|libstdc++.so*|libresolv.so*|libnss_*.so*|libGL.so*|libEGL.so*|libOpenGL.so*|libGLX.so*|libX*.so*|libxcb*.so*|libwayland*.so*|libdrm.so*|libgbm.so*|libpipewire*.so*|libpulse*.so*|libasound.so*|libva*.so*|libvulkan.so*) ;;
+                  *) test -f "${dep}" && cp -L "${dep}" internal/engine/linux/mpv/lib/ ;;
+                esac
+                ;;
+            esac
+          done
+          patchelf --set-rpath '$ORIGIN/lib' internal/engine/linux/mpv/mpv
+          if [[ "${{ matrix.arch }}" == "x64" ]]; then
+            file internal/engine/linux/mpv/mpv | grep -Eq 'x86-64|x86_64'
+          else
+            file internal/engine/linux/mpv/mpv | grep -Eq 'ARM aarch64|AArch64'
+          fi
+          test -f internal/engine/linux/mpv/mpv
+          test -n "$(find internal/engine/linux/mpv/lib -type f -print -quit)"
+          readelf -d internal/engine/linux/mpv/mpv | grep -F '$ORIGIN/lib'
+          LD_LIBRARY_PATH="${PWD}/internal/engine/linux/mpv/lib" internal/engine/linux/mpv/mpv --version >/dev/null
 
       # ---------- secrets.json: inject OAuth credentials ----------
       - name: Generate secrets.json
@@ -160,12 +233,14 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "${ONEDRIVE_CLIENT_ID}" || -n "${DROPBOX_APP_KEY}" ]]; then
-            cat > secrets.json <<EOF
-          {
-            "onedrive_client_id": "${ONEDRIVE_CLIENT_ID}",
-            "dropbox_app_key": "${DROPBOX_APP_KEY}"
+            node <<'NODE'
+          const fs = require('node:fs')
+          const secrets = {
+            onedrive_client_id: process.env.ONEDRIVE_CLIENT_ID || '',
+            dropbox_app_key: process.env.DROPBOX_APP_KEY || '',
           }
-          EOF
+          fs.writeFileSync('secrets.json', JSON.stringify(secrets, null, 2) + '\n', { mode: 0o600 })
+          NODE
             echo "secrets.json generated"
           else
             echo "no OAuth secrets provided, building without secrets.json"
@@ -182,6 +257,60 @@ jobs:
         shell: bash
         run: wails build -platform ${{ matrix.platform }} -clean
 
+      # DataDir reads runtime configuration next to the executable. Keep the
+      # generated OAuth file in that exact location for every package layout;
+      # the repository-root copy is only a CI staging file.
+      - name: Install runtime data directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            Windows)
+              runtime_dir="build/bin/data"
+              ;;
+            macOS)
+              runtime_dir="build/bin/mnemo-go.app/Contents/MacOS/data"
+              ;;
+            Linux)
+              runtime_dir="build/bin/data"
+              ;;
+            *)
+              echo "unsupported runner: ${{ runner.os }}" >&2
+              exit 1
+              ;;
+          esac
+          mkdir -p "${runtime_dir}"
+          if [[ -f secrets.json ]]; then
+            cp secrets.json "${runtime_dir}/secrets.json"
+            chmod 600 "${runtime_dir}/secrets.json" || true
+            echo "runtime OAuth secrets installed at ${runtime_dir}/secrets.json"
+          else
+            echo "no OAuth secrets to install"
+          fi
+          test -d "${runtime_dir}"
+
+      - name: Verify bundled mpv is present in the built binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_bin="build/bin/mnemo-go"
+          case "${{ runner.os }}" in
+            Windows)
+              app_bin="${app_bin}.exe"
+              test -f internal/engine/win32/mpv/mpv.exe
+              ;;
+            macOS)
+              app_bin="${app_bin}.app/Contents/MacOS/mnemo-go"
+              test -x internal/engine/darwin/mpv/mpv.app/Contents/MacOS/mpv
+              ;;
+            Linux)
+              test -x internal/engine/linux/mpv/mpv
+              test -n "$(find internal/engine/linux/mpv/lib -type f -print -quit)"
+              ;;
+          esac
+          test -s "${app_bin}"
+          grep -a -q 'mpv' "${app_bin}"
+
       # ---------- package ----------
       - name: Create Inno Setup installer (Windows)
         if: runner.os == 'Windows'
@@ -191,9 +320,9 @@ jobs:
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           if [ ! -f "$ISCC" ]; then
             choco install innosetup -y --no-progress
-            ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           fi
-          "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss || "$ISCC" build/windows/installer.iss
+          test -f "$ISCC"
+          "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss
 
       - name: Rename installer (Windows)
         if: runner.os == 'Windows'
@@ -221,32 +350,53 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          cd build/bin
           # 1. tar.gz (always)
-          tar czf "../../${{ matrix.artifact }}.tar.gz" * &
-          # 2. install nfpm for deb + rpm
-          curl -fsSL https://nfpm.goreleaser.com/static.php -o /tmp/nfpm
-          chmod +x /tmp/nfpm
+          (cd build/bin && tar czf "../../${{ matrix.artifact }}.tar.gz" *) &
+          # 2. install the pinned nfpm binary for deb + rpm
+          nfpm_arch="x86_64"
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then nfpm_arch="arm64"; fi
+          nfpm_url="https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${NFPM_VERSION#v}_Linux_${nfpm_arch}.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors "${nfpm_url}" -o /tmp/nfpm.tar.gz
+          if [[ "${nfpm_arch}" == "x86_64" ]]; then
+            printf '%s  /tmp/nfpm.tar.gz\n' '0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783' | sha256sum -c -
+          else
+            printf '%s  /tmp/nfpm.tar.gz\n' '1c0f5f2999b9a974bfb04fdb0cc3306096de530ac5dbb25d739cc5f5219c919c' | sha256sum -c -
+          fi
+          mkdir -p /tmp/nfpm-bin
+          tar xzf /tmp/nfpm.tar.gz -C /tmp/nfpm-bin
+          nfpm_cmd="/tmp/nfpm-bin/nfpm"
+          test -x "${nfpm_cmd}"
           arch="$(dpkg --print-architecture)"
           # nfpm config uses {{.Arch}} placeholder; substitute
-          sed "s/{{.Arch}}/${arch}/" ../../build/linux/nfpm.yaml > /tmp/nfpm.yaml
-          /tmp/nfpm pkg --packager deb --config /tmp/nfpm.yaml --target "../../${{ matrix.artifact }}.deb" &
-          /tmp/nfpm pkg --packager rpm --config /tmp/nfpm.yaml --target "../../${{ matrix.artifact }}.rpm" &
+          sed "s/{{.Arch}}/${arch}/" build/linux/nfpm.yaml > /tmp/nfpm.yaml
+          "${nfpm_cmd}" pkg --packager deb --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.deb" &
+          "${nfpm_cmd}" pkg --packager rpm --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.rpm" &
           wait
-          ls -la ../../${{ matrix.artifact }}.*
+          ls -la "${{ matrix.artifact }}".*
 
       - name: Build AppImage (Linux)
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          arch="amd64"
+          arch="x86_64"
           if [[ "${{ matrix.arch }}" == "arm64" ]]; then arch="aarch64"; fi
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${arch}.AppImage -O /tmp/linuxdeploy
-          wget -q https://github.com/linuxdeploy/appimagetool/releases/download/continuous/appimagetool-${arch}.AppImage -O /tmp/appimagetool
+          curl -fsSL --retry 5 --retry-all-errors \
+            "https://github.com/TheAssassin/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-${arch}.AppImage" \
+            -o /tmp/linuxdeploy
+          curl -fsSL --retry 5 --retry-all-errors \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${arch}.AppImage" \
+            -o /tmp/appimagetool
+          if [[ "${arch}" == "x86_64" ]]; then
+            printf '%s  /tmp/linuxdeploy\n' 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d' | sha256sum -c -
+            printf '%s  /tmp/appimagetool\n' 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0' | sha256sum -c -
+          else
+            printf '%s  /tmp/linuxdeploy\n' '620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff' | sha256sum -c -
+            printf '%s  /tmp/appimagetool\n' 'f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158' | sha256sum -c -
+          fi
           chmod +x /tmp/linuxdeploy /tmp/appimagetool
-          mkdir -p AppDir/usr/bin AppDir/usr/share/mnemo
+          mkdir -p AppDir/usr/bin AppDir/usr/bin/data
           cp build/bin/mnemo-go AppDir/usr/bin/mnemo
-          cp -r build/bin/* AppDir/usr/share/mnemo/ || true
+          cp -a build/bin/data/. AppDir/usr/bin/data/
           cat > AppDir/mnemo.desktop <<EOF
           [Desktop Entry]
           Name=Mnemo
@@ -255,14 +405,14 @@ jobs:
           Type=Application
           Categories=Utility;
           EOF
-          wget -q https://raw.githubusercontent.com/lllll081926i/mnemo-go/master/frontend/src/assets/logo.svg -O AppDir/mnemo.svg || true
+          cp frontend/src/assets/icon.svg AppDir/mnemo.svg
           cat > AppDir/AppRun <<EOF
           #!/bin/sh
           exec \$APPDIR/usr/bin/mnemo \$@
           EOF
           chmod +x AppDir/AppRun
-          DEPLOY_GTK_VERSION=3 /tmp/linuxdeploy --appdir AppDir --desktop-file AppDir/mnemo.desktop --icon-file AppDir/mnemo.svg || true
-          /tmp/appimagetool AppDir "${{ matrix.artifact }}.AppImage" || echo "AppImage build skipped (optional)"
+          APPIMAGE_EXTRACT_AND_RUN=1 DEPLOY_GTK_VERSION=3 /tmp/linuxdeploy --appdir AppDir --desktop-file AppDir/mnemo.desktop --icon-file AppDir/mnemo.svg
+          APPIMAGE_EXTRACT_AND_RUN=1 /tmp/appimagetool AppDir "${{ matrix.artifact }}.AppImage"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -316,7 +466,7 @@ jobs:
           else
             gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="${GITHUB_REF_NAME}" \
-              --jq .body > release-notes.md || echo "Mnemo ${GITHUB_REF_NAME}" > release-notes.md
+              --jq .body > release-notes.md
           fi
 
           is_prerelease='false'
@@ -332,12 +482,13 @@ jobs:
             fi
           else
             release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)
+            if [[ "${is_prerelease}" == 'true' ]]; then make_latest='false'; else make_latest='true'; fi
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
               -f name="Mnemo ${tag}" \
               -F body=@release-notes.md \
               -f draft=false \
               -f prerelease="${is_prerelease}" \
-              -f make_latest="$([[ "${is_prerelease}" == 'true' ]] && echo false || echo true)" >/dev/null
+              -f make_latest="${make_latest}" >/dev/null
           fi
 
           find release-assets -maxdepth 1 -type f -print0 \

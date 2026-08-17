@@ -15,8 +15,8 @@ license: GPL-3.0
 contents:
   - src: build/bin/mnemo-go
     dst: /usr/bin/mnemo
-  - src: build/bin/
-    dst: /usr/share/mnemo
+  - src: build/bin/data
+    dst: /usr/bin/data
 scripts:
   postinstall: build/linux/postinstall.sh
   postrm: build/linux/postrm.sh
