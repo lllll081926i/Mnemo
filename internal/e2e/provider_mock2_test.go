@@ -292,6 +292,36 @@ func TestOneDriveRefreshMockPreservesExpiry(t *testing.T) {
 	}
 }
 
+func TestOneDriveSearchEscapesODataKeyword(t *testing.T) {
+	seenPath := make(chan string, 1)
+	MockAPI(t, "graph.microsoft.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.0/me/drive/root/search(q='O''Reilly & plan')" {
+			t.Errorf("search path = %q, want OData-escaped keyword", r.URL.Path)
+		}
+		seenPath <- r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"value": []map[string]any{{"id": "search-file", "name": "O'Reilly plan.txt", "file": map[string]any{}}},
+		})
+	}))
+
+	uid, did, _ := SeedAccount(t, "onedrive", &model.TokenInfo{
+		TokenFrom: "onedrive", AccessToken: "search-access", RefreshToken: "search-refresh",
+		UserID: "onedrive_search_test", DefaultDriveID: "onedrive:drive-search",
+	})
+	files, err := drive.SearchDir(uid, did, "O'Reilly & plan")
+	if err != nil {
+		t.Fatalf("OneDrive search: %v", err)
+	}
+	if len(files) != 1 || files[0].Name != "O'Reilly plan.txt" {
+		t.Fatalf("unexpected OneDrive search result: %#v", files)
+	}
+	select {
+	case <-seenPath:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OneDrive search request was not observed")
+	}
+}
+
 func TestDropboxLoginMock(t *testing.T) {
 	tokenForms := make(chan url.Values, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

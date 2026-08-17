@@ -237,7 +237,11 @@ func (c *client) Detail(ctx context.Context, fileID string) (*Item, error) {
 // Search uses the Graph search endpoint.
 func (c *client) Search(ctx context.Context, keyword string) ([]Item, error) {
 	var out []Item
-	target := "/me/drive/root/search(q='" + url.QueryEscape(keyword) + "')"
+	// Graph parses the search argument as an OData string literal. Escape a
+	// literal apostrophe first, then escape the complete value as a path
+	// segment so spaces remain spaces instead of becoming '+' in the URL path.
+	odataKeyword := strings.ReplaceAll(keyword, "'", "''")
+	target := "/me/drive/root/search(q='" + url.PathEscape(odataKeyword) + "')"
 	seen := map[string]bool{}
 	for target != "" {
 		if seen[target] {

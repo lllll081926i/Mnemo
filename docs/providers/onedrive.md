@@ -114,7 +114,7 @@ SetHashes(["sha1", "quickxorhash"], nil)
 | **搜索分页** | ✅ | `graph.go:238-261` 跟随 @odata.nextLink 循环 | 无 |
 | **缩略图** | ❌ | URL 无 $expand=thumbnails | 🟡 旧版有 |
 | **过滤器** | ❌ | 无 | 🟡 旧版 filterOneDriveSearchResults |
-| **引号转义** | ⚠️ | url.QueryEscape | 🟡 旧版 OData `''` 转义（潜在 bug） |
+| **引号转义** | ✅ | OData 单引号加倍 + `url.PathEscape` | 无 |
 
 ---
 
@@ -144,6 +144,6 @@ SetHashes(["sha1", "quickxorhash"], nil)
 4. ✅ **ProvideHashes 已声明**（`onedrive.go:30` SetHashes）
 5. ✅ **搜索分页已实现**（`graph.go:238-261` 跟随 nextLink）
 6. 🟡 上传冲突策略单一（仅 rename）
-7. 🟡 搜索无缩略图、引号转义可能错误
+7. 🟡 搜索无缩略图；关键词的 OData 单引号和 URL 路径转义已修复
 8. 🟡 版本历史完全缺失
 9. ✅ **OAuth 默认凭据与 client_secret**（`auth.go`）：沿用旧版/rclone，登录与刷新均使用同一组凭据；登录会显示账号选择。
