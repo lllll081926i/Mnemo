@@ -473,6 +473,49 @@ func TestDropboxRefreshMockPreservesExpiry(t *testing.T) {
 	}
 }
 
+func TestDropboxMoveCopyAllowSharedFolder(t *testing.T) {
+	seen := make(chan map[string]any, 2)
+	MockAPI(t, "api.dropboxapi.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/2/files/move_v2" && r.URL.Path != "/2/files/copy_v2" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode Dropbox %s body: %v", r.URL.Path, err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if body["allow_shared_folder"] != true {
+			t.Errorf("Dropbox %s body missing allow_shared_folder: %#v", r.URL.Path, body)
+		}
+		seen <- body
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+
+	uid, did, _ := SeedAccount(t, "dropbox", &model.TokenInfo{
+		TokenFrom: "dropbox", AccessToken: "dropbox-file-access", RefreshToken: "dropbox-file-refresh",
+		UserID: "dropbox_file_ops_test", DefaultDriveID: "dropbox:drive-file-ops",
+	})
+	refs := []drive.FileRef{{ID: "/source/movie.mp4"}}
+	if _, err := drive.MoveBatch(uid, did, refs, "/shared-target", ""); err != nil {
+		t.Fatalf("Dropbox move: %v", err)
+	}
+	if _, err := drive.CopyBatch(uid, did, refs, "/shared-target", ""); err != nil {
+		t.Fatalf("Dropbox copy: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case body := <-seen:
+			if body["to_path"] != "/shared-target/movie.mp4" {
+				t.Fatalf("Dropbox operation target = %#v", body["to_path"])
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Dropbox move/copy request was not observed")
+		}
+	}
+}
+
 type dropboxAuthRewriteRT struct{ mockHost string }
 
 func (r dropboxAuthRewriteRT) RoundTrip(req *http.Request) (*http.Response, error) {

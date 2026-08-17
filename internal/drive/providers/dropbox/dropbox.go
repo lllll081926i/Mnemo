@@ -285,14 +285,20 @@ func (c *client) Delete(ctx context.Context, path string) error {
 func (c *client) Move(ctx context.Context, from, targetParent string) error {
 	to := joinTarget(targetParent, from)
 	var resp struct{}
-	return c.rpc(ctx, "/files/move_v2", map[string]any{"from_path": from, "to_path": to, "autorename": true}, &resp)
+	return c.rpc(ctx, "/files/move_v2", map[string]any{
+		"from_path": from, "to_path": to, "autorename": true,
+		"allow_shared_folder": true,
+	}, &resp)
 }
 
 // Copy copies entries into a target folder.
 func (c *client) Copy(ctx context.Context, from, targetParent string) error {
 	to := joinTarget(targetParent, from)
 	var resp struct{}
-	return c.rpc(ctx, "/files/copy_v2", map[string]any{"from_path": from, "to_path": to, "autorename": true}, &resp)
+	return c.rpc(ctx, "/files/copy_v2", map[string]any{
+		"from_path": from, "to_path": to, "autorename": true,
+		"allow_shared_folder": true,
+	}, &resp)
 }
 
 // sharedLinkMetadata is a create_shared_link response.

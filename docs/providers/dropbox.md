@@ -79,8 +79,8 @@ SetHashes(["dropbox"], nil)
 |------|:----:|---------|------|
 | Mkdir | ✅ | `dropbox.go:187-206` /files/create_folder_v2 autorename:true | 🟡 旧版 autorename:false |
 | Rename | ✅ | `dropbox.go:209-219` move_v2 | 🟡 多一次 Detail 调用 |
-| Move | ✅ | `dropbox.go:222-227` move_v2 | 🟡 缺 allow_shared_folder |
-| Copy | ✅ | `dropbox.go:230-234` copy_v2 | 🟡 缺 allow_shared_folder |
+| Move | ✅ | `dropbox.go` move_v2 + `allow_shared_folder` | 无 |
+| Copy | ✅ | `dropbox.go` copy_v2 + `allow_shared_folder` | 无 |
 | 路径解析 | ⚠️ | `dropbox.go:438-450` resolveCommandPath 简单处理 | 🟡 旧版从 description 提取 dropbox_path: |
 
 ---
@@ -151,5 +151,5 @@ SetHashes(["dropbox"], nil)
 7. ✅ 上传冲突策略已按统一 ConflictPolicy 处理
 8. 🟡 搜索无过滤器、file_status
 9. 🟡 分享 list settings_error 无友好提示
-10. 🟡 move/copy 缺 allow_shared_folder
+10. ✅ move/copy 已支持 shared folder 参数
 11. 🟡 版本历史、缩略图完全缺失
