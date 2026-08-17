@@ -4,12 +4,15 @@
 package store
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"mnemo-go/internal/model"
 )
 
 // Store is the local persistence root.
@@ -40,6 +43,68 @@ func (s *Store) SetAccountsDir(d string) {
 // Dir returns the backing directory.
 func (s *Store) Dir() string { return s.dir }
 
+type directoryCacheDoc struct {
+	UpdatedAt int64        `json:"updatedAt"`
+	Files     []model.File `json:"files"`
+}
+
+// LoadDirectoryCache reads one account-isolated directory snapshot. Cache
+// files live under data/cache, which is co-located with the installation by
+// config.DataDir; missing cache is represented by a nil slice and no error.
+func (s *Store) LoadDirectoryCache(key string) ([]model.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name := directoryCacheName(key)
+	var doc directoryCacheDoc
+	if err := s.readJSON(name, &doc); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return doc.Files, nil
+}
+
+// SaveDirectoryCache persists one directory snapshot without mixing it with
+// accounts, transfer history, settings, or playback state.
+func (s *Store) SaveDirectoryCache(key string, files []model.File) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name := directoryCacheName(key)
+	if err := os.MkdirAll(filepath.Dir(s.path(name)), 0o755); err != nil {
+		return err
+	}
+	return s.writeJSONUnlocked(name, directoryCacheDoc{UpdatedAt: time.Now().Unix(), Files: files})
+}
+
+// DeleteDirectoryCache removes one directory snapshot after a file mutation.
+func (s *Store) DeleteDirectoryCache(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := os.Remove(s.path(directoryCacheName(key)))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// ClearCache removes only the application cache directory. It deliberately
+// leaves credentials and all user-visible persistent state untouched.
+func (s *Store) ClearCache() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target := filepath.Join(s.dir, "cache")
+	if err := os.RemoveAll(target); err != nil {
+		return err
+	}
+	return os.MkdirAll(target, 0o755)
+}
+
+func directoryCacheName(key string) string {
+	digest := sha256.Sum256([]byte(key))
+	return filepath.Join("cache", "directories", fmt.Sprintf("%x.json", digest[:]))
+}
+
 // path returns the full path for a collection file, honoring accountsDir
 // override for accounts.json.
 func (s *Store) path(name string) string {
@@ -65,6 +130,10 @@ func (s *Store) readJSON(name string, v any) error {
 func (s *Store) writeJSON(name string, v any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.writeJSONUnlocked(name, v)
+}
+
+func (s *Store) writeJSONUnlocked(name string, v any) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err

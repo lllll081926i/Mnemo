@@ -38,6 +38,7 @@ export function move(userId, driveId, ids, toParent) { return App.MoveFiles(user
 export function copy(userId, driveId, ids, toParent) { return App.CopyFiles(userId, driveId, ids, toParent) }
 export function favorite(userId, driveId, fav, ids) { return App.FavoriteFiles(userId, driveId, fav, ids) }
 export function download(userId, driveId, file) { return App.DownloadFile(userId, driveId, file) }
+export function pinFileSnapshot(userId, driveId, file) { return App.PinFileSnapshot(userId, driveId, file) }
 export function downloadUrl(name, url, headers) { return App.DownloadURL(name, url, headers) }
 export function createShare(userId, driveId, params) { return App.CreateShare(userId, driveId, params) }
 export function uploadFiles(userId, driveId, parentId, paths) { return App.UploadFiles(userId, driveId, parentId, paths) }
@@ -45,6 +46,10 @@ export function saveCloudText(userId, driveId, parentId, fileName, content) { re
 export function migrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move) {
   return App.MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move)
 }
+export function listMigrateJobs() { return App.ListMigrateJobs() }
+export function cancelMigrate(id) { return App.CancelMigrate(id) }
+export function deleteMigrateJob(id) { return App.DeleteMigrateJob(id) }
+export function clearMigrateJobs() { return App.ClearMigrateJobs() }
 
 // ---------- transfer (download) ----------
 export function listDownloads() { return App.ListDownloads() }
@@ -75,6 +80,18 @@ export function listShareHistory(userId) { return App.ListShareHistory(userId) }
 // ---------- settings ----------
 export function getSettings() { return App.GetSettings() }
 export function saveSettings(s) { return App.SaveSettings(s) }
+
+// Cache RPCs share one queue so a clear cannot race a pending directory write.
+let cacheRpcTail = Promise.resolve()
+function enqueueCacheRpc(fn) {
+  const next = cacheRpcTail.catch(() => {}).then(fn)
+  cacheRpcTail = next.catch(() => {})
+  return next
+}
+export function GetDirectoryCache(key) { return enqueueCacheRpc(() => App.GetDirectoryCache(key)) }
+export function SaveDirectoryCache(key, files) { return enqueueCacheRpc(() => App.SaveDirectoryCache(key, files)) }
+export function DeleteDirectoryCache(key) { return enqueueCacheRpc(() => App.DeleteDirectoryCache(key)) }
+export function ClearCache() { return enqueueCacheRpc(() => App.ClearCache()) }
 
 // ---------- account ----------
 export function refreshAccount(userId) { return App.RefreshAccount(userId) }
@@ -173,9 +190,10 @@ export function extOf(name) {
 export function iconOf(file) {
   if (file.isDir) return 'folder'
   const cat = file.category || ''
-  if (cat === 'video') return 'video'
-  if (cat === 'audio') return 'audio'
-  if (cat === 'image') return 'image'
+  const ext = extOf(file.name)
+  if (cat === 'video' || VIDEO_EXTS.has(ext)) return 'video'
+  if (cat === 'audio' || AUDIO_EXTS.has(ext)) return 'audio'
+  if (cat === 'image' || IMAGE_EXTS.has(ext)) return 'image'
   if (cat === 'archive') return 'archive'
   if (cat === 'doc' || cat === 'text') return 'doc'
   return 'file'
@@ -188,14 +206,24 @@ const PREVIEW_TEXT_EXTS = new Set([
   'log', 'sh', 'bash', 'zsh', 'bat', 'cmd', 'ps1', 'sql', 'diff', 'patch', 'srt', 'vtt', 'ass', 'ssa', 'gitignore', 'dockerfile'
 ])
 
+const VIDEO_EXTS = new Set([
+  'mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'ts', 'm3u8', 'rmvb', 'rm', '3gp', 'mpg', 'mpeg', 'm2ts',
+])
+const AUDIO_EXTS = new Set([
+  'mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a', 'wma', 'ape', 'opus', 'amr', 'mid', 'midi',
+])
+const IMAGE_EXTS = new Set([
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tif', 'tiff', 'heic', 'avif',
+])
+
 /** 文件打开方式判定：video/audio → 播放，image/text/pdf → 预览，其余 → 下载。 */
 export function openKindOf(file) {
   if (file.isDir) return 'dir'
   const cat = file.category || ''
   const ext = extOf(file.name)
-  if (cat === 'video') return 'video'
-  if (cat === 'audio') return 'audio'
-  if (cat === 'image') return 'image'
+  if (cat === 'video' || VIDEO_EXTS.has(ext)) return 'video'
+  if (cat === 'audio' || AUDIO_EXTS.has(ext)) return 'audio'
+  if (cat === 'image' || IMAGE_EXTS.has(ext)) return 'image'
   if (cat === 'text' || PREVIEW_TEXT_EXTS.has(ext)) return 'text'
   if (ext === 'pdf') return 'pdf'
   return 'download'

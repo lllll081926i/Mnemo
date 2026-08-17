@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -90,4 +91,90 @@ func TestAccountSaveLoad(t *testing.T) {
 		t.Errorf("UserName mismatch: %s", got.Token.UserName)
 	}
 	_ = filepath.Join(dir, "unused")
+}
+
+func TestListAccountsIgnoresNullEntries(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// Plaintext is a supported legacy format and is intentionally used here
+	// to exercise recovery of a partially corrupted account list.
+	content := `[
+  null,
+  {"user_id":"valid-account","order":1}
+]`
+	if err := os.WriteFile(filepath.Join(dir, "accounts.json"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write legacy accounts: %v", err)
+	}
+	list, err := st.ListAccounts()
+	if err != nil {
+		t.Fatalf("ListAccounts: %v", err)
+	}
+	if len(list) != 1 || list[0] == nil || list[0].UserID != "valid-account" {
+		t.Fatalf("unexpected accounts: %#v", list)
+	}
+	account, err := st.GetAccount("valid-account")
+	if err != nil || account == nil {
+		t.Fatalf("GetAccount: account=%#v err=%v", account, err)
+	}
+}
+
+func TestDirectoryCacheIsolationAndClear(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	files := []model.File{{FileID: "file-1", Name: "one.txt"}}
+	if err := st.SaveDirectoryCache("provider|account-a|drive-a|list|root|", files); err != nil {
+		t.Fatalf("SaveDirectoryCache: %v", err)
+	}
+	got, err := st.LoadDirectoryCache("provider|account-a|drive-a|list|root|")
+	if err != nil {
+		t.Fatalf("LoadDirectoryCache: %v", err)
+	}
+	if len(got) != 1 || got[0].FileID != "file-1" {
+		t.Fatalf("cached files mismatch: %#v", got)
+	}
+	other, err := st.LoadDirectoryCache("provider|account-b|drive-a|list|root|")
+	if err != nil {
+		t.Fatalf("LoadDirectoryCache(other): %v", err)
+	}
+	if other != nil {
+		t.Fatalf("cache leaked between accounts: %#v", other)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cache", "directories")); err != nil {
+		t.Fatalf("cache directory missing: %v", err)
+	}
+	if err := st.DeleteDirectoryCache("provider|account-a|drive-a|list|root|"); err != nil {
+		t.Fatalf("DeleteDirectoryCache: %v", err)
+	}
+	deleted, err := st.LoadDirectoryCache("provider|account-a|drive-a|list|root|")
+	if err != nil {
+		t.Fatalf("LoadDirectoryCache after delete: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("cache still present after delete: %#v", deleted)
+	}
+	if err := st.SaveDirectoryCache("provider|account-a|drive-a|list|root|", files); err != nil {
+		t.Fatalf("SaveDirectoryCache after delete: %v", err)
+	}
+	if err := st.SetSettings(Settings{}); err != nil {
+		t.Fatalf("SetSettings: %v", err)
+	}
+	if err := st.ClearCache(); err != nil {
+		t.Fatalf("ClearCache: %v", err)
+	}
+	cleared, err := st.LoadDirectoryCache("provider|account-a|drive-a|list|root|")
+	if err != nil {
+		t.Fatalf("LoadDirectoryCache after clear: %v", err)
+	}
+	if cleared != nil {
+		t.Fatalf("cache still present after clear: %#v", cleared)
+	}
+	if _, err := st.GetSettings(); err != nil {
+		t.Fatalf("ClearCache removed settings: %v", err)
+	}
 }

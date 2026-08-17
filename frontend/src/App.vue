@@ -145,6 +145,10 @@ function onPanGo(target) {
   else switchTab(target)
 }
 
+function clearPanCache() {
+  panView.value?.clearCache?.()
+}
+
 function providerLabel(acc) {
   const p = providers.value.find((x) => x.ID === providerOf(acc.user_id))
   return p ? p.Meta.label : providerOf(acc.user_id)
@@ -163,8 +167,15 @@ function remove(acc) {
 
 function toast(msg, type = '') {
   const id = Date.now() + Math.random()
-  toasts.value.push({ id, msg, type })
-  setTimeout(() => { toasts.value = toasts.value.filter((t) => t.id !== id) }, 3200)
+  const normalizedType = ['success', 'error', 'warn', 'info'].includes(type) ? type : 'info'
+  const item = { id, msg: String(msg ?? ''), type: normalizedType }
+  toasts.value.push(item)
+  const lifetime = normalizedType === 'error' ? 6500 : 3600
+  setTimeout(() => dismissToast(id), lifetime)
+}
+
+function dismissToast(id) {
+  toasts.value = toasts.value.filter((t) => t.id !== id)
 }
 
 function applyTheme(theme) {
@@ -279,11 +290,13 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       />
       <main class="page-host">
         <transition :name="pageTrans" mode="out-in">
-          <PanView v-if="tab === 'pan'" ref="panView" :key="'pan'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" @go="onPanGo" />
-          <TransferView v-else-if="tab === 'transfer'" :key="'transfer'" :accounts="accounts" :providers="providers" @toast="toast" />
-          <SyncView v-else-if="tab === 'sync'" :key="'sync'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" />
-          <ShareView v-else-if="tab === 'share'" :key="'share'" :accounts="accounts" :providers="providers" @toast="toast" />
-          <SettingsView v-else :key="'settings'" @toast="toast" @theme="applyTheme" @update="showUpdate = true" />
+          <KeepAlive>
+            <PanView v-if="tab === 'pan'" ref="panView" :key="'pan'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" @go="onPanGo" />
+            <TransferView v-else-if="tab === 'transfer'" :key="'transfer'" :accounts="accounts" :providers="providers" @toast="toast" />
+            <SyncView v-else-if="tab === 'sync'" :key="'sync'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" />
+            <ShareView v-else-if="tab === 'share'" :key="'share'" :accounts="accounts" :providers="providers" @toast="toast" />
+            <SettingsView v-else :key="'settings'" @toast="toast" @theme="applyTheme" @update="showUpdate = true" @clear-cache="clearPanCache" />
+          </KeepAlive>
         </transition>
       </main>
     </div>
@@ -316,10 +329,11 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </template>
     </Modal>
 
-    <transition-group name="toast-list" tag="div" class="toast-wrap">
-      <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">
-        <span v-if="t.type" class="t-icon"><UiIcon :name="t.type === 'error' ? 'warning' : 'check'" :size="14" /></span>
-        <span>{{ t.msg }}</span>
+    <transition-group name="toast-list" tag="div" class="toast-wrap" role="status" aria-live="polite">
+      <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" role="alert">
+        <span class="t-icon"><UiIcon :name="t.type === 'success' ? 'check' : (t.type === 'error' || t.type === 'warn' ? 'warning' : 'info')" :size="16" /></span>
+        <span class="t-message">{{ t.msg }}</span>
+        <button class="toast-close" type="button" title="关闭通知" aria-label="关闭通知" @click="dismissToast(t.id)"><UiIcon name="close" :size="14" /></button>
       </div>
     </transition-group>
 

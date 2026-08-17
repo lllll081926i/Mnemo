@@ -5,7 +5,7 @@ import {
   move, copy, favorite, createShare, uploadFiles, migrateFiles, download,
   AddFavorite, RemoveFavorite, ListFavorites, OfflineDownload, PickDirectory, PickFiles,
   formatBytes, formatTime, formatTimeParts, iconOf, extOf, openKindOf, copyText,
-  capsOf, providerMetaOf,
+  capsOf, providerMetaOf, providerOf, GetDirectoryCache, SaveDirectoryCache, DeleteDirectoryCache,
 } from '../api'
 import ContextMenu from '../components/ContextMenu.vue'
 import DropdownBtn from '../components/DropdownBtn.vue'
@@ -134,37 +134,81 @@ const rootKey = computed(() => meta.value.rootKey || 'root')
 const rootTitle = computed(() => meta.value.rootTitle || '全部文件')
 
 // ---------- 数据加载 ----------
-// 目录缓存：按 uid|did|mode|id 隔离，切走再切回直接展示缓存再后台刷新。
+// 目录缓存：按 provider、账号、存储、模式、目录和关键词隔离。
 const dirCache = new Map() // key -> { files: File[], at: number }
 const DIR_CACHE_MAX = 200
-function dirCacheKey(uidV, didV, modeV, idV, kwV) { return uidV + '|' + didV + '|' + modeV + '|' + (idV || '') + '|' + (kwV || '') }
+const cacheWrites = new Map()
+function cacheKeyPart(value) { return encodeURIComponent(String(value ?? '')) }
+function dirCacheKey(uidV, didV, modeV, idV, kwV) {
+  return [providerOf(uidV), uidV, didV, modeV, idV || '', kwV || ''].map(cacheKeyPart).join('|')
+}
 function cacheDir(key, list) {
   dirCache.set(key, { files: list || [], at: Date.now() })
   if (dirCache.size > DIR_CACHE_MAX) { const first = dirCache.keys().next().value; dirCache.delete(first) }
 }
+function queueCacheWrite(key, action) {
+  const previous = cacheWrites.get(key) || Promise.resolve()
+  const next = previous.catch(() => {}).then(action)
+  cacheWrites.set(key, next)
+  next.finally(() => {
+    if (cacheWrites.get(key) === next) cacheWrites.delete(key)
+  }).catch(() => {})
+  return next
+}
+function persistDir(key, list, epoch = cacheEpoch) {
+  return queueCacheWrite(key, () => {
+    if (epoch !== cacheEpoch) return
+    return SaveDirectoryCache(key, list || [])
+  })
+}
+function isPersistableMode(modeV) { return modeV === 'list' }
 function invalidateDirCache(uidV, didV, modeV, idV) {
   // 变更后清掉该目录缓存，避免后台刷新前闪现旧数据
-  const prefix = uidV + '|' + didV + '|' + modeV + '|' + (idV || '') + '|'
+  const prefix = dirCacheKey(uidV, didV, modeV, idV, '')
   for (const k of dirCache.keys()) if (k.startsWith(prefix)) dirCache.delete(k)
+  const key = dirCacheKey(uidV, didV, modeV, idV, '')
+  queueCacheWrite(key, () => DeleteDirectoryCache(key)).catch(() => {})
 }
 let loadSeq = 0
+let cacheEpoch = 0
 async function load(id) {
   if (!props.account) return
   const seq = ++loadSeq
+  const epoch = cacheEpoch
   const snapUid = uid.value, snapDid = did.value, snapMode = mode.value, snapKw = keyword.value
   const ckey = dirCacheKey(snapUid, snapDid, snapMode, id, snapKw)
   // 快路径：有缓存先立即展示，后台静默刷新
   const cached = dirCache.get(ckey)
-  if (cached) { files.value = cached.files; loading.value = false }
+  let displayedCache = Boolean(cached)
+  let networkDone = false
+  if (cached) {
+    files.value = cached.files
+    loading.value = false
+    if (snapMode === 'list') updateTreeSnapshot(id, cached.files, snapUid, snapDid)
+  }
   else loading.value = true
   error.value = ''
+  if (!cached && isPersistableMode(snapMode)) {
+    // Persistent cache is a second fast path for a newly mounted page. It is
+    // intentionally account/provider keyed and is ignored once fresh data
+    // has arrived from the provider.
+    GetDirectoryCache(ckey).then((list) => {
+      if (seq !== loadSeq || epoch !== cacheEpoch || networkDone || !Array.isArray(list)) return
+      displayedCache = true
+      files.value = list
+      cacheDir(ckey, list)
+      if (snapMode === 'list') updateTreeSnapshot(id, list, snapUid, snapDid)
+      loading.value = false
+    }).catch(() => {})
+  }
   try {
     let list
     if (snapMode === 'trash') list = (await listTrash(snapUid, snapDid)) || []
     else if (snapMode === 'search') list = snapKw ? (await search(snapUid, snapDid, snapKw.trim())) || [] : []
     else list = (await listDir(snapUid, snapDid, id)) || []
+    networkDone = true
     // 时序保护：过期响应（账号/目录已切换或有更新请求）直接丢弃
-    if (seq !== loadSeq) return
+    if (seq !== loadSeq || epoch !== cacheEpoch) return
     files.value = list
     // 清理当前目录已不存在的缩略图错误标记，避免瞬时失败被永久记住
     const validIds = new Set(list.map((f) => f.file_id))
@@ -172,12 +216,44 @@ async function load(id) {
     for (const k in thumbErrors.value) if (validIds.has(k)) nextErr[k] = thumbErrors.value[k]
     thumbErrors.value = nextErr
     cacheDir(ckey, list)
+    if (epoch === cacheEpoch && isPersistableMode(snapMode)) persistDir(ckey, list, epoch)
+    if (snapMode === 'list') updateTreeSnapshot(id, list, snapUid, snapDid)
   } catch (e) {
+    networkDone = true
     if (seq !== loadSeq) return
-    error.value = String(e)
-    files.value = []
+    if (!displayedCache) {
+      error.value = String(e)
+      files.value = []
+    }
   }
   if (seq === loadSeq) loading.value = false
+}
+
+function updateTreeSnapshot(id, list, snapUid = uid.value, snapDid = did.value) {
+  if (snapUid !== uid.value || snapDid !== did.value) return
+  tree.value[id] = (list || []).filter((f) => f.isDir)
+  for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
+}
+
+async function listDirectorySnapshot(id) {
+  const snapUid = uid.value, snapDid = did.value
+  const epoch = cacheEpoch
+  const key = dirCacheKey(snapUid, snapDid, 'list', id, '')
+  const inMemory = dirCache.get(key)
+  if (inMemory) return inMemory.files
+  const persisted = await GetDirectoryCache(key).catch(() => null)
+  if (epoch !== cacheEpoch || snapUid !== uid.value || snapDid !== did.value) return []
+  if (Array.isArray(persisted)) {
+    cacheDir(key, persisted)
+    updateTreeSnapshot(id, persisted, snapUid, snapDid)
+    return persisted
+  }
+  const list = (await listDir(snapUid, snapDid, id)) || []
+  if (epoch !== cacheEpoch || snapUid !== uid.value || snapDid !== did.value) return []
+  cacheDir(key, list)
+  if (epoch === cacheEpoch) persistDir(key, list, epoch)
+  updateTreeSnapshot(id, list, snapUid, snapDid)
+  return list
 }
 
 async function loadFavorites() {
@@ -328,10 +404,9 @@ async function toggleTree(idOrNode, name) {
   const snapUid = uid.value, snapDid = did.value
   if (expanded.value[id] && !tree.value[id] && props.account) {
     try {
-      const list = await listDir(snapUid, snapDid, id)
+      const list = await listDirectorySnapshot(id)
       if (snapUid !== uid.value || snapDid !== did.value) return
-      tree.value[id] = (list || []).filter((f) => f.isDir)
-      for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
+      updateTreeSnapshot(id, list, snapUid, snapDid)
     } catch { if (snapUid === uid.value && snapDid === did.value) tree.value[id] = [] }
   }
 }
@@ -343,10 +418,9 @@ async function expandTree(id, name) {
   const snapUid = uid.value, snapDid = did.value
   if (!tree.value[id] && props.account) {
     try {
-      const list = await listDir(snapUid, snapDid, id)
+      const list = await listDirectorySnapshot(id)
       if (snapUid !== uid.value || snapDid !== did.value) return
-      tree.value[id] = (list || []).filter((f) => f.isDir)
-      for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
+      updateTreeSnapshot(id, list, snapUid, snapDid)
     } catch { if (snapUid === uid.value && snapDid === did.value) tree.value[id] = [] }
   }
 }
@@ -825,15 +899,16 @@ function onKey(e) {
   }
 }
 
-watch(() => props.account, (a) => {
+watch(() => [props.account?.user_id || '', props.account?.drive_id || ''], ([nextUid, nextDid]) => {
+  const a = props.account
   if (!a) { files.value = []; return }
   tree.value = {}
   expanded.value = {}
   treeNames.value = {}
   thumbErrors.value = {}
   goHome()
+  expanded.value[rootKey.value] = true
   loadFavorites()
-  expandTree(rootKey.value, rootTitle.value) // 根目录默认展开
 })
 
 async function onDropUpload(paths) {
@@ -854,13 +929,25 @@ defineExpose({
   refresh,
   openMkdirModal,
   openUploadModal,
+  clearCache: () => {
+    cacheEpoch++
+    loadSeq++
+    dirCache.clear()
+    tree.value = {}
+    expanded.value = {}
+    if (props.account) load(dirId.value)
+  },
 })
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', sideMove)
   window.addEventListener('mouseup', sideUp)
-  if (props.account) { load(rootKey.value); loadFavorites(); expandTree(rootKey.value, rootTitle.value) }
+  if (props.account) {
+    expanded.value[rootKey.value] = true
+    load(rootKey.value)
+    loadFavorites()
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)

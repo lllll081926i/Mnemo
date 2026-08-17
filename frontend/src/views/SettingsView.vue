@@ -1,13 +1,13 @@
 <script setup>
 // 设置页：左侧导航 + 右侧平面行式布局，极简干净无冗余说明
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { GetSettings, SaveSettings, PickDirectory, RevealInFolder } from '../api'
+import { GetSettings, SaveSettings, ClearCache, PickDirectory, RevealInFolder } from '../api'
 import { getPrefs, setPref } from '../appearance'
 import SegTabs from '../components/SegTabs.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 
-const emit = defineEmits(['toast', 'theme', 'update'])
+const emit = defineEmits(['toast', 'theme', 'update', 'clear-cache'])
 
 const defaults = {
   theme: 'system',
@@ -26,16 +26,18 @@ const defaults = {
 const settings = ref({ ...defaults })
 const loaded = ref(false)
 const saving = ref(false)
+const clearingCache = ref(false)
 let pendingSave = false
 const bodyEl = ref(null)
 const activeNav = ref('general')
 
 const groups = [
-  { id: 'general', label: '通用', icon: 'settings' },
-  { id: 'pan', label: '网盘', icon: 'cloud' },
+  { id: 'general', label: '基础', icon: 'settings' },
+  { id: 'pan', label: '文件', icon: 'cloud' },
   { id: 'transfer', label: '传输', icon: 'download' },
-  { id: 'player', label: '播放器', icon: 'play' },
-  { id: 'network', label: '网络', icon: 'cloud-down' },
+  { id: 'player', label: '播放', icon: 'play' },
+  { id: 'network', label: '连接', icon: 'cloud-down' },
+  { id: 'cache', label: '缓存', icon: 'database' },
 ]
 
 // 纯前端偏好
@@ -181,6 +183,20 @@ function setUploadLimitPreset(kb) {
   settings.value.maxUploadSpeed = kb
   save(true)
 }
+
+async function clearCache() {
+  if (clearingCache.value) return
+  clearingCache.value = true
+  try {
+    await ClearCache()
+    emit('clear-cache')
+    emit('toast', '缓存已清除', 'success')
+  } catch (e) {
+    emit('toast', '清除缓存失败: ' + String(e), 'error')
+  } finally {
+    clearingCache.value = false
+  }
+}
 </script>
 
 <template>
@@ -201,9 +217,9 @@ function setUploadLimitPreset(kb) {
 
     <div class="settings-body" ref="bodyEl">
       <div class="settings-column">
-        <!-- 1. 通用 -->
+        <!-- 1. 基础 -->
         <section class="settings-group" id="sg-general">
-          <header class="sg-heading"><h2>通用</h2></header>
+          <header class="sg-heading"><h2>基础</h2></header>
 
           <div class="sg-row">
             <span class="sg-label">外观主题</span>
@@ -282,9 +298,9 @@ function setUploadLimitPreset(kb) {
           </div>
         </section>
 
-        <!-- 2. 网盘 -->
+        <!-- 2. 文件 -->
         <section class="settings-group" id="sg-pan">
-          <header class="sg-heading"><h2>网盘</h2></header>
+          <header class="sg-heading"><h2>文件</h2></header>
 
           <div class="sg-row">
             <span class="sg-label">默认视图</span>
@@ -413,9 +429,9 @@ function setUploadLimitPreset(kb) {
           </div>
         </section>
 
-        <!-- 4. 播放器 -->
+        <!-- 4. 播放 -->
         <section class="settings-group" id="sg-player">
-          <header class="sg-heading"><h2>播放器</h2></header>
+          <header class="sg-heading"><h2>播放</h2></header>
 
           <div class="sg-row">
             <span class="sg-label">断点续播</span>
@@ -490,9 +506,9 @@ function setUploadLimitPreset(kb) {
           </div>
         </section>
 
-        <!-- 5. 网络 -->
+        <!-- 5. 连接 -->
         <section class="settings-group" id="sg-network">
-          <header class="sg-heading"><h2>网络</h2></header>
+          <header class="sg-heading"><h2>连接</h2></header>
 
           <div class="sg-row">
             <span class="sg-label">代理服务器</span>
@@ -509,7 +525,22 @@ function setUploadLimitPreset(kb) {
           </div>
         </section>
 
-        <!-- 6. 关于已移除 -->
+        <!-- 6. 缓存 -->
+        <section class="settings-group" id="sg-cache">
+          <header class="sg-heading"><h2>缓存</h2></header>
+
+          <div class="sg-row">
+            <span class="sg-label">目录与页面缓存</span>
+            <div class="sg-control">
+              <button class="btn sm" :disabled="clearingCache" @click="clearCache">
+                <span v-if="clearingCache" class="spin"></span>
+                <UiIcon v-else name="trash" :size="13" />
+                {{ clearingCache ? '清除中…' : '清除缓存' }}
+              </button>
+            </div>
+          </div>
+          <div class="sg-hint">缓存保存在安装目录的 data/cache 中，不会删除账号、传输记录或播放进度。</div>
+        </section>
 
         <div class="settings-foot">
           <span style="font-size:12px;color:var(--text-tertiary)">修改即时自动保存</span>
