@@ -82,7 +82,7 @@ SetHashes(["md5"], nil)
 
 ## 9. ProvideHashes（guangya.go）
 
-✅ `guangya.go:43` SetHashes(["md5"], nil)。mapFile `f.ContentHash = it.MD5`。ResolveTransferHash 支持 md5（`:470-481`）。
+✅ `guangya.go:42-43, 243-279` SetHashes(["md5"], nil)，详情兼容旧版 `data.fileInfo` 与列表形态并读取 MD5。`ResolveTransferHash` 支持 md5（`:500-513`）。
 
 ---
 

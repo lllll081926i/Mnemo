@@ -244,21 +244,34 @@ func (c *client) List(ctx context.Context, parentID string) ([]File, error) {
 func (c *client) Detail(ctx context.Context, fileID string) (*File, error) {
 	var resp struct {
 		Data *struct {
-			List []map[string]any `json:"list"`
+			List     []map[string]any `json:"list"`
+			FileInfo map[string]any   `json:"fileInfo"`
 		} `json:"data"`
 	}
 	err := c.post(ctx, "/userres/v1/file/get_file_detail", map[string]any{"fileId": fileID}, &resp)
 	if err != nil {
 		return nil, err
 	}
-	if resp.Data != nil && len(resp.Data.List) > 0 {
-		item := resp.Data.List[0]
+	var item map[string]any
+	if resp.Data != nil {
+		if len(resp.Data.List) > 0 {
+			item = resp.Data.List[0]
+		} else {
+			// The current API returns data.fileInfo; the old web client uses
+			// this shape for the MD5 needed by cross-drive instant transfer.
+			item = resp.Data.FileInfo
+		}
+	}
+	if item != nil {
 		return &File{
-			FileID: fileID, FileName: str(item["fileName"], item["name"]),
+			FileID:   str(item["fileId"], item["file_id"], fileID),
+			FileName: str(item["fileName"], item["name"]),
 			FileSize: num(item["fileSize"], item["size"]),
 			ResType:  int(num(item["resType"], item["res_type"])),
+			CTime:    int64(num(item["cTime"], item["ctime"])),
 			UTime:    int64(num(item["uTime"], item["utime"])),
-			MD5:      str(item["md5"]),
+			ParentID: str(item["parentId"], item["parent_id"]),
+			MD5:      str(item["md5"], item["MD5"]),
 		}, nil
 	}
 	return &File{FileID: fileID, FileName: fileID}, nil

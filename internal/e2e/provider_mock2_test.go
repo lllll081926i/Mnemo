@@ -647,6 +647,43 @@ func TestGuangyaDownloadUsesLegacyEndpointAndSignedURL(t *testing.T) {
 	}
 }
 
+func TestGuangyaResolveTransferHashUsesFileInfo(t *testing.T) {
+	mock := MockAPI(t, "api.guangyapan.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/userres/v1/file/get_file_detail" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode guangya detail body: %v", err)
+		}
+		if body["fileId"] != "guangya-hash-file" {
+			t.Errorf("guangya detail body = %#v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"fileInfo": map[string]any{
+					"fileId": "guangya-hash-file", "fileName": "hash.bin", "fileSize": 12,
+					"resType": 1, "md5": "0123456789abcdef0123456789abcdef",
+				},
+			},
+		})
+	}))
+	_ = mock
+
+	uid, did, _ := SeedAccount(t, "guangya", &model.TokenInfo{
+		AccessToken: "guangya-hash-access", TokenFrom: "guangya", UserID: "guangya_hash_test",
+		RefreshToken: `{"access_token":"guangya-hash-access","refresh_token":"guangya-hash-refresh","device_id":"hash-device","client_id":"aMe-8VSlkrbQXpUR"}`,
+	})
+	hash, err := drive.ResolveTransferHash(uid, did, "guangya-hash-file", "md5", false)
+	if err != nil {
+		t.Fatalf("guangya resolve hash: %v", err)
+	}
+	if hash != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("guangya hash = %q", hash)
+	}
+}
+
 func TestGuangyaUploadUsesLocalFileSizeInPrecreate(t *testing.T) {
 	var fileSize float64
 	mock := MockAPI(t, "api.guangyapan.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
