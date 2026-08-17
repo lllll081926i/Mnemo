@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -11,6 +12,8 @@ const migrateJobsFile = "migrate_jobs.json"
 
 // ListMigrateJobs loads all persisted migrate jobs.
 func (s *Store) ListMigrateJobs() ([]model.MigrateJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var list []model.MigrateJob
 	err := s.readJSON(migrateJobsFile, &list)
 	if err != nil && !os.IsNotExist(err) {
@@ -21,7 +24,16 @@ func (s *Store) ListMigrateJobs() ([]model.MigrateJob, error) {
 
 // SaveMigrateJob upserts a migrate job record.
 func (s *Store) SaveMigrateJob(j *model.MigrateJob) error {
-	list, err := s.ListMigrateJobs()
+	if j == nil || j.ID == "" {
+		return fmt.Errorf("store: migrate job id is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.MigrateJob
+	err := s.readJSON(migrateJobsFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -40,12 +52,18 @@ func (s *Store) SaveMigrateJob(j *model.MigrateJob) error {
 	if !replaced {
 		list = append(list, *j)
 	}
-	return s.writeJSON(migrateJobsFile, list)
+	return s.writeJSONUnlocked(migrateJobsFile, list)
 }
 
 // DeleteMigrateJob removes a single migrate job by ID.
 func (s *Store) DeleteMigrateJob(id string) error {
-	list, err := s.ListMigrateJobs()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.MigrateJob
+	err := s.readJSON(migrateJobsFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -56,12 +74,18 @@ func (s *Store) DeleteMigrateJob(id string) error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(migrateJobsFile, out)
+	return s.writeJSONUnlocked(migrateJobsFile, out)
 }
 
 // ClearMigrateJobs removes finished migrate jobs (completed/canceled/partial/failed).
 func (s *Store) ClearMigrateJobs() error {
-	list, err := s.ListMigrateJobs()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.MigrateJob
+	err := s.readJSON(migrateJobsFile, &list)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -73,5 +97,5 @@ func (s *Store) ClearMigrateJobs() error {
 		}
 		out = append(out, list[i])
 	}
-	return s.writeJSON(migrateJobsFile, out)
+	return s.writeJSONUnlocked(migrateJobsFile, out)
 }
