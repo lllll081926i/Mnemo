@@ -3,8 +3,12 @@ package pikpak
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,7 +36,11 @@ func clientOf(c drive.Context) (*client, error) {
 	if deviceID == "" {
 		deviceID = c.Token.UserName
 	}
-	cl := newClient(c.Token.AccessToken, deviceID)
+	accountID := strings.TrimSpace(c.Token.ProviderAccountID)
+	if accountID == "" {
+		accountID = model.StripUserID(providerID, c.Token.UserID)
+	}
+	cl := newClient(c.Token.AccessToken, deviceID, accountID)
 	if cl.deviceID == "" {
 		cl.deviceID = c.Token.DeviceID
 	}
@@ -223,6 +231,9 @@ func (d *Driver) Favorite(ctx context.Context, c drive.Context, fileIDs []string
 }
 
 func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.ShareParams) (*model.ShareItem, error) {
+	if len(params.FileIDs) == 0 {
+		return nil, errors.New("pikpak: 创建分享至少选择一个文件")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
@@ -231,27 +242,144 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	if err != nil {
 		return nil, err
 	}
+	expiration := res.Expiration
+	if expiration == "" {
+		expiration = params.Expiration
+	}
+	fileIDs := res.FileIDs
+	if len(fileIDs) == 0 {
+		fileIDs = append([]string(nil), params.FileIDs...)
+	}
 	return &model.ShareItem{
 		AccountID: c.UserID, DriveID: c.DriveID,
 		ShareID: res.ShareID, ShareURL: res.ShareURL, SharePwd: res.PassCode,
-		ShareName: params.ShareName, Expiration: res.Expiration, FileIDList: res.FileIDs,
+		ShareName: params.ShareName, Expiration: expiration, FileIDList: fileIDs,
 	}, nil
+}
+
+func (c *client) findUploadConflict(ctx context.Context, parentID, name string) (*File, error) {
+	items, err := c.List(ctx, rootID(parentID), false)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if !items[i].Trashed && items[i].Name == name {
+			return &items[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func pikpakConflictName(name string, index int) string {
+	ext := path.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	return fmt.Sprintf("%s (%d)%s", stem, index, ext)
+}
+
+// prepareUploadTarget applies the shared conflict policy before hashing. This
+// avoids expensive GCID work for refuse/skip and mirrors the legacy trash-based
+// overwrite behavior.
+func (d *Driver) prepareUploadTarget(ctx context.Context, cl *client, ui *model.UploadingUI) (bool, error) {
+	name := strings.TrimSpace(ui.Info.Name)
+	if name == "" {
+		name = filepath.Base(ui.Info.LocalFilePath)
+		ui.Info.Name = name
+	}
+	policy := driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy)
+	for index := 1; ; index++ {
+		conflict, err := cl.findUploadConflict(ctx, ui.Info.ParentFileID, name)
+		if err != nil {
+			return false, err
+		}
+		if conflict == nil {
+			ui.Info.Name = name
+			return true, nil
+		}
+		switch policy {
+		case driveutil.ConflictRefuse:
+			return false, fmt.Errorf("目标目录已存在同名文件：%s", conflict.Name)
+		case driveutil.ConflictSkip:
+			return false, nil
+		case driveutil.ConflictRename:
+			name = pikpakConflictName(name, index)
+		default:
+			if err := cl.Trash(ctx, []string{conflict.ID}); err != nil {
+				return false, fmt.Errorf("处理同名文件失败：%w", err)
+			}
+			return true, nil
+		}
+	}
+}
+
+func markPikPakUploadComplete(ui *model.UploadingUI, fileID string) {
+	ui.Upload.FileID = fileID
+	ui.Upload.DownSize = ui.Info.Size
+	ui.Upload.DownProcess = 100
+	ui.Upload.IsDowning = false
+	ui.Upload.IsCompleted = true
+	ui.Upload.IsFailed = false
+	ui.Upload.DownState = "completed"
+	ui.Upload.FailedMessage = ""
+}
+
+func markPikPakUploadFailed(ui *model.UploadingUI, err error) {
+	if ui == nil {
+		return
+	}
+	ui.Upload.IsDowning = false
+	ui.Upload.IsCompleted = false
+	ui.Upload.IsFailed = true
+	ui.Upload.DownState = "failed"
+	if err != nil {
+		ui.Upload.FailedMessage = err.Error()
+	}
+}
+
+func cleanupPikPakUpload(cl *client, fileID string) error {
+	if cl == nil || fileID == "" {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return cl.Delete(cleanupCtx, []string{fileID})
 }
 
 // UploadOneFile uploads one file (GCID + create + optional OSS PUT).
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || ui.Info.LocalFilePath == "" {
+		return errors.New("pikpak: 上传文件路径为空")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return err
 	}
-	gcid, err := computeGCID(ui.Info.LocalFilePath)
+	shouldUpload, err := d.prepareUploadTarget(ctx, cl, ui)
 	if err != nil {
+		markPikPakUploadFailed(ui, err)
 		return err
 	}
+	if !shouldUpload {
+		return nil
+	}
+	ui.Upload.DownState = "uploading"
+	ui.Upload.IsDowning = true
+	ui.Upload.IsFailed = false
+	ui.Upload.IsCompleted = false
+	gcid, err := computeGCID(ui.Info.LocalFilePath)
+	if err != nil {
+		markPikPakUploadFailed(ui, err)
+		return err
+	}
+	info, err := os.Stat(ui.Info.LocalFilePath)
+	if err != nil {
+		markPikPakUploadFailed(ui, err)
+		return err
+	}
+	ui.Info.Size = info.Size()
 	body := map[string]any{
 		"kind": "drive#file", "name": ui.Info.Name, "size": ui.Info.Size,
 		"hash": gcid, "upload_type": "UPLOAD_TYPE_RESUMABLE",
-		"resumable": map[string]any{"provider": "PROVIDER_ALIYUN"},
+		"resumable":   map[string]any{"provider": "PROVIDER_ALIYUN"},
 		"folder_type": "NORMAL",
 	}
 	if ui.Info.ParentFileID != "" && ui.Info.ParentFileID != RootID {
@@ -260,7 +388,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	var res struct {
 		UploadType string `json:"upload_type"`
 		Resumable  *struct {
-			Params *model.ConnConfig `json:"params"`
+			Params *pikpakOSSParams `json:"params"`
 		} `json:"resumable"`
 		File *struct {
 			ID string `json:"id"`
@@ -269,7 +397,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		Error string `json:"error"`
 	}
 	// Use a client where we can pass X-Captcha-Token if needed; basic flow:
-	if err := cl.jsonDo(ctx, httpMethodPost(), apiHost+"/drive/v1/files", body, &res, nil); err != nil {
+	if err := cl.jsonDo(ctx, httpMethodPost(), "/drive/v1/files", body, &res, nil); err != nil {
+		markPikPakUploadFailed(ui, err)
 		return err
 	}
 	fileID := ""
@@ -280,33 +409,59 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		fileID = res.ID
 	}
 	if fileID == "" {
-		return errors.New("pikpak: upload create missing file id")
+		err := errors.New("pikpak: upload create missing file id")
+		markPikPakUploadFailed(ui, err)
+		return err
 	}
+	ui.Upload.FileID = fileID
 	// No resumable params => rapid upload completed server side.
 	if res.Resumable == nil || res.Resumable.Params == nil {
+		markPikPakUploadComplete(ui, fileID)
 		return nil
 	}
 	params := res.Resumable.Params
-	return ossPut(ctx, c, ui.Info.LocalFilePath, params, ui)
+	if err := ossPut(ctx, c, ui.Info.LocalFilePath, params, ui); err != nil {
+		cleanupErr := cleanupPikPakUpload(cl, fileID)
+		markPikPakUploadFailed(ui, err)
+		if cleanupErr != nil {
+			return fmt.Errorf("%w；清理远端残留失败：%v", err, cleanupErr)
+		}
+		return err
+	}
+	markPikPakUploadComplete(ui, fileID)
+	return nil
 }
 
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	if token == nil {
-		return nil, nil
+		return nil, errors.New("PikPak 未登录")
+	}
+	refresh := strings.TrimSpace(token.RefreshToken)
+	if refresh == "" {
+		return nil, errors.New("PikPak 缺少 refresh token，请重新登录")
 	}
 	deviceID := token.DeviceID
 	if deviceID == "" {
 		deviceID = token.UserName
 	}
 	hc := netx.NewClient(60 * time.Second)
-	auth, err := refreshToken(ctx, hc, deviceID, token.RefreshToken)
+	auth, err := refreshToken(ctx, hc, deviceID, refresh)
 	if err != nil {
 		return nil, err
 	}
 	token.AccessToken = auth.AccessToken
-	token.RefreshToken = auth.RefreshToken
-	token.ExpiresIn = auth.ExpiresIn
-	if cl := newClient(auth.AccessToken, deviceID); cl != nil {
+	// PikPak may omit refresh_token or expires_in when rotation is not
+	// required. Never erase a still-valid persisted session field in that case.
+	if strings.TrimSpace(auth.RefreshToken) != "" {
+		token.RefreshToken = auth.RefreshToken
+	}
+	if auth.ExpiresIn > 0 {
+		token.ExpiresIn = auth.ExpiresIn
+	}
+	if auth.TokenType != "" {
+		token.TokenType = auth.TokenType
+	}
+	if cl := newClient(auth.AccessToken, deviceID, token.ProviderAccountID); cl != nil {
 		token.UsedSize, token.TotalSize = cl.About(ctx)
 	}
 	return token, nil
@@ -374,16 +529,18 @@ func httpMethodPost() string { return "POST" }
 
 // shareInfoResp is the GET /drive/v1/share response.
 type shareInfoResp struct {
-	ShareStatus    string `json:"share_status"`
-	PassCodeToken  string `json:"pass_code_token"`
-	FileID         string `json:"file_id"`
-	ID             string `json:"id"`
+	ShareStatus   string `json:"share_status"`
+	PassCodeToken string `json:"pass_code_token"`
+	FileID        string `json:"file_id"`
+	ID            string `json:"id"`
 }
 
 // shareDetailResp is the GET /drive/v1/share/detail response.
 type shareDetailResp struct {
-	Files []File `json:"files"`
-	NextPageToken string `json:"next_page_token"`
+	Files           []File `json:"files"`
+	NextPageToken   string `json:"next_page_token"`
+	ShareStatus     string `json:"share_status"`
+	ShareStatusText string `json:"share_status_text"`
 }
 
 // ImportShareSession implements drive.ShareImportDriver.
@@ -440,17 +597,29 @@ func (d *Driver) ImportShareSession(ctx context.Context, c drive.Context, shareU
 
 func pikpakShareListAll(ctx context.Context, cl *client, shareID, passCodeToken, parentID string) ([]drive.ShareImportFile, error) {
 	var out []drive.ShareImportFile
-	marker := parentID
+	pageToken := ""
 	seen := map[string]bool{}
 	for {
 		q := url.Values{}
 		q.Set("share_id", shareID)
-		q.Set("parent_id", marker)
+		q.Set("parent_id", parentID)
 		q.Set("pass_code_token", passCodeToken)
+		q.Set("thumbnail_size", "SIZE_LARGE")
+		q.Set("with_audit", "true")
 		q.Set("limit", "100")
+		q.Set("filters", `{"phase":{"eq":"PHASE_TYPE_COMPLETE"},"trashed":{"eq":false}}`)
+		if pageToken != "" {
+			q.Set("page_token", pageToken)
+		}
 		var resp shareDetailResp
 		if err := cl.get(ctx, "/drive/v1/share/detail", q, &resp); err != nil {
 			return nil, err
+		}
+		if resp.ShareStatus != "" && resp.ShareStatus != "OK" {
+			if resp.ShareStatusText != "" {
+				return nil, errors.New(resp.ShareStatusText)
+			}
+			return nil, fmt.Errorf("pikpak: 分享状态 %s", resp.ShareStatus)
 		}
 		for i := range resp.Files {
 			f := resp.Files[i]
@@ -465,16 +634,22 @@ func pikpakShareListAll(ctx context.Context, cl *client, shareID, passCodeToken,
 			break
 		}
 		if seen[resp.NextPageToken] {
-			break
+			return nil, errors.New("pikpak: 分享文件分页游标重复")
 		}
 		seen[resp.NextPageToken] = true
-		marker = resp.NextPageToken
+		pageToken = resp.NextPageToken
 	}
 	return out, nil
 }
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	if session == nil || strings.TrimSpace(session.ShareID) == "" {
+		return nil, errors.New("pikpak: 分享会话无效")
+	}
+	if len(fileIDs) == 0 {
+		return nil, errors.New("pikpak: 至少选择一个分享文件")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
@@ -484,7 +659,7 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 		parent = ""
 	}
 	body := map[string]any{
-		"share_id":       session.ShareID,
+		"share_id":        session.ShareID,
 		"pass_code_token": session.PassCodeToken,
 		"file_ids":        fileIDs,
 		"parent_id":       parent,
@@ -497,31 +672,47 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 
 // parsePikPakShareURL extracts share_id from a PikPak share URL.
 func parsePikPakShareURL(raw string) (shareID, passCode string) {
-	u, err := url.Parse(raw)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	// url.Parse treats a link without a scheme as a path. Normalize it so
+	// `mypikpak.com/s/<id>` behaves the same as the copied HTTPS link.
+	normalized := raw
+	if !strings.Contains(normalized, "://") && !strings.HasPrefix(normalized, "//") {
+		normalized = "https://" + normalized
+	}
+	u, err := url.Parse(normalized)
 	if err != nil {
 		return "", ""
 	}
-	// https://mypikpak.com/drive/sharing/share/{shareID}?pass_code=xxx
-	// or https://mypikpak.com/s/{shareID}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	for i, p := range parts {
-		if p == "share" && i+1 < len(parts) {
-			shareID = parts[i+1]
+	query := u.Query()
+	for _, key := range []string{"share_id", "shareId", "shareid"} {
+		if value := strings.TrimSpace(query.Get(key)); value != "" {
+			shareID = value
 			break
 		}
 	}
-	if shareID == "" && len(parts) > 0 {
-		last := parts[len(parts)-1]
-		if len(last) > 10 {
-			shareID = last
+	// https://mypikpak.com/drive/sharing/share/{shareID}?pass_code=xxx
+	// https://mypikpak.com/s/{shareID}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		switch strings.ToLower(strings.TrimSpace(parts[i])) {
+		case "share", "s":
+			if shareID == "" {
+				shareID = strings.TrimSpace(parts[i+1])
+			}
 		}
 	}
-	passCode = u.Query().Get("pass_code")
-	if passCode == "" {
-		passCode = u.Query().Get("passcode")
+	for _, key := range []string{"pass_code", "passcode", "pwd", "password"} {
+		if value := strings.TrimSpace(query.Get(key)); value != "" {
+			passCode = value
+			break
+		}
 	}
 	return shareID, passCode
 }
+
 // OfflineCreate submits a cloud offline task (magnet/link) to PikPak servers.
 func (d *Driver) OfflineCreate(ctx context.Context, c drive.Context, url, fileName, parentID string) (taskID, fileID string, err error) {
 	cl, err := clientOf(c)

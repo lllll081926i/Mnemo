@@ -11,18 +11,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
 
 const (
-	apiHost    = "https://api-drive.mypikpak.com"
-	userHost   = "https://user.mypikpak.com"
-	RootID     = "pikpak_root"
+	apiHost  = "https://api-drive.mypikpak.com"
+	userHost = "https://user.mypikpak.com"
+	RootID   = "pikpak_root"
 
 	clientID      = "YUMx5nI8ZU8Ap8pm"
 	clientVersion = "2.0.0"
@@ -59,6 +62,7 @@ type CaptchaMeta struct {
 	ClientVersion string `json:"client_version"`
 	PackageName   string `json:"package_name"`
 	Timestamp     string `json:"timestamp"`
+	UserID        string `json:"user_id,omitempty"`
 	Email         string `json:"email,omitempty"`
 	PhoneNumber   string `json:"phone_number,omitempty"`
 	Username      string `json:"username,omitempty"`
@@ -94,18 +98,49 @@ func isPhone(s string) bool {
 
 // client is an authenticated PikPak session.
 type client struct {
-	http       *netx.Client
+	http        *netx.Client
 	accessToken string
-	deviceID   string
+	deviceID    string
+	accountID   string
 }
 
-func newClient(accessToken, deviceID string) *client {
-	return &client{http: netx.NewClient(90 * time.Second), accessToken: accessToken, deviceID: deviceID}
+const pikpakFileDetailTTL = 45 * time.Second
+
+type pikpakFileDetailCacheEntry struct {
+	item      File
+	expiresAt time.Time
+}
+
+var pikpakFileDetailCache = struct {
+	sync.Mutex
+	items map[string]pikpakFileDetailCacheEntry
+}{items: make(map[string]pikpakFileDetailCacheEntry)}
+
+type pikpakVIPCacheEntry struct {
+	isVIP     bool
+	expiresAt time.Time
+}
+
+var pikpakVIPCache = struct {
+	sync.Mutex
+	items map[string]pikpakVIPCacheEntry
+}{items: make(map[string]pikpakVIPCacheEntry)}
+
+func newClient(accessToken, deviceID, accountID string) *client {
+	return &client{
+		http:        netx.NewClient(90 * time.Second),
+		accessToken: accessToken,
+		deviceID:    deviceID,
+		accountID:   strings.TrimSpace(accountID),
+	}
 }
 
 func (c *client) headers(extra map[string]string) map[string]string {
 	h := map[string]string{
 		"User-Agent":       userAgent,
+		"Accept":           "application/json",
+		"Referer":          "https://mypikpak.com/",
+		"X-Client-Id":      clientID,
 		"X-Device-Id":      c.deviceID,
 		"X-Client-Version": clientVersion,
 	}
@@ -120,18 +155,13 @@ func (c *client) headers(extra map[string]string) map[string]string {
 
 // jsonDo performs an authenticated JSON call against the drive API.
 func (c *client) jsonDo(ctx context.Context, method, path string, body any, out any, extra map[string]string) error {
-	err := c.jsonDoOnce(ctx, method, path, body, out, extra)
+	action := method + ":" + path
+	err := c.jsonDoOnce(ctx, method, path, body, out, withCaptchaToken(extra, cachedAPICaptchaToken(c, action)))
 	if err != nil && isCaptchaError(err) {
-		// Acquire a fresh captcha token for this action and retry once.
-		action := method + ":" + path
-		tok, _, terr := initCaptcha(ctx, c.http, c.deviceID, "", action)
+		// Exchange the cached token (when present) for a fresh action token and retry once.
+		tok, terr := apiCaptchaToken(ctx, c, action, true)
 		if terr == nil && tok != "" {
-			merged := map[string]string{}
-			for k, v := range extra {
-				merged[k] = v
-			}
-			merged["X-Captcha-Token"] = tok
-			return c.jsonDoOnce(ctx, method, path, body, out, merged)
+			return c.jsonDoOnce(ctx, method, path, body, out, withCaptchaToken(extra, tok))
 		}
 	}
 	return err
@@ -139,7 +169,7 @@ func (c *client) jsonDo(ctx context.Context, method, path string, body any, out 
 
 // jsonDoOnce performs a single authenticated JSON call without captcha retry.
 func (c *client) jsonDoOnce(ctx context.Context, method, path string, body any, out any, extra map[string]string) error {
-	target := apiHost + path
+	target := apiURL(path)
 	var reader io.Reader
 	if body != nil {
 		reader = netx.JSONBody(body)
@@ -151,7 +181,7 @@ func (c *client) jsonDoOnce(ctx context.Context, method, path string, body any, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return parseAPIError(data, resp.StatusCode)
+		return parseAPIErrorWithRetry(data, resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	if out == nil {
 		return nil
@@ -174,19 +204,33 @@ func isCaptchaError(err error) bool {
 
 // get performs a GET with query params.
 func (c *client) get(ctx context.Context, path string, q url.Values, out any) error {
-	err := c.getOnce(ctx, path, q, out, nil)
+	action := http.MethodGet + ":" + path
+	err := c.getOnce(ctx, path, q, out, withCaptchaToken(nil, cachedAPICaptchaToken(c, action)))
 	if err != nil && isCaptchaError(err) {
-		action := http.MethodGet + ":" + path
-		tok, _, terr := initCaptcha(ctx, c.http, c.deviceID, "", action)
+		tok, terr := apiCaptchaToken(ctx, c, action, true)
 		if terr == nil && tok != "" {
-			return c.getOnce(ctx, path, q, out, map[string]string{"X-Captcha-Token": tok})
+			return c.getOnce(ctx, path, q, out, withCaptchaToken(nil, tok))
 		}
 	}
 	return err
 }
 
+func withCaptchaToken(extra map[string]string, token string) map[string]string {
+	if token == "" && len(extra) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(extra)+1)
+	for k, v := range extra {
+		merged[k] = v
+	}
+	if token != "" {
+		merged["X-Captcha-Token"] = token
+	}
+	return merged
+}
+
 func (c *client) getOnce(ctx context.Context, path string, q url.Values, out any, extra map[string]string) error {
-	target := apiHost + path
+	target := apiURL(path)
 	if q != nil {
 		target += "?" + q.Encode()
 	}
@@ -197,7 +241,7 @@ func (c *client) getOnce(ctx context.Context, path string, q url.Values, out any
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return parseAPIError(data, resp.StatusCode)
+		return parseAPIErrorWithRetry(data, resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	if out == nil {
 		return nil
@@ -205,15 +249,63 @@ func (c *client) getOnce(ctx context.Context, path string, q url.Values, out any
 	return json.Unmarshal(data, out)
 }
 
+func apiURL(path string) string {
+	if strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "http://") {
+		return path
+	}
+	return apiHost + "/" + strings.TrimPrefix(path, "/")
+}
+
+const pikpakMinRateLimitSeconds = 30
+
+// PikPakRateLimitError tells the UI how long the provider asks the user to
+// wait before trying the request again. The server has returned both 429 and
+// provider-specific "too many" payloads, so status alone is not sufficient.
+type PikPakRateLimitError struct {
+	RetryAfterSeconds int
+}
+
+func (e *PikPakRateLimitError) Error() string {
+	seconds := e.RetryAfterSeconds
+	if seconds < pikpakMinRateLimitSeconds {
+		seconds = pikpakMinRateLimitSeconds
+	}
+	return fmt.Sprintf("PikPak 请求过于频繁，请等待 %d 秒后再试", seconds)
+}
+
 func parseAPIError(data []byte, status int) error {
+	return parseAPIErrorWithRetry(data, status, "")
+}
+
+func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 	var e struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
-		Message          string `json:"message"`
-		Reason           string `json:"reason"`
-		Code             int    `json:"code"`
+		Error            string          `json:"error"`
+		ErrorDescription string          `json:"error_description"`
+		Message          string          `json:"message"`
+		Reason           string          `json:"reason"`
+		Code             int             `json:"code"`
+		ErrorCode        int             `json:"error_code"`
+		RetryAfter       json.RawMessage `json:"retry_after"`
+		RetryAfterSecond json.RawMessage `json:"retry_after_seconds"`
 	}
 	_ = json.Unmarshal(data, &e)
+	detail := strings.ToLower(strings.Join([]string{e.Error, e.ErrorDescription, e.Message, e.Reason}, " "))
+	if status == http.StatusTooManyRequests || e.Code == http.StatusTooManyRequests || e.ErrorCode == http.StatusTooManyRequests ||
+		strings.Contains(detail, "too_many") || strings.Contains(detail, "too many") ||
+		strings.Contains(detail, "too_frequent") || strings.Contains(detail, "request_frequency") ||
+		strings.Contains(detail, "rate_limit") || strings.Contains(detail, "rate limited") ||
+		strings.Contains(detail, "请求频繁") || strings.Contains(detail, "操作频繁") {
+		seconds := pikpakMinRateLimitSeconds
+		for _, raw := range []json.RawMessage{e.RetryAfter, e.RetryAfterSecond} {
+			if value := parseRetryAfterSeconds(raw); value > seconds {
+				seconds = value
+			}
+		}
+		if value := parseRetryAfterHeader(retryAfter); value > seconds {
+			seconds = value
+		}
+		return &PikPakRateLimitError{RetryAfterSeconds: seconds}
+	}
 	// 常见错误友好化（对齐旧版 parsePikPakError）
 	switch e.Error {
 	case "invalid_account_or_password":
@@ -237,23 +329,52 @@ func parseAPIError(data []byte, status int) error {
 	return errors.New(msg)
 }
 
+func parseRetryAfterSeconds(raw json.RawMessage) int {
+	value := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if value == "" {
+		return 0
+	}
+	seconds, err := strconv.ParseFloat(value, 64)
+	if err == nil && seconds > 0 {
+		return int(seconds + 0.999999)
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		remaining := time.Until(when)
+		if remaining > 0 {
+			return int((remaining + time.Second - 1) / time.Second)
+		}
+	}
+	return 0
+}
+
+func parseRetryAfterHeader(value string) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	return parseRetryAfterSeconds(json.RawMessage(strconv.Quote(value)))
+}
+
 // File is a raw PikPak drive file item.
 type File struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Kind        string `json:"kind"`
-	Size        int64  `json:"size"`
-	ParentID    string `json:"parent_id"`
-	CreatedTime string `json:"created_time"`
-	ModifiedTime string `json:"modified_time"`
-	Trashed     bool   `json:"trashed"`
-	Starred     bool   `json:"starred"`
-	Thumbnail   string `json:"thumbnail_link"`
-	WebContentLink string `json:"web_content_link"`
-	Medias      []Media `json:"medias"`
-	Phase       string `json:"phase"`
-	FileExtension string `json:"file_extension"`
-	Links       *struct {
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	Kind           string         `json:"kind"`
+	Size           int64          `json:"size"`
+	ParentID       string         `json:"parent_id"`
+	CreatedTime    string         `json:"created_time"`
+	ModifiedTime   string         `json:"modified_time"`
+	Trashed        bool           `json:"trashed"`
+	Starred        bool           `json:"starred"`
+	Thumbnail      string         `json:"thumbnail_link"`
+	WebContentLink string         `json:"web_content_link"`
+	Medias         []Media        `json:"medias"`
+	Phase          string         `json:"phase"`
+	FileExtension  string         `json:"file_extension"`
+	MimeType       string         `json:"mime_type"`
+	Duration       any            `json:"duration"`
+	Params         map[string]any `json:"params"`
+	Links          *struct {
 		ApplicationOctetStream *struct {
 			URL string `json:"url"`
 		} `json:"application/octet-stream"`
@@ -262,38 +383,50 @@ type File struct {
 
 // Media is a video media stream entry.
 type Media struct {
-	MediaName   string `json:"media_name"`
+	MediaName      string `json:"media_name"`
 	ResolutionName string `json:"resolution_name"`
-	IsOrigin    bool   `json:"is_origin"`
-	Category    string `json:"category"`
-	NeedMoreQuota bool `json:"need_more_quota"`
-	IsVisible   bool   `json:"is_visible"`
-	Priority    int    `json:"priority"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	Link        *struct {
+	IsOrigin       bool   `json:"is_origin"`
+	Category       string `json:"category"`
+	NeedMoreQuota  bool   `json:"need_more_quota"`
+	IsVisible      bool   `json:"is_visible"`
+	Priority       int    `json:"priority"`
+	Width          int    `json:"width"`
+	Height         int    `json:"height"`
+	Link           *struct {
 		URL  string `json:"url"`
 		Type string `json:"type"`
 	} `json:"link"`
-	Video *struct {
-		VideoType string `json:"video_type"`
-	} `json:"video"`
+	Video *MediaVideo `json:"video"`
+}
+
+type MediaVideo struct {
+	VideoType string `json:"video_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Duration  any    `json:"duration"`
 }
 
 // listResp is the paginated file listing.
 type listResp struct {
-	Files        []File `json:"files"`
+	Files         []File `json:"files"`
 	NextPageToken string `json:"next_page_token"`
 }
 
 // ListPage lists one page.
 func (c *client) ListPage(ctx context.Context, parentID, pageToken string, trashed bool) ([]File, string, error) {
 	q := url.Values{}
-	q.Set("parent_id", parentID)
 	q.Set("page_size", "100")
 	q.Set("thumbnail_size", "SIZE_LARGE")
-	q.Set("filters", fmt.Sprintf(`{"trashed":%t}`, trashed))
 	q.Set("with_audit", "false")
+	if trashed {
+		q.Set("parent_id", "*")
+		q.Set("filters", `{"trashed":{"eq":true}}`)
+	} else {
+		q.Set("filters", `{"trashed":{"eq":false},"phase":{"eq":"PHASE_TYPE_COMPLETE"}}`)
+		if parentID != "" && parentID != RootID && parentID != "*" {
+			q.Set("parent_id", parentID)
+		}
+	}
 	if pageToken != "" {
 		q.Set("page_token", pageToken)
 	}
@@ -327,13 +460,84 @@ func (c *client) List(ctx context.Context, parentID string, trashed bool) ([]Fil
 	return out, nil
 }
 
-// Detail returns one file.
-func (c *client) Detail(ctx context.Context, fileID string) (*File, error) {
+func (c *client) detailCacheKey(fileID string) string {
+	return strings.Join([]string{c.deviceID, c.accountID, md5hex(c.accessToken), fileID}, "\x00")
+}
+
+func (c *client) detailOnce(ctx context.Context, fileID string) (*File, error) {
 	var f File
 	if err := c.get(ctx, "/drive/v1/files/"+url.PathEscape(fileID), nil, &f); err != nil {
 		return nil, err
 	}
 	return &f, nil
+}
+
+func fileHasPlayableLink(f *File) bool {
+	if originalLink(f) != "" || f.WebContentLink != "" {
+		return true
+	}
+	for _, media := range f.Medias {
+		if media.Link != nil && media.Link.URL != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func linksExpireSoon(f *File) bool {
+	deadline := time.Now().Add(time.Minute).UnixMilli()
+	urls := []string{originalLink(f), f.WebContentLink}
+	for _, media := range f.Medias {
+		if media.Link != nil {
+			urls = append(urls, media.Link.URL)
+		}
+	}
+	for _, raw := range urls {
+		if expiresAt := driveutil.GetExpiresTime(raw); expiresAt > 0 && expiresAt <= deadline {
+			return true
+		}
+	}
+	return false
+}
+
+// Detail keeps short-lived metadata and signed links per account. The cache
+// key includes the access token so a refreshed session cannot reuse an old
+// account's links.
+func (c *client) Detail(ctx context.Context, fileID string) (*File, error) {
+	key := c.detailCacheKey(fileID)
+	now := time.Now()
+	pikpakFileDetailCache.Lock()
+	entry, ok := pikpakFileDetailCache.items[key]
+	if ok && entry.expiresAt.After(now) && !linksExpireSoon(&entry.item) {
+		item := entry.item
+		pikpakFileDetailCache.Unlock()
+		return &item, nil
+	}
+	if ok {
+		delete(pikpakFileDetailCache.items, key)
+	}
+	pikpakFileDetailCache.Unlock()
+
+	item, err := c.detailOnce(ctx, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if !fileHasPlayableLink(item) {
+		timer := time.NewTimer(400 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		if retry, retryErr := c.detailOnce(ctx, fileID); retryErr == nil {
+			item = retry
+		}
+	}
+	pikpakFileDetailCache.Lock()
+	pikpakFileDetailCache.items[key] = pikpakFileDetailCacheEntry{item: *item, expiresAt: time.Now().Add(pikpakFileDetailTTL)}
+	pikpakFileDetailCache.Unlock()
+	return item, nil
 }
 
 // About returns quota.
@@ -350,8 +554,70 @@ func (c *client) About(ctx context.Context) (used, total int64) {
 	return 0, 0
 }
 
+func originalLink(f *File) string {
+	if f == nil {
+		return ""
+	}
+	if f.Links != nil && f.Links.ApplicationOctetStream != nil && f.Links.ApplicationOctetStream.URL != "" {
+		return f.Links.ApplicationOctetStream.URL
+	}
+	return f.WebContentLink
+}
+
+func fidFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("fid")
+}
+
+// bestDownloadLink mirrors the legacy provider's same-fid media selection.
+func bestDownloadLink(f *File) string {
+	original := originalLink(f)
+	originalFID := fidFromURL(original)
+	if originalFID == "" {
+		return original
+	}
+	firstSameFID := ""
+	for _, media := range f.Medias {
+		if media.Link == nil || !strings.HasPrefix(media.Link.URL, "http") || fidFromURL(media.Link.URL) != originalFID {
+			continue
+		}
+		if firstSameFID == "" {
+			firstSameFID = media.Link.URL
+		}
+		if media.IsOrigin || media.Category == "category_origin" {
+			return media.Link.URL
+		}
+	}
+	if firstSameFID != "" {
+		return firstSameFID
+	}
+	return original
+}
+
+func originMediaLink(f *File) string {
+	original := originalLink(f)
+	originalFID := fidFromURL(original)
+	for _, media := range f.Medias {
+		if media.Link == nil || !media.IsOrigin || !strings.HasPrefix(media.Link.URL, "http") {
+			continue
+		}
+		if originalFID == "" || fidFromURL(media.Link.URL) == originalFID {
+			return media.Link.URL
+		}
+	}
+	return original
+}
+
 // DownloadURL resolves the direct download URL.
 func (c *client) DownloadURL(ctx context.Context, fileID string) (string, int64, error) {
+	if f, err := c.Detail(ctx, fileID); err == nil {
+		if direct := bestDownloadLink(f); direct != "" {
+			return direct, f.Size, nil
+		}
+	}
 	var resp struct {
 		URL  string `json:"url"`
 		Size int64  `json:"size"`
@@ -362,23 +628,41 @@ func (c *client) DownloadURL(ctx context.Context, fileID string) (string, int64,
 		if err2 != nil {
 			return "", 0, err
 		}
+		if direct := bestDownloadLink(f); direct != "" {
+			return direct, f.Size, nil
+		}
 		if f.WebContentLink == "" {
 			return "", 0, errors.New("pikpak: no download url")
 		}
 		return f.WebContentLink, f.Size, nil
+	}
+	if resp.URL == "" {
+		return "", 0, errors.New("pikpak: no download url")
 	}
 	return resp.URL, resp.Size, nil
 }
 
 // VipInfo returns whether the account has a VIP.
 func (c *client) VipInfo(ctx context.Context) bool {
+	cacheKey := strings.Join([]string{c.deviceID, c.accountID}, "\x00")
+	now := time.Now()
+	pikpakVIPCache.Lock()
+	if entry, ok := pikpakVIPCache.items[cacheKey]; ok && entry.expiresAt.After(now) {
+		pikpakVIPCache.Unlock()
+		return entry.isVIP
+	}
+	pikpakVIPCache.Unlock()
 	var resp struct {
 		Vip struct {
 			Identity int `json:"identity"`
 		} `json:"vip"`
 	}
 	_ = c.get(ctx, "/drive/v1/privilege/vip", nil, &resp)
-	return resp.Vip.Identity > 0
+	isVIP := resp.Vip.Identity > 0
+	pikpakVIPCache.Lock()
+	pikpakVIPCache.items[cacheKey] = pikpakVIPCacheEntry{isVIP: isVIP, expiresAt: time.Now().Add(10 * time.Minute)}
+	pikpakVIPCache.Unlock()
+	return isVIP
 }
 
 // PlayInfo resolves video transcode qualities.
@@ -389,13 +673,17 @@ func (c *client) PlayInfo(ctx context.Context, fileID string) (*model.VideoPrevi
 	var resp struct {
 		MediaPlayInfo *struct {
 			TranscodeList []struct {
-				TemplateID   string `json:"template_id"`
-				URL          string `json:"url"`
-				Width        int    `json:"width"`
-				Height       int    `json:"height"`
-				Status       string `json:"status"`
-				Video        *struct{ VideoType string `json:"video_type"` } `json:"video"`
-				Audio        *struct{ AudioType string `json:"audio_type"` } `json:"audio"`
+				TemplateID     string      `json:"template_id"`
+				ResolutionName string      `json:"resolution_name"`
+				MediaName      string      `json:"media_name"`
+				URL            string      `json:"url"`
+				Width          int         `json:"width"`
+				Height         int         `json:"height"`
+				Status         string      `json:"status"`
+				Video          *MediaVideo `json:"video"`
+				Audio          *struct {
+					AudioType string `json:"audio_type"`
+				} `json:"audio"`
 			} `json:"transcode_list"`
 		} `json:"media_play_info"`
 	}
@@ -407,40 +695,40 @@ func (c *client) PlayInfo(ctx context.Context, fileID string) (*model.VideoPrevi
 		return nil, err
 	}
 	isVip := c.VipInfo(ctx)
-	preview := &model.VideoPreview{FileID: fileID, Size: f.Size}
+	preview := &model.VideoPreview{FileID: fileID, Size: f.Size, Duration: fileDurationSeconds(f)}
 	if resp.MediaPlayInfo != nil {
 		for _, tc := range resp.MediaPlayInfo.TranscodeList {
 			if tc.URL == "" || tc.Status != "" && tc.Status != "success" {
 				continue
 			}
-			if !isVip && tc.Height > 720 {
+			height := tc.Height
+			width := tc.Width
+			streamTypeName := ""
+			if tc.Video != nil {
+				if height == 0 {
+					height = tc.Video.Height
+				}
+				if width == 0 {
+					width = tc.Video.Width
+				}
+				streamTypeName = tc.Video.VideoType
+			}
+			height = resolutionHeight(height, tc.ResolutionName, tc.MediaName, tc.TemplateID)
+			if !isVip && height > 720 {
 				continue
 			}
-				tier := qualityTier(tc.Height)
-				var streamTypeName string
-				if tc.Video != nil {
-					streamTypeName = tc.Video.VideoType
-				}
-				preview.Qualities = append(preview.Qualities, model.VideoQuality{
-					HTML: tier.html, Quality: tier.quality, Height: tc.Height, Width: tc.Width,
-					Label: tier.html, Value: tier.quality, URL: tc.URL,
-					Type: streamType(tc.URL, streamTypeName),
-				})
+			tier := qualityTier(height)
+			preview.Qualities = append(preview.Qualities, model.VideoQuality{
+				HTML: tier.html, Quality: tier.quality, Height: height, Width: width,
+				Label: tier.html, Value: tier.quality, URL: tc.URL,
+				Type: streamType(tc.URL, streamTypeName),
+			})
 		}
 	}
 	// origin
-	origin := f.WebContentLink
-	if origin == "" {
-		for _, m := range f.Medias {
-			if m.IsOrigin || m.Category == "category_origin" {
-				if m.Link != nil && m.Link.URL != "" {
-					origin = m.Link.URL
-				}
-			}
-		}
-	}
+	origin := originMediaLink(f)
 	if origin != "" {
-		q := model.VideoQuality{HTML: "原画", Quality: "Origin", Label: "原画", Value: "Origin", URL: origin, ForceProxy: true}
+		q := model.VideoQuality{HTML: "原画", Quality: "Origin", Label: "原画", Value: "Origin", URL: origin, Type: streamType(origin, ""), ForceProxy: true}
 		if isVip {
 			preview.Qualities = append([]model.VideoQuality{q}, preview.Qualities...)
 		} else {
@@ -454,6 +742,72 @@ func (c *client) PlayInfo(ctx context.Context, fileID string) (*model.VideoPrevi
 }
 
 type tierInfo struct{ quality, html string }
+
+var (
+	resolutionPixelPattern = regexp.MustCompile(`(?i)(?:^|[^0-9])([0-9]{3,4})\s*p(?:\b|$)`)
+	resolutionKPattern     = regexp.MustCompile(`(?i)(?:^|[^0-9])([248])\s*k(?:\b|$)`)
+)
+
+func resolutionHeight(height int, labels ...string) int {
+	if height > 0 {
+		return height
+	}
+	label := strings.ToLower(strings.Join(labels, " "))
+	if match := resolutionPixelPattern.FindStringSubmatch(label); len(match) == 2 {
+		if value, err := strconv.Atoi(match[1]); err == nil {
+			return value
+		}
+	}
+	if match := resolutionKPattern.FindStringSubmatch(label); len(match) == 2 {
+		if value, err := strconv.Atoi(match[1]); err == nil {
+			return value * 512
+		}
+	}
+	return 0
+}
+
+func durationSeconds(raw any) int64 {
+	value := 0.0
+	switch v := raw.(type) {
+	case float64:
+		value = v
+	case float32:
+		value = float64(v)
+	case int:
+		value = float64(v)
+	case int64:
+		value = float64(v)
+	case json.Number:
+		value, _ = v.Float64()
+	case string:
+		value, _ = strconv.ParseFloat(strings.TrimSpace(v), 64)
+	}
+	if value <= 0 {
+		return 0
+	}
+	if value > 100000 {
+		value /= 1000
+	}
+	return int64(value + 0.5)
+}
+
+func fileDurationSeconds(f *File) int64 {
+	if f == nil {
+		return 0
+	}
+	best := durationSeconds(f.Duration)
+	for _, media := range f.Medias {
+		if media.Video != nil {
+			if value := durationSeconds(media.Video.Duration); value > best {
+				best = value
+			}
+		}
+	}
+	if value := durationSeconds(f.Params["duration"]); value > best {
+		best = value
+	}
+	return best
+}
 
 func qualityTier(height int) tierInfo {
 	switch {
@@ -472,28 +826,51 @@ func qualityTier(height int) tierInfo {
 
 func streamType(rawURL, t string) string {
 	u := strings.ToLower(rawURL)
-	if strings.Contains(u, ".m3u8") || t == "m3u8" {
+	t = strings.ToLower(strings.TrimSpace(t))
+	if strings.Contains(u, ".m3u8") || t == "m3u8" || strings.Contains(t, "mpegurl") || strings.Contains(t, "hls") {
 		return "hls"
 	}
-	if strings.Contains(u, ".mpd") {
+	if strings.Contains(u, ".mpd") || t == "mpd" || strings.Contains(t, "dash") {
 		return "dash"
+	}
+	if strings.Contains(u, ".ts") || t == "ts" || strings.Contains(t, "mpegts") || strings.Contains(t, "mp2t") {
+		return "ts"
 	}
 	return "mp4"
 }
 
-// Mkdir creates a folder.
+func apiParentID(parentID string) string {
+	switch strings.TrimSpace(parentID) {
+	case "", "root", RootID, "*", "/":
+		return ""
+	default:
+		return parentID
+	}
+}
+
+// Mkdir creates a folder. PikPak uses the same /files endpoint for folder
+// creation; the action-specific create_folder endpoint is not part of the
+// legacy API used by the desktop and AList clients.
 func (c *client) Mkdir(ctx context.Context, parentID, name string) (*driveMkdirResult, error) {
 	var res struct {
-		File File `json:"file"`
+		File File   `json:"file"`
+		ID   string `json:"id"`
 	}
-	body := map[string]any{"name": name, "kind": "drive#folder"}
-	if parentID != "" && parentID != RootID {
-		body["parent_id"] = parentID
+	body := map[string]any{
+		"kind": "drive#folder",
+		"name": name,
 	}
-	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/files:create_folder", body, &res, nil); err != nil {
+	if parent := apiParentID(parentID); parent != "" {
+		body["parent_id"] = parent
+	}
+	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/files", body, &res, nil); err != nil {
 		return &driveMkdirResult{Error: err.Error()}, nil
 	}
-	return &driveMkdirResult{FileID: res.File.ID}, nil
+	fileID := res.File.ID
+	if fileID == "" {
+		fileID = res.ID
+	}
+	return &driveMkdirResult{FileID: fileID}, nil
 }
 
 type driveMkdirResult struct {
@@ -501,25 +878,62 @@ type driveMkdirResult struct {
 	Error  string `json:"error"`
 }
 
-// batchOp performs a files:batch_* call and waits for async tasks to finish.
+// batchOp performs a files:batch* call and waits for every async task to
+// finish. A batch response can contain more than one task; waiting only for
+// the first one leaves the UI reporting success while other files are still
+// being moved or copied.
 // PikPak returns a list of async tasks in the response; we poll /drive/v1/tasks
 // until each completes (phase != PHASE_TYPE_PENDING/running) or a timeout is
 // reached. This mirrors the legacy waitForPikPakTask behavior.
 func (c *client) batchOp(ctx context.Context, command string, body map[string]any) error {
 	var resp struct {
 		Tasks []struct {
-			TaskID string `json:"id"`
-			Phase string `json:"phase"`
+			ID     string `json:"id"`
+			TaskID string `json:"task_id"`
+			Phase  string `json:"phase"`
 			Status string `json:"status"`
 		} `json:"tasks"`
+		TaskID string `json:"task_id"`
+		ID     string `json:"id"`
+		Task   *struct {
+			ID     string `json:"id"`
+			TaskID string `json:"task_id"`
+		} `json:"task"`
 	}
 	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/files:"+command, body, &resp, nil); err != nil {
 		return err
 	}
-	if len(resp.Tasks) == 0 {
+	taskIDs := make([]string, 0, len(resp.Tasks)+2)
+	seen := make(map[string]struct{}, len(resp.Tasks)+2)
+	appendTaskID := func(taskID string) {
+		if taskID == "" {
+			return
+		}
+		if _, ok := seen[taskID]; ok {
+			return
+		}
+		seen[taskID] = struct{}{}
+		taskIDs = append(taskIDs, taskID)
+	}
+	appendTaskID(resp.TaskID)
+	appendTaskID(resp.ID)
+	if resp.Task != nil {
+		appendTaskID(resp.Task.TaskID)
+		appendTaskID(resp.Task.ID)
+	}
+	for _, task := range resp.Tasks {
+		appendTaskID(task.TaskID)
+		appendTaskID(task.ID)
+	}
+	if len(taskIDs) == 0 {
 		return nil
 	}
-	return c.waitForTasks(ctx, resp.Tasks[0].TaskID)
+	for _, taskID := range taskIDs {
+		if err := c.waitForTasks(ctx, taskID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // waitForTasks polls a PikPak async task until it reaches a terminal phase.
@@ -534,126 +948,394 @@ func (c *client) waitForTasks(ctx context.Context, taskID string) error {
 			return ctx.Err()
 		default:
 		}
-		task, err := c.FindOfflineTask(ctx, taskID, "")
-		if err != nil || task == nil {
-			// task lookup failed; assume completed (best effort)
-			return nil
+		task, err := c.findTask(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("pikpak: query task %s: %w", taskID, err)
 		}
-		switch task.Phase {
+		if task == nil {
+			return fmt.Errorf("pikpak: task %s not found", taskID)
+		}
+		phase := task.Phase
+		if phase == "" {
+			phase = task.Status
+		}
+		switch phase {
 		case "PHASE_TYPE_COMPLETE", "complete", "completed":
 			return nil
 		case "PHASE_TYPE_ERROR", "error", "failed":
+			if task.Message != "" {
+				return fmt.Errorf("pikpak: task %s failed: %s", taskID, task.Message)
+			}
 			return fmt.Errorf("pikpak: task %s failed", taskID)
 		}
-		time.Sleep(time.Second)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return nil // timeout: treat as success (best effort)
+	return fmt.Errorf("pikpak: task %s timeout", taskID)
+}
+
+// findTask queries the task endpoint used by file batch operations. Offline
+// tasks are exposed through a different filtered collection.
+func (c *client) findTask(ctx context.Context, taskID string) (*OfflineTask, error) {
+	var raw json.RawMessage
+	if err := c.get(ctx, "/drive/v1/tasks/"+url.PathEscape(taskID), nil, &raw); err != nil {
+		return nil, err
+	}
+	var task OfflineTask
+	if err := json.Unmarshal(raw, &task); err != nil {
+		return nil, err
+	}
+	if task.TaskID != "" || task.Phase != "" || task.Status != "" {
+		return &task, nil
+	}
+	var envelope struct {
+		Task json.RawMessage `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	if len(envelope.Task) == 0 || string(envelope.Task) == "null" {
+		return &task, nil
+	}
+	if err := json.Unmarshal(envelope.Task, &task); err != nil {
+		return nil, err
+	}
+	return &task, nil
 }
 
 // Rename renames a file.
 func (c *client) Rename(ctx context.Context, fileID, name string) error {
-	return c.batchOp(ctx, "batch_rename", map[string]any{"requests": []any{map[string]any{"id": fileID, "name": name}}})
+	return c.jsonDo(ctx, http.MethodPatch, "/drive/v1/files/"+url.PathEscape(fileID), map[string]any{"name": name}, nil, nil)
 }
 
 // Trash moves ids to trash.
 func (c *client) Trash(ctx context.Context, ids []string) error {
-	return c.batchOp(ctx, "batch_trash", map[string]any{"ids": ids})
+	return c.batchOp(ctx, "batchTrash", map[string]any{"ids": ids})
 }
 
 // Delete permanently deletes ids.
 func (c *client) Delete(ctx context.Context, ids []string) error {
-	return c.batchOp(ctx, "batch_delete", map[string]any{"ids": ids})
+	return c.batchOp(ctx, "batchDelete", map[string]any{"ids": ids})
 }
 
 // Restore restores ids from trash.
 func (c *client) Restore(ctx context.Context, ids []string) error {
-	return c.batchOp(ctx, "batch_restore", map[string]any{"ids": ids})
+	return c.batchOp(ctx, "batchUntrash", map[string]any{"ids": ids})
 }
 
 // Move moves ids to a parent.
 func (c *client) Move(ctx context.Context, ids []string, toParentID string) error {
-	return c.batchOp(ctx, "batch_move", map[string]any{"requests": []any{map[string]any{"ids": ids, "to_parent_id": toParentID}}})
+	to := map[string]any{}
+	if parent := apiParentID(toParentID); parent != "" {
+		to["parent_id"] = parent
+	}
+	return c.batchOp(ctx, "batchMove", map[string]any{
+		"ids": ids,
+		"to":  to,
+	})
 }
 
 // Copy copies ids to a parent.
 func (c *client) Copy(ctx context.Context, ids []string, toParentID string) error {
-	return c.batchOp(ctx, "batch_copy", map[string]any{"requests": []any{map[string]any{"ids": ids, "to_parent_id": toParentID}}})
+	to := map[string]any{}
+	if parent := apiParentID(toParentID); parent != "" {
+		to["parent_id"] = parent
+	}
+	return c.batchOp(ctx, "batchCopy", map[string]any{
+		"ids": ids,
+		"to":  to,
+	})
 }
 
 // Star sets starred state.
 func (c *client) Star(ctx context.Context, ids []string, starred bool) error {
-	return c.batchOp(ctx, "batch_star", map[string]any{"ids": ids, "starred": starred})
+	command := "star"
+	if !starred {
+		command = "unstar"
+	}
+	return c.jsonDo(ctx, http.MethodPost, "/drive/v1/files:"+command, map[string]any{"ids": ids}, nil, nil)
 }
 
 // ShareResult is a created share.
 type ShareResult struct {
-	ShareID  string `json:"share_id"`
-	ShareURL string `json:"share_url"`
-	PassCode string `json:"pass_code"`
-	Expiration string `json:"expiration"`
-	FileIDs  []string `json:"file_ids"`
+	ShareID    string   `json:"share_id"`
+	ShareURL   string   `json:"share_url"`
+	PassCode   string   `json:"pass_code"`
+	Expiration string   `json:"expiration"`
+	FileIDs    []string `json:"file_ids"`
+}
+
+func (r *ShareResult) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ShareID    string   `json:"share_id"`
+		ID         string   `json:"id"`
+		ShareURL   string   `json:"share_url"`
+		ShareLink  string   `json:"share_link"`
+		PassCode   string   `json:"pass_code"`
+		Passcode   string   `json:"passcode"`
+		Expiration string   `json:"expiration"`
+		FileIDs    []string `json:"file_ids"`
+		FileIDList []string `json:"file_id_list"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.ShareID = firstNonEmpty(raw.ShareID, raw.ID)
+	r.ShareURL = firstNonEmpty(raw.ShareURL, raw.ShareLink)
+	r.PassCode = firstNonEmpty(raw.PassCode, raw.Passcode)
+	r.Expiration = raw.Expiration
+	r.FileIDs = raw.FileIDs
+	if len(r.FileIDs) == 0 {
+		r.FileIDs = raw.FileIDList
+	}
+	return nil
 }
 
 // CreateShare creates a share.
-func (c *client) CreateShare(ctx context.Context, fileIDs []string, shareName string, passCode string, expiration string) (*ShareResult, error) {
+func (c *client) CreateShare(ctx context.Context, fileIDs []string, _ string, passCode string, expiration string) (*ShareResult, error) {
+	shareTo := "publiclink"
+	passCodeOption := "NOT_REQUIRED"
+	if strings.TrimSpace(passCode) != "" {
+		shareTo = "encryptedlink"
+		passCodeOption = "REQUIRED"
+	}
 	body := map[string]any{
-		"file_ids":   fileIDs,
-		"share_name": shareName,
-		"pass_code":  passCode,
-		"expiration": expiration,
+		"file_ids":         fileIDs,
+		"share_to":         shareTo,
+		"expiration_days":  pikpakExpirationDays(expiration),
+		"pass_code_option": passCodeOption,
 	}
 	var res ShareResult
 	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/share", body, &res, nil); err != nil {
 		return nil, err
 	}
+	if res.ShareID == "" || res.ShareURL == "" {
+		return nil, errors.New("pikpak: 创建分享未返回有效链接")
+	}
 	return &res, nil
 }
 
-// OfflineCreate submits an offline download task (magnet/link).
+func pikpakExpirationDays(expiration string) int {
+	value := strings.TrimSpace(expiration)
+	if value == "" {
+		return -1
+	}
+	if days, err := strconv.Atoi(value); err == nil && days > 0 {
+		return days
+	}
+	target, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		target, err = time.Parse("2006-01-02", value)
+	}
+	if err != nil {
+		return -1
+	}
+	remaining := time.Until(target)
+	if remaining <= 0 {
+		return 1
+	}
+	return int((remaining + 24*time.Hour - 1) / (24 * time.Hour))
+}
+
+// OfflineCreate submits an offline download task (magnet/link). PikPak uses
+// the file creation API with UPLOAD_TYPE_URL; the /tasks?type=offline shape is
+// not compatible with the legacy web client.
 func (c *client) OfflineCreate(ctx context.Context, urlValue, fileName, parentID string) (taskID, fileID string, err error) {
 	var res struct {
-		TaskID string `json:"task_id"`
-		FileID string `json:"file_id"`
+		Task   OfflineTask     `json:"task"`
+		TaskID string          `json:"task_id"`
+		FileID string          `json:"file_id"`
+		File   json.RawMessage `json:"file"`
+		ID     string          `json:"id"`
 	}
 	body := map[string]any{
-		"kind":        "drive#task",
-		"upload_type": "UPLOAD_TYPE_FORM",
-		"urls":        []string{urlValue},
-		"name":        fileName,
+		"kind":        "drive#file",
+		"upload_type": "UPLOAD_TYPE_URL",
+		"url":         map[string]any{"url": urlValue},
 	}
-	if parentID != "" && parentID != RootID {
-		body["parent_id"] = parentID
+	if strings.TrimSpace(fileName) != "" {
+		body["name"] = fileName
 	}
-	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/tasks?type=offline", body, &res, nil); err != nil {
+	if parent := apiParentID(parentID); parent != "" {
+		body["parent_id"] = parent
+		body["folder_type"] = ""
+	} else {
+		body["folder_type"] = "DOWNLOAD"
+	}
+	if err := c.jsonDo(ctx, http.MethodPost, "/drive/v1/files", body, &res, nil); err != nil {
 		return "", "", err
 	}
-	return res.TaskID, res.FileID, nil
+	taskID = firstNonEmpty(res.Task.TaskID, res.TaskID, res.ID)
+	fileID = res.FileID
+	if fileID == "" {
+		fileID, _, _ = offlineResourceInfo(res.File)
+	}
+	if taskID == "" && fileID == "" {
+		return "", "", errors.New("pikpak: 离线任务响应缺少任务或文件 ID")
+	}
+	return taskID, fileID, nil
 }
 
 // OfflineTask is a raw offline task.
 type OfflineTask struct {
-	TaskID string `json:"task_id"`
-	FileID string `json:"file_id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	// progress fields
-	Progress int `json:"progress"`
-	Phase    string `json:"phase"`
-	Message  string `json:"message"`
+	TaskID      string `json:"task_id"`
+	FileID      string `json:"file_id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Progress    int    `json:"progress"`
+	Phase       string `json:"phase"`
+	Message     string `json:"message"`
+	FileSize    int64  `json:"file_size,omitempty"`
+	CreatedTime string `json:"created_time,omitempty"`
+	UpdatedTime string `json:"updated_time,omitempty"`
+	URL         string `json:"url,omitempty"`
+}
+
+type offlineTaskWire struct {
+	ID                string                     `json:"id"`
+	TaskID            string                     `json:"task_id"`
+	FileID            string                     `json:"file_id"`
+	FileName          string                     `json:"file_name"`
+	Name              string                     `json:"name"`
+	Status            string                     `json:"status"`
+	Phase             string                     `json:"phase"`
+	Progress          json.RawMessage            `json:"progress"`
+	Message           string                     `json:"message"`
+	Error             string                     `json:"error"`
+	ErrorDescription  string                     `json:"error_description"`
+	FileSize          json.RawMessage            `json:"file_size"`
+	CreatedTime       string                     `json:"created_time"`
+	UpdatedTime       string                     `json:"updated_time"`
+	ReferenceResource json.RawMessage            `json:"reference_resource"`
+	File              json.RawMessage            `json:"file"`
+	Params            map[string]json.RawMessage `json:"params"`
+}
+
+func offlineRawString(raw json.RawMessage) string {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return ""
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		return value
+	}
+	return strings.Trim(strings.TrimSpace(string(raw)), `"`)
+}
+
+func offlineRawInt64(raw json.RawMessage) int64 {
+	value, err := strconv.ParseFloat(offlineRawString(raw), 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return int64(value)
+}
+
+func offlineProgress(raw json.RawMessage) int {
+	value, err := strconv.ParseFloat(offlineRawString(raw), 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	if value <= 1 {
+		value *= 100
+	}
+	if value > 100 {
+		value = 100
+	}
+	return int(value)
+}
+
+func offlineResourceInfo(raw json.RawMessage) (id, name string, size int64) {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return "", "", 0
+	}
+	var resource struct {
+		ID   string          `json:"id"`
+		Name string          `json:"name"`
+		Size json.RawMessage `json:"size"`
+	}
+	if json.Unmarshal(raw, &resource) == nil && (resource.ID != "" || resource.Name != "" || len(resource.Size) > 0) {
+		return resource.ID, resource.Name, offlineRawInt64(resource.Size)
+	}
+	return offlineRawString(raw), "", 0
+}
+
+func (t *OfflineTask) UnmarshalJSON(data []byte) error {
+	var raw offlineTaskWire
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	resourceID, resourceName, resourceSize := offlineResourceInfo(raw.ReferenceResource)
+	fileID, fileName, fileSize := offlineResourceInfo(raw.File)
+	t.TaskID = firstNonEmpty(raw.TaskID, raw.ID)
+	t.FileID = firstNonEmpty(raw.FileID, resourceID, fileID)
+	t.Name = firstNonEmpty(raw.Name, raw.FileName, resourceName, fileName)
+	t.Status = raw.Status
+	t.Phase = raw.Phase
+	if t.Phase == "" {
+		t.Phase = t.Status
+	}
+	if t.Status == "" {
+		t.Status = t.Phase
+	}
+	t.Progress = offlineProgress(raw.Progress)
+	if t.Phase == "PHASE_TYPE_COMPLETE" {
+		t.Progress = 100
+	}
+	t.Message = firstNonEmpty(raw.Message, raw.ErrorDescription, raw.Error)
+	t.FileSize = offlineRawInt64(raw.FileSize)
+	if t.FileSize == 0 {
+		t.FileSize = resourceSize
+	}
+	if t.FileSize == 0 {
+		t.FileSize = fileSize
+	}
+	t.CreatedTime = raw.CreatedTime
+	t.UpdatedTime = raw.UpdatedTime
+	if raw.Params != nil {
+		t.URL = offlineRawString(raw.Params["url"])
+	}
+	return nil
 }
 
 // OfflineList returns offline tasks.
 func (c *client) OfflineList(ctx context.Context) ([]OfflineTask, error) {
-	q := url.Values{}
-	q.Set("type", "offline")
-	q.Set("page_size", "100")
-	var resp struct {
-		Tasks []OfflineTask `json:"tasks"`
+	const filters = `{"phase":{"in":"PHASE_TYPE_RUNNING,PHASE_TYPE_ERROR,PHASE_TYPE_COMPLETE,PHASE_TYPE_PENDING"}}`
+	var out []OfflineTask
+	pageToken := ""
+	seenTokens := map[string]struct{}{}
+	for {
+		q := url.Values{}
+		q.Set("type", "offline")
+		q.Set("thumbnail_size", "SIZE_SMALL")
+		q.Set("limit", "10000")
+		q.Set("filters", filters)
+		q.Set("with", "reference_resource")
+		if pageToken != "" {
+			q.Set("page_token", pageToken)
+		}
+		var resp struct {
+			Tasks         []OfflineTask `json:"tasks"`
+			NextPageToken string        `json:"next_page_token"`
+		}
+		if err := c.get(ctx, "/drive/v1/tasks", q, &resp); err != nil {
+			return nil, err
+		}
+		out = append(out, resp.Tasks...)
+		if resp.NextPageToken == "" {
+			break
+		}
+		if _, ok := seenTokens[resp.NextPageToken]; ok {
+			return nil, errors.New("pikpak: offline task page token repeated")
+		}
+		seenTokens[resp.NextPageToken] = struct{}{}
+		pageToken = resp.NextPageToken
 	}
-	if err := c.get(ctx, "/drive/v1/tasks", q, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Tasks, nil
+	return out, nil
 }
 
 // OfflineDelete cancels and removes an offline download task. deleteFiles=true
@@ -663,19 +1345,9 @@ func (c *client) OfflineDelete(ctx context.Context, taskIDs []string, deleteFile
 		return nil
 	}
 	q := url.Values{}
-	q.Set("type", "offline")
 	q.Set("task_ids", strings.Join(taskIDs, ","))
-	if deleteFiles {
-		q.Set("delete_files", "true")
-	}
+	q.Set("delete_files", strconv.FormatBool(deleteFiles))
 	target := apiHost + "/drive/v1/tasks?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
-	if err != nil {
-		return err
-	}
-	for k, v := range c.headers(nil) {
-		req.Header.Set(k, v)
-	}
 	resp, err := c.http.Do(ctx, http.MethodDelete, target, c.headers(nil), nil)
 	if err != nil {
 		return err
@@ -683,7 +1355,7 @@ func (c *client) OfflineDelete(ctx context.Context, taskIDs []string, deleteFile
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("pikpak: offline delete %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return parseAPIErrorWithRetry(b, resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	return nil
 }

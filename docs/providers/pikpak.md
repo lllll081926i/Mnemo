@@ -2,7 +2,7 @@
 
 > 调研范围：`internal/drive/providers/pikpak/`（auth.go, client.go, pikpak.go, gcid.go, oss.go）
 > 对照旧版：`../Mnemo/src/pikpak/`（8 文件）+ `src/drive/providers/pikpak.ts`
-> 整体完成度：✅ ~95%（captcha 续接仍有部分标记）
+> 整体完成度：✅ ~98%（登录、列表、下载、视频预览、上传主链路已完成迁移审计）
 
 ---
 
@@ -26,13 +26,13 @@
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | 账密登录 | ✅ | `auth.go:167-196` signIn POST `/v1/auth/signin` | 无 |
-| 验证码 init | ✅ | `auth.go:99-134` initCaptcha `/v1/shield/captcha/init` | ⚠️ 旧版有退避重试链 `[600,1200,2000]ms`，新版单次链式 |
+| 验证码 init | ✅ | `auth.go:initCaptchaWithPrev` + `exchangeLoginCaptcha` `/v1/shield/captcha/init` | 已按旧版 `[600,1200,2000]ms` 链式换发，支持 context 取消 |
 | captcha_sign | ✅ | `client.go:43-52` 16 段 salt MD5 链 | 无 |
 | device_id 持久化 | ✅ | `auth.go:58-91` UUID v4 写文件 | 存储介质不同（文件 vs localStorage） |
 | refresh_token 存储 | ✅ | `auth.go:198-234` authSignIn | 无 |
 | token 刷新 | ✅ | `auth.go:237-260` refreshToken `/v1/auth/token` | 无 |
-| **速率限制处理** | ❌ | 无 | 🔴 旧版 `PikPakRateLimitError` + 30s 冷却完全缺失 |
-| **API captcha token 注入** | ⚠️ | `auth.go:204` 登录流程已用 X-Captcha-Token；业务 API 续接不完整 | 🟡 业务 API 遇到二次挑战后的完整续接体系仍不完整 |
+| **速率限制处理** | ✅ | `client.go:PikPakRateLimitError`，识别 429/too_many/rate_limit 和 `Retry-After` | 最短冷却 30 秒，并保留服务端更长冷却时间 |
+| **API captcha token 注入** | ✅ | `auth.go:apiCaptchaToken` 按设备/账号/action 缓存并用 previousToken 换发；`client.go:jsonDo/get` 自动重试 | 无 |
 
 ---
 
@@ -42,7 +42,7 @@
 |--------|:----:|---------|------|
 | List 全量分页 | ✅ | `client.go:147-163` 循环 ListPage + seen 去重 | 无 |
 | ListPaged 单页 | ✅ | `pikpak.go:46-55` → `client.go:136-146` page_size=100 | 无 |
-| **phase 过滤** | ❌ | `client.go:139` 仅 `{"trashed":%t}` | 🟡 不过滤未完成文件，可能列出上传/转码中的文件 |
+| **phase 过滤** | ✅ | `client.go:ListPage` 正常列表使用 `trashed.eq=false + phase.eq=PHASE_TYPE_COMPLETE` | 回收站使用 `parent_id=* + trashed.eq=true` |
 
 ---
 
@@ -50,12 +50,12 @@
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| 直链获取 | ✅ | `client.go:194-210` GET `/drive/v1/files/{id}/download?redirect=false` | 路径不同（旧版从 detail 取最佳链接） |
+| 直链获取 | ✅ | `client.go:DownloadURL` 优先从详情选择同 `fid` 的媒体链接，失败再请求 download 端点 | 无 |
 | DownloadMode | redirect | `pikpak.go:64-74` | 无 |
-| **Referer** | ❌ | `client.go:75-82` headers 无 Referer | 🟡 旧版 buildHeaders 设了 Referer |
-| **最佳链接选择** | ❌ | 直接用 download 端点 | 🟡 旧版 `getPikPakBestDownloadLink` 按 fid 取 origin media link |
-| **链接过期检测** | ❌ | 无 | 🟡 旧版 `pikPakItemLinksExpiring` 提前 60s 检测 X-Amz 签名 |
-| **detail 缓存** | ❌ | 无 | 🟡 旧版 45s TTL 缓存 |
+| **Referer** | ✅ | `client.go:headers` / `auth.go:captchaHeaders` | 与旧版一致发送 `https://mypikpak.com/` 和 `X-Client-Id` |
+| **最佳链接选择** | ✅ | `client.go:bestDownloadLink` 按同 `fid` 优先选择 origin media | 无 |
+| **链接过期检测** | ✅ | `client.go:linksExpireSoon` 使用通用签名解析并提前 60 秒刷新 | 无 |
+| **detail 缓存** | ✅ | `client.go:Detail` 按设备/账号/token 隔离，TTL 45 秒 | 无 |
 
 ---
 
@@ -64,13 +64,13 @@
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | 转码清晰度 | ✅ | `client.go:223-272` PlayInfo GET `/drive/v1/files/{id}/video/play_info` | 路径不同（旧版从 detail medias 解析） |
-| VIP 检测 | ✅ | `client.go:214-221` VipInfo `/drive/v1/privilege/vip` identity>0 | 🟡 无缓存，每次播放都请求 |
+| VIP 检测 | ✅ | `client.go:VipInfo` `/drive/v1/privilege/vip` identity>0，按账号缓存 10 分钟 | 无 |
 | 非会员 720p 限制 | ✅ | `client.go:252` height>720 跳过 | 无 |
 | 原画流 | ✅ | `client.go:258-269` web_content_link / medias[].is_origin, ForceProxy | 无 |
 | 清晰度 tier | ✅ | `client.go:278-290` QHD/FHD/HD/SD/LD | 无 |
-| **stream type** | ⚠️ | `client.go:292-299` m3u8/dash/mp4 | 🟡 不检测 ts/mpegts |
-| **duration** | ❌ | model.VideoPreview 未设 | 🟡 旧版从 medias/params 取 |
-| **分辨率 fallback 解析** | ❌ | 仅依赖 tc.Height | 🟡 旧版正则解析 resolution_name |
+| **stream type** | ✅ | `client.go:streamType` | 支持 m3u8/dash/ts(mpegts)/mp4 |
+| **duration** | ✅ | `client.go:fileDurationSeconds` 从详情 duration、medias.video.duration、params.duration 取最大值 | 毫秒值自动转秒 |
+| **分辨率 fallback 解析** | ✅ | `client.go:resolutionHeight` 解析 `resolution_name/media_name/template_id` | 无 |
 
 ---
 
@@ -83,9 +83,9 @@
 | 创建上传任务 | ✅ | `pikpak.go:295-322` POST `/drive/v1/files` RESUMABLE + PROVIDER_ALIYUN | 无 |
 | 秒传 | ✅ | `pikpak.go:325-327` res.Resumable==nil 时完成 | 无 |
 | OSS PUT | ✅ | `oss.go:18-89` HMAC-SHA1 签名流式 PUT | 无 |
-| **同名冲突处理** | ❌ | 无 | 🟡 旧版 `resolveProviderUploadConflict` 分页查找 + trash |
-| **上传失败清理** | ❌ | 无 | 🟡 旧版上传失败时 trashDelete 清理残留 |
-| **实时进度** | ⚠️ | `oss.go:82-85` 仅完成时设 100 | 🟡 旧版有实时进度 |
+| **同名冲突处理** | ✅ | `pikpak.go:prepareUploadTarget` 分页查找，支持 refuse/skip/rename/overwrite | overwrite 移入回收站后再上传 |
+| **上传失败清理** | ✅ | `pikpak.go:cleanupPikPakUpload` OSS 失败后永久删除已创建文件 | 清理失败会附加错误返回 |
+| **实时进度** | ✅ | `oss.go:driveutil.NewProgressReader` 按实际读取字节回调 | 同时继承全局代理/上传限速 |
 
 ---
 
@@ -93,10 +93,10 @@
 
 | 操作 | 状态 | Go 证据 | 差距 |
 |------|:----:|---------|------|
-| Mkdir | ✅ | `client.go:305-318` POST `/files:create_folder` | 端点不同（旧版裸 /files POST） |
-| Rename | ✅ | `client.go:330-333` POST `/files:batch_rename` | 端点不同（旧版 PATCH 单文件） |
-| Move | ✅ | `client.go:345-348` POST `/files:batch_move` requests 包裹 | body 结构不同（旧版 to 包裹） |
-| Copy | ✅ | `client.go:353-356` POST `/files:batch_copy` | 同 Move |
+| Mkdir | ✅ | `client.go` POST `/drive/v1/files`，`kind=drive#folder` | 无 |
+| Rename | ✅ | `client.go` PATCH `/drive/v1/files/{id}` | 无 |
+| Move | ✅ | `client.go` POST `/drive/v1/files:batchMove`，body 为 `ids + to.parent_id` | 异步任务统一等待完成 |
+| Copy | ✅ | `client.go` POST `/drive/v1/files:batchCopy`，body 为 `ids + to.parent_id` | 异步任务统一等待完成 |
 | **任务轮询等待** | ✅ | `client.go:526-555` waitForTasks 60×1s 轮询 | 无 |
 
 ---
@@ -105,9 +105,9 @@
 
 | 操作 | 状态 | Go 证据 | 差距 |
 |------|:----:|---------|------|
-| Trash | ✅ | `client.go:338` POST `/files:batch_trash` | 无 |
-| Delete | ✅ | `client.go:342` POST `/files:batch_delete` | 无 |
-| Restore | ✅ | `client.go:346` POST `/files:batch_restore` | 端点不同（旧版 batchUntrash） |
+| Trash | ✅ | `client.go` POST `/drive/v1/files:batchTrash` | 异步任务统一等待完成 |
+| Delete | ✅ | `client.go` POST `/drive/v1/files:batchDelete` | 异步任务统一等待完成 |
+| Restore | ✅ | `client.go` POST `/drive/v1/files:batchUntrash` | 异步任务统一等待完成 |
 | ListTrash | ✅ | `pikpak.go:58-63` listPages(trashed=true) | ⚠️ filters `{"trashed":true}` 旧版 `{"trashed":{"eq":true},"parent_id":"*"}`，可能列不正确 |
 | TrashPurge | — | 声明已移除（auth.go Caps 不再声明） | — |
 | TrashClear | — | 声明已移除（auth.go Caps 不再声明） | — |
@@ -118,10 +118,10 @@
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| CreateShare | ✅ | `client.go:366-381` POST `/drive/v1/share` | body 结构差异大（旧版 share_to + expiration_days + pass_code_option） |
-| 过期时间 | ✅ | 直传 expiration 字符串 | 旧版转 expiration_days 整数 |
-| 密码 | ✅ | 直传 pass_code | 无 |
-| **分享导入 importShare** | ✅ | `pikpak.go:390-475` ImportShareSession（getShareToken → listByShare → SaveShare `pikpak.go:477-500`） | 无 |
+| CreateShare | ✅ | `client.go` POST `/drive/v1/share` | body 使用 `share_to + expiration_days + pass_code_option` |
+| 过期时间 | ✅ | `pikpakExpirationDays` 将天数或 RFC3339 日期转换为整数 | 永久分享发送 `-1` |
+| 密码 | ✅ | `pass_code_option=REQUIRED`，响应兼容 `pass_code/passcode` | 无 |
+| **分享导入 importShare** | ✅ | `pikpak.go` `/drive/v1/share` + `/drive/v1/share/detail` 分页 + `/drive/v1/share/restore` | 支持 `/s/{id}`、`sharing/share/{id}` 和 `share_id` 查询参数 |
 
 ---
 
@@ -129,11 +129,11 @@
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| 提交任务 | ✅ | `client.go:384-405` POST `/drive/v1/tasks?type=offline` | 端点+body 与旧版完全不同（旧版 /files + url 对象） |
-| 任务列表 | ✅ | `client.go:560-570` GET `/drive/v1/tasks?type=offline&page_size=100` | ⚠️ 无 phase 过滤、无 reference_resource、page_size=100 vs 旧版 limit=10000 |
-| **进度查询** | ✅ | `pikpak.go:544-552` OfflineFind → FindOfflineTask 按 taskID/fileID 查询 | 无 |
-| **任务删除** | ✅ | `pikpak.go:553-560` OfflineDelete DELETE `/tasks?task_ids=...` | 无 |
-| 任务查找 | ✅ | `client.go:572-585` FindOfflineTask | 无 |
+| 提交任务 | ✅ | `client.go` POST `/drive/v1/files`，`upload_type=UPLOAD_TYPE_URL`，`url={url}` | 兼容任务 ID、文件 ID 两种响应 |
+| 任务列表 | ✅ | `client.go` GET `/drive/v1/tasks?type=offline&limit=10000` | phase 过滤、`reference_resource` 和 `page_token` 分页均已覆盖 |
+| **进度查询** | ✅ | `pikpak.go` OfflineFind → FindOfflineTask，按 taskID/fileID 查找 | 进度兼容小数和百分比 |
+| **任务删除** | ✅ | `pikpak.go` OfflineDelete DELETE `/drive/v1/tasks?task_ids=...&delete_files=...` | 明确传递是否删除已下载文件 |
+| 任务查找 | ✅ | `client.go` FindOfflineTask | 任务字段兼容 `id/task_id`、`file/reference_resource` |
 
 ---
 
@@ -141,7 +141,7 @@
 
 | 状态 | Go 证据 | 差距 |
 |:----:|---------|------|
-| ✅ | `client.go:350` POST `/files:batch_star` starred 参数 | 端点不同（旧版 star/unstar 双端点） |
+| ✅ | `client.go` POST `/drive/v1/files:star` 或 `:unstar`，body 为 `ids` | 无 |
 
 ---
 
@@ -166,7 +166,7 @@
 
 ## P0 差距清单
 
-1. ⚠️ **API captcha token 续接不完整**：登录流程已用 X-Captcha-Token(`auth.go:204`)，但业务 API 遇到二次挑战后的完整续接体系仍不完整
+1. ✅ **API captcha token 续接**：业务 API 遇到 captcha_required/captcha_invalid 时按 action 换发、缓存并带 `X-Captcha-Token` 重试
 2. ✅ **分享导入**：已实现（`pikpak.go:390-500` ImportShareSession + SaveShare）
 3. ✅ **离线下载进度/删除**：已实现（`pikpak.go:544-560` OfflineFind + OfflineDelete）
 4. ✅ **TrashPurge/TrashClear**：声明已移除（auth.go Caps 不再声明）

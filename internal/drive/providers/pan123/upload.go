@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,9 +19,15 @@ import (
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
 )
 
 const maxChunk = 16 * 1024 * 1024 // 单片 ≤16MB（AList newUpload）
+
+var (
+	errPan123UploadSessionInvalid = errors.New("123: 上传会话已失效")
+	errPan123UploadStopped        = errors.New("123: 上传已停止")
+)
 
 // ChunkPlan is the 123 upload chunk plan.
 type ChunkPlan struct {
@@ -60,6 +67,51 @@ type UploadRequestData struct {
 	EndPoint        string `json:"EndPoint"`
 	StorageNode     string `json:"StorageNode"`
 	UploadID        string `json:"UploadId"`
+}
+
+// pan123UploadSession contains only the fields needed to resume an upload.
+// Temporary access keys from upload_request are intentionally not persisted.
+type pan123UploadSession struct {
+	Bucket      string `json:"bucket"`
+	Key         string `json:"key"`
+	FileID      string `json:"fileId"`
+	StorageNode string `json:"storageNode"`
+	UploadID    string `json:"uploadId"`
+}
+
+func encodePan123UploadSession(data UploadRequestData) string {
+	b, _ := json.Marshal(pan123UploadSession{
+		Bucket:      data.Bucket,
+		Key:         data.Key,
+		FileID:      data.FileID,
+		StorageNode: data.StorageNode,
+		UploadID:    data.UploadID,
+	})
+	return string(b)
+}
+
+func decodePan123UploadSession(raw string) (UploadRequestData, bool) {
+	var session pan123UploadSession
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &session) != nil {
+		return UploadRequestData{}, false
+	}
+	if strings.TrimSpace(session.Bucket) == "" || strings.TrimSpace(session.Key) == "" ||
+		strings.TrimSpace(session.FileID) == "" || strings.TrimSpace(session.StorageNode) == "" ||
+		strings.TrimSpace(session.UploadID) == "" {
+		return UploadRequestData{}, false
+	}
+	return UploadRequestData{
+		Bucket:      session.Bucket,
+		Key:         session.Key,
+		FileID:      session.FileID,
+		StorageNode: session.StorageNode,
+		UploadID:    session.UploadID,
+	}, true
+}
+
+func pan123UploadSessionKey(c drive.Context, parentID, name string, size int64, fileMD5 string) string {
+	identity := name + "\x00md5:" + strings.ToLower(strings.TrimSpace(fileMD5))
+	return drive.UploadSessionKey(c.UserID, c.DriveID, parentID, identity, size)
 }
 
 func parseUploadRequestData(raw map[string]any) UploadRequestData {
@@ -102,6 +154,13 @@ func (d *Driver) presignBatch(ctx context.Context, c drive.Context, api string, 
 		"StorageNode":     data.StorageNode,
 	}, nil)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		var apiErr *pan123APIError
+		if errors.As(err, &apiErr) && apiErr.Code != 401 && apiErr.Code != 403 {
+			return nil, fmt.Errorf("%w: %v", errPan123UploadSessionInvalid, err)
+		}
 		return nil, err
 	}
 	dm := parseMap(resp.Data)
@@ -118,19 +177,18 @@ func (d *Driver) presignBatch(ctx context.Context, c drive.Context, api string, 
 
 // putChunk PUTs one chunk body to a presigned url; returns the http status.
 func putChunk(ctx context.Context, rawURL string, body []byte) (int, error) {
-	hc := &http.Client{Timeout: 5 * time.Minute}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, rawURL, bytes.NewReader(body))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("User-Agent", ua)
-	resp, err := hc.Do(req)
+	hc := netx.NewClient(5 * time.Minute)
+	resp, err := hc.Do(ctx, http.MethodPut, rawURL, map[string]string{
+		"Content-Type": "application/octet-stream",
+		"User-Agent":   ua,
+	}, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	// Return the status even for HTTP errors. The caller must be able to
+	// distinguish an expired presigned URL (403) and refresh it before failing.
 	return resp.StatusCode, nil
 }
 
@@ -145,6 +203,99 @@ func readSlice(f *os.File, offset, n int64) ([]byte, error) {
 		return nil, err
 	}
 	return buf[:m], nil
+}
+
+func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *model.UploadingUI, data UploadRequestData, sessionKey string, savedParts []int, f *os.File, size int64) error {
+	plan := calcPan123ChunkPlan(size)
+	batchSize := int64(1)
+	if plan.ChunkCount > 1 {
+		batchSize = 10 // 多片时一次最多预签 10 个 URL
+	}
+	api := apiS3Auth
+	if plan.ChunkCount > 1 {
+		api = apiS3Prepare
+	}
+
+	uploadedSet := make(map[int]bool, len(savedParts))
+	for _, pn := range savedParts {
+		if pn >= 1 && int64(pn) <= plan.ChunkCount {
+			uploadedSet[pn] = true
+		}
+	}
+
+	for i := int64(1); i <= plan.ChunkCount; i += batchSize {
+		if stopped(ctx, ui) {
+			return errPan123UploadStopped
+		}
+		start := i
+		end := i + batchSize
+		if end > plan.ChunkCount+1 {
+			end = plan.ChunkCount + 1
+		}
+		urls, err := d.presignBatch(ctx, c, api, data, start, end)
+		if err != nil {
+			return err
+		}
+		for j := start; j < end; j++ {
+			if stopped(ctx, ui) {
+				return errPan123UploadStopped
+			}
+			offset := (j - 1) * plan.ChunkSize
+			cur := plan.ChunkSize
+			if size-offset < cur {
+				cur = size - offset
+			}
+			// Skip already-uploaded parts (resume).
+			if uploadedSet[int(j)] {
+				ui.Upload.DownSize = offset + cur
+				if size > 0 {
+					ui.Upload.DownProcess = int(100 * (offset + cur) / size)
+				}
+				continue
+			}
+			uploadURL := urls[strconv.FormatInt(j, 10)]
+			if uploadURL == "" {
+				return fmt.Errorf("%w: 获取分片 %d 上传地址失败", errPan123UploadSessionInvalid, j)
+			}
+			buff, err := readSlice(f, offset, cur)
+			if err != nil {
+				return fmt.Errorf("读取上传文件失败: %w", err)
+			}
+			status, err := putChunk(ctx, uploadURL, buff)
+			if err != nil {
+				return err
+			}
+			if status == http.StatusForbidden {
+				// 预签名过期：整批重签后重试当前片。
+				urls, err = d.presignBatch(ctx, c, api, data, start, end)
+				if err != nil {
+					return err
+				}
+				uploadURL = urls[strconv.FormatInt(j, 10)]
+				if uploadURL == "" {
+					return fmt.Errorf("%w: 获取分片 %d 重试上传地址失败", errPan123UploadSessionInvalid, j)
+				}
+				status, err = putChunk(ctx, uploadURL, buff)
+				if err != nil {
+					return err
+				}
+			}
+			if status == http.StatusForbidden {
+				drive.ClearUploadSession(sessionKey)
+				return fmt.Errorf("%w: 分片上传失败 HTTP %d", errPan123UploadSessionInvalid, status)
+			}
+			if status < http.StatusOK || status >= http.StatusMultipleChoices {
+				return fmt.Errorf("分片上传失败 HTTP %d", status)
+			}
+			uploadedSet[int(j)] = true
+			_ = drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), drive.SortedUniqueParts(uploadedSet))
+			ui.Upload.DownSize = offset + cur
+			if size > 0 {
+				ui.Upload.DownProcess = int(100 * (offset + cur) / size)
+			}
+		}
+	}
+	return nil
 }
 
 // UploadOneFile uploads a single file: MD5 → upload_request (可能秒传) →
@@ -182,36 +333,18 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 
 	stat, err := os.Stat(ui.Info.LocalFilePath)
 	if err != nil {
-		stat = nil
+		mark(false, true, "获取上传文件信息失败: "+err.Error())
+		return err
 	}
-	size := ui.Info.Size
-	if stat != nil {
-		size = stat.Size()
-	}
+	size := stat.Size()
+	ui.Info.Size = size
 	parentFileID := toPan123Number(ui.Info.ParentFileID)
+	sessionKey := pan123UploadSessionKey(c, strconv.FormatInt(parentFileID, 10), ui.Info.Name, size, etag)
+	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)
+	data, resumed := decodePan123UploadSession(savedSessionID)
 
 	ui.Upload.DownState = "uploading"
 	ui.Upload.IsDowning = true
-
-	reqResp, err := d.api(ctx, c, http.MethodPost, apiUploadReq, map[string]any{
-		"driveId":      0,
-		"duplicate":    2, // 默认 overwrite（旧版 pan123DuplicateFromPolicy 默认策略）
-		"etag":         etag,
-		"fileName":     ui.Info.Name,
-		"parentFileId": parentFileID,
-		"size":         size,
-		"type":         0,
-	}, nil)
-	if err != nil {
-		mark(false, true, err.Error())
-		return err
-	}
-	data := parseUploadRequestData(parseMap(reqResp.Data))
-	if data.Reuse || data.Key == "" {
-		// 本地 MD5 命中秒传
-		mark(true, false, "")
-		return nil
-	}
 
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
@@ -221,124 +354,91 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	defer f.Close()
 
 	plan := calcPan123ChunkPlan(size)
-	batchSize := int64(1)
-	if plan.ChunkCount > 1 {
-		batchSize = 10 // 多片时一次最多预签 10 个 URL
-	}
-	api := apiS3Auth
-	if plan.ChunkCount > 1 {
-		api = apiS3Prepare
-	}
+	for sessionAttempt := 0; sessionAttempt < 2; sessionAttempt++ {
+		if !resumed {
+			reqResp, reqErr := d.api(ctx, c, http.MethodPost, apiUploadReq, map[string]any{
+				"driveId":      0,
+				"duplicate":    2, // 默认 overwrite（旧版 pan123DuplicateFromPolicy 默认策略）
+				"etag":         etag,
+				"fileName":     ui.Info.Name,
+				"parentFileId": parentFileID,
+				"size":         size,
+				"type":         0,
+			}, nil)
+			if reqErr != nil {
+				mark(false, true, reqErr.Error())
+				return reqErr
+			}
+			data = parseUploadRequestData(parseMap(reqResp.Data))
+			if data.Reuse || data.Key == "" {
+				// 本地 MD5 命中秒传
+				ui.Upload.FileID = data.FileID
+				ui.Upload.DownSize = size
+				ui.Upload.DownProcess = 100
+				drive.ClearUploadSession(sessionKey)
+				mark(true, false, "")
+				return nil
+			}
+			if strings.TrimSpace(data.UploadID) == "" {
+				err := errors.New("123: 上传初始化未返回 uploadId")
+				mark(false, true, err.Error())
+				return err
+			}
+			// Persist the remote session before the first part so a stop or process
+			// exit can resume even when no part has completed yet.
+			_ = drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), nil)
+		}
+		ui.Upload.UploadID = data.UploadID
+		ui.Upload.FileID = data.FileID
 
-	// Resume: load previously uploaded part numbers
-	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
-	uploadedSet := make(map[int]bool)
-	for _, pn := range drive.LoadUploadSession(sessionKey) {
-		uploadedSet[int(pn)] = true
-	}
-
-	var i int64
-	for i = 1; i <= plan.ChunkCount; i += batchSize {
-		if stopped(ctx, ui) {
+		uploadErr := d.uploadPan123Parts(ctx, c, ui, data, sessionKey, savedParts, f, size)
+		if errors.Is(uploadErr, errPan123UploadStopped) {
 			markStopped(ui)
 			return nil
 		}
-		start := i
-		end := i + batchSize
-		if end > plan.ChunkCount+1 {
-			end = plan.ChunkCount + 1
-		}
-		urls, err := d.presignBatch(ctx, c, api, data, start, end)
-		if err != nil {
-			mark(false, true, err.Error())
-			return err
-		}
-		for j := start; j < end; j++ {
-			if stopped(ctx, ui) {
-				markStopped(ui)
-				return nil
-			}
-			offset := (j - 1) * plan.ChunkSize
-			cur := plan.ChunkSize
-			if size-offset < cur {
-				cur = size - offset
-			}
-			uploadURL := urls[strconv.FormatInt(j, 10)]
-			if uploadURL == "" {
-				err := fmt.Errorf("获取分片 %d 上传地址失败", j)
-				mark(false, true, err.Error())
-				return err
-			}
-			buff, err := readSlice(f, offset, cur)
-			if err != nil {
-				mark(false, true, "读取上传文件失败: "+err.Error())
-				return err
-			}
-			// Skip already-uploaded parts (resume)
-			if uploadedSet[int(j)] {
-				ui.Upload.DownSize = offset + cur
-				if size > 0 {
-					ui.Upload.DownProcess = int(100 * (offset + cur) / size)
-				}
+		if uploadErr != nil {
+			if resumed && sessionAttempt == 0 && errors.Is(uploadErr, errPan123UploadSessionInvalid) {
+				// The provider rejected the saved remote session. Drop only this
+				// session and start one fresh upload_request; network/auth errors
+				// never take this path and retain resumable state.
+				drive.ClearUploadSession(sessionKey)
+				savedParts = nil
+				data = UploadRequestData{}
+				resumed = false
+				ui.Upload.DownSize = 0
+				ui.Upload.DownProcess = 0
 				continue
 			}
-			status, err := putChunk(ctx, uploadURL, buff)
-			if err != nil {
-				mark(false, true, err.Error())
-				return err
-			}
-			if status == http.StatusForbidden {
-				// 预签名过期：整批重签后重试当前片
-				urls, err = d.presignBatch(ctx, c, api, data, start, end)
-				if err != nil {
-					mark(false, true, err.Error())
-					return err
-				}
-				uploadURL = urls[strconv.FormatInt(j, 10)]
-				if uploadURL != "" {
-					status, err = putChunk(ctx, uploadURL, buff)
-					if err != nil {
-						mark(false, true, err.Error())
-						return err
-					}
-				}
-			}
-			if status >= 400 {
-				err := fmt.Errorf("分片上传失败 HTTP %d", status)
-				mark(false, true, err.Error())
-				return err
-			}
-			uploadedSet[int(j)] = true
-			_ = drive.SaveUploadSession(sessionKey, drive.SortedUniqueParts(uploadedSet))
-			ui.Upload.DownSize = offset + cur
-			if size > 0 {
-				ui.Upload.DownProcess = int(100 * (offset + cur) / size)
-			}
+			mark(false, true, uploadErr.Error())
+			return uploadErr
 		}
-	}
 
-	completeBody := map[string]any{
-		"StorageNode": data.StorageNode,
-		"bucket":      data.Bucket,
-		"fileId":      data.FileID,
-		"fileSize":    size,
-		"isMultipart": plan.ChunkCount > 1,
-		"key":         data.Key,
-		"uploadId":    data.UploadID,
-	}
-	_, err = d.api(ctx, c, http.MethodPost, apiUploadDoneV2, completeBody, nil)
-	if err != nil {
-		// 回退到 v1
-		if _, err2 := d.api(ctx, c, http.MethodPost, apiUploadDone, map[string]any{
-			"fileId": data.FileID,
-		}, nil); err2 != nil {
-			mark(false, true, err2.Error())
-			return err2
+		completeBody := map[string]any{
+			"StorageNode": data.StorageNode,
+			"bucket":      data.Bucket,
+			"fileId":      data.FileID,
+			"fileSize":    size,
+			"isMultipart": plan.ChunkCount > 1,
+			"key":         data.Key,
+			"uploadId":    data.UploadID,
 		}
+		_, err = d.api(ctx, c, http.MethodPost, apiUploadDoneV2, completeBody, nil)
+		if err != nil {
+			// 回退到 v1
+			if _, err2 := d.api(ctx, c, http.MethodPost, apiUploadDone, map[string]any{
+				"fileId": data.FileID,
+			}, nil); err2 != nil {
+				mark(false, true, err2.Error())
+				return err2
+			}
+		}
+		ui.Upload.DownSize = size
+		ui.Upload.DownProcess = 100
+		mark(true, false, "")
+		drive.ClearUploadSession(sessionKey)
+		return nil
 	}
-	mark(true, false, "")
-	drive.ClearUploadSession(sessionKey)
-	return nil
+	return errors.New("123: 上传会话重试失败")
 }
 
 // stopped reports user cancellation (legacy fileui.IsRunning checks).

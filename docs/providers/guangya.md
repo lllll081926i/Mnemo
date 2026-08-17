@@ -19,9 +19,10 @@ SetHashes(["md5"], nil)
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| 短信验证码 | ✅ | `guangya.go:583-625` loginBySms 三步：SendSms → verify → signin | 无 |
-| refresh_token | ✅ | `guangya.go:543-560` loginByRefreshToken | 无 |
-| SendGuangyaSms | ✅ | `guangya.go:555-580` + `:688-692` Driver.SendSms 包装 | 无 |
+| 短信验证码 | ✅ | `guangya.go` 的 SendSms → verify → signin，含静默 captcha 初始化与失效重取 | 无 |
+| refresh_token | ✅ | `guangya.go` 的 loginByRefreshToken | 无 |
+| SendGuangyaSms | ✅ | Driver.SendSms 返回 verification/device/captcha token，前端会带回登录 | 无 |
+| 请求级刷新 | ✅ | `guangya.go` client.post 遇 401/403 自动 refresh_token、重试一次并落库 | 无 |
 
 ---
 
@@ -33,13 +34,13 @@ SetHashes(["md5"], nil)
 
 ## 3. 下载（guangya.go）
 
-✅ `guangya.go:201-212` DownloadInfo → `:385-397` GetDownloadURL proxy。对齐。
+✅ `guangya.go:267-288` DownloadInfo → `:398-415` GetDownloadURL proxy；使用旧版稳定的 `/nd.bizuserres.s/v1/get_res_download_url`，优先解析 `data.signedURL`，兼容 `downloadUrl`。
 
 ---
 
 ## 4. 视频预览（guangya.go）
 
-✅ `guangya.go:399-410` GetVideoPreview 复用 GetDownloadURL origin。
+✅ `guangya.go:422-433` GetVideoPreview 复用 GetDownloadURL origin，视频仍统一交给 mpv。
 
 ---
 
@@ -47,9 +48,10 @@ SetHashes(["md5"], nil)
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| OSS multipart | ✅ | `upload.go:96-165` get_res_center_token → S3 multipart queueSize=2 → waitUploadTask | 无 |
+| OSS multipart | ✅ | `upload.go:144-196` get_res_center_token → S3 multipart queueSize=2 → waitUploadTask | 无 |
 | 秒传 | ✅ | code=156 命中 | 无 |
-| directPut 回退 | ✅ | 无 | 无 |
+| directPut 回退 | ✅ | `upload.go:186-189,226-252`，直传后校验 waitUploadTask 错误 | 无 |
+| 本地文件尺寸 | ✅ | `upload.go:141-150` 先 `Stat` 再申请上传凭证 | 避免 `fileSize: 0` 破坏秒传/上传任务 |
 
 > 500ms 限速（`guangya.go:145`）与旧版一致。
 
@@ -74,7 +76,7 @@ SetHashes(["md5"], nil)
 
 ## 8. RefreshAccount（guangya.go）
 
-✅ `guangya.go:490-496` SpaceInfo /userres/v1/user/space 获取 usedSize/totalSize。对齐。
+✅ 登录完成后和 `RefreshAccount` 均调用 SpaceInfo `/userres/v1/user/space` 获取 usedSize/totalSize；业务请求收到 401/403 时会先刷新会话再重试。
 
 ---
 
@@ -86,4 +88,4 @@ SetHashes(["md5"], nil)
 
 ## 差距清单
 
-无明显差距。guangya 是最忠实的移植之一，上传（OSS S3 multipart + 秒传 + directPut 回退 + waitUploadTask 轮询）与旧版完全对齐。
+无明显差距。guangya 是最忠实的移植之一，登录（短信 captcha、refresh_token、请求级续期）和上传（OSS S3 multipart + 秒传 + directPut 回退 + waitUploadTask 轮询）均与旧版关键链路对齐。

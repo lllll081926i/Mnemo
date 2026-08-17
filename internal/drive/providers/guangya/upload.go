@@ -129,6 +129,9 @@ func waitUploadTask(ctx context.Context, c *client, taskID string) (string, erro
 
 // UploadOneFile mirrors legacy GuangyaUploadDisk.UploadOneFile.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
+	if ui == nil || ui.Info.LocalFilePath == "" {
+		return errors.New("光鸭：上传文件路径为空")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return err
@@ -137,6 +140,16 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if parentID == "" {
 		parentID = RootID
 	}
+	f, err := os.Open(ui.Info.LocalFilePath)
+	if err != nil {
+		return errors.New("打开文件失败: " + err.Error())
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	ui.Info.Size = info.Size()
 
 	var tokenRes resCenterToken
 	if err := cl.post(ctx, "/nd.bizuserres.s/v1/get_res_center_token", map[string]any{
@@ -168,12 +181,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	bucket := tokenRes.Data.BucketName
 	objectPath := tokenRes.Data.ObjectPath
 	endpoint := normalizeEndpoint(firstNonEmptyStr(tokenRes.Data.FullEndPoint, tokenRes.Data.EndPoint), bucket)
-
-	f, err := os.Open(ui.Info.LocalFilePath)
-	if err != nil {
-		return errors.New("打开文件失败: " + err.Error())
-	}
-	defer f.Close()
 
 	// 兼容旧直传 URL
 	if (accessKey == "" || bucket == "" || objectPath == "") && tokenRes.Data.UploadURL != "" {
@@ -239,7 +246,9 @@ func directPut(ctx context.Context, ui *model.UploadingUI, f *os.File, uploadURL
 	ui.Upload.DownSize = ui.Info.Size
 	ui.Upload.DownProcess = 100
 	if taskID != "" {
-		_, _ = waitUploadTask(ctx, cl, taskID)
+		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

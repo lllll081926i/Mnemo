@@ -5,25 +5,38 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
 
+// pikpakOSSParams matches the snake_case fields returned by
+// /drive/v1/files. It must stay separate from mounted-drive ConnConfig.
+type pikpakOSSParams struct {
+	AccessKeyID     string `json:"access_key_id"`
+	AccessKeySecret string `json:"access_key_secret"`
+	Bucket          string `json:"bucket"`
+	Endpoint        string `json:"endpoint"`
+	Key             string `json:"key"`
+	SecurityToken   string `json:"security_token"`
+}
+
 // ossPut uploads a file to the Alibaba OSS endpoint provided by PikPak's
 // create upload response. It uses the STS credentials (access_key, secret_key,
 // security_token) to sign the PUT request.
-func ossPut(ctx context.Context, c drive.Context, localPath string, params *model.ConnConfig, ui *model.UploadingUI) error {
-	if params == nil || params.Endpoint == "" {
+func ossPut(ctx context.Context, c drive.Context, localPath string, params *pikpakOSSParams, ui *model.UploadingUI) error {
+	if params == nil || params.Endpoint == "" || params.Bucket == "" || params.Key == "" || params.AccessKeyID == "" || params.AccessKeySecret == "" {
 		return errors.New("pikpak: oss params missing")
 	}
 	f, err := os.Open(localPath)
@@ -36,16 +49,20 @@ func ossPut(ctx context.Context, c drive.Context, localPath string, params *mode
 		return err
 	}
 
-	// Reconstruct from ConnConfig mapping: Username=access_key_id, Password=access_key_secret,
-	// Bucket=bucket, Endpoint=endpoint, BasePath=key, Region=security_token.
-	accessKey := params.Username
-	secretKey := params.Password
+	accessKey := params.AccessKeyID
+	secretKey := params.AccessKeySecret
 	bucket := params.Bucket
-	objectKey := params.BasePath
-	securityToken := params.Region
+	objectKey := params.Key
+	securityToken := params.SecurityToken
 
-	url := fmt.Sprintf("https://%s.%s/%s", bucket, params.Endpoint, strings.TrimPrefix(objectKey, "/"))
-	contentType := "application/octet-stream"
+	endpoint := strings.TrimRight(strings.TrimSpace(params.Endpoint), "/")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	url := fmt.Sprintf("https://%s.%s/%s", bucket, endpoint, strings.TrimPrefix(objectKey, "/"))
+	contentType := mime.TypeByExtension(filepath.Ext(objectKey))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
 	date := time.Now().UTC().Format(http.TimeFormat)
 
 	// Build OSS signature
@@ -57,8 +74,19 @@ func ossPut(ctx context.Context, c drive.Context, localPath string, params *mode
 	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	authorization := "OSS " + accessKey + ":" + signature
 
-	// Create request streaming the file body (no full buffering).
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
+	var body io.Reader = f
+	if ui != nil {
+		body = driveutil.NewProgressReader(f, info.Size(), func(read int64) {
+			ui.Upload.DownSize = read
+			if info.Size() > 0 {
+				ui.Upload.DownProcess = int(read * 100 / info.Size())
+			}
+		})
+	}
+
+	// Use netx so proxy and test transports apply to the OSS leg as well.
+	hc := netx.NewClient(600 * time.Second)
+	req, err := hc.Req(ctx, http.MethodPut, url, body)
 	if err != nil {
 		return err
 	}
@@ -67,9 +95,7 @@ func ossPut(ctx context.Context, c drive.Context, localPath string, params *mode
 	req.Header.Set("Authorization", authorization)
 	req.Header.Set("x-oss-security-token", securityToken)
 	req.ContentLength = info.Size()
-
-	httpClient := &http.Client{Timeout: 600 * time.Second}
-	resp, err := httpClient.Do(req)
+	resp, err := hc.HTTP.Do(req)
 	if err != nil {
 		return err
 	}
@@ -85,6 +111,3 @@ func ossPut(ctx context.Context, c drive.Context, localPath string, params *mode
 	}
 	return nil
 }
-
-var _ = json.Marshal
-var _ = netx.DefaultUA

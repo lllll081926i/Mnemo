@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -35,6 +36,7 @@ func init() {
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
 			"copy":            true,
+			"recycleBin":      false,
 			"permanentDelete": true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"md5"}, nil)
@@ -51,18 +53,20 @@ func init() {
 
 // Session is the guangya credential set.
 type Session struct {
-	AccessToken   string `json:"access_token"`
-	RefreshToken  string `json:"refresh_token"`
-	DeviceID      string `json:"device_id"`
-	ClientID      string `json:"client_id"`
-	RootFolderID  string `json:"root_folder_id"`
-	Phone         string `json:"phone,omitempty"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	DeviceID     string `json:"device_id"`
+	ClientID     string `json:"client_id"`
+	RootFolderID string `json:"root_folder_id"`
+	Phone        string `json:"phone,omitempty"`
 }
 
 // client is an authenticated guangya session.
 type client struct {
-	http *netx.Client
-	sess *Session
+	http      *netx.Client
+	sess      *Session
+	token     *model.TokenInfo
+	refreshMu sync.Mutex
 }
 
 func newDeviceID() string {
@@ -85,7 +89,7 @@ func clientOf(c drive.Context) (*client, error) {
 	if sess.ClientID == "" {
 		sess.ClientID = clientID
 	}
-	return &client{http: netx.NewClient(60 * time.Second), sess: sess}, nil
+	return &client{http: netx.NewClient(60 * time.Second), sess: sess, token: c.Token}, nil
 }
 
 func parseSession(tok *model.TokenInfo) *Session {
@@ -113,8 +117,8 @@ func (c *client) apiHeaders(extra map[string]string) map[string]string {
 		"Content-Type": "application/json", "Accept": "application/json, text/plain, */*",
 		"X-Client-Id": c.sess.ClientID, "X-Client-Version": "0.0.1",
 		"X-Device-Id": c.sess.DeviceID, "X-Device-Model": "chrome%2F147.0.0.0",
-		"X-Device-Name": "PC-Chrome",
-		"X-Device-Sign": fmt.Sprintf("wdi10.%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", c.sess.DeviceID),
+		"X-Device-Name":   "PC-Chrome",
+		"X-Device-Sign":   fmt.Sprintf("wdi10.%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", c.sess.DeviceID),
 		"X-Net-Work-Type": "NONE", "X-OS-Version": "MacIntel", "X-Platform-Version": "1",
 		"X-Protocol-Version": "301", "X-Provider-Name": "NONE", "X-SDK-Version": "9.0.2",
 		"User-Agent": ua,
@@ -130,10 +134,25 @@ func (c *client) apiHeaders(extra map[string]string) map[string]string {
 
 // post calls the guangya API (rate limited 500ms).
 func (c *client) post(ctx context.Context, path string, body any, out any) error {
-	time.Sleep(500 * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(500 * time.Millisecond):
+	}
 	resp, err := c.http.Do(ctx, http.MethodPost, apiHost+path, c.apiHeaders(nil), netx.JSONBody(body))
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if err := c.refresh(ctx); err != nil {
+			return fmt.Errorf("光鸭登录已失效且刷新失败: %w", err)
+		}
+		resp, err = c.http.Do(ctx, http.MethodPost, apiHost+path, c.apiHeaders(nil), netx.JSONBody(body))
+		if err != nil {
+			return err
+		}
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
@@ -144,6 +163,27 @@ func (c *client) post(ctx context.Context, path string, body any, out any) error
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+// refresh renews the session once for a request that received 401/403 and
+// updates the cloned TokenInfo so drive.ops can persist it after the call.
+func (c *client) refresh(ctx context.Context) error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	if c.sess == nil || strings.TrimSpace(c.sess.RefreshToken) == "" {
+		return errors.New("缺少 refresh_token")
+	}
+	next, err := refreshSession(ctx, c.http, c.sess)
+	if err != nil {
+		return err
+	}
+	c.sess = next
+	if c.token != nil {
+		c.token.AccessToken = next.AccessToken
+		c.token.RefreshToken = mustJSON(next)
+		c.token.TokenType = "Bearer"
+	}
+	return nil
 }
 
 // File is a raw guangya file entry.
@@ -228,17 +268,22 @@ func (c *client) Detail(ctx context.Context, fileID string) (*File, error) {
 func (c *client) DownloadInfo(ctx context.Context, fileID string) (string, error) {
 	var resp struct {
 		Data *struct {
-			URL string `json:"downloadUrl"`
+			SignedURL string `json:"signedURL"`
+			URL       string `json:"downloadUrl"`
 		} `json:"data"`
 	}
-	err := c.post(ctx, "/userres/v1/file/get_res_download_url", map[string]any{"fileId": fileID}, &resp)
+	err := c.post(ctx, "/nd.bizuserres.s/v1/get_res_download_url", map[string]any{"fileId": fileID}, &resp)
 	if err != nil {
 		return "", err
 	}
-	if resp.Data == nil || resp.Data.URL == "" {
+	if resp.Data == nil {
 		return "", errors.New("guangya: 获取下载地址失败")
 	}
-	return resp.Data.URL, nil
+	url := firstNonEmpty(resp.Data.SignedURL, resp.Data.URL)
+	if url == "" {
+		return "", errors.New("guangya: 获取下载地址失败")
+	}
+	return url, nil
 }
 
 // Mkdir creates a folder.
@@ -468,11 +513,33 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 }
 
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
+	if token == nil {
+		return nil, errors.New("光鸭云盘未登录")
+	}
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
 	}
-	token.UsedSize, token.TotalSize = cl.SpaceInfo(ctx)
+	// Access tokens are short-lived. Renew before querying the API when a
+	// refresh token is available, then persist the complete session back into
+	// TokenInfo so the next request uses the new access token.
+	if strings.TrimSpace(cl.sess.RefreshToken) != "" {
+		if next, refreshErr := refreshSession(ctx, cl.http, cl.sess); refreshErr == nil {
+			cl.sess = next
+			token.AccessToken = next.AccessToken
+			token.RefreshToken = mustJSON(next)
+		} else {
+			return nil, fmt.Errorf("光鸭云盘刷新凭据失败: %w", refreshErr)
+		}
+	}
+	used, total := cl.SpaceInfo(ctx)
+	if used > 0 || total > 0 {
+		token.UsedSize, token.TotalSize = used, total
+		token.FreeSize = total - used
+		if token.FreeSize < 0 {
+			token.FreeSize = 0
+		}
+	}
 	return token, nil
 }
 
@@ -510,7 +577,7 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 	if phone == "" || code == "" {
 		return nil, errors.New("光鸭云盘：请填写手机号和验证码（或 Refresh Token）")
 	}
-	return loginBySms(ctx, phone, code, req.Config["verification_id"], req.Config["device_id"])
+	return loginBySms(ctx, phone, code, req.Config["verification_id"], req.Config["device_id"], req.Config["captcha_token"])
 }
 
 func loginByRefreshToken(ctx context.Context, refresh string) (*model.TokenInfo, error) {
@@ -533,52 +600,88 @@ func loginByRefreshToken(ctx context.Context, refresh string) (*model.TokenInfo,
 	if resp.AccessToken == "" {
 		return nil, errors.New("guangya: 刷新 token 失败")
 	}
-	return buildToken(&Session{
+	sess := &Session{
 		AccessToken: resp.AccessToken, RefreshToken: firstNonEmpty(resp.RefreshToken, refresh),
 		DeviceID: deviceID, ClientID: clientID,
-	}), nil
+	}
+	return enrichLoginToken(ctx, hc, sess), nil
+}
+
+func refreshSession(ctx context.Context, hc *netx.Client, sess *Session) (*Session, error) {
+	if sess == nil || strings.TrimSpace(sess.RefreshToken) == "" {
+		return sess, errors.New("guangya: refresh_token 为空")
+	}
+	deviceID := firstNonEmpty(sess.DeviceID, newDeviceID())
+	clientIDValue := firstNonEmpty(sess.ClientID, clientID)
+	headers := map[string]string{
+		"Content-Type": "application/json", "Accept": "application/json",
+		"X-Client-Id": clientIDValue, "X-Client-Version": "0.0.1", "X-Device-Id": deviceID,
+	}
+	var resp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		Error        string `json:"error"`
+		ErrorDesc    string `json:"error_description"`
+	}
+	if err := hc.PostJSON(ctx, accountHost+"/v1/auth/token", headers, map[string]any{
+		"client_id": clientIDValue, "grant_type": "refresh_token", "refresh_token": sess.RefreshToken,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(resp.AccessToken) == "" {
+		msg := firstNonEmpty(resp.ErrorDesc, resp.Error, "刷新光鸭 token 失败")
+		return nil, errors.New(msg)
+	}
+	return &Session{
+		AccessToken: resp.AccessToken, RefreshToken: firstNonEmpty(resp.RefreshToken, sess.RefreshToken),
+		DeviceID: deviceID, ClientID: clientIDValue, RootFolderID: sess.RootFolderID, Phone: sess.Phone,
+	}, nil
 }
 
 // SendSms requests a verification code for a phone.
 func SendSms(ctx context.Context, phone string) (verificationID, deviceID, captchaToken string, err error) {
 	hc := netx.NewClient(60 * time.Second)
 	deviceID = newDeviceID()
-	headers := map[string]string{
-		"Content-Type": "application/json", "Accept": "application/json",
-		"X-Client-Id": clientID, "X-Client-Version": "0.0.1", "X-Device-Id": deviceID,
+	// Guangya's current account API silently accepts requests without a
+	// captcha in some environments, so initialization is best effort.
+	captchaToken, _ = initCaptchaToken(ctx, hc, phone, deviceID)
+	send := func(token string) (string, error) {
+		headers := accountHeaders(deviceID, token)
+		var resp struct {
+			VerificationID string `json:"verification_id"`
+			Error          string `json:"error"`
+			ErrorDesc      string `json:"error_description"`
+		}
+		if err := hc.PostJSON(ctx, accountHost+"/v1/auth/verification", headers, map[string]any{
+			"phone_number": normalizePhone(phone), "target": "ANY", "client_id": clientID,
+		}, &resp); err != nil {
+			return "", err
+		}
+		if resp.VerificationID != "" {
+			return resp.VerificationID, nil
+		}
+		msg := firstNonEmpty(resp.ErrorDesc, resp.Error, "发送验证码失败")
+		return "", errors.New(msg)
 	}
-	var resp struct {
-		VerificationID string `json:"verification_id"`
-		Error          string `json:"error"`
-		ErrorDesc      string `json:"error_description"`
+	verificationID, err = send(captchaToken)
+	if err != nil && isCaptchaError(err) {
+		if refreshed, initErr := initCaptchaToken(ctx, hc, phone, deviceID); initErr == nil {
+			captchaToken = refreshed
+			verificationID, err = send(captchaToken)
+		}
 	}
-	if err := hc.PostJSON(ctx, accountHost+"/v1/auth/verification", headers, map[string]any{
-		"phone_number": normalizePhone(phone), "target": "ANY", "client_id": clientID,
-	}, &resp); err != nil {
+	if err != nil {
 		return "", "", "", err
 	}
-	if resp.VerificationID == "" {
-		msg := resp.ErrorDesc
-		if msg == "" {
-			msg = resp.Error
-		}
-		if msg == "" {
-			msg = "发送验证码失败"
-		}
-		return "", "", "", errors.New(msg)
-	}
-	return resp.VerificationID, deviceID, "", nil
+	return verificationID, deviceID, captchaToken, nil
 }
 
-func loginBySms(ctx context.Context, phone, code, verificationID, deviceID string) (*model.TokenInfo, error) {
+func loginBySms(ctx context.Context, phone, code, verificationID, deviceID, captchaToken string) (*model.TokenInfo, error) {
 	if deviceID == "" {
 		deviceID = newDeviceID()
 	}
 	hc := netx.NewClient(60 * time.Second)
-	headers := map[string]string{
-		"Content-Type": "application/json", "Accept": "application/json",
-		"X-Client-Id": clientID, "X-Client-Version": "0.0.1", "X-Device-Id": deviceID,
-	}
+	headers := accountHeaders(deviceID, captchaToken)
 	var verifyResp struct {
 		VerificationToken string `json:"verification_token"`
 	}
@@ -604,27 +707,91 @@ func loginBySms(ctx context.Context, phone, code, verificationID, deviceID strin
 	if signResp.AccessToken == "" {
 		return nil, errors.New("guangya: 登录失败")
 	}
-	return buildToken(&Session{
+	sess := &Session{
 		AccessToken: signResp.AccessToken, RefreshToken: signResp.RefreshToken,
 		DeviceID: deviceID, ClientID: clientID, Phone: normalizePhone(phone),
-	}), nil
+	}
+	return enrichLoginToken(ctx, hc, sess), nil
+}
+
+func enrichLoginToken(ctx context.Context, hc *netx.Client, sess *Session) *model.TokenInfo {
+	tok := buildToken(sess)
+	cl := &client{http: hc, sess: sess, token: tok}
+	used, total := cl.SpaceInfo(ctx)
+	if used > 0 || total > 0 {
+		tok.UsedSize, tok.TotalSize = used, total
+		tok.FreeSize = total - used
+		if tok.FreeSize < 0 {
+			tok.FreeSize = 0
+		}
+	}
+	return tok
+}
+
+func accountHeaders(deviceID, captchaToken string) map[string]string {
+	headers := map[string]string{
+		"Content-Type": "application/json", "Accept": "application/json",
+		"X-Client-Id": clientID, "X-Client-Version": "0.0.1", "X-Device-Id": deviceID,
+	}
+	if strings.TrimSpace(captchaToken) != "" {
+		headers["X-Captcha-Token"] = strings.TrimSpace(captchaToken)
+	}
+	return headers
+}
+
+func initCaptchaToken(ctx context.Context, hc *netx.Client, phone, deviceID string) (string, error) {
+	var resp struct {
+		CaptchaToken string `json:"captcha_token"`
+		Error        string `json:"error"`
+		ErrorDesc    string `json:"error_description"`
+	}
+	e164 := normalizePhone(phone)
+	err := hc.PostJSON(ctx, accountHost+"/v1/shield/captcha/init", accountHeaders(deviceID, ""), map[string]any{
+		"client_id": clientID,
+		"action":    "POST:/v1/auth/verification",
+		"device_id": deviceID,
+		"meta": map[string]string{
+			"username": e164, "phone_number": e164, "VERIFICATION_PHONE": e164,
+		},
+	}, &resp)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(resp.CaptchaToken) == "" {
+		return "", errors.New(firstNonEmpty(resp.ErrorDesc, resp.Error, "初始化 captcha_token 失败"))
+	}
+	return strings.TrimSpace(resp.CaptchaToken), nil
+}
+
+func isCaptchaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "captcha_invalid") || strings.Contains(msg, "captcha_token expired")
 }
 
 func buildToken(sess *Session) *model.TokenInfo {
 	uid := sess.Phone
 	if uid == "" {
-		uid = sess.DeviceID[:8]
+		uid = sess.DeviceID
+		if len(uid) > 8 {
+			uid = uid[:8]
+		}
+		if uid == "" {
+			uid = "guangya"
+		}
 	}
 	name := "光鸭 " + uid
 	return &model.TokenInfo{
-		TokenFrom:    providerID,
-		AccessToken:  sess.AccessToken,
-		RefreshToken: mustJSON(sess),
-		TokenType:    "Bearer",
-		UserID:       model.BuildUserID(providerID, uid),
-		UserName:     name,
-		NickName:     name,
-		Name:         name,
+		TokenFrom:         providerID,
+		AccessToken:       sess.AccessToken,
+		RefreshToken:      mustJSON(sess),
+		TokenType:         "Bearer",
+		UserID:            model.BuildUserID(providerID, uid),
+		UserName:          name,
+		NickName:          name,
+		Name:              name,
 		ProviderAccountID: uid,
 		ProviderRootID:    RootID,
 	}
@@ -686,6 +853,7 @@ func truncate(b []byte, n int) string {
 	}
 	return string(b)
 }
+
 // SendSms satisfies the app binding interface (sends a verification code).
 func (d *Driver) SendSms(ctx context.Context, phone string) (verificationID, deviceID, captchaToken string, err error) {
 	return SendSms(ctx, phone)

@@ -74,6 +74,7 @@ func init() {
 			"importShare":     true,
 			"trashView":       true,
 			"trashRestore":    true,
+			"recycleBin":      true,
 			"copy":            false,
 			"permanentDelete": true,
 		}, func(c *drive.Capabilities) {
@@ -178,11 +179,40 @@ func pan123RateLimitOK() {
 
 // ---- http plumbing ----
 
+// pan123Code accepts both JSON numbers and numeric strings. The legacy client
+// used Number(json.code), and the web API has returned both representations.
+type pan123Code int
+
+func (c *pan123Code) UnmarshalJSON(raw []byte) error {
+	var number int64
+	if err := json.Unmarshal(raw, &number); err == nil {
+		*c = pan123Code(number)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return fmt.Errorf("123: invalid response code: %w", err)
+	}
+	number, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+	if err != nil {
+		return fmt.Errorf("123: invalid response code %q: %w", text, err)
+	}
+	*c = pan123Code(number)
+	return nil
+}
+
 type apiResp struct {
-	Code    int             `json:"code"`
+	Code    pan123Code      `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data"`
 }
+
+type pan123APIError struct {
+	Code    pan123Code
+	Message string
+}
+
+func (e *pan123APIError) Error() string { return e.Message }
 
 // apiClient issues signed, rate-limited requests with a concrete bearer token.
 type apiClient struct {
@@ -246,7 +276,7 @@ func (a *apiClient) do(ctx context.Context, method, rawURL string, body any, que
 	}
 	pan123RateLimitOK()
 	if resp.StatusCode >= 400 && out.Code == 0 {
-		out.Code = resp.StatusCode
+		out.Code = pan123Code(resp.StatusCode)
 	}
 	return &out, nil
 }
@@ -277,28 +307,40 @@ func (d *Driver) api(ctx context.Context, c drive.Context, method, rawURL string
 		if msg == "" {
 			msg = fmt.Sprintf("123 云盘请求失败 code=%d", resp.Code)
 		}
-		return nil, errors.New(msg)
+		return nil, &pan123APIError{Code: resp.Code, Message: msg}
 	}
 	return resp, nil
 }
 
 // reloginFromToken replays the stored username/password on 401.
 func reloginFromToken(ctx context.Context, tok *model.TokenInfo) (string, bool) {
-	if tok == nil {
+	username, password, ok := storedPan123Credentials(tok)
+	if !ok {
 		return "", false
+	}
+	next, err := pan123Login(ctx, username, password)
+	if err != nil || next == "" {
+		return "", false
+	}
+	return next, true
+}
+
+func storedPan123Credentials(tok *model.TokenInfo) (username, password string, ok bool) {
+	if tok == nil {
+		return "", "", false
 	}
 	var cred struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.Unmarshal([]byte(tok.RefreshToken), &cred); err != nil || cred.Username == "" || cred.Password == "" {
-		return "", false
+	if err := json.Unmarshal([]byte(tok.RefreshToken), &cred); err != nil {
+		return "", "", false
 	}
-	next, err := pan123Login(ctx, cred.Username, cred.Password)
-	if err != nil || next == "" {
-		return "", false
+	username = strings.TrimSpace(cred.Username)
+	if username == "" || cred.Password == "" {
+		return "", "", false
 	}
-	return next, true
+	return username, cred.Password, true
 }
 
 // ---- login (legacy auth.ts: username+password, no RSA/captcha in web API) ----
@@ -323,8 +365,8 @@ func pan123Login(ctx context.Context, username, password string) (string, error)
 		"user-agent":   ua,
 	}
 	var out struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
+		Code    pan123Code `json:"code"`
+		Message string     `json:"message"`
 		Data    struct {
 			Token string `json:"token"`
 		} `json:"data"`
@@ -356,10 +398,18 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 	if err != nil {
 		return nil, err
 	}
-	data := map[string]any{}
-	if resp, err := newAPIClient(token).do(ctx, http.MethodGet, apiUserInfo, nil, nil); err == nil {
-		data = parseMap(resp.Data)
+	resp, err := newAPIClient(token).do(ctx, http.MethodGet, apiUserInfo, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("123 云盘登录后获取账号信息失败: %w", err)
 	}
+	if resp.Code != 0 {
+		msg := resp.Message
+		if msg == "" {
+			msg = fmt.Sprintf("123 云盘获取账号信息失败 code=%d", resp.Code)
+		}
+		return nil, errors.New(msg)
+	}
+	data := parseMap(resp.Data)
 	uid := firstString(data, "Uid", "uid")
 	if uid == "" {
 		uid = username
@@ -401,7 +451,10 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	}
 	resp, err := d.api(ctx, c, http.MethodGet, apiUserInfo, nil, nil)
 	if err != nil {
-		return token, nil
+		// Do not report an expired/invalid session as a successful refresh. The
+		// caller needs the error to surface the account state and offer login
+		// again; d.api already retries once with the stored credentials on 401.
+		return token, err
 	}
 	data := parseMap(resp.Data)
 	used := firstInt64(data, "SpaceUsed", "spaceUsed")
@@ -435,18 +488,23 @@ var (
 
 // putPool normalizes and stores a file; non-empty fields win, but empty
 // S3KeyFlag/Etag/FileName from a stub /file/info never poison a listed file.
-func putPool(f pan123File) pan123File {
+func poolKey(driveID, fileID string) string {
+	return driveID + "\x00" + toPan123FileID(fileID)
+}
+
+func putPool(c drive.Context, f pan123File) pan123File {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 	id := toPan123FileID(f.FileID)
 	if id == "" || id == "0" {
 		return f
 	}
-	if ex, ok := filePool[id]; ok {
+	key := poolKey(c.DriveID, id)
+	if ex, ok := filePool[key]; ok {
 		f = mergeFile(f, ex)
 	}
-	delete(filePool, id)
-	filePool[id] = f
+	delete(filePool, key)
+	filePool[key] = f
 	for len(filePool) > maxFilePool {
 		for k := range filePool {
 			delete(filePool, k)
@@ -456,10 +514,10 @@ func putPool(f pan123File) pan123File {
 	return f
 }
 
-func poolGet(fileID string) (pan123File, bool) {
+func poolGet(c drive.Context, fileID string) (pan123File, bool) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	f, ok := filePool[toPan123FileID(fileID)]
+	f, ok := filePool[poolKey(c.DriveID, fileID)]
 	return f, ok
 }
 
@@ -588,6 +646,36 @@ func decodePan123MetaDesc(description string) (pan123File, bool) {
 		return pan123File{}, false
 	}
 	return normalizePan123File(data), true
+}
+
+// pan123FileFromModel restores the provider-only fields from a unified list
+// snapshot. The API detail endpoint does not always return S3KeyFlag, while
+// the list response does; Description is the durable bridge between them.
+func pan123FileFromModel(f model.File) (pan123File, bool) {
+	if strings.TrimSpace(f.FileID) == "" {
+		return pan123File{}, false
+	}
+	item, ok := decodePan123MetaDesc(f.Description)
+	if !ok || item.S3KeyFlag == "" {
+		return pan123File{}, false
+	}
+	item.FileID = toPan123FileID(f.FileID)
+	if item.FileName == "" {
+		item.FileName = f.Name
+	}
+	if item.Size == 0 {
+		item.Size = f.Size
+	}
+	if item.Etag == "" {
+		item.Etag = f.ContentHash
+	}
+	if item.ParentFileID == "" {
+		item.ParentFileID = f.ParentFileID
+	}
+	if f.IsDir {
+		item.Type = 1
+	}
+	return item, true
 }
 
 // ---- id helpers ----
@@ -754,51 +842,79 @@ func mapFiles(items []pan123File, driveID, parentID string) []model.File {
 
 // ---- list / search / trash / detail (legacy dirfilelist.ts) ----
 
-// fileListRaw implements the AList getFiles paging loop (guard 200 pages).
-func (d *Driver) fileListRaw(ctx context.Context, c drive.Context, parentID string, trashed bool, search string) ([]pan123File, error) {
+// fileListPageRaw returns one page from the 123 API. The API uses a numeric
+// Page field and reports "-1" in Next for the final page.
+func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID string, trashed bool, search string, page int) ([]pan123File, string, error) {
 	parentFileID := toPan123FileID(parentID)
-	var res []pan123File
-	page := 1
+	if page < 1 {
+		page = 1
+	}
 	event := "homeListFile"
 	operateType := "4"
 	if search != "" {
 		event = "homeSearchFile"
 		operateType = "2"
 	}
-	for guard := 0; guard < 200; guard++ {
-		query := map[string]string{
-			"driveId":              "0",
-			"limit":                "100",
-			"next":                 "0",
-			"orderBy":              "file_id",
-			"orderDirection":       "desc",
-			"parentFileId":         parentFileID,
-			"trashed":              strconv.FormatBool(trashed),
-			"SearchData":           search,
-			"Page":                 strconv.Itoa(page),
-			"OnlyLookAbnormalFile": "0",
-			"event":                event,
-			"operateType":          operateType,
-			"inDirectSpace":        "false",
+	query := map[string]string{
+		"driveId":              "0",
+		"limit":                "100",
+		"next":                 "0",
+		"orderBy":              "file_id",
+		"orderDirection":       "desc",
+		"parentFileId":         parentFileID,
+		"trashed":              strconv.FormatBool(trashed),
+		"SearchData":           search,
+		"Page":                 strconv.Itoa(page),
+		"OnlyLookAbnormalFile": "0",
+		"event":                event,
+		"operateType":          operateType,
+		"inDirectSpace":        "false",
+	}
+	resp, err := d.api(ctx, c, http.MethodGet, apiFileList, nil, query)
+	if err != nil {
+		return nil, "", err
+	}
+	data := parseMap(resp.Data)
+	list := rawList(data)
+	res := make([]pan123File, 0, len(list))
+	for _, raw := range list {
+		if m, ok := raw.(map[string]any); ok {
+			res = append(res, putPool(c, normalizePan123File(m)))
 		}
-		resp, err := d.api(ctx, c, http.MethodGet, apiFileList, nil, query)
+	}
+	next := asString(pick(data, "Next", "next"))
+	if len(list) == 0 || next == "-1" {
+		next = ""
+	} else {
+		next = strconv.Itoa(page + 1)
+	}
+	return res, next, nil
+}
+
+// fileListRaw implements the AList getFiles paging loop (guard 200 pages).
+func (d *Driver) fileListRaw(ctx context.Context, c drive.Context, parentID string, trashed bool, search string) ([]pan123File, error) {
+	var res []pan123File
+	marker := "1"
+	for guard := 0; guard < 200; guard++ {
+		page, next, err := d.fileListPageRaw(ctx, c, parentID, trashed, search, pageMarker123(marker))
 		if err != nil {
 			return nil, err
 		}
-		data := parseMap(resp.Data)
-		list := rawList(data)
-		for _, raw := range list {
-			if m, ok := raw.(map[string]any); ok {
-				res = append(res, putPool(normalizePan123File(m)))
-			}
+		res = append(res, page...)
+		if next == "" {
+			return res, nil
 		}
-		page++
-		next := asString(pick(data, "Next", "next"))
-		if len(list) == 0 || next == "-1" {
-			break
-		}
+		marker = next
 	}
-	return res, nil
+	return nil, errors.New("123: 文件列表分页超过上限")
+}
+
+func pageMarker123(marker string) int {
+	page, err := strconv.Atoi(marker)
+	if err != nil || page < 1 {
+		return 1
+	}
+	return page
 }
 
 // rawList extracts InfoList/infoList from a list data map.
@@ -821,17 +937,17 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 	return mapFiles(items, c.DriveID, parent), nil
 }
 
-func (d *Driver) ListPaged(ctx context.Context, c drive.Context, dirID, _ string, opts *drive.ListOptions) (*drive.DirPage, error) {
+func (d *Driver) ListPaged(ctx context.Context, c drive.Context, dirID, marker string, opts *drive.ListOptions) (*drive.DirPage, error) {
 	parent := toPan123FileID(dirID)
 	search := ""
 	if opts != nil {
 		search = opts.Search
 	}
-	items, err := d.fileListRaw(ctx, c, parent, false, search)
+	page, next, err := d.fileListPageRaw(ctx, c, parent, false, search, pageMarker123(marker))
 	if err != nil {
 		return nil, err
 	}
-	return &drive.DirPage{Items: mapFiles(items, c.DriveID, parent)}, nil
+	return &drive.DirPage{Items: mapFiles(page, c.DriveID, parent), NextMarker: next}, nil
 }
 
 func (d *Driver) ListTrash(ctx context.Context, c drive.Context, _ *drive.ListOptions) ([]model.File, error) {
@@ -871,7 +987,7 @@ func (d *Driver) detail(ctx context.Context, c drive.Context, fileID string) (*p
 	if len(m) == 0 {
 		return nil, errors.New("123: 文件不存在")
 	}
-	f := putPool(normalizePan123File(m))
+	f := putPool(c, normalizePan123File(m))
 	return &f, nil
 }
 
@@ -883,7 +999,7 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 		}, nil
 	}
 	fid := toPan123FileID(fileID)
-	if pooled, ok := poolGet(fid); ok {
+	if pooled, ok := poolGet(c, fid); ok {
 		f := mapFile(pooled, c.DriveID, pooled.ParentFileID)
 		return f, nil
 	}
@@ -910,11 +1026,20 @@ func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*
 // ---- download (legacy download.ts: AList Link 逐行移植) ----
 
 // resolveAListFile reproduces the Link prerequisite: a listed file with
-// S3KeyFlag. 顺序对齐旧版 resolvePan123AListFile：
-// pool → 父目录重拉 → 根目录重拉 → 按文件名全局搜索。
+// S3KeyFlag. 顺序对齐旧版 resolvePan123AListFile，并优先消费统一缓存中
+// 的点击快照：缓存 → pool → 详情 → 父目录重拉 → 根目录重拉 → 文件名搜索。
 func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID string) (*pan123File, error) {
 	fid := toPan123FileID(fileID)
-	if f, ok := poolGet(fid); ok && f.S3KeyFlag != "" {
+	// A download/preview may be triggered from a cached frontend row after
+	// the provider's in-memory pool has been evicted. Prefer that exact row
+	// snapshot so the list-only S3KeyFlag survives the transition.
+	if cached, ok := drive.CachedFile(c.DriveID, fid); ok {
+		if restored, ok := pan123FileFromModel(cached); ok {
+			pinned := putPool(c, restored)
+			return &pinned, nil
+		}
+	}
+	if f, ok := poolGet(c, fid); ok && f.S3KeyFlag != "" {
 		return &f, nil
 	}
 	// 先尝试直接请求 /file/info 详情接口补全
@@ -923,7 +1048,7 @@ func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID s
 	}
 	// 冷启动/池被驱逐：用池里残条的父目录与文件名做线索
 	var parentID, name string
-	if stub, ok := poolGet(fid); ok {
+	if stub, ok := poolGet(c, fid); ok {
 		parentID, name = stub.ParentFileID, stub.FileName
 	}
 	if parentID != "" && parentID != "0" {
@@ -954,7 +1079,7 @@ func (d *Driver) resolveAListFile(ctx context.Context, c drive.Context, fileID s
 			}
 		}
 	}
-	if f, ok := poolGet(fid); ok && f.S3KeyFlag != "" {
+	if f, ok := poolGet(c, fid); ok && f.S3KeyFlag != "" {
 		return &f, nil
 	}
 	return nil, errors.New("can't convert obj（无法获取 123 盘下载直链，请先刷新所在文件夹）")
@@ -1265,6 +1390,9 @@ func parseFlexibleTime(value string) time.Time {
 }
 
 func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.ShareParams) (*model.ShareItem, error) {
+	if len(params.FileIDs) == 0 {
+		return nil, errors.New("创建分享失败：至少选择一个文件")
+	}
 	shareName := params.ShareName
 	if shareName == "" {
 		shareName = "分享文件"
@@ -1377,7 +1505,7 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 		return "", nil
 	}
 	fid := toPan123FileID(fileID)
-	if pooled, ok := poolGet(fid); ok && pooled.Etag != "" {
+	if pooled, ok := poolGet(c, fid); ok && pooled.Etag != "" {
 		return etagAsMd5(pooled.Etag), nil
 	}
 	detail, err := d.detail(ctx, c, fileID)
@@ -1461,17 +1589,23 @@ func pan123ShareList(ctx context.Context, d *Driver, c drive.Context, shareKey, 
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	if session == nil || session.ShareKey == "" {
+		return nil, errors.New("123: 分享会话无效")
+	}
+	if len(fileIDs) == 0 {
+		return nil, errors.New("123: 至少选择一个分享文件")
+	}
 	parent := toPan123Number(toParentID)
 	fileIDList := make([]any, 0, len(fileIDs))
 	for _, id := range fileIDs {
 		fileIDList = append(fileIDList, map[string]any{"fileId": toPan123Number(id)})
 	}
 	body := map[string]any{
-		"fileIdList":     fileIDList,
-		"targetFileId":   parent,
-		"event":          "shareTransfer",
-		"shareKey":       session.ShareKey,
-		"sharePwd":       session.Password,
+		"fileIdList":   fileIDList,
+		"targetFileId": parent,
+		"event":        "shareTransfer",
+		"shareKey":     session.ShareKey,
+		"sharePwd":     session.Password,
 	}
 	if _, err := d.api(ctx, c, http.MethodPost, apiFileAsync, body, nil); err != nil {
 		return nil, err
