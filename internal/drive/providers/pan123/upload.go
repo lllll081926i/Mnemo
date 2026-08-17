@@ -358,7 +358,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if !resumed {
 			reqResp, reqErr := d.api(ctx, c, http.MethodPost, apiUploadReq, map[string]any{
 				"driveId":      0,
-				"duplicate":    2, // 默认 overwrite（旧版 pan123DuplicateFromPolicy 默认策略）
+				"duplicate":    duplicateFromPolicy(ui.Info.ConflictPolicy),
 				"etag":         etag,
 				"fileName":     ui.Info.Name,
 				"parentFileId": parentFileID,

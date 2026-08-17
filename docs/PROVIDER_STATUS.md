@@ -96,7 +96,7 @@
 |----------|:-------------:|:--------:|:--------:|:--------:|:----:|:--------:|:--------:|:--------:|
 | pikpak | ✅ | ➖ | ✅(OSS PUT) | ✅ | ✅(GCID) | ✅(refuse/skip/rename/overwrite) | ✅ | queue |
 | aliopen | ✅ | ✅(10MB) | ➖ | ✅ | ✅(SHA1) | ❌(固定ignore) | ✅ | queue |
-| pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ⚠️(duplicate) | ✅ | queue |
+| pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ✅(1/2 映射) | ✅ | queue |
 | pan189 | ✅ | ✅(10/20MB) | ➖ | ✅ | ✅(MD5) | ➖ | ✅ | queue |
 | pan139 | ✅ | ✅(100/200MB预签名) | ➖ | ✅ | ✅(SHA-256) | ⚠️(服务端auto_rename) | ✅ | queue |
 | lanzou | ✅ | ➖ | ✅(≤200MB) | ➖ | ➖ | ➖ | ➖ | queue |

@@ -2,6 +2,7 @@ package pan123
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -374,6 +375,22 @@ func TestDuplicateFromRequest(t *testing.T) {
 	}
 }
 
+func TestDuplicateFromPolicy(t *testing.T) {
+	cases := map[string]int{
+		"":          2,
+		"overwrite": 2,
+		"rename":    1,
+		"refuse":    1,
+		"skip":      1,
+		"unknown":   2,
+	}
+	for policy, want := range cases {
+		if got := duplicateFromPolicy(policy); got != want {
+			t.Errorf("duplicateFromPolicy(%q) = %d, want %d", policy, got, want)
+		}
+	}
+}
+
 // ---- expiration ----
 
 func TestFormatPan123Time(t *testing.T) {
@@ -472,6 +489,26 @@ func TestExtractPan123RedirectURL(t *testing.T) {
 	// empty
 	if got := extractPan123RedirectURL("", "https://yun.123pan.com/x"); got != "" {
 		t.Fatalf("empty body must yield empty, got %q", got)
+	}
+}
+
+func TestDecodePan123ParamsURL(t *testing.T) {
+	const target = "https://x.test/?q=???"
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{name: "standard padded", value: base64.StdEncoding.EncodeToString([]byte(target))},
+		{name: "standard raw", value: base64.RawStdEncoding.EncodeToString([]byte(target))},
+		{name: "url padded", value: base64.URLEncoding.EncodeToString([]byte(target))},
+		{name: "url raw", value: base64.RawURLEncoding.EncodeToString([]byte(target))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decodePan123ParamsURL(tc.value); got != target {
+				t.Fatalf("decodePan123ParamsURL(%q) = %q, want %q", tc.value, got, target)
+			}
+		})
 	}
 }
 
@@ -928,6 +965,67 @@ func TestPan123UploadInstantReuse(t *testing.T) {
 	}
 	if !store.cleared {
 		t.Fatal("instant upload session was not cleared")
+	}
+}
+
+func TestPan123UploadRequestUsesConflictPolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.txt")
+	content := []byte("conflict policy")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	c := drive.Context{UserID: "pan123:policy-user", DriveID: "pan123:policy-drive", Token: &model.TokenInfo{AccessToken: "access-token"}}
+	cases := []struct {
+		policy string
+		want   float64
+	}{
+		{policy: "", want: 2},
+		{policy: "overwrite", want: 2},
+		{policy: "rename", want: 1},
+		{policy: "refuse", want: 1},
+		{policy: "skip", want: 1},
+	}
+	for _, tc := range cases {
+		name := tc.policy
+		if name == "" {
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
+			previous := netx.TestTransportHook
+			var request map[string]any
+			var requestErr error
+			netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if strings.HasSuffix(req.URL.Path, "/file/upload_request") {
+					raw, err := io.ReadAll(req.Body)
+					if err != nil {
+						requestErr = err
+					} else {
+						requestErr = json.Unmarshal(raw, &request)
+					}
+					return pan123JSONResponse(`{"code":0,"data":{"Reuse":true,"FileId":"9"}}`, req), nil
+				}
+				return pan123JSONResponse(`{"code":0}`, req), nil
+			})
+			t.Cleanup(func() { netx.TestTransportHook = previous })
+
+			ui := &model.UploadingUI{Info: model.UploadInfo{
+				LocalFilePath:  path,
+				ParentFileID:   "pan123_root",
+				DriveID:        c.DriveID,
+				Name:           "policy.txt",
+				ConflictPolicy: tc.policy,
+			}}
+			if err := (&Driver{}).UploadOneFile(context.Background(), c, ui); err != nil {
+				t.Fatalf("UploadOneFile: %v", err)
+			}
+			if requestErr != nil {
+				t.Fatalf("decode upload_request body: %v", requestErr)
+			}
+			if got, ok := request["duplicate"].(float64); !ok || got != tc.want {
+				t.Fatalf("duplicate = %#v, want %v; body=%+v", request["duplicate"], tc.want, request)
+			}
+		})
 	}
 }
 

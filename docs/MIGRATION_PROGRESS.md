@@ -181,3 +181,4 @@
 35. ⚠️ 前端测试框架搭建
 36. ⚠️ 瀑布流/相册模式
 37. ⚠️ 调试/日志设置页
+38. ✅ **123 云盘参数与上传策略兼容**：AList 下载参数兼容旧版 Base64 解码；upload_request 按 `ConflictPolicy` 映射 `duplicate`

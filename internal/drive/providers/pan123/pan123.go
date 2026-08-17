@@ -1124,6 +1124,43 @@ func extractPan123RedirectURL(bodyText, baseURL string) string {
 
 var hrefRe = regexp.MustCompile(`(?i)href\s*=\s*["'](https?:[^"']+)["']`)
 
+// decodePan123ParamsURL mirrors the legacy Buffer.from(value, "base64")
+// behaviour while restricting the result to a usable HTTP(S) URL. The API
+// has returned standard padded, raw and URL-safe variants over time.
+func decodePan123ParamsURL(raw string) string {
+	variants := []string{raw}
+	if strings.ContainsAny(raw, " \t\r\n") {
+		withoutWhitespace := strings.Map(func(r rune) rune {
+			switch r {
+			case ' ', '\t', '\r', '\n':
+				return -1
+			default:
+				return r
+			}
+		}, raw)
+		variants = append(variants, withoutWhitespace, strings.ReplaceAll(raw, " ", "+"))
+	}
+	encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+	for _, value := range variants {
+		for _, encoding := range encodings {
+			decoded, err := encoding.DecodeString(value)
+			if err != nil || len(decoded) == 0 {
+				continue
+			}
+			u, err := url.Parse(string(decoded))
+			if err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+				return u.String()
+			}
+		}
+	}
+	return ""
+}
+
 // alistLink runs the AList Link body: download_info → params b64 → redirect GET.
 func (d *Driver) alistLink(ctx context.Context, c drive.Context, f pan123File) (string, map[string]string, error) {
 	fileID, _ := strconv.ParseInt(f.FileID, 10, 64)
@@ -1151,8 +1188,8 @@ func (d *Driver) alistLink(ctx context.Context, c drive.Context, f pan123File) (
 	// base64(params) is the real URL when present.
 	if u, err := url.Parse(downloadURL); err == nil {
 		if nu := u.Query().Get("params"); nu != "" {
-			if du, err := base64.StdEncoding.DecodeString(nu); err == nil && len(du) > 0 {
-				downloadURL = string(du)
+			if decodedURL := decodePan123ParamsURL(nu); decodedURL != "" {
+				downloadURL = decodedURL
 			}
 		}
 	}
@@ -1465,6 +1502,16 @@ var md5Re = regexp.MustCompile(`^[a-f0-9]{32}$`)
 // 2=overwrite, anything else → 1 (keep both / rename; 123 has no skip value).
 func duplicateFromRequest(duplicate int) int {
 	if duplicate == 2 {
+		return 2
+	}
+	return 1
+}
+
+// duplicateFromPolicy mirrors the legacy pan123DuplicateFromPolicy mapping:
+// 123 accepts 2 for overwrite and 1 for the non-overwrite branch. The API
+// does not expose separate native values for rename and skip.
+func duplicateFromPolicy(policy string) int {
+	if driveutil.ResolveConflictPolicy(policy) == driveutil.ConflictOverwrite {
 		return 2
 	}
 	return 1
