@@ -119,7 +119,7 @@ func uploadStatus(u model.UploadState) string {
 }
 
 // AddFiles enqueues local files/dirs into a parent folder.
-func (q *UploadQueue) AddFiles(userID, driveID, parentID string, localPaths []string) []*model.UploadingUI {
+func (q *UploadQueue) AddFiles(userID, driveID, parentID, conflictPolicy string, localPaths []string) []*model.UploadingUI {
 	var created []*model.UploadingUI
 	for _, p := range localPaths {
 		info, err := os.Stat(p)
@@ -134,13 +134,13 @@ func (q *UploadQueue) AddFiles(userID, driveID, parentID string, localPaths []st
 				}
 				rel, _ := filepath.Rel(filepath.Dir(p), path)
 				name := strings.ReplaceAll(rel, "\\", "/")
-				if j := q.enqueue(userID, driveID, parentID, path, name, fi.Size()); j != nil {
+				if j := q.enqueue(userID, driveID, parentID, conflictPolicy, path, name, fi.Size()); j != nil {
 					created = append(created, j)
 				}
 				return nil
 			})
 		} else {
-			if j := q.enqueue(userID, driveID, parentID, p, info.Name(), info.Size()); j != nil {
+			if j := q.enqueue(userID, driveID, parentID, conflictPolicy, p, info.Name(), info.Size()); j != nil {
 				created = append(created, j)
 			}
 		}
@@ -148,7 +148,7 @@ func (q *UploadQueue) AddFiles(userID, driveID, parentID string, localPaths []st
 	return created
 }
 
-func (q *UploadQueue) enqueue(userID, driveID, parentID, localPath, name string, size int64) *model.UploadingUI {
+func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPath, name string, size int64) *model.UploadingUI {
 	relative := normalizeUploadPath(name)
 	if relative == "" {
 		relative = normalizeUploadPath(filepath.Base(localPath))
@@ -160,7 +160,8 @@ func (q *UploadQueue) enqueue(userID, driveID, parentID, localPath, name string,
 			LocalFilePath: localPath, ParentFileID: parentID,
 			DriveID: driveID, Path: relative, Name: uploadLeaf(relative), Size: size,
 			SizeStr: model.FormatBytes(size),
-			IsDir:   false,
+			IsDir:          false,
+			ConflictPolicy: conflictPolicy,
 		},
 		Upload: model.UploadState{
 			DownState: "queued", DownTime: time.Now().Unix(), DownSize: 0,

@@ -365,7 +365,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Upload.IsDowning = true
 	ui.Upload.IsFailed = false
 	ui.Upload.IsCompleted = false
-	gcid, err := computeGCID(ui.Info.LocalFilePath)
+	gcid, err := computeGCID(ui.Info.LocalFilePath, ui)
 	if err != nil {
 		markPikPakUploadFailed(ui, err)
 		return err

@@ -796,7 +796,9 @@ func canonicalUploadParent(userID, driveID, parentID string) string {
 	return parentID
 }
 
-func (a *App) UploadFiles(userID, driveID, parentID string, localPaths []string) []*model.UploadingUI {
+// UploadFiles enqueues local files or folders for upload. conflictPolicy
+// controls behavior when a same-name file already exists remotely:// "overwrite" (default), "rename" (keep both, append suffix), "skip".
+func (a *App) UploadFiles(userID, driveID, parentID, conflictPolicy string, localPaths []string) []*model.UploadingUI {
 	uploads := a.uploadQueue()
 	if uploads == nil {
 		return nil
@@ -805,7 +807,7 @@ func (a *App) UploadFiles(userID, driveID, parentID string, localPaths []string)
 	// provider metadata is loading. Canonicalize it before the asynchronous
 	// queue starts resolving the remote parent.
 	parentID = canonicalUploadParent(userID, driveID, parentID)
-	return uploads.AddFiles(userID, driveID, parentID, localPaths)
+	return uploads.AddFiles(userID, driveID, parentID, conflictPolicy, localPaths)
 }
 
 // ListUploads lists upload jobs.

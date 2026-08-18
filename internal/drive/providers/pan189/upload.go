@@ -212,10 +212,12 @@ func putPart(ctx context.Context, rawURL string, headers map[string]string, chun
 
 // fileMD5Of computes the whole-file MD5 plus per-slice md5 hex + partInfo.
 // Returns uppercase whole-file md5, per-slice md5 hex list and partInfo list.
-func fileMD5Of(r io.ReaderAt, size, slice int64, count int) (string, []string, []string, error) {
+// Progress is reported via ui.Upload.DownSize/DownProcess during hashing.
+func fileMD5Of(r io.ReaderAt, size, slice int64, count int, ui *model.UploadingUI) (string, []string, []string, error) {
 	var fileSum = md5.New()
 	sliceHexs := make([]string, 0, count)
 	partInfos := make([]string, 0, count)
+	var hashed int64
 	for i := 1; i <= count; i++ {
 		start := (int64(i) - 1) * slice
 		cur := slice
@@ -230,6 +232,13 @@ func fileMD5Of(r io.ReaderAt, size, slice int64, count int) (string, []string, [
 		sliceSum := md5Sum(chunk)
 		sliceHexs = append(sliceHexs, strings.ToUpper(hexEncode(sliceSum)))
 		partInfos = append(partInfos, itoa(int64(i))+"-"+base64StdEncode(sliceSum))
+		hashed += cur
+		if ui != nil {
+			ui.Upload.DownSize = hashed
+			if size > 0 {
+				ui.Upload.DownProcess = int(100 * hashed / size)
+			}
+		}
 	}
 	return strings.ToUpper(hexEncode(fileSum.Sum(nil))), sliceHexs, partInfos, nil
 }
@@ -299,7 +308,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	fileName := ui.Info.Name
 
 	// 单遍预计算 整文件MD5 + 各分片MD5 + partInfo（对齐 AList FastUpload）。
-	fileMD5Hex, sliceMD5Hexs, partInfos, err := fileMD5Of(f, size, slice, count)
+	fileMD5Hex, sliceMD5Hexs, partInfos, err := fileMD5Of(f, size, slice, count, ui)
 	if err != nil {
 		return err
 	}

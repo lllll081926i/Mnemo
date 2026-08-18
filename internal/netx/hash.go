@@ -46,12 +46,48 @@ func HashReader(r io.Reader, kind HashKind) (string, error) {
 
 // HashFile hashes a local file.
 func HashFile(path string, kind HashKind) (string, error) {
+	return HashFileWithProgress(path, kind, nil, 0)
+}
+
+// HashFileWithProgress hashes a local file while reporting bytes read via the
+// optional progress callback. total, if non-zero, sets the denominator for
+// pct computation (usually the file size).
+func HashFileWithProgress(path string, kind HashKind, progress func(read int64), total int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	return HashReader(f, kind)
+	h, err := NewHash(kind)
+	if err != nil {
+		return "", err
+	}
+	if total <= 0 {
+		if info, err := f.Stat(); err == nil {
+			total = info.Size()
+		}
+	}
+	buf := make([]byte, 256*1024)
+	var read int64
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			if _, werr := h.Write(buf[:n]); werr != nil {
+				return "", werr
+			}
+			read += int64(n)
+			if progress != nil {
+				progress(read)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // MD5Hex hashes bytes to hex md5.

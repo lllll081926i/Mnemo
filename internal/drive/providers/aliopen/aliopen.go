@@ -1450,7 +1450,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 
 	contentHash := strings.ToUpper(strings.TrimSpace(ui.Info.SHA1))
 	if contentHash == "" {
-		contentHash, err = netx.HashFile(ui.Info.LocalFilePath, netx.HashSHA1)
+		contentHash, err = netx.HashFileWithProgress(ui.Info.LocalFilePath, netx.HashSHA1, func(read int64) {
+			if ui != nil {
+				ui.Upload.DownSize = read
+				if ui.Info.Size > 0 {
+					ui.Upload.DownProcess = int(100 * read / ui.Info.Size)
+				}
+			}
+		}, 0)
 		if err != nil {
 			return fmt.Errorf("aliopen: 计算文件 SHA1 失败: %w", err)
 		}

@@ -962,12 +962,18 @@ func pan139ContentType(name string) string {
 	return contentType
 }
 
-func hashPan139File(ctx context.Context, f *os.File) (string, error) {
+func hashPan139File(ctx context.Context, f *os.File, ui *model.UploadingUI) (string, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
+	info, _ := f.Stat()
+	size := int64(0)
+	if info != nil {
+		size = info.Size()
+	}
 	h := sha256.New()
 	buf := make([]byte, 1024*1024)
+	var hashed int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -976,6 +982,13 @@ func hashPan139File(ctx context.Context, f *os.File) (string, error) {
 		if n > 0 {
 			if _, writeErr := h.Write(buf[:n]); writeErr != nil {
 				return "", writeErr
+			}
+			hashed += int64(n)
+			if ui != nil {
+				ui.Upload.DownSize = hashed
+				if size > 0 {
+					ui.Upload.DownProcess = int(100 * hashed / size)
+				}
 			}
 		}
 		if err == io.EOF {
@@ -1087,7 +1100,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	size := info.Size()
 	ui.Info.Size = size
-	contentHash, err := hashPan139File(ctx, f)
+	contentHash, err := hashPan139File(ctx, f, ui)
 	if err != nil {
 		return err
 	}

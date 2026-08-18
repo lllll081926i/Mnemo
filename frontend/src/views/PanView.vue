@@ -709,17 +709,43 @@ async function doShare() {
 
 // 上传：原生文件/目录选择器（选择文件夹时后端递归入队），停留当前页 + toast
 const uploadPickModal = ref(false) // 上传前的小弹窗：选文件还是文件夹
+const conflictModal = ref(null) // { names, onPolicy }
+
+async function checkUploadConflict(paths) {
+  const existing = new Set()
+  try {
+    const res = await listDir(uid.value, did.value, dirId.value)
+    if (res && res.files) {
+      for (const f of res.files) existing.add(f.name)
+    }
+  } catch { /* 忽略 */ }
+  const clashes = []
+  for (const p of paths) {
+    const name = p.split(/[/\\]/).pop()
+    if (existing.has(name)) clashes.push(name)
+  }
+  if (clashes.length === 0) return 'overwrite'
+  return new Promise((resolve) => {
+    conflictModal.value = {
+      names: clashes,
+      onPolicy: (policy) => { conflictModal.value = null; resolve(policy) },
+    }
+  })
+}
+
 async function pickUploadFiles() {
   let paths
   try { paths = await PickFiles('选择要上传的文件') } catch { return }
   if (!paths || !paths.length) return
-  await run(() => uploadFiles(uid.value, did.value, dirId.value, paths), `已加入上传队列（${paths.length} 项）`)
+  const policy = await checkUploadConflict(paths)
+  await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, paths), `已加入上传队列（${paths.length} 项）`)
 }
 async function pickUploadFolder() {
   let dir
   try { dir = await PickDirectory('选择要上传的文件夹', '') } catch { return }
   if (!dir) return
-  await run(() => uploadFiles(uid.value, did.value, dirId.value, [dir]), '已加入上传队列（文件夹）')
+  const policy = await checkUploadConflict([dir])
+  await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, [dir]), '已加入上传队列（文件夹）')
 }
 
 async function doOffline() {
@@ -916,7 +942,8 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
 
 async function onDropUpload(paths) {
   if (!props.account || mode.value !== 'list' || !caps.value.upload) return
-  await run(() => uploadFiles(uid.value, did.value, dirId.value, paths), `已添加拖拽上传（${paths.length} 项）`)
+  const policy = await checkUploadConflict(paths)
+  await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, paths), `已添加拖拽上传（${paths.length} 项）`)
 }
 
 function openMkdirModal() {
@@ -1419,6 +1446,23 @@ onBeforeUnmount(() => {
       </template>
     </Modal>
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
+
+    <!-- 上传同名文件冲突选择 -->
+    <Modal v-if="conflictModal" title="同名文件已存在" @close="conflictModal.onPolicy('overwrite')">
+      <div class="conflict-body">
+        <p class="conflict-msg">目标目录已存在同名文件：</p>
+        <div class="conflict-files">
+          <span v-for="n in conflictModal.names.slice(0, 5)" :key="n" class="conflict-file">{{ n }}</span>
+          <span v-if="conflictModal.names.length > 5" class="conflict-more">等 {{ conflictModal.names.length }} 个文件</span>
+        </div>
+        <p class="conflict-q">请选择处理方式：</p>
+        <div class="conflict-actions">
+          <button class="btn primary" @click="conflictModal.onPolicy('overwrite')">覆盖</button>
+          <button class="btn" @click="conflictModal.onPolicy('rename')">保留两者（新增后缀）</button>
+          <button class="btn ghost" @click="conflictModal.onPolicy('skip')">跳过</button>
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>
 
@@ -1429,4 +1473,11 @@ mark.hl {
   border-radius: 2px;
   padding: 0 1px;
 }
+.conflict-body { padding: 8px 0; }
+.conflict-msg { color: var(--text-secondary); margin-bottom: 8px; }
+.conflict-files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.conflict-file { background: var(--bg-subtle); padding: 2px 8px; border-radius: var(--radius-sm); font-size: var(--fs-aux); color: var(--text-primary); }
+.conflict-more { font-size: var(--fs-aux); color: var(--text-tertiary); align-self: center; }
+.conflict-q { color: var(--text-primary); margin-bottom: 12px; }
+.conflict-actions { display: flex; gap: 8px; justify-content: flex-end; }
 </style>

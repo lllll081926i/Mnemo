@@ -17,7 +17,7 @@ func main() {
 	application := app.NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "Mnemo",
+		Title:     "Mneno",
 		Width:     1440,
 		Height:    900,
 		MinWidth:  1024,

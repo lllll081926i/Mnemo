@@ -41,7 +41,7 @@ export function download(userId, driveId, file) { return App.DownloadFile(userId
 export function pinFileSnapshot(userId, driveId, file) { return App.PinFileSnapshot(userId, driveId, file) }
 export function downloadUrl(name, url, headers) { return App.DownloadURL(name, url, headers) }
 export function createShare(userId, driveId, params) { return App.CreateShare(userId, driveId, params) }
-export function uploadFiles(userId, driveId, parentId, paths) { return App.UploadFiles(userId, driveId, parentId, paths) }
+export function uploadFiles(userId, driveId, parentId, conflictPolicy, paths) { return App.UploadFiles(userId, driveId, parentId, conflictPolicy, paths) }
 export function saveCloudText(userId, driveId, parentId, fileName, content) { return App.SaveCloudTextFile(userId, driveId, parentId, fileName, content) }
 export function migrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move) {
   return App.MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move)
