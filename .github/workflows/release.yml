@@ -361,16 +361,36 @@ jobs:
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
-          cd build/bin
-          tar czf "../../${{ matrix.artifact }}.tar.gz" *
+          set -euo pipefail
+          brew install create-dmg
+          # create-dmg produces a styled .dmg from the .app bundle.
+          # Retry once: create-dmg can fail spuriously if the volume is busy.
+          for attempt in 1 2; do
+            if create-dmg \
+                --volname "Mnemo" \
+                --window-size 600 400 \
+                --icon-size 128 \
+                --app-drop-link 425 200 \
+                --icon "mnemo-go.app" 175 200 \
+                --no-internet-enable \
+                "${{ matrix.artifact }}.dmg" \
+                "build/bin/mnemo-go.app"; then
+              exit 0
+            fi
+            if [[ "${attempt}" == '2' ]]; then
+              echo 'create-dmg failed after 2 attempts' >&2
+              exit 1
+            fi
+            rm -f "${{ matrix.artifact }}.dmg"
+            sleep 5
+          done
+          test -f "${{ matrix.artifact }}.dmg"
 
-      - name: Package (Linux — multi-format parallel)
+      - name: Package (Linux — deb + rpm)
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          # 1. tar.gz (always)
-          (cd build/bin && tar czf "../../${{ matrix.artifact }}.tar.gz" *) &
-          # 2. install the pinned nfpm binary for deb + rpm
+          # install the pinned nfpm binary for deb + rpm
           nfpm_arch="x86_64"
           if [[ "${{ matrix.arch }}" == "arm64" ]]; then nfpm_arch="arm64"; fi
           nfpm_url="https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${NFPM_VERSION#v}_Linux_${nfpm_arch}.tar.gz"
@@ -389,7 +409,6 @@ jobs:
           sed "s/{{.Arch}}/${arch}/" build/linux/nfpm.yaml > /tmp/nfpm.yaml
           "${nfpm_cmd}" pkg --packager deb --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.deb"
           "${nfpm_cmd}" pkg --packager rpm --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.rpm"
-          wait
           test -f "${{ matrix.artifact }}.deb"
           test -f "${{ matrix.artifact }}.rpm"
           ls -la "${{ matrix.artifact }}".*
@@ -440,7 +459,7 @@ jobs:
           name: ${{ matrix.artifact }}-${{ github.ref_name }}
           path: |
             ${{ matrix.artifact }}.zip
-            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.deb
             ${{ matrix.artifact }}.rpm
             ${{ matrix.artifact }}.AppImage
