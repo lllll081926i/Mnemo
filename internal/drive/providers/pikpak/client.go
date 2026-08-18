@@ -198,8 +198,38 @@ func isCaptchaError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var captchaErr *pikpakCaptchaError
+	if errors.As(err, &captchaErr) {
+		return true
+	}
 	s := err.Error()
 	return strings.Contains(s, "captcha_required") || strings.Contains(s, "captcha_invalid") || strings.Contains(s, "验证失败")
+}
+
+func isCaptchaRequiredError(err error) bool {
+	var captchaErr *pikpakCaptchaError
+	if errors.As(err, &captchaErr) {
+		return captchaErr.reason == "captcha_required"
+	}
+	return strings.Contains(errString(err), "captcha_required")
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+type pikpakCaptchaError struct{ reason string }
+
+func (e *pikpakCaptchaError) Error() string {
+	switch e.reason {
+	case "captcha_invalid", "captcha_required":
+		return "PikPak 验证失败，请重试登录"
+	default:
+		return "PikPak 验证失败"
+	}
 }
 
 // get performs a GET with query params.
@@ -293,6 +323,7 @@ func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 	if status == http.StatusTooManyRequests || e.Code == http.StatusTooManyRequests || e.ErrorCode == http.StatusTooManyRequests ||
 		strings.Contains(detail, "too_many") || strings.Contains(detail, "too many") ||
 		strings.Contains(detail, "too_frequent") || strings.Contains(detail, "request_frequency") ||
+		strings.Contains(detail, "too_fluent") || strings.Contains(detail, "too fluent") || strings.Contains(detail, "too fast") ||
 		strings.Contains(detail, "rate_limit") || strings.Contains(detail, "rate limited") ||
 		strings.Contains(detail, "请求频繁") || strings.Contains(detail, "操作频繁") {
 		seconds := pikpakMinRateLimitSeconds
@@ -307,11 +338,11 @@ func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 		return &PikPakRateLimitError{RetryAfterSeconds: seconds}
 	}
 	// 常见错误友好化（对齐旧版 parsePikPakError）
-	switch e.Error {
+	switch strings.ToLower(e.Error) {
 	case "invalid_account_or_password":
 		return errors.New("PikPak 账号或密码错误")
 	case "captcha_invalid", "captcha_required":
-		return errors.New("PikPak 验证失败，请重试登录")
+		return &pikpakCaptchaError{reason: strings.ToLower(e.Error)}
 	}
 	msg := e.ErrorDescription
 	if msg == "" {

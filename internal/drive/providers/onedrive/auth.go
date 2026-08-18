@@ -24,7 +24,9 @@ import (
 const (
 	msAuthorizeURL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 	msTokenURL     = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-	redirectPath   = "/callback"
+	redirectPath   = "/"
+	redirectURI    = "http://localhost:53682/"
+	listenAddress  = "localhost:53682"
 
 	// Keep the same public desktop OAuth application used by the legacy
 	// client/rclone. A release may override these through secrets.json.
@@ -39,13 +41,11 @@ const (
 func authPKCE(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
 	clientID, clientSecret := resolveCredentials(req.Config["client_id"], req.Config["client_secret"], req.Config["onedrive_client_id"], req.Config["onedrive_client_secret"])
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}
 	defer ln.Close()
-	port := ln.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d%s", port, redirectPath)
 
 	verifier, err := pkceVerifier()
 	if err != nil {
@@ -285,7 +285,8 @@ func validCallbackRequest(r *http.Request, ln net.Listener, path string) bool {
 		return false
 	}
 	host, port, err := net.SplitHostPort(r.Host)
-	if err != nil || host != "127.0.0.1" || port != fmt.Sprint(addr.Port) {
+	host = strings.Trim(host, "[]")
+	if err != nil || !isLoopbackCallbackHost(host) || port != fmt.Sprint(addr.Port) {
 		return false
 	}
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -294,4 +295,13 @@ func validCallbackRequest(r *http.Request, ln net.Listener, path string) bool {
 	}
 	ip := net.ParseIP(remoteHost)
 	return ip != nil && ip.IsLoopback()
+}
+
+func isLoopbackCallbackHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }

@@ -26,6 +26,8 @@ export function ClearMigrateJobs():Promise<void>;
 
 export function ClearUploads():Promise<void>;
 
+export function ClosePikPakCaptcha():Promise<void>;
+
 export function CopyFiles(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<Array<string>>;
 
 export function CreateShare(arg1:string,arg2:string,arg3:drive.ShareParams):Promise<model.ShareItem>;
@@ -59,8 +61,6 @@ export function GetFileDetail(arg1:string,arg2:string,arg3:string):Promise<model
 export function GetPan189Captcha():Promise<string>;
 
 export function GetPlayCursor(arg1:string,arg2:string,arg3:string):Promise<number>;
-
-export function GetPlayerState():Promise<Record<string, number>>;
 
 export function GetSettings():Promise<store.Settings>;
 
@@ -110,9 +110,9 @@ export function OpenBrowser(arg1:string):Promise<void>;
 
 export function OpenFile(arg1:string):Promise<void>;
 
-export function PauseDownload(arg1:string):Promise<void>;
+export function OpenPikPakCaptcha(arg1:string):Promise<void>;
 
-export function PausePlayer(arg1:boolean):Promise<void>;
+export function PauseDownload(arg1:string):Promise<void>;
 
 export function PickDirectory(arg1:string,arg2:string):Promise<string>;
 
@@ -172,17 +172,9 @@ export function SaveSyncConfig(arg1:sync.Config):Promise<void>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:string):Promise<Array<model.File>>;
 
-export function SeekPlayer(arg1:number):Promise<void>;
-
 export function SendGuangyaSms(arg1:string):Promise<Record<string, string>>;
 
-export function SetPlayerSpeed(arg1:number):Promise<void>;
-
-export function SetPlayerVolume(arg1:number):Promise<void>;
-
 export function StartSyncScheduler():Promise<string>;
-
-export function StopPlayer():Promise<void>;
 
 export function TrashFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 

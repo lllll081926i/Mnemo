@@ -518,12 +518,12 @@ body {
 .task-list-enter-from { opacity: 0; transform: translateY(-8px); }
 .task-list-leave-to { opacity: 0; transform: translateX(24px); max-height: 0 !important; margin-top: 0 !important; margin-bottom: 0 !important; }
 
-/* 登录弹窗：左 provider 列表 + 右表单 */
-.login-modal { width: 680px; height: 480px; }
+/* 登录弹窗：左 provider 列表 + 右表单，验证码也在同一面板内完成 */
+.login-modal { width: min(760px, 94vw); height: min(680px, 88vh); max-height: 88vh; }
 .login-body { display: flex; flex: 1; min-height: 0; }
 .login-side {
-  width: 168px; flex-shrink: 0; overflow-y: auto;
-  border-right: 1px solid var(--border-lighter); padding: 8px;
+  width: 184px; flex-shrink: 0; overflow-y: auto;
+  border-right: 1px solid var(--border-lighter); padding: 10px 8px;
 }
 .login-side .lp-item {
   display: flex; align-items: center; gap: 9px;
@@ -533,11 +533,23 @@ body {
 .login-side .lp-item:hover { background: var(--bg-hover); }
 .login-side .lp-item.active { background: var(--listselectbg); color: var(--color-primary); font-weight: 600; }
 .login-side .lp-item img { width: 17px; height: 17px; object-fit: contain; }
-.login-form { flex: 1; overflow-y: auto; padding: 18px 22px; }
+.login-form { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 24px 18px; }
 .login-form .lf-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
 .login-form .lf-head img { width: 30px; height: 30px; object-fit: contain; }
 .login-form .lf-head .lf-title { font-size: 16px; font-weight: 700; }
 .login-form .lf-head .lf-sub { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+
+@media (max-width: 640px) {
+  .login-modal { width: 94vw; height: 88vh; }
+  .login-body { flex-direction: column; }
+  .login-side {
+    width: 100%; max-height: 112px; padding: 8px;
+    border-right: 0; border-bottom: 1px solid var(--border-lighter);
+    display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+  }
+  .login-side .lp-item { flex: 0 0 auto; min-width: 100px; justify-content: center; }
+  .login-form { padding: 16px; }
+}
 
 /* ============ 传输页 ============ */
 .down-layout { flex: 1; display: flex; min-height: 0; }

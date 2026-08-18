@@ -42,6 +42,10 @@ export function ClearUploads() {
   return window['go']['app']['App']['ClearUploads']();
 }
 
+export function ClosePikPakCaptcha() {
+  return window['go']['app']['App']['ClosePikPakCaptcha']();
+}
+
 export function CopyFiles(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['CopyFiles'](arg1, arg2, arg3, arg4);
 }
@@ -108,10 +112,6 @@ export function GetPan189Captcha() {
 
 export function GetPlayCursor(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetPlayCursor'](arg1, arg2, arg3);
-}
-
-export function GetPlayerState() {
-  return window['go']['app']['App']['GetPlayerState']();
 }
 
 export function GetSettings() {
@@ -210,12 +210,12 @@ export function OpenFile(arg1) {
   return window['go']['app']['App']['OpenFile'](arg1);
 }
 
-export function PauseDownload(arg1) {
-  return window['go']['app']['App']['PauseDownload'](arg1);
+export function OpenPikPakCaptcha(arg1) {
+  return window['go']['app']['App']['OpenPikPakCaptcha'](arg1);
 }
 
-export function PausePlayer(arg1) {
-  return window['go']['app']['App']['PausePlayer'](arg1);
+export function PauseDownload(arg1) {
+  return window['go']['app']['App']['PauseDownload'](arg1);
 }
 
 export function PickDirectory(arg1, arg2) {
@@ -334,28 +334,12 @@ export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['SearchFiles'](arg1, arg2, arg3);
 }
 
-export function SeekPlayer(arg1) {
-  return window['go']['app']['App']['SeekPlayer'](arg1);
-}
-
 export function SendGuangyaSms(arg1) {
   return window['go']['app']['App']['SendGuangyaSms'](arg1);
 }
 
-export function SetPlayerSpeed(arg1) {
-  return window['go']['app']['App']['SetPlayerSpeed'](arg1);
-}
-
-export function SetPlayerVolume(arg1) {
-  return window['go']['app']['App']['SetPlayerVolume'](arg1);
-}
-
 export function StartSyncScheduler() {
   return window['go']['app']['App']['StartSyncScheduler']();
-}
-
-export function StopPlayer() {
-  return window['go']['app']['App']['StopPlayer']();
 }
 
 export function TrashFiles(arg1, arg2, arg3) {

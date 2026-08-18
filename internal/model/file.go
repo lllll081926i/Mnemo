@@ -80,6 +80,10 @@ type VideoPreview struct {
 	NoOrigin   bool              `json:"no_origin,omitempty"`
 	Qualities  []VideoQuality    `json:"qualities,omitempty"`
 	Subtitles  []Subtitle        `json:"subtitles,omitempty"`
+
+	// URL is the local proxy URL the frontend <video> element should load.
+	URL            string `json:"url,omitempty"`
+	CurrentQuality string `json:"current_quality,omitempty"`
 }
 
 // DownloadURL holds a resolvable direct download source for a file.

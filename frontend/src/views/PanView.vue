@@ -902,7 +902,7 @@ function onKey(e) {
   }
 }
 
-watch(() => [props.account?.user_id || '', props.account?.drive_id || ''], ([nextUid, nextDid]) => {
+watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKey.value], ([nextUid, nextDid]) => {
   const a = props.account
   if (!a) { files.value = []; return }
   tree.value = {}

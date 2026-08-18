@@ -102,10 +102,8 @@ export function localPreviewUrl(path) { return App.LocalPreviewURL(path) }
 export function mediaProxy() { return App.MediaProxy() }
 export function playVideo(userId, driveId, fileId) { return App.PlayVideo(userId, driveId, fileId) }
 export function playVideoQuality(userId, driveId, fileId, quality) { return App.PlayVideoQuality(userId, driveId, fileId, quality) }
-export function pausePlayer(paused) { return App.PausePlayer(paused) }
-export function seekPlayer(sec) { return App.SeekPlayer(sec) }
-export function setPlayerVolume(v) { return App.SetPlayerVolume(v) }
-export function stopPlayer() { return App.StopPlayer() }
+export function getPlayCursor(userId, driveId, fileId) { return App.GetPlayCursor(userId, driveId, fileId) }
+export function savePlayCursor(userId, driveId, fileId, sec) { return App.SavePlayCursor(userId, driveId, fileId, sec) }
 
 /** 从 user_id 解析 provider：普通盘 `pikpak_xxx`，挂载存储 `webdav:xxx` / `s3:xxx`。 */
 export function providerOf(userId) {
@@ -251,3 +249,5 @@ export async function copyText(text) {
 
 // 打开外部浏览器（后端包装，避免直接依赖 runtime）
 export function OpenBrowser(url) { return App.OpenBrowser(url) }
+export function OpenPikPakCaptcha(url) { return App.OpenPikPakCaptcha(url) }
+export function ClosePikPakCaptcha() { return App.ClosePikPakCaptcha() }

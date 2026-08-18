@@ -300,7 +300,14 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	}
 	j.Info.Path = relative
 	j.Info.Name = uploadLeaf(relative)
-	parentID, parentErr := q.ensureRemoteParent(ctx, userID, driveID, j.Info.ParentFileID, relative)
+	parentID := strings.TrimSpace(j.Info.ParentFileID)
+	provider := drive.ProviderOf(userID, driveID, "")
+	if parentID == "" || drive.IsRootID(provider, parentID) {
+		if root, rootErr := drive.RootID(userID, driveID); rootErr == nil && root != "" {
+			parentID = root
+		}
+	}
+	parentID, parentErr := q.ensureRemoteParent(ctx, userID, driveID, parentID, relative)
 	if parentErr != nil {
 		j.Upload.IsDowning = false
 		if errors.Is(ctx.Err(), context.Canceled) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"mnemo-go/internal/captcha"
 	"mnemo-go/internal/config"
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
@@ -43,8 +44,7 @@ type App struct {
 	uploads      *transfer.UploadQueue
 	secrets      config.Secrets
 	dataDir      string
-	player       *playback
-	playerMu     sync.Mutex
+
 	migrate      *migrate.Engine
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
 	shutdownOnce sync.Once
@@ -327,7 +327,7 @@ func (a *App) emit(name string, data any) {
 }
 
 // shutdown is wired to Wails OnShutdown to release long-lived resources:
-// the download manager, preview server and mpv player. Errors are logged to
+// the download manager, preview server and captcha server. Errors are logged to
 // stderr because Wails ignores the returned error and we must not panic on
 // the shutdown path.
 func (a *App) Shutdown(ctx context.Context) {
@@ -335,6 +335,7 @@ func (a *App) Shutdown(ctx context.Context) {
 		return
 	}
 	a.shutdownOnce.Do(func() {
+		captcha.Close()
 		a.stateMu.Lock()
 		migrations, downloads, uploads, mediaProxy, stop := a.migrate, a.dl, a.uploads, a.preview, a.schedStop
 		a.schedStop = nil
@@ -345,7 +346,7 @@ func (a *App) Shutdown(ctx context.Context) {
 		if migrations != nil {
 			migrations.CancelAll()
 		}
-		_ = a.StopPlayer()
+	
 		if downloads != nil {
 			downloads.Shutdown()
 		}
@@ -363,6 +364,22 @@ func (a *App) OpenBrowser(url string) {
 	if ctx, ok := a.wailsContext(); ok {
 		runtime.BrowserOpenURL(ctx, url)
 	}
+}
+
+// OpenPikPakCaptcha opens the challenge in a temporary application-owned
+// WebView and emits the final token when PikPak accepts the verification.
+func (a *App) OpenPikPakCaptcha(url string) error {
+	return captcha.Open(url, func(token string) {
+		a.emit("pikpak:captcha:completed", map[string]string{
+			"url":           url,
+			"captcha_token": token,
+		})
+	})
+}
+
+// ClosePikPakCaptcha closes the temporary challenge window, if any.
+func (a *App) ClosePikPakCaptcha() {
+	captcha.Close()
 }
 
 // ProviderInfo is the JSON-safe projection of a provider registration exposed
@@ -769,11 +786,25 @@ func (a *App) ClearDownloads() {
 }
 
 // UploadFiles enqueues uploads.
+func canonicalUploadParent(userID, driveID, parentID string) string {
+	if strings.TrimSpace(parentID) != "" && strings.TrimSpace(parentID) != "root" {
+		return parentID
+	}
+	if root, err := drive.RootID(userID, driveID); err == nil && root != "" {
+		return root
+	}
+	return parentID
+}
+
 func (a *App) UploadFiles(userID, driveID, parentID string, localPaths []string) []*model.UploadingUI {
 	uploads := a.uploadQueue()
 	if uploads == nil {
 		return nil
 	}
+	// The frontend can briefly still hold the generic "root" sentinel while
+	// provider metadata is loading. Canonicalize it before the asynchronous
+	// queue starts resolving the remote parent.
+	parentID = canonicalUploadParent(userID, driveID, parentID)
 	return uploads.AddFiles(userID, driveID, parentID, localPaths)
 }
 

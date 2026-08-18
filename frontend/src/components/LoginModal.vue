@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, SendGuangyaSms, providerIconUrl, OpenBrowser } from '../api'
+import { login, saveMounted, SendGuangyaSms, providerIconUrl, OpenBrowser, OpenPikPakCaptcha, ClosePikPakCaptcha, onEvent } from '../api'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({ providers: { type: Array, default: () => [] } })
@@ -13,6 +13,7 @@ const busy = ref(false)
 const smsBusy = ref(false)
 const smsCountdown = ref(0)
 let smsTimer = null
+let captchaEventOff = null
 function startSmsCountdown() {
   smsCountdown.value = 60
   if (smsTimer) clearInterval(smsTimer)
@@ -30,7 +31,12 @@ const provider = computed(() => props.providers.find((p) => p.ID === providerId.
 const fields = computed(() => (provider.value && provider.value.Login && provider.value.Login.fields) || [])
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuth = computed(() => fields.value.some((f) => f.type === 'oauth'))
-const isLongText = (key) => /cookie|token|bduss|secret/i.test(key)
+const isCookieField = (field) => /cookie|cookies|bduss/i.test(`${field.key} ${field.label}`)
+const hasNonCookieLogin = computed(() => fields.value.some((field) => !isCookieField(field)))
+const visibleFields = computed(() => hasNonCookieLogin.value
+  ? fields.value.filter((field) => !isCookieField(field))
+  : fields.value)
+const isLongText = (key) => /cookie|token|bduss|secret|authorization/i.test(key)
 const isPan139DirectLogin = computed(() => providerId.value === 'pan139' && String(form.value.authorization || '').trim() !== '')
 function isFieldRequired(field) {
   if (isPan139DirectLogin.value && (field.key === 'username' || field.key === 'password')) return false
@@ -53,9 +59,28 @@ watch(() => props.providers, (list) => {
 }, { immediate: true })
 
 function onKey(e) { if (e.key === 'Escape') emit('close') }
-onMounted(() => window.addEventListener('keydown', onKey))
+onMounted(() => {
+  window.addEventListener('keydown', onKey)
+  window.addEventListener('message', onCaptchaMessage)
+  captchaEventOff = onEvent('pikpak:captcha:completed', (payload) => {
+    if (providerId.value !== 'pikpak' || !captchaUrl.value) return
+    const resultURL = String(payload?.url || '')
+    if (resultURL && resultURL !== captchaUrl.value) return
+    if (!acceptCaptchaToken(payload?.captcha_token)) {
+      errorText.value = '验证码已完成，但没有收到有效结果，请重新验证'
+      captchaNativeOpened.value = false
+      return
+    }
+    captchaNativeOpened.value = true
+    void submit()
+  })
+})
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('message', onCaptchaMessage)
+  captchaEventOff?.()
+  captchaEventOff = null
+  void ClosePikPakCaptcha()
   if (smsTimer) clearInterval(smsTimer)
 })
 
@@ -69,18 +94,91 @@ function openHelp() { if (providerHelp.value) OpenBrowser(providerHelp.value.url
 
 // PikPak 滑块验证
 const captchaUrl = ref('')
-const captchaOpened = ref(false)
+const captchaCompleted = ref(false)
+const captchaFrameReady = ref(false)
+const captchaSubmitting = ref(false)
+const captchaNativeOpened = ref(false)
+function findCaptchaToken(value, depth = 0) {
+  if (value == null || depth > 5) return ''
+  if (typeof value === 'string') {
+    const text = value.trim()
+    try {
+      const parsed = JSON.parse(text)
+      return findCaptchaToken(parsed, depth + 1)
+    } catch {
+      return text.length > 20 && /^[A-Za-z0-9._~+/=-]+$/.test(text) ? text : ''
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const token = findCaptchaToken(item, depth + 1)
+      if (token) return token
+    }
+    return ''
+  }
+  if (typeof value !== 'object') return ''
+  for (const key of ['captcha_token', 'captchaToken', 'token']) {
+    const token = String(value[key] || '').trim()
+    if (token.length > 20) return token
+  }
+  for (const item of Object.values(value)) {
+    const token = findCaptchaToken(item, depth + 1)
+    if (token) return token
+  }
+  return ''
+}
+function acceptCaptchaToken(token) {
+  const value = String(token || '').trim()
+  if (!value || value.length <= 20) return false
+  form.value.captcha_token = value
+  form.value.captcha_verified = 'true'
+  captchaCompleted.value = true
+  errorText.value = ''
+  return true
+}
+function onCaptchaMessage(event) {
+  if (providerId.value !== 'pikpak' || !captchaUrl.value) return
+  let allowed = false
+  try {
+    const challenge = new URL(captchaUrl.value)
+    allowed = !event.origin || event.origin === challenge.origin || /(^|\.)mypikpak\.(com|net)$/i.test(new URL(event.origin).hostname)
+  } catch { /* ignore malformed browser messages */ }
+  if (!allowed) return
+  const token = findCaptchaToken(event.data)
+  if (acceptCaptchaToken(token)) void submit()
+}
 function parseCaptcha(err) {
   const m = String(err).match(/captcha_required\nurl=(\S+)\ntoken=(\S*)/)
   if (!m) return false
   captchaUrl.value = m[1]
   form.value.captcha_token = m[2]
-  captchaOpened.value = false
+  delete form.value.captcha_verified
+  captchaCompleted.value = false
+  captchaFrameReady.value = false
+  captchaNativeOpened.value = false
   return true
 }
-function openCaptcha() {
-  captchaOpened.value = true
-  OpenBrowser(captchaUrl.value).catch(() => {})
+async function openCaptchaWebView() {
+  if (!captchaUrl.value || captchaNativeOpened.value) return
+  try {
+    await OpenPikPakCaptcha(captchaUrl.value)
+    captchaNativeOpened.value = true
+    errorText.value = '请在应用内验证窗口完成安全验证，完成后会自动继续登录'
+  } catch {
+    // The inline iframe remains available when WebView2 is unavailable.
+    captchaNativeOpened.value = false
+    errorText.value = '应用内验证窗口不可用，请直接在下方完成安全验证'
+  }
+}
+function reloadCaptcha() {
+  if (!captchaUrl.value) return
+  void ClosePikPakCaptcha()
+  captchaCompleted.value = false
+  captchaFrameReady.value = false
+  captchaNativeOpened.value = false
+  captchaUrl.value = `${captchaUrl.value}${captchaUrl.value.includes('?') ? '&' : '?'}_mneno=${Date.now()}`
+  delete form.value.captcha_token
+  delete form.value.captcha_verified
 }
 
 // 天翼云 189 图形验证码
@@ -93,10 +191,15 @@ function parse189Captcha(err) {
 }
 
 function resetCaptcha() {
+  void ClosePikPakCaptcha()
   captchaUrl.value = ''
-  captchaOpened.value = false
+  captchaCompleted.value = false
+  captchaFrameReady.value = false
+  captchaSubmitting.value = false
+  captchaNativeOpened.value = false
   pan189Captcha.value = ''
   delete form.value.captcha_token
+  delete form.value.captcha_verified
   delete form.value.validate_code
 }
 
@@ -128,12 +231,12 @@ function validate() {
     return ''
   }
   if (isOAuth.value) return '' // OAuth 无表单校验
-  for (const f of fields.value) {
+  for (const f of visibleFields.value) {
     if (isFieldRequired(f) && !String(form.value[f.key] || '').trim()) return `请填写${f.label}`
   }
   // 全可选字段的 provider 至少填一项
-  const allOpt = fields.value.length > 0 && fields.value.every((f) => !f.required)
-  if (allOpt && !fields.value.some((f) => String(form.value[f.key] || '').trim())) return '至少填写一个字段'
+  const allOpt = visibleFields.value.length > 0 && visibleFields.value.every((f) => !f.required)
+  if (allOpt && !visibleFields.value.some((f) => String(form.value[f.key] || '').trim())) return '至少填写一个字段'
   return ''
 }
 
@@ -142,6 +245,7 @@ async function submit() {
   const err = validate()
   if (err) { errorText.value = err; return }
   busy.value = true
+  captchaSubmitting.value = true
   errorText.value = ''
   try {
     if (isMounted.value) {
@@ -153,7 +257,8 @@ async function submit() {
     emit('close')
   } catch (e) {
     if (providerId.value === 'pikpak' && parseCaptcha(e)) {
-      errorText.value = ''
+      errorText.value = '请完成安全验证'
+      await openCaptchaWebView()
     } else if (providerId.value === 'pan189' && parse189Captcha(e)) {
       errorText.value = '请输入图片中的验证码'
     } else {
@@ -161,6 +266,7 @@ async function submit() {
     }
   }
   busy.value = false
+  captchaSubmitting.value = false
 }
 </script>
 
@@ -220,7 +326,7 @@ async function submit() {
 
               <!-- 常规表单 -->
               <template v-else>
-                <div v-for="f in fields" :key="f.key" class="field">
+                <div v-for="f in visibleFields" :key="f.key" class="field">
                   <label>{{ f.label }}<span v-if="isFieldRequired(f)" class="req">*</span></label>
                   <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                   <input v-else class="input" :type="f.type === 'password' ? 'password' : 'text'" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
@@ -230,7 +336,7 @@ async function submit() {
                     class="btn sm" style="margin-top:8px" :disabled="smsBusy" type="button" @click="sendSms"
                   >{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + 's 后重发' : '获取验证码') }}</button>
                 </div>
-                <div v-if="!fields.length" class="hint" style="color:var(--text-tertiary);font-size: 13px">该网盘无需填写表单，直接点击登录。</div>
+                <div v-if="!visibleFields.length" class="hint" style="color:var(--text-tertiary);font-size: 13px">该网盘无需填写表单，直接点击登录。</div>
               </template>
 
               <!-- 网盘专属帮助链接 -->
@@ -240,10 +346,31 @@ async function submit() {
 
               <!-- PikPak 滑块安全验证 -->
               <div v-if="captchaUrl" class="captcha-box">
-                <p>{{ captchaOpened ? '验证窗口已打开，完成滑块后点「完成验证并登录」' : '账号触发了 PikPak 安全验证，需要在浏览器中完成滑块' }}</p>
+                <div class="captcha-head">
+                  <div>
+                    <strong>{{ captchaCompleted ? '验证已完成' : '请在下方完成安全验证' }}</strong>
+                    <p>{{ captchaCompleted ? '正在使用最新验证结果继续登录' : (captchaNativeOpened ? '请在应用内验证窗口完成滑块' : (captchaFrameReady ? '完成滑块后将自动继续登录' : '正在加载验证页面…')) }}</p>
+                  </div>
+                  <button class="btn sm" type="button" :disabled="captchaSubmitting" @click="reloadCaptcha">重新加载</button>
+                </div>
+                <div v-if="captchaNativeOpened" class="captcha-native-state">
+                  <UiIcon name="monitor" :size="22" />
+                  <span>验证窗口已打开，完成后会自动回传结果</span>
+                  <button class="btn sm" type="button" :disabled="captchaSubmitting" @click="openCaptchaWebView">重新打开验证窗口</button>
+                </div>
+                <iframe
+                  v-if="!captchaNativeOpened"
+                  class="captcha-frame"
+                  :src="captchaUrl"
+                  title="PikPak 安全验证"
+                  referrerpolicy="strict-origin-when-cross-origin"
+                  allow="clipboard-read; clipboard-write"
+                  @load="captchaFrameReady = true"
+                ></iframe>
                 <div class="captcha-actions">
-                  <button class="btn sm" type="button" @click="openCaptcha">{{ captchaOpened ? '重新打开验证页' : '打开验证页' }}</button>
-                  <button v-if="captchaOpened" class="btn primary sm" type="submit" :disabled="busy">完成验证并登录</button>
+                  <span v-if="captchaCompleted" class="captcha-state">已收到验证结果</span>
+                  <button v-if="!captchaNativeOpened" class="btn sm" type="button" :disabled="captchaSubmitting" @click="openCaptchaWebView">在应用内打开验证</button>
+                  <button v-if="captchaCompleted" class="btn primary sm" type="submit" :disabled="busy">{{ busy ? '登录中…' : '验证完成并登录' }}</button>
                 </div>
               </div>
 
@@ -252,7 +379,6 @@ async function submit() {
                 <p style="margin-bottom:6px">请输入下图中的验证码：</p>
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
                   <img :src="pan189Captcha" alt="图形验证码" style="height:36px;border-radius:var(--radius-xs);background:#fff;border:1px solid var(--border-light)" />
-                  <input class="input" style="width:120px" v-model="form.validate_code" placeholder="验证码" autofocus />
                 </div>
               </div>
 
@@ -299,5 +425,25 @@ async function submit() {
   font-size: 13px; color: var(--text-secondary); line-height: 1.6;
 }
 .captcha-box p { margin: 0 0 8px; }
-.captcha-actions { display: flex; gap: 8px; }
+.captcha-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.captcha-head strong { display:block; color:var(--text-primary); font-size:13px; }
+.captcha-head p { margin:3px 0 0; }
+.captcha-frame {
+  display:block; width:100%; height:320px; margin-top:10px;
+  border:1px solid var(--border-light); border-radius:var(--radius-sm);
+  background:#fff;
+}
+.captcha-native-state {
+  min-height: 190px; margin-top:10px; padding:24px 16px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  border:1px dashed var(--border-light); border-radius:var(--radius-sm);
+  color:var(--text-secondary); text-align:center;
+}
+.captcha-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; }
+.captcha-state { color:var(--color-success); font-size:12px; }
+@media (max-width: 640px) {
+  .captcha-frame { height:300px; }
+  .captcha-head { align-items:stretch; flex-direction:column; }
+  .captcha-head .btn { align-self:flex-start; }
+}
 </style>

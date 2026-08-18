@@ -137,9 +137,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	parentID := toID(ui.Info.ParentFileID)
-	if parentID == "" {
-		parentID = RootID
-	}
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
 		return errors.New("打开文件失败: " + err.Error())

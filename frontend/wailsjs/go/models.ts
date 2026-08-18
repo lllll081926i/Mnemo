@@ -1086,6 +1086,8 @@ export namespace model {
 	    no_origin?: boolean;
 	    qualities?: VideoQuality[];
 	    subtitles?: Subtitle[];
+	    url?: string;
+	    current_quality?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VideoPreview(source);
@@ -1104,6 +1106,8 @@ export namespace model {
 	        this.no_origin = source["no_origin"];
 	        this.qualities = this.convertValues(source["qualities"], VideoQuality);
 	        this.subtitles = this.convertValues(source["subtitles"], Subtitle);
+	        this.url = source["url"];
+	        this.current_quality = source["current_quality"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

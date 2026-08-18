@@ -738,7 +738,7 @@ func TestPan123UploadResumesSavedSessionBeforeRequest(t *testing.T) {
 		DriveID: "pan123:user",
 		Token:   &model.TokenInfo{AccessToken: "access-token"},
 	}
-	etag, err := fileMD5(path)
+	etag, err := fileMD5(path, nil)
 	if err != nil {
 		t.Fatalf("fileMD5: %v", err)
 	}
@@ -805,7 +805,7 @@ func TestPan123UploadRecreatesStaleSavedSession(t *testing.T) {
 		DriveID: "pan123:user",
 		Token:   &model.TokenInfo{AccessToken: "access-token"},
 	}
-	etag, err := fileMD5(path)
+	etag, err := fileMD5(path, nil)
 	if err != nil {
 		t.Fatalf("fileMD5: %v", err)
 	}

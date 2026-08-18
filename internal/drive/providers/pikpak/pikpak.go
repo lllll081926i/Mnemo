@@ -382,8 +382,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		"resumable":   map[string]any{"provider": "PROVIDER_ALIYUN"},
 		"folder_type": "NORMAL",
 	}
-	if ui.Info.ParentFileID != "" && ui.Info.ParentFileID != RootID {
-		body["parent_id"] = ui.Info.ParentFileID
+	if parentID := apiParentID(ui.Info.ParentFileID); parentID != "" {
+		body["parent_id"] = parentID
 	}
 	var res struct {
 		UploadType string `json:"upload_type"`

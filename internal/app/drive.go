@@ -32,6 +32,7 @@ func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content str
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("上传服务未启动")
 	}
+	parentID = canonicalUploadParent(userID, driveID, parentID)
 	if created := uploads.AddFiles(userID, driveID, parentID, []string{tmpPath}); len(created) == 0 {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("文件未能加入上传队列")

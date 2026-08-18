@@ -14,3 +14,4 @@ internal/engine/win32/mpv/mpv.exe
 internal/engine/*/mpv/mpv.exe
 internal/engine/*/mpv/mpv
 internal/engine/**/*.exe
+.tmp-go-cache/

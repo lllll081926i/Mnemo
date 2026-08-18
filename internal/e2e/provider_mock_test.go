@@ -129,6 +129,9 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 	var initCalls, signinCalls int
 	var previousTokens []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Device-Id"); len(got) != 32 || strings.Trim(got, "0123456789abcdefABCDEF") != "" {
+			t.Errorf("X-Device-Id = %q, want 32 hexadecimal characters", got)
+		}
 		if got := r.Header.Get("Referer"); got != "https://mypikpak.com/" {
 			t.Errorf("Referer = %q", got)
 		}
@@ -196,6 +199,49 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 	}
 }
 
+func TestPikPakLoginUsesVerifiedCaptchaTokenDirectly(t *testing.T) {
+	var initCalls, signinCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/shield/captcha/init":
+			initCalls++
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "captcha init must not run after visual verification"})
+		case "/v1/auth/signin":
+			signinCalls++
+			if got := r.Header.Get("X-Captcha-Token"); got != "verified-final" {
+				t.Errorf("X-Captcha-Token = %q, want verified-final", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "direct-access", "refresh_token": "direct-refresh",
+				"expires_in": 3600, "token_type": "Bearer", "sub": "direct-account",
+			})
+		case "/drive/v1/about":
+			_ = json.NewEncoder(w).Encode(map[string]any{"quota": map[string]any{"used": 0, "limit": 1}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	netx.TestTransportHook = pikpakCaptchaRewriteRT{mockHost: stripSchemeHost(srv.URL)}
+	t.Cleanup(func() { netx.TestTransportHook = nil })
+
+	reg, ok := drive.Get("pikpak")
+	if !ok || reg.Auth == nil {
+		t.Fatal("pikpak login registration missing")
+	}
+	tok, err := reg.Auth(context.Background(), drive.AuthRequest{Config: map[string]string{
+		"username": "direct@example.com", "password": "password",
+		"captcha_token": "verified-final", "captcha_verified": "true",
+	}})
+	if err != nil || tok == nil || tok.AccessToken != "direct-access" {
+		t.Fatalf("login token/error = %#v/%v", tok, err)
+	}
+	if initCalls != 0 || signinCalls != 1 {
+		t.Fatalf("captcha/signin calls = %d/%d, want 0/1", initCalls, signinCalls)
+	}
+}
+
 func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
 	var initCalls, signinCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +300,67 @@ func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
 	}
 	if initCalls != 2 || signinCalls != 2 {
 		t.Fatalf("captcha/signin calls = %d/%d", initCalls, signinCalls)
+	}
+}
+
+func TestPikPakLoginRefreshesInvalidCaptchaWithoutPreviousToken(t *testing.T) {
+	var initCalls, signinCalls int
+	var previousTokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/shield/captcha/init":
+			var body struct {
+				CaptchaToken string `json:"captcha_token"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode captcha init: %v", err)
+			}
+			initCalls++
+			previousTokens = append(previousTokens, body.CaptchaToken)
+			result := "initial-token"
+			if initCalls == 2 {
+				result = "final-token"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"captcha_token": result})
+		case "/v1/auth/signin":
+			signinCalls++
+			if signinCalls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "captcha_invalid"})
+				return
+			}
+			if got := r.Header.Get("X-Captcha-Token"); got != "final-token" {
+				t.Errorf("retry X-Captcha-Token = %q", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "invalid-retry-access", "refresh_token": "invalid-retry-refresh",
+				"expires_in": 3600, "token_type": "Bearer", "sub": "invalid-retry-account",
+			})
+		case "/drive/v1/about":
+			_ = json.NewEncoder(w).Encode(map[string]any{"quota": map[string]any{"used": 0, "limit": 1}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	netx.TestTransportHook = pikpakCaptchaRewriteRT{mockHost: stripSchemeHost(srv.URL)}
+	t.Cleanup(func() { netx.TestTransportHook = nil })
+
+	reg, ok := drive.Get("pikpak")
+	if !ok || reg.Auth == nil {
+		t.Fatal("pikpak login registration missing")
+	}
+	tok, err := reg.Auth(context.Background(), drive.AuthRequest{Config: map[string]string{
+		"username": "invalid@example.com", "password": "password",
+	}})
+	if err != nil || tok == nil || tok.AccessToken != "invalid-retry-access" {
+		t.Fatalf("login token/error = %#v/%v", tok, err)
+	}
+	if initCalls != 2 || signinCalls != 2 {
+		t.Fatalf("captcha/signin calls = %d/%d", initCalls, signinCalls)
+	}
+	if strings.Join(previousTokens, ",") != "," {
+		t.Fatalf("previous tokens = %v, want no token reuse", previousTokens)
 	}
 }
 

@@ -89,13 +89,13 @@ func idKey(username string) string {
 	return md5hex(strings.ToLower(strings.TrimSpace(username)))
 }
 
-// createDeviceID generates an RFC4122 v4 UUID.
+// createDeviceID generates the 32-character hexadecimal device id expected by
+// PikPak's web login protocol. UUIDs with hyphens are rejected by the service
+// in some login flows.
 func createDeviceID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	return fmt.Sprintf("%x", b)
 }
 
 // getOrCreateDeviceID returns a stable device id for an account.
@@ -104,8 +104,8 @@ func getOrCreateDeviceID(username string) string {
 	if deviceStore != nil {
 		id = deviceStore.get(username)
 	}
-	compact := strings.ReplaceAll(id, "-", "")
-	if len(compact) == 32 && isHex(compact) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if len(id) == 32 && isHex(id) {
 		return id
 	}
 	id = createDeviceID()
@@ -327,10 +327,10 @@ func signIn(ctx context.Context, hc *netx.Client, deviceID, username, password, 
 	if err := json.Unmarshal(data, &res); err != nil {
 		return nil, err
 	}
+	if res.Error != "" || res.ErrorDescription != "" {
+		return nil, parseAPIErrorWithRetry(data, resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
 	if res.AccessToken == "" {
-		if res.ErrorDescription != "" {
-			return nil, errors.New(res.ErrorDescription)
-		}
 		return nil, errors.New("pikpak: login failed")
 	}
 	res.DeviceID = deviceID
@@ -392,6 +392,13 @@ func exchangeLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, userna
 	}
 }
 
+// retryLoginCaptcha mirrors the legacy login flow after signin reports a
+// captcha error. A required captcha reuses the token that was submitted;
+// an invalid captcha starts a fresh chain without reusing that token.
+func retryLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken string) (string, string, error) {
+	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, previousToken)
+}
+
 // authSignIn is the Registration.Auth login flow.
 func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
 	username := strings.TrimSpace(req.Config["username"])
@@ -403,6 +410,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	hc := netx.NewClient(60 * time.Second)
 
 	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
+	captchaVerified := strings.EqualFold(strings.TrimSpace(req.Config["captcha_verified"]), "true")
 	if captchaToken == "" {
 		// A failed captcha init must stop here. Continuing with an empty token
 		// turns a transport/rate-limit failure into a misleading login error.
@@ -415,7 +423,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 			// 需要滑块验证：把验证 URL 与 token 带回前端，用户完成后带 token 重试
 			return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
 		}
-	} else {
+	} else if !captchaVerified {
 		// 滑块完成后的重试：链式带 previousToken 重发 init，等服务端登记验证结果
 		// （对齐旧版 loginPikPakWithCaptcha 的退避链）
 		tok, urlValue, err := exchangeLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken)
@@ -429,13 +437,20 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	}
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)
-	if err != nil && isCaptchaError(err) {
-		// Some accounts return no challenge URL from init but reject the first
-		// signin anyway. Reuse that token as the legacy flow does, then retry
-		// signin once with the exchanged token.
-		tok, urlValue, exchangeErr := exchangeLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken)
-		if exchangeErr != nil {
-			return nil, exchangeErr
+	if err != nil {
+		if !isCaptchaError(err) {
+			return nil, err
+		}
+		previousToken := ""
+		if isCaptchaRequiredError(err) {
+			previousToken = captchaToken
+		}
+		// The first failed signin follows the legacy client's single retry.
+		// Do not run the post-slider chain here: the user has not completed a
+		// new challenge yet.
+		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken)
+		if retryErr != nil {
+			return nil, retryErr
 		}
 		if urlValue != "" {
 			return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
