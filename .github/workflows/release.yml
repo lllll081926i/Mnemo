@@ -349,6 +349,7 @@ jobs:
           test -f "$ISCC"
           MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" build/windows/installer.iss
           test -f "build/installer/${{ matrix.artifact }}-Setup.exe"
+          cp "build/installer/${{ matrix.artifact }}-Setup.exe" "${{ matrix.artifact }}-Setup.exe"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -443,7 +444,7 @@ jobs:
             ${{ matrix.artifact }}.deb
             ${{ matrix.artifact }}.rpm
             ${{ matrix.artifact }}.AppImage
-            build/installer/${{ matrix.artifact }}-Setup.exe
+            ${{ matrix.artifact }}-Setup.exe
           if-no-files-found: warn
 
   publish:
