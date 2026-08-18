@@ -307,10 +307,10 @@ jobs:
           # Keep the runtime data dir non-empty so package globs (nfpm/AppImage)
           # always match at least one file even when no secrets are injected.
           if [[ -z "$(find "${runtime_dir}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-            cat > "${runtime_dir}/README.txt" <<'EOF'
-Mnemo runtime data directory.
-OAuth secrets.json (if configured) is written here at build time.
-EOF
+            printf '%s\n' \
+              'Mnemo runtime data directory.' \
+              'OAuth secrets.json (if configured) is written here at build time.' \
+              > "${runtime_dir}/README.txt"
           fi
           test -d "${runtime_dir}"
 
