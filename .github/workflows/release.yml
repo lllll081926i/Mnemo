@@ -179,7 +179,7 @@ jobs:
           python3 -m venv --clear /tmp/mnemo-meson-venv
           /tmp/mnemo-meson-venv/bin/python -m pip install \
             --disable-pip-version-check --no-input --retries 5 --timeout 120 \
-            "meson==${MESON_VERSION}"
+            "meson==${MESON_VERSION}" "pyelftools==0.31"
           export PATH="/tmp/mnemo-meson-venv/bin:${PATH}"
           test "$(meson --version)" = "${MESON_VERSION}"
           expected_arch="amd64"
