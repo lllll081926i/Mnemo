@@ -340,15 +340,7 @@ jobs:
           fi
           test -f "$ISCC"
           MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" build/windows/installer.iss
-
-      - name: Rename installer (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p build/installer
-          if [ -f build/installer/MnemoSetup.exe ]; then
-            mv build/installer/MnemoSetup.exe "build/installer/${{ matrix.artifact }}-Setup.exe"
-          fi
+          test -f "build/installer/${{ matrix.artifact }}-Setup.exe"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -386,9 +378,11 @@ jobs:
           arch="$(dpkg --print-architecture)"
           # nfpm config uses {{.Arch}} placeholder; substitute
           sed "s/{{.Arch}}/${arch}/" build/linux/nfpm.yaml > /tmp/nfpm.yaml
-          "${nfpm_cmd}" pkg --packager deb --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.deb" &
-          "${nfpm_cmd}" pkg --packager rpm --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.rpm" &
+          "${nfpm_cmd}" pkg --packager deb --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.deb"
+          "${nfpm_cmd}" pkg --packager rpm --config /tmp/nfpm.yaml --target "${{ matrix.artifact }}.rpm"
           wait
+          test -f "${{ matrix.artifact }}.deb"
+          test -f "${{ matrix.artifact }}.rpm"
           ls -la "${{ matrix.artifact }}".*
 
       - name: Build AppImage (Linux)

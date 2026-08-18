@@ -19,4 +19,4 @@ contents:
     dst: /usr/bin/data
 scripts:
   postinstall: build/linux/postinstall.sh
-  postrm: build/linux/postrm.sh
+  postremove: build/linux/postrm.sh
