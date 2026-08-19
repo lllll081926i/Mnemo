@@ -9,7 +9,8 @@ package captcha
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,51 +22,100 @@ import (
 	"time"
 )
 
+// Session identifies one application-owned captcha callback endpoint.
+// The random path keeps unrelated local requests from completing a login.
+type Session struct {
+	ID          string
+	CallbackURL string
+}
+
 // CompletedFunc receives the token returned after a visual challenge.
-type CompletedFunc func(token string)
+// A token can be empty when PikPak only signals completion through its redirect;
+// callers can then exchange the original challenge token with the API.
+type CompletedFunc func(session Session, token string)
 
 var (
-	mu        sync.Mutex
-	server    *http.Server
-	listener  net.Listener
-	onDone    CompletedFunc
+	mu            sync.Mutex
+	server        *http.Server
+	listener      net.Listener
+	onDone        CompletedFunc
+	activeSession Session
+	completed     bool
 )
 
+// Start creates a localhost callback endpoint without opening a browser. The
+// caller supplies Session.CallbackURL to PikPak while it initializes a visual
+// challenge, so the challenge itself redirects back to this application.
+func Start(onComplete CompletedFunc) (*Session, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	return startLocked(onComplete)
+}
+
 // Open launches the system browser at the challenge URL and starts a local
-// HTTP server to receive the captcha callback.
+// HTTP server to receive the captcha callback. It remains as a legacy fallback;
+// the normal login flow keeps the challenge embedded in the login page.
 func Open(rawURL string, onComplete CompletedFunc) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// stop any previous session
-	stopLocked()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	session, err := startLocked(onComplete)
 	if err != nil {
-		return fmt.Errorf("captcha: start callback server: %w", err)
+		return err
 	}
-	listener = ln
-	onDone = onComplete
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", handleCallback)
-	mux.HandleFunc("/redirect", handleRedirect)
-	srv := &http.Server{Handler: mux}
-	server = srv
-	go srv.Serve(ln)
 
 	// The challenge URL points to PikPak's captcha page. After the user
 	// completes the slider, PikPak redirects to a callback. We intercept by
 	// opening the challenge in the system browser — the redirect will land on
 	// our local server if PikPak uses a localhost redirect_uri, or we extract
 	// the token from the final URL via the /redirect helper.
-	challengeURL := buildChallengeURL(rawURL, ln.Addr().String())
+	challengeURL := buildChallengeURL(rawURL, session.CallbackURL)
 
 	if err := openBrowser(challengeURL); err != nil {
 		stopLocked()
 		return fmt.Errorf("captcha: 无法打开浏览器: %w", err)
 	}
 	return nil
+}
+
+func startLocked(onComplete CompletedFunc) (*Session, error) {
+	// Stop any previous session: only one login modal can be active at once.
+	stopLocked()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("captcha: start callback server: %w", err)
+	}
+	id, err := newSessionID()
+	if err != nil {
+		_ = ln.Close()
+		return nil, fmt.Errorf("captcha: create callback session: %w", err)
+	}
+	session := Session{
+		ID:          id,
+		CallbackURL: fmt.Sprintf("http://%s/callback/%s", ln.Addr().String(), id),
+	}
+
+	listener = ln
+	onDone = onComplete
+	activeSession = session
+	completed = false
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback/"+id, handleCallback)
+	mux.HandleFunc("/redirect/"+id, handleRedirect)
+	srv := &http.Server{Handler: mux}
+	server = srv
+	go func() { _ = srv.Serve(ln) }()
+	return &session, nil
+}
+
+func newSessionID() (string, error) {
+	b := make([]byte, 18)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Close stops the callback server.
@@ -76,31 +126,43 @@ func Close() {
 }
 
 func stopLocked() {
-	if server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = server.Shutdown(ctx)
-		cancel()
-		server = nil
-	}
-	if listener != nil {
-		_ = listener.Close()
-		listener = nil
-	}
+	// Detach first while the session lock is held. Shutdown can wait for an
+	// in-flight callback, which may itself need this lock to report completion.
+	// Closing the listener rejects new requests immediately; the detached server
+	// then drains asynchronously without blocking a replacement session.
+	srv := server
+	ln := listener
+	server = nil
+	listener = nil
 	onDone = nil
+	activeSession = Session{}
+	completed = false
+	if ln != nil {
+		_ = ln.Close()
+	}
+	if srv != nil {
+		go shutdownServer(srv)
+	}
 }
 
-// buildChallengeURL appends our callback as a redirect parameter so PikPak
-// knows where to send the token after verification.
-func buildChallengeURL(rawURL, callbackAddr string) string {
+func shutdownServer(srv *http.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+}
+
+// buildChallengeURL appends our callback as a redirect parameter for the
+// legacy browser fallback. Normal login supplies the same callback URI during
+// PikPak's captcha-init request, before the challenge URL is issued.
+func buildChallengeURL(rawURL, callbackURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return rawURL
 	}
 	q := parsed.Query()
-	// Some flows honor redirect_uri; others use a custom-scheme callback.
-	// We set both the standard redirect_uri and our own /redirect endpoint.
-	callbackURL := fmt.Sprintf("http://%s/callback", callbackAddr)
-	q.Set("redirect_uri", callbackURL)
+	if callbackURL != "" {
+		q.Set("redirect_uri", callbackURL)
+	}
 	parsed.RawQuery = q.Encode()
 	return parsed.String()
 }
@@ -108,18 +170,18 @@ func buildChallengeURL(rawURL, callbackAddr string) string {
 // handleCallback receives the redirect from PikPak after captcha completion.
 func handleCallback(w http.ResponseWriter, r *http.Request) {
 	token := extractToken(r)
-	if token != "" && onDone != nil {
-		go onDone(token)
-	}
+	session, accepted := complete(token)
 	// Return a minimal HTML that auto-closes the tab.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`<!html><body><p>验证完成，可关闭此页面</p><script>setTimeout(()=>window.close(),1000)</script></body></html>`))
 	// Shut down the server after a short delay.
-	go func() {
-		time.Sleep(2 * time.Second)
-		Close()
-	}()
+	if accepted {
+		go func(sessionID string) {
+			time.Sleep(2 * time.Second)
+			closeSession(sessionID)
+		}(session.ID)
+	}
 }
 
 // handleRedirect is a fallback: the challenge page can post the token via
@@ -128,14 +190,32 @@ func handleRedirect(w http.ResponseWriter, r *http.Request) {
 	handleCallback(w, r)
 }
 
-func extractToken(r *http.Request) string {
-	for _, values := range r.URL.Query() {
-		for _, v := range values {
-			if t := normalizeToken(v); t != "" {
-				return t
-			}
-		}
+func complete(token string) (Session, bool) {
+	mu.Lock()
+	if completed || onDone == nil {
+		mu.Unlock()
+		return Session{}, false
 	}
+	completed = true
+	callback := onDone
+	session := activeSession
+	mu.Unlock()
+	go callback(session, token)
+	return session, true
+}
+
+func closeSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if activeSession.ID == sessionID {
+		stopLocked()
+	}
+}
+
+func extractToken(r *http.Request) string {
 	if frag := r.URL.Fragment; frag != "" {
 		if parsed, err := url.ParseQuery(frag); err == nil {
 			for _, key := range []string{"captcha_token", "captchaToken", "token"} {
@@ -172,6 +252,3 @@ func openBrowser(rawURL string) error {
 		return exec.Command("xdg-open", rawURL).Start()
 	}
 }
-
-// Unused but kept for JSON parsing of callback bodies.
-var _ = json.Decoder{}

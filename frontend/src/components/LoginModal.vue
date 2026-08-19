@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, SendGuangyaSms, providerIconUrl, OpenBrowser } from '../api'
+import { login, saveMounted, SendGuangyaSms, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({ providers: { type: Array, default: () => [] } })
@@ -97,18 +97,30 @@ function fieldInputMode(field) {
 // Captcha state is initialized before the provider watcher. A stale saved
 // provider can be corrected synchronously as soon as the provider list arrives.
 const captchaUrl = ref('')
-const captchaCompleted = ref(false)
+const captchaSessionId = ref('')
 const captchaFrameReady = ref(false)
 const captchaSubmitting = ref(false)
-const captchaFrame = ref(null)
 const pan189Captcha = ref('')
+let offPikPakCaptchaCompleted = null
+let loginModalDisposed = false
+let captchaCompletionBusy = false
+let captchaClosePromise = Promise.resolve()
 
-watch(providerId, (v) => {
+function closePikPakCaptchaSession() {
+  const close = captchaClosePromise
+    .catch(() => {})
+    .then(() => ClosePikPakCaptcha())
+    .catch(() => {})
+  captchaClosePromise = close
+  return close
+}
+
+watch(providerId, (v, previous) => {
   localStorage.setItem('login_provider', v)
   form.value = {}
   mountedForm.value = { name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true }
   errorText.value = ''
-  resetCaptcha()
+  resetCaptcha(previous === 'pikpak')
   if (v !== 'pikpak') clearPikPakCooldown()
 })
 
@@ -121,12 +133,18 @@ watch(availableProviders, (list) => {
 
 function onKey(e) { if (e.key === 'Escape') emit('close') }
 onMounted(() => {
+  loginModalDisposed = false
   window.addEventListener('keydown', onKey)
-  window.addEventListener('message', onCaptchaMessage)
+  offPikPakCaptchaCompleted = onEvent('pikpak:captcha:completed', (payload) => {
+    void completePikPakCaptcha(payload)
+  })
 })
 onBeforeUnmount(() => {
+  loginModalDisposed = true
   window.removeEventListener('keydown', onKey)
-  window.removeEventListener('message', onCaptchaMessage)
+  if (offPikPakCaptchaCompleted) offPikPakCaptchaCompleted()
+  offPikPakCaptchaCompleted = null
+  void closePikPakCaptchaSession()
   if (smsTimer) clearInterval(smsTimer)
   clearPikPakCooldown()
 })
@@ -138,78 +156,69 @@ const PROVIDER_HELP = {
 const providerHelp = computed(() => PROVIDER_HELP[providerId.value] || null)
 function openHelp() { if (providerHelp.value) OpenBrowser(providerHelp.value.url).catch(() => {}) }
 
-// PikPak 滑块验证
-function findCaptchaToken(value, depth = 0) {
-  if (value == null || depth > 5) return ''
-  if (typeof value === 'string') {
-    const text = value.trim()
-    try {
-      const parsed = JSON.parse(text)
-      return findCaptchaToken(parsed, depth + 1)
-    } catch {
-      return text.length > 20 && /^[A-Za-z0-9._~+/=-]+$/.test(text) ? text : ''
-    }
+// PikPak 的验证页会回调应用创建的一次性 localhost 地址。不要依赖 iframe
+// postMessage：挑战页并不保证会把最终 token 发给嵌入方。
+async function completePikPakCaptcha(payload) {
+  const sessionID = String(payload?.session_id || '').trim()
+  if (
+    captchaCompletionBusy ||
+    providerId.value !== 'pikpak' ||
+    !captchaUrl.value ||
+    !captchaSessionId.value ||
+    sessionID !== captchaSessionId.value
+  ) return
+
+  captchaCompletionBusy = true
+  const token = String(payload?.captcha_token || '').trim()
+  captchaSessionId.value = ''
+  captchaFrameReady.value = false
+  captchaUrl.value = ''
+  if (token) {
+    form.value.captcha_token = token
+    form.value.captcha_verified = 'true'
+  } else {
+    // 部分 PikPak 挑战只会跳转，不会返回最终 token。保留初始 token，让
+    // 后端按旧版流程换发已验证 token。
+    delete form.value.captcha_verified
   }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const token = findCaptchaToken(item, depth + 1)
-      if (token) return token
-    }
-    return ''
-  }
-  if (typeof value !== 'object') return ''
-  for (const key of ['captcha_token', 'captchaToken', 'token']) {
-    const token = String(value[key] || '').trim()
-    if (token.length > 20) return token
-  }
-  for (const item of Object.values(value)) {
-    if (item == null || (typeof item !== 'object' && typeof item !== 'string')) continue
-    const token = findCaptchaToken(item, depth + 1)
-    if (token) return token
-  }
-  return ''
-}
-function acceptCaptchaToken(token) {
-  const value = String(token || '').trim()
-  if (!value || value.length <= 20) return false
-  form.value.captcha_token = value
-  form.value.captcha_verified = 'true'
-  captchaCompleted.value = true
   errorText.value = ''
-  return true
-}
-function onCaptchaMessage(event) {
-  if (providerId.value !== 'pikpak' || !captchaUrl.value) return
-  const frame = captchaFrame.value
-  if (!frame || event.source !== frame.contentWindow) return
+
   try {
-    const challenge = new URL(captchaUrl.value)
-    const source = new URL(event.origin)
-    const trustedPikPakHost = /(^|\.)mypikpak\.(com|net)$/i.test(source.hostname)
-    if (source.origin !== challenge.origin && !(source.protocol === 'https:' && trustedPikPakHost)) return
-  } catch {
-    return
+    try {
+      await closePikPakCaptchaSession()
+    } catch {
+      // 回调服务会自行关闭；关闭失败不应阻断已经完成的登录续办。
+    }
+    if (!loginModalDisposed && providerId.value === 'pikpak') await submit()
+  } finally {
+    captchaCompletionBusy = false
   }
-  const token = findCaptchaToken(event.data)
-  if (acceptCaptchaToken(token)) void submit()
 }
+
 function parseCaptcha(err) {
-  const m = String(err).match(/captcha_required\nurl=(\S+)\ntoken=(\S*)/)
+  const text = String(err)
+  const m = text.match(/captcha_required\r?\nurl=(\S+)\r?\ntoken=(\S*)/)
   if (!m) return false
+  const session = text.match(/(?:^|\r?\n)session=([A-Za-z0-9_-]+)/)
   captchaUrl.value = m[1]
+  captchaSessionId.value = session ? session[1] : ''
   form.value.captcha_token = m[2]
   delete form.value.captcha_verified
-  captchaCompleted.value = false
   captchaFrameReady.value = false
   return true
 }
 async function reloadCaptcha() {
   if (!captchaUrl.value || busy.value) return
-  captchaCompleted.value = false
+  captchaSessionId.value = ''
   captchaFrameReady.value = false
   captchaUrl.value = ''
   delete form.value.captcha_token
   delete form.value.captcha_verified
+  try {
+    await closePikPakCaptchaSession()
+  } catch {
+    // A stale callback must not prevent a deliberate retry.
+  }
   await submit()
 }
 
@@ -222,15 +231,16 @@ function parse189Captcha(err) {
   return true
 }
 
-function resetCaptcha() {
+function resetCaptcha(closeSession = false) {
+  captchaSessionId.value = ''
   captchaUrl.value = ''
-  captchaCompleted.value = false
   captchaFrameReady.value = false
   captchaSubmitting.value = false
   pan189Captcha.value = ''
   delete form.value.captcha_token
   delete form.value.captcha_verified
   delete form.value.validate_code
+  if (closeSession) void closePikPakCaptchaSession()
 }
 
 async function sendSms() {
@@ -286,6 +296,14 @@ function validate() {
 
 async function submit() {
   if (busy.value) return
+  if (providerId.value === 'pikpak' && captchaUrl.value) {
+    errorText.value = '请先完成当前安全验证'
+    return
+  }
+  if (providerId.value === 'pikpak') {
+    await captchaClosePromise
+    if (loginModalDisposed || providerId.value !== 'pikpak' || captchaUrl.value || busy.value) return
+  }
   if (providerId.value === 'pikpak' && pikpakCooldownSeconds.value > 0) {
     errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
     return
@@ -417,8 +435,8 @@ async function submit() {
                 <div v-if="captchaUrl" class="login-state-card captcha-box">
                   <div class="captcha-head">
                     <div>
-                      <strong>{{ captchaCompleted ? '验证已完成' : '请在下方完成安全验证' }}</strong>
-                      <p>{{ captchaCompleted ? '已收到验证结果，正在继续登录' : (captchaFrameReady ? '完成验证后将自动继续登录；未自动继续时请点击下方按钮' : '正在加载验证页面…') }}</p>
+                      <strong>请在下方完成安全验证</strong>
+                      <p>{{ captchaFrameReady ? '验证完成后将自动继续登录。' : '正在加载验证页面…' }}</p>
                     </div>
                     <button class="btn sm" type="button" :disabled="captchaSubmitting || pikpakCooldownSeconds > 0" @click="reloadCaptcha">重新加载</button>
                   </div>
@@ -426,15 +444,10 @@ async function submit() {
                     class="captcha-frame"
                     :src="captchaUrl"
                     title="PikPak 安全验证"
-                    ref="captchaFrame"
                     referrerpolicy="strict-origin-when-cross-origin"
                     allow="clipboard-read; clipboard-write"
                     @load="captchaFrameReady = true"
                   ></iframe>
-                  <div class="captcha-actions">
-                    <span v-if="captchaCompleted" class="captcha-state">已收到验证结果</span>
-                    <button class="btn primary sm" type="button" :disabled="busy || pikpakCooldownSeconds > 0" @click="submit">{{ busy ? '登录中…' : (pikpakCooldownSeconds > 0 ? `${pikpakCooldownSeconds} 秒后重试` : (captchaCompleted ? '验证完成并登录' : '我已完成验证，继续登录')) }}</button>
-                  </div>
                 </div>
 
                 <!-- 统一错误提示（带 Shake 抖动动画） -->
@@ -445,7 +458,7 @@ async function submit() {
 
               <div class="modal-actions login-actions">
                 <button class="btn" type="button" @click="emit('close')">取消</button>
-                <button class="btn primary" type="submit" :disabled="busy || (providerId === 'pikpak' && pikpakCooldownSeconds > 0)">
+                <button class="btn primary" type="submit" :disabled="busy || (providerId === 'pikpak' && (pikpakCooldownSeconds > 0 || captchaUrl))">
                   <span v-if="busy" class="spin spin-on-primary"></span>
                   {{ busy ? '处理中…' : isOAuth ? '打开授权页面' : (isMounted ? '保存连接' : '登录') }}
                 </button>
@@ -523,8 +536,6 @@ async function submit() {
   border:1px solid var(--border-light); border-radius:var(--radius-sm);
   background:#fff;
 }
-.captcha-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; }
-.captcha-state { color:var(--color-success); font-size:12px; }
 .login-actions {
   flex-shrink: 0; margin-top: 16px; padding: 14px 0 0;
   border-top: 1px solid var(--border-lighter);
@@ -535,7 +546,5 @@ async function submit() {
   .captcha-frame { height:280px; }
   .captcha-head { align-items:stretch; flex-direction:column; }
   .captcha-head .btn { align-self:flex-start; }
-  .captcha-actions { align-items: stretch; flex-direction: column; }
-  .captcha-actions .btn { width: 100%; }
 }
 </style>

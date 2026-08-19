@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"mnemo-go/internal/captcha"
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/providers/pikpak"
 	"mnemo-go/internal/model"
@@ -125,9 +127,151 @@ func TestPikPakLoginStopsWhenCaptchaInitFails(t *testing.T) {
 	}
 }
 
+func TestPikPakCaptchaCallbackCompletesCurrentSession(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "with-final-token", token: "verified-captcha-token-123456"},
+		{name: "redirect-only"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer captcha.Close()
+			completed := make(chan struct {
+				session captcha.Session
+				token   string
+			}, 1)
+			session, err := captcha.Start(func(got captcha.Session, token string) {
+				completed <- struct {
+					session captcha.Session
+					token   string
+				}{session: got, token: token}
+			})
+			if err != nil {
+				t.Fatalf("start captcha callback: %v", err)
+			}
+
+			callbackURL := session.CallbackURL
+			if tt.token != "" {
+				callbackURL += "?captcha_token=" + tt.token
+			}
+			resp, err := http.Get(callbackURL)
+			if err != nil {
+				t.Fatalf("captcha callback request: %v", err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("captcha callback status = %d", resp.StatusCode)
+			}
+
+			select {
+			case got := <-completed:
+				if got.session.ID != session.ID || got.token != tt.token {
+					t.Fatalf("captcha completion = %#v, want session=%q token=%q", got, session.ID, tt.token)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("captcha callback did not complete the session")
+			}
+		})
+	}
+}
+
+func TestPikPakCaptchaDelayedCloseKeepsNewSessionAlive(t *testing.T) {
+	defer captcha.Close()
+	oldCompleted := make(chan captcha.Session, 1)
+	oldSession, err := captcha.Start(func(got captcha.Session, _ string) {
+		oldCompleted <- got
+	})
+	if err != nil {
+		t.Fatalf("start old captcha session: %v", err)
+	}
+	oldResponse, err := http.Get(oldSession.CallbackURL)
+	if err != nil {
+		t.Fatalf("complete old captcha session: %v", err)
+	}
+	_ = oldResponse.Body.Close()
+	select {
+	case got := <-oldCompleted:
+		if got.ID != oldSession.ID {
+			t.Fatalf("old session completion = %q, want %q", got.ID, oldSession.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old captcha session did not complete")
+	}
+
+	newCompleted := make(chan captcha.Session, 1)
+	newSession, err := captcha.Start(func(got captcha.Session, _ string) {
+		newCompleted <- got
+	})
+	if err != nil {
+		t.Fatalf("start new captcha session: %v", err)
+	}
+	// The first session schedules a delayed cleanup. It must compare session IDs
+	// instead of closing the current session after a reload has created a new one.
+	time.Sleep(2200 * time.Millisecond)
+	newResponse, err := http.Get(newSession.CallbackURL)
+	if err != nil {
+		t.Fatalf("new captcha callback after delayed cleanup: %v", err)
+	}
+	_ = newResponse.Body.Close()
+	select {
+	case got := <-newCompleted:
+		if got.ID != newSession.ID {
+			t.Fatalf("new session completion = %q, want %q", got.ID, newSession.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delayed cleanup closed the new captcha session")
+	}
+}
+
+func TestPikPakLoginUsesConfiguredCaptchaRedirectURI(t *testing.T) {
+	const callbackURI = "http://127.0.0.1:45678/callback/test-session"
+	var gotRedirectURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/shield/captcha/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			RedirectURI string `json:"redirect_uri"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode captcha init: %v", err)
+		}
+		gotRedirectURI = body.RedirectURI
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"captcha_token": "initial-captcha-token",
+			"url":           "https://captcha.example.test/slider",
+		})
+	}))
+	t.Cleanup(srv.Close)
+	netx.TestTransportHook = pikpakCaptchaRewriteRT{mockHost: stripSchemeHost(srv.URL)}
+	t.Cleanup(func() { netx.TestTransportHook = nil })
+
+	reg, ok := drive.Get("pikpak")
+	if !ok || reg.Auth == nil {
+		t.Fatal("pikpak login registration missing")
+	}
+	_, err := reg.Auth(context.Background(), drive.AuthRequest{Config: map[string]string{
+		"username":             "login@example.com",
+		"password":             "password",
+		"captcha_redirect_uri": callbackURI,
+	}})
+	var challenge *pikpak.CaptchaRequiredError
+	if !errors.As(err, &challenge) {
+		t.Fatalf("login error = %v, want captcha challenge", err)
+	}
+	if gotRedirectURI != callbackURI {
+		t.Fatalf("captcha redirect_uri = %q, want %q", gotRedirectURI, callbackURI)
+	}
+}
+
 func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 	var initCalls, signinCalls int
 	var previousTokens []string
+	var redirectURIs []string
+	const callbackURI = "http://127.0.0.1:45678/callback/retry-session"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Device-Id"); len(got) != 32 || strings.Trim(got, "0123456789abcdefABCDEF") != "" {
 			t.Errorf("X-Device-Id = %q, want 32 hexadecimal characters", got)
@@ -142,12 +286,14 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 		case "/v1/shield/captcha/init":
 			var body struct {
 				CaptchaToken string `json:"captcha_token"`
+				RedirectURI  string `json:"redirect_uri"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode captcha init: %v", err)
 			}
 			initCalls++
 			previousTokens = append(previousTokens, body.CaptchaToken)
+			redirectURIs = append(redirectURIs, body.RedirectURI)
 			response := map[string]any{"captcha_token": "chain-" + string(rune('0'+initCalls))}
 			if initCalls < 3 {
 				response["url"] = "https://captcha.example.test/slider"
@@ -180,9 +326,10 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 		t.Fatal("pikpak login registration missing")
 	}
 	tok, err := reg.Auth(context.Background(), drive.AuthRequest{Config: map[string]string{
-		"username":      "login@example.com",
-		"password":      "password",
-		"captcha_token": "verified-token",
+		"username":             "login@example.com",
+		"password":             "password",
+		"captcha_token":        "verified-token",
+		"captcha_redirect_uri": callbackURI,
 	}})
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -196,6 +343,11 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 	wantPrevious := []string{"verified-token", "chain-1", "chain-2"}
 	if strings.Join(previousTokens, ",") != strings.Join(wantPrevious, ",") {
 		t.Fatalf("previous tokens = %v, want %v", previousTokens, wantPrevious)
+	}
+	for i, got := range redirectURIs {
+		if got != callbackURI {
+			t.Fatalf("captcha redirect_uri[%d] = %q, want %q", i, got, callbackURI)
+		}
 	}
 }
 

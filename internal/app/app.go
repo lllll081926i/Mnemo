@@ -365,12 +365,13 @@ func (a *App) OpenBrowser(url string) {
 	}
 }
 
-// OpenPikPakCaptcha opens the challenge in a temporary application-owned
-// WebView and emits the final token when PikPak accepts the verification.
+// OpenPikPakCaptcha is retained as a legacy external-browser fallback. The
+// normal login flow creates its callback session before it requests the
+// challenge, then keeps the challenge embedded in the login page.
 func (a *App) OpenPikPakCaptcha(url string) error {
-	return captcha.Open(url, func(token string) {
+	return captcha.Open(url, func(session captcha.Session, token string) {
 		a.emit("pikpak:captcha:completed", map[string]string{
-			"url":           url,
+			"session_id":    session.ID,
 			"captcha_token": token,
 		})
 	})
@@ -379,6 +380,15 @@ func (a *App) OpenPikPakCaptcha(url string) error {
 // ClosePikPakCaptcha closes the temporary challenge window, if any.
 func (a *App) ClosePikPakCaptcha() {
 	captcha.Close()
+}
+
+func (a *App) startPikPakCaptchaSession() (*captcha.Session, error) {
+	return captcha.Start(func(session captcha.Session, token string) {
+		a.emit("pikpak:captcha:completed", map[string]string{
+			"session_id":    session.ID,
+			"captcha_token": token,
+		})
+	})
 }
 
 // ProviderInfo is the JSON-safe projection of a provider registration exposed
@@ -420,6 +430,17 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	if config == nil {
 		config = map[string]string{}
 	}
+	var captchaSession *captcha.Session
+	if provider == model.ProviderPikpak {
+		session, err := a.startPikPakCaptchaSession()
+		if err != nil {
+			return nil, fmt.Errorf("PikPak 验证会话初始化失败: %w", err)
+		}
+		captchaSession = session
+		// The callback must be set before PikPak issues its challenge URL; adding
+		// it to an already-issued URL cannot change the provider-side redirect.
+		config["captcha_redirect_uri"] = session.CallbackURL
+	}
 	secrets := a.secretsSnapshot()
 	if secrets.OnedriveClientID != "" {
 		config["onedrive_client_id"] = secrets.OnedriveClientID
@@ -439,7 +460,17 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		},
 	})
 	if err != nil {
+		var challenge *pikpak.CaptchaRequiredError
+		if captchaSession != nil && errors.As(err, &challenge) {
+			return nil, fmt.Errorf("%w\nsession=%s", err, captchaSession.ID)
+		}
+		if captchaSession != nil {
+			captcha.Close()
+		}
 		return nil, err
+	}
+	if captchaSession != nil {
+		captcha.Close()
 	}
 	if tok == nil {
 		return nil, fmt.Errorf("%s 登录未返回会话", provider)

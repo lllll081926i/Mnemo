@@ -125,14 +125,14 @@ func isHex(s string) bool {
 }
 
 // initCaptcha requests a captcha token (challenge url may be returned).
-func initCaptcha(ctx context.Context, hc *netx.Client, deviceID, username string, action string) (string, string, error) {
-	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, "")
+func initCaptcha(ctx context.Context, hc *netx.Client, deviceID, username string, action, callbackURI string) (string, string, error) {
+	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, "", callbackURI)
 }
 
 // initCaptchaWithPrev requests a captcha token; previousToken chains a verified
 // slider token so the server registers the result (legacy previousToken retry).
 // signin 动作的 meta 只含 email/phone_number/username 单字段（对齐旧版）。
-func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken string) (string, string, error) {
+func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken, callbackURI string) (string, string, error) {
 	u := strings.TrimSpace(username)
 	meta := map[string]string{}
 	if strings.Contains(u, "@") && strings.Contains(u, ".") {
@@ -147,7 +147,7 @@ func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, usernam
 		"action":       action,
 		"device_id":    deviceID,
 		"meta":         meta,
-		"redirect_uri": redirectURI,
+		"redirect_uri": loginCaptchaRedirectURI(callbackURI),
 	}
 	if previousToken != "" {
 		body["captcha_token"] = previousToken
@@ -172,6 +172,13 @@ func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, usernam
 		return "", "", errors.New("pikpak: 验证接口未返回 captcha token")
 	}
 	return res.CaptchaToken, res.URL, nil
+}
+
+func loginCaptchaRedirectURI(callbackURI string) string {
+	if value := strings.TrimSpace(callbackURI); value != "" {
+		return value
+	}
+	return redirectURI
 }
 
 // initAPICaptcha follows the drive API captcha protocol. Its meta payload is
@@ -371,10 +378,10 @@ var pikpakCaptchaExchangeRetryDelays = []time.Duration{
 
 // exchangeLoginCaptcha waits for PikPak to register a completed slider and
 // chains the newest token through the legacy retry sequence.
-func exchangeLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken string) (string, string, error) {
+func exchangeLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken, callbackURI string) (string, string, error) {
 	previous := previousToken
 	for attempt := 0; ; attempt++ {
-		token, challengeURL, err := initCaptchaWithPrev(ctx, hc, deviceID, username, action, previous)
+		token, challengeURL, err := initCaptchaWithPrev(ctx, hc, deviceID, username, action, previous, callbackURI)
 		if err != nil {
 			return "", "", err
 		}
@@ -395,8 +402,19 @@ func exchangeLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, userna
 // retryLoginCaptcha mirrors the legacy login flow after signin reports a
 // captcha error. A required captcha reuses the token that was submitted;
 // an invalid captcha starts a fresh chain without reusing that token.
-func retryLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken string) (string, string, error) {
-	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, previousToken)
+func retryLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken, callbackURI string) (string, string, error) {
+	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, previousToken, callbackURI)
+}
+
+// CaptchaRequiredError carries the visual challenge values while preserving the
+// text protocol consumed by the Wails login page.
+type CaptchaRequiredError struct {
+	URL   string
+	Token string
+}
+
+func (e *CaptchaRequiredError) Error() string {
+	return fmt.Sprintf("pikpak: captcha_required\nurl=%s\ntoken=%s", e.URL, e.Token)
 }
 
 // authSignIn is the Registration.Auth login flow.
@@ -408,30 +426,31 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	}
 	deviceID := getOrCreateDeviceID(username)
 	hc := netx.NewClient(60 * time.Second)
+	callbackURI := strings.TrimSpace(req.Config["captcha_redirect_uri"])
 
 	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
 	captchaVerified := strings.EqualFold(strings.TrimSpace(req.Config["captcha_verified"]), "true")
 	if captchaToken == "" {
 		// A failed captcha init must stop here. Continuing with an empty token
 		// turns a transport/rate-limit failure into a misleading login error.
-		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin")
+		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", callbackURI)
 		if err != nil {
 			return nil, err
 		}
 		captchaToken = tok
 		if urlValue != "" {
 			// 需要滑块验证：把验证 URL 与 token 带回前端，用户完成后带 token 重试
-			return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
+			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 	} else if !captchaVerified {
 		// 滑块完成后的重试：链式带 previousToken 重发 init，等服务端登记验证结果
 		// （对齐旧版 loginPikPakWithCaptcha 的退避链）
-		tok, urlValue, err := exchangeLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken)
+		tok, urlValue, err := exchangeLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken, callbackURI)
 		if err != nil {
 			return nil, err
 		}
 		if urlValue != "" {
-			return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
+			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 		captchaToken = tok
 	}
@@ -448,12 +467,12 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// The first failed signin follows the legacy client's single retry.
 		// Do not run the post-slider chain here: the user has not completed a
 		// new challenge yet.
-		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken)
+		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken, callbackURI)
 		if retryErr != nil {
 			return nil, retryErr
 		}
 		if urlValue != "" {
-			return nil, fmt.Errorf("pikpak: captcha_required\nurl=%s\ntoken=%s", urlValue, tok)
+			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 		captchaToken = tok
 		auth, err = signIn(ctx, hc, deviceID, username, password, captchaToken)
