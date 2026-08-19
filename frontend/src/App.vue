@@ -70,7 +70,10 @@ function windowMinimise() {
   try { WindowMinimise() } catch { /* browser preview */ }
 }
 function windowToggleMaximise() {
-  try { WindowToggleMaximise(); windowMaximized.value = !windowMaximized.value } catch { /* browser preview */ }
+  try {
+    WindowToggleMaximise()
+    windowMaximized.value = !windowMaximized.value
+  } catch { /* browser preview */ }
 }
 function windowQuit() {
   try { Quit() } catch { window.close?.() }
@@ -403,6 +406,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
 <template>
   <div class="app-shell">
     <header class="topbar">
+      <div class="app-brand">Mnemo</div>
       <div ref="tabStrip" class="top-tabs">
         <span class="top-tab-glider" :style="gliderStyle"></span>
         <button
@@ -419,9 +423,9 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
       <div class="window-actions" aria-label="窗口控制">
-        <button class="icon-btn window-btn" title="最小化" @click="windowMinimise"><UiIcon name="minimize" :size="15" /></button>
-        <button class="icon-btn window-btn" :title="windowMaximized ? '还原窗口' : '最大化'" @click="windowToggleMaximise"><UiIcon :name="windowMaximized ? 'copy' : 'maximize'" :size="15" /></button>
-        <button class="icon-btn window-btn window-close" title="关闭窗口" @click="windowQuit"><UiIcon name="close" :size="15" /></button>
+        <button class="window-btn" type="button" title="最小化" @click="windowMinimise"><UiIcon name="window-minimize" :size="13" /></button>
+        <button class="window-btn" type="button" :title="windowMaximized ? '还原窗口' : '最大化'" @click="windowToggleMaximise"><UiIcon :name="windowMaximized ? 'window-restore' : 'window-maximize'" :size="13" /></button>
+        <button class="window-btn window-close" type="button" title="关闭窗口" @click="windowQuit"><UiIcon name="close" :size="14" /></button>
       </div>
     </header>
 

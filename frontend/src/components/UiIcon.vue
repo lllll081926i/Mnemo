@@ -66,6 +66,9 @@ const PATHS = {
   captions: 'M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 10h3 M7 14h2 M14 10h3 M14 14h3',
   maximize: 'M8 3H3v5 M16 3h5v5 M21 16v5h-5 M3 16v5h5',
   minimize: 'M3 8h5V3 M16 3v5h5 M21 16h-5v5 M8 21v-5H3',
+  'window-minimize': 'M5 12h14',
+  'window-maximize': 'M5 5h14v14H5z',
+  'window-restore': 'M7 7h12v12H7z M5 17H4V5h12v1',
   'more-horizontal': 'M5 12h.01 M12 12h.01 M19 12h.01',
   'picture-in-picture': 'M3 5h18v14H3z M13 13h6v4h-6z',
 }

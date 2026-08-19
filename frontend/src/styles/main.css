@@ -49,6 +49,19 @@ body {
   --wails-draggable: drag;
 }
 .topbar .spacer { flex: 1; }
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  margin-right: 18px;
+  padding-left: 4px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  --wails-draggable: drag;
+}
 .topbar-account {
   display: inline-flex;
   align-items: center;
@@ -59,16 +72,26 @@ body {
 }
 .window-actions {
   display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  margin-left: 4px;
-  padding-left: 5px;
-  border-left: 1px solid var(--border-light);
+  align-items: stretch;
+  height: 100%;
+  margin-left: 6px;
   --wails-draggable: no-drag;
 }
-.window-btn { width: 30px; height: 30px; }
+.window-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  --wails-draggable: no-drag;
+}
+.window-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .window-close:hover { color: #fff; background: #c43d4b; }
-
 .top-tabs { position: relative; display: flex; align-items: center; gap: 4px; height: 100%; }
 .top-tab-glider {
   position: absolute; top: 5px; bottom: 5px; left: 0; width: 0;
