@@ -1,110 +1,104 @@
-# Mnemo
+<div align="center">
 
-Mnemo 是一个基于 Go + Wails 的跨平台多网盘桌面文件管理器。它把不同网盘统一为文件、传输、分享和同步工作区，并使用系统 WebView 播放网页媒体，不再依赖 mpv 或其他平台播放器进程。
+# 🧠 Mnemo
 
-## 主要能力
+**一个免费的跨平台多云网盘桌面文件管理器**
 
-- 统一浏览：目录树、列表、搜索、排序、回收站、收藏、标签和批量操作。
-- 传输管理：分段下载、断点续传、限速、队列上传、暂停/继续、任务即时状态和跨盘迁移。
-- 网页预览：文本、Markdown、图片和视频预览；视频通过 HTML5、HLS.js、dash.js 及本地会话代理处理鉴权流。
-- 分享与同步：创建和管理分享链接，支持本地与网盘之间的定时 push、pull、two-way 同步及删除保护。
-- 账号体验：多账号切换、账号显示名、配额信息和上次使用网盘记忆。
-- 登录安全：PikPak 验证码挑战内嵌登录页，验证完成后自动继续登录并带请求冷却；短信、图片验证码、OAuth、Cookie 和账号密码登录按网盘能力显示。
-- 运维设置：英文结构化日志，默认 `warning` 等级，支持清除、导出和调整日志等级。
+把 13 家网盘装进同一个窗口 —— 浏览、传输、分享、同步、在线播放，一个应用搞定。
 
-## 支持的平台
+[![Release](https://img.shields.io/github/v/release/lllll081926i/mnemo-go?style=flat-square&color=7c6cf0)](https://github.com/lllll081926i/mnemo-go/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/lllll081926i/mnemo-go/release.yml?style=flat-square&label=release)](https://github.com/lllll081926i/mnemo-go/actions/workflows/release.yml)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
+[![Wails](https://img.shields.io/badge/Wails-v2-e0342f?style=flat-square)](https://wails.io)
+[![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-arm64%2Fx64-lightgrey?style=flat-square)](https://github.com/lllll081926i/mnemo-go/releases/latest)
+[![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)](LICENSE)
 
-| 平台 | 架构 | 发布产物 |
-| --- | --- | --- |
-| Windows | x64、arm64 | 安装程序 `.exe` |
-| Linux | x64、arm64 | Debian 包 `.deb`、压缩包 `.tar.gz` |
-| macOS | Apple Silicon（M 系列） | 磁盘映像 `.dmg`、压缩包 `.tar.gz` |
+</div>
 
-安装后的产品文件名固定为：Windows `Mnemo.exe`、Linux `Mnemo`、macOS `Mnemo.app`。Windows 只提供安装程序，不提供 ZIP 便携版；Linux/macOS 同时提供对应压缩包。发布文件只包含产品名和平台/架构标识，不在文件名中写入版本号，例如 `Mnemo-windows-x64-Setup.exe`；版本号只用于 Git tag、更新检查和安装器元数据。
+---
 
-Windows 需要 WebView2 Runtime；Linux 需要发行版提供的 GTK/WebKit 运行库；macOS 使用系统 WebKit。各平台均不需要额外安装 mpv。
+## ✨ 功能特性
 
-## 已内置的网盘
+| | |
+|---|---|
+| 📁 **统一文件管理** | 目录树 / 列表 / 搜索 / 排序 / 批量操作 / 重命名 / 回收站 / 收藏 / 标签 |
+| ⬇️ **原生分段下载** | 纯 Go Range 分段引擎，断点续传、多连接、限速，无需 aria2 |
+| ⬆️ **队列上传** | 批量上传、冲突策略询问、哈希进度显示 |
+| 🎬 **沉浸式播放器** | Netflix 风控制层、0–200% 音量增益、滚轮调亮度、截图、画中画、断点续播 |
+| 💬 **全格式字幕** | SRT / VTT 文本轨、自研 PGS/SUP 图形字幕渲染、jassub(libass) 特效字幕 |
+| 🎯 **画质切换** | 按网盘能力提供多档清晰度，HLS.js / dash.js 按需加载 |
+| 🔀 **跨盘迁移** | server→stream 流式迁移，文件不落本地磁盘 |
+| 🔄 **双向同步** | push / pull / two-way 三种模式，定时执行 + 删除保护 |
+| 🔗 **分享管理** | 创建分享链接、历史记录一站式管理 |
+| 🖥️ **托盘常驻** | 关闭最小化到托盘、单实例唤起、退出前下载任务确认 |
+| 🎨 **精致界面** | 深色半透明设计、macOS 卡片式设置页、账号栏拖拽排序 |
+| 🔐 **登录安全** | OAuth PKCE / 账密 / Cookie / 短信验证码，日志自动脱敏 |
 
-`pikpak`、`onedrive`、`dropbox`、`pan123`、`lanzou`、`ilanzou`、`pan139`、`pan189`、`aliopen`、`guangya`、`webdav`、`s3` 和 `yike`。
+## 💾 支持的网盘（13 家）
 
-其中 yike 已在登录页暂时隐藏，后端注册代码保留，待该平台重新开发完成后再恢复入口。WebDAV 登录页提供坚果云、InfiniCLOUD、Nextcloud 和自定义地址预设；OneDrive/Dropbox 的 OAuth 配置由发布环境注入，不将 secret 写入仓库。
+| | | |
+|---|---|---|
+| 🟣 PikPak | 🔵 OneDrive | 📦 Dropbox |
+| 🔢 123 云盘 | 🐱 蓝奏云 | ☁️ 蓝奏优享 |
+| 📱 移动云盘 | 📠 天翼云盘 | 🚀 阿里云盘开放版 |
+| 🌐 光压云 | 🌍 WebDAV | 🪣 S3 对象存储 |
+| ⚡ 一刻相册 | | |
 
-## 快速开始
+> WebDAV 预置坚果云 / InfiniCLOUD / Nextcloud，也支持自定义地址；S3 兼容各类对象存储。
 
-### 环境要求
+## 📥 下载安装
 
-- Go `1.25` 或更高版本。
-- Node.js `20` 或更高版本及 npm。
-- Wails CLI `v2.14` 或兼容版本。
-- 原生构建所需的平台工具链；Windows 构建还需要 WebView2 相关 SDK/运行环境。
+前往 [**Releases**](https://github.com/lllll081926i/mnemo-go/releases/latest) 下载对应平台安装包：
 
-### 安装依赖与开发
+| 平台 | 架构 | 安装包 |
+|---|---|---|
+| 🪟 Windows | x64 / arm64 | `Mnemo-windows-*-Setup.exe` |
+| 🐧 Linux | x64 / arm64 | `.deb` 或 `.tar.gz` |
+| 🍎 macOS | Apple Silicon | `.dmg` 或 `.tar.gz` |
+
+所有产物附带 `SHA256SUMS.txt` 校验文件。Windows 需要 WebView2 Runtime（Win10/11 一般已内置）；Linux 需要 GTK3 / WebKitGTK 4.1 运行库。
+
+应用启动时会自动检查更新，Windows 支持一键下载安装。
+
+## 🛠️ 从源码构建
+
+**环境**：Go 1.25+ · Node.js 20+ · Wails CLI v2.14 · 平台原生工具链
 
 ```bash
 go mod download
-cd frontend
-npm ci
-cd ..
+(cd frontend && npm ci)
 
-# 启动 Wails 开发模式
-wails dev
+wails dev      # 热重载开发
+wails build    # 构建到 build/bin/
+go test ./...  # 单元测试
 ```
 
-### 构建与验证
-
-```bash
-# 构建当前平台，输出到 build/bin/
-wails build -clean
-
-# 前端生产构建
-cd frontend && npm run build && cd ..
-
-# Go 单元测试、集成测试与静态检查
-go test ./...
-go vet ./...
-
-# 检查提交中的空白和冲突标记
-git diff --check
-```
-
-发布流水线位于 `.github/workflows/release.yml`，通过 `v*` Git tag 或手动触发。流水线会分别构建 Windows x64/arm64、Linux x64/arm64 和 macOS arm64，并上传安装包、压缩包和 `SHA256SUMS.txt`。更新器会按当前平台/架构选择资产并校验 SHA-256；Linux/macOS 下载后需要用户手动安装。
-
-## 项目结构
+## 🏗️ 技术架构
 
 ```text
-main.go                  Wails 入口与窗口配置
-internal/app/             前端绑定、事件、生命周期和应用服务
-internal/drive/           网盘驱动契约、能力声明和统一操作门面
-internal/drive/providers/ 各网盘插件，使用 init() 注册
-internal/model/           统一文件、账号、传输和预览模型
-internal/netx/            HTTP、代理、上传、哈希和限速工具
-internal/store/           原子 JSON 持久化与账号/任务/设置存储
-internal/transfer/        分段下载、上传队列和跨盘迁移
-internal/sync/            本地与网盘同步调度及快照
-internal/preview/         本地播放会话、Range、HLS/DASH 和字幕代理
-internal/logging/         结构化日志、脱敏、轮转和导出
-frontend/                 Vue 3 + Vite 前端
-build/                    Wails 图标、清单和平台安装器模板
-docs/                     架构、设计和网盘插件文档
+┌─────────────────────────────────────────┐
+│  Vue 3 + Vite 前端（WebView 渲染）        │
+├─────────────────────────────────────────┤
+│  Wails v2 绑定层（internal/app）          │
+├──────────┬──────────┬─────────┬─────────┤
+│ 网盘插件层│ 传输引擎  │ 同步引擎 │ 播放代理 │
+│ 13 家驱动 │ 分段下载  │ 双向同步 │ HLS/DASH│
+├──────────┴──────────┴─────────┴─────────┤
+│  原子 JSON 持久化（internal/store）       │
+└─────────────────────────────────────────┘
 ```
 
-新增网盘请遵循 [网盘插件指南](docs/PROVIDER_GUIDE.md)，不要在 `internal/app` 或前端堆叠 provider 特判。架构边界见 [架构说明](docs/ARCHITECTURE.md)，界面约束见 [设计规范](DESIGN.md)。
+- **插件化网盘驱动**：每个网盘一个包，实现 `drive.Driver` 契约后 `init()` 注册，UI 与传输只走统一门面，无 provider 特判
+- **零外部依赖**：纯 Go 无 cgo（仅 macOS 托盘需要），下载引擎、字幕解析、播放代理全部自研
+- **无数据库**：账号 / 设置 / 任务 / 收藏全部原子 JSON 文件存储
 
-## 日志与问题排查
+## 📚 文档
 
-日志默认写入应用数据目录的 `logs/mnemo.log`，默认等级为 `warning`，并对 token、Cookie、密码、验证码和 URL 查询参数脱敏。出现登录或传输问题时，优先在设置中导出日志并保留发生时间、网盘类型和操作步骤；不要手工粘贴未脱敏的 token、Cookie 或验证码链接。
+- [架构说明](docs/ARCHITECTURE.md) — 模块边界与数据流
+- [网盘插件指南](docs/PROVIDER_GUIDE.md) — 如何接入新网盘
+- [界面设计规范](docs/DESIGN.md) — 设计 token 与组件约定
+- [发布记录](docs/releases/) — 各版本更新说明
 
-PikPak 返回 `too frequent` 或 `AccessProhibited` 时，说明服务端风控处于冷却状态。停止重复点击，等待界面提示的冷却时间后再进行一次登录；反复刷新验证码会延长限制。
+## 📄 许可证
 
-## 文档
-
-- [架构说明](docs/ARCHITECTURE.md)
-- [网盘插件指南](docs/PROVIDER_GUIDE.md)
-- [界面设计规范](DESIGN.md)
-- [发布记录](docs/releases/)
-- [工程约束](AGENTS.md)
-
-## 许可证
-
-GPL-3.0
+[GPL-3.0](LICENSE) © Mnemo

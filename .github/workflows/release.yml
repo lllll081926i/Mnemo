@@ -123,6 +123,8 @@ jobs:
           # MSYS_NO_PATHCONV=1 防止 Git Bash 把 /D 参数误转为 Windows 路径
           MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" build/windows/installer.iss
           test -f "build/installer/${{ matrix.artifact }}-Setup.exe"
+          # 拷到根目录再上传，保证 artifact 解包后文件位于顶层（publish 按 maxdepth 1 收集）
+          cp "build/installer/${{ matrix.artifact }}-Setup.exe" "${{ matrix.artifact }}-Setup.exe"
 
       - name: Package Linux installer and archive
         if: matrix.kind == 'linux'
@@ -181,7 +183,7 @@ jobs:
             ${{ matrix.artifact }}.deb
             ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.tar.gz
-            build/installer/${{ matrix.artifact }}-Setup.exe
+            ${{ matrix.artifact }}-Setup.exe
           if-no-files-found: error
 
   publish:
