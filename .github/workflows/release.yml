@@ -68,15 +68,28 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
+      - name: Install Linux build deps
+        if: matrix.kind == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          pkg-config --modversion webkit2gtk-4.1
+
       - name: Build native application
         shell: bash
-        run: wails build -platform "${{ matrix.platform }}" -clean
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.kind }}" == 'linux' ]]; then
+            wails build -platform "${{ matrix.platform }}" -clean -tags webkit2_41
+          else
+            wails build -platform "${{ matrix.platform }}" -clean
+          fi
 
       - name: Stage OAuth configuration
         shell: bash
@@ -107,7 +120,9 @@ jobs:
           set -euo pipefail
           choco install innosetup -y --no-progress
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
-          "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss
+          # MSYS_NO_PATHCONV=1 防止 Git Bash 把 /D 参数误转为 Windows 路径
+          MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" build/windows/installer.iss
+          test -f "build/installer/${{ matrix.artifact }}-Setup.exe"
 
       - name: Package Linux installer and archive
         if: matrix.kind == 'linux'
