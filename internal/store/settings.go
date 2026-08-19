@@ -23,7 +23,12 @@ type Settings struct {
 	PlaybackResume bool   `json:"playbackResume"`
 	KeepTasks      bool   `json:"keepTasks"`
 	LogLevel       string `json:"logLevel,omitempty"`
+	// CloseToTray 为 nil 时表示默认开启「关闭不退出」（最小化到系统托盘）
+	CloseToTray *bool `json:"closeToTray,omitempty"`
 }
+
+// CloseToTrayEnabled 返回「关闭窗口时最小化到托盘」是否生效（默认开启）。
+func (s Settings) CloseToTrayEnabled() bool { return s.CloseToTray == nil || *s.CloseToTray }
 
 // DefaultSettings returns sane defaults.
 func DefaultSettings() Settings {

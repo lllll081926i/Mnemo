@@ -374,9 +374,8 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
         </div>
       </section>
     </div>
-  </div>
 
-  <Modal v-if="importOpen" title="导入分享" width="620px" @close="closeImport">
+    <Modal v-if="importOpen" title="导入分享" width="620px" @close="closeImport">
     <template v-if="importStep === 'form'">
       <div class="field">
         <label>目标网盘账号</label>
@@ -435,15 +434,16 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
     </template>
   </Modal>
 
-  <SelectDirModal
-    v-if="importDirPick && importTarget"
-    title="选择分享保存目录"
-    :account="importTarget"
-    :providers="providers"
-    @close="importDirPick = false"
-    @select="(dir) => { importDir = dir; importDirPick = false }"
-    @toast="(message, type) => emit('toast', message, type)"
-  />
+    <SelectDirModal
+      v-if="importDirPick && importTarget"
+      title="选择分享保存目录"
+      :account="importTarget"
+      :providers="providers"
+      @close="importDirPick = false"
+      @select="(dir) => { importDir = dir; importDirPick = false }"
+      @toast="(message, type) => emit('toast', message, type)"
+    />
+  </div>
 </template>
 
 <style scoped>

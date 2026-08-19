@@ -111,6 +111,7 @@ onBeforeUnmount(() => {
 .uiselect.block, .uiselect.block .uiselect-btn { width: 100%; }
 .uiselect-btn {
   display: inline-flex; align-items: center; gap: 6px;
+  width: 100%;
   height: 28px; padding: 0 8px 0 10px; min-width: 0;
   font-size: 13.5px; color: var(--text-primary);
   background: var(--control-bg); border: 1px solid var(--control-border);

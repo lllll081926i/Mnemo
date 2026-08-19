@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
 )
@@ -16,7 +17,8 @@ func applyWindows(installerPath string) error {
 // the app bundle/binary; we extract and let the user restart.
 func applyUnix(archivePath string) error {
 	_ = runtime.GOOS
-	// Best-effort: leave the archive in the updates dir; the frontend will
-	// prompt the user to restart manually after extraction.
-	return nil
+	// Replacing a running Wails binary/app bundle safely requires a platform
+	// specific handoff process. Never report success while leaving the archive
+	// untouched; the caller can surface this actionable error instead.
+	return fmt.Errorf("automatic update installation is not supported on this platform; downloaded archive: %s", archivePath)
 }

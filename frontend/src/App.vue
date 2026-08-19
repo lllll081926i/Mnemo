@@ -75,8 +75,16 @@ function windowToggleMaximise() {
     windowMaximized.value = !windowMaximized.value
   } catch { /* browser preview */ }
 }
-function windowQuit() {
-  try { Quit() } catch { window.close?.() }
+async function windowQuit() {
+  try {
+    // 「关闭不退出」（默认开）：隐藏到托盘；关闭该选项才真正退出
+    const s = await GetSettings()
+    if (s?.closeToTray !== false) {
+      WindowHide()
+      return
+    }
+    Quit()
+  } catch { window.close?.() }
 }
 async function saveThemePref() {
   try {
@@ -451,17 +459,16 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       />
       <main class="page-host">
         <transition :name="pageTrans" mode="out-in">
-          <div :key="tab" class="page-view">
-            <KeepAlive>
-              <component
-                :is="pageComponent"
-                :key="tab"
-                :ref="tab === 'pan' ? 'panView' : undefined"
-                v-bind="pageProps"
-                v-on="pageListeners"
-              />
-            </KeepAlive>
-          </div>
+          <KeepAlive>
+            <component
+              :is="pageComponent"
+              :key="tab"
+              class="page-view"
+              :ref="tab === 'pan' ? 'panView' : undefined"
+              v-bind="pageProps"
+              v-on="pageListeners"
+            />
+          </KeepAlive>
         </transition>
       </main>
     </div>

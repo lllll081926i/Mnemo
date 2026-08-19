@@ -21,6 +21,7 @@ const defaults = {
   confirmUpdate: true,
   playbackResume: true,
   keepTasks: true,
+  closeToTray: true,
   logLevel: 'warning',
 }
 
@@ -43,6 +44,7 @@ const groups = [
   { id: 'network', label: '连接', icon: 'cloud-down' },
   { id: 'cache', label: '缓存', icon: 'database' },
   { id: 'logs', label: '日志', icon: 'doc' },
+  { id: 'update', label: '更新', icon: 'refresh' },
 ]
 
 // 纯前端偏好
@@ -101,7 +103,13 @@ const hwDecodeOptions = [
 onMounted(async () => {
   try {
     const s = (await GetSettings()) || {}
-    settings.value = { ...defaults, ...s }
+    settings.value = {
+      ...defaults,
+      ...s,
+      // Backend stores bytes/s; the settings UI presents the friendlier KB/s.
+      maxDownloadSpeed: Math.round((Number(s.maxDownloadSpeed) || 0) / 1024),
+      maxUploadSpeed: Math.round((Number(s.maxUploadSpeed) || 0) / 1024),
+    }
 		settings.value.logLevel = settings.value.logLevel || 'warning'
 		logPath.value = await GetLogPath()
   } catch {
@@ -137,10 +145,10 @@ async function save(silent) {
   if (saving.value) { pendingSave = true; return }
   saving.value = true
   try {
-    const s = settings.value
+    const s = { ...settings.value }
     s.maxConcurrentDownloads = Math.min(8, Math.max(1, Number(s.maxConcurrentDownloads) || 1))
-    s.maxDownloadSpeed = Math.max(0, Number(s.maxDownloadSpeed) || 0)
-    s.maxUploadSpeed = Math.max(0, Number(s.maxUploadSpeed) || 0)
+    s.maxDownloadSpeed = Math.max(0, Number(s.maxDownloadSpeed) || 0) * 1024
+    s.maxUploadSpeed = Math.max(0, Number(s.maxUploadSpeed) || 0) * 1024
     await SaveSettings(s)
     if (!silent) emit('toast', '设置已保存', 'success')
   } catch (e) {
@@ -254,80 +262,65 @@ async function exportLogs() {
         <!-- 1. 基础 -->
         <section class="settings-group" id="sg-general">
           <header class="sg-heading"><h2>基础</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">外观主题</span>
-            <div class="sg-control">
-              <div class="theme-cards">
-                <button
-                  class="theme-card"
-                  :class="{ active: settings.theme === 'system' || !settings.theme }"
-                  @click="onThemeChange('system')"
-                >
-                  <UiIcon name="globe" :size="15" />
-                  <span>跟随系统</span>
-                </button>
-                <button
-                  class="theme-card"
-                  :class="{ active: settings.theme === 'light' }"
-                  @click="onThemeChange('light')"
-                >
-                  <UiIcon name="sun" :size="15" />
-                  <span>浅色</span>
-                </button>
-                <button
-                  class="theme-card"
-                  :class="{ active: settings.theme === 'dark' }"
-                  @click="onThemeChange('dark')"
-                >
-                  <UiIcon name="moon" :size="15" />
-                  <span>深色</span>
-                </button>
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">外观主题</span></div>
+              <div class="sg-control">
+                <div class="theme-cards">
+                  <button
+                    class="theme-card"
+                    :class="{ active: settings.theme === 'system' || !settings.theme }"
+                    @click="onThemeChange('system')"
+                  >
+                    <UiIcon name="globe" :size="14" /><span>跟随系统</span>
+                  </button>
+                  <button
+                    class="theme-card"
+                    :class="{ active: settings.theme === 'light' }"
+                    @click="onThemeChange('light')"
+                  >
+                    <UiIcon name="sun" :size="14" /><span>浅色</span>
+                  </button>
+                  <button
+                    class="theme-card"
+                    :class="{ active: settings.theme === 'dark' }"
+                    @click="onThemeChange('dark')"
+                  >
+                    <UiIcon name="moon" :size="14" /><span>深色</span>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">默认启动页面</span>
-            <div class="sg-control">
-              <SegTabs
-                :options="tabOptions"
-                :modelValue="settings.defaultTab || 'pan'"
-                @update:modelValue="(v) => { settings.defaultTab = v; save(true) }"
-              />
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">默认启动页面</span></div>
+              <div class="sg-control">
+                <SegTabs
+                  :options="tabOptions"
+                  :modelValue="settings.defaultTab || 'pan'"
+                  @update:modelValue="(v) => { settings.defaultTab = v; save(true) }"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">下载完成提示音</span>
-            <div class="sg-control" style="display:flex;gap:10px;align-items:center">
-              <div class="switch" :class="{ on: prefs.downloadSound }" @click="onPref('downloadSound', !prefs.downloadSound)"></div>
-              <button v-if="prefs.downloadSound" class="tbtn xs" @click="playTestSound">
-                <UiIcon name="play" :size="12" />试听
-              </button>
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">关闭时最小化到托盘</span>
+                <span class="sg-hint">关闭窗口后继续在系统托盘运行，点击托盘图标恢复</span>
+              </div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: settings.closeToTray !== false }" @click="toggle('closeToTray')"></div>
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">自动检查更新</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: settings.autoUpdate }" @click="toggle('autoUpdate')"></div>
-            </div>
-          </div>
-
-          <div class="sg-row">
-            <span class="sg-label">更新前确认</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: settings.confirmUpdate }" @click="toggle('confirmUpdate')"></div>
-            </div>
-          </div>
-
-          <div class="sg-row">
-            <span class="sg-label">检查更新</span>
-            <div class="sg-control">
-              <button class="btn sm" @click="emit('update')">
-                <UiIcon name="refresh" :size="13" />立即检查
-              </button>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">下载完成提示音</span></div>
+              <div class="sg-control">
+                <button v-if="prefs.downloadSound" class="tbtn xs" @click="playTestSound">
+                  <UiIcon name="play" :size="12" />试听
+                </button>
+                <div class="switch" :class="{ on: prefs.downloadSound }" @click="onPref('downloadSound', !prefs.downloadSound)"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -335,39 +328,40 @@ async function exportLogs() {
         <!-- 2. 文件 -->
         <section class="settings-group" id="sg-pan">
           <header class="sg-heading"><h2>文件</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">默认视图</span>
-            <div class="sg-control">
-              <SegTabs
-                :options="[{ key: 'list', label: '列表' }, { key: 'grid', label: '网格' }]"
-                :modelValue="prefs.viewMode"
-                @update:modelValue="(v) => onPref('viewMode', v)"
-              />
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">默认视图</span></div>
+              <div class="sg-control">
+                <SegTabs
+                  :options="[{ key: 'list', label: '列表' }, { key: 'grid', label: '网格' }]"
+                  :modelValue="prefs.viewMode"
+                  @update:modelValue="(v) => onPref('viewMode', v)"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">默认排序</span>
-            <div class="sg-control" style="display:flex;gap:8px;align-items:center">
-              <UiSelect
-                :modelValue="prefs.defaultSortKey || 'name'"
-                :options="sortKeyOptions"
-                style="width:120px"
-                @update:modelValue="(v) => onPref('defaultSortKey', v)"
-              />
-              <SegTabs
-                :options="[{ key: 'asc', label: '升序' }, { key: 'desc', label: '降序' }]"
-                :modelValue="prefs.defaultSortAsc ? 'asc' : 'desc'"
-                @update:modelValue="(v) => onPref('defaultSortAsc', v === 'asc')"
-              />
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">默认排序</span></div>
+              <div class="sg-control">
+                <UiSelect
+                  :modelValue="prefs.defaultSortKey || 'name'"
+                  :options="sortKeyOptions"
+                  style="width:116px"
+                  @update:modelValue="(v) => onPref('defaultSortKey', v)"
+                />
+                <SegTabs
+                  :options="[{ key: 'asc', label: '升序' }, { key: 'desc', label: '降序' }]"
+                  :modelValue="prefs.defaultSortAsc ? 'asc' : 'desc'"
+                  @update:modelValue="(v) => onPref('defaultSortAsc', v === 'asc')"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">目录树悬停预览</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: prefs.hoverPreview }" @click="onPref('hoverPreview', !prefs.hoverPreview)"></div>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">目录树悬停预览</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: prefs.hoverPreview }" @click="onPref('hoverPreview', !prefs.hoverPreview)"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -375,90 +369,96 @@ async function exportLogs() {
         <!-- 3. 传输 -->
         <section class="settings-group" id="sg-transfer">
           <header class="sg-heading"><h2>传输</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">下载保存目录</span>
-            <div class="sg-control" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <input
-                class="input"
-                style="min-width:240px;flex:1"
-                v-model="settings.downloadDir"
-                placeholder="系统默认下载目录"
-                @blur="onInputCommit"
-                @keydown.enter="onInputCommit"
-              />
-              <button class="btn sm" @click="pickDownloadDir">选择</button>
-              <button v-if="settings.downloadDir" class="btn sm" @click="openDownloadDir">打开</button>
-            </div>
-          </div>
-
-          <div class="sg-row">
-            <span class="sg-label">最大并发下载数</span>
-            <div class="sg-control" style="display:flex;gap:8px;align-items:center">
-              <input
-                class="input input-sm"
-                type="number"
-                min="1"
-                max="8"
-                v-model.number="settings.maxConcurrentDownloads"
-                @blur="onInputCommit"
-                @keydown.enter="onInputCommit"
-              />
-            </div>
-          </div>
-
-          <div class="sg-row">
-            <span class="sg-label">下载限速 (KB/s)</span>
-            <div class="sg-control" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <input
-                class="input input-sm"
-                type="number"
-                min="0"
-                v-model.number="settings.maxDownloadSpeed"
-                placeholder="0 为不限速"
-                @blur="onInputCommit"
-                @keydown.enter="onInputCommit"
-              />
-              <div class="preset-pills">
-                <button class="pill-btn" :class="{ active: !settings.maxDownloadSpeed }" @click="setDownloadLimitPreset(0)">不限速</button>
-                <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 5120 }" @click="setDownloadLimitPreset(5120)">5M</button>
-                <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 10240 }" @click="setDownloadLimitPreset(10240)">10M</button>
-                <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 20480 }" @click="setDownloadLimitPreset(20480)">20M</button>
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">下载保存目录</span></div>
+              <div class="sg-control sg-control-grow">
+                <input
+                  class="input"
+                  v-model="settings.downloadDir"
+                  placeholder="系统默认下载目录"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
+                <button class="btn sm" @click="pickDownloadDir">选择</button>
+                <button v-if="settings.downloadDir" class="btn sm" @click="openDownloadDir">打开</button>
               </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">上传限速 (KB/s)</span>
-            <div class="sg-control" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <input
-                class="input input-sm"
-                type="number"
-                min="0"
-                v-model.number="settings.maxUploadSpeed"
-                placeholder="0 为不限速"
-                @blur="onInputCommit"
-                @keydown.enter="onInputCommit"
-              />
-              <div class="preset-pills">
-                <button class="pill-btn" :class="{ active: !settings.maxUploadSpeed }" @click="setUploadLimitPreset(0)">不限速</button>
-                <button class="pill-btn" :class="{ active: settings.maxUploadSpeed === 2048 }" @click="setUploadLimitPreset(2048)">2M</button>
-                <button class="pill-btn" :class="{ active: settings.maxUploadSpeed === 5120 }" @click="setUploadLimitPreset(5120)">5M</button>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">最大并发下载数</span></div>
+              <div class="sg-control">
+                <input
+                  class="input input-sm"
+                  type="number"
+                  min="1"
+                  max="8"
+                  v-model.number="settings.maxConcurrentDownloads"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
               </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">保留传输记录</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: settings.keepTasks }" @click="toggle('keepTasks')"></div>
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">下载限速</span>
+                <span class="sg-desc">单位 KB/s，0 为不限速</span>
+              </div>
+              <div class="sg-control">
+                <input
+                  class="input input-sm"
+                  type="number"
+                  min="0"
+                  v-model.number="settings.maxDownloadSpeed"
+                  placeholder="0"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
+                <div class="preset-pills">
+                  <button class="pill-btn" :class="{ active: !settings.maxDownloadSpeed }" @click="setDownloadLimitPreset(0)">不限速</button>
+                  <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 5120 }" @click="setDownloadLimitPreset(5120)">5M</button>
+                  <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 10240 }" @click="setDownloadLimitPreset(10240)">10M</button>
+                  <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 20480 }" @click="setDownloadLimitPreset(20480)">20M</button>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">桌面传输悬浮球</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: prefs.transferBall }" @click="onPref('transferBall', !prefs.transferBall)"></div>
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">上传限速</span>
+                <span class="sg-desc">单位 KB/s，0 为不限速</span>
+              </div>
+              <div class="sg-control">
+                <input
+                  class="input input-sm"
+                  type="number"
+                  min="0"
+                  v-model.number="settings.maxUploadSpeed"
+                  placeholder="0"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
+                <div class="preset-pills">
+                  <button class="pill-btn" :class="{ active: !settings.maxUploadSpeed }" @click="setUploadLimitPreset(0)">不限速</button>
+                  <button class="pill-btn" :class="{ active: settings.maxUploadSpeed === 2048 }" @click="setUploadLimitPreset(2048)">2M</button>
+                  <button class="pill-btn" :class="{ active: settings.maxUploadSpeed === 5120 }" @click="setUploadLimitPreset(5120)">5M</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">保留传输记录</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: settings.keepTasks }" @click="toggle('keepTasks')"></div>
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">桌面传输悬浮球</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: prefs.transferBall }" @click="onPref('transferBall', !prefs.transferBall)"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -466,76 +466,77 @@ async function exportLogs() {
         <!-- 4. 播放 -->
         <section class="settings-group" id="sg-player">
           <header class="sg-heading"><h2>播放</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">断点续播</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: settings.playbackResume }" @click="toggle('playbackResume')"></div>
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">断点续播</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: settings.playbackResume }" @click="toggle('playbackResume')"></div>
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">默认播放音量</span>
-            <div class="sg-control" style="display:flex;gap:10px;align-items:center">
-              <input
-                type="range"
-                min="0"
-                max="100"
-                :value="prefs.defaultVolume"
-                @input="(e) => onPref('defaultVolume', Number(e.target.value))"
-                style="width:140px;cursor:pointer"
-              />
-              <span class="sg-value" style="font-variant-numeric:tabular-nums">{{ prefs.defaultVolume }}%</span>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">默认播放音量</span></div>
+              <div class="sg-control">
+                <input
+                  type="range"
+                  class="sg-range"
+                  min="0"
+                  max="200"
+                  :value="prefs.defaultVolume"
+                  @input="(e) => onPref('defaultVolume', Number(e.target.value))"
+                />
+                <span class="sg-value sg-value-num">{{ prefs.defaultVolume }}%</span>
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">默认播放倍速</span>
-            <div class="sg-control">
-              <UiSelect
-                :modelValue="prefs.defaultSpeed"
-                :options="speedOptions"
-                style="width:130px"
-                @update:modelValue="(v) => onPref('defaultSpeed', Number(v))"
-              />
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">默认播放倍速</span></div>
+              <div class="sg-control">
+                <UiSelect
+                  :modelValue="prefs.defaultSpeed"
+                  :options="speedOptions"
+                  style="width:116px"
+                  @update:modelValue="(v) => onPref('defaultSpeed', Number(v))"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">快进 / 快退步长</span>
-            <div class="sg-control">
-              <UiSelect
-                :modelValue="prefs.seekStep || 10"
-                :options="seekStepOptions"
-                style="width:130px"
-                @update:modelValue="(v) => onPref('seekStep', Number(v))"
-              />
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">快进 / 快退步长</span></div>
+              <div class="sg-control">
+                <UiSelect
+                  :modelValue="prefs.seekStep || 10"
+                  :options="seekStepOptions"
+                  style="width:116px"
+                  @update:modelValue="(v) => onPref('seekStep', Number(v))"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">播放完自动收起</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></div>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">播放完自动收起</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></div>
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">硬件解码加速</span>
-            <div class="sg-control">
-              <UiSelect
-                :modelValue="prefs.hardwareDecode || 'auto'"
-                :options="hwDecodeOptions"
-                style="width:150px"
-                @update:modelValue="(v) => onPref('hardwareDecode', v)"
-              />
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">硬件解码加速</span></div>
+              <div class="sg-control">
+                <UiSelect
+                  :modelValue="prefs.hardwareDecode || 'auto'"
+                  :options="hwDecodeOptions"
+                  style="width:140px"
+                  @update:modelValue="(v) => onPref('hardwareDecode', v)"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="sg-row">
-            <span class="sg-label">自动挂载同名字幕</span>
-            <div class="sg-control">
-              <div class="switch" :class="{ on: prefs.autoLoadSubtitles }" @click="onPref('autoLoadSubtitles', !prefs.autoLoadSubtitles)"></div>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">自动挂载同名字幕</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: prefs.autoLoadSubtitles }" @click="onPref('autoLoadSubtitles', !prefs.autoLoadSubtitles)"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -543,18 +544,21 @@ async function exportLogs() {
         <!-- 5. 连接 -->
         <section class="settings-group" id="sg-network">
           <header class="sg-heading"><h2>连接</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">代理服务器</span>
-            <div class="sg-control">
-              <input
-                class="input"
-                style="width:min(100%, 300px)"
-                v-model="settings.proxy"
-                placeholder="http://127.0.0.1:7890"
-                @blur="onInputCommit"
-                @keydown.enter="onInputCommit"
-              />
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">代理服务器</span>
+                <span class="sg-desc">留空表示直连</span>
+              </div>
+              <div class="sg-control">
+                <input
+                  class="input"
+                  v-model="settings.proxy"
+                  placeholder="http://127.0.0.1:7890"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
+              </div>
             </div>
           </div>
         </section>
@@ -562,67 +566,96 @@ async function exportLogs() {
         <!-- 6. 缓存 -->
         <section class="settings-group" id="sg-cache">
           <header class="sg-heading"><h2>缓存</h2></header>
-
-          <div class="sg-row">
-            <span class="sg-label">目录与页面缓存</span>
-            <div class="sg-control">
-              <button class="btn sm" :disabled="clearingCache" @click="clearCache">
-                <span v-if="clearingCache" class="spin"></span>
-                <UiIcon v-else name="trash" :size="13" />
-                {{ clearingCache ? '清除中…' : '清除缓存' }}
-              </button>
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">目录与页面缓存</span>
+                <span class="sg-desc">保存在安装目录的 data/cache 中，不会删除账号、传输记录或播放进度</span>
+              </div>
+              <div class="sg-control">
+                <button class="btn sm" :disabled="clearingCache" @click="clearCache">
+                  <span v-if="clearingCache" class="spin"></span>
+                  <UiIcon v-else name="trash" :size="13" />
+                  {{ clearingCache ? '清除中…' : '清除缓存' }}
+                </button>
+              </div>
             </div>
           </div>
-          <div class="sg-hint">缓存保存在安装目录的 data/cache 中，不会删除账号、传输记录或播放进度。</div>
         </section>
 
         <!-- 7. 日志 -->
         <section class="settings-group" id="sg-logs">
           <header class="sg-heading"><h2>日志</h2></header>
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">日志等级</span>
+                <span class="sg-desc">Debug 会记录详细网络信息，排查问题时临时开启</span>
+              </div>
+              <div class="sg-control">
+                <UiSelect
+                  :modelValue="settings.logLevel || 'warning'"
+                  :options="[
+                    { value: 'error', label: 'Error' },
+                    { value: 'warning', label: 'Warning' },
+                    { value: 'info', label: 'Info' },
+                    { value: 'debug', label: 'Debug' },
+                  ]"
+                  style="width:116px"
+                  @update:modelValue="(v) => { settings.logLevel = v; save(true) }"
+                />
+              </div>
+            </div>
 
-          <div class="sg-row">
-            <span class="sg-label">日志等级</span>
-            <div class="sg-control">
-              <UiSelect
-                :modelValue="settings.logLevel || 'warning'"
-                :options="[
-                  { value: 'error', label: 'Error' },
-                  { value: 'warning', label: 'Warning' },
-                  { value: 'info', label: 'Info' },
-                  { value: 'debug', label: 'Debug' },
-                ]"
-                style="width:130px"
-                @update:modelValue="(v) => { settings.logLevel = v; save(true) }"
-              />
+            <div class="sg-row">
+              <div class="sg-text" style="min-width:0">
+                <span class="sg-label">日志文件</span>
+                <span class="sg-desc log-path" :title="logPath">{{ logPath || '未初始化' }}</span>
+              </div>
+              <div class="sg-control">
+                <button class="btn sm" :disabled="exportingLogs" @click="exportLogs">
+                  <span v-if="exportingLogs" class="spin"></span>
+                  <UiIcon v-else name="download" :size="13" />
+                  {{ exportingLogs ? '导出中…' : '导出' }}
+                </button>
+                <button class="btn sm danger" :disabled="clearingLogs" @click="clearLogs">
+                  <span v-if="clearingLogs" class="spin"></span>
+                  <UiIcon v-else name="trash" :size="13" />
+                  {{ clearingLogs ? '清除中…' : '清除' }}
+                </button>
+              </div>
             </div>
           </div>
-
-          <div class="sg-row">
-            <span class="sg-label">日志文件</span>
-            <div class="sg-control log-actions">
-              <span class="sg-value log-path" :title="logPath">{{ logPath || '未初始化' }}</span>
-              <button class="btn sm" :disabled="exportingLogs" @click="exportLogs">
-                <span v-if="exportingLogs" class="spin"></span>
-                <UiIcon v-else name="download" :size="13" />
-                {{ exportingLogs ? '导出中…' : '导出日志' }}
-              </button>
-              <button class="btn sm danger" :disabled="clearingLogs" @click="clearLogs">
-                <span v-if="clearingLogs" class="spin"></span>
-                <UiIcon v-else name="trash" :size="13" />
-                {{ clearingLogs ? '清除中…' : '清除日志' }}
-              </button>
-            </div>
-          </div>
-          <div class="sg-hint">默认等级为 Warning。Debug 会记录更详细的网络与交互信息，排查问题时临时开启即可。</div>
         </section>
 
-        <div class="settings-foot">
-          <span style="font-size:12px;color:var(--text-tertiary)">修改即时自动保存</span>
-          <button class="btn primary sm" :disabled="saving" @click="save()">
-            <span v-if="saving" class="spin spin-on-primary"></span>
-            <span>{{ saving ? '保存中…' : '保存设置' }}</span>
-          </button>
-        </div>
+        <!-- 8. 更新 -->
+        <section class="settings-group" id="sg-update">
+          <header class="sg-heading"><h2>更新</h2></header>
+          <div class="sg-card">
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">自动检查更新</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: settings.autoUpdate }" @click="toggle('autoUpdate')"></div>
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">更新前确认</span></div>
+              <div class="sg-control">
+                <div class="switch" :class="{ on: settings.confirmUpdate }" @click="toggle('confirmUpdate')"></div>
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">手动检查更新</span></div>
+              <div class="sg-control">
+                <button class="btn sm" @click="emit('update')">
+                  <UiIcon name="refresh" :size="13" />立即检查
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -683,6 +716,12 @@ async function exportLogs() {
   border-color: var(--color-primary);
   font-weight: 600;
 }
-.log-actions { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; }
-.log-path { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-tertiary); font-size:12px; }
+.sg-control-grow { flex: 1; min-width: 0; }
+.sg-control-grow .input { flex: 1; min-width: 160px; }
+.sg-range { width: 140px; cursor: pointer; accent-color: var(--color-primary); }
+.sg-value-num { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.log-path {
+  display: block; max-width: 320px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 </style>

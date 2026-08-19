@@ -29,7 +29,7 @@ const PREFS_DEFAULTS = {
   hoverPreview: true,     // 目录树悬停预览
   transferBall: true,     // 传输悬浮球
   downloadSound: true,    // 传输完成提示音
-  defaultVolume: 50,      // 播放器默认音量 0-100
+  defaultVolume: 100,     // 播放器默认音量 0-200
   defaultSpeed: 1,        // 播放器默认倍速
   seekStep: 10,           // 快进/快退步长（秒）
   autoCloseOnEnd: false,  // 播放到结尾自动收起控制条

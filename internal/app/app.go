@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -51,6 +52,7 @@ type App struct {
 	migrate      *migrate.Engine
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
 	shutdownOnce sync.Once
+	forceQuit    atomic.Bool
 }
 
 func configKeys(config map[string]string) []string {
@@ -363,6 +365,9 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	logging.Info("application startup completed", "preview_port", mediaProxy.Port, "duration", logging.Duration(startupAt))
+	if message := a.StartSyncScheduler(); message != "" {
+		logging.Warn("sync scheduler startup failed", "error", message)
+	}
 	a.emit("app:ready", map[string]any{"port": mediaProxy.Port})
 }
 
@@ -497,7 +502,7 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		config = map[string]string{}
 	}
 	var captchaSession *captcha.Session
-	if provider == model.ProviderPikpak {
+	if provider == model.ProviderPikpak && !strings.EqualFold(strings.TrimSpace(config["captcha_verified"]), "true") {
 		session, err := a.startPikPakCaptchaSession()
 		if err != nil {
 			logging.Error("PikPak captcha session initialization failed", "error", err)
@@ -782,6 +787,31 @@ func (a *App) SaveSettings(s store.Settings) error {
 
 // GetLogPath returns the active persistent log file path.
 func (a *App) GetLogPath() string { return logging.Path() }
+
+// LogFrontend forwards structured frontend diagnostics into the same
+// persistent log used by backend operations. The message and fields are
+// sanitized by the logging package before they are written.
+func (a *App) LogFrontend(level, scope, message string, fields map[string]string) {
+	args := make([]any, 0, len(fields)*2+2)
+	args = append(args, "scope", scope)
+	keys := make([]string, 0, len(fields))
+	for key := range fields { keys = append(keys, key) }
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := fields[key]
+		args = append(args, key, value)
+	}
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "error":
+		logging.Error(message, args...)
+	case "warning", "warn":
+		logging.Warn(message, args...)
+	case "debug":
+		logging.Debug(message, args...)
+	default:
+		logging.Info(message, args...)
+	}
+}
 
 // ClearLogs removes the active log and starts a fresh file.
 func (a *App) ClearLogs() error { return logging.Clear() }

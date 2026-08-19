@@ -14,8 +14,16 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/windows/icon.ico
+var trayIcon []byte
+
 func main() {
+	// 单实例：已有实例时激活其窗口后直接退出
+	if !app.AcquireSingleInstance("Mnemo") {
+		return
+	}
 	application := app.NewApp()
+	application.SetupTray(trayIcon)
 
 	err := wails.Run(&options.App{
 		Title:     "Mnemo",
@@ -34,6 +42,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 20, G: 24, B: 34, A: 1},
 		OnStartup:        application.Startup,
 		OnShutdown:       application.Shutdown,
+		OnBeforeClose:    application.BeforeClose,
 		Bind: []interface{}{
 			application,
 		},

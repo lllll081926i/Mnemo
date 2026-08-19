@@ -2,7 +2,11 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"mnemo-go/internal/updater"
 )
@@ -35,22 +39,47 @@ func (a *App) CheckUpdate() (*CheckUpdateResult, error) {
 }
 
 // DownloadUpdate downloads the update and emits "update:progress" events.
-func (a *App) DownloadUpdate(url string) (string, error) {
-	if url == "" {
-		// resolve from CheckUpdate if not provided
-		info, err := updater.Check(context.Background())
-		if err != nil || info == nil {
-			return "", err
-		}
-		url = info.URL
+func (a *App) DownloadUpdate(downloadURL string) (string, error) {
+	info, err := updater.Check(context.Background())
+	if err != nil {
+		return "", err
 	}
-	dest := filepath.Join(updater.DownloadDir(a.dataDirectory()), "mnemo-update")
+	if info == nil || info.URL == "" {
+		return "", fmt.Errorf("no update is available")
+	}
+	if downloadURL != "" && downloadURL != info.URL {
+		return "", fmt.Errorf("update URL does not match the latest release")
+	}
+	name := "mnemo-update"
+	if parsed, parseErr := url.Parse(info.URL); parseErr == nil {
+		base := filepath.Base(parsed.Path)
+		if strings.HasSuffix(base, ".exe") {
+			name += ".exe"
+		} else if strings.HasSuffix(base, ".tar.gz") {
+			name += ".tar.gz"
+		} else if strings.HasSuffix(base, ".zip") {
+			name += ".zip"
+		} else if strings.HasSuffix(base, ".deb") {
+			name += ".deb"
+		}
+	}
+	dest := filepath.Join(updater.DownloadDir(a.dataDirectory()), name)
 	go func() {
-		_, err := updater.Download(context.Background(), url, dest, func(p updater.Progress) {
+		_, downloadErr := updater.Download(context.Background(), info.URL, dest, func(p updater.Progress) {
 			a.emit("update:progress", p)
 		})
-		if err != nil {
-			a.emit("update:progress", map[string]any{"error": err.Error()})
+		if downloadErr != nil {
+			a.emit("update:progress", map[string]any{"error": downloadErr.Error()})
+			return
+		}
+		ok, checksumErr := updater.VerifyChecksum(dest, info.SHA256)
+		if checksumErr != nil || !ok {
+			_ = os.Remove(dest)
+			if checksumErr != nil {
+				a.emit("update:progress", map[string]any{"error": fmt.Sprintf("update checksum verification failed: %v", checksumErr)})
+			} else {
+				a.emit("update:progress", map[string]any{"error": "update checksum verification failed"})
+			}
 		} else {
 			a.emit("update:done", map[string]any{"path": dest})
 		}
@@ -60,6 +89,9 @@ func (a *App) DownloadUpdate(url string) (string, error) {
 
 // ApplyUpdate launches the downloaded installer and quits.
 func (a *App) ApplyUpdate(path string) error {
+	if !updater.IsDownloadPath(a.dataDirectory(), path) {
+		return fmt.Errorf("invalid update path")
+	}
 	go func() {
 		if err := updater.Apply(path); err != nil {
 			a.emit("update:error", map[string]any{"error": err.Error()})

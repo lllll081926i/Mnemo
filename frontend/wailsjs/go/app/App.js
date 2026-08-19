@@ -10,6 +10,10 @@ export function ApplyUpdate(arg1) {
   return window['go']['app']['App']['ApplyUpdate'](arg1);
 }
 
+export function BeforeClose(arg1) {
+  return window['go']['app']['App']['BeforeClose'](arg1);
+}
+
 export function CancelDownload(arg1) {
   return window['go']['app']['App']['CancelDownload'](arg1);
 }
@@ -102,6 +106,10 @@ export function FavoriteFiles(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['FavoriteFiles'](arg1, arg2, arg3, arg4);
 }
 
+export function ForceQuit() {
+  return window['go']['app']['App']['ForceQuit']();
+}
+
 export function GetDirectoryCache(arg1) {
   return window['go']['app']['App']['GetDirectoryCache'](arg1);
 }
@@ -114,6 +122,10 @@ export function GetFileDetail(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetFileDetail'](arg1, arg2, arg3);
 }
 
+export function GetLogPath() {
+  return window['go']['app']['App']['GetLogPath']();
+}
+
 export function GetPan189Captcha() {
   return window['go']['app']['App']['GetPan189Captcha']();
 }
@@ -124,10 +136,6 @@ export function GetPlayCursor(arg1, arg2, arg3) {
 
 export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
-}
-
-export function GetLogPath() {
-  return window['go']['app']['App']['GetLogPath']();
 }
 
 export function GetVideoPreview(arg1, arg2, arg3) {
@@ -192,6 +200,10 @@ export function ListUploads() {
 
 export function LocalPreviewURL(arg1) {
   return window['go']['app']['App']['LocalPreviewURL'](arg1);
+}
+
+export function LogFrontend(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['LogFrontend'](arg1, arg2, arg3, arg4);
 }
 
 export function MediaProxy() {
@@ -348,6 +360,14 @@ export function SearchFiles(arg1, arg2, arg3) {
 
 export function SendGuangyaSms(arg1) {
   return window['go']['app']['App']['SendGuangyaSms'](arg1);
+}
+
+export function SetupTray(arg1) {
+  return window['go']['app']['App']['SetupTray'](arg1);
+}
+
+export function ShowMainWindow() {
+  return window['go']['app']['App']['ShowMainWindow']();
 }
 
 export function StartSyncScheduler() {

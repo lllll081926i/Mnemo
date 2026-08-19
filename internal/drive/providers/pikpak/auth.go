@@ -467,6 +467,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	callbackURI := strings.TrimSpace(req.Config["captcha_redirect_uri"])
 
 	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
+	captchaVerified := strings.EqualFold(strings.TrimSpace(req.Config["captcha_verified"]), "true")
 	if captchaToken == "" {
 		// A failed captcha init must stop here. Continuing with an empty token
 		// turns a transport/rate-limit failure into a misleading login error.
@@ -483,11 +484,27 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 	}
+	if captchaVerified {
+		// The callback is the provider's completion signal. Give the service a
+		// short window to persist the result, then submit exactly once. Do not
+		// exchange or re-initialize another token here: that loop is interpreted
+		// as high-frequency abuse by PikPak.
+		timer := time.NewTimer(1500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)
 	if err != nil {
 		rememberPikPakLoginCooldown(err)
 		logging.Warn("PikPak sign-in request failed", "error", err)
+		if captchaVerified {
+			return nil, err
+		}
 		if !isCaptchaError(err) {
 			return nil, err
 		}

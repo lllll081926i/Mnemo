@@ -5,6 +5,14 @@ function write(level, scope, message, fields) {
   const label = `${prefix}[${scope}] ${message}`
   if (fields && Object.keys(fields).length) method.call(console, label, fields)
   else method.call(console, label)
+  try {
+    const bridge = window?.go?.app?.App?.LogFrontend
+    if (typeof bridge === 'function') {
+      const safeFields = {}
+      for (const [key, value] of Object.entries(fields || {})) safeFields[key] = String(value ?? '')
+      void Promise.resolve(bridge(level, scope, message, safeFields)).catch(() => {})
+    }
+  } catch { /* browser preview has no Wails bridge */ }
 }
 export function debug(scope, message, fields) { write('debug', scope, message, fields) }
 export function info(scope, message, fields) { write('info', scope, message, fields) }

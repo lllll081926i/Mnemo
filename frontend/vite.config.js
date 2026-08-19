@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   base: './',
+  // jassub 的 libass worker 本身是 module worker，iife 打包不支持代码分割
+  worker: { format: 'es' },
   build: {
     outDir: 'dist',
     assetsInlineLimit: 0,

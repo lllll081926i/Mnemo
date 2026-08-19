@@ -2,8 +2,9 @@
 // 网页播放器只保留浏览器/WebView 可解码路径：原生 MP4/WebM/Ogg，按需加载
 // HLS.js 和 dash.js 的 MSE 流。所有远程请求都经 Go 侧本地会话代理。
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings } from '../api'
+import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings, previewUrl } from '../api'
 import { getPrefs } from '../appearance'
+import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -15,7 +16,6 @@ const emit = defineEmits(['close', 'toast', 'select-file'])
 
 const videoEl = ref(null)
 const containerEl = ref(null)
-const moreMenuEl = ref(null)
 const progressEl = ref(null)
 const loading = ref(true)
 const error = ref('')
@@ -23,8 +23,9 @@ const playing = ref(false)
 const position = ref(0)
 const duration = ref(0)
 const buffered = ref(0)
-const volume = ref(getPrefs().defaultVolume ?? 50)
+const volume = ref(Math.min(200, Math.max(0, getPrefs().defaultVolume ?? 100)))
 const muted = ref(false)
+const brightness = ref(100)
 const speed = ref(getPrefs().defaultSpeed || 1)
 const seekStep = getPrefs().seekStep || 10
 const qualities = ref([])
@@ -39,13 +40,25 @@ const subtitleSources = ref([])
 const subtitleTracks = ref([])
 const currentSubtitle = ref('')
 const subtitleEnabled = ref(false)
-const moreMenuOpen = ref(false)
+const activeMenu = ref('')
 const subtitleScale = ref(1)
 const subtitlePosition = ref('bottom')
 const scrubVisible = ref(false)
 const scrubX = ref(0)
 const scrubTime = ref(0)
 const centerPulse = ref(false)
+const osdVisible = ref(false)
+const osdIcon = ref('volume')
+const osdText = ref('')
+const osdPct = ref(0)
+const supCanvasEl = ref(null)
+const localSubInput = ref(null)
+const extraTextSubs = ref([]) // 网盘同名字幕 + 本地文本字幕（srt/vtt）
+const supTracks = ref([])     // SUP 图形字幕：{ label, url }
+const supActive = ref(false)
+const assTracks = ref([])     // ASS/SSA 特效字幕：{ label, url | content }
+const assActive = ref(false)
+const fsAnim = ref('') // 'in' | 'out'：全屏切换过渡动画
 
 let unmounted = false
 let playbackSeq = 0
@@ -62,6 +75,12 @@ let dashRecoveryAttempts = 0
 let activeSourceURL = ''
 let playbackEnded = false
 let centerTimer = null
+let osdTimer = null
+let audioCtx = null
+let gainNode = null
+let supRenderer = null
+let fsAnimTimer = null
+let assRenderer = null
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const speedOptions = SPEEDS.map((s) => ({ value: s, label: s + 'x' }))
@@ -75,6 +94,7 @@ onMounted(() => {
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
+  window.addEventListener('resize', onWindowResize)
   startPlayback()
 })
 watch(() => props.file?.file_id, (nextId, previousId) => {
@@ -95,9 +115,24 @@ onBeforeUnmount(() => {
   if (saveTimer) clearInterval(saveTimer)
   if (controlsTimer) clearTimeout(controlsTimer)
   if (centerTimer) clearTimeout(centerTimer)
+  if (osdTimer) clearTimeout(osdTimer)
+  if (audioCtx) { try { audioCtx.close() } catch {}; audioCtx = null; gainNode = null }
+  if (fsAnimTimer) clearTimeout(fsAnimTimer)
+  stopSup()
+  destroyAss()
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+  window.removeEventListener('resize', onWindowResize)
+})
+
+// 全屏切换：窗口级变化比较生硬，用短暂的缩放+淡入过渡
+watch(isFullscreen, (full) => {
+  fsAnim.value = ''
+  if (containerEl.value) void containerEl.value.offsetWidth
+  fsAnim.value = full ? 'in' : 'out'
+  if (fsAnimTimer) clearTimeout(fsAnimTimer)
+  fsAnimTimer = setTimeout(() => { fsAnim.value = '' }, 360)
 })
 
 function isVideoFile(file) {
@@ -128,6 +163,11 @@ async function startPlayback() {
   streamType.value = ''
   subtitleSources.value = []
   subtitleTracks.value = []
+  extraTextSubs.value = []
+  supTracks.value = []
+  assTracks.value = []
+  stopSup()
+  destroyAss()
   pendingResume = 0
   clearVideoSource()
   try {
@@ -143,6 +183,8 @@ async function startPlayback() {
     if (unmounted || seq !== playbackSeq) return
     setQualityOptions(preview)
     if (preview && Number.isFinite(preview.duration) && preview.duration > 0) duration.value = preview.duration
+    await mountCloudSubtitles()
+    if (unmounted || seq !== playbackSeq) return
     loading.value = false
     await nextTick()
     if (unmounted || seq !== playbackSeq) return
@@ -168,10 +210,12 @@ async function loadPlaybackSource(preview, resumeAt, autoplay, parentSeq) {
   pendingResume = Math.max(0, Number(resumeAt) || 0)
   pendingAutoplay = Boolean(autoplay)
   streamType.value = normalizeStreamType(preview)
-  subtitleSources.value = normalizeSubtitles(preview && preview.subtitles)
+  subtitleSources.value = [...normalizeSubtitles(preview && preview.subtitles), ...extraTextSubs.value]
   subtitleTracks.value = []
   subtitleEnabled.value = false
   currentSubtitle.value = ''
+  stopSup()
+  destroyAss()
   await nextTick()
   if (unmounted || parentSeq !== playbackSeq || loadSeq !== sourceSeq) return
 
@@ -364,7 +408,7 @@ function onLoaded() {
   if (!v) return
   playbackEnded = false
   updateDuration(v)
-  v.volume = volume.value / 100
+  applyVolume()
   v.playbackRate = speed.value
   if (pendingResume > 0 && (!Number.isFinite(v.duration) || pendingResume < v.duration)) v.currentTime = pendingResume
   pendingResume = 0
@@ -395,6 +439,7 @@ function onTimeUpdate() {
   if (playbackEnded && (!Number.isFinite(v.duration) || v.currentTime < v.duration)) playbackEnded = false
   position.value = v.currentTime
   updateBuffered(v)
+  if (supActive.value) renderSupFrame()
 }
 
 function onProgress() {
@@ -426,7 +471,8 @@ function onError() {
 function onVolumeChange() {
   const v = videoEl.value
   if (!v) return
-  volume.value = Math.round(v.volume * 100)
+  // 增益链接管后 video.volume 恒为 1，音量以 volume ref 为准
+  if (!gainNode) volume.value = Math.round(v.volume * 100)
   muted.value = v.muted
 }
 function onPipEnter() { pipActive.value = true }
@@ -436,9 +482,10 @@ function onPipLeave() { pipActive.value = false }
 function togglePlay() {
   const v = videoEl.value
   if (!v) return
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
   centerPulse.value = true
   if (centerTimer) clearTimeout(centerTimer)
-  centerTimer = setTimeout(() => { centerPulse.value = false }, 2000)
+  centerTimer = setTimeout(() => { centerPulse.value = false }, 700)
   if (v.paused) v.play().catch(() => {})
   else v.pause()
 }
@@ -461,13 +508,50 @@ function onSeekInput(e) {
 }
 
 function onVolume(e) {
-  const value = Number(e.target.value)
-  volume.value = value
+  volume.value = Number(e.target.value)
+  applyVolume()
+  showOsd(muted.value || volume.value === 0 ? 'volume-x' : 'volume', `音量 ${muted.value ? 0 : volume.value}%`, (muted.value ? 0 : volume.value) / 2)
+}
+
+// 音量 0–200%：100% 以内用原生 volume，超过后接入 WebAudio 增益链
+function ensureAudioChain() {
   const v = videoEl.value
-  if (v) {
-    v.volume = value / 100
-    if (value > 0) v.muted = false
+  if (gainNode || !v) return
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    audioCtx = audioCtx || new Ctx()
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    const source = audioCtx.createMediaElementSource(v)
+    gainNode = audioCtx.createGain()
+    source.connect(gainNode)
+    gainNode.connect(audioCtx.destination)
+  } catch {
+    gainNode = null
   }
+}
+
+function applyVolume() {
+  const v = videoEl.value
+  if (!v) return
+  const level = volume.value
+  if (level > 100) ensureAudioChain()
+  if (gainNode) {
+    v.volume = 1
+    gainNode.gain.value = level / 100
+  } else {
+    v.volume = Math.min(100, level) / 100
+  }
+  if (level > 0) v.muted = false
+}
+
+function showOsd(icon, text, pct) {
+  osdIcon.value = icon
+  osdText.value = text
+  osdPct.value = Math.max(0, Math.min(100, pct))
+  osdVisible.value = true
+  if (osdTimer) clearTimeout(osdTimer)
+  osdTimer = setTimeout(() => { osdVisible.value = false }, 900)
 }
 
 function toggleMute() {
@@ -565,6 +649,7 @@ function screenshot() {
       link.download = (props.file.name || 'screenshot').replace(/\.[^.]+$/, '') + '-' + Math.floor(position.value) + 's.png'
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
+      emit('toast', '截图已保存')
     }, 'image/png')
   } catch (e) {
     emit('toast', '当前视频无法截图: ' + String(e), 'error')
@@ -586,6 +671,8 @@ function onTracksChange() {
   subtitleEnabled.value = selected >= 0
   currentSubtitle.value = selected >= 0 ? String(selected) : ''
   setSubtitlePosition(subtitlePosition.value)
+  // 自动挂载同名字幕偏好：有可用文本轨且未选择时默认开启第一条
+  if (selected < 0 && tracks.length > 0 && !supActive.value && getPrefs().autoLoadSubtitles !== false) selectSubtitle(0)
 }
 
 function selectSubtitle(index) {
@@ -599,12 +686,184 @@ function selectSubtitle(index) {
 }
 
 function toggleSubtitle() {
+  if (supActive.value) { stopSup(); currentSubtitle.value = ''; return }
+  if (assActive.value) { destroyAss(); currentSubtitle.value = ''; return }
   if (subtitleEnabled.value) selectSubtitle(-1)
   else if (subtitleTracks.value.length > 0) selectSubtitle(0)
 }
 
 function onSubtitleSelected(value) {
+  stopSup()
+  destroyAss()
   selectSubtitle(value === 'off' ? -1 : Number(value))
+}
+
+// ---- 网盘同名字幕 / 本地字幕 / SUP 图形字幕 ----
+function isSubtitleSibling(file, base) {
+  const name = String(file?.name || '').toLowerCase()
+  if (!name.startsWith(base + '.')) return false
+  return ['srt', 'vtt', 'ass', 'ssa', 'sup'].includes(extensionOf(name))
+}
+
+async function mountCloudSubtitles() {
+  const base = String(props.file.name || '').replace(/\.[^.]+$/, '').toLowerCase()
+  if (!base) return
+  const siblings = (props.files || []).filter((f) => !f.isDir && f.file_id !== props.file.file_id && isSubtitleSibling(f, base))
+  for (const sibling of siblings) {
+    const ext = extensionOf(sibling.name)
+    try {
+      const url = await previewUrl(props.account.user_id, props.account.drive_id, sibling.file_id)
+      if (unmounted) return
+      if (ext === 'sup') {
+        supTracks.value = [...supTracks.value, { label: sibling.name, url }]
+      } else if (ext === 'ass' || ext === 'ssa') {
+        assTracks.value = [...assTracks.value, { label: sibling.name, url }]
+      } else {
+        // 代理按扩展名自动完成 srt→vtt 转换
+        extraTextSubs.value = [...extraTextSubs.value, { url, label: sibling.name }]
+      }
+    } catch { /* 单个字幕获取失败不影响其余 */ }
+  }
+}
+
+function textBlobUrl(text) {
+  return URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
+}
+
+async function selectSup(index) {
+  const track = supTracks.value[index]
+  if (!track) return
+  selectSubtitle(-1)
+  destroyAss()
+  try {
+    const buffer = await (await fetch(track.url)).arrayBuffer()
+    const sets = parseSup(buffer)
+    if (!sets.length) throw new Error('no display sets')
+    if (!supRenderer) supRenderer = new SupRenderer(supCanvasEl.value)
+    supRenderer.load(sets)
+    supActive.value = true
+    currentSubtitle.value = 'sup:' + index
+    renderSupFrame()
+  } catch {
+    emit('toast', 'SUP 字幕解析失败', 'error')
+  }
+}
+
+function stopSup() {
+  supActive.value = false
+  if (supRenderer) supRenderer.stop()
+}
+
+// ---- ASS/SSA 特效字幕（libass WASM 渲染，保留定位/颜色/卡拉 OK 等全部特效） ----
+let jassubPromise = null
+async function getJassub() {
+  if (!jassubPromise) {
+    jassubPromise = Promise.all([
+      import('jassub'),
+      import('jassub/dist/wasm/jassub-worker.js?url'),
+      import('jassub/dist/wasm/jassub-worker.wasm?url'),
+      import('jassub/dist/default.woff2?url'),
+    ]).then(([mod, worker, wasm, font]) => ({
+      JASSUB: mod.default,
+      workerUrl: worker.default,
+      wasmUrl: wasm.default,
+      fontUrl: font.default,
+    }))
+  }
+  return jassubPromise
+}
+
+async function selectAss(index) {
+  const track = assTracks.value[index]
+  if (!track) return
+  selectSubtitle(-1)
+  stopSup()
+  try {
+    const content = track.content || await (await fetch(track.url)).text()
+    if (unmounted) return
+    const { JASSUB, workerUrl, wasmUrl, fontUrl } = await getJassub()
+    if (unmounted) return
+    destroyAss()
+    assRenderer = new JASSUB({ video: videoEl.value, subContent: content, workerUrl, wasmUrl, fonts: [fontUrl] })
+    assActive.value = true
+    currentSubtitle.value = 'ass:' + index
+  } catch {
+    emit('toast', 'ASS 字幕加载失败', 'error')
+  }
+}
+
+function destroyAss() {
+  assActive.value = false
+  if (assRenderer) {
+    try { assRenderer.destroy() } catch {}
+    assRenderer = null
+  }
+}
+
+function onWindowResize() {
+  if (supActive.value) renderSupFrame()
+}
+
+function renderSupFrame() {
+  const v = videoEl.value
+  const canvas = supCanvasEl.value
+  if (!v || !canvas || !supRenderer) return
+  supRenderer.renderAt(v.currentTime, computeSubtitleBox(v, canvas))
+}
+
+// SUP 按 16:9 规格制作：渲染框锁定为视频内容矩形内的最大 16:9 区域，其余保持透明
+function computeSubtitleBox(v, canvas) {
+  const cw = Math.round(v.clientWidth)
+  const ch = Math.round(v.clientHeight)
+  if (!cw || !ch) return null
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch }
+  const vw = v.videoWidth || 16
+  const vh = v.videoHeight || 9
+  const scale = Math.min(cw / vw, ch / vh)
+  const dw = vw * scale
+  const dh = vh * scale
+  const dx = (cw - dw) / 2
+  const dy = (ch - dh) / 2
+  let bw = dw
+  let bh = dw * 9 / 16
+  if (bh > dh) { bh = dh; bw = dh * 16 / 9 }
+  return { x: dx + (dw - bw) / 2, y: dy + (dh - bh) / 2, w: bw, h: bh }
+}
+
+function onLocalSubtitlePicked(event) {
+  const picked = event.target.files && event.target.files[0]
+  event.target.value = ''
+  if (!picked) return
+  const ext = extensionOf(picked.name)
+  const label = picked.name + '（本地）'
+  if (ext === 'sup') {
+    supTracks.value = [...supTracks.value, { label, url: URL.createObjectURL(picked) }]
+    selectSup(supTracks.value.length - 1)
+    return
+  }
+  if (ext === 'ass' || ext === 'ssa') {
+    const reader = new FileReader()
+    reader.onload = () => {
+      assTracks.value = [...assTracks.value, { label, content: String(reader.result || '') }]
+      selectAss(assTracks.value.length - 1)
+    }
+    reader.readAsText(picked)
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = String(reader.result || '')
+    const vtt = srtToVtt(text)
+    const url = textBlobUrl(vtt)
+    const entry = { url, language: 'und', label }
+    extraTextSubs.value = [...extraTextSubs.value, entry]
+    subtitleSources.value = [...subtitleSources.value, entry]
+    nextTick(() => {
+      const v = videoEl.value
+      if (v && v.textTracks.length > 0) selectSubtitle(v.textTracks.length - 1)
+    })
+  }
+  reader.readAsText(picked)
 }
 
 function setSubtitleScale(value) {
@@ -626,11 +885,21 @@ function setSubtitlePosition(value) {
 
 function selectEpisode(file) {
   if (!file || file.file_id === props.file?.file_id) {
-    moreMenuOpen.value = false
+    activeMenu.value = ''
     return
   }
-  moreMenuOpen.value = false
+  activeMenu.value = ''
   emit('select-file', file)
+}
+
+// ---- popover menus ----
+function toggleMenu(name) {
+  activeMenu.value = activeMenu.value === name ? '' : name
+  if (activeMenu.value) showControls.value = true
+}
+
+function closeMenu() {
+  activeMenu.value = ''
 }
 
 // ---- save cursor ----
@@ -674,8 +943,8 @@ function onKeyDown(e) {
     case 'Space': e.preventDefault(); togglePlay(); break
     case 'ArrowLeft': e.preventDefault(); seek(-seekStep); break
     case 'ArrowRight': e.preventDefault(); seek(seekStep); break
-    case 'ArrowUp': e.preventDefault(); adjustVolume(0.05); break
-    case 'ArrowDown': e.preventDefault(); adjustVolume(-0.05); break
+    case 'ArrowUp': e.preventDefault(); adjustVolume(5); break
+    case 'ArrowDown': e.preventDefault(); adjustVolume(-5); break
     case 'KeyF': toggleFullscreen(); break
     case 'KeyM': toggleMute(); break
     case 'KeyP': togglePip(); break
@@ -683,7 +952,7 @@ function onKeyDown(e) {
     case 'KeyS': screenshot(); break
     case 'KeyC': toggleSubtitle(); break
     case 'Escape':
-      if (moreMenuOpen.value) moreMenuOpen.value = false
+      if (activeMenu.value) activeMenu.value = ''
       else if (isFullscreen.value) toggleFullscreen()
       else if (!isFullscreen.value) emit('close')
       break
@@ -693,10 +962,15 @@ function onKeyDown(e) {
 }
 
 function adjustVolume(delta) {
-  const v = videoEl.value
-  if (!v) return
-  v.volume = Math.max(0, Math.min(1, v.volume + delta))
-  volume.value = Math.round(v.volume * 100)
+  if (!videoEl.value) return
+  volume.value = Math.max(0, Math.min(200, volume.value + delta))
+  applyVolume()
+  showOsd(muted.value || volume.value === 0 ? 'volume-x' : 'volume', `音量 ${muted.value ? 0 : volume.value}%`, (muted.value ? 0 : volume.value) / 2)
+}
+
+function adjustBrightness(delta) {
+  brightness.value = Math.max(20, Math.min(200, brightness.value + delta))
+  showOsd('sun', `亮度 ${brightness.value}%`, brightness.value / 2)
 }
 
 // ---- auto-hide controls ----
@@ -704,8 +978,8 @@ function scheduleHideControls() {
   if (controlsTimer) clearTimeout(controlsTimer)
   if (!playing.value) return
   controlsTimer = setTimeout(() => {
-    if (!moreMenuOpen.value) showControls.value = false
-  }, 2000)
+    if (!activeMenu.value) showControls.value = false
+  }, 2600)
 }
 
 function onMouseMove() {
@@ -714,7 +988,7 @@ function onMouseMove() {
 }
 
 function onMouseLeave() {
-  if (playing.value) showControls.value = false
+  if (playing.value && !activeMenu.value) showControls.value = false
 }
 
 function onProgressPointerMove(event) {
@@ -730,14 +1004,18 @@ function onProgressPointerMove(event) {
 function onProgressPointerLeave() { scrubVisible.value = false }
 
 function onWheel(event) {
-  if (event.target?.closest?.('.pp-settings-panel')) return
+  if (event.target?.closest?.('.pp-pop')) return
   if (Math.abs(event.deltaY) < 1) return
-  adjustVolume(event.deltaY < 0 ? 0.05 : -0.05)
+  const el = containerEl.value
+  const half = el ? el.getBoundingClientRect().width / 2 : window.innerWidth / 2
+  const step = event.deltaY < 0 ? 5 : -5
+  if (event.clientX < half) adjustBrightness(step)
+  else adjustVolume(step)
 }
 
 function onDocumentPointerDown(event) {
-  if (moreMenuOpen.value && moreMenuEl.value && !moreMenuEl.value.contains(event.target)) {
-    moreMenuOpen.value = false
+  if (activeMenu.value && !event.target.closest('.pp-menu-root')) {
+    activeMenu.value = ''
   }
 }
 
@@ -764,7 +1042,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
     <div
       ref="containerEl"
       class="player-panel"
-      :class="{ 'cursor-hidden': !showControls && playing, fullscreen: isFullscreen }"
+      :class="{ 'cursor-hidden': !showControls && playing, fullscreen: isFullscreen, [`fs-anim-${fsAnim}`]: !!fsAnim }"
       :style="{ '--subtitle-scale': subtitleScale }"
       @mousemove="onMouseMove"
       @mouseleave="onMouseLeave"
@@ -776,6 +1054,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
           v-show="!loading && !error"
           :src="src"
           class="pp-video"
+          :style="{ filter: 'brightness(' + brightness / 100 + ')' }"
           @loadedmetadata="onLoaded"
           @loadeddata="onLoadedData"
           @durationchange="onDurationChange"
@@ -808,90 +1087,174 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
             @error="onTracksChange"
           />
         </video>
-        <div v-if="loading" class="pp-state pp-loading"><span class="spin"></span><span>正在准备播放…</span></div>
+        <canvas v-show="supActive" ref="supCanvasEl" class="pp-sup-canvas"></canvas>
+        <div v-if="loading" class="pp-state"><span class="pp-spinner"></span></div>
         <div v-else-if="error" class="pp-state pp-error">
-          <UiIcon name="warning" :size="26" />
-          <span>{{ error }}</span>
-          <button class="pp-retry" type="button" @click="startPlayback"><UiIcon name="refresh" :size="15" />重新加载</button>
+          <UiIcon name="warning" :size="28" />
+          <span class="pp-error-text">{{ error }}</span>
+          <button class="pp-retry" type="button" @click="startPlayback"><UiIcon name="refresh" :size="14" />重新加载</button>
         </div>
-        <button v-if="!loading && !error && (!playing || centerPulse)" type="button" class="pp-center-play" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="28" /></button>
+        <transition name="pp-osd">
+          <div v-if="osdVisible" class="pp-osd">
+            <UiIcon :name="osdIcon" :size="17" />
+            <span class="pp-osd-text">{{ osdText }}</span>
+            <div class="pp-osd-bar"><i :style="{ width: osdPct + '%' }"></i></div>
+          </div>
+        </transition>
+        <transition name="pp-center-fade">
+          <button
+            v-if="!loading && !error && (!playing || centerPulse)"
+            type="button"
+            class="pp-center"
+            :title="playing ? '暂停 (空格)' : '播放 (空格)'"
+            @click="togglePlay"
+          ><UiIcon :name="playing ? 'pause' : 'play'" :size="32" /></button>
+        </transition>
       </div>
 
       <header class="pp-topbar" :class="{ hidden: !showControls && playing }">
         <div class="pp-file-meta pp-window-drag">
-          <span class="pp-file-icon"><UiIcon name="video" :size="17" /></span>
-          <div class="pp-file-copy">
-            <div class="pp-title" :title="file.name">{{ file.name }}</div>
-            <div class="pp-source-label">{{ currentQualityLabel }}<span v-if="episodeFiles.length > 1"> · {{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
-          </div>
+          <div class="pp-title" :title="file.name">{{ file.name }}</div>
+          <div class="pp-sub">{{ currentQualityLabel }}<span v-if="episodeFiles.length > 1"> · 第 {{ episodeIndex + 1 }} 集 / 共 {{ episodeFiles.length }} 集</span></div>
         </div>
         <div class="pp-top-actions">
-          <button type="button" class="pp-icon pp-wide-action" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="17" /></button>
-          <button v-if="subtitleTracks.length" type="button" class="pp-icon pp-wide-action" :class="{ active: subtitleEnabled }" title="字幕 (C)" @click="toggleSubtitle"><UiIcon name="captions" :size="18" /></button>
-          <button type="button" class="pp-icon pp-wide-action" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="18" /></button>
-          <button type="button" class="pp-icon" title="播放设置" @click.stop="moreMenuOpen = !moreMenuOpen"><UiIcon name="settings" :size="18" /></button>
-          <button type="button" class="pp-icon pp-close" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
+          <button type="button" class="pp-btn" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="19" /></button>
+          <button type="button" class="pp-btn" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="20" /></button>
+          <button type="button" class="pp-btn" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="20" /></button>
         </div>
       </header>
 
       <section v-if="!loading && !error" class="pp-bottom" :class="{ hidden: !showControls && playing }">
-        <div ref="progressEl" class="pp-progress" :style="{ '--played': pct + '%', '--buffered': bufPct + '%' }" @pointermove="onProgressPointerMove" @pointerleave="onProgressPointerLeave">
+        <div
+          ref="progressEl"
+          class="pp-progress"
+          :style="{ '--played': pct + '%', '--buffered': bufPct + '%' }"
+          @pointermove="onProgressPointerMove"
+          @pointerleave="onProgressPointerLeave"
+        >
           <div class="pp-progress-buffer"></div>
-          <div class="pp-progress-fill"></div>
-          <div v-if="scrubVisible" class="pp-scrub-preview" :style="{ left: scrubX + '%' }">
+          <div class="pp-progress-fill"><span class="pp-progress-thumb"></span></div>
+          <div v-if="scrubVisible" class="pp-scrub" :style="{ left: scrubX + '%' }">
             <img v-if="thumbnailUrl" :src="thumbnailUrl" alt="" />
             <span>{{ fmtTime(scrubTime) }}</span>
           </div>
           <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="position" aria-label="播放进度" @input="onSeekInput" />
         </div>
-        <div class="pp-control-row">
-          <div class="pp-control-group pp-left-controls">
-            <button type="button" class="pp-icon pp-skip" title="快退 (←)" @click="seek(-seekStep)"><UiIcon name="back" :size="17" /></button>
-            <button type="button" class="pp-play" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="19" /></button>
-            <button type="button" class="pp-icon pp-skip" title="快进 (→)" @click="seek(seekStep)"><UiIcon name="forward" :size="17" /></button>
+
+        <div class="pp-controls">
+          <div class="pp-group">
+            <button type="button" class="pp-btn pp-skip" :title="`快退 ${seekStep}s (←)`" @click="seek(-seekStep)"><UiIcon name="rewind" :size="21" /></button>
+            <button type="button" class="pp-btn pp-play-main" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="24" /></button>
+            <button type="button" class="pp-btn pp-skip" :title="`快进 ${seekStep}s (→)`" @click="seek(seekStep)"><UiIcon name="fast-forward" :size="21" /></button>
+            <div class="pp-vol">
+              <button type="button" class="pp-btn" :title="muted ? '取消静音 (M)' : '静音 (M)'" @click="toggleMute"><UiIcon :name="muted || volume === 0 ? 'volume-x' : 'volume'" :size="20" /></button>
+              <div class="pp-vol-slider">
+                <input type="range" min="0" max="200" :value="muted ? 0 : volume" :style="{ '--vol-fill': (muted ? 0 : volume) / 2 + '%' }" aria-label="音量" @input="onVolume" />
+                <span class="pp-vol-value">{{ muted ? 0 : volume }}%</span>
+              </div>
+            </div>
             <span class="pp-time">{{ fmtTime(position) }}<i>/</i>{{ fmtTime(duration) }}</span>
           </div>
-          <div class="pp-control-group pp-right-controls">
-            <div class="pp-volume">
-              <button type="button" class="pp-icon" :title="muted ? '取消静音 (M)' : '静音 (M)'" @click="toggleMute"><UiIcon :name="muted || volume === 0 ? 'volume-x' : 'volume'" :size="18" /></button>
-              <input type="range" class="pp-vol-input" min="0" max="100" :value="muted ? 0 : volume" aria-label="音量" @input="onVolume" />
+
+          <div class="pp-group pp-right">
+            <div class="pp-menu-root">
+              <button type="button" class="pp-btn pp-text-btn" :class="{ active: activeMenu === 'speed' }" title="播放速度" @click.stop="toggleMenu('speed')">{{ speed }}x</button>
+              <div v-if="activeMenu === 'speed'" class="pp-pop">
+                <div class="pp-pop-title">播放速度</div>
+                <button v-for="item in speedOptions" :key="item.value" type="button" class="pp-pop-item" :class="{ on: item.value === speed }" @click="onSpeed(item.value); closeMenu()">
+                  <span class="pp-pop-check"><UiIcon v-if="item.value === speed" name="check" :size="14" /></span>{{ item.label }}
+                </button>
+              </div>
             </div>
-            <button type="button" class="pp-icon" :class="{ active: moreMenuOpen }" title="播放设置" @click.stop="moreMenuOpen = !moreMenuOpen"><UiIcon name="more-horizontal" :size="19" /></button>
-            <button type="button" class="pp-icon pp-loop-control" :class="{ active: looping }" title="循环 (L)" @click="toggleLoop"><UiIcon name="refresh" :size="17" /></button>
-            <button type="button" class="pp-icon" :title="isFullscreen ? '退出全屏 (F)' : '全屏 (F)'" @click="toggleFullscreen"><UiIcon :name="isFullscreen ? 'minimize' : 'maximize'" :size="18" /></button>
-          </div>
-        </div>
-        <div v-if="moreMenuOpen" ref="moreMenuEl" class="pp-settings-panel" @click.stop>
-          <div class="pp-settings-head"><span>播放设置</span><button class="pp-panel-close" type="button" @click="moreMenuOpen = false"><UiIcon name="close" :size="15" /></button></div>
-          <div v-if="episodeFiles.length > 1" class="pp-setting-block">
-            <div class="pp-setting-label">选集 <span>{{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
-            <div class="pp-option-grid pp-episode-grid">
-              <button v-for="(episode, index) in episodeFiles" :key="episode.file_id" type="button" class="pp-option" :class="{ active: episode.file_id === file.file_id }" :title="episode.name" @click="selectEpisode(episode)">{{ index + 1 }}</button>
+
+            <div class="pp-menu-root">
+              <button type="button" class="pp-btn" :class="{ active: activeMenu === 'subtitle' || subtitleEnabled || supActive }" title="字幕 (C)" @click.stop="toggleMenu('subtitle')"><UiIcon name="captions" :size="20" /></button>
+              <div v-if="activeMenu === 'subtitle'" class="pp-pop">
+                <div class="pp-pop-title">字幕</div>
+                <button type="button" class="pp-pop-item" :class="{ on: !subtitleEnabled && !supActive }" @click="onSubtitleSelected('off'); closeMenu()">
+                  <span class="pp-pop-check"><UiIcon v-if="!subtitleEnabled && !supActive" name="check" :size="14" /></span>关闭
+                </button>
+                <button v-for="track in subtitleTracks" :key="track.index" type="button" class="pp-pop-item" :class="{ on: subtitleEnabled && currentSubtitle === String(track.index) }" @click="onSubtitleSelected(String(track.index)); closeMenu()">
+                  <span class="pp-pop-check"><UiIcon v-if="subtitleEnabled && currentSubtitle === String(track.index)" name="check" :size="14" /></span><span class="pp-pop-item-label">{{ track.label }}</span>
+                </button>
+                <button v-for="(track, index) in supTracks" :key="'sup-' + index" type="button" class="pp-pop-item" :class="{ on: supActive && currentSubtitle === 'sup:' + index }" @click="selectSup(index); closeMenu()">
+                  <span class="pp-pop-check"><UiIcon v-if="supActive && currentSubtitle === 'sup:' + index" name="check" :size="14" /></span><span class="pp-pop-item-label">{{ track.label }}</span><span class="pp-pop-tag">SUP</span>
+                </button>
+                <button v-for="(track, index) in assTracks" :key="'ass-' + index" type="button" class="pp-pop-item" :class="{ on: assActive && currentSubtitle === 'ass:' + index }" @click="selectAss(index); closeMenu()">
+                  <span class="pp-pop-check"><UiIcon v-if="assActive && currentSubtitle === 'ass:' + index" name="check" :size="14" /></span><span class="pp-pop-item-label">{{ track.label }}</span><span class="pp-pop-tag">ASS</span>
+                </button>
+                <div v-if="!subtitleTracks.length && !supTracks.length && !assTracks.length" class="pp-pop-empty">无可用字幕</div>
+                <div class="pp-pop-divider"></div>
+                <button type="button" class="pp-pop-item" @click="localSubInput && localSubInput.click(); closeMenu()">
+                  <span class="pp-pop-check"></span><UiIcon name="upload" :size="14" />加载本地字幕…
+                </button>
+                <template v-if="subtitleTracks.length">
+                  <div class="pp-pop-divider"></div>
+                  <div class="pp-pop-tools">
+                    <span class="pp-pop-tools-label">大小</span>
+                    <button type="button" class="pp-tool" @click="setSubtitleScale(subtitleScale - .1)">−</button>
+                    <span class="pp-tool-value">{{ Math.round(subtitleScale * 100) }}%</span>
+                    <button type="button" class="pp-tool" @click="setSubtitleScale(subtitleScale + .1)">＋</button>
+                    <span class="pp-pop-tools-label">位置</span>
+                    <button type="button" class="pp-tool pp-tool-wide" @click="setSubtitlePosition(subtitlePosition === 'top' ? 'bottom' : 'top')">{{ subtitlePosition === 'top' ? '顶部' : '底部' }}</button>
+                  </div>
+                </template>
+              </div>
             </div>
+
+            <div class="pp-menu-root">
+              <button type="button" class="pp-btn" :class="{ active: activeMenu === 'episodes' }" title="播放列表" @click.stop="toggleMenu('episodes')"><UiIcon name="list" :size="20" /></button>
+              <div v-if="activeMenu === 'episodes'" class="pp-pop pp-pop-list">
+                <div class="pp-pop-title">播放列表 <span class="pp-pop-count">{{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
+                <button v-for="(episode, index) in episodeFiles" :key="episode.file_id" type="button" class="pp-pop-item pp-episode" :class="{ on: episode.file_id === file.file_id }" :title="episode.name" @click="selectEpisode(episode)">
+                  <span class="pp-episode-no">{{ index + 1 }}</span>
+                  <span class="pp-episode-name">{{ episode.name }}</span>
+                  <UiIcon v-if="episode.file_id === file.file_id" name="play" :size="11" />
+                </button>
+              </div>
+            </div>
+
+            <div v-if="qualities.length > 1" class="pp-menu-root">
+              <button type="button" class="pp-btn pp-text-btn" :class="{ active: activeMenu === 'quality' }" title="清晰度" @click.stop="toggleMenu('quality')">{{ currentQualityLabel }}</button>
+              <div v-if="activeMenu === 'quality'" class="pp-pop">
+                <div class="pp-pop-title">清晰度</div>
+                <button v-for="quality in qualities" :key="quality.value" type="button" class="pp-pop-item" :class="{ on: quality.value === currentQuality }" @click="switchQuality(quality.value); closeMenu()">
+                  <span class="pp-pop-check"><UiIcon v-if="quality.value === currentQuality" name="check" :size="14" /></span>{{ quality.label }}
+                </button>
+              </div>
+            </div>
+
+            <button type="button" class="pp-btn" :class="{ active: looping }" title="循环播放 (L)" @click="toggleLoop"><UiIcon name="refresh" :size="18" /></button>
+            <button type="button" class="pp-btn" :title="isFullscreen ? '退出全屏 (F)' : '全屏 (F)'" @click="toggleFullscreen"><UiIcon :name="isFullscreen ? 'minimize' : 'maximize'" :size="20" /></button>
           </div>
-          <div v-if="qualities.length > 1" class="pp-setting-block"><div class="pp-setting-label">清晰度</div><div class="pp-option-grid"><button v-for="quality in qualities" :key="quality.value" type="button" class="pp-option pp-option-text" :class="{ active: quality.value === currentQuality }" @click="switchQuality(quality.value)">{{ quality.label }}</button></div></div>
-          <div class="pp-setting-block"><div class="pp-setting-label">倍速</div><div class="pp-option-grid"><button v-for="item in speedOptions" :key="item.value" type="button" class="pp-option pp-option-text" :class="{ active: item.value === speed }" @click="onSpeed(item.value)">{{ item.label }}</button></div></div>
-          <div v-if="subtitleTracks.length" class="pp-setting-block"><div class="pp-setting-label">字幕</div><div class="pp-option-grid"><button type="button" class="pp-option pp-option-text" :class="{ active: !subtitleEnabled }" @click="onSubtitleSelected('off')">关闭</button><button v-for="track in subtitleTracks" :key="track.index" type="button" class="pp-option pp-option-text" :class="{ active: subtitleEnabled && currentSubtitle === String(track.index) }" @click="onSubtitleSelected(String(track.index))">{{ track.label }}</button></div><div class="pp-subtitle-tools"><button type="button" class="pp-mini-option" @click="setSubtitleScale(subtitleScale - .1)">字幕 -</button><span>{{ Math.round(subtitleScale * 100) }}%</span><button type="button" class="pp-mini-option" @click="setSubtitleScale(subtitleScale + .1)">字幕 +</button><button type="button" class="pp-mini-option" :class="{ active: subtitlePosition === 'top' }" @click="setSubtitlePosition(subtitlePosition === 'top' ? 'bottom' : 'top')">{{ subtitlePosition === 'top' ? '顶部' : '底部' }}</button></div></div>
-          <div class="pp-setting-actions"><button type="button" class="pp-menu-action" :class="{ active: looping }" @click="toggleLoop"><UiIcon name="refresh" :size="15" /><span>循环播放</span></button><button type="button" class="pp-menu-action" @click="screenshot"><UiIcon name="camera" :size="15" /><span>保存截图</span></button><button type="button" class="pp-menu-action" :class="{ active: pipActive }" @click="togglePip"><UiIcon name="picture-in-picture" :size="15" /><span>画中画</span></button></div>
         </div>
       </section>
+      <input ref="localSubInput" type="file" accept=".srt,.vtt,.ass,.ssa,.sup" class="pp-hidden-input" @change="onLocalSubtitlePicked" />
     </div>
   </teleport>
 </template>
 
 <style scoped>
+/* —— Netflix / Apple TV 沉浸路线：渐变遮罩、细线进度、玻璃二级菜单 —— */
 .player-panel {
+  --pp-white: rgba(255, 255, 255, .92);
+  --pp-dim: rgba(255, 255, 255, .55);
+  --pp-glass: rgba(16, 16, 16, .78);
+  --pp-hover: rgba(255, 255, 255, .12);
+  --subtitle-scale: 1;
   position: fixed;
   z-index: 520;
   inset: 0;
-  display: block;
   overflow: hidden;
-  background: #07080a;
-  color: #f9f9f9;
+  isolation: isolate;
+  background: #000;
+  color: #fff;
   font-family: inherit;
   letter-spacing: 0;
+  user-select: none;
 }
 .player-panel.cursor-hidden { cursor: none; }
+
 .pp-stage {
   position: absolute;
   inset: 0;
@@ -900,7 +1263,44 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   justify-content: center;
   background: #000;
 }
-.pp-video { width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+.pp-video { width: 100%; height: 100%; object-fit: contain; }
+.player-panel video::cue {
+  color: #fff;
+  background: rgba(0, 0, 0, .55);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .9);
+  font-size: calc(1em * var(--subtitle-scale));
+}
+
+/* 全屏切换过渡：进入由小放大，退出由大收小 */
+.player-panel.fs-anim-in .pp-stage { animation: pp-fs-in 340ms cubic-bezier(.22, .9, .3, 1) both; }
+.player-panel.fs-anim-out .pp-stage { animation: pp-fs-out 340ms cubic-bezier(.22, .9, .3, 1) both; }
+@keyframes pp-fs-in { from { opacity: .25; transform: scale(.93); } to { opacity: 1; transform: scale(1); } }
+@keyframes pp-fs-out { from { opacity: .25; transform: scale(1.06); } to { opacity: 1; transform: scale(1); } }
+
+/* SUP 字幕覆盖层：与视频同区，16:9 锁定由 JS 计算 */
+.pp-sup-canvas {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.pp-hidden-input { display: none; }
+.pp-pop-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-pop-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, .75);
+  background: rgba(255, 255, 255, .14);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+}
+.pp-pop-empty { padding: 8px 10px; color: var(--pp-dim); font-size: 12px; }
+
+/* 状态层 */
 .pp-state {
   position: absolute;
   z-index: 2;
@@ -909,30 +1309,42 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 16px;
   padding: 24px;
-  color: rgba(249, 249, 249, .72);
+  color: var(--pp-dim);
   font-size: 14px;
   text-align: center;
 }
-.pp-error { color: #ff8c8c; }
-.pp-loading .spin { width: 19px; height: 19px; border-width: 2px; }
+.pp-spinner {
+  width: 34px;
+  height: 34px;
+  border: 2.5px solid rgba(255, 255, 255, .18);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: pp-spin 800ms linear infinite;
+}
+@keyframes pp-spin { to { transform: rotate(360deg); } }
+.pp-error { color: rgba(255, 130, 130, .95); }
+.pp-error-text { max-width: 480px; line-height: 1.6; }
 .pp-retry {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, .2);
-  border-radius: 6px;
-  color: #f9f9f9;
-  background: rgba(255, 255, 255, .08);
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 999px;
+  color: #fff;
+  background: transparent;
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+  transition: background .16s ease, border-color .16s ease;
 }
-.pp-retry:hover { background: rgba(255, 255, 255, .15); }
-.pp-center-play {
+.pp-retry:hover { background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .5); }
+
+/* 悬浮大按钮 */
+.pp-center {
   position: absolute;
   z-index: 2;
   left: 50%;
@@ -940,267 +1352,356 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 64px;
-  padding-left: 3px;
+  width: 78px;
+  height: 78px;
+  padding: 0 0 0 4px;
   transform: translate(-50%, -50%);
-  border: 1px solid rgba(255, 255, 255, .64);
+  border: 2px solid rgba(255, 255, 255, .9);
   border-radius: 50%;
-  color: #07080a;
-  background: rgba(255, 255, 255, .92);
+  color: #fff;
+  background: rgba(0, 0, 0, .6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   cursor: pointer;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .32);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+  transition: transform .18s ease, background .18s ease;
 }
-.pp-center-play:hover { background: #fff; transform: translate(-50%, -50%) scale(1.04); }
-.pp-topbar,
-.pp-bottom {
+.pp-center:hover { transform: translate(-50%, -50%) scale(1.07); background: rgba(0, 0, 0, .72); }
+.pp-center-fade-enter-active, .pp-center-fade-leave-active { transition: opacity .22s ease; }
+.pp-center-fade-enter-from, .pp-center-fade-leave-to { opacity: 0; }
+
+/* 顶栏 / 底栏：纯渐变遮罩，无实体条 */
+.pp-topbar, .pp-bottom {
   position: absolute;
   z-index: 3;
   left: 0;
   right: 0;
   display: flex;
-  align-items: center;
-  background: rgba(7, 8, 10, .84);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity .3s ease, transform .3s ease;
 }
 .pp-topbar {
   top: 0;
+  align-items: flex-start;
   justify-content: space-between;
-  min-height: 68px;
-  padding: 12px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  gap: 16px;
+  padding: 20px 24px 48px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .68), rgba(0, 0, 0, .28) 55%, transparent);
+  --wails-draggable: drag;
 }
-.pp-topbar.hidden { opacity: 0; transform: translateY(-8px); pointer-events: none; }
-.pp-file-meta { display: flex; align-items: center; min-width: 0; flex: 1; gap: 10px; }
-.pp-file-icon {
+.pp-window-drag { --wails-draggable: drag; }
+.pp-topbar button, .pp-bottom, .pp-bottom button, .pp-bottom input, .pp-pop { --wails-draggable: no-drag; }
+.pp-topbar.hidden { opacity: 0; transform: translateY(-12px); pointer-events: none; }
+.pp-bottom.hidden { opacity: 0; transform: translateY(12px); pointer-events: none; }
+
+.pp-file-meta { min-width: 0; flex: 1; padding-top: 2px; }
+.pp-title {
+  overflow: hidden;
+  color: var(--pp-white);
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .6);
+}
+.pp-sub { margin-top: 2px; color: var(--pp-dim); font-size: 12px; }
+.pp-top-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+/* 通用图标按钮 */
+.pp-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 6px;
-  color: rgba(249, 249, 249, .86);
-  background: rgba(255, 255, 255, .045);
-  flex-shrink: 0;
-}
-.pp-file-copy { min-width: 0; }
-.pp-title { overflow: hidden; color: #f9f9f9; font-size: 14px; font-weight: 600; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
-.pp-source-label { margin-top: 1px; color: rgba(249, 249, 249, .5); font-size: 11px; line-height: 15px; text-transform: uppercase; }
-.pp-top-actions,
-.pp-control-group,
-.pp-volume { display: flex; align-items: center; }
-.pp-top-actions { gap: 4px; margin-left: 12px; flex-shrink: 0; }
-.pp-icon,
-.pp-play {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   margin: 0;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: rgba(249, 249, 249, .78);
+  border: 0;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, .82);
   background: transparent;
   cursor: pointer;
   flex-shrink: 0;
-  transition: opacity 140ms ease, background 140ms ease, border-color 140ms ease;
+  transition: color .15s ease, background .15s ease, transform .15s ease;
 }
-.pp-icon:hover { color: #fff; border-color: rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .08); }
-.pp-icon.active { color: #88c8ff; background: rgba(85, 179, 255, .14); }
-.pp-close { margin-left: 2px; }
-.pp-more { position: relative; }
-.pp-popover {
+.pp-btn:hover { color: #fff; background: var(--pp-hover); }
+.pp-btn:active { transform: scale(.92); }
+.pp-btn.active { color: #fff; background: rgba(255, 255, 255, .2); }
+.pp-text-btn {
+  width: auto;
+  min-width: 40px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 底栏 */
+.pp-bottom {
+  bottom: 0;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 48px 24px 14px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, .78), rgba(0, 0, 0, .34) 55%, transparent);
+}
+
+/* 细线进度条 */
+.pp-progress { position: relative; height: 16px; cursor: pointer; }
+.pp-progress::before, .pp-progress-buffer, .pp-progress-fill {
   position: absolute;
-  z-index: 12;
-  top: calc(100% + 8px);
+  top: 50%;
   right: 0;
-  width: 230px;
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 7px;
-  background: #101111;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .04);
+  left: 0;
+  height: 3px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  transition: height .14s ease;
 }
-.pp-menu-action {
+.pp-progress::before { content: ''; background: rgba(255, 255, 255, .22); }
+.pp-progress-buffer { right: auto; width: var(--buffered); background: rgba(255, 255, 255, .38); }
+.pp-progress-fill { right: auto; width: var(--played); background: #fff; }
+.pp-progress:hover::before, .pp-progress:hover .pp-progress-buffer, .pp-progress:hover .pp-progress-fill { height: 5px; }
+.pp-progress-thumb {
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  width: 12px;
+  height: 12px;
+  transform: translateY(-50%) scale(0);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .5);
+  transition: transform .14s ease;
+}
+.pp-progress:hover .pp-progress-thumb { transform: translateY(-50%) scale(1); }
+.pp-progress-input { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.pp-scrub {
+  position: absolute;
+  z-index: 5;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 5px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 10px;
+  background: var(--pp-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .5);
+  pointer-events: none;
+}
+.pp-scrub img { display: block; width: 148px; height: 83px; object-fit: cover; border-radius: 6px; }
+.pp-scrub span { color: #fff; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 控制行 */
+.pp-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+.pp-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.pp-right { justify-content: flex-end; gap: 4px; }
+.pp-play-main { width: 46px; height: 46px; color: #fff; }
+.pp-play-main:hover { transform: scale(1.08); background: var(--pp-hover); }
+.pp-time {
+  margin-left: 10px;
+  color: rgba(255, 255, 255, .78);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .5);
+}
+.pp-time i { margin: 0 6px; color: rgba(255, 255, 255, .32); font-style: normal; }
+
+/* 音量：悬停展开横向滑杆 */
+.pp-vol { display: flex; align-items: center; }
+.pp-vol-slider {
+  width: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
-  width: 100%;
-  height: 34px;
-  gap: 9px;
-  padding: 0 8px;
+  transition: width .2s ease;
+}
+.pp-vol:hover .pp-vol-slider, .pp-vol-slider:focus-within { width: 132px; }
+.pp-vol-slider input {
+  width: 84px;
+  margin-left: 2px;
+  height: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #fff var(--vol-fill, 50%), rgba(255, 255, 255, .28) var(--vol-fill, 50%));
+  cursor: pointer;
+}
+.pp-vol-slider input::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  appearance: none;
+  -webkit-appearance: none;
   border: 0;
-  border-radius: 5px;
-  color: rgba(249, 249, 249, .78);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .5);
+}
+.pp-vol-value {
+  margin-left: 8px;
+  min-width: 36px;
+  color: rgba(255, 255, 255, .85);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 屏幕提示药丸 */
+.pp-osd {
+  position: absolute;
+  z-index: 4;
+  top: 84px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 14px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(0, 0, 0, .6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.pp-osd-text { white-space: nowrap; }
+.pp-osd-bar {
+  width: 64px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .25);
+}
+.pp-osd-bar i { display: block; height: 100%; border-radius: 999px; background: #fff; transition: width .1s ease; }
+.pp-osd-enter-active, .pp-osd-leave-active { transition: opacity .22s ease, transform .22s ease; }
+.pp-osd-enter-from, .pp-osd-leave-to { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+
+/* 二级弹出菜单：玻璃拟态 */
+.pp-menu-root { position: relative; }
+.pp-pop {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 14px);
+  min-width: 208px;
+  max-width: 320px;
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 14px;
+  background: var(--pp-glass);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow: 0 20px 56px rgba(0, 0, 0, .6);
+  animation: pp-pop-in .18s cubic-bezier(.2, .9, .3, 1.2);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, .25) transparent;
+}
+.pp-pop::-webkit-scrollbar { width: 5px; }
+.pp-pop::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255, 255, 255, .22); }
+@keyframes pp-pop-in { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
+.pp-pop-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 8px;
+  color: var(--pp-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.pp-pop-count { font-variant-numeric: tabular-nums; }
+.pp-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: rgba(255, 255, 255, .85);
   background: transparent;
   font: inherit;
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+  transition: background .13s ease;
 }
-.pp-menu-action:hover { color: #fff; background: rgba(255, 255, 255, .075); }
-.pp-menu-action.active { color: #88c8ff; }
-.pp-menu-select { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; padding: 3px 8px; color: rgba(249, 249, 249, .56); font-size: 12px; }
-.pp-menu-select :deep(.uiselect-btn) { min-width: 92px; height: 28px; border-color: rgba(255, 255, 255, .13); background: rgba(255, 255, 255, .04); color: #f9f9f9; }
-.pp-bottom {
-  bottom: 0;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 11px;
-  padding: 12px 18px 14px;
-  border-top: 1px solid rgba(255, 255, 255, .08);
+.pp-pop-item:hover { background: var(--pp-hover); color: #fff; }
+.pp-pop-item.on { color: #fff; font-weight: 600; }
+.pp-pop-check { display: inline-flex; width: 16px; flex-shrink: 0; color: #fff; }
+.pp-pop-divider { height: 1px; margin: 6px 4px; background: rgba(255, 255, 255, .1); }
+.pp-pop-list { width: 300px; }
+.pp-episode { gap: 10px; }
+.pp-episode-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--pp-dim);
+  background: rgba(255, 255, 255, .08);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
-.pp-bottom.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
-.pp-progress { position: relative; height: 8px; cursor: pointer; }
-.pp-progress::before,
-.pp-progress-buffer,
-.pp-progress-fill {
-  position: absolute;
-  top: 2px;
-  right: 0;
-  left: 0;
-  height: 4px;
-  border-radius: 3px;
-}
-.pp-progress::before { content: ''; background: rgba(255, 255, 255, .18); }
-.pp-progress-buffer { right: auto; width: var(--buffered); background: rgba(255, 255, 255, .35); }
-.pp-progress-fill { right: auto; width: var(--played); background: #f4f5f6; }
-.pp-progress-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.pp-control-row { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 14px; }
-.pp-left-controls { min-width: 0; gap: 3px; }
-.pp-right-controls { justify-content: flex-end; gap: 5px; min-width: 0; }
-.pp-play { width: 38px; height: 38px; color: #07080a; background: #f4f5f6; border-color: #f4f5f6; }
-.pp-play:hover { background: #fff; }
-.pp-time { margin-left: 7px; color: rgba(249, 249, 249, .83); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pp-time i { margin: 0 5px; color: rgba(249, 249, 249, .35); font-style: normal; }
-.pp-volume { gap: 2px; }
-.pp-vol-input { width: 72px; margin: 0 4px 0 0; accent-color: #f4f5f6; cursor: pointer; }
-.pp-select { flex-shrink: 0; }
-.pp-select :deep(.uiselect-btn) { min-width: 72px; height: 30px; border-color: transparent; border-radius: 6px; color: rgba(249, 249, 249, .78); background: transparent; }
-.pp-select :deep(.uiselect-btn:hover),
-.pp-select :deep(.uiselect-btn.open) { border-color: rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .075); box-shadow: none; }
-.pp-select :deep(.uiselect-arrow) { color: rgba(249, 249, 249, .5); }
-:global(.uiselect-drop) { z-index: 600; }
+.pp-pop-item.on .pp-episode-no { color: #000; background: #fff; }
+.pp-episode-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 字幕工具行 */
+.pp-pop-tools { display: flex; align-items: center; gap: 6px; padding: 4px 10px 6px; }
+.pp-pop-tools-label { color: var(--pp-dim); font-size: 11.5px; }
+.pp-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .06);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .13s ease;
+}
+.pp-tool:hover { background: rgba(255, 255, 255, .16); color: #fff; }
+.pp-tool-wide { padding: 0 10px; margin-left: 2px; }
+.pp-tool-value { min-width: 38px; color: rgba(255, 255, 255, .7); font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* 响应式 */
 @media (max-width: 760px) {
-  .pp-topbar { min-height: 60px; padding: 10px 12px; }
-  .pp-bottom { padding: 10px 12px 12px; }
-  .pp-file-icon { width: 31px; height: 31px; }
-  .pp-wide-action, .pp-loop-control, .pp-quality-select, .pp-subtitle-select { display: none; }
-  .pp-vol-input { width: 56px; }
+  .pp-topbar { padding: 14px 14px 40px; }
+  .pp-bottom { padding: 40px 14px 10px; }
+  .pp-skip, .pp-vol-slider { display: none; }
+  .pp-scrub img { width: 112px; height: 63px; }
+  .pp-pop-list { width: min(300px, calc(100vw - 28px)); }
 }
 @media (max-width: 560px) {
-  .pp-source-label, .pp-skip, .pp-vol-input, .pp-speed-select { display: none; }
-  .pp-top-actions { gap: 2px; margin-left: 6px; }
-  .pp-icon { width: 34px; height: 34px; }
-  .pp-play { width: 36px; height: 36px; }
-  .pp-time { margin-left: 4px; font-size: 11px; }
-  .pp-bottom { gap: 8px; }
-  .pp-center-play { width: 58px; height: 58px; }
-}
-</style>
-
-<style scoped>
-/* Immersive playback surface: keep the stage quiet and reveal controls only on demand. */
-.player-panel {
-  --player-accent: #4da3ff;
-  --player-glass: rgba(0, 0, 0, .62);
-  --subtitle-scale: 1;
-  isolation: isolate;
-  background: #000;
-  color: #fff;
-}
-.pp-stage { background: #000; }
-.pp-video { cursor: default; }
-.pp-topbar, .pp-bottom {
-  background: linear-gradient(180deg, rgba(0, 0, 0, .72), var(--player-glass));
-  border: 0;
-  backdrop-filter: blur(18px) saturate(120%);
-  -webkit-backdrop-filter: blur(18px) saturate(120%);
-}
-.pp-topbar {
-  min-height: 74px;
-  padding: 14px 22px;
-  --wails-draggable: drag;
-}
-.pp-window-drag { --wails-draggable: drag; }
-.pp-top-actions, .pp-top-actions button, .pp-bottom button, .pp-bottom input, .pp-settings-panel { --wails-draggable: no-drag; }
-.pp-topbar.hidden { transform: translateY(-18px); }
-.pp-bottom.hidden { transform: translateY(18px); }
-.pp-file-icon { width: 36px; height: 36px; border: 0; border-radius: 50%; color: rgba(255,255,255,.82); background: rgba(255,255,255,.1); }
-.pp-title { font-size: 15px; font-weight: 600; }
-.pp-source-label { color: rgba(255,255,255,.54); text-transform: none; }
-.pp-icon, .pp-play, .pp-panel-close { width: 42px; height: 42px; border: 0; border-radius: 50%; color: rgba(255,255,255,.78); }
-.pp-icon:hover, .pp-panel-close:hover { color: #fff; background: rgba(255,255,255,.14); }
-.pp-icon.active { color: #fff; background: color-mix(in srgb, var(--player-accent) 28%, transparent); }
-.pp-close { margin-left: 8px; }
-.pp-center-play {
-  width: 64px;
-  height: 64px;
-  border: 1px solid rgba(255,255,255,.5);
-  color: #111;
-  background: rgba(255,255,255,.92);
-  box-shadow: 0 12px 42px rgba(0,0,0,.45), 0 0 0 8px rgba(255,255,255,.08);
-  animation: pp-center-in 180ms ease-out;
-}
-.pp-center-play:hover { background: #fff; box-shadow: 0 14px 48px rgba(0,0,0,.52), 0 0 0 10px rgba(255,255,255,.11); }
-@keyframes pp-center-in { from { opacity: 0; transform: translate(-50%, -50%) scale(.82); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
-.pp-bottom { gap: 14px; padding: 15px 22px 18px; }
-.pp-progress { height: 12px; }
-.pp-progress::before, .pp-progress-buffer, .pp-progress-fill { top: 4px; height: 4px; border-radius: 999px; transition: height 120ms ease, top 120ms ease; }
-.pp-progress::before { background: rgba(255,255,255,.25); }
-.pp-progress-buffer { background: rgba(255,255,255,.45); }
-.pp-progress-fill { background: var(--player-accent); box-shadow: 0 0 10px color-mix(in srgb, var(--player-accent) 45%, transparent); }
-.pp-progress:hover::before, .pp-progress:hover .pp-progress-buffer, .pp-progress:hover .pp-progress-fill { top: 3px; height: 6px; }
-.pp-progress-input { z-index: 2; }
-.pp-progress-input::-webkit-slider-thumb { width: 14px; height: 14px; opacity: 0; border: 0; border-radius: 50%; background: #fff; appearance: none; }
-.pp-progress:hover .pp-progress-input::-webkit-slider-thumb, .pp-progress-input:focus-visible::-webkit-slider-thumb { opacity: 1; }
-.pp-scrub-preview { position: absolute; z-index: 5; bottom: 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 68px; padding: 4px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.2); border-radius: 6px; background: rgba(8,8,8,.9); box-shadow: 0 10px 24px rgba(0,0,0,.42); pointer-events: none; }
-.pp-scrub-preview img { display: block; width: 140px; height: 78px; object-fit: cover; border-radius: 3px; }
-.pp-scrub-preview span { color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
-.pp-play { width: 44px; height: 44px; color: #111; background: #fff; border-color: #fff; }
-.pp-play:hover { background: #fff; }
-.pp-time { color: rgba(255,255,255,.8); font-size: 12px; }
-.pp-volume { position: relative; gap: 2px; }
-.pp-vol-input { position: absolute; bottom: 37px; left: 8px; display: block; width: 34px; height: 86px; margin: 0; padding: 8px 0; opacity: 0; border: 1px solid rgba(255,255,255,.15); border-radius: 18px; background: rgba(0,0,0,.75); writing-mode: vertical-lr; direction: rtl; transition: opacity 140ms ease; }
-.pp-volume:hover .pp-vol-input, .pp-vol-input:focus-visible { opacity: 1; }
-.pp-vol-input::-webkit-slider-runnable-track { width: 4px; border-radius: 4px; background: rgba(255,255,255,.26); }
-.pp-vol-input::-webkit-slider-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; appearance: none; }
-.pp-settings-panel { position: fixed; z-index: 20; left: 50%; bottom: 88px; display: flex; flex-direction: column; width: min(560px, calc(100vw - 32px)); max-height: min(62vh, 520px); overflow: auto; padding: 14px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.14); border-radius: 14px; background: rgba(14,15,18,.94); box-shadow: 0 22px 70px rgba(0,0,0,.56); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
-.pp-settings-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 10px; color: #fff; font-size: 13px; font-weight: 600; }
-.pp-panel-close { width: 30px; height: 30px; }
-.pp-setting-block { padding: 10px 2px; border-top: 1px solid rgba(255,255,255,.09); }
-.pp-setting-label { display: flex; justify-content: space-between; margin-bottom: 8px; color: rgba(255,255,255,.55); font-size: 11px; }
-.pp-option-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-.pp-option { min-width: 36px; height: 32px; padding: 0 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.05); font: inherit; font-size: 12px; cursor: pointer; }
-.pp-option:hover, .pp-option.active { border-color: color-mix(in srgb, var(--player-accent) 70%, transparent); color: #fff; background: color-mix(in srgb, var(--player-accent) 22%, transparent); }
-.pp-episode-grid .pp-option { width: 36px; padding: 0; }
-.pp-subtitle-tools { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: rgba(255,255,255,.56); font-size: 11px; }
-.pp-mini-option { height: 28px; padding: 0 9px; border: 1px solid rgba(255,255,255,.13); border-radius: 6px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.05); font: inherit; font-size: 11px; cursor: pointer; }
-.pp-mini-option:hover, .pp-mini-option.active { color: #fff; background: rgba(255,255,255,.14); }
-.pp-setting-actions { display: flex; gap: 4px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.09); }
-.pp-menu-action { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px; border: 0; border-radius: 6px; color: rgba(255,255,255,.72); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
-.pp-menu-action:hover, .pp-menu-action.active { color: #fff; background: rgba(255,255,255,.11); }
-.player-panel video::cue { color: #fff; background: rgba(0,0,0,.72); text-shadow: 0 1px 3px #000; font-size: calc(1em * var(--subtitle-scale)); }
-@media (max-width: 760px) {
-  .pp-topbar { min-height: 62px; padding: 10px 12px; }
-  .pp-bottom { padding: 10px 12px 12px; }
-  .pp-wide-action, .pp-loop-control { display: none; }
-  .pp-vol-input { display: none; }
-  .pp-scrub-preview img { width: 104px; height: 58px; }
-}
-@media (max-width: 560px) {
-  .pp-source-label, .pp-skip { display: none; }
-  .pp-top-actions { gap: 2px; margin-left: 6px; }
-  .pp-icon { width: 38px; height: 38px; }
-  .pp-play { width: 40px; height: 40px; }
-  .pp-time { margin-left: 4px; font-size: 11px; }
-  .pp-bottom { gap: 8px; }
-  .pp-center-play { width: 58px; height: 58px; }
-  .pp-settings-panel { bottom: 72px; width: calc(100vw - 20px); }
+  .pp-sub, .pp-text-btn { display: none; }
+  .pp-time { margin-left: 6px; font-size: 11.5px; }
+  .pp-btn { width: 36px; height: 36px; }
+  .pp-play-main { width: 42px; height: 42px; }
+  .pp-center { width: 66px; height: 66px; }
+  .pp-title { font-size: 14px; }
 }
 </style>

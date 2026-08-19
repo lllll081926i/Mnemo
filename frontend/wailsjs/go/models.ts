@@ -598,6 +598,7 @@ export namespace model {
 	    status: string;
 	    localPath: string;
 	    url?: string;
+	    headers?: Record<string, string>;
 	    error?: string;
 	    created: number;
 	    updated: number;
@@ -622,6 +623,7 @@ export namespace model {
 	        this.status = source["status"];
 	        this.localPath = source["localPath"];
 	        this.url = source["url"];
+	        this.headers = source["headers"];
 	        this.error = source["error"];
 	        this.created = source["created"];
 	        this.updated = source["updated"];
@@ -1196,6 +1198,7 @@ export namespace store {
 	    playbackResume: boolean;
 	    keepTasks: boolean;
 	    logLevel?: string;
+	    closeToTray?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -1215,6 +1218,7 @@ export namespace store {
 	        this.playbackResume = source["playbackResume"];
 	        this.keepTasks = source["keepTasks"];
 	        this.logLevel = source["logLevel"];
+	        this.closeToTray = source["closeToTray"];
 	    }
 	}
 

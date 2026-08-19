@@ -50,23 +50,24 @@ type UploadingUI struct {
 
 // DownloadTask is a transfer-center download task.
 type DownloadTask struct {
-	ID          string `json:"id"`
-	UserID      string `json:"user_id"`
-	DriveID     string `json:"drive_id"`
-	Provider    string `json:"provider"`
-	FileID      string `json:"file_id"`
-	Name        string `json:"name"`
-	Size        int64  `json:"size"`
-	Downloaded  int64  `json:"downloaded"`
-	Speed       int64  `json:"speed"`
-	Progress    int    `json:"progress"`
-	Status      string `json:"status"` // queued|downloading|paused|completed|failed|canceled
-	LocalPath   string `json:"localPath"`
-	URL         string `json:"url,omitempty"`
-	Error       string `json:"error,omitempty"`
-	Created     int64  `json:"created"`
-	Updated     int64  `json:"updated"`
-	Concurrency int    `json:"concurrency,omitempty"`
+	ID          string            `json:"id"`
+	UserID      string            `json:"user_id"`
+	DriveID     string            `json:"drive_id"`
+	Provider    string            `json:"provider"`
+	FileID      string            `json:"file_id"`
+	Name        string            `json:"name"`
+	Size        int64             `json:"size"`
+	Downloaded  int64             `json:"downloaded"`
+	Speed       int64             `json:"speed"`
+	Progress    int               `json:"progress"`
+	Status      string            `json:"status"` // queued|downloading|paused|completed|failed|canceled
+	LocalPath   string            `json:"localPath"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Created     int64             `json:"created"`
+	Updated     int64             `json:"updated"`
+	Concurrency int               `json:"concurrency,omitempty"`
 }
 
 // OfflineTask is a provider-side (cloud) offline download task (PikPak).

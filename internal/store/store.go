@@ -139,10 +139,16 @@ func (s *Store) writeJSONUnlocked(name string, v any) error {
 		return err
 	}
 	tmp := s.path(name + ".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	// Store documents may contain share passwords, proxy credentials, or
+	// transfer metadata. Keep every document private to the current user.
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return renameWithRetry(tmp, s.path(name))
+	target := s.path(name)
+	if err := renameWithRetry(tmp, target); err != nil {
+		return err
+	}
+	return os.Chmod(target, 0o600)
 }
 
 // renameWithRetry wraps os.Rename with a short retry loop. On Windows the

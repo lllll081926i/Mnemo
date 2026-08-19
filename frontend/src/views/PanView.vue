@@ -578,7 +578,6 @@ function onCtx(e, file) {
   }
   const list = [
     caps.value.download && { icon: 'download', label: '下载', action: 'download' },
-    !file.isDir && { icon: 'play', label: '播放 / 预览', action: 'open' },
     caps.value.createShare && { icon: 'share', label: '分享', action: 'share' },
     { icon: 'star', label: isFav(file) ? '移出收藏' : '加入收藏', action: 'fav' },
     { sep: true },

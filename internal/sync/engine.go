@@ -3,10 +3,12 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -209,7 +211,10 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 	// delete propagation: files in the snapshot but absent locally now →
 	// remove them from the remote side.
 	if cfg.DeletePropagation && e.snapshots != nil {
-		snap, _ := e.snapshots.LoadSyncSnapshot(cfg.ID)
+		snap, snapErr := e.snapshots.LoadSyncSnapshot(cfg.ID)
+		if snapErr != nil {
+			return fmt.Errorf("load sync snapshot: %w", snapErr)
+		}
 		localByName := map[string]Entry{}
 		for _, l := range local {
 			localByName[l.RemoteName] = l
@@ -224,14 +229,18 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 			if ok := e.guardDelete(cfg.ID, len(toDelete), len(snap)); !ok {
 				// safety threshold exceeded — skip deletions
 			} else {
-				e.propagateRemoteDeletes(ctx, cfg, toDelete)
+				if err := e.propagateRemoteDeletes(ctx, cfg, toDelete); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
 	// persist the new snapshot of local files for next run's delete detection
 	if e.snapshots != nil {
-		_ = e.snapshots.SaveSyncSnapshot(cfg.ID, local)
+		if err := e.snapshots.SaveSyncSnapshot(cfg.ID, local); err != nil {
+			return fmt.Errorf("save sync snapshot: %w", err)
+		}
 	}
 	return nil
 }
@@ -319,6 +328,7 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 		remoteByName[r.RemoteName] = r
 	}
 	total := len(remoteFiles)
+	var failures []error
 	for i, f := range remoteFiles {
 		select {
 		case <-ctx.Done():
@@ -338,13 +348,16 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 		}
 		u, err := drive.GetDownloadURL(cfg.UserID, cfg.DriveID, f.RemoteID, 14400)
 		if err != nil {
+			failures = append(failures, fmt.Errorf("resolve download URL for %s: %w", f.RemoteName, err))
 			continue
 		}
 		// ensure local parent directory exists
 		if mkErr := os.MkdirAll(filepath.Dir(localPath), 0o755); mkErr != nil {
+			failures = append(failures, fmt.Errorf("create local directory for %s: %w", f.RemoteName, mkErr))
 			continue
 		}
 		if err := downloadTo(ctx, u, localPath); err != nil {
+			failures = append(failures, fmt.Errorf("download %s: %w", f.RemoteName, err))
 			continue
 		}
 		if e.onProgress != nil {
@@ -355,7 +368,10 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 	// delete propagation: files in the snapshot but absent on the remote now →
 	// remove them locally.
 	if cfg.DeletePropagation && e.snapshots != nil {
-		snap, _ := e.snapshots.LoadSyncSnapshot(cfg.ID)
+		snap, snapErr := e.snapshots.LoadSyncSnapshot(cfg.ID)
+		if snapErr != nil {
+			return fmt.Errorf("load sync snapshot: %w", snapErr)
+		}
 		var toDelete []Entry
 		for _, s := range snap {
 			if _, exists := remoteByName[s.RemoteName]; !exists {
@@ -366,14 +382,21 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 			if ok := e.guardDelete(cfg.ID, len(toDelete), len(snap)); !ok {
 				// safety threshold exceeded — skip deletions
 			} else {
-				e.propagateLocalDeletes(cfg, toDelete)
+				if err := e.propagateLocalDeletes(cfg, toDelete); err != nil {
+					failures = append(failures, err)
+				}
 			}
 		}
 	}
 
 	// persist the new snapshot of remote files for next run's delete detection
 	if e.snapshots != nil {
-		_ = e.snapshots.SaveSyncSnapshot(cfg.ID, remoteFiles)
+		if err := e.snapshots.SaveSyncSnapshot(cfg.ID, remoteFiles); err != nil {
+			failures = append(failures, fmt.Errorf("save sync snapshot: %w", err))
+		}
+	}
+	if len(failures) > 0 {
+		return errors.Join(failures...)
 	}
 	return nil
 }
@@ -418,7 +441,7 @@ func (e *Engine) guardDelete(jobID string, deleteCount, snapTotal int) bool {
 
 // propagateRemoteDeletes trashes/deletes the given remote files that no
 // longer exist locally. It uses the drive trash batch for safety.
-func (e *Engine) propagateRemoteDeletes(_ context.Context, cfg Config, toDelete []Entry) {
+func (e *Engine) propagateRemoteDeletes(_ context.Context, cfg Config, toDelete []Entry) error {
 	ids := make([]string, 0, len(toDelete))
 	names := make([]string, 0, len(toDelete))
 	for _, d := range toDelete {
@@ -428,23 +451,26 @@ func (e *Engine) propagateRemoteDeletes(_ context.Context, cfg Config, toDelete 
 		}
 	}
 	if len(ids) == 0 {
-		return
+		return nil
 	}
 	_, err := drive.TrashBatch(cfg.UserID, cfg.DriveID, ids)
 	if err != nil {
 		e.log(cfg.ID, "delete_error", fmt.Sprintf("remote trash failed: %v", err))
-		return
+		return fmt.Errorf("delete remote files: %w", err)
 	}
 	e.log(cfg.ID, "delete", fmt.Sprintf("removed remote files: %v", names))
+	return nil
 }
 
 // propagateLocalDeletes removes local files that no longer exist on the
 // remote side.
-func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) {
+func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) error {
 	names := make([]string, 0, len(toDelete))
+	var failures []error
 	for _, d := range toDelete {
 		localPath := filepath.Join(cfg.LocalDir, filepath.FromSlash(d.RemoteName))
 		if err := os.Remove(localPath); err != nil {
+			failures = append(failures, fmt.Errorf("delete local file %s: %w", d.RemoteName, err))
 			continue
 		}
 		names = append(names, d.RemoteName)
@@ -452,6 +478,7 @@ func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) {
 	if len(names) > 0 {
 		e.log(cfg.ID, "delete", fmt.Sprintf("removed local files: %v", names))
 	}
+	return errors.Join(failures...)
 }
 
 // StartScheduler launches a background goroutine that periodically runs all
@@ -459,29 +486,16 @@ func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) {
 // is closed. When IntervalMin <= 0 the scheduler is a no-op and returns
 // immediately.
 func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, error)) {
-	// Determine the minimum non-zero interval across all enabled configs; if
-	// none qualify the scheduler does nothing.
-	all, err := configs()
-	if err != nil {
-		return
-	}
-	minInterval := 0
-	for _, c := range all {
-		if c.Enabled && c.IntervalMin > 0 {
-			if minInterval == 0 || c.IntervalMin < minInterval {
-				minInterval = c.IntervalMin
-			}
-		}
-	}
-	if minInterval <= 0 {
-		return
-	}
-
 	go func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		ticker := time.NewTicker(time.Duration(minInterval) * time.Minute)
+		// Re-read the config every minute so jobs can be added, removed, or
+		// have their interval changed without restarting the application.
+		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
+		lastRun := make(map[string]time.Time)
+		running := make(map[string]bool)
+		var runningMu sync.Mutex
 		for {
 			select {
 			case <-stop:
@@ -492,11 +506,42 @@ func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, 
 				if err != nil {
 					continue
 				}
+				seen := make(map[string]bool, len(runList))
+				now := time.Now()
 				for _, c := range runList {
 					if !c.Enabled || c.IntervalMin <= 0 {
 						continue
 					}
-					_ = e.Run(ctx, c)
+					seen[c.ID] = true
+					runningMu.Lock()
+					isRunning := running[c.ID]
+					runningMu.Unlock()
+					if isRunning || now.Sub(lastRun[c.ID]) < time.Duration(c.IntervalMin)*time.Minute {
+						continue
+					}
+					lastRun[c.ID] = now
+					runningMu.Lock()
+					running[c.ID] = true
+					runningMu.Unlock()
+					job := c
+					go func() {
+						if err := e.Run(ctx, job); err != nil {
+							e.log(job.ID, "scheduler_error", err.Error())
+						}
+						// The scheduler goroutine owns this map; this callback is
+						// only used as a best-effort guard for the next tick.
+						runningMu.Lock()
+						delete(running, job.ID)
+						runningMu.Unlock()
+					}()
+				}
+				for id := range lastRun {
+					if !seen[id] {
+						delete(lastRun, id)
+						runningMu.Lock()
+						delete(running, id)
+						runningMu.Unlock()
+					}
 				}
 			}
 		}

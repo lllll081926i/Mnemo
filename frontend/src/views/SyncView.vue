@@ -37,7 +37,7 @@ const dirLabel = { 'two-way': '双向', push: '仅上传', pull: '仅下载' }
 const dirArrow = { 'two-way': '⇄', push: '→', pull: '←' }
 
 function emptyForm() {
-  return { name: '', local_dir: '', user_id: '', drive_id: '', remote_dir: 'root', remote_name: '根目录', direction: 'two-way' }
+  return { name: '', local_dir: '', user_id: '', drive_id: '', remote_dir: 'root', remote_name: '根目录', direction: 'two-way', intervalMin: 0, deletePropagation: false }
 }
 
 function refresh() {
@@ -73,6 +73,8 @@ function openEdit(job) {
     remote_dir: job.remote_dir || 'root',
     remote_name: job.remote_name || (job.remote_dir && job.remote_dir !== 'root' ? job.remote_dir : '根目录'),
     direction: job.direction || 'two-way',
+    intervalMin: Number(job.intervalMin) || 0,
+    deletePropagation: !!job.deletePropagation,
   }
   showEdit.value = true
 }
@@ -110,8 +112,10 @@ async function save() {
       local_dir: form.value.local_dir.trim(),
       remote_dir: form.value.remote_dir || 'root',
       remote_name: form.value.remote_name || '',
-      direction: form.value.direction,
-      enabled: editingId.value ? (jobs.value.find((j) => j.id === editingId.value) || {}).enabled !== false : true,
+       direction: form.value.direction,
+       enabled: editingId.value ? (jobs.value.find((j) => j.id === editingId.value) || {}).enabled !== false : true,
+       intervalMin: Math.max(0, Math.floor(Number(form.value.intervalMin) || 0)),
+       deletePropagation: !!form.value.deletePropagation,
     })
     showEdit.value = false
     refresh()
@@ -268,6 +272,15 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       <div class="field">
         <label>同步方向</label>
         <SegTabs v-model="form.direction" :options="dirOptions" />
+      </div>
+      <div class="field">
+        <label>自动同步周期（分钟，0 为关闭）</label>
+        <input class="input" type="number" min="0" step="1" v-model.number="form.intervalMin" placeholder="0" />
+      </div>
+      <div class="field switch-row">
+        <label>删除传播</label>
+        <div class="switch" :class="{ on: form.deletePropagation }" role="switch" :aria-checked="form.deletePropagation" @click="form.deletePropagation = !form.deletePropagation"></div>
+        <span class="hint">启用后会同步删除两端缺失的文件</span>
       </div>
       <template #actions>
         <button class="btn" :disabled="savingEdit" @click="showEdit = false">取消</button>

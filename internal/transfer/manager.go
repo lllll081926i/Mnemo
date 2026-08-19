@@ -251,12 +251,19 @@ func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.Down
 
 // AddDownloadURL enqueues a download from a direct URL.
 func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*model.DownloadTask, error) {
+	storedHeaders := make(map[string]string, len(headers))
+	for key, value := range headers {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			storedHeaders[key] = value
+		}
+	}
 	t := &model.DownloadTask{
 		ID:        newID("dl"),
 		Name:      name,
 		URL:       url,
 		Status:    "queued",
 		LocalPath: filepath.Join(m.dir, safeName(name)),
+		Headers:   storedHeaders,
 		Created:   time.Now().Unix(),
 		Updated:   time.Now().Unix(),
 	}
@@ -314,7 +321,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	m.update(t)
 
 	url := t.URL
-	var headers map[string]string
+	headers := t.Headers
 	s, _ := m.store.GetSettings()
 	opts := dlengine.Options{Concurrency: concurrencyFromSettings(s)}
 	if s.MaxDownloadSpeed > 0 {

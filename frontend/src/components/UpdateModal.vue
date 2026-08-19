@@ -9,6 +9,7 @@ const emit = defineEmits(['close'])
 const state = ref('idle') // idle | checking | available | downloading | done | error
 const info = ref(null)
 const progress = ref({ downloaded: 0, total: 0 })
+const updatePath = ref('')
 const errorMsg = ref('')
 let offProgress, offDone, offApplying, offError
 
@@ -59,7 +60,11 @@ onMounted(() => {
     if (p && p.error) { errorMsg.value = p.error; state.value = 'error'; return }
     progress.value = p || progress.value
   })
-  offDone = onEvent('update:done', () => { state.value = 'done' })
+  offDone = onEvent('update:done', (payload) => {
+    updatePath.value = payload?.path || ''
+    progress.value = { ...progress.value, path: updatePath.value }
+    state.value = 'done'
+  })
   offApplying = onEvent('update:applying', () => { state.value = 'done' })
   offError = onEvent('update:error', (e) => { errorMsg.value = e?.error || '更新失败'; state.value = 'error' })
 })
@@ -67,8 +72,18 @@ onMounted(() => {
 onBeforeUnmount(() => { offProgress && offProgress(); offDone && offDone(); offApplying && offApplying(); offError && offError() })
 
 async function install() {
-  const path = progress.value.path || ''
-  await ApplyUpdate(path)
+  const path = updatePath.value || progress.value.path || ''
+  if (!path) {
+    errorMsg.value = '更新文件路径不可用，请重新下载'
+    state.value = 'error'
+    return
+  }
+  try {
+    await ApplyUpdate(path)
+  } catch (e) {
+    errorMsg.value = String(e)
+    state.value = 'error'
+  }
 }
 </script>
 
@@ -105,7 +120,7 @@ async function install() {
 
       <!-- error -->
       <div v-else-if="state === 'error'" class="upd-state">
-        <UiIcon name="warn" :size="32" />
+        <UiIcon name="warning" :size="32" />
         <p class="upd-title">更新失败</p>
         <p class="upd-err">{{ errorMsg }}</p>
         <button class="btn" @click="check">重试</button>

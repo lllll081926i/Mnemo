@@ -15,3 +15,7 @@ internal/engine/*/mpv/mpv.exe
 internal/engine/*/mpv/mpv
 internal/engine/**/*.exe
 .tmp-go-cache/
+.gocache/
+.workflow/
+mnemo-darwin-check
+mnemo-linux-check

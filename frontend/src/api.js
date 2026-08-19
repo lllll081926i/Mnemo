@@ -7,7 +7,7 @@ import { debug, info, warn, error, errorText, configKeys } from './logger'
 export * from '../wailsjs/go/app/App'
 
 export function onEvent(name, cb) {
-  return EventsOn(name, cb)
+  try { return EventsOn(name, cb) } catch { return () => {} } // 浏览器预览无 Wails bridge
 }
 
 export function onFileDrop(cb) {
