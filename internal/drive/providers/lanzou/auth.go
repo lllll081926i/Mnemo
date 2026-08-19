@@ -69,7 +69,7 @@ func buildLanzouToken(kind, cookie, uid, displayName, vei, account, password str
 		ShareURL: LANZOU_DEFAULT.ShareURL,
 	})
 	if displayName == "" {
-		displayName = "蓝奏 " + uid
+		displayName = uid
 	}
 	return &model.TokenInfo{
 		TokenFrom:         model.ProviderLanzou,

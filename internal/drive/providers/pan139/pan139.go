@@ -1450,7 +1450,13 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 			uid = uid[:16]
 		}
 	}
-	name := "139 " + uid
+	name := strings.TrimSpace(req.Config["username"])
+	if name == "" {
+		name = account
+	}
+	if name == "" {
+		name = uid
+	}
 	stored := map[string]any{"authorization": next, "account": account, "personalCloudHost": host}
 	if u := req.Config["username"]; u != "" {
 		stored["username"] = u

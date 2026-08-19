@@ -114,10 +114,72 @@ export function providerOf(userId) {
   return ui > 0 ? uid.slice(0, ui) : ''
 }
 
+function accountText(value) {
+  return String(value ?? '').trim()
+}
+
+function accountProvider(acc) {
+  const t = acc && acc.token ? acc.token : {}
+  return accountText(t.tokenfrom) || providerOf(acc && acc.user_id)
+}
+
+function accountID(acc, provider) {
+  const t = acc && acc.token ? acc.token : {}
+  const providerID = accountText(t.provider_account_id)
+  if (providerID) return providerID
+
+  const userID = accountText(acc && acc.user_id)
+  for (const prefix of [`${provider}_`, `${provider}:`]) {
+    if (provider && userID.startsWith(prefix)) return userID.slice(prefix.length)
+  }
+  return userID
+}
+
+function displayAccountText(provider, value) {
+  let text = accountText(value)
+  if (!text) return ''
+
+  switch (provider) {
+    case 'guangya': {
+      text = text.replace(/^光鸭(?:云盘)?(?:\s+|\s*[-:：]\s*|\s*(?=\+86))/u, '')
+      const compact = text.replace(/[\s-]/g, '')
+      if (/^\+?861\d{10}$/u.test(compact)) return compact.replace(/^\+?86/u, '')
+      return text
+    }
+    case 'pan139':
+      return text.replace(/^139(?:\s*云盘)?(?:\s+|\s*[-:：]\s*)/u, '')
+    case 'aliopen':
+      return text.replace(/^阿里云盘(?:\s+|\s*[-:：]\s*)/u, '')
+    case 'lanzou':
+      return text.replace(/^蓝奏(?:云)?(?:\s+|\s*[-:：]\s*)/u, '')
+    case 'ilanzou':
+      return text.replace(/^优享版蓝奏云(?:\s+|\s*[-:：]\s*)/u, '')
+    case 'pan189':
+      return text.replace(/\s*·\s*家庭云$/u, '')
+    case 'yike':
+      return text.replace(/^一刻相册(?:\s+|\s*[-:：]\s*)/u, '')
+    default:
+      return text
+  }
+}
+
 export function accountName(acc) {
   if (!acc) return ''
   const t = acc.token || {}
-  return t.nick_name || t.user_name || t.name || acc.user_id
+  const provider = accountProvider(acc)
+  const candidates = [
+    t.nick_name,
+    t.user_name,
+    t.name,
+    t.email,
+    t.mail,
+    accountID(acc, provider)
+  ]
+  for (const candidate of candidates) {
+    const name = displayAccountText(provider, candidate)
+    if (name) return name
+  }
+  return ''
 }
 
 export function accountDetail(acc, providers) {
@@ -125,10 +187,8 @@ export function accountDetail(acc, providers) {
   const pid = providerOf(acc.user_id)
   const p = (providers || []).find((x) => x.ID === pid)
   const label = p ? p.Meta.label : pid
-  const t = acc.token || {}
-  const id = t.user_name || t.user_id || acc.user_id
-  const short = id.length > 12 ? '••••' + id.slice(-6) : id
-  return `${label} · ${short}`
+  const name = accountName(acc)
+  return name ? `${label} · ${name}` : label
 }
 
 export function providerIconUrl(metaOrIcon) {

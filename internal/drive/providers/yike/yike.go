@@ -652,7 +652,7 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 		sum := sha256.Sum256([]byte(cookie))
 		uid = "cookie_" + hex.EncodeToString(sum[:6])
 	}
-	name := "一刻相册 " + uid[:min(8, len(uid))]
+	name := uid
 	return &model.TokenInfo{
 		TokenFrom:         providerID,
 		AccessToken:       cookie,

@@ -398,9 +398,6 @@ func login189(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, err
 		accountID = uid + "_family"
 	}
 	name := uid
-	if isFamily {
-		name = uid + " · 家庭云"
-	}
 	tok := &model.TokenInfo{
 		TokenFrom:         providerID,
 		AccessToken:       session.SessionKey,

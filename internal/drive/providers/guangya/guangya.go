@@ -795,7 +795,7 @@ func buildToken(sess *Session) *model.TokenInfo {
 			uid = "guangya"
 		}
 	}
-	name := "光鸭 " + uid
+	name := strings.TrimPrefix(uid, "+86")
 	return &model.TokenInfo{
 		TokenFrom:         providerID,
 		AccessToken:       sess.AccessToken,

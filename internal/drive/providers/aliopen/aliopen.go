@@ -1959,7 +1959,7 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 	if uid == "" {
 		return nil, errors.New("aliopen: 登录成功但未返回 drive_id")
 	}
-	name := "阿里云盘 " + uid[:min(8, len(uid))]
+	name := uid
 	used, total := cl.GetSpaceInfo(ctx)
 
 	tok := &model.TokenInfo{
