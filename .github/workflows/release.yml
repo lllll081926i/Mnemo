@@ -109,9 +109,17 @@ jobs:
           export PATH="/c/Program Files/7-Zip:/c/Program Files (x86)/Inno Setup 6:$PATH"
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss
-          inputs=(build/bin/Mnemo.exe)
-          [[ -f build/bin/data/secrets.json ]] && inputs+=(build/bin/data/secrets.json)
-          7z a "${{ matrix.artifact }}.zip" "${inputs[@]}"
+          staging="$(mktemp -d)"
+          cp -a build/bin/Mnemo.exe "$staging/Mnemo.exe"
+          if [[ -f build/bin/data/secrets.json ]]; then
+            mkdir -p "$staging/data"
+            cp -a build/bin/data/secrets.json "$staging/data/secrets.json"
+          fi
+          zip_path="$PWD/${{ matrix.artifact }}.zip"
+          (
+            cd "$staging"
+            7z a "$zip_path" .
+          )
 
       - name: Package Linux installer and archive
         if: matrix.kind == 'linux'
