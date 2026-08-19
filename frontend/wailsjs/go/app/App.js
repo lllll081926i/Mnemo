@@ -34,6 +34,10 @@ export function ClearDownloads() {
   return window['go']['app']['App']['ClearDownloads']();
 }
 
+export function ClearLogs() {
+  return window['go']['app']['App']['ClearLogs']();
+}
+
 export function ClearMigrateJobs() {
   return window['go']['app']['App']['ClearMigrateJobs']();
 }
@@ -90,6 +94,10 @@ export function DownloadUpdate(arg1) {
   return window['go']['app']['App']['DownloadUpdate'](arg1);
 }
 
+export function ExportLogs() {
+  return window['go']['app']['App']['ExportLogs']();
+}
+
 export function FavoriteFiles(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['FavoriteFiles'](arg1, arg2, arg3, arg4);
 }
@@ -116,6 +124,10 @@ export function GetPlayCursor(arg1, arg2, arg3) {
 
 export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
+}
+
+export function GetLogPath() {
+  return window['go']['app']['App']['GetLogPath']();
 }
 
 export function GetVideoPreview(arg1, arg2, arg3) {

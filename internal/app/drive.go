@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/providers/pikpak"
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
 )
@@ -17,6 +19,7 @@ import (
 
 // SaveCloudTextFile writes text content to a temporary file and triggers an upload back to the cloud.
 func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content string) error {
+	logging.Info("cloud text save requested", "account_id", redactID(userID), "drive_id", redactID(driveID), "file_name", fileName, "content_bytes", len(content))
 	name := filepath.Base(strings.TrimSpace(fileName))
 	if name == "." || name == "" || name == string(filepath.Separator) {
 		return fmt.Errorf("文件名无效")
@@ -42,9 +45,14 @@ func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content str
 
 // ListDir lists a directory.
 func (a *App) ListDir(userID, driveID, dirID string) ([]model.File, error) {
+	started := time.Now()
+	logging.Debug("directory listing started", "account_id", redactID(userID), "drive_id", redactID(driveID), "directory_id", redactID(dirID))
 	files, err := drive.ListDir(userID, driveID, dirID, nil)
 	if err == nil {
 		drive.RememberListedFiles(userID, driveID, dirID, files)
+		logging.Debug("directory listing completed", "count", len(files), "duration", logging.Duration(started))
+	} else {
+		logging.Warn("directory listing failed", "error", err, "duration", logging.Duration(started))
 	}
 	return files, err
 }
@@ -56,7 +64,14 @@ func (a *App) ListDirPage(userID, driveID, dirID, marker string) (*drive.DirPage
 
 // SearchFiles searches a drive.
 func (a *App) SearchFiles(userID, driveID, keyword string) ([]model.File, error) {
-	return drive.SearchDir(userID, driveID, keyword)
+	logging.Debug("file search started", "account_id", redactID(userID), "drive_id", redactID(driveID), "keyword_length", len(keyword))
+	files, err := drive.SearchDir(userID, driveID, keyword)
+	if err != nil {
+		logging.Warn("file search failed", "error", err)
+	} else {
+		logging.Debug("file search completed", "count", len(files))
+	}
+	return files, err
 }
 
 // ListTrash lists the recycle bin.
@@ -71,12 +86,26 @@ func (a *App) GetFileDetail(userID, driveID, fileID string) (*model.File, error)
 
 // GetDownloadURL returns a file's download url.
 func (a *App) GetDownloadURL(userID, driveID, fileID string) (*model.DownloadURL, error) {
-	return drive.GetDownloadURL(userID, driveID, fileID, 14400)
+	logging.Debug("download URL resolution started", "account_id", redactID(userID), "file_id", redactID(fileID))
+	result, err := drive.GetDownloadURL(userID, driveID, fileID, 14400)
+	if err != nil {
+		logging.Warn("download URL resolution failed", "error", err)
+	} else if result != nil {
+		logging.Debug("download URL resolved", "expire_time", result.ExpireTime)
+	}
+	return result, err
 }
 
 // GetVideoPreview returns playback sources.
 func (a *App) GetVideoPreview(userID, driveID, fileID string) (*model.VideoPreview, error) {
-	return drive.GetVideoPreview(userID, driveID, fileID)
+	logging.Debug("video preview resolution started", "account_id", redactID(userID), "file_id", redactID(fileID))
+	preview, err := drive.GetVideoPreview(userID, driveID, fileID)
+	if err != nil {
+		logging.Warn("video preview resolution failed", "error", err)
+	} else if preview != nil {
+		logging.Debug("video preview resolved", "quality_count", len(preview.Qualities))
+	}
+	return preview, err
 }
 
 // Mkdir creates a folder.
@@ -145,7 +174,11 @@ func (a *App) FavoriteFiles(userID, driveID string, favorite bool, fileIDs []str
 
 // CreateShare creates a share.
 func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*model.ShareItem, error) {
+	logging.Info("share creation started", "account_id", redactID(userID), "file_count", len(params.FileIDs), "expiration", params.Expiration, "has_password", strings.TrimSpace(params.Password) != "")
 	item, err := drive.CreateShare(userID, driveID, params)
+	if err != nil {
+		logging.Warn("share creation failed", "error", err)
+	}
 	if err == nil && item != nil {
 		st, storeErr := a.storeOrError()
 		if storeErr != nil {
@@ -159,6 +192,9 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 		}); storeErr != nil {
 			a.emit("share:history-error", map[string]string{"error": storeErr.Error()})
 		}
+	}
+	if err == nil && item != nil {
+		logging.Info("share creation completed", "share_id", redactID(item.ShareID))
 	}
 	return item, err
 }
@@ -180,7 +216,14 @@ func (a *App) ListShareHistory(userID string) []model.ShareHistoryEntry {
 // state for subsequent save. The session must be passed back to
 // SaveImportedShare to transfer selected files.
 func (a *App) ImportShare(userID, driveID, shareURL, password string) (*drive.ShareImportSession, error) {
-	return drive.ImportShare(userID, driveID, shareURL, password)
+	logging.Info("share import started", "account_id", redactID(userID), "url_host", urlHost(shareURL), "has_password", strings.TrimSpace(password) != "")
+	session, err := drive.ImportShare(userID, driveID, shareURL, password)
+	if err != nil {
+		logging.Warn("share import failed", "error", err)
+	} else {
+		logging.Info("share import completed", "file_count", len(session.Files))
+	}
+	return session, err
 }
 
 // SaveImportedShare transfers selected files from a parsed share session

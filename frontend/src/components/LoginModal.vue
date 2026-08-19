@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { login, saveMounted, SendGuangyaSms, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
 import UiIcon from './UiIcon.vue'
+import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
 
 const props = defineProps({ providers: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'toast'])
@@ -116,6 +117,7 @@ function closePikPakCaptchaSession() {
 }
 
 watch(providerId, (v, previous) => {
+	info('login', 'login provider selected', { provider: v, previous_provider: previous || '' })
   localStorage.setItem('login_provider', v)
   form.value = {}
   mountedForm.value = { name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true }
@@ -133,13 +135,16 @@ watch(availableProviders, (list) => {
 
 function onKey(e) { if (e.key === 'Escape') emit('close') }
 onMounted(() => {
+	debug('login', 'login modal mounted', { provider: providerId.value })
   loginModalDisposed = false
   window.addEventListener('keydown', onKey)
   offPikPakCaptchaCompleted = onEvent('pikpak:captcha:completed', (payload) => {
+	info('captcha', 'PikPak captcha completion event received', { session_id: String(payload?.session_id || ''), has_token: !!String(payload?.captcha_token || '').trim() })
     void completePikPakCaptcha(payload)
   })
 })
 onBeforeUnmount(() => {
+	debug('login', 'login modal unmounted')
   loginModalDisposed = true
   window.removeEventListener('keydown', onKey)
   if (offPikPakCaptchaCompleted) offPikPakCaptchaCompleted()
@@ -167,6 +172,7 @@ async function completePikPakCaptcha(payload) {
     !captchaSessionId.value ||
     sessionID !== captchaSessionId.value
   ) return
+	info('captcha', 'PikPak captcha completion accepted', { session_id: sessionID, has_token: !!String(payload?.captcha_token || '').trim() })
 
   captchaCompletionBusy = true
   const token = String(payload?.captcha_token || '').trim()
@@ -215,6 +221,7 @@ async function reloadCaptcha() {
   delete form.value.captcha_token
   delete form.value.captcha_verified
   try {
+	info('captcha', 'PikPak captcha reload requested')
     await closePikPakCaptchaSession()
   } catch {
     // A stale callback must not prevent a deliberate retry.
@@ -246,6 +253,7 @@ function resetCaptcha(closeSession = false) {
 async function sendSms() {
   if (!String(form.value.phone || '').trim()) { errorText.value = '请先填写手机号'; return }
   smsBusy.value = true
+	info('login', 'SMS verification request started', { provider: providerId.value })
   errorText.value = ''
   try {
     const r = await SendGuangyaSms(form.value.phone)
@@ -255,6 +263,7 @@ async function sendSms() {
     emit('toast', '验证码已发送', 'success')
     startSmsCountdown()
   } catch (e) {
+		warn('login', 'SMS verification request failed', { error: formatErrorText(e) })
     errorText.value = String(e)
   } finally {
     smsBusy.value = false
@@ -296,6 +305,7 @@ function validate() {
 
 async function submit() {
   if (busy.value) return
+	debug('login', 'login form submit started', { provider: providerId.value, config_keys: configKeys(isMounted.value ? mountedForm.value : form.value), has_captcha: !!captchaUrl.value })
   // The callback normally resumes login automatically. Keep a manual
   // fallback for dev WebView/browser environments where the event bridge can
   // be delayed or unavailable after the challenge redirects.
@@ -315,7 +325,11 @@ async function submit() {
     return
   }
   const err = validate()
-  if (err) { errorText.value = err; return }
+  if (err) {
+		warn('login', 'login form validation failed', { provider: providerId.value, reason: err })
+		errorText.value = err
+		return
+	}
   busy.value = true
   captchaSubmitting.value = true
   errorText.value = ''
@@ -326,6 +340,7 @@ async function submit() {
       await login(providerId.value, { ...form.value })
     }
     emit('toast', isOAuth.value ? '授权成功' : '登录成功', 'success')
+		info('login', 'login form submit completed', { provider: providerId.value })
     emit('close')
   } catch (e) {
     try {
@@ -338,9 +353,11 @@ async function submit() {
       } else {
         errorText.value = String(e)
       }
+		warn('login', 'login form submit failed', { provider: providerId.value, error: formatErrorText(e) })
     } catch (handlerError) {
       // Error rendering must never leave the submit button stuck in busy state.
-      errorText.value = String(handlerError)
+			errorText.value = String(handlerError)
+			error('login', 'login error handler failed', { provider: providerId.value, error: formatErrorText(handlerError) })
     }
   } finally {
     busy.value = false

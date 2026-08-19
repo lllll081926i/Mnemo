@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
@@ -419,9 +420,12 @@ func (e *CaptchaRequiredError) Error() string {
 
 // authSignIn is the Registration.Auth login flow.
 func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
+	started := time.Now()
 	username := strings.TrimSpace(req.Config["username"])
 	password := req.Config["password"]
+	logging.Info("PikPak sign-in started", "identifier_type", pikpakIdentifierType(username), "has_captcha_token", strings.TrimSpace(req.Config["captcha_token"]) != "")
 	if username == "" || password == "" {
+		logging.Warn("PikPak sign-in rejected", "reason", "missing credentials")
 		return nil, errors.New("pikpak: 请输入账号和密码")
 	}
 	deviceID := getOrCreateDeviceID(username)
@@ -435,10 +439,12 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// turns a transport/rate-limit failure into a misleading login error.
 		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", callbackURI)
 		if err != nil {
+			logging.Warn("PikPak captcha initialization failed", "error", err)
 			return nil, err
 		}
 		captchaToken = tok
 		if urlValue != "" {
+			logging.Info("PikPak visual captcha required")
 			// 需要滑块验证：把验证 URL 与 token 带回前端，用户完成后带 token 重试
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
@@ -447,9 +453,11 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// （对齐旧版 loginPikPakWithCaptcha 的退避链）
 		tok, urlValue, err := exchangeLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken, callbackURI)
 		if err != nil {
+			logging.Warn("PikPak captcha exchange failed", "error", err)
 			return nil, err
 		}
 		if urlValue != "" {
+			logging.Info("PikPak captcha exchange returned another challenge")
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 		captchaToken = tok
@@ -457,6 +465,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)
 	if err != nil {
+		logging.Warn("PikPak sign-in request failed", "error", err)
 		if !isCaptchaError(err) {
 			return nil, err
 		}
@@ -469,15 +478,18 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// new challenge yet.
 		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken, callbackURI)
 		if retryErr != nil {
+			logging.Warn("PikPak captcha retry initialization failed", "error", retryErr)
 			return nil, retryErr
 		}
 		if urlValue != "" {
+			logging.Info("PikPak retry requires visual captcha")
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 		captchaToken = tok
 		auth, err = signIn(ctx, hc, deviceID, username, password, captchaToken)
 	}
 	if err != nil {
+		logging.Warn("PikPak sign-in retry failed", "error", err)
 		return nil, err
 	}
 
@@ -509,5 +521,17 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		UsedSize:          used,
 		TotalSize:         total,
 	}
+	logging.Info("PikPak sign-in completed", "duration", logging.Duration(started))
 	return tok, nil
+}
+
+func pikpakIdentifierType(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.Contains(value, "@") {
+		return "email"
+	}
+	if isPhone(value) {
+		return "phone"
+	}
+	return "username"
 }

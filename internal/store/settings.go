@@ -18,10 +18,11 @@ type Settings struct {
 	MaxDownloadSpeed       int64 `json:"maxDownloadSpeed"` // bytes/s, 0 = unlimited
 	MaxUploadSpeed         int64 `json:"maxUploadSpeed"`
 
-	AutoUpdate     bool `json:"autoUpdate"`
-	ConfirmUpdate  bool `json:"confirmUpdate"`
-	PlaybackResume bool `json:"playbackResume"`
-	KeepTasks      bool `json:"keepTasks"`
+	AutoUpdate     bool   `json:"autoUpdate"`
+	ConfirmUpdate  bool   `json:"confirmUpdate"`
+	PlaybackResume bool   `json:"playbackResume"`
+	KeepTasks      bool   `json:"keepTasks"`
+	LogLevel       string `json:"logLevel,omitempty"`
 }
 
 // DefaultSettings returns sane defaults.
@@ -36,6 +37,7 @@ func DefaultSettings() Settings {
 		ConfirmUpdate:          true,
 		PlaybackResume:         true,
 		KeepTasks:              true,
+		LogLevel:               "warning",
 	}
 }
 

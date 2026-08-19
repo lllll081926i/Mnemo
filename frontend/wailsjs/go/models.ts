@@ -1195,6 +1195,7 @@ export namespace store {
 	    confirmUpdate: boolean;
 	    playbackResume: boolean;
 	    keepTasks: boolean;
+	    logLevel?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -1213,6 +1214,7 @@ export namespace store {
 	        this.confirmUpdate = source["confirmUpdate"];
 	        this.playbackResume = source["playbackResume"];
 	        this.keepTasks = source["keepTasks"];
+	        this.logLevel = source["logLevel"];
 	    }
 	}
 

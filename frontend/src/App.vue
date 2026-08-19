@@ -16,6 +16,7 @@ import QuickOpen from './components/QuickOpen.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import { CheckUpdate } from './api'
+import { debug, info, installGlobalErrorLogging } from './logger'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -40,7 +41,8 @@ const pageListeners = computed(() => {
   return listeners
 })
 function switchTab(key) {
-  if (key === tab.value) return
+	if (key === tab.value) return
+	info('navigation', 'page switch requested', { from: tab.value, to: key })
   const ni = tabOrder.indexOf(key)
   pageTrans.value = ni >= tabOrder.indexOf(tab.value) ? 'page-slide-left' : 'page-slide-right'
   prevTabIdx.value = tabOrder.indexOf(tab.value)
@@ -340,7 +342,9 @@ function onQuickAction(action) {
 }
 
 onMounted(async () => {
-  listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
+	info('app', 'frontend mounted')
+	const removeGlobalErrorLogging = installGlobalErrorLogging()
+	listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
   refresh()
   try {
     const s = await GetSettings()
@@ -366,7 +370,8 @@ onMounted(async () => {
   ]
   nextTick(updateGlider)
   window.addEventListener('resize', updateGlider)
-  cleanupFns = () => {
+	cleanupFns = () => {
+		removeGlobalErrorLogging()
     window.removeEventListener('resize', updateGlider)
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('mnemo:prefs-changed', onPrefsChanged)
@@ -375,7 +380,8 @@ onMounted(async () => {
     ballUpdateTimer = null
     transferActivities.clear()
     offFns.forEach((fn) => { try { fn && fn() } catch { /* noop */ } })
-  }
+	}
+	debug('app', 'frontend initialization tasks scheduled')
 })
 let cleanupFns = null
 onBeforeUnmount(() => cleanupFns && cleanupFns())

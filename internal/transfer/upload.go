@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 	"mnemo-go/internal/store"
@@ -275,11 +276,14 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 // for a global concurrency slot and runs under a cancelable context so Cancel
 // can stop the provider request, not just flip a UI flag.
 func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
+	started := time.Now()
+	logging.Info("upload worker started", "job_id", j.UploadID, "name", j.Info.Name, "size", j.Info.Size)
 	// wait for a slot
 	select {
 	case q.sem <- struct{}{}:
 		defer func() { <-q.sem }()
 	case <-q.ctx.Done():
+		logging.Debug("upload worker canceled before start", "job_id", j.UploadID)
 		return
 	}
 
@@ -298,6 +302,7 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	q.mu.Lock()
 	if j.Upload.IsStop {
 		q.mu.Unlock()
+		logging.Debug("upload worker skipped", "job_id", j.UploadID, "reason", "job already stopped")
 		return
 	}
 	j.Upload.IsDowning = true
@@ -319,6 +324,7 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 		j.Upload.DownState = "failed"
 		j.Upload.FailedMessage = "上传路径无效"
 		q.update(j)
+		logging.Warn("upload path validation failed", "job_id", j.UploadID)
 		return
 	}
 	j.Info.Path = relative
@@ -342,6 +348,7 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 		}
 		j.Upload.FailedMessage = parentErr.Error()
 		q.update(j)
+		logging.Warn("remote upload parent resolution failed", "job_id", j.UploadID, "error", parentErr)
 		return
 	}
 	j.Info.ParentFileID = parentID
@@ -360,6 +367,7 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 		j.Upload.IsFailed = true
 		j.Upload.FailedMessage = err.Error()
 		q.update(j)
+		logging.Warn("upload handler lookup failed", "job_id", j.UploadID, "error", err)
 		return
 	}
 
@@ -397,12 +405,14 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 			j.Upload.DownState = "failed"
 		}
 		q.update(j)
+		logging.Warn("upload worker failed", "job_id", j.UploadID, "error", handlerErr, "duration", logging.Duration(started))
 		return
 	}
 	if wasStopped {
 		j.Upload.IsDowning = false
 		j.Upload.DownState = "stopped"
 		q.update(j)
+		logging.Info("upload worker stopped", "job_id", j.UploadID, "duration", logging.Duration(started))
 		return
 	}
 	j.Upload.IsDowning = false
@@ -411,6 +421,7 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	j.Upload.DownSize = j.Info.Size
 	j.Upload.DownState = "completed"
 	q.update(j)
+	logging.Info("upload worker finished", "job_id", j.UploadID, "status", "completed", "duration", logging.Duration(started))
 }
 
 // rapidMethod returns the fingerprint kind a provider supports for upload.

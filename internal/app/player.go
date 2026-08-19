@@ -11,6 +11,7 @@ import (
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	previewserver "mnemo-go/internal/preview"
 	"mnemo-go/internal/store"
@@ -29,11 +30,15 @@ func (a *App) PlayVideoQuality(userID, driveID, fileID, quality string) (*model.
 }
 
 func (a *App) playVideo(userID, driveID, fileID, requestedQuality string) (*model.VideoPreview, error) {
+	started := time.Now()
+	logging.Info("video playback resolution started", "account_id", redactID(userID), "drive_id", redactID(driveID), "file_id", redactID(fileID), "requested_quality", requestedQuality)
 	preview, streamURL, err := a.resolveVideoSource(userID, driveID, fileID, requestedQuality)
 	if err != nil {
+		logging.Warn("video playback resolution failed", "error", err, "duration", logging.Duration(started))
 		return nil, err
 	}
 	preview.URL = streamURL
+	logging.Info("video playback resolution completed", "quality", preview.CurrentQuality, "stream_type", preview.StreamType, "duration", logging.Duration(started))
 	return preview, nil
 }
 

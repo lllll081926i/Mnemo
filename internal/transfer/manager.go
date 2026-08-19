@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/transfer/dlengine"
@@ -265,6 +266,8 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 }
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
+	started := time.Now()
+	logging.Info("download worker started", "task_id", t.ID, "name", t.Name)
 	// wait for a concurrency slot before doing any work
 	if err := m.acquireSlot(m.ctx); err != nil {
 		// app shutting down before the task could start
@@ -278,6 +281,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		if shouldPause {
 			m.update(t)
 		}
+		logging.Debug("download worker paused before start", "task_id", t.ID, "reason", err)
 		return
 	}
 	defer m.releaseSlot()
@@ -285,6 +289,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	m.mu.Lock()
 	if m.removed[t.ID] || m.tasks[t.ID] != t || t.Status != "queued" || m.ctx.Err() != nil {
 		m.mu.Unlock()
+		logging.Debug("download worker skipped", "task_id", t.ID, "reason", "task no longer queued")
 		return
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
@@ -326,6 +331,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			t.Updated = time.Now().Unix()
 			m.mu.Unlock()
 			m.update(t)
+			logging.Warn("download URL resolution failed", "task_id", t.ID, "error", err)
 			return
 		}
 		if u == nil {
@@ -337,6 +343,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			t.Updated = time.Now().Unix()
 			m.mu.Unlock()
 			m.update(t)
+			logging.Warn("download URL resolution returned empty result", "task_id", t.ID)
 			return
 		}
 		url = u.URL
@@ -362,6 +369,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
+		logging.Warn("download URL missing", "task_id", t.ID)
 		return
 	}
 
@@ -375,6 +383,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	m.mu.Unlock()
 	opts.Headers = headers
 	m.update(t)
+	logging.Info("download started", "task_id", t.ID)
 
 	progress := func(p dlengine.Progress) {
 		m.mu.Lock()
@@ -434,6 +443,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
 	m.update(t)
+	logging.Info("download worker finished", "task_id", t.ID, "status", t.Status, "error_present", t.Error != "", "duration", logging.Duration(started))
 }
 
 func isExpiredDownloadError(err error) bool {

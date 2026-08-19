@@ -1,7 +1,7 @@
 <script setup>
 // 设置页：左侧导航 + 右侧平面行式布局，极简干净无冗余说明
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { GetSettings, SaveSettings, ClearCache, PickDirectory, RevealInFolder } from '../api'
+import { GetSettings, SaveSettings, ClearCache, PickDirectory, RevealInFolder, GetLogPath, ClearLogs, ExportLogs } from '../api'
 import { getPrefs, setPref } from '../appearance'
 import SegTabs from '../components/SegTabs.vue'
 import UiIcon from '../components/UiIcon.vue'
@@ -21,12 +21,16 @@ const defaults = {
   confirmUpdate: true,
   playbackResume: true,
   keepTasks: true,
+  logLevel: 'warning',
 }
 
 const settings = ref({ ...defaults })
 const loaded = ref(false)
 const saving = ref(false)
 const clearingCache = ref(false)
+const clearingLogs = ref(false)
+const exportingLogs = ref(false)
+const logPath = ref('')
 let pendingSave = false
 const bodyEl = ref(null)
 const activeNav = ref('general')
@@ -38,6 +42,7 @@ const groups = [
   { id: 'player', label: '播放', icon: 'play' },
   { id: 'network', label: '连接', icon: 'cloud-down' },
   { id: 'cache', label: '缓存', icon: 'database' },
+  { id: 'logs', label: '日志', icon: 'doc' },
 ]
 
 // 纯前端偏好
@@ -97,6 +102,8 @@ onMounted(async () => {
   try {
     const s = (await GetSettings()) || {}
     settings.value = { ...defaults, ...s }
+		settings.value.logLevel = settings.value.logLevel || 'warning'
+		logPath.value = await GetLogPath()
   } catch {
     settings.value = { ...defaults }
   }
@@ -195,6 +202,33 @@ async function clearCache() {
     emit('toast', '清除缓存失败: ' + String(e), 'error')
   } finally {
     clearingCache.value = false
+  }
+}
+
+async function clearLogs() {
+  if (clearingLogs.value) return
+  clearingLogs.value = true
+  try {
+    await ClearLogs()
+    logPath.value = await GetLogPath()
+    emit('toast', '日志已清除', 'success')
+  } catch (e) {
+    emit('toast', '清除日志失败: ' + String(e), 'error')
+  } finally {
+    clearingLogs.value = false
+  }
+}
+
+async function exportLogs() {
+  if (exportingLogs.value) return
+  exportingLogs.value = true
+  try {
+    const path = await ExportLogs()
+    if (path) emit('toast', '日志已导出', 'success')
+  } catch (e) {
+    emit('toast', '导出日志失败: ' + String(e), 'error')
+  } finally {
+    exportingLogs.value = false
   }
 }
 </script>
@@ -542,6 +576,46 @@ async function clearCache() {
           <div class="sg-hint">缓存保存在安装目录的 data/cache 中，不会删除账号、传输记录或播放进度。</div>
         </section>
 
+        <!-- 7. 日志 -->
+        <section class="settings-group" id="sg-logs">
+          <header class="sg-heading"><h2>日志</h2></header>
+
+          <div class="sg-row">
+            <span class="sg-label">日志等级</span>
+            <div class="sg-control">
+              <UiSelect
+                :modelValue="settings.logLevel || 'warning'"
+                :options="[
+                  { value: 'error', label: 'Error' },
+                  { value: 'warning', label: 'Warning' },
+                  { value: 'info', label: 'Info' },
+                  { value: 'debug', label: 'Debug' },
+                ]"
+                style="width:130px"
+                @update:modelValue="(v) => { settings.logLevel = v; save(true) }"
+              />
+            </div>
+          </div>
+
+          <div class="sg-row">
+            <span class="sg-label">日志文件</span>
+            <div class="sg-control log-actions">
+              <span class="sg-value log-path" :title="logPath">{{ logPath || '未初始化' }}</span>
+              <button class="btn sm" :disabled="exportingLogs" @click="exportLogs">
+                <span v-if="exportingLogs" class="spin"></span>
+                <UiIcon v-else name="download" :size="13" />
+                {{ exportingLogs ? '导出中…' : '导出日志' }}
+              </button>
+              <button class="btn sm danger" :disabled="clearingLogs" @click="clearLogs">
+                <span v-if="clearingLogs" class="spin"></span>
+                <UiIcon v-else name="trash" :size="13" />
+                {{ clearingLogs ? '清除中…' : '清除日志' }}
+              </button>
+            </div>
+          </div>
+          <div class="sg-hint">默认等级为 Warning。Debug 会记录更详细的网络与交互信息，排查问题时临时开启即可。</div>
+        </section>
+
         <div class="settings-foot">
           <span style="font-size:12px;color:var(--text-tertiary)">修改即时自动保存</span>
           <button class="btn primary sm" :disabled="saving" @click="save()">
@@ -609,4 +683,6 @@ async function clearCache() {
   border-color: var(--color-primary);
   font-weight: 600;
 }
+.log-actions { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; }
+.log-path { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-tertiary); font-size:12px; }
 </style>

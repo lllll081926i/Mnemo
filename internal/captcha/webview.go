@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mnemo-go/internal/logging"
 )
 
 // Session identifies one application-owned captcha callback endpoint.
@@ -49,7 +51,13 @@ var (
 func Start(onComplete CompletedFunc) (*Session, error) {
 	mu.Lock()
 	defer mu.Unlock()
-	return startLocked(onComplete)
+	session, err := startLocked(onComplete)
+	if err != nil {
+		logging.Warn("captcha callback server start failed", "error", err)
+	} else {
+		logging.Debug("captcha callback server started", "session_id", session.ID, "callback_host", "127.0.0.1")
+	}
+	return session, err
 }
 
 // Open launches the system browser at the challenge URL and starts a local
@@ -61,6 +69,7 @@ func Open(rawURL string, onComplete CompletedFunc) error {
 
 	session, err := startLocked(onComplete)
 	if err != nil {
+		logging.Warn("captcha browser session start failed", "error", err)
 		return err
 	}
 
@@ -72,9 +81,11 @@ func Open(rawURL string, onComplete CompletedFunc) error {
 	challengeURL := buildChallengeURL(rawURL, session.CallbackURL)
 
 	if err := openBrowser(challengeURL); err != nil {
+		logging.Warn("captcha browser launch failed", "error", err)
 		stopLocked()
 		return fmt.Errorf("captcha: 无法打开浏览器: %w", err)
 	}
+	logging.Info("captcha browser challenge opened", "session_id", session.ID)
 	return nil
 }
 
@@ -123,6 +134,7 @@ func Close() {
 	mu.Lock()
 	defer mu.Unlock()
 	stopLocked()
+	logging.Debug("captcha callback server stopped")
 }
 
 func stopLocked() {
@@ -171,6 +183,7 @@ func buildChallengeURL(rawURL, callbackURL string) string {
 func handleCallback(w http.ResponseWriter, r *http.Request) {
 	token := extractToken(r)
 	session, accepted := complete(token)
+	logging.Info("captcha callback received", "session_id", session.ID, "accepted", accepted, "has_token", token != "")
 	// Return a minimal HTML that auto-closes the tab.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -194,6 +207,7 @@ func complete(token string) (Session, bool) {
 	mu.Lock()
 	if completed || onDone == nil {
 		mu.Unlock()
+		logging.Debug("captcha callback ignored", "reason", "no active session or already completed")
 		return Session{}, false
 	}
 	completed = true

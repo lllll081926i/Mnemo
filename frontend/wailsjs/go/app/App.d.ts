@@ -22,6 +22,8 @@ export function ClearCache():Promise<void>;
 
 export function ClearDownloads():Promise<void>;
 
+export function ClearLogs():Promise<void>;
+
 export function ClearMigrateJobs():Promise<void>;
 
 export function ClearUploads():Promise<void>;
@@ -50,6 +52,8 @@ export function DownloadURL(arg1:string,arg2:string,arg3:Record<string, string>)
 
 export function DownloadUpdate(arg1:string):Promise<string>;
 
+export function ExportLogs():Promise<string>;
+
 export function FavoriteFiles(arg1:string,arg2:string,arg3:boolean,arg4:Array<string>):Promise<Array<string>>;
 
 export function GetDirectoryCache(arg1:string):Promise<Array<model.File>>;
@@ -57,6 +61,8 @@ export function GetDirectoryCache(arg1:string):Promise<Array<model.File>>;
 export function GetDownloadURL(arg1:string,arg2:string,arg3:string):Promise<model.DownloadURL>;
 
 export function GetFileDetail(arg1:string,arg2:string,arg3:string):Promise<model.File>;
+
+export function GetLogPath():Promise<string>;
 
 export function GetPan189Captcha():Promise<string>;
 

@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync/atomic"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"mnemo-go/internal/logging"
 )
 
 // DefaultUA mirrors the legacy renderer user agent.
@@ -99,14 +101,24 @@ func (c *Client) Req(ctx context.Context, method, rawURL string, body io.Reader)
 
 // Do executes a request with the client UA preset.
 func (c *Client) Do(ctx context.Context, method, rawURL string, headers map[string]string, body io.Reader) (*http.Response, error) {
+	started := time.Now()
+	target := requestTarget(rawURL)
+	logging.Debug("HTTP request started", "method", method, "target", target)
 	req, err := c.Req(ctx, method, rawURL, body)
 	if err != nil {
+		logging.Warn("HTTP request construction failed", "method", method, "target", target, "error", err)
 		return nil, err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	return c.HTTP.Do(req)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		logging.Warn("HTTP request failed", "method", method, "target", target, "error", err, "duration", logging.Duration(started))
+		return nil, err
+	}
+	logging.Debug("HTTP request completed", "method", method, "target", target, "status", resp.StatusCode, "duration", logging.Duration(started))
+	return resp, nil
 }
 
 // GetJSON GETs rawURL and decodes a JSON response.
@@ -127,15 +139,9 @@ func (c *Client) PostJSON(ctx context.Context, rawURL string, headers map[string
 			return err
 		}
 	}
-	req, err := c.Req(ctx, http.MethodPost, rawURL, &buf)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := c.HTTP.Do(req)
+	headers = cloneHeaders(headers)
+	headers["Content-Type"] = "application/json"
+	resp, err := c.Do(ctx, http.MethodPost, rawURL, headers, &buf)
 	if err != nil {
 		return err
 	}
@@ -145,20 +151,30 @@ func (c *Client) PostJSON(ctx context.Context, rawURL string, headers map[string
 
 // PostForm POSTs form data and decodes JSON.
 func (c *Client) PostForm(ctx context.Context, rawURL string, headers map[string]string, form url.Values, out any) error {
-	req, err := c.Req(ctx, http.MethodPost, rawURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := c.HTTP.Do(req)
+	headers = cloneHeaders(headers)
+	headers["Content-Type"] = "application/x-www-form-urlencoded"
+	resp, err := c.Do(ctx, http.MethodPost, rawURL, headers, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	return DecodeJSON(resp, out)
+}
+
+func requestTarget(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return "invalid"
+	}
+	return u.Hostname() + u.EscapedPath()
+}
+
+func cloneHeaders(headers map[string]string) map[string]string {
+	clone := make(map[string]string, len(headers)+1)
+	for key, value := range headers {
+		clone[key] = value
+	}
+	return clone
 }
 
 // DecodeJSON reads a response into out, tolerating gzip.

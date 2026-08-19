@@ -8,6 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"mnemo-go/internal/app"
+	"mnemo-go/internal/logging"
 )
 
 //go:embed all:frontend/dist
@@ -37,6 +38,6 @@ func main() {
 		},
 	})
 	if err != nil {
-		println("Error:", err.Error())
+		logging.Error("Wails application exited with error", "error", err)
 	}
 }

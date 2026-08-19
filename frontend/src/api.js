@@ -1,6 +1,7 @@
 // api.js — thin wrapper over the generated Wails bindings + runtime events.
 import * as App from '../wailsjs/go/app/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
+import { debug, info, warn, error, errorText, configKeys } from './logger'
 
 // re-export the raw binding surface (used by views directly)
 export * from '../wailsjs/go/app/App'
@@ -20,9 +21,39 @@ export { EventsOn }
 
 // ---------- helpers ----------
 
-export function listProviders() { return App.ListProviders() }
-export function listAccounts() { return App.ListAccounts() }
-export function login(provider, config) { return App.ProviderLogin(provider, config) }
+export function listProviders() {
+  const started = performance.now()
+  debug('rpc', 'ListProviders started')
+  return App.ListProviders().then((result) => {
+    info('rpc', 'ListProviders completed', { count: (result || []).length, duration_ms: Math.round(performance.now() - started) })
+    return result
+  }).catch((err) => {
+    error('rpc', 'ListProviders failed', { error: errorText(err), duration_ms: Math.round(performance.now() - started) })
+    throw err
+  })
+}
+export function listAccounts() {
+  const started = performance.now()
+  debug('rpc', 'ListAccounts started')
+  return App.ListAccounts().then((result) => {
+    info('rpc', 'ListAccounts completed', { count: (result || []).length, duration_ms: Math.round(performance.now() - started) })
+    return result
+  }).catch((err) => {
+    error('rpc', 'ListAccounts failed', { error: errorText(err), duration_ms: Math.round(performance.now() - started) })
+    throw err
+  })
+}
+export function login(provider, config) {
+  const started = performance.now()
+  info('login', 'provider login RPC started', { provider, config_keys: configKeys(config), has_captcha_token: !!String(config?.captcha_token || '').trim() })
+  return App.ProviderLogin(provider, config).then((result) => {
+    info('login', 'provider login RPC completed', { provider, duration_ms: Math.round(performance.now() - started) })
+    return result
+  }).catch((err) => {
+    warn('login', 'provider login RPC failed', { provider, error: errorText(err), duration_ms: Math.round(performance.now() - started) })
+    throw err
+  })
+}
 export function saveMounted(provider, conn) { return App.SaveMountedAccount(provider, conn) }
 export function removeAccount(userId) { return App.RemoveAccount(userId) }
 
@@ -80,6 +111,9 @@ export function listShareHistory(userId) { return App.ListShareHistory(userId) }
 // ---------- settings ----------
 export function getSettings() { return App.GetSettings() }
 export function saveSettings(s) { return App.SaveSettings(s) }
+export function getLogPath() { return App.GetLogPath() }
+export function clearLogs() { return App.ClearLogs() }
+export function exportLogs() { return App.ExportLogs() }
 
 // Cache RPCs share one queue so a clear cannot race a pending directory write.
 let cacheRpcTail = Promise.resolve()

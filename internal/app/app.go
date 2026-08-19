@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -20,6 +22,7 @@ import (
 	_ "mnemo-go/internal/drive/providers" // register all plugins
 	"mnemo-go/internal/drive/providers/pan189"
 	"mnemo-go/internal/drive/providers/pikpak"
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 	"mnemo-go/internal/preview"
@@ -48,6 +51,28 @@ type App struct {
 	migrate      *migrate.Engine
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
 	shutdownOnce sync.Once
+}
+
+func configKeys(config map[string]string) []string {
+	keys := make([]string, 0, len(config))
+	for key := range config {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func redactID(value string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(value)))
+	return hex.EncodeToString(sum[:6])
+}
+
+func urlHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return "invalid"
+	}
+	return u.Hostname()
 }
 
 // NewApp constructs the app (no side effects; wiring happens in startup).
@@ -207,17 +232,37 @@ func (a *App) migrationEngine() *migrate.Engine {
 // startup initializes persistence, providers and transfer engines.
 func (a *App) startup(ctx context.Context) {
 	if a == nil {
+		logging.Error("application startup skipped", "reason", "nil app")
 		return
 	}
+	startupAt := time.Now()
+	logging.Info("application startup started")
 	a.stateMu.Lock()
 	a.ctx = ctx
 	a.stateMu.Unlock()
 	st, err := a.ensurePersistence()
 	if err != nil {
+		logging.Error("persistence initialization failed", "error", err)
 		panic(fmt.Errorf("store: %w", err))
 	}
 	dataDir := a.dataDirectory()
 	secrets := a.secretsSnapshot()
+	if err := logging.Configure(dataDir); err != nil {
+		logging.Warn("persistent logging unavailable", "error", err, "data_dir", dataDir)
+	} else {
+		logging.Info("persistent logging enabled", "file", logging.Path())
+	}
+	if settings, settingsErr := st.GetSettings(); settingsErr == nil {
+		if settings.LogLevel == "" {
+			settings.LogLevel = "warning"
+		}
+		if levelErr := logging.SetLevel(settings.LogLevel); levelErr != nil {
+			logging.Warn("invalid persisted log level, using warning", "value", settings.LogLevel, "error", levelErr)
+			_ = logging.SetLevel("warning")
+		}
+	} else {
+		logging.Warn("failed to load persisted log level", "error", settingsErr)
+	}
 
 	// token resolver so drive ops can load sessions
 	drive.SetTokenResolver(func(userID, driveID string) (*model.TokenInfo, error) {
@@ -261,6 +306,7 @@ func (a *App) startup(ctx context.Context) {
 	dlDir := transfer.DownloadDir(st)
 	mediaProxy, err := preview.NewServer(dlDir, dataDir)
 	if err != nil {
+		logging.Error("preview server initialization failed", "error", err)
 		// preview is not optional for media playback; surface the error instead
 		// of crashing silently on a nil Port access later.
 		panic(fmt.Errorf("preview server: %w", err))
@@ -274,6 +320,7 @@ func (a *App) startup(ctx context.Context) {
 		a.emit("transfer:event", ev)
 	})
 	if err != nil {
+		logging.Error("download manager initialization failed", "error", err)
 		panic(fmt.Errorf("download manager: %w", err))
 	}
 	a.stateMu.Lock()
@@ -315,11 +362,13 @@ func (a *App) startup(ctx context.Context) {
 		netx.SetGlobalUploadRate(s.MaxUploadSpeed)
 	}
 
+	logging.Info("application startup completed", "preview_port", mediaProxy.Port, "duration", logging.Duration(startupAt))
 	a.emit("app:ready", map[string]any{"port": mediaProxy.Port})
 }
 
 // emit pushes an event to the frontend.
 func (a *App) emit(name string, data any) {
+	logging.Debug("frontend event emitted", "event", name)
 	if ctx, ok := a.wailsContext(); ok {
 		runtime.EventsEmit(ctx, name, data)
 	}
@@ -334,6 +383,8 @@ func (a *App) Shutdown(ctx context.Context) {
 		return
 	}
 	a.shutdownOnce.Do(func() {
+		shutdownAt := time.Now()
+		logging.Info("application shutdown started")
 		captcha.Close()
 		a.stateMu.Lock()
 		migrations, downloads, uploads, mediaProxy, stop := a.migrate, a.dl, a.uploads, a.preview, a.schedStop
@@ -355,13 +406,18 @@ func (a *App) Shutdown(ctx context.Context) {
 		if mediaProxy != nil {
 			_ = mediaProxy.Close()
 		}
+		logging.Info("application shutdown completed", "duration", logging.Duration(shutdownAt))
+		logging.Close()
 	})
 }
 
 // OpenBrowser opens a URL in the system browser.
 func (a *App) OpenBrowser(url string) {
+	logging.Info("opening external browser", "url_host", urlHost(url))
 	if ctx, ok := a.wailsContext(); ok {
 		runtime.BrowserOpenURL(ctx, url)
+	} else {
+		logging.Warn("external browser request skipped", "reason", "wails context unavailable")
 	}
 }
 
@@ -369,7 +425,9 @@ func (a *App) OpenBrowser(url string) {
 // normal login flow creates its callback session before it requests the
 // challenge, then keeps the challenge embedded in the login page.
 func (a *App) OpenPikPakCaptcha(url string) error {
+	logging.Info("opening legacy PikPak captcha", "url_host", urlHost(url))
 	return captcha.Open(url, func(session captcha.Session, token string) {
+		logging.Info("PikPak captcha callback received", "session_id", session.ID, "has_token", token != "")
 		a.emit("pikpak:captcha:completed", map[string]string{
 			"session_id":    session.ID,
 			"captcha_token": token,
@@ -379,11 +437,14 @@ func (a *App) OpenPikPakCaptcha(url string) error {
 
 // ClosePikPakCaptcha closes the temporary challenge window, if any.
 func (a *App) ClosePikPakCaptcha() {
+	logging.Debug("closing PikPak captcha session")
 	captcha.Close()
 }
 
 func (a *App) startPikPakCaptchaSession() (*captcha.Session, error) {
+	logging.Debug("starting PikPak captcha session")
 	return captcha.Start(func(session captcha.Session, token string) {
+		logging.Info("PikPak captcha callback received", "session_id", session.ID, "has_token", token != "")
 		a.emit("pikpak:captcha:completed", map[string]string{
 			"session_id":    session.ID,
 			"captcha_token": token,
@@ -409,6 +470,7 @@ func (a *App) ListProviders() []ProviderInfo {
 	for _, r := range regs {
 		out = append(out, ProviderInfo{ID: r.ID, Meta: r.Meta, Capabilities: r.Caps, Login: r.Login})
 	}
+	logging.Debug("providers listed", "count", len(out))
 	return out
 }
 
@@ -419,11 +481,15 @@ func (a *App) GetPan189Captcha() string {
 
 // ProviderLogin performs a login for a provider with form config.
 func (a *App) ProviderLogin(provider string, config map[string]string) (*model.Account, error) {
+	started := time.Now()
+	logging.Info("provider login started", "provider", provider, "config_keys", configKeys(config), "has_captcha_token", strings.TrimSpace(config["captcha_token"]) != "")
 	reg, ok := drive.Get(provider)
 	if !ok {
+		logging.Error("provider login rejected", "provider", provider, "reason", "unknown provider")
 		return nil, fmt.Errorf("未知网盘: %s", provider)
 	}
 	if reg.Auth == nil {
+		logging.Error("provider login rejected", "provider", provider, "reason", "auth unsupported")
 		return nil, fmt.Errorf("%s 不支持此登录方式", provider)
 	}
 	// inject secrets
@@ -434,6 +500,7 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	if provider == model.ProviderPikpak {
 		session, err := a.startPikPakCaptchaSession()
 		if err != nil {
+			logging.Error("PikPak captcha session initialization failed", "error", err)
 			return nil, fmt.Errorf("PikPak 验证会话初始化失败: %w", err)
 		}
 		captchaSession = session
@@ -460,8 +527,10 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		},
 	})
 	if err != nil {
+		logging.Warn("provider login failed", "provider", provider, "error", err, "duration", logging.Duration(started))
 		var challenge *pikpak.CaptchaRequiredError
 		if captchaSession != nil && errors.As(err, &challenge) {
+			logging.Info("provider login requires captcha", "provider", provider, "session_id", captchaSession.ID)
 			return nil, fmt.Errorf("%w\nsession=%s", err, captchaSession.ID)
 		}
 		if captchaSession != nil {
@@ -473,6 +542,7 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		captcha.Close()
 	}
 	if tok == nil {
+		logging.Error("provider login returned empty session", "provider", provider)
 		return nil, fmt.Errorf("%s 登录未返回会话", provider)
 	}
 	// The registration that performed the login is authoritative. Do not let a
@@ -484,6 +554,7 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	// cross-provider account key.
 	accountID := model.StripUserID(provider, tok.UserID)
 	if accountID == "" {
+		logging.Error("provider login returned no account identity", "provider", provider)
 		accountID = strings.TrimSpace(tok.ProviderAccountID)
 	}
 	if accountID == "" {
@@ -507,8 +578,10 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		return nil, err
 	}
 	if err := st.SaveAccount(acc); err != nil {
+		logging.Error("provider account persistence failed", "provider", provider, "error", err)
 		return nil, err
 	}
+	logging.Info("provider login completed", "provider", provider, "account_id", redactID(accountID), "duration", logging.Duration(started))
 	a.emit("account:changed", acc)
 	return acc, nil
 }
@@ -516,10 +589,14 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 // SaveMountedAccount persists a mounted storage account (webdav/s3) from the
 // connection form.
 func (a *App) SaveMountedAccount(provider string, conn model.ConnConfig) (*model.Account, error) {
+	started := time.Now()
+	logging.Info("mounted account save started", "provider", provider, "endpoint_host", urlHost(conn.Endpoint))
 	if provider != model.ProviderWebdav && provider != model.ProviderS3 {
+		logging.Error("mounted account save rejected", "provider", provider, "reason", "unsupported provider")
 		return nil, fmt.Errorf("仅支持挂载存储: %s", provider)
 	}
 	if err := drive.ValidateConnection(provider, &conn); err != nil {
+		logging.Warn("mounted account validation failed", "provider", provider, "error", err)
 		return nil, fmt.Errorf("连接校验失败: %w", err)
 	}
 	accountID := mountedAccountID(provider, conn)
@@ -540,8 +617,10 @@ func (a *App) SaveMountedAccount(provider string, conn model.ConnConfig) (*model
 		return nil, err
 	}
 	if err := st.SaveAccount(acc); err != nil {
+		logging.Error("mounted account persistence failed", "provider", provider, "error", err)
 		return nil, err
 	}
+	logging.Info("mounted account save completed", "provider", provider, "account_id", redactID(accountID), "duration", logging.Duration(started))
 	a.emit("account:changed", acc)
 	return acc, nil
 }
@@ -593,6 +672,7 @@ func (a *App) ListAccounts() []*model.Account {
 	if err != nil {
 		return nil
 	}
+	logging.Debug("accounts listed", "count", len(list))
 	return list
 }
 
@@ -600,6 +680,8 @@ func (a *App) ListAccounts() []*model.Account {
 // provider, persists the updated token, and returns the refreshed account.
 // Frontend polls this at a low frequency for the avatar/quota popover.
 func (a *App) RefreshAccount(userID string) (*model.Account, error) {
+	started := time.Now()
+	logging.Debug("account refresh started", "account_id", redactID(userID))
 	st, err := a.storeOrError()
 	if err != nil {
 		return nil, err
@@ -610,6 +692,7 @@ func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 	}
 	tok, err := drive.RefreshAccount(userID, acc.DriveID)
 	if err != nil {
+		logging.Warn("account refresh failed", "account_id", redactID(userID), "error", err, "duration", logging.Duration(started))
 		return acc, err
 	}
 	if tok != nil {
@@ -625,22 +708,27 @@ func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 		acc.DriveID = normalizedDriveID(provider, accountID, tok.DefaultDriveID)
 	}
 	if err := st.SaveAccount(acc); err != nil {
+		logging.Error("refreshed account persistence failed", "account_id", redactID(userID), "error", err)
 		return acc, fmt.Errorf("保存账号失败: %w", err)
 	}
 	a.emit("account:changed", acc)
+	logging.Debug("account refresh completed", "account_id", redactID(userID), "duration", logging.Duration(started))
 	return acc, nil
 }
 
 // RemoveAccount deletes an account.
 func (a *App) RemoveAccount(userID string) error {
+	logging.Info("account removal started", "account_id", redactID(userID))
 	st, err := a.storeOrError()
 	if err != nil {
 		return err
 	}
 	if err := st.DeleteAccount(userID); err != nil {
+		logging.Warn("account removal failed", "account_id", redactID(userID), "error", err)
 		return err
 	}
 	a.emit("account:changed", map[string]string{"removed": userID})
+	logging.Info("account removal completed", "account_id", redactID(userID))
 	return nil
 }
 
@@ -656,11 +744,19 @@ func (a *App) GetSettings() store.Settings {
 
 // SaveSettings persists settings and applies runtime-relevant changes.
 func (a *App) SaveSettings(s store.Settings) error {
+	logging.Info("settings save started", "download_dir_configured", strings.TrimSpace(s.DownloadDir) != "", "proxy_configured", strings.TrimSpace(s.Proxy) != "", "max_concurrent_downloads", s.MaxConcurrentDownloads, "max_upload_speed", s.MaxUploadSpeed)
 	st, err := a.storeOrError()
 	if err != nil {
 		return err
 	}
+	if s.LogLevel == "" {
+		s.LogLevel = "warning"
+	}
+	if err := logging.SetLevel(s.LogLevel); err != nil {
+		return err
+	}
 	if err := st.SetSettings(s); err != nil {
+		logging.Warn("settings persistence failed", "error", err)
 		return err
 	}
 	dl := a.downloadManager()
@@ -680,7 +776,44 @@ func (a *App) SaveSettings(s store.Settings) error {
 	netx.SetGlobalProxy(s.Proxy)
 	// apply upload speed cap at runtime (direct uploads via ProgressReader)
 	netx.SetGlobalUploadRate(s.MaxUploadSpeed)
+	logging.Info("settings save completed")
 	return nil
+}
+
+// GetLogPath returns the active persistent log file path.
+func (a *App) GetLogPath() string { return logging.Path() }
+
+// ClearLogs removes the active log and starts a fresh file.
+func (a *App) ClearLogs() error { return logging.Clear() }
+
+// ExportLogs copies the active log to a user-selected destination and returns
+// the destination path. The dialog is intentionally native for all platforms.
+func (a *App) ExportLogs() (string, error) {
+	path := logging.Path()
+	if path == "" {
+		return "", errors.New("persistent logging is not initialized")
+	}
+	ctx, ok := a.wailsContext()
+	if !ok {
+		return "", errors.New("application UI is not initialized")
+	}
+	destination, err := runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{
+		Title:           "Export Mnemo Log",
+		DefaultFilename: "mnemo.log",
+		Filters:         []runtime.FileFilter{{DisplayName: "Log files (*.log)", Pattern: "*.log"}},
+	})
+	if err != nil || destination == "" {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(destination, data, 0o600); err != nil {
+		return "", err
+	}
+	logging.Info("log file exported", "destination", destination)
+	return destination, nil
 }
 
 // GetDirectoryCache returns a persisted directory snapshot. The key is
@@ -742,11 +875,18 @@ func (a *App) ClearCache() error {
 
 // DownloadFile enqueues a download.
 func (a *App) DownloadFile(userID, driveID string, f model.File) (*model.DownloadTask, error) {
+	logging.Info("download enqueue requested", "account_id", redactID(userID), "drive_id", redactID(driveID), "file_id", redactID(f.FileID), "size", f.Size)
 	dl := a.downloadManager()
 	if dl == nil {
 		return nil, errors.New("下载服务未启动")
 	}
-	return dl.AddDownload(userID, driveID, f)
+	task, err := dl.AddDownload(userID, driveID, f)
+	if err != nil {
+		logging.Warn("download enqueue failed", "error", err)
+	} else if task != nil {
+		logging.Info("download enqueued", "task_id", task.ID)
+	}
+	return task, err
 }
 
 // PinFileSnapshot keeps the exact list-row metadata available for a provider
@@ -757,11 +897,18 @@ func (a *App) PinFileSnapshot(userID string, driveID string, f model.File) {
 
 // DownloadURL enqueues a direct URL download.
 func (a *App) DownloadURL(name, url string, headers map[string]string) (*model.DownloadTask, error) {
+	logging.Info("direct URL download requested", "name", name, "url_host", urlHost(url), "header_count", len(headers))
 	dl := a.downloadManager()
 	if dl == nil {
 		return nil, errors.New("下载服务未启动")
 	}
-	return dl.AddDownloadURL(name, url, headers)
+	task, err := dl.AddDownloadURL(name, url, headers)
+	if err != nil {
+		logging.Warn("direct URL download enqueue failed", "error", err)
+	} else if task != nil {
+		logging.Info("direct URL download enqueued", "task_id", task.ID)
+	}
+	return task, err
 }
 
 // ListDownloads lists download tasks.
@@ -829,6 +976,7 @@ func canonicalUploadParent(userID, driveID, parentID string) string {
 // UploadFiles enqueues local files or folders for upload. conflictPolicy
 // controls behavior when a same-name file already exists remotely:// "overwrite" (default), "rename" (keep both, append suffix), "skip".
 func (a *App) UploadFiles(userID, driveID, parentID, conflictPolicy string, localPaths []string) []*model.UploadingUI {
+	logging.Info("upload enqueue requested", "account_id", redactID(userID), "drive_id", redactID(driveID), "parent_id", redactID(parentID), "conflict_policy", conflictPolicy, "path_count", len(localPaths))
 	uploads := a.uploadQueue()
 	if uploads == nil {
 		return nil
@@ -837,7 +985,9 @@ func (a *App) UploadFiles(userID, driveID, parentID, conflictPolicy string, loca
 	// provider metadata is loading. Canonicalize it before the asynchronous
 	// queue starts resolving the remote parent.
 	parentID = canonicalUploadParent(userID, driveID, parentID)
-	return uploads.AddFiles(userID, driveID, parentID, conflictPolicy, localPaths)
+	items := uploads.AddFiles(userID, driveID, parentID, conflictPolicy, localPaths)
+	logging.Info("upload items enqueued", "count", len(items))
+	return items
 }
 
 // ListUploads lists upload jobs.
