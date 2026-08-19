@@ -34,16 +34,16 @@ import (
 
 // App is the root Wails-bound struct.
 type App struct {
-	stateMu      sync.RWMutex
-	persistMu    sync.Mutex
-	persistErr   error
-	ctx          context.Context
-	store        *store.Store
-	preview      *preview.Server
-	dl           *transfer.Manager
-	uploads      *transfer.UploadQueue
-	secrets      config.Secrets
-	dataDir      string
+	stateMu    sync.RWMutex
+	persistMu  sync.Mutex
+	persistErr error
+	ctx        context.Context
+	store      *store.Store
+	preview    *preview.Server
+	dl         *transfer.Manager
+	uploads    *transfer.UploadQueue
+	secrets    config.Secrets
+	dataDir    string
 
 	migrate      *migrate.Engine
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
@@ -256,11 +256,10 @@ func (a *App) startup(ctx context.Context) {
 	store.InitUploadSessions(dataDir)
 	drive.SetUploadSessionStore(uploadSessionAdapter{})
 
-	// internal media/preview server. Roots restrict /local/ serving to the
-	// download dir, engine dir and data dir (logs, mpv-config, etc.).
+	// Internal media/preview server. /local/ serving is restricted to the
+	// download and data directories; remote playback uses opaque sessions.
 	dlDir := transfer.DownloadDir(st)
-	engineDir := filepath.Join(dataDir, "engine")
-	mediaProxy, err := preview.NewServer(dlDir, engineDir, dataDir)
+	mediaProxy, err := preview.NewServer(dlDir, dataDir)
 	if err != nil {
 		// preview is not optional for media playback; surface the error instead
 		// of crashing silently on a nil Port access later.
@@ -346,7 +345,7 @@ func (a *App) Shutdown(ctx context.Context) {
 		if migrations != nil {
 			migrations.CancelAll()
 		}
-	
+
 		if downloads != nil {
 			downloads.Shutdown()
 		}

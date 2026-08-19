@@ -1,7 +1,7 @@
 # Mnemo → Mnemo-Go 迁移进度报告
 
 > 旧项目：`../Mnemo`（Electron + Vue3 + TypeScript + aria2c + mpv）
-> 新项目：`Mnemo-Go`（Go + Wails v2 + Vue3 JS + 原生 Go 下载引擎 + mpv JSON IPC）
+> 新项目：`Mnemo-Go`（Go + Wails v2 + Vue3 JS + 原生 Go 下载引擎 + HTML5 网页播放器）
 > 最近更新：2026-08-17（全量源码调研 + 旧版对照 + 迁移回归验证 + 跨平台构建复核）
 > 废弃说明：`gofile`、`gdrive`、`encryption` 已按需求移除/不再支持
 
@@ -11,9 +11,9 @@
 
 | 维度 | 进度 | 说明 |
 |------|:----:|------|
-| 后端核心架构 | ~85% | drive/transfer/store/preview/player/netx/config 已迁移；迁移策略和同步引擎为简化版 |
+| 后端核心架构 | ~90% | drive/transfer/store/preview/netx/config 已迁移；迁移策略和同步引擎为简化版 |
 | 后端 Provider | ~85% | 13 个 provider 全部已移植且可注册，但深度不一 |
-| 前端视图与组件 | ~72% | 5 视图 + 16 组件完整，缺瀑布流/字幕选择/播放列表 |
+| 前端视图与组件 | ~82% | 5 视图 + 16 组件完整，缺瀑布流/播放列表 |
 | 设计系统 | ~90% | 令牌系统更系统化，但移除多色包 |
 | 文档 | ~65% | 3 核心文档 + 发版记录，旧 8 份辅助文档缺失（现已新增 PROVIDER_STATUS + 13 网盘详情） |
 | 测试 | ~60% | 后端 provider 单测与 mock/e2e 已覆盖关键登录、刷新、列表、上传、下载链路；前端暂无测试框架，未覆盖真实云端账号 |
@@ -31,8 +31,8 @@
 | netx | internal/netx/ | ✅ | ~80% | 无统一 Set-Cookie 中继、无下载代理穿透(CONNECT/DNS缓存/flow-enc)；上传限速令牌桶已实现（SetGlobalUploadRate + ProgressReader throttle） |
 | store | internal/store/ | ✅ | ~90% | 原子 JSON；同一进程内读改写由 Store 互斥保护；无加密存储（已废弃加密，符合需求） |
 | transfer | internal/transfer/ | ✅ | ~90% | 原生 Go 分段下载器替代 aria2c；上传历史管理 API 未明确 |
-| player | internal/player/ | ✅ | ~95% | Windows、macOS arm64、Linux 均由 CI 注入同版本随包 mpv，使用平台原生 JSON IPC；保留独立窗口设计，不做 texture bridge/overlay |
-| preview | internal/preview/ | ✅ | ~85% | 无 CONNECT 隧道/DNS 缓存/123 CDN 路由/proxyAccessToken |
+| player | frontend/src/components/PlayerPanel.vue | ✅ | ~90% | HTML5 原生媒体 + 按需 HLS.js/dash.js；浏览器不支持的容器不承诺在线解码 |
+| preview | internal/preview/ | ✅ | ~95% | 不透明播放会话、HLS/DASH 清单重写、字幕代理、Range 和签名刷新已覆盖 |
 | sync | internal/sync/ | ✅ | ~85% | 已支持递归目录、大小/修改时间比较、快照、删除传播阈值保护、日志与定时调度；高级冲突合并仍有限 |
 | migrate（跨盘迁移） | internal/transfer/migrate/ | ✅ | ~85% | 已按秒传 → 流式 → 临时文件降级并持久化任务状态；Yike 明确不走跨盘秒传，源端清理失败会标记为部分完成 |
 | config/engine/e2e | — | ✅ | ~90% | 多个 provider 有 mock/e2e；真实云端账号验证仍需发布前按平台执行 |
@@ -55,7 +55,7 @@
 |------|:----:|------|
 | 瀑布流/相册模式 | ❌ | 旧 PanRight 相册盘瀑布流，新 PanView 无 |
 | 分享导入 UI | ✅ | 分享页按 importShare 能力筛选目标账号，支持解析、文件选择和目录转存 |
-| 播放器字幕选择 | ❌ | 旧 CloudSubtitlePickerModal，新项目无 |
+| 播放器字幕选择 | ✅ | 网页播放器原生 `<track>` + SRT→WebVTT 代理 |
 | 播放列表 | ❌ | 旧 MpvPlaylistPanel，新项目无 |
 | 多音轨 | ❌ | 旧 MpvSettingsPanel，新项目无 |
 | 任务详情抽屉 | ❌ | 旧 TaskDetailDrawer，新项目无 |
@@ -171,13 +171,13 @@
 25. ⚠️ 版本历史：onedrive/dropbox revisions
 26. ⚠️ 缩略图：dropbox get_thumbnail_v2
 27. ⚠️ 账号凭据系统级保护：DPAPI/钥匙串（需平台特定实现）
-28. ⚠️ 前端缺失功能：瀑布流/字幕选择/播放列表/调试设置页
+28. ⚠️ 前端缺失功能：瀑布流/播放列表/调试设置页
 29. ⚠️ 前端测试框架
 30. ⚠️ 测试覆盖率：provider 深度覆盖仍不均衡，当前主要是 mock/e2e 关键链路，未覆盖真实云端账号
 31. ✅ **上传进度回调：webdav/s3**：已实现 ProgressReader + 令牌桶限速（`progress.go:22`）
 32. ✅ **MaxUploadSpeed 限速**：已实现 SetGlobalUploadRate + ProgressReader throttle（`app.go:128,328`）
 33. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5
-34. ⚠️ player 字幕选择 + 播放列表 + 多音轨
+34. ⚠️ player 播放列表 + 多音轨
 35. ⚠️ 前端测试框架搭建
 36. ⚠️ 瀑布流/相册模式
 37. ⚠️ 调试/日志设置页

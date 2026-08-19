@@ -1053,6 +1053,7 @@ export namespace model {
 	    value: string;
 	    url: string;
 	    type?: string;
+	    expire_time?: number;
 	    headers?: Record<string, string>;
 	    forceProxy?: boolean;
 	
@@ -1070,6 +1071,7 @@ export namespace model {
 	        this.value = source["value"];
 	        this.url = source["url"];
 	        this.type = source["type"];
+	        this.expire_time = source["expire_time"];
 	        this.headers = source["headers"];
 	        this.forceProxy = source["forceProxy"];
 	    }
@@ -1088,6 +1090,7 @@ export namespace model {
 	    subtitles?: Subtitle[];
 	    url?: string;
 	    current_quality?: string;
+	    stream_type?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VideoPreview(source);
@@ -1108,6 +1111,7 @@ export namespace model {
 	        this.subtitles = this.convertValues(source["subtitles"], Subtitle);
 	        this.url = source["url"];
 	        this.current_quality = source["current_quality"];
+	        this.stream_type = source["stream_type"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

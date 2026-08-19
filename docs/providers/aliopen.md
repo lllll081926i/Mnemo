@@ -54,8 +54,8 @@ SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 
 ## 4. 视频预览（aliopen.go）
 
-✅ `GetVideoPreview` 复用 `DownloadInfo` 返回的原画或 Live Photo `mov` 流，交给统一本地预览代理和随包 `mpv` 播放。
-> 阿里 Open 的真正转码清晰度接口 `/adrive/v1.0/openFile/getVideoPreviewPlayInfo` 仍未接入；当前产品约束是视频默认统一走 `mpv`，不设置播放器回退。
+✅ `GetVideoPreview` 复用 `DownloadInfo` 返回的原画或 Live Photo `mov` 流，交给统一播放会话代理和网页播放器。
+> 阿里 Open 的真正转码清晰度接口 `/adrive/v1.0/openFile/getVideoPreviewPlayInfo` 仍未接入；当前产品约束是浏览器可解码容器在线播放，不支持的容器提示下载。
 
 ---
 

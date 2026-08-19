@@ -856,18 +856,70 @@ func qualityTier(height int) tierInfo {
 }
 
 func streamType(rawURL, t string) string {
-	u := strings.ToLower(rawURL)
-	t = strings.ToLower(strings.TrimSpace(t))
-	if strings.Contains(u, ".m3u8") || t == "m3u8" || strings.Contains(t, "mpegurl") || strings.Contains(t, "hls") {
-		return "hls"
+	if stream := streamTypeHint(t); stream != "" {
+		return stream
 	}
-	if strings.Contains(u, ".mpd") || t == "mpd" || strings.Contains(t, "dash") {
-		return "dash"
-	}
-	if strings.Contains(u, ".ts") || t == "ts" || strings.Contains(t, "mpegts") || strings.Contains(t, "mp2t") {
-		return "ts"
+	if parsed, err := url.Parse(rawURL); err == nil {
+		if stream := streamTypePath(parsed.Path); stream != "" {
+			return stream
+		}
 	}
 	return "mp4"
+}
+
+func streamTypeHint(value string) string {
+	value = strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
+	switch value {
+	case "hls", "m3u8", "application/vnd.apple.mpegurl", "application/x-mpegurl":
+		return "hls"
+	case "dash", "mpd", "application/dash+xml":
+		return "dash"
+	case "ts", "video/mp2t", "video/mpegts", "video/x-mpegts":
+		return "ts"
+	case "webm", "video/webm":
+		return "webm"
+	case "mkv", "matroska", "video/x-matroska":
+		return "mkv"
+	case "avi", "video/x-msvideo":
+		return "avi"
+	case "flv", "video/x-flv":
+		return "flv"
+	case "wmv", "video/x-ms-wmv":
+		return "wmv"
+	case "rm", "rmvb":
+		return value
+	case "video/vnd.rn-realvideo":
+		return "rmvb"
+	case "m2ts", "mts", "mpeg", "mpg", "mov", "m4v", "3gp":
+		return value
+	case "video/mpeg":
+		return "mpeg"
+	case "video/quicktime":
+		return "mov"
+	case "video/3gpp":
+		return "3gp"
+	default:
+		return ""
+	}
+}
+
+func streamTypePath(value string) string {
+	path := strings.ToLower(value)
+	for _, container := range []string{"m3u8", "mpd", "m2ts", "webm", "mkv", "avi", "flv", "wmv", "rmvb", "mpeg", "mts", "mpg", "mov", "m4v", "3gp", "ts", "rm"} {
+		if strings.HasSuffix(path, "."+container) {
+			switch container {
+			case "m3u8":
+				return "hls"
+			case "mpd":
+				return "dash"
+			case "m2ts", "mts":
+				return "ts"
+			default:
+				return container
+			}
+		}
+	}
+	return ""
 }
 
 func apiParentID(parentID string) string {

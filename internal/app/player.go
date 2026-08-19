@@ -1,14 +1,18 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strings"
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
+	previewserver "mnemo-go/internal/preview"
 	"mnemo-go/internal/store"
 )
 
@@ -52,10 +56,115 @@ func (a *App) resolveVideoSource(userID, driveID, fileID, requestedQuality strin
 	if mediaProxy == nil {
 		return nil, "", errors.New("预览服务未启动")
 	}
-	headers := mergeHeaders(preview.Headers, quality.Headers)
-	// Always use the local proxy. It provides Range support, CORS and one
-	// consistent header path for all providers, including public URLs.
-	return preview, mediaProxy.ProxyURL(quality.URL, headers, videoFileName(a, userID, driveID, fileID)), nil
+	filename := videoFileName(a, userID, driveID, fileID)
+	streamType := videoStreamType(quality.Type, filename)
+	selectedQuality := qualityIdentifier(quality)
+	refresh := func(_ context.Context) (previewserver.PlaybackSource, error) {
+		fresh, err := drive.GetVideoPreview(userID, driveID, fileID)
+		if err != nil {
+			return previewserver.PlaybackSource{}, err
+		}
+		if fresh == nil {
+			return previewserver.PlaybackSource{}, errors.New("刷新后的播放信息为空")
+		}
+		freshQuality, err := chooseVideoQuality(fresh.Qualities, selectedQuality)
+		if err != nil {
+			return previewserver.PlaybackSource{}, err
+		}
+		if strings.TrimSpace(freshQuality.URL) == "" {
+			return previewserver.PlaybackSource{}, errors.New("刷新后的播放地址为空")
+		}
+		return previewserver.PlaybackSource{
+			URL:        freshQuality.URL,
+			Headers:    mergeHeaders(fresh.Headers, freshQuality.Headers),
+			Filename:   filename,
+			StreamType: videoStreamType(freshQuality.Type, filename),
+			ExpiresAt:  sourceExpiration(fresh, freshQuality),
+		}, nil
+	}
+	streamURL, err := mediaProxy.PlaybackURL(previewserver.PlaybackSource{
+		URL:        quality.URL,
+		Headers:    mergeHeaders(preview.Headers, quality.Headers),
+		Filename:   filename,
+		StreamType: streamType,
+		ExpiresAt:  sourceExpiration(preview, quality),
+		Refresh:    refresh,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	preview.CurrentQuality = selectedQuality
+	preview.StreamType = streamType
+	a.proxyVideoSubtitles(mediaProxy, userID, driveID, fileID, filename, preview)
+	sanitizeVideoPreview(preview)
+	return preview, streamURL, nil
+}
+
+func qualityIdentifier(quality model.VideoQuality) string {
+	if value := strings.TrimSpace(quality.Value); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(quality.Quality); value != "" {
+		return value
+	}
+	return strings.TrimSpace(quality.Label)
+}
+
+func videoStreamType(declared, filename string) string {
+	declared = strings.ToLower(strings.TrimSpace(declared))
+	switch declared {
+	case "hls", "m3u8":
+		return "hls"
+	case "dash", "mpd":
+		return "dash"
+	case "mp4", "webm", "ts", "m2ts", "mts", "ogg", "mkv", "avi", "flv", "wmv", "rm", "rmvb", "mpeg":
+		return declared
+	}
+	switch strings.TrimPrefix(strings.ToLower(path.Ext(filename)), ".") {
+	case "m3u8":
+		return "hls"
+	case "mpd":
+		return "dash"
+	case "mp4", "m4v", "mov", "3gp":
+		return "mp4"
+	case "webm":
+		return "webm"
+	case "ogv", "ogg":
+		return "ogg"
+	case "ts", "m2ts", "mts":
+		return "ts"
+	case "mkv", "avi", "flv", "wmv", "rm", "rmvb", "mpg", "mpeg":
+		return strings.TrimPrefix(strings.ToLower(path.Ext(filename)), ".")
+	default:
+		return ""
+	}
+}
+
+func expirationTime(values ...int64) time.Time {
+	var earliest time.Time
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		// Some providers expose seconds and others milliseconds. Normalize at
+		// the app boundary so the local stream session has one representation.
+		if value < 10_000_000_000 {
+			value *= 1000
+		}
+		candidate := time.UnixMilli(value)
+		if earliest.IsZero() || candidate.Before(earliest) {
+			earliest = candidate
+		}
+	}
+	return earliest
+}
+
+func sourceExpiration(preview *model.VideoPreview, quality model.VideoQuality) time.Time {
+	previewExpiry := int64(0)
+	if preview != nil {
+		previewExpiry = preview.ExpireTime
+	}
+	return expirationTime(previewExpiry, quality.ExpireTime, driveutil.GetExpiresTime(quality.URL))
 }
 
 func chooseVideoQuality(qualities []model.VideoQuality, requested string) (model.VideoQuality, error) {
@@ -90,6 +199,111 @@ func mergeHeaders(base, override map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// proxyVideoSubtitles gives <track> URLs the same privacy and header handling
+// as the main media stream. A provider may omit subtitles or return an
+// unsupported one; neither condition should prevent the video itself playing.
+func (a *App) proxyVideoSubtitles(mediaProxy *previewserver.Server, userID, driveID, fileID, videoName string, preview *model.VideoPreview) {
+	if mediaProxy == nil || preview == nil || len(preview.Subtitles) == 0 {
+		return
+	}
+	originals := append([]model.Subtitle(nil), preview.Subtitles...)
+	proxied := make([]model.Subtitle, 0, len(originals))
+	for index, subtitle := range originals {
+		if strings.TrimSpace(subtitle.URL) == "" {
+			continue
+		}
+		language := strings.TrimSpace(subtitle.Language)
+		source := subtitlePlaybackSource(preview, subtitle, subtitleFileName(videoName, index, subtitle.URL))
+		source.Refresh = func(_ context.Context) (previewserver.PlaybackSource, error) {
+			fresh, err := drive.GetVideoPreview(userID, driveID, fileID)
+			if err != nil {
+				return previewserver.PlaybackSource{}, err
+			}
+			if fresh == nil {
+				return previewserver.PlaybackSource{}, errors.New("刷新后的字幕信息为空")
+			}
+			freshSubtitle, err := chooseSubtitle(fresh.Subtitles, index, language)
+			if err != nil {
+				return previewserver.PlaybackSource{}, err
+			}
+			return subtitlePlaybackSource(fresh, freshSubtitle, subtitleFileName(videoName, index, freshSubtitle.URL)), nil
+		}
+		localURL, err := mediaProxy.PlaybackURL(source)
+		if err != nil {
+			continue
+		}
+		subtitle.URL = localURL
+		subtitle.Headers = nil
+		proxied = append(proxied, subtitle)
+	}
+	preview.Subtitles = proxied
+}
+
+func subtitlePlaybackSource(preview *model.VideoPreview, subtitle model.Subtitle, filename string) previewserver.PlaybackSource {
+	return previewserver.PlaybackSource{
+		URL:        subtitle.URL,
+		Headers:    mergeHeaders(preview.Headers, subtitle.Headers),
+		Filename:   filename,
+		StreamType: subtitleStreamType(subtitle.URL),
+		ExpiresAt:  subtitleExpiration(preview, subtitle),
+	}
+}
+
+func subtitleExpiration(preview *model.VideoPreview, subtitle model.Subtitle) time.Time {
+	previewExpiry := int64(0)
+	if preview != nil {
+		previewExpiry = preview.ExpireTime
+	}
+	return expirationTime(previewExpiry, driveutil.GetExpiresTime(subtitle.URL))
+}
+
+func subtitleStreamType(rawURL string) string {
+	ext := strings.ToLower(path.Ext(strings.SplitN(rawURL, "?", 2)[0]))
+	if ext == ".srt" {
+		return "subtitle-srt"
+	}
+	return "subtitle"
+}
+
+func subtitleFileName(videoName string, index int, rawURL string) string {
+	base := strings.TrimSuffix(videoName, path.Ext(videoName))
+	if strings.TrimSpace(base) == "" {
+		base = "subtitle"
+	}
+	ext := path.Ext(strings.SplitN(rawURL, "?", 2)[0])
+	if ext == "" {
+		ext = ".vtt"
+	}
+	return fmt.Sprintf("%s.subtitle-%d%s", base, index+1, ext)
+}
+
+func chooseSubtitle(subtitles []model.Subtitle, preferredIndex int, language string) (model.Subtitle, error) {
+	if preferredIndex >= 0 && preferredIndex < len(subtitles) && strings.TrimSpace(subtitles[preferredIndex].URL) != "" {
+		return subtitles[preferredIndex], nil
+	}
+	for _, subtitle := range subtitles {
+		if strings.EqualFold(strings.TrimSpace(subtitle.Language), language) && strings.TrimSpace(subtitle.URL) != "" {
+			return subtitle, nil
+		}
+	}
+	return model.Subtitle{}, errors.New("刷新后的字幕地址为空")
+}
+
+// sanitizeVideoPreview ensures the WebView only sees local opaque URLs. The
+// provider response remains in the refresh closure in Go, while labels and
+// quality identifiers stay available for the player UI.
+func sanitizeVideoPreview(preview *model.VideoPreview) {
+	if preview == nil {
+		return
+	}
+	preview.Headers = nil
+	for index := range preview.Qualities {
+		preview.Qualities[index].HTML = ""
+		preview.Qualities[index].URL = ""
+		preview.Qualities[index].Headers = nil
+	}
 }
 
 func videoFileName(a *App, userID, driveID, fileID string) string {

@@ -2,6 +2,8 @@ package preview
 
 import (
 	"bytes"
+	"context"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -310,6 +312,371 @@ func TestProxyErrorsAndRedirectProtection(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("private redirect status = %d", resp.StatusCode)
 	}
+}
+
+func TestPlaybackSessionKeepsUpstreamDetailsPrivate(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("video"))
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL:      upstream.URL + "/video.mp4?signature=secret-value",
+		Headers:  map[string]string{"Authorization": "Bearer secret-token"},
+		Filename: "video.mp4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(streamURL, upstream.URL) || strings.Contains(streamURL, "secret") {
+		t.Fatalf("browser-facing stream URL leaked upstream details: %q", streamURL)
+	}
+	resp, err := http.Get(streamURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "video" {
+		t.Fatalf("playback response = %d %q", resp.StatusCode, body)
+	}
+	if gotAuth != "Bearer secret-token" {
+		t.Fatalf("upstream Authorization = %q", gotAuth)
+	}
+}
+
+func TestPlaybackSessionRewritesNestedHLSResources(t *testing.T) {
+	var segmentAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/master.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvariant.m3u8\n"))
+		case "/variant.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key.bin?signature=secret\"\n#EXTINF:4,\nsegment.ts?signature=secret\n"))
+		case "/segment.ts":
+			segmentAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "video/mp2t")
+			_, _ = w.Write([]byte("segment"))
+		case "/keys/key.bin":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("key"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL:        upstream.URL + "/master.m3u8?signature=top-secret",
+		Headers:    map[string]string{"Authorization": "Bearer hls-token"},
+		StreamType: "hls",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := mustGetBody(t, streamURL)
+	if strings.Contains(master, upstream.URL) || strings.Contains(master, "signature=secret") {
+		t.Fatalf("rewritten master playlist leaked upstream URL: %q", master)
+	}
+	variantURL := firstPlaylistResource(t, master)
+	variant := mustGetBody(t, variantURL)
+	if strings.Contains(variant, upstream.URL) || strings.Contains(variant, "signature=secret") {
+		t.Fatalf("rewritten variant playlist leaked upstream URL: %q", variant)
+	}
+	if !strings.Contains(variant, "URI=\""+s.BaseURL()+"/stream/") {
+		t.Fatalf("HLS key URI was not rewritten: %q", variant)
+	}
+	segmentURL := firstPlaylistResource(t, variant)
+	if got := mustGetBody(t, segmentURL); got != "segment" {
+		t.Fatalf("segment body = %q", got)
+	}
+	if segmentAuth != "Bearer hls-token" {
+		t.Fatalf("segment Authorization = %q", segmentAuth)
+	}
+}
+
+func TestPlaybackSessionRewritesDASHResources(t *testing.T) {
+	var initAuth, segmentAuth, initSignature, segmentSignature, segmentTime string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dash/manifest.mpd":
+			w.Header().Set("Content-Type", "application/dash+xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><MPD><Period><AdaptationSet mimeType="video/mp4"><Representation id="video"><SegmentTemplate initialization="init.mp4?signature=init-secret" media="segments/chunk-$Number$.m4s?signature=segment-secret&amp;time=$Time$" startNumber="1" /></Representation></AdaptationSet></Period></MPD>`))
+		case "/dash/init.mp4":
+			initAuth = r.Header.Get("Authorization")
+			initSignature = r.URL.Query().Get("signature")
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("init"))
+		case "/dash/segments/chunk-1.m4s":
+			segmentAuth = r.Header.Get("Authorization")
+			segmentSignature = r.URL.Query().Get("signature")
+			segmentTime = r.URL.Query().Get("time")
+			w.Header().Set("Content-Type", "video/iso.segment")
+			_, _ = w.Write([]byte("segment"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL:        upstream.URL + "/dash/manifest.mpd?signature=manifest-secret",
+		Headers:    map[string]string{"Authorization": "Bearer dash-token"},
+		StreamType: "dash",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := mustGetBody(t, streamURL)
+	if strings.Contains(manifest, upstream.URL) || strings.Contains(manifest, "signature=") {
+		t.Fatalf("rewritten DASH manifest leaked upstream details: %q", manifest)
+	}
+	var mpd struct {
+		SegmentTemplate struct {
+			Initialization string `xml:"initialization,attr"`
+			Media          string `xml:"media,attr"`
+		} `xml:"Period>AdaptationSet>Representation>SegmentTemplate"`
+	}
+	if err := xml.Unmarshal([]byte(manifest), &mpd); err != nil {
+		t.Fatalf("parse rewritten DASH manifest: %v", err)
+	}
+	if !strings.Contains(mpd.SegmentTemplate.Initialization, "/stream/") || !strings.Contains(mpd.SegmentTemplate.Media, "/stream/") {
+		t.Fatalf("DASH resources were not rewritten: %+v", mpd.SegmentTemplate)
+	}
+	if got := mustGetBody(t, mpd.SegmentTemplate.Initialization); got != "init" {
+		t.Fatalf("init body = %q", got)
+	}
+	if !strings.Contains(mpd.SegmentTemplate.Media, "$Time$") {
+		t.Fatalf("DASH query template was not preserved locally: %q", mpd.SegmentTemplate.Media)
+	}
+	segmentURL := strings.Replace(mpd.SegmentTemplate.Media, "$Number$", "1", 1)
+	segmentURL = strings.Replace(segmentURL, "$Time$", "5000", 1)
+	if got := mustGetBody(t, segmentURL); got != "segment" {
+		t.Fatalf("segment body = %q", got)
+	}
+	if initAuth != "Bearer dash-token" || segmentAuth != "Bearer dash-token" {
+		t.Fatalf("DASH Authorization headers = init:%q segment:%q", initAuth, segmentAuth)
+	}
+	if initSignature != "init-secret" || segmentSignature != "segment-secret" || segmentTime != "5000" {
+		t.Fatalf("DASH signed queries = init:%q segment:%q time:%q", initSignature, segmentSignature, segmentTime)
+	}
+}
+
+func TestPlaybackSessionConvertsSRTSubtitle(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/x-subrip")
+		_, _ = w.Write([]byte("1\r\n00:00:01,000 --> 00:00:02,500\r\n字幕内容\r\n"))
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL:        upstream.URL + "/captions.srt?signature=subtitle-secret",
+		Headers:    map[string]string{"Authorization": "Bearer subtitle-token"},
+		StreamType: "subtitle-srt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(streamURL, "subtitle-secret") {
+		t.Fatalf("subtitle stream URL leaked upstream details: %q", streamURL)
+	}
+	resp, err := http.Get(streamURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/vtt") {
+		t.Fatalf("subtitle response = %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if got := string(body); !strings.HasPrefix(got, "WEBVTT\n\n") || strings.Contains(got, "00:00:01,000") || !strings.Contains(got, "00:00:01.000 --> 00:00:02.500") {
+		t.Fatalf("converted subtitle = %q", got)
+	}
+	if gotAuth != "Bearer subtitle-token" {
+		t.Fatalf("subtitle Authorization = %q", gotAuth)
+	}
+}
+
+func TestPlaybackSessionRefreshesAfterAdaptiveResourceForbidden(t *testing.T) {
+	refreshes := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/old.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:4,\nold.ts\n"))
+		case "/old.ts":
+			http.Error(w, "expired", http.StatusForbidden)
+		case "/fresh.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:4,\nfresh.ts\n"))
+		case "/fresh.ts":
+			w.Header().Set("Content-Type", "video/mp2t")
+			_, _ = w.Write([]byte("fresh"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL:        upstream.URL + "/old.m3u8",
+		StreamType: "hls",
+		Refresh: func(context.Context) (PlaybackSource, error) {
+			refreshes++
+			return PlaybackSource{URL: upstream.URL + "/fresh.m3u8", StreamType: "hls"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldManifest := mustGetBody(t, streamURL)
+	oldSegment := firstPlaylistResource(t, oldManifest)
+	resp, err := http.Get(oldSegment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("old segment status = %d", resp.StatusCode)
+	}
+	if refreshes != 1 {
+		t.Fatalf("refreshes after forbidden segment = %d", refreshes)
+	}
+	freshManifest := mustGetBody(t, streamURL)
+	if strings.Contains(freshManifest, "old.ts") {
+		t.Fatalf("root manifest was not refreshed: %q", freshManifest)
+	}
+	freshSegment := firstPlaylistResource(t, freshManifest)
+	if got := mustGetBody(t, freshSegment); got != "fresh" {
+		t.Fatalf("fresh segment body = %q", got)
+	}
+}
+
+func TestPlaybackSessionRefreshesExpiredURLAndKeepsRange(t *testing.T) {
+	initialCalls := 0
+	freshCalls := 0
+	var refreshedRange string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/expired.mp4":
+			initialCalls++
+			http.Error(w, "expired", http.StatusForbidden)
+		case "/fresh.mp4":
+			freshCalls++
+			refreshedRange = r.Header.Get("Range")
+			w.Header().Set("Content-Type", "video/mp4")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("fresh-bytes"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL: upstream.URL + "/expired.mp4",
+		Refresh: func(context.Context) (PlaybackSource, error) {
+			return PlaybackSource{URL: upstream.URL + "/fresh.mp4"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodGet, streamURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", "bytes=8-")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusPartialContent || string(body) != "fresh-bytes" {
+		t.Fatalf("refreshed response = %d %q", resp.StatusCode, body)
+	}
+	if initialCalls != 1 || freshCalls != 1 {
+		t.Fatalf("upstream calls expired=%d fresh=%d", initialCalls, freshCalls)
+	}
+	if refreshedRange != "bytes=8-" {
+		t.Fatalf("refreshed Range = %q", refreshedRange)
+	}
+}
+
+func mustGetBody(t *testing.T, rawURL string) string {
+	t.Helper()
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s status = %d body=%q", rawURL, resp.StatusCode, body)
+	}
+	return string(body)
+}
+
+func firstPlaylistResource(t *testing.T, playlist string) string {
+	t.Helper()
+	for _, line := range strings.Split(playlist, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "http://127.0.0.1:") {
+			return line
+		}
+	}
+	t.Fatalf("playlist does not contain a local resource URL: %q", playlist)
+	return ""
 }
 
 var _ = http.MethodGet

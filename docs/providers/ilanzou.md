@@ -50,7 +50,7 @@ search, createShare, copy, recycleBin, trashView: false
 
 ## 4. 视频预览（ilanzou.go）
 
-✅ `ilanzou.go:115-126` 复用 GetDownloadURL origin 原画并标记 `ForceProxy`；应用层统一交给本地 mpv 预览代理。
+✅ `ilanzou.go:115-126` 复用 GetDownloadURL origin 原画并标记 `ForceProxy`；应用层统一交给本地网页播放会话代理。
 
 ---
 

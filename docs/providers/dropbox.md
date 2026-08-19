@@ -55,7 +55,7 @@ SetHashes(["dropbox"], nil)
 
 ## 4. 视频预览（onedrive.go）
 
-✅ `onedrive.go` 复用 GetDownloadURL origin，并统一经过本地 Range 代理交给 mpv；Dropbox/OneDrive 预签名地址不携带 Bearer。
+✅ `onedrive.go` 复用 GetDownloadURL origin，并统一经过本地 Range 播放会话代理交给网页播放器；Dropbox/OneDrive 预签名地址不携带 Bearer。
 
 ---
 

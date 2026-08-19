@@ -8,6 +8,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "dashjs": "^5.2.1",
+    "hls.js": "^1.6.19",
     "vue": "^3.5.13"
   },
   "devDependencies": {

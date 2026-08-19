@@ -8,7 +8,7 @@
 - 文件浏览、上传/下载、跨盘迁移、批量重命名
 - 分段下载 + 断点续传
 - 在线预览（文本/图片/视频/Markdown）
-- mpv 进程播放（JSON IPC）
+- 网页播放器播放（原生 HTML5 + HLS.js / dash.js，自适应流经本地会话代理）
 - 双向同步引擎（两盘/本地↔网盘，定时调度）
 - 分享链接管理
 - 多账号切换、配额展示
@@ -44,9 +44,8 @@ internal/
   netx/                HTTP 客户端/上传/哈希/限速
   store/               本地持久化（原子 JSON）
   transfer/            分段下载器 + 上传队列 + 跨盘迁移
-  player/              mpv JSON IPC 桥
   sync/                双向同步引擎
-  preview/             本地 Range 代理（鉴权流/预览）
+  preview/             本地 Range/播放会话代理（鉴权流、HLS/DASH、字幕）
 frontend/              Vue 3 前端
 docs/                  架构/加盘指南/设计规范
 ```

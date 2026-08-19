@@ -19,10 +19,13 @@
 package preview
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"mime"
@@ -32,6 +35,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,7 +54,59 @@ type Server struct {
 	proxyClient       *http.Client
 	proxyTransport    *http.Transport
 	mu                sync.Mutex // guards roots and allowedProxyHosts
+	sessionsMu        sync.Mutex
+	sessions          map[string]*playbackSession
 }
+
+// PlaybackSource is a browser-playable source registered with the local
+// proxy. The URL and headers stay in the Go process; only an opaque session
+// id is exposed to the WebView. Refresh is called when a provider rejects an
+// expired signed URL, allowing an in-flight video request to recover without
+// exposing provider credentials to JavaScript.
+type PlaybackSource struct {
+	URL        string
+	Headers    map[string]string
+	Filename   string
+	StreamType string
+	ExpiresAt  time.Time
+	Refresh    func(context.Context) (PlaybackSource, error)
+}
+
+type playbackSession struct {
+	mu              sync.Mutex
+	source          PlaybackSource
+	lastUsed        time.Time
+	resources       map[string]string
+	resourceIDs     map[string]string
+	dashResources   map[string]dashPlaybackResource
+	dashResourceIDs map[string]string
+	resourceOrder   []playbackResourceRef
+	resourceSeq     uint64
+}
+
+type dashPlaybackResource struct {
+	BaseURL       string
+	RawQuery      string
+	QueryBindings []dashQueryBinding
+}
+
+type dashQueryBinding struct {
+	Token    string
+	LocalKey string
+}
+
+type playbackResourceRef struct {
+	ID   string
+	Dash bool
+}
+
+const playbackSessionTTL = 12 * time.Hour
+const maxPlaybackResources = 2048
+
+// dashTokenParam keeps the local stream token separate from an upstream DASH
+// URL's query string. Signed query strings stay in the Go-side session and
+// are never copied into browser-visible segment URLs.
+const dashTokenParam = "_mnemo_stream_token"
 
 // NewServer starts the internal HTTP server on a random port.
 // roots are the directory prefixes that /local/ is allowed to serve from.
@@ -86,6 +142,7 @@ func NewServer(roots ...string) (*Server, error) {
 		token:             base64.RawURLEncoding.EncodeToString(tok),
 		roots:             cleanRoots,
 		allowedProxyHosts: make(map[string]struct{}),
+		sessions:          make(map[string]*playbackSession),
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = true
@@ -98,6 +155,7 @@ func NewServer(roots ...string) (*Server, error) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/proxy/", s.handleProxy)
+	mux.HandleFunc("/stream/", s.handleStream)
 	mux.HandleFunc("/local/", s.handleLocal)
 	s.server = &http.Server{Handler: mux, ReadHeaderTimeout: 30 * time.Second}
 	go func() { _ = s.server.Serve(ln) }()
@@ -139,6 +197,308 @@ func (s *Server) ProxyURL(target string, headers map[string]string, filename str
 	return fmt.Sprintf("%s/proxy/?%s", s.BaseURL(), q.Encode())
 }
 
+// PlaybackURL registers a source-backed stream session and returns its local
+// URL. Unlike ProxyURL, this does not put the upstream URL or auth headers in
+// the browser-visible query string. The session is also the anchor used to
+// rewrite HLS playlist references to local proxy routes.
+func (s *Server) PlaybackURL(source PlaybackSource) (string, error) {
+	source = clonePlaybackSource(source)
+	if strings.TrimSpace(source.URL) == "" {
+		return "", fmt.Errorf("empty playback source")
+	}
+	// Provider URLs are registered by the Go side. Remembering the initial host
+	// also permits local test/provider endpoints while redirects are still
+	// checked by checkProxyRedirect.
+	s.rememberProxyHost(source.URL)
+	if !s.isSafeProxyURL(source.URL) {
+		return "", fmt.Errorf("playback source host is not allowed")
+	}
+	idBytes := make([]byte, 24)
+	if _, err := rand.Read(idBytes); err != nil {
+		return "", fmt.Errorf("create playback session: %w", err)
+	}
+	id := base64.RawURLEncoding.EncodeToString(idBytes)
+	now := time.Now()
+	s.sessionsMu.Lock()
+	for key, session := range s.sessions {
+		session.mu.Lock()
+		stale := now.Sub(session.lastUsed) > playbackSessionTTL
+		session.mu.Unlock()
+		if stale {
+			delete(s.sessions, key)
+		}
+	}
+	s.sessions[id] = &playbackSession{
+		source:          source,
+		lastUsed:        now,
+		resources:       make(map[string]string),
+		resourceIDs:     make(map[string]string),
+		dashResources:   make(map[string]dashPlaybackResource),
+		dashResourceIDs: make(map[string]string),
+	}
+	s.sessionsMu.Unlock()
+	return fmt.Sprintf("%s/stream/%s?t=%s", s.BaseURL(), id, url.QueryEscape(s.token)), nil
+}
+
+func clonePlaybackSource(source PlaybackSource) PlaybackSource {
+	if len(source.Headers) > 0 {
+		source.Headers = cloneHeaderMap(source.Headers)
+	}
+	return source
+}
+
+func cloneHeaderMap(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, value := range headers {
+		out[key] = value
+	}
+	return out
+}
+
+func (s *Server) getPlaybackSession(id string) *playbackSession {
+	s.sessionsMu.Lock()
+	session := s.sessions[id]
+	s.sessionsMu.Unlock()
+	if session == nil {
+		return nil
+	}
+	session.mu.Lock()
+	if time.Since(session.lastUsed) > playbackSessionTTL {
+		session.mu.Unlock()
+		s.sessionsMu.Lock()
+		if s.sessions[id] == session {
+			delete(s.sessions, id)
+		}
+		s.sessionsMu.Unlock()
+		return nil
+	}
+	session.lastUsed = time.Now()
+	session.mu.Unlock()
+	return session
+}
+
+func (session *playbackSession) resolve(ctx context.Context, forceRefresh bool) (PlaybackSource, error) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	now := time.Now()
+	needsRefresh := forceRefresh
+	if !needsRefresh && !session.source.ExpiresAt.IsZero() {
+		needsRefresh = !now.Before(session.source.ExpiresAt.Add(-30 * time.Second))
+	}
+	if needsRefresh && session.source.Refresh != nil {
+		refresh := session.source.Refresh
+		fresh, err := refresh(ctx)
+		if err != nil {
+			return PlaybackSource{}, err
+		}
+		fresh = clonePlaybackSource(fresh)
+		if strings.TrimSpace(fresh.URL) == "" {
+			return PlaybackSource{}, fmt.Errorf("refreshed playback source is empty")
+		}
+		if fresh.Refresh == nil {
+			fresh.Refresh = refresh
+		}
+		session.source = fresh
+	}
+	session.lastUsed = now
+	return clonePlaybackSource(session.source), nil
+}
+
+func (s *Server) playbackResourceURL(sessionID string, session *playbackSession, target string) string {
+	session.mu.Lock()
+	if id, ok := session.resourceIDs[target]; ok {
+		session.lastUsed = time.Now()
+		session.mu.Unlock()
+		return fmt.Sprintf("%s/stream/%s/%s?t=%s", s.BaseURL(), sessionID, id, url.QueryEscape(s.token))
+	}
+	session.resourceSeq++
+	id := strconv.FormatUint(session.resourceSeq, 36)
+	session.resources[id] = target
+	session.resourceIDs[target] = id
+	session.resourceOrder = append(session.resourceOrder, playbackResourceRef{ID: id})
+	session.trimResourcesLocked()
+	session.lastUsed = time.Now()
+	session.mu.Unlock()
+	return fmt.Sprintf("%s/stream/%s/%s?t=%s", s.BaseURL(), sessionID, id, url.QueryEscape(s.token))
+}
+
+func (session *playbackSession) dashResourceID(baseURL, rawQuery string) (string, dashPlaybackResource) {
+	key := baseURL + "\x00" + rawQuery
+	session.mu.Lock()
+	if id, ok := session.dashResourceIDs[key]; ok {
+		resource := session.dashResources[id]
+		session.lastUsed = time.Now()
+		session.mu.Unlock()
+		return id, resource
+	}
+	session.resourceSeq++
+	id := strconv.FormatUint(session.resourceSeq, 36)
+	resource := dashPlaybackResource{BaseURL: baseURL, RawQuery: rawQuery, QueryBindings: dashQueryBindings(rawQuery)}
+	session.dashResources[id] = resource
+	session.dashResourceIDs[key] = id
+	session.resourceOrder = append(session.resourceOrder, playbackResourceRef{ID: id, Dash: true})
+	session.trimResourcesLocked()
+	session.lastUsed = time.Now()
+	session.mu.Unlock()
+	return id, resource
+}
+
+func (session *playbackSession) trimResourcesLocked() {
+	for len(session.resourceOrder) > maxPlaybackResources {
+		oldest := session.resourceOrder[0]
+		session.resourceOrder = session.resourceOrder[1:]
+		if oldest.Dash {
+			if source, ok := session.dashResources[oldest.ID]; ok {
+				delete(session.dashResources, oldest.ID)
+				delete(session.dashResourceIDs, source.BaseURL+"\x00"+source.RawQuery)
+			}
+			continue
+		}
+		if target, ok := session.resources[oldest.ID]; ok {
+			delete(session.resources, oldest.ID)
+			delete(session.resourceIDs, target)
+		}
+	}
+}
+
+// dashResourceURL maps one concrete DASH resource URL to a local route while
+// keeping the dynamic path suffix visible to dash.js. Segment templates such
+// as chunk-$Number$.m4s are expanded by the browser after the MPD is parsed,
+// so storing only a full opaque target (as HLS does) is not sufficient here.
+func (s *Server) dashResourceURL(sessionID string, session *playbackSession, target string) (string, error) {
+	targetURL, err := url.Parse(target)
+	if err != nil || (targetURL.Scheme != "http" && targetURL.Scheme != "https") || targetURL.Hostname() == "" {
+		return "", fmt.Errorf("invalid DASH resource URL")
+	}
+	if !s.isSafeProxyURL(target) {
+		return "", fmt.Errorf("DASH resource host is not allowed")
+	}
+	baseURL := (&url.URL{
+		Scheme: targetURL.Scheme,
+		Host:   targetURL.Host,
+		User:   targetURL.User,
+	}).String()
+	resourceID, resource := session.dashResourceID(baseURL, targetURL.RawQuery)
+	path := targetURL.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	query := dashTokenParam + "=" + url.QueryEscape(s.token)
+	for _, binding := range resource.QueryBindings {
+		// Leave DASH placeholders literal so dash.js can substitute them in the
+		// local URL without ever receiving the signed provider query string.
+		query += "&" + binding.LocalKey + "=" + binding.Token
+	}
+	return fmt.Sprintf("%s/stream/%s/r/%s%s?%s", s.BaseURL(), sessionID, resourceID, path, query), nil
+}
+
+// dashResourceTarget reconstructs an upstream target from a local /r/ route.
+// The stored URL is origin-only; the MPD-controlled suffix cannot replace the
+// origin, which preserves the proxy's SSRF boundary.
+func (s *Server) dashResourceTarget(session *playbackSession, resourceID, escapedSuffix string, query url.Values) (string, bool) {
+	if !strings.HasPrefix(escapedSuffix, "/") || strings.HasPrefix(escapedSuffix, "//") {
+		return "", false
+	}
+	resource, ok := session.dashResource(resourceID)
+	if !ok {
+		return "", false
+	}
+	baseURL, err := url.Parse(resource.BaseURL)
+	if err != nil || baseURL.Hostname() == "" {
+		return "", false
+	}
+	reference, err := url.Parse(escapedSuffix)
+	if err != nil || reference.IsAbs() || reference.Host != "" {
+		return "", false
+	}
+	rawQuery, ok := resolveDashQuery(resource, query)
+	if !ok {
+		return "", false
+	}
+	reference.RawQuery = rawQuery
+	target := baseURL.ResolveReference(reference).String()
+	return target, s.isSafeProxyURL(target)
+}
+
+func dashQueryBindings(rawQuery string) []dashQueryBinding {
+	if rawQuery == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	bindings := make([]dashQueryBinding, 0, 2)
+	for offset := 0; offset < len(rawQuery); {
+		startOffset := strings.IndexByte(rawQuery[offset:], '$')
+		if startOffset < 0 {
+			break
+		}
+		start := offset + startOffset
+		endOffset := strings.IndexByte(rawQuery[start+1:], '$')
+		if endOffset < 0 {
+			break
+		}
+		end := start + endOffset + 2
+		token := rawQuery[start:end]
+		offset = end
+		if !isDASHTemplateToken(token) {
+			continue
+		}
+		if _, exists := seen[token]; exists {
+			continue
+		}
+		seen[token] = struct{}{}
+		bindings = append(bindings, dashQueryBinding{Token: token, LocalKey: fmt.Sprintf("_mnemo_dash_%d", len(bindings))})
+	}
+	return bindings
+}
+
+func isDASHTemplateToken(token string) bool {
+	if len(token) < 3 || token[0] != '$' || token[len(token)-1] != '$' {
+		return false
+	}
+	name := token[1 : len(token)-1]
+	for _, prefix := range []string{"Number", "Time", "RepresentationID", "Bandwidth", "SubNumber"} {
+		if name == prefix || strings.HasPrefix(name, prefix+"%") {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveDashQuery(resource dashPlaybackResource, query url.Values) (string, bool) {
+	rawQuery := resource.RawQuery
+	for _, binding := range resource.QueryBindings {
+		values, ok := query[binding.LocalKey]
+		if !ok || len(values) == 0 {
+			return "", false
+		}
+		rawQuery = strings.ReplaceAll(rawQuery, binding.Token, url.QueryEscape(values[0]))
+	}
+	return rawQuery, true
+}
+
+func (session *playbackSession) dashResource(id string) (dashPlaybackResource, bool) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	resource, ok := session.dashResources[id]
+	if ok {
+		session.lastUsed = time.Now()
+	}
+	return resource, ok
+}
+
+func (session *playbackSession) resource(id string) (string, bool) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	target, ok := session.resources[id]
+	if ok {
+		session.lastUsed = time.Now()
+	}
+	return target, ok
+}
+
 // LocalURL builds a URL for a local file.
 func (s *Server) LocalURL(path string) string {
 	q := url.Values{}
@@ -149,7 +509,8 @@ func (s *Server) LocalURL(path string) string {
 
 // validToken checks the session token.
 func (s *Server) validToken(r *http.Request) bool {
-	return r.URL.Query().Get("t") == s.token
+	query := r.URL.Query()
+	return query.Get("t") == s.token || query.Get(dashTokenParam) == s.token
 }
 
 // corsHeaders sets a permissive CORS policy for the Wails webview origin.
@@ -205,6 +566,68 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	filtered := filterProxyHeaders(headers)
 	filename := r.URL.Query().Get("f")
 	proxyRequest(s, w, r, target, filtered, filename)
+}
+
+// handleStream serves an opaque playback session. The optional path suffix is
+// a URL-safe encoded HLS resource; it lets the browser request relative
+// segments while the session keeps the provider headers private.
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	corsHeaders(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.validToken(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	pathValue := strings.TrimPrefix(r.URL.EscapedPath(), "/stream/")
+	parts := strings.Split(pathValue, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "missing playback session", http.StatusBadRequest)
+		return
+	}
+	sessionID := parts[0]
+	session := s.getPlaybackSession(sessionID)
+	if session == nil {
+		http.Error(w, "playback session expired", http.StatusGone)
+		return
+	}
+	resourceTarget := ""
+	if len(parts) > 1 {
+		if parts[1] == "r" {
+			if len(parts) < 3 || parts[2] == "" {
+				http.Error(w, "invalid DASH playback resource", http.StatusBadRequest)
+				return
+			}
+			escapedSuffix := "/"
+			if len(parts) > 3 {
+				escapedSuffix += strings.Join(parts[3:], "/")
+			}
+			var ok bool
+			resourceTarget, ok = s.dashResourceTarget(session, parts[2], escapedSuffix, r.URL.Query())
+			if !ok {
+				http.Error(w, "invalid DASH playback resource", http.StatusBadRequest)
+				return
+			}
+		} else if len(parts) == 2 && parts[1] != "" {
+			var ok bool
+			resourceTarget, ok = session.resource(parts[1])
+			if !ok {
+				http.Error(w, "invalid playback resource", http.StatusBadRequest)
+				return
+			}
+		} else {
+			http.Error(w, "invalid playback resource", http.StatusBadRequest)
+			return
+		}
+	}
+	s.proxySessionRequest(w, r, sessionID, session, resourceTarget)
 }
 
 func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
@@ -288,53 +711,436 @@ func filterProxyHeaders(headers map[string]string) map[string]string {
 	return out
 }
 
-// proxyRequest streams a remote URL with Range passthrough.
+// proxyRequest streams a remote URL with Range passthrough. It is kept for
+// non-player previews; video playback uses the opaque /stream/ session route.
 func proxyRequest(s *Server, w http.ResponseWriter, r *http.Request, target string, headers map[string]string, filename string) {
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, r.Method, target, nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	// pass range through
-	if rng := r.Header.Get("Range"); rng != "" {
-		req.Header.Set("Range", rng)
-	}
-	// Media responses must be byte-for-byte identical to the upstream stream.
-	// The server-level transport keeps connections reusable across Range
-	// requests; DisableCompression prevents the body from being decompressed
-	// while Content-Encoding is copied to mpv.
-	resp, err := s.proxyClient.Do(req)
+	resp, err := s.doProxyRequest(r.Context(), r.Method, target, headers, r.Header.Get("Range"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
-	// copy status + headers
-	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag", "Cache-Control", "Expires", "Content-Encoding"} {
-		if v := resp.Header.Get(h); v != "" {
-			w.Header().Set(h, v)
-		}
-	}
+	copyProxyResponseHeaders(w, resp, filename, false)
 	corsHeaders(w, r)
-	// surface the real file name so the browser preview shows it correctly
-	// instead of guessing from the opaque proxy URL.
-	if filename != "" {
-		w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeDispositionFilename(filename)+"\"")
-	} else if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-		w.Header().Set("Content-Disposition", cd)
-	}
 	w.WriteHeader(resp.StatusCode)
-	if r.Method == http.MethodHead {
+	if r.Method != http.MethodHead {
+		_, _ = io.Copy(w, resp.Body)
+	}
+}
+
+func (s *Server) proxySessionRequest(w http.ResponseWriter, r *http.Request, sessionID string, session *playbackSession, resourceTarget string) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	for attempt := 0; attempt < 2; attempt++ {
+		source, err := session.resolve(ctx, attempt > 0 && resourceTarget == "")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		target := source.URL
+		if resourceTarget != "" {
+			target = resourceTarget
+		}
+		if !s.isSafeProxyURL(target) {
+			http.Error(w, "url not allowed", http.StatusBadRequest)
+			return
+		}
+		resp, err := s.doProxyRequest(ctx, r.Method, target, source.Headers, r.Header.Get("Range"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && attempt == 0 && source.Refresh != nil {
+			resp.Body.Close()
+			// For a stale HLS/DASH segment we cannot assume the new stream uses
+			// the same signed path. Refresh the session first; retrying once still
+			// covers providers that rotate only headers, and the adaptive client
+			// then reloads the fresh root manifest if its old segment remains gone.
+			if resourceTarget != "" {
+				if _, err := session.resolve(ctx, true); err != nil {
+					http.Error(w, err.Error(), http.StatusBadGateway)
+					return
+				}
+			}
+			continue
+		}
+		defer resp.Body.Close()
+		isHLS := isHLSPlaylist(source.StreamType, resp.Header.Get("Content-Type"), target, resourceTarget == "")
+		isDASH := isDASHManifest(source.StreamType, resp.Header.Get("Content-Type"), target, resourceTarget == "")
+		if (isHLS || isDASH) && r.Method != http.MethodHead && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			body, readErr := readPlaylistBody(resp)
+			if readErr != nil {
+				http.Error(w, readErr.Error(), http.StatusBadGateway)
+				return
+			}
+			var rewritten []byte
+			var rewriteErr error
+			if isHLS {
+				rewritten, rewriteErr = s.rewriteHLSPlaylist(sessionID, session, target, body)
+			} else {
+				rewritten, rewriteErr = s.rewriteDASHManifest(sessionID, session, target, body)
+			}
+			if rewriteErr != nil {
+				http.Error(w, rewriteErr.Error(), http.StatusBadGateway)
+				return
+			}
+			copyProxyResponseHeaders(w, resp, source.Filename, true)
+			if isHLS {
+				w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			} else {
+				w.Header().Set("Content-Type", "application/dash+xml")
+			}
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(rewritten)))
+			corsHeaders(w, r)
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(rewritten)
+			return
+		}
+		if isSRTSubtitle(source.StreamType, resp.Header.Get("Content-Type"), target) && r.Method != http.MethodHead && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			body, readErr := readPlaylistBody(resp)
+			if readErr != nil {
+				http.Error(w, readErr.Error(), http.StatusBadGateway)
+				return
+			}
+			converted := srtToWebVTT(body)
+			copyProxyResponseHeaders(w, resp, source.Filename, true)
+			w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(converted)))
+			corsHeaders(w, r)
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(converted)
+			return
+		}
+		copyProxyResponseHeaders(w, resp, source.Filename, false)
+		corsHeaders(w, r)
+		w.WriteHeader(resp.StatusCode)
+		if r.Method != http.MethodHead {
+			_, _ = io.Copy(w, resp.Body)
+		}
 		return
 	}
-	_, _ = io.Copy(w, resp.Body)
+	http.Error(w, "upstream playback URL expired", http.StatusBadGateway)
+}
+
+func (s *Server) doProxyRequest(ctx context.Context, method, target string, headers map[string]string, byteRange string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range filterProxyHeaders(headers) {
+		req.Header.Set(key, value)
+	}
+	if byteRange != "" {
+		req.Header.Set("Range", byteRange)
+	}
+	return s.proxyClient.Do(req)
+}
+
+func copyProxyResponseHeaders(w http.ResponseWriter, resp *http.Response, filename string, omitEncoding bool) {
+	for _, header := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag", "Cache-Control", "Expires", "Content-Encoding"} {
+		if omitEncoding && header == "Content-Encoding" {
+			continue
+		}
+		if value := resp.Header.Get(header); value != "" {
+			w.Header().Set(header, value)
+		}
+	}
+	if filename != "" {
+		w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeDispositionFilename(filename)+"\"")
+	} else if disposition := resp.Header.Get("Content-Disposition"); disposition != "" {
+		w.Header().Set("Content-Disposition", disposition)
+	}
+}
+
+func isHLSPlaylist(streamType, contentType, target string, rootRequest bool) bool {
+	if rootRequest && strings.EqualFold(strings.TrimSpace(streamType), "hls") {
+		return true
+	}
+	contentType = strings.ToLower(contentType)
+	return strings.Contains(contentType, "mpegurl") || strings.Contains(strings.ToLower(target), ".m3u8")
+}
+
+func isDASHManifest(streamType, contentType, target string, rootRequest bool) bool {
+	if rootRequest && strings.EqualFold(strings.TrimSpace(streamType), "dash") {
+		return true
+	}
+	contentType = strings.ToLower(contentType)
+	path := strings.ToLower(strings.SplitN(target, "?", 2)[0])
+	return strings.Contains(contentType, "dash+xml") || strings.HasSuffix(path, ".mpd")
+}
+
+func isSRTSubtitle(streamType, contentType, target string) bool {
+	if strings.EqualFold(strings.TrimSpace(streamType), "subtitle-srt") {
+		return true
+	}
+	contentType = strings.ToLower(contentType)
+	path := strings.ToLower(strings.SplitN(target, "?", 2)[0])
+	return strings.Contains(contentType, "subrip") || strings.HasSuffix(path, ".srt")
+}
+
+func readPlaylistBody(resp *http.Response) ([]byte, error) {
+	var reader io.Reader = resp.Body
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		reader = gz
+	}
+	return io.ReadAll(io.LimitReader(reader, 8<<20))
+}
+
+func (s *Server) rewriteHLSPlaylist(sessionID string, session *playbackSession, playlistURL string, body []byte) ([]byte, error) {
+	base, err := url.Parse(playlistURL)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(body), "\n")
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			lines[index] = rewriteHLSURIAttributes(line, func(raw string) string {
+				return s.hlsResourceURL(sessionID, session, resolveHLSReference(base, raw))
+			})
+			continue
+		}
+		lines[index] = s.hlsResourceURL(sessionID, session, resolveHLSReference(base, trimmed))
+	}
+	return []byte(strings.Join(lines, "\n")), nil
+}
+
+func (s *Server) hlsResourceURL(sessionID string, session *playbackSession, target string) string {
+	u, err := url.Parse(target)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		// HLS permits data/blob-like URI attributes (for example, identity
+		// key formats). They are not network resources and must remain intact.
+		return target
+	}
+	return s.playbackResourceURL(sessionID, session, target)
+}
+
+func resolveHLSReference(base *url.URL, raw string) string {
+	ref, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+	return base.ResolveReference(ref).String()
+}
+
+func rewriteHLSURIAttributes(line string, replacement func(string) string) string {
+	upper := strings.ToUpper(line)
+	for start := 0; ; {
+		index := strings.Index(upper[start:], "URI=")
+		if index < 0 {
+			return line
+		}
+		index += start + len("URI=")
+		if index >= len(line) {
+			return line
+		}
+		if line[index] == '"' {
+			end := strings.Index(line[index+1:], "\"")
+			if end < 0 {
+				return line
+			}
+			end += index + 1
+			line = line[:index+1] + replacement(line[index+1:end]) + line[end:]
+			upper = strings.ToUpper(line)
+			start = end + 1
+			continue
+		}
+		end := len(line)
+		if comma := strings.IndexByte(line[index:], ','); comma >= 0 {
+			end = index + comma
+		}
+		line = line[:index] + replacement(line[index:end]) + line[end:]
+		upper = strings.ToUpper(line)
+		start = end
+	}
+}
+
+// rewriteDASHManifest replaces external segment references with local /stream/
+// routes. DASH requests are generated from XML templates after parsing, so the
+// HLS-style one-resource-per-complete-URL approach would leave relative
+// segments pointing at an invalid local path or directly at the provider.
+func (s *Server) rewriteDASHManifest(sessionID string, session *playbackSession, manifestURL string, body []byte) ([]byte, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	var output bytes.Buffer
+	encoder := xml.NewEncoder(&output)
+
+	type elementState struct {
+		name         xml.Name
+		isBaseURL    bool
+		isTextURL    bool
+		baseResolved bool
+	}
+	bases := []string{manifestURL}
+	elements := make([]elementState, 0, 8)
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse DASH manifest: %w", err)
+		}
+
+		switch value := token.(type) {
+		case xml.StartElement:
+			currentBase := bases[len(bases)-1]
+			for index := range value.Attr {
+				if !isDASHURLAttribute(value.Name.Local, value.Attr[index].Name.Local) || strings.TrimSpace(value.Attr[index].Value) == "" {
+					continue
+				}
+				rewritten, err := s.rewriteDASHReference(sessionID, session, currentBase, value.Attr[index].Value)
+				if err != nil {
+					return nil, err
+				}
+				value.Attr[index].Value = rewritten
+			}
+			if err := encoder.EncodeToken(value); err != nil {
+				return nil, err
+			}
+			isBaseURL := strings.EqualFold(value.Name.Local, "BaseURL")
+			elements = append(elements, elementState{
+				name:      value.Name,
+				isBaseURL: isBaseURL,
+				isTextURL: isBaseURL || strings.EqualFold(value.Name.Local, "Location") || strings.EqualFold(value.Name.Local, "PatchLocation"),
+			})
+			bases = append(bases, currentBase)
+
+		case xml.CharData:
+			if len(elements) > 0 {
+				state := &elements[len(elements)-1]
+				if state.isTextURL && (!state.isBaseURL || !state.baseResolved) {
+					raw := string(value)
+					trimmed := strings.TrimSpace(raw)
+					if trimmed != "" {
+						baseIndex := len(bases) - 1
+						if state.isBaseURL {
+							baseIndex--
+						}
+						resolved, ok := resolveDASHReference(bases[baseIndex], trimmed)
+						if ok {
+							rewritten, err := s.dashResourceURL(sessionID, session, resolved)
+							if err != nil {
+								return nil, err
+							}
+							if state.isBaseURL {
+								bases[baseIndex] = resolved
+							}
+							leading := raw[:len(raw)-len(strings.TrimLeft(raw, " \t\r\n"))]
+							trailing := raw[len(strings.TrimRight(raw, " \t\r\n")):]
+							value = xml.CharData([]byte(leading + rewritten + trailing))
+						}
+						state.baseResolved = true
+					}
+				}
+			}
+			if err := encoder.EncodeToken(value); err != nil {
+				return nil, err
+			}
+
+		case xml.EndElement:
+			if err := encoder.EncodeToken(value); err != nil {
+				return nil, err
+			}
+			if len(elements) == 0 || len(bases) < 2 {
+				return nil, fmt.Errorf("invalid DASH manifest structure")
+			}
+			elements = elements[:len(elements)-1]
+			bases = bases[:len(bases)-1]
+
+		default:
+			if err := encoder.EncodeToken(token); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := encoder.Flush(); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
+}
+
+func isDASHURLAttribute(element, attribute string) bool {
+	attribute = strings.ToLower(attribute)
+	switch attribute {
+	case "media", "initialization", "index", "sourceurl", "href":
+		return true
+	case "value":
+		return strings.EqualFold(element, "UTCTiming")
+	default:
+		return false
+	}
+}
+
+func (s *Server) rewriteDASHReference(sessionID string, session *playbackSession, base, raw string) (string, error) {
+	target, ok := resolveDASHReference(base, raw)
+	if !ok {
+		return raw, nil
+	}
+	return s.dashResourceURL(sessionID, session, target)
+}
+
+func resolveDASHReference(base, raw string) (string, bool) {
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return "", false
+	}
+	reference, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", false
+	}
+	target := baseURL.ResolveReference(reference)
+	if (target.Scheme != "http" && target.Scheme != "https") || target.Hostname() == "" {
+		return "", false
+	}
+	return target.String(), true
+}
+
+// srtToWebVTT converts the portable SubRip form that providers commonly
+// expose into the format supported by the browser <track> element. The
+// conversion deliberately leaves cue text untouched and only normalizes line
+// endings, cue indices and timestamp separators.
+func srtToWebVTT(body []byte) []byte {
+	text := strings.TrimPrefix(string(body), "\ufeff")
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	if strings.HasPrefix(strings.TrimSpace(text), "WEBVTT") {
+		return []byte(text)
+	}
+	lines := strings.Split(text, "\n")
+	var output strings.Builder
+	output.WriteString("WEBVTT\n\n")
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if isSubtitleCueIndex(trimmed) && index+1 < len(lines) && strings.Contains(lines[index+1], "-->") {
+			continue
+		}
+		if strings.Contains(line, "-->") {
+			line = strings.ReplaceAll(line, ",", ".")
+		}
+		output.WriteString(line)
+		output.WriteByte('\n')
+	}
+	return []byte(output.String())
+}
+
+func isSubtitleCueIndex(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // checkProxyRedirect validates redirect targets to prevent the proxy from

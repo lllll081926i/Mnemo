@@ -86,7 +86,7 @@
 | yike | ✅ | proxy | ➖ | ➖ | ➖ | ➖ | ➖ |
 | guangya | ✅ | proxy | ➖ | ✅ | ➖ | ➖ | ➖ |
 | webdav | ✅ | redirect | ➖ | ➖ | ➖ | ➖ | ➖ |
-| s3 | ✅ | redirect | ➖ | ✅(原画/mpv) | ➖ | ➖ | ✅(4h预签名) |
+| s3 | ✅ | redirect | ➖ | ✅(原画/网页播放器) | ➖ | ➖ | ✅(4h预签名) |
 
 ---
 

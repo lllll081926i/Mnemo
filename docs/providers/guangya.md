@@ -40,7 +40,7 @@ SetHashes(["md5"], nil)
 
 ## 4. 视频预览（guangya.go）
 
-✅ `guangya.go:422-433` GetVideoPreview 复用 GetDownloadURL origin，视频仍统一交给 mpv。
+✅ `guangya.go:422-433` GetVideoPreview 复用 GetDownloadURL origin，视频统一交给网页播放器会话代理。
 
 ---
 

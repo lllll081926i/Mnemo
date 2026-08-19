@@ -59,6 +59,13 @@ const PATHS = {
   forward: 'M13 5l7 7-7 7 M5 5l7 7-7 7',
   priority: 'M4 4h16 M12 20V9 M6.5 14.5L12 9l5.5 5.5',
   volume: 'M11 5L6 9H3v6h3l5 4z M15.5 8.5a5 5 0 0 1 0 7 M18.5 5.5a9 9 0 0 1 0 13',
+  'volume-x': 'M11 5L6 9H3v6h3l5 4z M16 9l5 5 M21 9l-5 5',
+  camera: 'M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  captions: 'M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 10h3 M7 14h2 M14 10h3 M14 14h3',
+  maximize: 'M8 3H3v5 M16 3h5v5 M21 16v5h-5 M3 16v5h5',
+  minimize: 'M3 8h5V3 M16 3v5h5 M21 16h-5v5 M8 21v-5H3',
+  'more-horizontal': 'M5 12h.01 M12 12h.01 M19 12h.01',
+  'picture-in-picture': 'M3 5h18v14H3z M13 13h6v4h-6z',
 }
 
 const d = computed(() => PATHS[props.name] || PATHS.file)

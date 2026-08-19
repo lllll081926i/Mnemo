@@ -28,7 +28,7 @@ go test ./...      # 单元测试
 - **Go 1.25+** + **Wails v2.14**（桌面壳：Go 后端 + WebView2 前端）
 - **Vue 3.5 + Vite 6**（前端为纯 JavaScript，非 TypeScript；样式 token 复用旧版）
 - 原生 Go HTTP Range 分段下载器（`internal/transfer/dlengine`），不再依赖 aria2c
-- **mpv** 进程 JSON IPC 播放（`internal/player`），资源和实现偏 Windows
+- **网页播放器**（HTML5 + HLS.js / dash.js），上游鉴权由 `internal/preview` 播放会话代理隔离
 - 多份原子 JSON 文件持久化（`internal/store`），无 SQLite、无加密存储
 - 纯 Go 无 cgo 外部依赖
 
@@ -56,10 +56,8 @@ OAuth client_id 等从 `config.LoadSecrets(dataDir)` 读取（`internal/config`�
 | `internal/transfer/` | 下载管理器 + 上传队列 + 跨盘迁移 |
 | `internal/transfer/dlengine/` | 原生 Go 分段下载器（Range + 断点续传） |
 | `internal/transfer/migrate/` | 跨盘迁移引擎 |
-| `internal/player/` | mpv JSON IPC 桥 |
 | `internal/sync/` | 双向同步引擎 |
-| `internal/preview/` | 本地 Range 代理（鉴权流/预览，会话令牌保护） |
-| `internal/engine/` | 内嵌引擎二进制（mpv）释放 |
+| `internal/preview/` | 本地 Range/播放会话代理（鉴权流、HLS/DASH、字幕，会话令牌保护） |
 | `internal/config/` | secrets 加载、UserDataDir |
 | `frontend/` | Vue 3 前端（Wails webview，纯 JS） |
 | `docs/` | 架构/加盘指南/设计规范/网盘状态/迁移进度 |
