@@ -191,12 +191,17 @@ body {
   justify-content: flex-start; gap: 10px; padding: 5px 6px;
 }
 .rail-item:hover { background: var(--bg-hover); }
+/* 拖拽换位动画：邻位让位带回弹，被拖项上浮 */
+.rail-move { transition: transform .34s cubic-bezier(.3, 1.45, .55, 1); }
+.rail-leave-active { display: none; }
 .rail-list.reordering { user-select: none; }
 .rail-list.reordering .rail-item { cursor: grabbing; }
 .rail-item.dragging {
   background: var(--bg-hover);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--color-primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), inset 0 0 0 1.5px var(--color-primary);
   position: relative; z-index: 2;
+  transition: transform .18s var(--rail-ease);
+  transform: scale(1.07) rotate(-2.5deg);
 }
 .rail-item.dragging .rail-icon { transform: scale(1.08); }
 .rail-item.active {

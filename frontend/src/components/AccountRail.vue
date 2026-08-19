@@ -151,7 +151,7 @@ function onMenu(action) {
     @mouseenter="onRailEnter"
     @mouseleave="onRailLeave"
   >
-    <div class="rail-list" :class="{ reordering: dragIdx >= 0 }">
+    <TransitionGroup name="rail" tag="div" class="rail-list" :class="{ reordering: dragIdx >= 0 }">
       <button
         v-for="(acc, i) in orderedAccounts"
         :key="acc.user_id"
@@ -174,10 +174,10 @@ function onMenu(action) {
           <span v-if="hasQuota(acc)" class="rail-quota"><i :style="{ width: quotaPct(acc) + '%' }"></i></span>
         </span>
       </button>
-      <div v-if="!accounts.length" class="rail-empty">
+      <div v-if="!accounts.length" class="rail-empty" key="__empty">
         <span v-show="expanded">尚未登录网盘账号</span>
       </div>
-    </div>
+    </TransitionGroup>
 
     <button type="button" class="rail-add" :title="'添加网盘账号'" @click="emit('add')">
       <UiIcon name="plus" :size="17" class="rail-add-icon" />

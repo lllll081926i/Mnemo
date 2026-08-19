@@ -4,6 +4,7 @@ package app
 
 import (
 	"errors"
+	"runtime"
 	"unsafe"
 
 	"github.com/energye/systray"
@@ -104,14 +105,18 @@ func activateExistingWindow(title string) {
 }
 
 // SetupTray 启动系统托盘图标：左键点击或菜单「显示」恢复主窗口，
-// 「退出」强制退出整个应用。
+// 「退出」强制退出整个应用。Windows 消息循环必须锁定在固定 OS 线程上，
+// 否则 goroutine 迁移后托盘窗口消息泵静默失效。
 func (a *App) SetupTray(icon []byte) {
-	go systray.Run(func() {
-		systray.SetIcon(icon)
-		systray.SetTooltip("Mnemo")
-		systray.SetOnClick(func(systray.IMenu) { a.ShowMainWindow() })
-		systray.AddMenuItem("显示 Mnemo", "显示主窗口").Click(func() { a.ShowMainWindow() })
-		systray.AddSeparator()
-		systray.AddMenuItem("退出 Mnemo", "完全退出").Click(func() { a.ForceQuit() })
-	}, func() {})
+	go func() {
+		runtime.LockOSThread()
+		systray.Run(func() {
+			systray.SetIcon(icon)
+			systray.SetTooltip("Mnemo")
+			systray.SetOnClick(func(systray.IMenu) { a.ShowMainWindow() })
+			systray.AddMenuItem("显示 Mnemo", "显示主窗口").Click(func() { a.ShowMainWindow() })
+			systray.AddSeparator()
+			systray.AddMenuItem("退出 Mnemo", "完全退出").Click(func() { a.ForceQuit() })
+		}, func() {})
+	}()
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -40,17 +41,64 @@ func (a *App) ForceQuit() {
 }
 
 // BeforeClose 实现 Wails OnBeforeClose：启用「关闭不退出」（默认）时隐藏
-// 窗口到托盘而非退出；返回 true 表示阻止关闭。
+// 窗口到托盘而非退出；真正退出前若仍有下载任务，弹窗请用户确认。
+// 返回 true 表示阻止关闭。
 func (a *App) BeforeClose(ctx context.Context) bool {
-	if a.forceQuit.Load() {
-		return false
-	}
-	if st, err := a.storeOrError(); err == nil {
-		if s, serr := st.GetSettings(); serr == nil && !s.CloseToTrayEnabled() {
-			return false
+	realQuit := a.forceQuit.Load()
+	if !realQuit {
+		if st, err := a.storeOrError(); err == nil {
+			if s, serr := st.GetSettings(); serr == nil && !s.CloseToTrayEnabled() {
+				realQuit = true
+			}
 		}
 	}
-	logging.Info("window close intercepted, hiding to tray")
-	runtime.WindowHide(ctx)
-	return true
+	if !realQuit {
+		logging.Info("window close intercepted, hiding to tray")
+		runtime.WindowHide(ctx)
+		return true
+	}
+	if a.confirmQuitWithActiveDownloads(ctx) {
+		return true // 用户在确认弹窗中取消
+	}
+	return false
+}
+
+// confirmQuitWithActiveDownloads 有进行中的下载任务时弹窗确认；
+// 返回 true 表示用户取消退出。
+func (a *App) confirmQuitWithActiveDownloads(ctx context.Context) bool {
+	dl := a.downloadManager()
+	if dl == nil {
+		return false
+	}
+	active := 0
+	for _, t := range dl.List() {
+		if t.Status == "queued" || t.Status == "downloading" {
+			active++
+		}
+	}
+	if active == 0 {
+		return false
+	}
+	logging.Info("quit blocked for confirmation", "active_downloads", active)
+	// 窗口可能处于托盘隐藏状态，先唤回再弹窗
+	runtime.WindowUnminimise(ctx)
+	runtime.WindowShow(ctx)
+	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         "退出 Mnemo",
+		Message:       fmt.Sprintf("还有 %d 个下载任务正在进行，退出后任务将暂停，下次启动可继续。\n确定要退出吗？", active),
+		Buttons:       []string{"退出", "取消"},
+		DefaultButton: "取消",
+		CancelButton:  "取消",
+	})
+	if err != nil {
+		logging.Warn("quit confirmation dialog failed", "error", err)
+		return false // 弹窗失败不阻塞退出
+	}
+	if choice != "退出" {
+		logging.Info("quit cancelled by user")
+		a.forceQuit.Store(false) // 托盘触发的退出被取消时复位标记
+		return true
+	}
+	return false
 }
