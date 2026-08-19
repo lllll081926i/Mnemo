@@ -40,21 +40,52 @@ function onItemPointerDown(e, acc) {
   const startX = e.clientX
   const startY = e.clientY
   const listEl = e.currentTarget.closest('.rail-list')
+  const itemEl = e.currentTarget
   let dragging = false
+  let ghost = null
+  let rafId = 0
+  let listTop = 0
+  let pitch = 0
+  let count = 0
+  let px = e.clientX
+  let py = e.clientY
+
+  const moveGhost = () => {
+    rafId = 0
+    if (ghost) {
+      ghost.style.transform = `translate(${px - startX}px, ${py - startY}px) scale(1.06) rotate(-2deg)`
+    }
+  }
+
   const onMove = (ev) => {
+    px = ev.clientX
+    py = ev.clientY
     if (!dragging) {
-      if (Math.abs(ev.clientY - startY) < 6 && Math.abs(ev.clientX - startX) < 6) return
+      if (Math.abs(py - startY) < 6 && Math.abs(px - startX) < 6) return
       dragging = true
+      dragActive = true
       suppressClick = true
       liveList.value = [...orderedAccounts.value]
       dragIdx.value = liveList.value.findIndex((a) => a.user_id === acc.user_id)
+      count = liveList.value.length
+      // 静态几何：列表内容起点与每项步距，拖动期间不再反复量 DOM
+      const r = itemEl.getBoundingClientRect()
+      const gap = parseFloat(getComputedStyle(listEl).rowGap) || 0
+      pitch = r.height + gap
+      listTop = r.top - dragIdx.value * pitch
+      // 幽灵克隆跟随指针（挂进 aside 以继承展开态样式），原项隐形占位
+      ghost = itemEl.cloneNode(true)
+      ghost.className = itemEl.className.replace('dragging', '').trim() + ' rail-ghost'
+      ghost.style.width = r.width + 'px'
+      ghost.style.left = r.left + 'px'
+      ghost.style.top = r.top + 'px'
+      listEl.closest('.account-rail').appendChild(ghost)
+      document.body.classList.add('rail-drag-active')
     }
-    const items = listEl ? [...listEl.querySelectorAll('.rail-item')] : []
-    let target = items.length - 1
-    for (let i = 0; i < items.length; i++) {
-      const r = items[i].getBoundingClientRect()
-      if (ev.clientY < r.top + r.height / 2) { target = i; break }
-    }
+    if (!rafId) rafId = requestAnimationFrame(moveGhost)
+    // 槽位 = 指针所在的项区间，纯位置函数不依赖当前顺序，不会来回振荡
+    let target = Math.floor((py - listTop) / pitch)
+    target = Math.max(0, Math.min(count - 1, target))
     const cur = dragIdx.value
     if (target !== cur && cur >= 0 && liveList.value) {
       const list = [...liveList.value]
@@ -67,17 +98,23 @@ function onItemPointerDown(e, acc) {
   const onUp = () => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+    if (rafId) cancelAnimationFrame(rafId)
     if (dragging && liveList.value) {
       setPref('accountOrder', liveList.value.map((a) => a.user_id))
       // click 紧跟 pointerup 触发，延后一帧清除以吞掉这次拖拽点击
       setTimeout(() => { suppressClick = false }, 0)
     }
+    if (ghost) { ghost.remove(); ghost = null }
+    document.body.classList.remove('rail-drag-active')
+    dragActive = false
     liveList.value = null
     dragIdx.value = -1
     dragging = false
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
 }
 
 function onItemClick(acc) {
@@ -85,13 +122,17 @@ function onItemClick(acc) {
   emit('select', acc)
 }
 
-// 悬停快速平滑展开，移出后延迟收起
+let dragActive = false
+
+// 悬停快速平滑展开，移出后延迟收起；拖拽期间冻结展开状态，避免中途布局突变
 function onRailEnter() {
+  if (dragActive) return
   clearTimeout(leaveTimer)
   clearTimeout(enterTimer)
   enterTimer = setTimeout(() => { expanded.value = true }, 220)
 }
 function onRailLeave() {
+  if (dragActive) return
   clearTimeout(enterTimer)
   leaveTimer = setTimeout(() => { expanded.value = false }, 200)
 }

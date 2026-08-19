@@ -16,8 +16,8 @@ import QuickOpen from './components/QuickOpen.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import { CheckUpdate } from './api'
-import { debug, info, installGlobalErrorLogging } from './logger'
-import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
+import { debug, error, errorText, info, installGlobalErrorLogging } from './logger'
+import { WindowHide, WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -82,11 +82,16 @@ async function windowQuit() {
   try {
     const s = await GetSettings()
     hide = s?.closeToTray !== false
-  } catch { /* 保持默认 */ }
+  } catch (err) {
+    error('window', 'failed to load close behavior', { error: errorText(err) })
+  }
   try {
     if (hide) WindowHide()
     else Quit()
-  } catch { window.close?.() }
+  } catch (err) {
+    error('window', 'window close action failed', { action: hide ? 'hide' : 'quit', error: errorText(err) })
+    window.close?.()
+  }
 }
 async function saveThemePref() {
   try {
