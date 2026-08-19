@@ -1214,7 +1214,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
               </div>
             </div>
 
-            <div v-if="qualities.length > 1" class="pp-menu-root">
+            <div v-if="qualities.length" class="pp-menu-root">
               <button type="button" class="pp-btn pp-text-btn" :class="{ active: activeMenu === 'quality' }" title="清晰度" @click.stop="toggleMenu('quality')">{{ currentQualityLabel }}</button>
               <div v-if="activeMenu === 'quality'" class="pp-pop">
                 <div class="pp-pop-title">清晰度</div>

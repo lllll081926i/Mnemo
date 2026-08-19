@@ -197,13 +197,15 @@ body {
 .rail-list.reordering { user-select: none; }
 .rail-list.reordering .rail-item { cursor: grabbing; }
 .rail-item.dragging { visibility: hidden; }
-/* 拖拽期间冻结栏宽/项高过渡（进行中的展开动画立即到位），只保留换位 transform 动画 */
+/* 拖拽期间冻结栏宽/项高过渡（进行中的展开动画立即到位），只保留换位 transform 动画；
+   幽灵克隆必须除外——它要紧跟指针，带上过渡会一直追指针（表现为抖动） */
 .account-rail.rail-frozen { transition: none !important; }
-.account-rail.rail-frozen .rail-item,
+.account-rail.rail-frozen .rail-item:not(.rail-ghost),
 .account-rail.rail-frozen .rail-icon,
 .account-rail.rail-frozen .rail-icon img {
   transition: transform .22s cubic-bezier(.25, .8, .35, 1) !important;
 }
+.rail-ghost { transition: none !important; }
 .rail-ghost {
   position: fixed; z-index: 9999; margin: 0; pointer-events: none;
   background: var(--bg-elevated, var(--bg-surface));

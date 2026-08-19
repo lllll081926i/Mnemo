@@ -50,10 +50,21 @@ function onItemPointerDown(e, acc) {
   let px = e.clientX
   let py = e.clientY
 
-  const moveGhost = () => {
+  // 每帧最多一次：幽灵跟随 + 槽位换位（pointermove 频率高于渲染帧率）
+  const frame = () => {
     rafId = 0
     if (ghost) {
       ghost.style.transform = `translate(${px - startX}px, ${py - startY}px) scale(1.06) rotate(-2deg)`
+    }
+    if (!heights || !liveList.value) return
+    const target = slotAt(py)
+    const cur = dragIdx.value
+    if (target !== cur && cur >= 0) {
+      const list = [...liveList.value]
+      const [moved] = list.splice(cur, 1)
+      list.splice(target, 0, moved)
+      liveList.value = list
+      dragIdx.value = target
     }
   }
 
@@ -105,17 +116,7 @@ function onItemPointerDown(e, acc) {
       document.body.classList.add('rail-drag-active')
       requestAnimationFrame(startDrag)
     }
-    if (!rafId) rafId = requestAnimationFrame(moveGhost)
-    if (!heights) return
-    const target = slotAt(py)
-    const cur = dragIdx.value
-    if (target !== cur && cur >= 0 && liveList.value) {
-      const list = [...liveList.value]
-      const [moved] = list.splice(cur, 1)
-      list.splice(target, 0, moved)
-      liveList.value = list
-      dragIdx.value = target
-    }
+    if (!rafId) rafId = requestAnimationFrame(frame)
   }
   const onUp = () => {
     window.removeEventListener('pointermove', onMove)
