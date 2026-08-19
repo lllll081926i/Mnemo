@@ -282,88 +282,95 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
 
 <template>
   <div class="share-page">
-    <!-- 工具条 -->
-    <div class="share-toolbar">
-      <span class="search-quick-wrap">
-        <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
-        <input class="search-quick share-search" style="width:240px" v-model="kwRaw" placeholder="搜索名称 / 链接 / 提取码" />
-        <button v-if="kwRaw" class="sq-clear" title="清空搜索" @click="kwRaw = ''"><UiIcon name="close" :size="11" /></button>
-      </span>
-      <UiSelect
-        v-model="filterProvider"
-        style="width:150px"
-        :options="[{ value: '', label: '全部网盘' }, ...providerOptions.map((pid) => ({ value: pid, label: labelOf(pid) }))]"
-      />
-      <UiSelect
-        v-model="filterAccount"
-        style="width:150px"
-        :options="[{ value: '', label: '全部账号' }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]"
-      />
-      <div style="flex:1"></div>
-      <button v-if="importAccounts.length" class="tbtn" @click="openImport">
-        <UiIcon name="download" :size="14" />导入分享
-      </button>
-      <button class="tbtn" :disabled="loading" @click="refresh">
-        <span v-if="loading" class="spin"></span><template v-else><UiIcon name="refresh" :size="14" />刷新</template>
-      </button>
-    </div>
-
-    <!-- 骨架屏加载状态 -->
-    <div v-if="loading && !history.length" class="skeleton-list" style="max-width:960px">
-      <div v-for="i in 4" :key="i" class="skeleton-row" style="height:64px;border:1px solid var(--border-lighter);border-radius:var(--radius-md);margin-bottom:8px">
-        <div class="skeleton skeleton-icon" style="width:32px;height:32px"></div>
-        <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-          <div class="skeleton" :style="{ width: (30 + (i * 11) % 40) + '%', height: '14px' }"></div>
-          <div class="skeleton" style="width:50%;height:10px"></div>
+    <div class="share-layout">
+      <!-- 工具条 -->
+      <header class="share-toolbar">
+        <div class="share-toolbar-main">
+          <span class="search-quick-wrap">
+            <span class="sq-icon"><UiIcon name="search" :size="13" /></span>
+            <input class="search-quick share-search" v-model="kwRaw" placeholder="搜索名称 / 链接 / 提取码" />
+            <button v-if="kwRaw" class="sq-clear" title="清空搜索" @click="kwRaw = ''"><UiIcon name="close" :size="11" /></button>
+          </span>
+          <UiSelect
+            v-model="filterProvider"
+            class="share-filter"
+            :options="[{ value: '', label: '全部网盘' }, ...providerOptions.map((pid) => ({ value: pid, label: labelOf(pid) }))]"
+          />
+          <UiSelect
+            v-model="filterAccount"
+            class="share-filter"
+            :options="[{ value: '', label: '全部账号' }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]"
+          />
         </div>
-        <div class="skeleton" style="width:120px;height:24px;border-radius:var(--radius-sm)"></div>
-      </div>
-    </div>
-    <div v-else-if="!groups.length" class="workspace-empty-state" style="flex:1">
-      <UiIcon name="link" :size="40" style="opacity:.4" />
-      <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有创建过分享记录' }}</span>
-      <span v-if="!history.length" class="wes-desc">在「网盘」页选中文件后点击「分享」创建链接</span>
-    </div>
+        <div class="share-toolbar-actions">
+          <button v-if="importAccounts.length" class="tbtn" @click="openImport">
+            <UiIcon name="download" :size="14" />导入分享
+          </button>
+          <button class="tbtn" :disabled="loading" @click="refresh">
+            <span v-if="loading" class="spin"></span><template v-else><UiIcon name="refresh" :size="14" />刷新</template>
+          </button>
+        </div>
+      </header>
 
-    <!-- 分组记录 -->
-    <div v-else class="share-groups">
-      <section v-for="g in groups" :key="g.key" class="share-group">
-        <header class="share-group-header">
-          <img v-if="g.icon" :src="g.icon" style="width:16px;height:16px;border-radius:4px" alt="" />
-          <span class="share-group-provider">{{ g.label }}</span>
-          <span class="share-group-account">{{ g.accName }}</span>
-          <span class="share-group-count">{{ g.items.length }} 条</span>
-        </header>
+      <section class="share-content">
+        <!-- 骨架屏加载状态 -->
+        <div v-if="loading && !history.length" class="skeleton-list share-skeleton">
+          <div v-for="i in 4" :key="i" class="skeleton-row share-skeleton-row">
+            <div class="skeleton skeleton-icon share-skeleton-icon"></div>
+            <div class="share-skeleton-copy">
+              <div class="skeleton" :style="{ width: (30 + (i * 11) % 40) + '%', height: '14px' }"></div>
+              <div class="skeleton" style="width:50%;height:10px"></div>
+            </div>
+            <div class="skeleton share-skeleton-action"></div>
+          </div>
+        </div>
+        <div v-else-if="!groups.length" class="share-empty">
+          <div class="share-empty-icon"><UiIcon name="link" :size="28" /></div>
+          <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有创建过分享记录' }}</span>
+          <span v-if="!history.length" class="wes-desc">在「网盘」页选中文件后点击「分享」创建链接</span>
+        </div>
 
-        <div v-for="(h, idx) in g.items" :key="itemKey(h, idx)" class="share-record">
-          <div class="share-record-main">
-            <div class="share-record-name" :title="h.share_name">{{ h.share_name || '未命名分享' }}</div>
-            <div class="share-record-meta">
-              <span>创建于 {{ formatTime(h.created_at) }}</span>
+        <!-- 分组记录 -->
+        <div v-else class="share-groups">
+          <section v-for="g in groups" :key="g.key" class="share-group">
+            <header class="share-group-header">
+              <img v-if="g.icon" :src="g.icon" class="share-group-icon" alt="" />
+              <span class="share-group-provider">{{ g.label }}</span>
+              <span class="share-group-account">{{ g.accName }}</span>
+              <span class="share-group-count">{{ g.items.length }} 条</span>
+            </header>
+
+            <div v-for="(h, idx) in g.items" :key="itemKey(h, idx)" class="share-record">
+              <div class="share-record-main">
+                <div class="share-record-name" :title="h.share_name">{{ h.share_name || '未命名分享' }}</div>
+                <div class="share-record-meta">
+                  <span>创建于 {{ formatTime(h.created_at) }}</span>
+                </div>
+                <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
+              </div>
+              <div class="share-record-side">
+                <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
+                <div class="share-record-actions">
+                  <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
+                  <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接', 'url_' + itemKey(h, idx))">
+                    <UiIcon v-if="copiedMap['url_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
+                    <UiIcon v-else name="copy" :size="13" />
+                    <span>{{ copiedMap['url_' + itemKey(h, idx)] ? '已复制' : '链接' }}</span>
+                  </button>
+                  <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码', 'pwd_' + itemKey(h, idx))">
+                    <UiIcon v-if="copiedMap['pwd_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
+                    <UiIcon v-else name="copy" :size="13" />
+                    <span>{{ copiedMap['pwd_' + itemKey(h, idx)] ? '已复制' : '提取码' }}</span>
+                  </button>
+                  <button class="tbtn" @click="copyAll(h, 'all_' + itemKey(h, idx))">
+                    <UiIcon v-if="copiedMap['all_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
+                    <UiIcon v-else name="copy" :size="13" />
+                    <span>{{ copiedMap['all_' + itemKey(h, idx)] ? '已复制' : '全部' }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
-          </div>
-          <div class="share-record-side">
-            <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
-            <div class="share-record-actions">
-              <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
-              <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接', 'url_' + itemKey(h, idx))">
-                <UiIcon v-if="copiedMap['url_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
-                <UiIcon v-else name="copy" :size="13" />
-                <span>{{ copiedMap['url_' + itemKey(h, idx)] ? '已复制' : '链接' }}</span>
-              </button>
-              <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码', 'pwd_' + itemKey(h, idx))">
-                <UiIcon v-if="copiedMap['pwd_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
-                <UiIcon v-else name="copy" :size="13" />
-                <span>{{ copiedMap['pwd_' + itemKey(h, idx)] ? '已复制' : '提取码' }}</span>
-              </button>
-              <button class="tbtn" @click="copyAll(h, 'all_' + itemKey(h, idx))">
-                <UiIcon v-if="copiedMap['all_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
-                <UiIcon v-else name="copy" :size="13" />
-                <span>{{ copiedMap['all_' + itemKey(h, idx)] ? '已复制' : '全部' }}</span>
-              </button>
-            </div>
-          </div>
+          </section>
         </div>
       </section>
     </div>

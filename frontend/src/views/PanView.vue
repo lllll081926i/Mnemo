@@ -18,7 +18,6 @@ import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import PlayerPanel from '../components/PlayerPanel.vue'
 import TreeNode from '../components/TreeNode.vue'
-import AccountAvatar from '../components/AccountAvatar.vue'
 import DragDropZone from '../components/DragDropZone.vue'
 import { getPrefs, setPref } from '../appearance'
 
@@ -1064,7 +1063,6 @@ onBeforeUnmount(() => {
             <template v-else>
               <span class="crumb" @click="goHome">{{ rootTitle }}</span><span class="crumb-sep">/</span><span class="crumb">{{ modeTitle }}</span>
             </template>
-            <span class="pathbar-acc"><AccountAvatar :account="props.account" :providers="props.providers" /></span>
           </div>
 
           <!-- 合并工具条：导航 + 新建/上传 + 选择管理 + 文件操作 + 排序/视图/筛选 -->
@@ -1159,11 +1157,6 @@ onBeforeUnmount(() => {
 
           <!-- 列表视图（旧版 fileitem 行） -->
           <div v-else-if="viewMode === 'list'" class="file-list">
-            <div v-if="mode === 'list' && pathStack.length" class="fileitem dir-up" @click="goUp">
-              <div class="rangselect"></div>
-              <div class="fileicon"><UiIcon name="up-level" :size="16" /></div>
-              <div class="filename"><div>返回上级目录</div></div>
-            </div>
             <div
               v-for="f in listShown"
               :key="f.file_id"
@@ -1202,10 +1195,6 @@ onBeforeUnmount(() => {
 
           <!-- 网格视图（旧版 griditem） -->
           <div v-else class="file-list gridlist">
-            <div v-if="mode === 'list' && pathStack.length" class="griditem up-dir" @click="goUp" @contextmenu.prevent>
-              <div class="gridicon ft-folder"><UiIcon name="folder" :size="48" /></div>
-              <div class="gridname" title="返回上级目录">返回上级目录</div>
-            </div>
             <div
               v-for="f in listShown"
               :key="f.file_id"

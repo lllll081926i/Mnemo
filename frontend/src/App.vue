@@ -8,6 +8,7 @@ import ShareView from './views/ShareView.vue'
 import SyncView from './views/SyncView.vue'
 import SettingsView from './views/SettingsView.vue'
 import AccountRail from './components/AccountRail.vue'
+import AccountAvatar from './components/AccountAvatar.vue'
 import UiIcon from './components/UiIcon.vue'
 import Modal from './components/Modal.vue'
 import LoginModal from './components/LoginModal.vue'
@@ -293,6 +294,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       <button class="icon-btn" title="快捷命令面板 (Ctrl+P)" @click="showQuickOpen = true"><UiIcon name="search" :size="16" /></button>
       <button class="icon-btn" :title="isDark ? '切换到浅色' : '切换到深色'" @click="quickToggleTheme"><UiIcon :name="isDark ? 'sun' : 'moon'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
+      <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
     </header>
 
     <div class="app-body">

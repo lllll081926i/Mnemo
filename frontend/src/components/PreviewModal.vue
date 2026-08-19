@@ -501,7 +501,7 @@ function decodeText(buf) {
         :title="isMaximized ? '还原窗口' : '最大化窗口'"
         @click="isMaximized = !isMaximized"
       >
-        <UiIcon :name="isMaximized ? 'close' : 'plus'" :size="13" />
+        <UiIcon :name="isMaximized ? 'minimize' : 'maximize'" :size="14" />
       </button>
     </template>
 
@@ -592,7 +592,7 @@ function decodeText(buf) {
         </button>
 
         <!-- 保存按钮 (编辑模式下) -->
-        <div v-if="textMode === 'edit'" style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <div v-if="textMode === 'edit'" class="pv-edit-actions">
           <span v-if="isModified" class="pv-modified-hint"><span class="pulse-dot"></span>已修改</span>
           <button class="btn primary sm" :disabled="!isModified || saving" title="保存修改并上传 (Ctrl+S)" @click="doSaveText">
             <span v-if="saving" class="spin spin-on-primary"></span>
@@ -820,31 +820,25 @@ function decodeText(buf) {
   font-size: 11px;
 }
 
-.preview-body {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  background: var(--bg-base);
-  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
-  overflow: hidden;
-}
 .pv-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 18px;
+  gap: 6px;
+  min-height: 46px;
+  padding: 7px 14px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
+.pv-toolbar > * { flex: 0 0 auto; }
 .pv-counter { font-size: 12.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 .pv-sep { width: 1px; height: 18px; background: var(--border-light); margin: 0 4px; }
 .pv-zoom-text { font-size: 12px; color: var(--text-secondary); min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
 .pv-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.pv-edit-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
 /* 模式分段选择器 */
 .pv-mode-seg {
@@ -938,7 +932,9 @@ function decodeText(buf) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
+  gap: 0;
+  padding: 12px 14px 14px;
+  background: var(--bg-base);
 }
 
 .pv-code-box {
@@ -950,6 +946,9 @@ function decodeText(buf) {
   line-height: 24px;
   overflow: hidden;
   position: relative;
+  border: 1px solid var(--border-light);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 /* 行号栏 */
@@ -958,7 +957,7 @@ function decodeText(buf) {
   flex-shrink: 0;
   background: var(--bg-subtle);
   border-right: 1px solid var(--border-light);
-  padding: 12px 0;
+  padding: 10px 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -978,7 +977,7 @@ function decodeText(buf) {
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 12px 20px;
+  padding: 10px 16px;
   margin: 0;
   border: none;
   background: transparent;
@@ -988,6 +987,7 @@ function decodeText(buf) {
   outline: none;
   resize: none;
   overflow: auto;
+  scrollbar-gutter: stable;
   user-select: text;
   white-space: pre;
   tab-size: 2;
@@ -1010,7 +1010,7 @@ function decodeText(buf) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 28px 48px 64px;
+  padding: 24px 42px 48px;
   background: var(--bg-surface);
   color: var(--text-primary);
   font-size: 15px;
@@ -1019,6 +1019,8 @@ function decodeText(buf) {
   max-width: 920px;
   margin: 0 auto;
   width: 100%;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
 }
 :deep(.md-h1) { font-size: 26px; font-weight: 750; margin: 18px 0 12px; border-bottom: 1px solid var(--border-light); padding-bottom: 8px; color: var(--text-primary); }
 :deep(.md-h2) { font-size: 21px; font-weight: 700; margin: 20px 0 10px; border-bottom: 1px solid var(--border-lighter); padding-bottom: 6px; color: var(--text-primary); }
@@ -1082,10 +1084,12 @@ function decodeText(buf) {
 .pv-statusbar {
   display: flex;
   align-items: center;
-  height: 26px;
+  height: 28px;
   padding: 0 14px;
   background: var(--bg-subtle);
-  border-top: 1px solid var(--border-light);
+  border: 1px solid var(--border-light);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   font-size: 12px;
   color: var(--text-tertiary);
   user-select: none;
@@ -1097,6 +1101,17 @@ function decodeText(buf) {
 .pv-sb-pos { color: var(--text-secondary); font-weight: 500; }
 .pv-sb-spacer { flex: 1; }
 .pv-sb-lang { color: var(--color-primary); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .pv-head-sub { overflow: hidden; text-overflow: ellipsis; }
+  .pv-toolbar { padding: 6px 10px; }
+  .pv-search-bar { padding: 7px 10px; }
+  .pv-text-container { padding: 8px; }
+  .pv-code-view, .pv-editor-textarea { padding: 10px 12px; }
+  .pv-markdown-view { padding: 20px 22px 36px; }
+  .pv-statusbar { padding: 0 10px; }
+  .pv-sb-section { gap: 8px; }
+}
 
 /* 图片画廊 */
 .pv-image-viewport {
