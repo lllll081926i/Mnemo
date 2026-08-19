@@ -76,14 +76,16 @@ function windowToggleMaximise() {
   } catch { /* browser preview */ }
 }
 async function windowQuit() {
+  // 「关闭不退出」（默认开）：隐藏到托盘；关闭该选项才真正退出。
+  // 读取设置失败也按默认隐藏处理，保证关闭按钮永远有明确行为。
+  let hide = true
   try {
-    // 「关闭不退出」（默认开）：隐藏到托盘；关闭该选项才真正退出
     const s = await GetSettings()
-    if (s?.closeToTray !== false) {
-      WindowHide()
-      return
-    }
-    Quit()
+    hide = s?.closeToTray !== false
+  } catch { /* 保持默认 */ }
+  try {
+    if (hide) WindowHide()
+    else Quit()
   } catch { window.close?.() }
 }
 async function saveThemePref() {

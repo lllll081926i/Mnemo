@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -12,12 +13,19 @@ import (
 func (a *App) ShowMainWindow() {
 	ctx, ok := a.wailsContext()
 	if !ok {
-		return
+		// 唤起信号可能先于 OnStartup 到达（二次启动竞态），稍候重试
+		for i := 0; i < 20 && !ok; i++ {
+			time.Sleep(300 * time.Millisecond)
+			ctx, ok = a.wailsContext()
+		}
+		if !ok {
+			return
+		}
 	}
 	logging.Debug("main window show requested")
 	runtime.WindowUnminimise(ctx)
 	runtime.WindowShow(ctx)
-	// Windows 上跨进程/托盘恢复需要 always-on-top 抖动才能拿到前台焦点
+	// Windows 上前台焦点需要 always-on-top 抖动
 	runtime.WindowSetAlwaysOnTop(ctx, true)
 	runtime.WindowSetAlwaysOnTop(ctx, false)
 }

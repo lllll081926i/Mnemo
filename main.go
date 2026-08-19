@@ -23,6 +23,7 @@ func main() {
 		return
 	}
 	application := app.NewApp()
+	application.WatchShowRequests()
 	application.SetupTray(trayIcon)
 
 	err := wails.Run(&options.App{
