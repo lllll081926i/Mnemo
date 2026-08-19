@@ -25,20 +25,22 @@ function pick(item) {
   emit('close')
 }
 
-function onDown(e) {
-  if (!e.target.closest || !e.target.closest('.ctx-menu')) emit('close')
+function onPointerDown(e) {
+  // Run after the menu has had a chance to stop events from its own items.
+  const target = e.target
+  if (!target || !target.closest || !target.closest('.ctx-menu')) emit('close')
 }
 function onKey(e) { if (e.key === 'Escape') emit('close') }
 
 function onBlur() { emit('close') }
 
 onMounted(() => {
-  window.addEventListener('mousedown', onDown, true)
+  window.addEventListener('pointerdown', onPointerDown)
   window.addEventListener('keydown', onKey)
   window.addEventListener('blur', onBlur)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('mousedown', onDown, true)
+  window.removeEventListener('pointerdown', onPointerDown)
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('blur', onBlur)
 })
@@ -47,7 +49,7 @@ onBeforeUnmount(() => {
 <template>
   <teleport to="body">
     <transition name="popover-zoom">
-      <div class="ctx-menu" :style="pos" @mousedown.stop>
+      <div class="ctx-menu" :style="pos" @pointerdown.stop @contextmenu.prevent.stop>
         <template v-for="(item, i) in items" :key="i">
           <div v-if="item.sep" class="ctx-sep"></div>
           <div v-else-if="item.header" class="ctx-header">{{ item.header }}</div>
