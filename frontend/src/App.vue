@@ -17,6 +17,7 @@ import ConfirmModal from './components/ConfirmModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import { CheckUpdate } from './api'
 import { debug, info, installGlobalErrorLogging } from './logger'
+import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -55,6 +56,7 @@ const showLogin = ref(false)
 const showQuickOpen = ref(false)
 const showUpdate = ref(false)
 const infoAcc = ref(null)
+const windowMaximized = ref(false)
 const curTheme = ref('system')
 const isDark = ref(false)
 applyAppearance('system') // 防启动闪白，随后以设置为准
@@ -63,6 +65,15 @@ isDark.value = document.documentElement.classList.contains('dark')
 function quickToggleTheme() {
   applyTheme(isDark.value ? 'light' : 'dark')
   saveThemePref()
+}
+function windowMinimise() {
+  try { WindowMinimise() } catch { /* browser preview */ }
+}
+function windowToggleMaximise() {
+  try { WindowToggleMaximise(); windowMaximized.value = !windowMaximized.value } catch { /* browser preview */ }
+}
+function windowQuit() {
+  try { Quit() } catch { window.close?.() }
 }
 async function saveThemePref() {
   try {
@@ -407,6 +418,11 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       <button class="icon-btn" :title="isDark ? '切换到浅色' : '切换到深色'" @click="quickToggleTheme"><UiIcon :name="isDark ? 'sun' : 'moon'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
+      <div class="window-actions" aria-label="窗口控制">
+        <button class="icon-btn window-btn" title="最小化" @click="windowMinimise"><UiIcon name="minimize" :size="15" /></button>
+        <button class="icon-btn window-btn" :title="windowMaximized ? '还原窗口' : '最大化'" @click="windowToggleMaximise"><UiIcon :name="windowMaximized ? 'copy' : 'maximize'" :size="15" /></button>
+        <button class="icon-btn window-btn window-close" title="关闭窗口" @click="windowQuit"><UiIcon name="close" :size="15" /></button>
+      </div>
     </header>
 
     <div class="app-body">

@@ -1411,7 +1411,15 @@ onBeforeUnmount(() => {
       @toast="(m, t) => emit('toast', m, t)"
       @saved="refresh"
     />
-    <PlayerPanel v-if="modal === 'player'" :account="account" :file="modalFile" @close="modal = null" @toast="(m, t) => emit('toast', m, t)" />
+    <PlayerPanel
+      v-if="modal === 'player'"
+      :account="account"
+      :file="modalFile"
+      :files="listShown"
+      @select-file="modalFile = $event"
+      @close="modal = null"
+      @toast="(m, t) => emit('toast', m, t)"
+    />
 
     <!-- 批量重命名 -->
     <RenameMultiModal

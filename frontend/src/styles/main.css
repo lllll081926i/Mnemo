@@ -57,6 +57,17 @@ body {
   border-left: 1px solid var(--border-light);
   --wails-draggable: no-drag;
 }
+.window-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 4px;
+  padding-left: 5px;
+  border-left: 1px solid var(--border-light);
+  --wails-draggable: no-drag;
+}
+.window-btn { width: 30px; height: 30px; }
+.window-close:hover { color: #fff; background: #c43d4b; }
 
 .top-tabs { position: relative; display: flex; align-items: center; gap: 4px; height: 100%; }
 .top-tab-glider {

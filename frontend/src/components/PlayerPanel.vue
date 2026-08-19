@@ -1,21 +1,22 @@
 <script setup>
 // 网页播放器只保留浏览器/WebView 可解码路径：原生 MP4/WebM/Ogg，按需加载
 // HLS.js 和 dash.js 的 MSE 流。所有远程请求都经 Go 侧本地会话代理。
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings } from '../api'
 import { getPrefs } from '../appearance'
 import UiIcon from './UiIcon.vue'
-import UiSelect from './UiSelect.vue'
 
 const props = defineProps({
   account: { type: Object, required: true },
   file: { type: Object, required: true },
+  files: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['close', 'toast'])
+const emit = defineEmits(['close', 'toast', 'select-file'])
 
 const videoEl = ref(null)
 const containerEl = ref(null)
 const moreMenuEl = ref(null)
+const progressEl = ref(null)
 const loading = ref(true)
 const error = ref('')
 const playing = ref(false)
@@ -39,6 +40,12 @@ const subtitleTracks = ref([])
 const currentSubtitle = ref('')
 const subtitleEnabled = ref(false)
 const moreMenuOpen = ref(false)
+const subtitleScale = ref(1)
+const subtitlePosition = ref('bottom')
+const scrubVisible = ref(false)
+const scrubX = ref(0)
+const scrubTime = ref(0)
+const centerPulse = ref(false)
 
 let unmounted = false
 let playbackSeq = 0
@@ -54,20 +61,29 @@ let hlsRecoveryAttempts = 0
 let dashRecoveryAttempts = 0
 let activeSourceURL = ''
 let playbackEnded = false
+let centerTimer = null
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const speedOptions = SPEEDS.map((s) => ({ value: s, label: s + 'x' }))
 const UNSUPPORTED_WEB_CONTAINERS = new Set(['avi', 'flv', 'm2ts', 'mkv', 'mpg', 'mpeg', 'mts', 'rm', 'rmvb', 'ts', 'wmv'])
-const subtitleOptions = computed(() => [
-  { value: 'off', label: '关闭字幕' },
-  ...subtitleTracks.value.map((track) => ({ value: String(track.index), label: track.label })),
-])
+const episodeFiles = computed(() => (props.files || []).filter((candidate) => !candidate?.isDir && isVideoFile(candidate)))
+const thumbnailUrl = computed(() => String(props.file?.thumbnail || props.file?.thumbnail_url || props.file?.thumb_url || '').trim())
+const episodeIndex = computed(() => episodeFiles.value.findIndex((candidate) => candidate.file_id === props.file?.file_id))
 const currentQualityLabel = computed(() => qualities.value.find((quality) => quality.value === currentQuality.value)?.label || currentQuality.value || (streamType.value || '网页播放').toUpperCase())
 
 onMounted(() => {
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
+  startPlayback()
+})
+watch(() => props.file?.file_id, (nextId, previousId) => {
+  if (!nextId || nextId === previousId || unmounted) return
+  saveCursor(previousId)
+  if (saveTimer) {
+    clearInterval(saveTimer)
+    saveTimer = null
+  }
   startPlayback()
 })
 onBeforeUnmount(() => {
@@ -78,14 +94,27 @@ onBeforeUnmount(() => {
   destroyAdaptivePlayers()
   if (saveTimer) clearInterval(saveTimer)
   if (controlsTimer) clearTimeout(controlsTimer)
+  if (centerTimer) clearTimeout(centerTimer)
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
 })
 
+function isVideoFile(file) {
+  const category = String(file?.category || file?.kind || '').toLowerCase()
+  if (category === 'video') return true
+  const name = String(file?.name || '')
+  const index = name.lastIndexOf('.')
+  return index > 0 && ['mp4', 'm4v', 'webm', 'ogg', 'ogv', 'mov', 'm3u8', 'mpd', '3gp', 'avi', 'mkv', 'flv', 'm2ts', 'mpg', 'mpeg', 'mts', 'rm', 'rmvb', 'ts', 'wmv'].includes(name.slice(index + 1).toLowerCase())
+}
+
 async function startPlayback() {
   const seq = ++playbackSeq
   sourceSeq++
+  if (saveTimer) {
+    clearInterval(saveTimer)
+    saveTimer = null
+  }
   destroyAdaptivePlayers()
   loading.value = true
   error.value = ''
@@ -407,6 +436,9 @@ function onPipLeave() { pipActive.value = false }
 function togglePlay() {
   const v = videoEl.value
   if (!v) return
+  centerPulse.value = true
+  if (centerTimer) clearTimeout(centerTimer)
+  centerTimer = setTimeout(() => { centerPulse.value = false }, 2000)
   if (v.paused) v.play().catch(() => {})
   else v.pause()
 }
@@ -459,6 +491,19 @@ function toggleFullscreen() {
   const el = containerEl.value
   const video = videoEl.value
   if (!el) return
+  const wailsRuntime = window.runtime
+  if (wailsRuntime && typeof wailsRuntime.WindowFullscreen === 'function') {
+    try {
+      if (isFullscreen.value) {
+        wailsRuntime.WindowUnfullscreen?.()
+        isFullscreen.value = false
+      } else {
+        wailsRuntime.WindowFullscreen()
+        isFullscreen.value = true
+      }
+      return
+    } catch {}
+  }
   if (document.fullscreenElement === el) {
     if (typeof document.exitFullscreen === 'function') document.exitFullscreen().catch?.(() => {})
     return
@@ -540,6 +585,7 @@ function onTracksChange() {
   subtitleTracks.value = tracks
   subtitleEnabled.value = selected >= 0
   currentSubtitle.value = selected >= 0 ? String(selected) : ''
+  setSubtitlePosition(subtitlePosition.value)
 }
 
 function selectSubtitle(index) {
@@ -561,19 +607,47 @@ function onSubtitleSelected(value) {
   selectSubtitle(value === 'off' ? -1 : Number(value))
 }
 
+function setSubtitleScale(value) {
+  subtitleScale.value = Math.max(0.8, Math.min(1.5, Number(value) || 1))
+}
+
+function setSubtitlePosition(value) {
+  subtitlePosition.value = value === 'top' ? 'top' : 'bottom'
+  const video = videoEl.value
+  if (!video) return
+  for (let index = 0; index < video.textTracks.length; index++) {
+    const cues = video.textTracks[index].cues
+    if (!cues) continue
+    for (let cueIndex = 0; cueIndex < cues.length; cueIndex++) {
+      try { cues[cueIndex].line = subtitlePosition.value === 'top' ? 10 : 90 } catch {}
+    }
+  }
+}
+
+function selectEpisode(file) {
+  if (!file || file.file_id === props.file?.file_id) {
+    moreMenuOpen.value = false
+    return
+  }
+  moreMenuOpen.value = false
+  emit('select-file', file)
+}
+
 // ---- save cursor ----
-function saveCursor() {
+function saveCursor(fileId = props.file?.file_id) {
   if (playbackEnded) {
-    clearPlayCursor()
+    clearPlayCursor(fileId)
     return
   }
   const v = videoEl.value
   if (!v || !v.currentTime || v.currentTime < 1) return
-  savePlayCursor(props.account.user_id, props.account.drive_id, props.file.file_id, v.currentTime).catch(() => {})
+  if (!fileId) return
+  savePlayCursor(props.account.user_id, props.account.drive_id, fileId, v.currentTime).catch(() => {})
 }
 
-function clearPlayCursor() {
-  savePlayCursor(props.account.user_id, props.account.drive_id, props.file.file_id, 0).catch(() => {})
+function clearPlayCursor(fileId = props.file?.file_id) {
+  if (!fileId) return
+  savePlayCursor(props.account.user_id, props.account.drive_id, fileId, 0).catch(() => {})
 }
 
 async function switchQuality(quality) {
@@ -610,6 +684,7 @@ function onKeyDown(e) {
     case 'KeyC': toggleSubtitle(); break
     case 'Escape':
       if (moreMenuOpen.value) moreMenuOpen.value = false
+      else if (isFullscreen.value) toggleFullscreen()
       else if (!isFullscreen.value) emit('close')
       break
   }
@@ -628,7 +703,9 @@ function adjustVolume(delta) {
 function scheduleHideControls() {
   if (controlsTimer) clearTimeout(controlsTimer)
   if (!playing.value) return
-  controlsTimer = setTimeout(() => { showControls.value = false }, 3000)
+  controlsTimer = setTimeout(() => {
+    if (!moreMenuOpen.value) showControls.value = false
+  }, 2000)
 }
 
 function onMouseMove() {
@@ -638,6 +715,24 @@ function onMouseMove() {
 
 function onMouseLeave() {
   if (playing.value) showControls.value = false
+}
+
+function onProgressPointerMove(event) {
+  const element = progressEl.value
+  if (!element || !duration.value) return
+  const rect = element.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  scrubX.value = ratio * 100
+  scrubTime.value = ratio * duration.value
+  scrubVisible.value = true
+}
+
+function onProgressPointerLeave() { scrubVisible.value = false }
+
+function onWheel(event) {
+  if (event.target?.closest?.('.pp-settings-panel')) return
+  if (Math.abs(event.deltaY) < 1) return
+  adjustVolume(event.deltaY < 0 ? 0.05 : -0.05)
 }
 
 function onDocumentPointerDown(event) {
@@ -670,109 +765,116 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
       ref="containerEl"
       class="player-panel"
       :class="{ 'cursor-hidden': !showControls && playing, fullscreen: isFullscreen }"
+      :style="{ '--subtitle-scale': subtitleScale }"
       @mousemove="onMouseMove"
       @mouseleave="onMouseLeave"
+      @wheel="onWheel"
     >
-    <div class="pp-stage">
-      <video
-        ref="videoEl"
-        v-show="!loading && !error"
-        :src="src"
-        class="pp-video"
-        @loadedmetadata="onLoaded"
-        @loadeddata="onLoadedData"
-        @durationchange="onDurationChange"
-        @timeupdate="onTimeUpdate"
-        @progress="onProgress"
-        @play="onPlay"
-        @pause="onPause"
-        @ended="onEnded"
-        @error="onError"
-        @volumechange="onVolumeChange"
-        @enterpictureinpicture="onPipEnter"
-        @leavepictureinpicture="onPipLeave"
-        @webkitpresentationmodechanged="onWebkitPresentationModeChange"
-        @webkitbeginfullscreen="onWebkitFullscreenEnter"
-        @webkitendfullscreen="onWebkitFullscreenLeave"
-        @click="togglePlay"
-        @dblclick="toggleFullscreen"
-        preload="metadata"
-        crossorigin="anonymous"
-        playsinline
-      >
-        <track
-          v-for="track in subtitleSources"
-          :key="track.url"
-          kind="subtitles"
-          :src="track.url"
-          :srclang="track.language"
-          :label="track.label"
-          @load="onTracksChange"
-          @error="onTracksChange"
-        />
-      </video>
-      <div v-if="loading" class="pp-state pp-loading"><span class="spin"></span><span>正在准备播放…</span></div>
-      <div v-else-if="error" class="pp-state pp-error">
-        <UiIcon name="warning" :size="26" />
-        <span>{{ error }}</span>
-        <button class="pp-retry" type="button" @click="startPlayback"><UiIcon name="refresh" :size="15" />重新加载</button>
-      </div>
-      <button v-else-if="!playing" type="button" class="pp-center-play" title="播放 (空格)" @click="togglePlay"><UiIcon name="play" :size="28" /></button>
-    </div>
-
-    <header class="pp-topbar" :class="{ hidden: !showControls && playing }">
-      <div class="pp-file-meta">
-        <span class="pp-file-icon"><UiIcon name="video" :size="17" /></span>
-        <div class="pp-file-copy">
-          <div class="pp-title" :title="file.name">{{ file.name }}</div>
-          <div class="pp-source-label">{{ currentQualityLabel }}</div>
+      <div class="pp-stage">
+        <video
+          ref="videoEl"
+          v-show="!loading && !error"
+          :src="src"
+          class="pp-video"
+          @loadedmetadata="onLoaded"
+          @loadeddata="onLoadedData"
+          @durationchange="onDurationChange"
+          @timeupdate="onTimeUpdate"
+          @progress="onProgress"
+          @play="onPlay"
+          @pause="onPause"
+          @ended="onEnded"
+          @error="onError"
+          @volumechange="onVolumeChange"
+          @enterpictureinpicture="onPipEnter"
+          @leavepictureinpicture="onPipLeave"
+          @webkitpresentationmodechanged="onWebkitPresentationModeChange"
+          @webkitbeginfullscreen="onWebkitFullscreenEnter"
+          @webkitendfullscreen="onWebkitFullscreenLeave"
+          @click="togglePlay"
+          @dblclick="toggleFullscreen"
+          preload="metadata"
+          crossorigin="anonymous"
+          playsinline
+        >
+          <track
+            v-for="track in subtitleSources"
+            :key="track.url"
+            kind="subtitles"
+            :src="track.url"
+            :srclang="track.language"
+            :label="track.label"
+            @load="onTracksChange"
+            @error="onTracksChange"
+          />
+        </video>
+        <div v-if="loading" class="pp-state pp-loading"><span class="spin"></span><span>正在准备播放…</span></div>
+        <div v-else-if="error" class="pp-state pp-error">
+          <UiIcon name="warning" :size="26" />
+          <span>{{ error }}</span>
+          <button class="pp-retry" type="button" @click="startPlayback"><UiIcon name="refresh" :size="15" />重新加载</button>
         </div>
+        <button v-if="!loading && !error && (!playing || centerPulse)" type="button" class="pp-center-play" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="28" /></button>
       </div>
-      <div class="pp-top-actions">
-        <button type="button" class="pp-icon pp-wide-action" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="17" /></button>
-        <button v-if="subtitleTracks.length" type="button" class="pp-icon pp-wide-action" :class="{ active: subtitleEnabled }" title="字幕 (C)" @click="toggleSubtitle"><UiIcon name="captions" :size="18" /></button>
-        <button type="button" class="pp-icon pp-wide-action" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="18" /></button>
-        <div ref="moreMenuEl" class="pp-more">
-          <button type="button" class="pp-icon" title="更多播放设置" @click.stop="moreMenuOpen = !moreMenuOpen"><UiIcon name="more-horizontal" :size="19" /></button>
-          <div v-if="moreMenuOpen" class="pp-popover" @click.stop>
-            <button type="button" class="pp-menu-action" :class="{ active: looping }" @click="toggleLoop"><UiIcon name="refresh" :size="15" /><span>循环播放</span></button>
-            <button type="button" class="pp-menu-action" @click="screenshot"><UiIcon name="camera" :size="15" /><span>保存截图</span></button>
-            <button type="button" class="pp-menu-action" :class="{ active: pipActive }" @click="togglePip"><UiIcon name="picture-in-picture" :size="15" /><span>画中画</span></button>
-            <div v-if="qualities.length > 1" class="pp-menu-select"><span>清晰度</span><UiSelect :modelValue="currentQuality" :options="qualities" @update:modelValue="switchQuality" /></div>
-            <div class="pp-menu-select"><span>倍速</span><UiSelect :modelValue="speed" :options="speedOptions" @update:modelValue="onSpeed" /></div>
-            <div v-if="subtitleTracks.length" class="pp-menu-select"><span>字幕</span><UiSelect :modelValue="subtitleEnabled ? currentSubtitle : 'off'" :options="subtitleOptions" @update:modelValue="onSubtitleSelected" /></div>
+
+      <header class="pp-topbar" :class="{ hidden: !showControls && playing }">
+        <div class="pp-file-meta pp-window-drag">
+          <span class="pp-file-icon"><UiIcon name="video" :size="17" /></span>
+          <div class="pp-file-copy">
+            <div class="pp-title" :title="file.name">{{ file.name }}</div>
+            <div class="pp-source-label">{{ currentQualityLabel }}<span v-if="episodeFiles.length > 1"> · {{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
           </div>
         </div>
-        <button type="button" class="pp-icon pp-close" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
-      </div>
-    </header>
+        <div class="pp-top-actions">
+          <button type="button" class="pp-icon pp-wide-action" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="17" /></button>
+          <button v-if="subtitleTracks.length" type="button" class="pp-icon pp-wide-action" :class="{ active: subtitleEnabled }" title="字幕 (C)" @click="toggleSubtitle"><UiIcon name="captions" :size="18" /></button>
+          <button type="button" class="pp-icon pp-wide-action" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="18" /></button>
+          <button type="button" class="pp-icon" title="播放设置" @click.stop="moreMenuOpen = !moreMenuOpen"><UiIcon name="settings" :size="18" /></button>
+          <button type="button" class="pp-icon pp-close" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
+        </div>
+      </header>
 
-    <section v-if="!loading && !error" class="pp-bottom" :class="{ hidden: !showControls && playing }">
-      <div class="pp-progress" :style="{ '--played': pct + '%', '--buffered': bufPct + '%' }">
-        <div class="pp-progress-buffer"></div>
-        <div class="pp-progress-fill"></div>
-        <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="position" aria-label="播放进度" @input="onSeekInput" />
-      </div>
-      <div class="pp-control-row">
-        <div class="pp-control-group pp-left-controls">
-          <button type="button" class="pp-icon pp-skip" title="快退 (←)" @click="seek(-seekStep)"><UiIcon name="back" :size="17" /></button>
-          <button type="button" class="pp-play" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="19" /></button>
-          <button type="button" class="pp-icon pp-skip" title="快进 (→)" @click="seek(seekStep)"><UiIcon name="forward" :size="17" /></button>
-          <span class="pp-time">{{ fmtTime(position) }}<i>/</i>{{ fmtTime(duration) }}</span>
-        </div>
-        <div class="pp-control-group pp-right-controls">
-          <div class="pp-volume">
-            <button type="button" class="pp-icon" :title="muted ? '取消静音 (M)' : '静音 (M)'" @click="toggleMute"><UiIcon :name="muted || volume === 0 ? 'volume-x' : 'volume'" :size="18" /></button>
-            <input type="range" class="pp-vol-input" min="0" max="100" :value="muted ? 0 : volume" aria-label="音量" @input="onVolume" />
+      <section v-if="!loading && !error" class="pp-bottom" :class="{ hidden: !showControls && playing }">
+        <div ref="progressEl" class="pp-progress" :style="{ '--played': pct + '%', '--buffered': bufPct + '%' }" @pointermove="onProgressPointerMove" @pointerleave="onProgressPointerLeave">
+          <div class="pp-progress-buffer"></div>
+          <div class="pp-progress-fill"></div>
+          <div v-if="scrubVisible" class="pp-scrub-preview" :style="{ left: scrubX + '%' }">
+            <img v-if="thumbnailUrl" :src="thumbnailUrl" alt="" />
+            <span>{{ fmtTime(scrubTime) }}</span>
           </div>
-          <UiSelect v-if="qualities.length > 1" class="pp-select pp-quality-select" :modelValue="currentQuality" :options="qualities" @update:modelValue="switchQuality" />
-          <UiSelect v-if="subtitleTracks.length" class="pp-select pp-subtitle-select" :modelValue="subtitleEnabled ? currentSubtitle : 'off'" :options="subtitleOptions" @update:modelValue="onSubtitleSelected" />
-          <UiSelect class="pp-select pp-speed-select" :modelValue="speed" :options="speedOptions" @update:modelValue="onSpeed" />
-          <button type="button" class="pp-icon pp-loop-control" :class="{ active: looping }" title="循环 (L)" @click="toggleLoop"><UiIcon name="refresh" :size="17" /></button>
-          <button type="button" class="pp-icon" :title="isFullscreen ? '退出全屏 (F)' : '全屏 (F)'" @click="toggleFullscreen"><UiIcon :name="isFullscreen ? 'minimize' : 'maximize'" :size="18" /></button>
+          <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="position" aria-label="播放进度" @input="onSeekInput" />
         </div>
-      </div>
-    </section>
+        <div class="pp-control-row">
+          <div class="pp-control-group pp-left-controls">
+            <button type="button" class="pp-icon pp-skip" title="快退 (←)" @click="seek(-seekStep)"><UiIcon name="back" :size="17" /></button>
+            <button type="button" class="pp-play" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="19" /></button>
+            <button type="button" class="pp-icon pp-skip" title="快进 (→)" @click="seek(seekStep)"><UiIcon name="forward" :size="17" /></button>
+            <span class="pp-time">{{ fmtTime(position) }}<i>/</i>{{ fmtTime(duration) }}</span>
+          </div>
+          <div class="pp-control-group pp-right-controls">
+            <div class="pp-volume">
+              <button type="button" class="pp-icon" :title="muted ? '取消静音 (M)' : '静音 (M)'" @click="toggleMute"><UiIcon :name="muted || volume === 0 ? 'volume-x' : 'volume'" :size="18" /></button>
+              <input type="range" class="pp-vol-input" min="0" max="100" :value="muted ? 0 : volume" aria-label="音量" @input="onVolume" />
+            </div>
+            <button type="button" class="pp-icon" :class="{ active: moreMenuOpen }" title="播放设置" @click.stop="moreMenuOpen = !moreMenuOpen"><UiIcon name="more-horizontal" :size="19" /></button>
+            <button type="button" class="pp-icon pp-loop-control" :class="{ active: looping }" title="循环 (L)" @click="toggleLoop"><UiIcon name="refresh" :size="17" /></button>
+            <button type="button" class="pp-icon" :title="isFullscreen ? '退出全屏 (F)' : '全屏 (F)'" @click="toggleFullscreen"><UiIcon :name="isFullscreen ? 'minimize' : 'maximize'" :size="18" /></button>
+          </div>
+        </div>
+        <div v-if="moreMenuOpen" ref="moreMenuEl" class="pp-settings-panel" @click.stop>
+          <div class="pp-settings-head"><span>播放设置</span><button class="pp-panel-close" type="button" @click="moreMenuOpen = false"><UiIcon name="close" :size="15" /></button></div>
+          <div v-if="episodeFiles.length > 1" class="pp-setting-block">
+            <div class="pp-setting-label">选集 <span>{{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
+            <div class="pp-option-grid pp-episode-grid">
+              <button v-for="(episode, index) in episodeFiles" :key="episode.file_id" type="button" class="pp-option" :class="{ active: episode.file_id === file.file_id }" :title="episode.name" @click="selectEpisode(episode)">{{ index + 1 }}</button>
+            </div>
+          </div>
+          <div v-if="qualities.length > 1" class="pp-setting-block"><div class="pp-setting-label">清晰度</div><div class="pp-option-grid"><button v-for="quality in qualities" :key="quality.value" type="button" class="pp-option pp-option-text" :class="{ active: quality.value === currentQuality }" @click="switchQuality(quality.value)">{{ quality.label }}</button></div></div>
+          <div class="pp-setting-block"><div class="pp-setting-label">倍速</div><div class="pp-option-grid"><button v-for="item in speedOptions" :key="item.value" type="button" class="pp-option pp-option-text" :class="{ active: item.value === speed }" @click="onSpeed(item.value)">{{ item.label }}</button></div></div>
+          <div v-if="subtitleTracks.length" class="pp-setting-block"><div class="pp-setting-label">字幕</div><div class="pp-option-grid"><button type="button" class="pp-option pp-option-text" :class="{ active: !subtitleEnabled }" @click="onSubtitleSelected('off')">关闭</button><button v-for="track in subtitleTracks" :key="track.index" type="button" class="pp-option pp-option-text" :class="{ active: subtitleEnabled && currentSubtitle === String(track.index) }" @click="onSubtitleSelected(String(track.index))">{{ track.label }}</button></div><div class="pp-subtitle-tools"><button type="button" class="pp-mini-option" @click="setSubtitleScale(subtitleScale - .1)">字幕 -</button><span>{{ Math.round(subtitleScale * 100) }}%</span><button type="button" class="pp-mini-option" @click="setSubtitleScale(subtitleScale + .1)">字幕 +</button><button type="button" class="pp-mini-option" :class="{ active: subtitlePosition === 'top' }" @click="setSubtitlePosition(subtitlePosition === 'top' ? 'bottom' : 'top')">{{ subtitlePosition === 'top' ? '顶部' : '底部' }}</button></div></div>
+          <div class="pp-setting-actions"><button type="button" class="pp-menu-action" :class="{ active: looping }" @click="toggleLoop"><UiIcon name="refresh" :size="15" /><span>循环播放</span></button><button type="button" class="pp-menu-action" @click="screenshot"><UiIcon name="camera" :size="15" /><span>保存截图</span></button><button type="button" class="pp-menu-action" :class="{ active: pipActive }" @click="togglePip"><UiIcon name="picture-in-picture" :size="15" /><span>画中画</span></button></div>
+        </div>
+      </section>
     </div>
   </teleport>
 </template>
@@ -999,5 +1101,106 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   .pp-time { margin-left: 4px; font-size: 11px; }
   .pp-bottom { gap: 8px; }
   .pp-center-play { width: 58px; height: 58px; }
+}
+</style>
+
+<style scoped>
+/* Immersive playback surface: keep the stage quiet and reveal controls only on demand. */
+.player-panel {
+  --player-accent: #4da3ff;
+  --player-glass: rgba(0, 0, 0, .62);
+  --subtitle-scale: 1;
+  isolation: isolate;
+  background: #000;
+  color: #fff;
+}
+.pp-stage { background: #000; }
+.pp-video { cursor: default; }
+.pp-topbar, .pp-bottom {
+  background: linear-gradient(180deg, rgba(0, 0, 0, .72), var(--player-glass));
+  border: 0;
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+.pp-topbar {
+  min-height: 74px;
+  padding: 14px 22px;
+  --wails-draggable: drag;
+}
+.pp-window-drag { --wails-draggable: drag; }
+.pp-top-actions, .pp-top-actions button, .pp-bottom button, .pp-bottom input, .pp-settings-panel { --wails-draggable: no-drag; }
+.pp-topbar.hidden { transform: translateY(-18px); }
+.pp-bottom.hidden { transform: translateY(18px); }
+.pp-file-icon { width: 36px; height: 36px; border: 0; border-radius: 50%; color: rgba(255,255,255,.82); background: rgba(255,255,255,.1); }
+.pp-title { font-size: 15px; font-weight: 600; }
+.pp-source-label { color: rgba(255,255,255,.54); text-transform: none; }
+.pp-icon, .pp-play, .pp-panel-close { width: 42px; height: 42px; border: 0; border-radius: 50%; color: rgba(255,255,255,.78); }
+.pp-icon:hover, .pp-panel-close:hover { color: #fff; background: rgba(255,255,255,.14); }
+.pp-icon.active { color: #fff; background: color-mix(in srgb, var(--player-accent) 28%, transparent); }
+.pp-close { margin-left: 8px; }
+.pp-center-play {
+  width: 64px;
+  height: 64px;
+  border: 1px solid rgba(255,255,255,.5);
+  color: #111;
+  background: rgba(255,255,255,.92);
+  box-shadow: 0 12px 42px rgba(0,0,0,.45), 0 0 0 8px rgba(255,255,255,.08);
+  animation: pp-center-in 180ms ease-out;
+}
+.pp-center-play:hover { background: #fff; box-shadow: 0 14px 48px rgba(0,0,0,.52), 0 0 0 10px rgba(255,255,255,.11); }
+@keyframes pp-center-in { from { opacity: 0; transform: translate(-50%, -50%) scale(.82); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.pp-bottom { gap: 14px; padding: 15px 22px 18px; }
+.pp-progress { height: 12px; }
+.pp-progress::before, .pp-progress-buffer, .pp-progress-fill { top: 4px; height: 4px; border-radius: 999px; transition: height 120ms ease, top 120ms ease; }
+.pp-progress::before { background: rgba(255,255,255,.25); }
+.pp-progress-buffer { background: rgba(255,255,255,.45); }
+.pp-progress-fill { background: var(--player-accent); box-shadow: 0 0 10px color-mix(in srgb, var(--player-accent) 45%, transparent); }
+.pp-progress:hover::before, .pp-progress:hover .pp-progress-buffer, .pp-progress:hover .pp-progress-fill { top: 3px; height: 6px; }
+.pp-progress-input { z-index: 2; }
+.pp-progress-input::-webkit-slider-thumb { width: 14px; height: 14px; opacity: 0; border: 0; border-radius: 50%; background: #fff; appearance: none; }
+.pp-progress:hover .pp-progress-input::-webkit-slider-thumb, .pp-progress-input:focus-visible::-webkit-slider-thumb { opacity: 1; }
+.pp-scrub-preview { position: absolute; z-index: 5; bottom: 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 68px; padding: 4px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.2); border-radius: 6px; background: rgba(8,8,8,.9); box-shadow: 0 10px 24px rgba(0,0,0,.42); pointer-events: none; }
+.pp-scrub-preview img { display: block; width: 140px; height: 78px; object-fit: cover; border-radius: 3px; }
+.pp-scrub-preview span { color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
+.pp-play { width: 44px; height: 44px; color: #111; background: #fff; border-color: #fff; }
+.pp-play:hover { background: #fff; }
+.pp-time { color: rgba(255,255,255,.8); font-size: 12px; }
+.pp-volume { position: relative; gap: 2px; }
+.pp-vol-input { position: absolute; bottom: 37px; left: 8px; display: block; width: 34px; height: 86px; margin: 0; padding: 8px 0; opacity: 0; border: 1px solid rgba(255,255,255,.15); border-radius: 18px; background: rgba(0,0,0,.75); writing-mode: vertical-lr; direction: rtl; transition: opacity 140ms ease; }
+.pp-volume:hover .pp-vol-input, .pp-vol-input:focus-visible { opacity: 1; }
+.pp-vol-input::-webkit-slider-runnable-track { width: 4px; border-radius: 4px; background: rgba(255,255,255,.26); }
+.pp-vol-input::-webkit-slider-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; appearance: none; }
+.pp-settings-panel { position: fixed; z-index: 20; left: 50%; bottom: 88px; display: flex; flex-direction: column; width: min(560px, calc(100vw - 32px)); max-height: min(62vh, 520px); overflow: auto; padding: 14px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.14); border-radius: 14px; background: rgba(14,15,18,.94); box-shadow: 0 22px 70px rgba(0,0,0,.56); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.pp-settings-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 10px; color: #fff; font-size: 13px; font-weight: 600; }
+.pp-panel-close { width: 30px; height: 30px; }
+.pp-setting-block { padding: 10px 2px; border-top: 1px solid rgba(255,255,255,.09); }
+.pp-setting-label { display: flex; justify-content: space-between; margin-bottom: 8px; color: rgba(255,255,255,.55); font-size: 11px; }
+.pp-option-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-option { min-width: 36px; height: 32px; padding: 0 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.05); font: inherit; font-size: 12px; cursor: pointer; }
+.pp-option:hover, .pp-option.active { border-color: color-mix(in srgb, var(--player-accent) 70%, transparent); color: #fff; background: color-mix(in srgb, var(--player-accent) 22%, transparent); }
+.pp-episode-grid .pp-option { width: 36px; padding: 0; }
+.pp-subtitle-tools { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: rgba(255,255,255,.56); font-size: 11px; }
+.pp-mini-option { height: 28px; padding: 0 9px; border: 1px solid rgba(255,255,255,.13); border-radius: 6px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.05); font: inherit; font-size: 11px; cursor: pointer; }
+.pp-mini-option:hover, .pp-mini-option.active { color: #fff; background: rgba(255,255,255,.14); }
+.pp-setting-actions { display: flex; gap: 4px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.09); }
+.pp-menu-action { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px; border: 0; border-radius: 6px; color: rgba(255,255,255,.72); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.pp-menu-action:hover, .pp-menu-action.active { color: #fff; background: rgba(255,255,255,.11); }
+.player-panel video::cue { color: #fff; background: rgba(0,0,0,.72); text-shadow: 0 1px 3px #000; font-size: calc(1em * var(--subtitle-scale)); }
+@media (max-width: 760px) {
+  .pp-topbar { min-height: 62px; padding: 10px 12px; }
+  .pp-bottom { padding: 10px 12px 12px; }
+  .pp-wide-action, .pp-loop-control { display: none; }
+  .pp-vol-input { display: none; }
+  .pp-scrub-preview img { width: 104px; height: 58px; }
+}
+@media (max-width: 560px) {
+  .pp-source-label, .pp-skip { display: none; }
+  .pp-top-actions { gap: 2px; margin-left: 6px; }
+  .pp-icon { width: 38px; height: 38px; }
+  .pp-play { width: 40px; height: 40px; }
+  .pp-time { margin-left: 4px; font-size: 11px; }
+  .pp-bottom { gap: 8px; }
+  .pp-center-play { width: 58px; height: 58px; }
+  .pp-settings-panel { bottom: 72px; width: calc(100vw - 20px); }
 }
 </style>

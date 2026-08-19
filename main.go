@@ -19,6 +19,7 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:     "Mneno",
+		Frameless: true,
 		Width:     1440,
 		Height:    900,
 		MinWidth:  1024,
