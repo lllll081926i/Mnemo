@@ -228,9 +228,11 @@ async function pauseTask(t) {
   t.status = 'paused'
   try {
     await PauseDownload(t.id)
+    await refresh()
     emit('toast', '已暂停', 'warn')
   } catch (e) {
     t.status = orig
+    await refresh()
     emit('toast', '操作失败: ' + String(e), 'error')
   }
 }
@@ -241,9 +243,11 @@ async function resumeTask(t) {
   t.status = 'queued'
   try {
     await ResumeDownload(t.id)
+    await refresh()
     emit('toast', '已恢复下载', 'success')
   } catch (e) {
     t.status = orig
+    await refresh()
     emit('toast', '操作失败: ' + String(e), 'error')
   }
 }
@@ -254,9 +258,11 @@ async function cancelTask(t) {
   t.status = 'canceled'
   try {
     await CancelDownload(t.id)
+    await refresh()
     emit('toast', '已取消下载', 'warn')
   } catch (e) {
     t.status = orig
+    await refresh()
     emit('toast', '操作失败: ' + String(e), 'error')
   }
 }
@@ -269,9 +275,11 @@ function prioritizeTask(t) {
     t.status = 'downloading'
     try {
       await PrioritizeDownload(t.id)
+      await refresh()
       emit('toast', '已优先下载该任务（其他已暂停）', 'success')
     } catch (e) {
       activeDownloads.value.forEach((x) => { if (origMap.has(x.id)) x.status = origMap.get(x.id) })
+      await refresh()
       emit('toast', '操作失败: ' + String(e), 'error')
     }
   }, { okText: '优先下载', title: '优先下载' })
@@ -287,9 +295,11 @@ async function removeTask(t) {
   selectedIds.value = s
   try {
     await RemoveDownload(id)
+    await refresh()
     emit('toast', '已删除记录', 'success')
   } catch (e) {
     downloads.value = origList
+    await refresh()
     emit('toast', '删除失败: ' + String(e), 'error')
   }
 }
@@ -305,9 +315,10 @@ function startAll() {
   targets.forEach((t) => { t.status = 'queued' })
   let failed = 0
   Promise.all(targets.map((t) => ResumeDownload(t.id).catch(() => { failed++; return t })))
-    .then((res) => {
+    .then(async (res) => {
       res.forEach((t) => { if (t) t.status = orig.get(t.id) })
-      if (failed) { emit('toast', `${failed} 个任务恢复失败`, 'error'); refresh() }
+      await refresh()
+      if (failed) emit('toast', `${failed} 个任务恢复失败`, 'error')
       else if (targets.length) emit('toast', `已开始全部任务`, 'success')
     })
 }
@@ -318,9 +329,10 @@ function pauseAll() {
   targets.forEach((t) => { t.status = 'paused' })
   let failed = 0
   Promise.all(targets.map((t) => PauseDownload(t.id).catch(() => { failed++; return t })))
-    .then((res) => {
+    .then(async (res) => {
       res.forEach((t) => { if (t) t.status = orig.get(t.id) })
-      if (failed) { emit('toast', `${failed} 个任务暂停失败`, 'error'); refresh() }
+      await refresh()
+      if (failed) emit('toast', `${failed} 个任务暂停失败`, 'error')
       else if (targets.length) emit('toast', `已暂停全部任务`, 'warn')
     })
 }
@@ -332,9 +344,10 @@ function batchResume() {
   tasks.forEach((t) => { t.status = 'queued' })
   let failed = 0
   Promise.all(tasks.map((t) => ResumeDownload(t.id).catch(() => { failed++; return t })))
-    .then((res) => {
+    .then(async (res) => {
       res.forEach((t) => { if (t) t.status = orig.get(t.id) })
-      if (failed) { emit('toast', `${failed} 个任务恢复失败`, 'error'); refresh() }
+      await refresh()
+      if (failed) emit('toast', `${failed} 个任务恢复失败`, 'error')
       else emit('toast', `已恢复 ${tasks.length} 个任务`, 'success')
     })
 }
@@ -345,9 +358,10 @@ function batchPause() {
   tasks.forEach((t) => { t.status = 'paused' })
   let failed = 0
   Promise.all(tasks.map((t) => PauseDownload(t.id).catch(() => { failed++; return t })))
-    .then((res) => {
+    .then(async (res) => {
       res.forEach((t) => { if (t) t.status = orig.get(t.id) })
-      if (failed) { emit('toast', `${failed} 个任务暂停失败`, 'error'); refresh() }
+      await refresh()
+      if (failed) emit('toast', `${failed} 个任务暂停失败`, 'error')
       else emit('toast', `已暂停 ${tasks.length} 个任务`, 'warn')
     })
 }
@@ -358,9 +372,10 @@ function batchCancel() {
   tasks.forEach((t) => { t.status = 'canceled' })
   let failed = 0
   Promise.all(tasks.map((t) => CancelDownload(t.id).catch(() => { failed++; return t })))
-    .then((res) => {
+    .then(async (res) => {
       res.forEach((t) => { if (t) t.status = orig.get(t.id) })
-      if (failed) { emit('toast', `${failed} 个任务取消失败`, 'error'); refresh() }
+      await refresh()
+      if (failed) emit('toast', `${failed} 个任务取消失败`, 'error')
       else emit('toast', `已取消 ${tasks.length} 个任务`, 'warn')
     })
 }
@@ -373,12 +388,13 @@ function batchRemove() {
   selectedIds.value = new Set()
   let failed = 0
   Promise.all(Array.from(ids).map((id) => RemoveDownload(id).catch(() => { failed++ })))
-    .then(() => {
+    .then(async () => {
       if (failed) {
         downloads.value = origList
+        await refresh()
         emit('toast', `${failed} 项记录删除失败`, 'error')
-        refresh()
       } else {
+        await refresh()
         emit('toast', `已删除 ${ids.size} 项记录`, 'success')
       }
     })
@@ -389,9 +405,10 @@ async function clearAllDoneDownloads() {
   downloads.value = downloads.value.filter((t) => t.status !== 'completed')
   try {
     await ClearDownloads()
+    await refresh()
     emit('toast', '已清除所有已完成记录', 'success')
   } catch (e) {
-    refresh()
+    await refresh()
     emit('toast', '清除失败: ' + String(e), 'error')
   }
 }
@@ -401,9 +418,10 @@ async function clearAllDoneUploads() {
   uploads.value = uploads.value.filter((t) => !t.Upload || !t.Upload.IsCompleted)
   try {
     await ClearUploads()
+    await refresh()
     emit('toast', '已清除所有已上传记录', 'success')
   } catch (e) {
-    refresh()
+    await refresh()
     emit('toast', '清除失败: ' + String(e), 'error')
   }
 }
@@ -415,9 +433,11 @@ async function cancelUploadTask(t) {
   uploads.value = uploads.value.filter((x) => x.UploadID !== id)
   try {
     await CancelUpload(id)
+    await refresh()
     emit('toast', '已取消上传', 'warn')
   } catch (e) {
     uploads.value = origList
+    await refresh()
     emit('toast', '取消失败: ' + String(e), 'error')
   }
 }
@@ -426,8 +446,9 @@ async function resumeUploadTask(t) {
   try {
     await ResumeUpload(t.UploadID)
     emit('toast', '已重新排队上传', 'success')
-    scheduleRefresh(100)
+    await refresh()
   } catch (e) {
+    await refresh()
     emit('toast', String(e), 'error')
   }
 }
@@ -591,8 +612,9 @@ async function delOfflineTask(t) {
     offlineTasks.value = offlineTasks.value.filter((x) => x.task_id !== t.task_id && x.id !== t.id)
     try {
       await DeleteOfflineTask(offlineUser.value, offlineDriveId.value, t.task_id || t.id, true)
+      await refreshOffline()
       emit('toast', '已删除', 'success')
-    } catch (e) { emit('toast', String(e), 'error'); refreshOffline() }
+    } catch (e) { await refreshOffline(); emit('toast', String(e), 'error') }
   }, { danger: true, title: '删除离线任务' })
 }
 
@@ -623,8 +645,9 @@ async function cancelMigrateJob(job) {
   try {
     await CancelMigrate(job.id)
     job.message = '正在取消…'
+    await refreshMigrateJobs()
+    setTimeout(refreshMigrateJobs, 150)
     emit('toast', '已请求取消迁移', 'warn')
-    setTimeout(refreshMigrateJobs, 120)
   } catch (e) {
     emit('toast', '取消迁移失败: ' + String(e), 'error')
   }
@@ -635,9 +658,11 @@ async function removeMigrateJob(job) {
   migrateJobs.value = original.filter((x) => x.id !== job.id)
   try {
     await DeleteMigrateJob(job.id)
+    await refreshMigrateJobs()
     emit('toast', '已删除迁移记录', 'success')
   } catch (e) {
     migrateJobs.value = original
+    await refreshMigrateJobs()
     emit('toast', '删除迁移记录失败: ' + String(e), 'error')
   }
 }
@@ -646,9 +671,11 @@ async function clearMigrateHistory() {
   migrateJobs.value = original.filter((x) => ['pending', 'running'].includes(x.status))
   try {
     await ClearMigrateJobs()
+    await refreshMigrateJobs()
     emit('toast', '已清除迁移历史', 'success')
   } catch (e) {
     migrateJobs.value = original
+    await refreshMigrateJobs()
     emit('toast', '清除迁移历史失败: ' + String(e), 'error')
   }
 }

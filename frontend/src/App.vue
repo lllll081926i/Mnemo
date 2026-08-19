@@ -300,10 +300,12 @@ function remove(acc) {
 function toast(msg, type = '') {
   const id = Date.now() + Math.random()
   const normalizedType = ['success', 'error', 'warn', 'info'].includes(type) ? type : 'info'
-  const item = { id, msg: String(msg ?? ''), type: normalizedType }
+  const labels = { success: '已完成', error: '操作失败', warn: '需要注意', info: '提示' }
+  const item = { id, msg: String(msg ?? ''), type: normalizedType, label: labels[normalizedType] }
   toasts.value.push(item)
   const lifetime = normalizedType === 'error' ? 6500 : 3600
   setTimeout(() => dismissToast(id), lifetime)
+  return id
 }
 
 function dismissToast(id) {
@@ -463,9 +465,13 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
 
     <transition-group name="toast-list" tag="div" class="toast-wrap" role="status" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" role="alert">
-        <span class="t-icon"><UiIcon :name="t.type === 'success' ? 'check' : (t.type === 'error' || t.type === 'warn' ? 'warning' : 'info')" :size="16" /></span>
-        <span class="t-message">{{ t.msg }}</span>
+        <span class="t-icon" aria-hidden="true"><UiIcon :name="t.type === 'success' ? 'check' : (t.type === 'error' || t.type === 'warn' ? 'warning' : 'info')" :size="17" /></span>
+        <div class="t-content">
+          <div class="t-head"><span class="t-label">{{ t.label }}</span><span class="t-dot">·</span><span class="t-context">Mnemo</span></div>
+          <div class="t-message">{{ t.msg }}</div>
+        </div>
         <button class="toast-close" type="button" title="关闭通知" aria-label="关闭通知" @click="dismissToast(t.id)"><UiIcon name="close" :size="14" /></button>
+        <span class="t-timebar" aria-hidden="true"></span>
       </div>
     </transition-group>
 

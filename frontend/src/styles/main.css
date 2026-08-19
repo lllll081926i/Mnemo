@@ -641,25 +641,38 @@ body {
 .switch.on:active::after { transform: translateX(14px); }
 
 /* ============ Toast ============ */
-.toast-wrap { position: fixed; top: 60px; right: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; width: 380px; max-width: calc(100vw - 32px); }
+.toast-wrap {
+  position: fixed; top: 54px; right: 16px; z-index: 300;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none; width: min(392px, calc(100vw - 32px));
+}
 .toast {
-  display: flex; align-items: flex-start; gap: 8px;
-  background: var(--bg-elevated); border: 1px solid var(--border-light);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-modal);
-  padding: 11px 10px 11px 14px; border-left: 3px solid var(--color-primary);
-  font-size: 14px; line-height: 1.55; width: 100%; word-break: break-word; user-select: text;
+  --toast-accent: var(--color-primary);
+  position: relative; display: flex; align-items: flex-start; gap: 10px;
+  overflow: hidden; width: 100%; min-height: 58px; padding: 11px 10px 12px 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--color-primary) 4%);
+  border: 1px solid var(--border-light); border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .12), 0 1px 2px rgba(15, 23, 42, .08);
+  font-size: 13.5px; line-height: 1.5; word-break: break-word; user-select: text;
   pointer-events: auto;
 }
-.toast.error { border-left-color: var(--color-error); }
-.toast.success { border-left-color: var(--color-success); }
-.toast.warn { border-left-color: var(--color-warning, #c88719); }
-.toast.info { border-left-color: var(--color-primary); }
-.toast .t-icon { flex-shrink: 0; display: inline-flex; margin-top: 2px; }
-.toast.error .t-icon { color: var(--color-error); }
-.toast.success .t-icon { color: var(--color-success); }
-.toast.warn .t-icon { color: var(--color-warning, #c88719); }
-.toast.info .t-icon { color: var(--color-primary); }
-.toast .t-message { min-width: 0; flex: 1; white-space: pre-wrap; }
+.toast::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--toast-accent); }
+.toast.error { --toast-accent: var(--color-error); }
+.toast.success { --toast-accent: var(--color-success); }
+.toast.warn { --toast-accent: var(--color-warning, #c88719); }
+.toast.info { --toast-accent: var(--color-primary); }
+.toast .t-icon {
+  flex: 0 0 30px; width: 30px; height: 30px; display: inline-flex;
+  align-items: center; justify-content: center; margin-top: 1px;
+  color: var(--toast-accent); border: 1px solid color-mix(in srgb, var(--toast-accent) 28%, transparent);
+  border-radius: var(--radius-sm); background: color-mix(in srgb, var(--toast-accent) 10%, transparent);
+}
+.toast .t-content { min-width: 0; flex: 1; }
+.toast .t-head { display: flex; align-items: center; gap: 5px; min-height: 16px; margin-bottom: 2px; font-size: 11px; line-height: 1.35; }
+.toast .t-label { color: var(--toast-accent); font-weight: 700; }
+.toast .t-dot { color: var(--text-tertiary); }
+.toast .t-context { color: var(--text-tertiary); }
+.toast .t-message { color: var(--text-primary); white-space: pre-wrap; }
 .toast-close {
   flex: 0 0 24px; width: 24px; height: 24px; margin: -2px -4px 0 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -668,8 +681,15 @@ body {
 }
 .toast-close:hover { color: var(--text-primary); background: var(--bg-hover); }
 .toast-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.toast .t-timebar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  transform-origin: left center; background: var(--toast-accent); opacity: .46;
+  animation: toast-timebar 3.6s linear forwards;
+}
+.toast.error .t-timebar { animation-duration: 6.5s; }
+@keyframes toast-timebar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @media (max-width: 560px) {
-  .toast-wrap { top: 52px; right: 10px; left: 10px; width: auto; max-width: none; }
+  .toast-wrap { top: 50px; right: 10px; left: 10px; width: auto; max-width: none; }
 }
 
 /* ---- 统一错误提示（表单/面板内联错误） ---- */
