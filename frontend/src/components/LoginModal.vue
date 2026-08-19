@@ -296,9 +296,15 @@ function validate() {
 
 async function submit() {
   if (busy.value) return
+  // The callback normally resumes login automatically. Keep a manual
+  // fallback for dev WebView/browser environments where the event bridge can
+  // be delayed or unavailable after the challenge redirects.
   if (providerId.value === 'pikpak' && captchaUrl.value) {
-    errorText.value = '请先完成当前安全验证'
-    return
+    captchaSessionId.value = ''
+    captchaFrameReady.value = false
+    captchaUrl.value = ''
+    delete form.value.captcha_verified
+    await closePikPakCaptchaSession()
   }
   if (providerId.value === 'pikpak') {
     await captchaClosePromise
@@ -322,18 +328,24 @@ async function submit() {
     emit('toast', isOAuth.value ? '授权成功' : '登录成功', 'success')
     emit('close')
   } catch (e) {
-    if (providerId.value === 'pikpak' && handlePikPakRateLimit(e)) {
-      // Keep the challenge state intact while the provider cooldown runs.
-    } else if (providerId.value === 'pikpak' && parseCaptcha(e)) {
-      errorText.value = '请在登录窗口内完成安全验证'
-    } else if (providerId.value === 'pan189' && parse189Captcha(e)) {
-      errorText.value = '请输入图片中的验证码'
-    } else {
-      errorText.value = String(e)
+    try {
+      if (providerId.value === 'pikpak' && handlePikPakRateLimit(e)) {
+        // Keep the challenge state intact while the provider cooldown runs.
+      } else if (providerId.value === 'pikpak' && parseCaptcha(e)) {
+        errorText.value = '请在登录窗口内完成安全验证'
+      } else if (providerId.value === 'pan189' && parse189Captcha(e)) {
+        errorText.value = '请输入图片中的验证码'
+      } else {
+        errorText.value = String(e)
+      }
+    } catch (handlerError) {
+      // Error rendering must never leave the submit button stuck in busy state.
+      errorText.value = String(handlerError)
     }
+  } finally {
+    busy.value = false
+    captchaSubmitting.value = false
   }
-  busy.value = false
-  captchaSubmitting.value = false
 }
 </script>
 
@@ -458,9 +470,9 @@ async function submit() {
 
               <div class="modal-actions login-actions">
                 <button class="btn" type="button" @click="emit('close')">取消</button>
-                <button class="btn primary" type="submit" :disabled="busy || (providerId === 'pikpak' && (pikpakCooldownSeconds > 0 || captchaUrl))">
+                <button class="btn primary" type="submit" :disabled="busy || (providerId === 'pikpak' && pikpakCooldownSeconds > 0)">
                   <span v-if="busy" class="spin spin-on-primary"></span>
-                  {{ busy ? '处理中…' : isOAuth ? '打开授权页面' : (isMounted ? '保存连接' : '登录') }}
+                  {{ busy ? '处理中…' : (providerId === 'pikpak' && captchaUrl ? '继续登录' : (isOAuth ? '打开授权页面' : (isMounted ? '保存连接' : '登录'))) }}
                 </button>
               </div>
             </form>
