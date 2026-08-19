@@ -21,6 +21,24 @@ const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
 const prevTabIdx = ref(0)
 const pageTrans = ref('page-slide-left')
+const pageComponents = { pan: PanView, transfer: TransferView, sync: SyncView, share: ShareView, settings: SettingsView }
+const pageComponent = computed(() => pageComponents[tab.value] || PanView)
+const pageProps = computed(() => {
+  if (tab.value === 'pan') return { account: current.value, accounts: accounts.value, providers: providers.value }
+  if (tab.value === 'sync') return { account: current.value, accounts: accounts.value, providers: providers.value }
+  if (tab.value === 'transfer' || tab.value === 'share') return { accounts: accounts.value, providers: providers.value }
+  return {}
+})
+const pageListeners = computed(() => {
+  const listeners = { toast }
+  if (tab.value === 'pan') listeners.go = onPanGo
+  if (tab.value === 'settings') {
+    listeners.theme = applyTheme
+    listeners.update = () => { showUpdate.value = true }
+    listeners.clearCache = clearPanCache
+  }
+  return listeners
+})
 function switchTab(key) {
   if (key === tab.value) return
   const ni = tabOrder.indexOf(key)
@@ -311,11 +329,13 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       <main class="page-host">
         <transition :name="pageTrans" mode="out-in">
           <KeepAlive>
-            <PanView v-if="tab === 'pan'" ref="panView" :key="'pan'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" @go="onPanGo" />
-            <TransferView v-else-if="tab === 'transfer'" :key="'transfer'" :accounts="accounts" :providers="providers" @toast="toast" />
-            <SyncView v-else-if="tab === 'sync'" :key="'sync'" :account="current" :accounts="accounts" :providers="providers" @toast="toast" />
-            <ShareView v-else-if="tab === 'share'" :key="'share'" :accounts="accounts" :providers="providers" @toast="toast" />
-            <SettingsView v-else :key="'settings'" @toast="toast" @theme="applyTheme" @update="showUpdate = true" @clear-cache="clearPanCache" />
+            <component
+              :is="pageComponent"
+              :key="tab"
+              :ref="tab === 'pan' ? 'panView' : undefined"
+              v-bind="pageProps"
+              v-on="pageListeners"
+            />
           </KeepAlive>
         </transition>
       </main>

@@ -93,8 +93,8 @@ body {
 .app-body { flex: 1; display: flex; min-height: 0; }
 
 /* 页面切换过渡（方向感知） */
-.page-host { flex: 1; display: flex; min-width: 0; position: relative; }
-.page-host > * { flex: 1; display: flex; min-width: 0; }
+.page-host { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+.page-host > * { flex: 1; display: flex; min-width: 0; min-height: 0; }
 /* 页面切换：左右滑动 */
 .page-slide-left-enter-active, .page-slide-right-enter-active {
   transition: opacity 220ms var(--motion-ease), transform 260ms var(--motion-ease);
