@@ -2,18 +2,25 @@ package transfer
 
 import "mnemo-go/internal/store"
 
+const maxPerDownloadConnections = 4
+
 // DefaultConcurrencyFromSettings returns a sane default concurrency.
 // Deprecated: use concurrencyFromSettings which reads the real value.
 func DefaultConcurrencyFromSettings() int {
-	return 8
+	return maxPerDownloadConnections
 }
 
-// concurrencyFromSettings reads MaxConcurrentDownloads from settings with a
-// sane fallback. The per-file connection count (DefaultConcurrency = 8) is
-// applied on top of this semaphore.
+// concurrencyFromSettings derives the per-file range connection count without
+// allowing the global queue setting to multiply resource use unchecked. At
+// most four buffers/connections are used for one file; the manager separately
+// controls how many files run at once.
 func concurrencyFromSettings(s store.Settings) int {
-	if s.MaxConcurrentDownloads > 0 {
-		return s.MaxConcurrentDownloads
+	n := s.MaxConcurrentDownloads
+	if n <= 0 {
+		n = 3
 	}
-	return 3
+	if n > maxPerDownloadConnections {
+		return maxPerDownloadConnections
+	}
+	return n
 }

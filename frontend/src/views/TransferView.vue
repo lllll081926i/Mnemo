@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import {
   ListDownloads, ListUploads,
   PauseDownload, ResumeDownload, CancelDownload, ClearDownloads,
@@ -71,6 +71,11 @@ function playFinishSound() {
 }
 
 async function refresh() {
+  if (refreshInFlight) {
+    refreshQueued = true
+    return
+  }
+  refreshInFlight = true
   const seq = ++refreshSeq
   try {
     const [d, u] = await Promise.all([ListDownloads(), ListUploads()])
@@ -79,8 +84,16 @@ async function refresh() {
     uploads.value = u || []
   } catch { /* 静默 */ } finally {
     if (seq === refreshSeq) loading.value = false
+    refreshInFlight = false
+    if (refreshQueued) {
+      refreshQueued = false
+      scheduleRefresh(0)
+    }
   }
 }
+
+let refreshInFlight = false
+let refreshQueued = false
 
 function onTransferEvent(ev) {
   if (!ev || !ev.task) { scheduleRefresh(); return }
@@ -88,6 +101,15 @@ function onTransferEvent(ev) {
   if (ev.kind === 'download') {
     const list = downloads.value
     const idx = list.findIndex((x) => x.id === t.id)
+    if (t.status === 'removed') {
+      if (idx >= 0) list.splice(idx, 1)
+      if (selectedIds.value.has(t.id)) {
+        const s = new Set(selectedIds.value)
+        s.delete(t.id)
+        selectedIds.value = s
+      }
+      return
+    }
     if (idx >= 0) {
       const prev = list[idx]
       if (prev.status !== 'completed' && t.status === 'completed') {
@@ -104,14 +126,42 @@ function onTransferEvent(ev) {
       downloads.value.unshift(t)
     }
   } else if (ev.kind === 'upload') {
-    scheduleRefresh()
+    const list = uploads.value
+    const idx = list.findIndex((x) => x.UploadID === t.id)
+    if (idx < 0) {
+      // The enqueue event can arrive before the first list refresh. Fetch once
+      // for the new task, then keep subsequent progress event-driven.
+      scheduleRefresh(150)
+      return
+    }
+    const job = list[idx]
+    const previous = upStatus(job)
+    const next = {
+      ...(job.Upload || {}),
+      DownSize: Number.isFinite(t.downloaded) ? t.downloaded : (job.Upload?.DownSize || 0),
+      DownSpeed: Number.isFinite(t.speed) ? t.speed : (job.Upload?.DownSpeed || 0),
+      DownSpeedStr: t.speed ? formatSpeed(t.speed) : '',
+      DownProcess: Number.isFinite(t.progress) ? t.progress : (job.Upload?.DownProcess || 0),
+      DownState: t.status === 'completed' ? 'completed' : (t.status === 'failed' ? 'failed' : (t.status === 'paused' ? 'stopped' : t.status)),
+      IsCompleted: t.status === 'completed',
+      IsFailed: t.status === 'failed',
+      IsStop: t.status === 'paused' || t.status === 'canceled',
+      IsDowning: t.status === 'uploading' || t.status === 'queued',
+    }
+    // Keep the rich upload metadata returned by ListUploads while replacing
+    // only the progress fields carried by the lightweight event snapshot.
+    job.Upload = next
+    if (previous !== upStatus(job) && t.status === 'completed') scheduleRefresh(0)
   }
 }
 
 let refreshTimer = null
 function scheduleRefresh(delay = 400) {
   clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(refresh, delay)
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    refresh()
+  }, delay)
 }
 
 // 快速筛选（任务名/链接，120ms 防抖）
@@ -617,28 +667,74 @@ const migProgressText = (j) => j.totalBytes > 0
 
 // ---------- 生命周期 ----------
 let pollTimer = null
-const offFns = []
-onMounted(() => {
-  refresh()
-  refreshMigrateJobs()
+let offFns = []
+let viewActive = false
+
+function bindEvents() {
+  if (offFns.length) return
   const off1 = EventsOn('transfer:event', onTransferEvent)
   const off2 = EventsOn('migrate:progress', onMigrate)
   if (typeof off1 === 'function') offFns.push(off1)
   if (typeof off2 === 'function') offFns.push(off2)
-  pollTimer = setInterval(() => {
-    if (!document.hidden) {
-      refresh()
-      if (menu.value === 'migrate') refreshMigrateJobs()
-    }
-  }, 2500)
-  offlineTimer = setInterval(() => { if (!document.hidden && menu.value === 'offline') refreshOffline() }, 8000)
-})
-onBeforeUnmount(() => {
-  clearTimeout(refreshTimer)
-  clearTimeout(taskFilterTimer)
-  clearInterval(pollTimer)
-  clearInterval(offlineTimer)
+}
+
+function unbindEvents() {
   offFns.forEach((fn) => { try { fn() } catch { /* 忽略 */ } })
+  offFns = []
+}
+
+function stopPolling() {
+  clearTimeout(pollTimer)
+  clearTimeout(offlineTimer)
+  pollTimer = null
+  offlineTimer = null
+}
+
+function startPolling() {
+  stopPolling()
+  const pollTransfers = async () => {
+    if (!viewActive) return
+    if (!document.hidden && (activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate')) {
+      await refresh()
+      if (menu.value === 'migrate') await refreshMigrateJobs()
+    }
+    pollTimer = setTimeout(pollTransfers, activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate' ? 5000 : 15000)
+  }
+  const pollOffline = async () => {
+    if (!viewActive) return
+    if (!document.hidden && menu.value === 'offline') await refreshOffline()
+    offlineTimer = setTimeout(pollOffline, menu.value === 'offline' ? 8000 : 20000)
+  }
+  pollTimer = setTimeout(pollTransfers, 5000)
+  offlineTimer = setTimeout(pollOffline, 8000)
+}
+
+function activateView() {
+  if (viewActive) return
+  viewActive = true
+  bindEvents()
+  refresh()
+  refreshMigrateJobs()
+  startPolling()
+}
+
+function deactivateView() {
+  if (!viewActive) return
+  viewActive = false
+  stopPolling()
+  clearTimeout(refreshTimer)
+  refreshTimer = null
+  refreshQueued = false
+  refreshSeq++
+  unbindEvents()
+}
+
+onMounted(activateView)
+onActivated(activateView)
+onDeactivated(deactivateView)
+onBeforeUnmount(() => {
+  deactivateView()
+  clearTimeout(taskFilterTimer)
 })
 </script>
 

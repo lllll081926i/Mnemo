@@ -101,6 +101,7 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 			IdleConnTimeout:       90 * time.Second,
 		},
 	}
+	defer hc.CloseIdleConnections()
 
 	// Resolve size + range support.
 	total, acceptRanges, lastModified, err := probe(ctx, hc, opts, url)

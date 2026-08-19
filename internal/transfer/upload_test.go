@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"testing"
+	"time"
 
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
@@ -24,10 +25,10 @@ func TestNewUploadQueueRestoresPaused(t *testing.T) {
 			DriveID:       "pikpak_test",
 		},
 		Upload: model.UploadState{
-			DownState:  "uploading",
-			IsDowning:  true,
-			DownTime:   1,
-			UploadID:   "up1",
+			DownState: "uploading",
+			IsDowning: true,
+			DownTime:  1,
+			UploadID:  "up1",
 		},
 	}
 	_ = st.SaveUploadTask(j)
@@ -62,5 +63,47 @@ func TestUploadQueueResumeNotFound(t *testing.T) {
 	q := NewUploadQueue(st, nil)
 	if err := q.Resume("nonexistent"); err == nil {
 		t.Error("expected error resuming nonexistent job")
+	}
+}
+
+func TestUploadProgressPersistenceIsThrottled(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+
+	job := &model.UploadingUI{
+		UploadID: "up-progress",
+		Info:     model.UploadInfo{Name: "payload.bin", Size: 1024},
+		Upload:   model.UploadState{DownState: "uploading", IsDowning: true},
+	}
+	q.update(job)
+	job.Upload.DownSize = 256
+	q.update(job)
+
+	list, err := st.ListUploadTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Upload.DownSize != 0 {
+		t.Fatalf("progress update should remain in memory before checkpoint: %#v", list)
+	}
+
+	q.mu.Lock()
+	state := q.lastPersist[job.UploadID]
+	state.at = time.Now().Add(-transferProgressPersistInterval)
+	q.lastPersist[job.UploadID] = state
+	q.mu.Unlock()
+	q.update(job)
+
+	list, err = st.ListUploadTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Upload.DownSize != 256 {
+		t.Fatalf("checkpoint should persist latest progress: %#v", list)
 	}
 }

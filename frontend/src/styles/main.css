@@ -691,25 +691,38 @@ body {
 /* ============ 传输球（窗内悬浮，可拖动；固定尺寸，不随内容增长） ============ */
 .transfer-ball {
   position: fixed; bottom: 22px; right: 22px; z-index: 250;
-  display: flex; align-items: center; gap: 8px;
-  height: 34px; padding: 0 14px; max-width: 240px; overflow: hidden; white-space: nowrap;
-  background: var(--color-primary-strong); color: var(--text-inverse);
-  border-radius: var(--radius-full);
-  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
-  box-shadow: var(--shadow-modal); cursor: grab; user-select: none; touch-action: none;
-  transition: transform var(--motion-fast) var(--motion-spring), box-shadow var(--motion-fast) var(--motion-ease);
+  display: inline-flex; align-items: center; gap: 6px;
+  box-sizing: border-box; width: 164px; min-width: 164px; max-width: 164px;
+  height: 38px; padding: 0 10px; overflow: hidden; white-space: nowrap;
+  background: var(--bg-elevated); color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xs);
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow-md); cursor: grab; user-select: none; touch-action: none;
+  contain: layout paint style;
+  transition: box-shadow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
 .transfer-ball:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-modal), 0 0 12px color-mix(in srgb, var(--color-primary) 40%, transparent);
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-md);
 }
 .transfer-ball:active, .transfer-ball.dragging {
   cursor: grabbing;
-  transform: scale(1.05);
-  box-shadow: 0 12px 28px -4px rgb(0 0 0 / 0.28), 0 0 16px color-mix(in srgb, var(--color-primary) 60%, transparent);
+  box-shadow: var(--shadow-md);
 }
-.transfer-ball .pulse { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--text-inverse); animation: pulse 1.6s ease infinite; }
-@keyframes pulse { 50% { opacity: .35; } }
+.transfer-ball .pulse {
+  width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
+  background: var(--color-primary);
+}
+.transfer-stat {
+  display: inline-flex; align-items: center; gap: 3px;
+  width: 58px; min-width: 58px; max-width: 58px; min-height: 22px;
+  overflow: hidden; color: var(--text-primary);
+}
+.transfer-stat > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.transfer-stat.idle { opacity: .58; }
 
 /* ============ 预览弹窗 ============ */
 .preview-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 12px 20px 18px; background: var(--bg-base); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }

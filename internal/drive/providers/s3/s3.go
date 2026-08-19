@@ -961,13 +961,14 @@ func uploadMultipart(ctx context.Context, cc *conn, key string, f *os.File, ui *
 		if n == 0 {
 			break
 		}
-		part := append([]byte(nil), buf[:n]...)
 		out, err := cc.client.UploadPart(ctx, &s3.UploadPartInput{
-			Bucket:        aws.String(cc.bucket),
-			Key:           aws.String(key),
-			UploadId:      aws.String(uploadID),
-			PartNumber:    aws.Int32(partNumber),
-			Body:          bytes.NewReader(part),
+			Bucket:     aws.String(cc.bucket),
+			Key:        aws.String(key),
+			UploadId:   aws.String(uploadID),
+			PartNumber: aws.Int32(partNumber),
+			// UploadPart consumes the reader before it returns, so the reusable
+			// buffer can be passed directly without a second 16 MiB allocation.
+			Body:          bytes.NewReader(buf[:n]),
 			ContentLength: aws.Int64(int64(n)),
 		})
 		if err != nil {

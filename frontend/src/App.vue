@@ -82,36 +82,132 @@ function handleConfirmOk() {
   if (typeof cb === 'function') cb()
 }
 const ball = ref(null) // { down, up }
-const showTransferBall = computed(() => !!ball.value && getPrefs().transferBall !== false)
+const prefsRevision = ref(0)
+const showTransferBall = computed(() => {
+  // Preferences live in localStorage, so a small revision ref bridges changes
+  // made from SettingsView into this long-lived root component.
+  prefsRevision.value
+  return !!ball.value && getPrefs().transferBall !== false
+})
 const ballPos = ref(null) // { x, y } 拖动后的固定位置
 const isBallDragging = ref(false)
+const transferActivities = new Map()
+let ballUpdateTimer = null
+
+function onPrefsChanged() {
+  prefsRevision.value += 1
+}
+
+function scheduleTransferBallUpdate() {
+  if (ballUpdateTimer) return
+  ballUpdateTimer = setTimeout(() => {
+    ballUpdateTimer = null
+    let down = 0
+    let up = 0
+    let hasDown = false
+    let hasUp = false
+    transferActivities.forEach((activity) => {
+      if (activity.kind === 'download') {
+        hasDown = true
+        down += activity.speed
+      } else if (activity.kind === 'upload') {
+        hasUp = true
+        up += activity.speed
+      }
+    })
+    const next = hasDown || hasUp ? { down, up } : null
+    if (!next || !ball.value || next.down !== ball.value.down || next.up !== ball.value.up) ball.value = next
+  }, 300)
+}
+
+function updateTransferBall(ev) {
+  if (!ev || !ev.task || !ev.task.id) return
+  const task = ev.task
+  const active = task.status === 'downloading' || task.status === 'uploading' || task.status === 'queued'
+  const key = `${ev.kind}:${task.id}`
+  if (active) transferActivities.set(key, { kind: ev.kind, speed: Number(task.speed) || 0 })
+  else transferActivities.delete(key)
+  scheduleTransferBallUpdate()
+}
 
 function onBallPointerDown(e) {
+  if (e.button !== undefined && e.button !== 0) return
+  e.preventDefault()
   const el = e.currentTarget
   const rect = el.getBoundingClientRect()
   const startX = e.clientX, startY = e.clientY
   const offX = startX - rect.left, offY = startY - rect.top
   let moved = false
+  let frame = 0
+  let pending = null
+  let current = { x: rect.left, y: rect.top }
   isBallDragging.value = true
+
+  const applyPending = () => {
+    frame = 0
+    if (!pending) return
+    current = pending
+    pending = null
+    el.style.transform = `translate3d(${current.x - rect.left}px, ${current.y - rect.top}px, 0)`
+  }
+
   const onMove = (ev) => {
     const dx = ev.clientX - startX, dy = ev.clientY - startY
     if (!moved && Math.hypot(dx, dy) < 4) return
+    if (!moved) {
+      // Anchor the element once, then move it on the compositor instead of
+      // updating the Vue tree for every pointer event.
+      el.style.left = `${rect.left}px`
+      el.style.top = `${rect.top}px`
+      el.style.right = 'auto'
+      el.style.bottom = 'auto'
+    }
     moved = true
-    const x = Math.min(Math.max(ev.clientX - offX, 4), window.innerWidth - rect.width - 4)
-    const y = Math.min(Math.max(ev.clientY - offY, 52), window.innerHeight - rect.height - 4)
-    ballPos.value = { x, y }
+    const maxX = Math.max(4, window.innerWidth - rect.width - 4)
+    const maxY = Math.max(52, window.innerHeight - rect.height - 4)
+    pending = {
+      x: Math.min(Math.max(ev.clientX - offX, 4), maxX),
+      y: Math.min(Math.max(ev.clientY - offY, 52), maxY),
+    }
+    // Pointer events can arrive faster than Vue needs to render. Coalesce them
+    // into one update per frame so dragging does not cause a render storm.
+    if (!frame) frame = requestAnimationFrame(applyPending)
   }
   const cleanup = () => {
+    if (frame) cancelAnimationFrame(frame)
+    frame = 0
+    if (pending) {
+      current = pending
+      pending = null
+      el.style.transform = `translate3d(${current.x - rect.left}px, ${current.y - rect.top}px, 0)`
+    }
     isBallDragging.value = false
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onCancel)
+    try { el.releasePointerCapture?.(e.pointerId) } catch { /* pointer already released */ }
   }
   const onUp = () => {
     cleanup()
-    if (!moved) switchTab('transfer')
+    if (!moved) {
+      switchTab('transfer')
+      return
+    }
+    ballPos.value = { x: Math.round(current.x), y: Math.round(current.y) }
+    nextTick(() => {
+      if (!isBallDragging.value && el.isConnected) el.style.transform = ''
+    })
   }
-  const onCancel = cleanup
+  const onCancel = () => {
+    cleanup()
+    if (moved) {
+      ballPos.value = { x: Math.round(current.x), y: Math.round(current.y) }
+      nextTick(() => {
+        if (!isBallDragging.value && el.isConnected) el.style.transform = ''
+      })
+    }
+  }
+  try { el.setPointerCapture?.(e.pointerId) } catch { /* unsupported by older WebView */ }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
   window.addEventListener('pointercancel', onCancel)
@@ -256,6 +352,7 @@ onMounted(async () => {
     CheckUpdate().then((r) => { if (r && r.available) showUpdate.value = true }).catch(() => {})
   }, 3000)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('mnemo:prefs-changed', onPrefsChanged)
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => applyAppearance(curTheme.value)
   mq.addEventListener('change', onScheme)
@@ -265,29 +362,18 @@ onMounted(async () => {
     onEvent('share:history-error', (ev) => {
       toast(`分享已创建，但本地历史保存失败：${ev?.error || '未知错误'}`, 'warn')
     }),
-    onEvent('transfer:event', (ev) => {
-      if (!ev || !ev.task) return
-      const t = ev.task
-      if (ev.kind === 'download' && (t.status === 'downloading' || t.status === 'queued')) {
-        ball.value = { down: t.speed || 0, up: (ball.value && ball.value.up) || 0 }
-      } else if (ev.kind === 'upload' && (t.status === 'uploading' || t.status === 'queued')) {
-        ball.value = { down: (ball.value && ball.value.down) || 0, up: t.speed || 0 }
-      } else if (t.status === 'completed' || t.status === 'failed' || t.status === 'canceled') {
-        // 并发传输时仅清零当前方向速度，保留对侧；两方向均无活跃才隐藏
-        const cur = ball.value
-        if (!cur) return
-        const down = ev.kind === 'download' ? 0 : cur.down
-        const up = ev.kind === 'upload' ? 0 : cur.up
-        ball.value = (down || up) ? { down, up } : null
-      }
-    }),
+    onEvent('transfer:event', updateTransferBall),
   ]
   nextTick(updateGlider)
   window.addEventListener('resize', updateGlider)
   cleanupFns = () => {
     window.removeEventListener('resize', updateGlider)
     window.removeEventListener('keydown', onKey)
+    window.removeEventListener('mnemo:prefs-changed', onPrefsChanged)
     mq.removeEventListener('change', onScheme)
+    clearTimeout(ballUpdateTimer)
+    ballUpdateTimer = null
+    transferActivities.clear()
     offFns.forEach((fn) => { try { fn && fn() } catch { /* noop */ } })
   }
 })
@@ -387,8 +473,14 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         @pointerdown="onBallPointerDown"
       >
         <span class="pulse"></span>
-        <span v-if="ball && ball.down">↓ {{ formatSpeed(ball.down) }}</span>
-        <span v-if="ball && ball.up">↑ {{ formatSpeed(ball.up) }}</span>
+        <span class="transfer-stat" :class="{ idle: !(ball && ball.down) }">
+          <UiIcon name="download" :size="13" />
+          <span>{{ ball && ball.down ? formatSpeed(ball.down) : '—' }}</span>
+        </span>
+        <span class="transfer-stat" :class="{ idle: !(ball && ball.up) }">
+          <UiIcon name="upload" :size="13" />
+          <span>{{ ball && ball.up ? formatSpeed(ball.up) : '—' }}</span>
+        </span>
       </div>
     </transition>
 

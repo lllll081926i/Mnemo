@@ -18,18 +18,21 @@ import (
 
 // UploadQueue manages upload jobs for queue-mode providers.
 type UploadQueue struct {
-	store     *store.Store
-	mu        sync.Mutex
-	dirMu     sync.Mutex
-	jobs      map[string]*model.UploadingUI
-	dirIDs    map[string]string
-	onEvent   OnTaskEvent
-	ctx       context.Context // root context, canceled on Close
-	cancel    context.CancelFunc
-	sem       chan struct{} // global concurrency slot
-	cancels   map[string]context.CancelFunc
-	persistMu sync.Mutex
+	store       *store.Store
+	mu          sync.Mutex
+	dirMu       sync.Mutex
+	jobs        map[string]*model.UploadingUI
+	dirIDs      map[string]string
+	lastPersist map[string]progressPersistState
+	onEvent     OnTaskEvent
+	ctx         context.Context // root context, canceled on Close
+	cancel      context.CancelFunc
+	sem         chan struct{} // global concurrency slot
+	cancels     map[string]context.CancelFunc
+	persistMu   sync.Mutex
 }
+
+const maxUploadDirectoryCacheEntries = 1024
 
 // NewUploadQueue creates the upload queue and restores persisted jobs.
 func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
@@ -40,14 +43,15 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	q := &UploadQueue{
-		store:   st,
-		jobs:    map[string]*model.UploadingUI{},
-		dirIDs:  map[string]string{},
-		onEvent: onEvent,
-		ctx:     rootCtx,
-		cancel:  rootCancel,
-		sem:     make(chan struct{}, maxConc),
-		cancels: map[string]context.CancelFunc{},
+		store:       st,
+		jobs:        map[string]*model.UploadingUI{},
+		dirIDs:      map[string]string{},
+		lastPersist: map[string]progressPersistState{},
+		onEvent:     onEvent,
+		ctx:         rootCtx,
+		cancel:      rootCancel,
+		sem:         make(chan struct{}, maxConc),
+		cancels:     map[string]context.CancelFunc{},
 	}
 	// restore persisted tasks as paused (user must resume manually)
 	if list, err := st.ListUploadTasks(); err == nil {
@@ -88,10 +92,13 @@ func (q *UploadQueue) update(j *model.UploadingUI) {
 	q.mu.Lock()
 	q.jobs[j.UploadID] = j
 	snapshot := *j
+	shouldPersist := q.shouldPersistLocked(snapshot)
 	q.mu.Unlock()
-	q.persistMu.Lock()
-	_ = q.store.SaveUploadTask(&snapshot)
-	q.persistMu.Unlock()
+	if shouldPersist {
+		q.persistMu.Lock()
+		_ = q.store.SaveUploadTask(&snapshot)
+		q.persistMu.Unlock()
+	}
 	if q.onEvent != nil {
 		t := model.DownloadTask{
 			ID: snapshot.UploadID, Name: snapshot.Info.Name, Size: snapshot.Info.Size,
@@ -101,6 +108,18 @@ func (q *UploadQueue) update(j *model.UploadingUI) {
 		}
 		q.onEvent(TaskEvent{Kind: "upload", Task: t})
 	}
+}
+
+func (q *UploadQueue) shouldPersistLocked(job model.UploadingUI) bool {
+	now := time.Now()
+	status := uploadStatus(job.Upload)
+	previous, ok := q.lastPersist[job.UploadID]
+	terminal := job.Upload.IsCompleted || job.Upload.IsFailed || job.Upload.IsStop
+	if !ok || previous.status != status || terminal || now.Sub(previous.at) >= transferProgressPersistInterval {
+		q.lastPersist[job.UploadID] = progressPersistState{status: status, at: now}
+		return true
+	}
+	return false
 }
 
 func uploadStatus(u model.UploadState) string {
@@ -159,7 +178,7 @@ func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPa
 		Info: model.UploadInfo{
 			LocalFilePath: localPath, ParentFileID: parentID,
 			DriveID: driveID, Path: relative, Name: uploadLeaf(relative), Size: size,
-			SizeStr: model.FormatBytes(size),
+			SizeStr:        model.FormatBytes(size),
 			IsDir:          false,
 			ConflictPolicy: conflictPolicy,
 		},
@@ -242,6 +261,9 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 				return "", fmt.Errorf("创建远端目录 %q 未返回目录 id", segment)
 			}
 			found = result.FileID
+		}
+		if len(q.dirIDs) >= maxUploadDirectoryCacheEntries {
+			q.dirIDs = map[string]string{}
 		}
 		q.dirIDs[key] = found
 		current = found
@@ -343,7 +365,9 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 
 	// 上传中周期推送进度（handler 内只写字段，事件由这里泵出）
 	done := make(chan struct{})
+	progressStopped := make(chan struct{})
 	go func() {
+		defer close(progressStopped)
 		t := time.NewTicker(500 * time.Millisecond)
 		defer t.Stop()
 		for {
@@ -357,6 +381,7 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	}()
 	handlerErr := handler(ctx, j)
 	close(done)
+	<-progressStopped
 	q.mu.Lock()
 	wasStopped := j.Upload.IsStop || ctx.Err() != nil
 	q.mu.Unlock()
@@ -453,9 +478,13 @@ func (q *UploadQueue) ClearCompleted() {
 	for id, j := range q.jobs {
 		if j.Upload.IsCompleted || j.Upload.IsFailed || j.Upload.IsStop {
 			delete(q.jobs, id)
+			delete(q.lastPersist, id)
 		}
 	}
 	q.mu.Unlock()
+	q.dirMu.Lock()
+	q.dirIDs = map[string]string{}
+	q.dirMu.Unlock()
 	q.persistMu.Lock()
 	_ = q.store.ClearUploadTasks()
 	q.persistMu.Unlock()

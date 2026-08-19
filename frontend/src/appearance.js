@@ -50,6 +50,11 @@ export function setPref(key, value) {
   const p = getPrefs()
   p[key] = value
   localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+  // localStorage is not reactive. Let mounted views update immediately when a
+  // preference is changed from the settings page.
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mnemo:prefs-changed', { detail: { key, value } }))
+  }
 }
 
 // ---------- 当前网盘（跨应用重启恢复，不包含任何凭据） ----------

@@ -27,21 +27,34 @@ type TaskEvent struct {
 	Task model.DownloadTask `json:"task"`
 }
 
+// Progress remains live in the UI, but task files only need a crash-recovery
+// checkpoint every few seconds. Writing the whole JSON task list for every
+// network tick creates unnecessary disk I/O and short-lived allocations.
+const transferProgressPersistInterval = 5 * time.Second
+
+type progressPersistState struct {
+	status string
+	at     time.Time
+}
+
 // Manager owns the active download queue.
 type Manager struct {
-	store        *store.Store
-	mu           sync.Mutex
-	persistMu    sync.Mutex
-	tasks        map[string]*model.DownloadTask
-	cancels      map[string]context.CancelFunc
-	removed      map[string]bool
-	onEvent      OnTaskEvent
-	dir          string
-	stop         chan struct{}
-	ctx          context.Context // root context for all downloads, canceled on Shutdown
-	cancel       context.CancelFunc
-	sem          chan struct{} // concurrency semaphore (cap = MaxConcurrentDownloads)
-	shutdownOnce sync.Once
+	store              *store.Store
+	mu                 sync.Mutex
+	persistMu          sync.Mutex
+	tasks              map[string]*model.DownloadTask
+	cancels            map[string]context.CancelFunc
+	removed            map[string]bool
+	lastPersist        map[string]progressPersistState
+	onEvent            OnTaskEvent
+	dir                string
+	stop               chan struct{}
+	ctx                context.Context // root context for all downloads, canceled on Shutdown
+	cancel             context.CancelFunc
+	maxConcurrent      int
+	activeConcurrent   int
+	concurrencyChanged chan struct{}
+	shutdownOnce       sync.Once
 }
 
 // NewManager creates a download manager.
@@ -57,16 +70,18 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		store:   st,
-		tasks:   map[string]*model.DownloadTask{},
-		cancels: map[string]context.CancelFunc{},
-		removed: map[string]bool{},
-		onEvent: onEvent,
-		dir:     downloadDir,
-		stop:    make(chan struct{}),
-		ctx:     rootCtx,
-		sem:     make(chan struct{}, maxConc),
-		cancel:  rootCancel,
+		store:              st,
+		tasks:              map[string]*model.DownloadTask{},
+		cancels:            map[string]context.CancelFunc{},
+		removed:            map[string]bool{},
+		lastPersist:        map[string]progressPersistState{},
+		onEvent:            onEvent,
+		dir:                downloadDir,
+		stop:               make(chan struct{}),
+		ctx:                rootCtx,
+		maxConcurrent:      maxConc,
+		concurrencyChanged: make(chan struct{}),
+		cancel:             rootCancel,
 	}
 	// restore persisted tasks
 	m.loadPersisted()
@@ -92,17 +107,51 @@ func (m *Manager) SetDir(dir string) {
 	m.mu.Unlock()
 }
 
-// SetConcurrency rebuilds the semaphore capacity. In-flight tasks are not
-// interrupted; only future starts are affected.
+// SetConcurrency changes the queue limit without replacing a semaphore under
+// active work. Existing downloads keep their slot and queued work is woken to
+// re-check the new limit, so settings updates cannot temporarily double the
+// number of active transfers.
 func (m *Manager) SetConcurrency(n int) {
 	if n <= 0 {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// drain old sem and replace; in-flight acquirers will release into the old
-	// channel they captured, so we only swap the reference.
-	m.sem = make(chan struct{}, n)
+	m.maxConcurrent = n
+	m.notifyConcurrencyLocked()
+}
+
+func (m *Manager) acquireSlot(ctx context.Context) error {
+	for {
+		m.mu.Lock()
+		if m.activeConcurrent < m.maxConcurrent {
+			m.activeConcurrent++
+			m.mu.Unlock()
+			return nil
+		}
+		changed := m.concurrencyChanged
+		m.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+func (m *Manager) releaseSlot() {
+	m.mu.Lock()
+	if m.activeConcurrent > 0 {
+		m.activeConcurrent--
+	}
+	m.notifyConcurrencyLocked()
+	m.mu.Unlock()
+}
+
+func (m *Manager) notifyConcurrencyLocked() {
+	close(m.concurrencyChanged)
+	m.concurrencyChanged = make(chan struct{})
 }
 
 func (m *Manager) loadPersisted() {
@@ -148,16 +197,30 @@ func (m *Manager) update(t *model.DownloadTask) {
 	}
 	m.tasks[t.ID] = t
 	snapshot := *t
+	shouldPersist := m.shouldPersistLocked(snapshot)
 	event := m.onEvent
 	m.mu.Unlock()
-	// Store methods read-modify-write one JSON file. Serialize the whole
-	// operation so concurrent task progress cannot lose another task's update.
-	m.persistMu.Lock()
-	_ = m.store.SaveDownloadTask(&snapshot)
-	m.persistMu.Unlock()
+	if shouldPersist {
+		// Store methods read-modify-write one JSON file. Serialize the whole
+		// operation so concurrent task progress cannot lose another task's update.
+		m.persistMu.Lock()
+		_ = m.store.SaveDownloadTask(&snapshot)
+		m.persistMu.Unlock()
+	}
 	if event != nil {
 		event(TaskEvent{Kind: "download", Task: snapshot})
 	}
+}
+
+func (m *Manager) shouldPersistLocked(task model.DownloadTask) bool {
+	now := time.Now()
+	previous, ok := m.lastPersist[task.ID]
+	terminal := task.Status == "completed" || task.Status == "failed" || task.Status == "canceled" || task.Status == "paused"
+	if !ok || previous.status != task.Status || terminal || now.Sub(previous.at) >= transferProgressPersistInterval {
+		m.lastPersist[task.ID] = progressPersistState{status: task.Status, at: now}
+		return true
+	}
+	return false
 }
 
 // AddDownload enqueues a download from a drive file.
@@ -203,23 +266,21 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
 	// wait for a concurrency slot before doing any work
-	m.mu.Lock()
-	sem := m.sem
-	m.mu.Unlock()
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	case <-m.ctx.Done():
+	if err := m.acquireSlot(m.ctx); err != nil {
 		// app shutting down before the task could start
 		m.mu.Lock()
-		if !m.removed[t.ID] && m.tasks[t.ID] == t {
+		shouldPause := !m.removed[t.ID] && m.tasks[t.ID] == t
+		if shouldPause {
 			t.Status = "paused"
 			t.Updated = time.Now().Unix()
 		}
 		m.mu.Unlock()
-		m.update(t)
+		if shouldPause {
+			m.update(t)
+		}
 		return
 	}
+	defer m.releaseSlot()
 
 	m.mu.Lock()
 	if m.removed[t.ID] || m.tasks[t.ID] != t || t.Status != "queued" || m.ctx.Err() != nil {
@@ -443,12 +504,19 @@ func (m *Manager) Cancel(id string) {
 func (m *Manager) Remove(id string) {
 	m.mu.Lock()
 	m.removed[id] = true
+	delete(m.lastPersist, id)
 	if cancel, ok := m.cancels[id]; ok {
 		cancel()
 	}
 	t, ok := m.tasks[id]
 	_, active := m.cancels[id]
 	delete(m.tasks, id)
+	// A waiting task cannot revive itself once it has been removed from tasks.
+	// Keep the tombstone only for an actively running task, whose progress
+	// callback may still be in flight until runDownload exits.
+	if !active {
+		delete(m.removed, id)
+	}
 	m.mu.Unlock()
 	_ = m.store.DeleteDownloadTask(id)
 	if ok && !active {
@@ -502,6 +570,7 @@ func (m *Manager) ClearCompleted() {
 	for id, t := range m.tasks {
 		if t.Status == "completed" || t.Status == "canceled" || t.Status == "failed" {
 			delete(m.tasks, id)
+			delete(m.lastPersist, id)
 		}
 	}
 	m.mu.Unlock()
@@ -511,7 +580,7 @@ func (m *Manager) ClearCompleted() {
 // Shutdown stops background work.
 func (m *Manager) Shutdown() {
 	m.shutdownOnce.Do(func() {
-		// cancel the root context so goroutines waiting on m.sem or m.ctx.Done()
+		// cancel the root context so goroutines waiting for a slot or in flight
 		// unblock immediately, in addition to any in-flight task contexts.
 		if m.cancel != nil {
 			m.cancel()
