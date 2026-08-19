@@ -343,6 +343,13 @@ function onKey(e) {
   if (map[e.code]) { switchTab(map[e.code]); e.preventDefault() }
 }
 
+function preventNativeContextMenu(e) {
+  // Keep the native menu for text editing, but never expose the browser menu in the app shell.
+  const target = e.target
+  if (target && target.closest && target.closest('input, textarea, select, [contenteditable="true"]')) return
+  e.preventDefault()
+}
+
 function onQuickAction(action) {
   if (action === 'toggle-theme') quickToggleTheme()
   else if (action === 'refresh') {
@@ -359,6 +366,7 @@ function onQuickAction(action) {
 
 onMounted(async () => {
 	info('app', 'frontend mounted')
+	window.addEventListener('contextmenu', preventNativeContextMenu, true)
 	const removeGlobalErrorLogging = installGlobalErrorLogging()
 	listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
   refresh()
@@ -390,6 +398,7 @@ onMounted(async () => {
 		removeGlobalErrorLogging()
     window.removeEventListener('resize', updateGlider)
     window.removeEventListener('keydown', onKey)
+    window.removeEventListener('contextmenu', preventNativeContextMenu, true)
     window.removeEventListener('mnemo:prefs-changed', onPrefsChanged)
     mq.removeEventListener('change', onScheme)
     clearTimeout(ballUpdateTimer)
