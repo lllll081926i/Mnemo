@@ -44,9 +44,9 @@ function onItemPointerDown(e, acc) {
   let dragging = false
   let ghost = null
   let rafId = 0
-  let listTop = 0
-  let pitch = 0
-  let count = 0
+  let heights = null   // Map<user_id, height>，拖动起点捕获的各项静止高度
+  let gapPx = 0
+  let top0 = 0         // 首项静止 top
   let px = e.clientX
   let py = e.clientY
 
@@ -57,6 +57,37 @@ function onItemPointerDown(e, acc) {
     }
   }
 
+  // 槽位 = 指针落入哪一项的区间；边界由捕获的各项高度按当前顺序累加，
+  // 支持各项高度不一致（展开态有无用量条），且与动画中的 DOM 无关
+  const slotAt = (y) => {
+    const list = liveList.value
+    let top = top0
+    for (let i = 0; i < list.length; i++) {
+      const h = heights.get(list[i].user_id) || 0
+      if (y < top + h + gapPx) return i
+      top += h + gapPx
+    }
+    return list.length - 1
+  }
+
+  // 拖动起点：冻结一切展开/收起过渡并等一帧让布局静止，再捕获几何与克隆
+  const startDrag = () => {
+    if (!dragging) return
+    const items = [...listEl.querySelectorAll('.rail-item')]
+    if (!items.length) return
+    heights = new Map()
+    items.forEach((el, i) => heights.set(liveList.value[i].user_id, el.getBoundingClientRect().height))
+    gapPx = parseFloat(getComputedStyle(listEl).rowGap) || 0
+    top0 = items[0].getBoundingClientRect().top
+    const r = itemEl.getBoundingClientRect()
+    ghost = itemEl.cloneNode(true)
+    ghost.className = itemEl.className.replace('dragging', '').trim() + ' rail-ghost'
+    ghost.style.width = r.width + 'px'
+    ghost.style.left = r.left + 'px'
+    ghost.style.top = r.top + 'px'
+    listEl.closest('.account-rail').appendChild(ghost)
+  }
+
   const onMove = (ev) => {
     px = ev.clientX
     py = ev.clientY
@@ -65,27 +96,18 @@ function onItemPointerDown(e, acc) {
       dragging = true
       dragActive = true
       suppressClick = true
+      clearTimeout(enterTimer)
+      clearTimeout(leaveTimer)
       liveList.value = [...orderedAccounts.value]
       dragIdx.value = liveList.value.findIndex((a) => a.user_id === acc.user_id)
-      count = liveList.value.length
-      // 静态几何：列表内容起点与每项步距，拖动期间不再反复量 DOM
-      const r = itemEl.getBoundingClientRect()
-      const gap = parseFloat(getComputedStyle(listEl).rowGap) || 0
-      pitch = r.height + gap
-      listTop = r.top - dragIdx.value * pitch
-      // 幽灵克隆跟随指针（挂进 aside 以继承展开态样式），原项隐形占位
-      ghost = itemEl.cloneNode(true)
-      ghost.className = itemEl.className.replace('dragging', '').trim() + ' rail-ghost'
-      ghost.style.width = r.width + 'px'
-      ghost.style.left = r.left + 'px'
-      ghost.style.top = r.top + 'px'
-      listEl.closest('.account-rail').appendChild(ghost)
+      // 冻结栏宽/项高过渡（进行中的展开动画立即到位），下一帧捕获静止几何
+      listEl.closest('.account-rail').classList.add('rail-frozen')
       document.body.classList.add('rail-drag-active')
+      requestAnimationFrame(startDrag)
     }
     if (!rafId) rafId = requestAnimationFrame(moveGhost)
-    // 槽位 = 指针所在的项区间，纯位置函数不依赖当前顺序，不会来回振荡
-    let target = Math.floor((py - listTop) / pitch)
-    target = Math.max(0, Math.min(count - 1, target))
+    if (!heights) return
+    const target = slotAt(py)
     const cur = dragIdx.value
     if (target !== cur && cur >= 0 && liveList.value) {
       const list = [...liveList.value]
@@ -106,11 +128,13 @@ function onItemPointerDown(e, acc) {
       setTimeout(() => { suppressClick = false }, 0)
     }
     if (ghost) { ghost.remove(); ghost = null }
+    listEl.closest('.account-rail')?.classList.remove('rail-frozen')
     document.body.classList.remove('rail-drag-active')
     dragActive = false
     liveList.value = null
     dragIdx.value = -1
     dragging = false
+    heights = null
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)

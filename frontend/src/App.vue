@@ -17,7 +17,7 @@ import ConfirmModal from './components/ConfirmModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import { CheckUpdate } from './api'
 import { debug, error, errorText, info, installGlobalErrorLogging } from './logger'
-import { WindowHide, WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
+import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -75,21 +75,13 @@ function windowToggleMaximise() {
     windowMaximized.value = !windowMaximized.value
   } catch { /* browser preview */ }
 }
-async function windowQuit() {
-  // 「关闭不退出」（默认开）：隐藏到托盘；关闭该选项才真正退出。
-  // 读取设置失败也按默认隐藏处理，保证关闭按钮永远有明确行为。
-  let hide = true
+function windowQuit() {
+  // Wails routes Quit through OnBeforeClose. The backend is the single source
+  // of truth for deciding whether to hide to tray or terminate the process.
   try {
-    const s = await GetSettings()
-    hide = s?.closeToTray !== false
+    Quit()
   } catch (err) {
-    error('window', 'failed to load close behavior', { error: errorText(err) })
-  }
-  try {
-    if (hide) WindowHide()
-    else Quit()
-  } catch (err) {
-    error('window', 'window close action failed', { action: hide ? 'hide' : 'quit', error: errorText(err) })
+    error('window', 'window close request failed', { error: errorText(err) })
     window.close?.()
   }
 }
