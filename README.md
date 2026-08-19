@@ -16,11 +16,11 @@ Mnemo 是一个基于 Go + Wails 的跨平台多网盘桌面文件管理器。�
 
 | 平台 | 架构 | 发布产物 |
 | --- | --- | --- |
-| Windows | x64、arm64 | 安装程序 `.exe`、压缩包 `.zip` |
+| Windows | x64、arm64 | 安装程序 `.exe` |
 | Linux | x64、arm64 | Debian 包 `.deb`、压缩包 `.tar.gz` |
 | macOS | Apple Silicon（M 系列） | 磁盘映像 `.dmg`、压缩包 `.tar.gz` |
 
-安装后的产品文件名固定为：Windows `Mnemo.exe`、Linux `Mnemo`、macOS `Mnemo.app`。发布文件只包含产品名和平台/架构标识，不在文件名中写入版本号，例如 `Mnemo-windows-x64-Setup.exe`；版本号只用于 Git tag、更新检查和安装器元数据。
+安装后的产品文件名固定为：Windows `Mnemo.exe`、Linux `Mnemo`、macOS `Mnemo.app`。Windows 只提供安装程序，不提供 ZIP 便携版；Linux/macOS 同时提供对应压缩包。发布文件只包含产品名和平台/架构标识，不在文件名中写入版本号，例如 `Mnemo-windows-x64-Setup.exe`；版本号只用于 Git tag、更新检查和安装器元数据。
 
 Windows 需要 WebView2 Runtime；Linux 需要发行版提供的 GTK/WebKit 运行库；macOS 使用系统 WebKit。各平台均不需要额外安装 mpv。
 

@@ -100,26 +100,14 @@ jobs:
           }
           EOF
 
-      - name: Package Windows installer and archive
+      - name: Package Windows installer
         if: matrix.kind == 'windows'
         shell: bash
         run: |
           set -euo pipefail
-          choco install 7zip innosetup -y --no-progress
-          export PATH="/c/Program Files/7-Zip:/c/Program Files (x86)/Inno Setup 6:$PATH"
+          choco install innosetup -y --no-progress
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss
-          staging="$(mktemp -d)"
-          cp -a build/bin/Mnemo.exe "$staging/Mnemo.exe"
-          if [[ -f build/bin/data/secrets.json ]]; then
-            mkdir -p "$staging/data"
-            cp -a build/bin/data/secrets.json "$staging/data/secrets.json"
-          fi
-          zip_path="$PWD/${{ matrix.artifact }}.zip"
-          (
-            cd "$staging"
-            7z a "$zip_path" .
-          )
 
       - name: Package Linux installer and archive
         if: matrix.kind == 'linux'
@@ -175,7 +163,6 @@ jobs:
         with:
           name: ${{ matrix.artifact }}-${{ github.ref_name }}
           path: |
-            ${{ matrix.artifact }}.zip
             ${{ matrix.artifact }}.deb
             ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.tar.gz

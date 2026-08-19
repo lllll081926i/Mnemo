@@ -20,30 +20,36 @@ import (
 )
 
 const (
-	repoOwner  = "lllll081926i"
-	repoName   = "mnemo-go"
+	repoOwner   = "lllll081926i"
+	repoName    = "mnemo-go"
 	apiReleases = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
 )
 
 // Info describes an available update.
 type Info struct {
-	Version    string `json:"version"`     // e.g. "v0.1.1" (tag name)
-	URL        string `json:"url"`         // browser_download_url for this platform
-	Size       int64  `json:"size"`        // asset size in bytes
-	SHA256     string `json:"sha256"`      // expected checksum (from SHA256SUMS.txt)
-	ReleaseURL string `json:"releaseUrl"`  // html_url of the release
-	Notes      string `json:"notes"`       // release body (unused in UI but available)
+	Version    string `json:"version"`    // e.g. "v0.1.1" (tag name)
+	URL        string `json:"url"`        // browser_download_url for this platform
+	Size       int64  `json:"size"`       // asset size in bytes
+	SHA256     string `json:"sha256"`     // expected checksum (from SHA256SUMS.txt)
+	ReleaseURL string `json:"releaseUrl"` // html_url of the release
+	Notes      string `json:"notes"`      // release body (unused in UI but available)
 }
 
 // assetSuffix returns the download asset filename suffix for the current platform.
 func assetSuffix() string {
 	switch runtime.GOOS {
 	case "windows":
-		return "windows"
+		if runtime.GOARCH == "arm64" {
+			return "windows-arm64"
+		}
+		return "windows-x64"
 	case "darwin":
-		return "macos"
+		return "macos-arm64"
 	default:
-		return "linux"
+		if runtime.GOARCH == "arm64" {
+			return "linux-arm64"
+		}
+		return "linux-x64"
 	}
 }
 func currentVersion() string {
@@ -67,10 +73,10 @@ func Check(ctx context.Context) (*Info, error) {
 		return nil, fmt.Errorf("github api: %s", resp.Status)
 	}
 	var rel struct {
-		TagName     string `json:"tag_name"`
-		HTMLURL     string `json:"html_url"`
-		Body        string `json:"body"`
-		Assets      []struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+		Body    string `json:"body"`
+		Assets  []struct {
 			Name               string `json:"name"`
 			BrowserDownloadURL string `json:"browser_download_url"`
 			Size               int64  `json:"size"`
@@ -83,20 +89,65 @@ func Check(ctx context.Context) (*Info, error) {
 		return nil, nil
 	}
 	suffix := assetSuffix()
-	// prefer the Inno Setup installer on Windows
+	checksums := ""
+	for _, a := range rel.Assets {
+		if a.Name == "SHA256SUMS.txt" {
+			checksums = a.BrowserDownloadURL
+			break
+		}
+	}
+	shaByName := map[string]string{}
+	if checksums != "" {
+		values, checksumErr := fetchChecksums(ctx, checksums)
+		if checksumErr != nil { return nil, fmt.Errorf("fetch release checksums: %w", checksumErr) }
+		shaByName = values
+	}
+	makeInfo := func(name, downloadURL string, size int64) *Info {
+		if shaByName[name] == "" { return nil }
+		return &Info{Version: rel.TagName, URL: downloadURL, Size: size, SHA256: shaByName[name], ReleaseURL: rel.HTMLURL, Notes: rel.Body}
+	}
+	// Windows releases intentionally provide only the native installer.
 	if runtime.GOOS == "windows" {
 		for _, a := range rel.Assets {
 			if strings.Contains(a.Name, suffix) && strings.HasSuffix(a.Name, "-Setup.exe") {
-				return &Info{Version: rel.TagName, URL: a.BrowserDownloadURL, Size: a.Size, ReleaseURL: rel.HTMLURL, Notes: rel.Body}, nil
+				if info := makeInfo(a.Name, a.BrowserDownloadURL, a.Size); info != nil { return info, nil }
 			}
 		}
+		return nil, nil
 	}
 	for _, a := range rel.Assets {
-		if strings.Contains(a.Name, suffix) {
-			return &Info{Version: rel.TagName, URL: a.BrowserDownloadURL, Size: a.Size, ReleaseURL: rel.HTMLURL, Notes: rel.Body}, nil
+		if strings.Contains(a.Name, suffix) && (strings.HasSuffix(a.Name, ".tar.gz") || strings.HasSuffix(a.Name, ".deb")) {
+			if info := makeInfo(a.Name, a.BrowserDownloadURL, a.Size); info != nil { return info, nil }
 		}
 	}
 	return nil, nil
+}
+
+func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checksum download: %s", resp.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && len(fields[0]) == 64 {
+			result[fields[len(fields)-1]] = strings.ToLower(fields[0])
+		}
+	}
+	return result, nil
 }
 
 // Progress is emitted during download.
@@ -159,7 +210,6 @@ func Download(ctx context.Context, url, dest string, onProgress func(Progress)) 
 	if err := out.Close(); err != nil {
 		return "", err
 	}
-	// verify checksum if sha256 file is available (optional, best-effort)
 	return dest, nil
 }
 
@@ -192,6 +242,17 @@ func Apply(installerPath string) error {
 	default:
 		return applyUnix(installerPath)
 	}
+}
+
+// IsDownloadPath accepts only files created beneath the app's update cache.
+func IsDownloadPath(dataDir, path string) bool {
+	root, rootErr := filepath.Abs(DownloadDir(dataDir))
+	target, targetErr := filepath.Abs(path)
+	if rootErr != nil || targetErr != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, target)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // DownloadDir returns a writable temp directory for the update download.
