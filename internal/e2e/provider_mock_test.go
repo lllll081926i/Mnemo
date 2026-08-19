@@ -94,6 +94,7 @@ func TestPikPakApiCaptchaRetry(t *testing.T) {
 }
 
 func TestPikPakLoginStopsWhenCaptchaInitFails(t *testing.T) {
+	t.Cleanup(pikpak.ResetPikPakLoginCooldown)
 	var signinCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/shield/captcha/init" {
@@ -119,7 +120,8 @@ func TestPikPakLoginStopsWhenCaptchaInitFails(t *testing.T) {
 		"username": "login@example.com",
 		"password": "password",
 	}})
-	if err == nil || !strings.Contains(err.Error(), "等待 30 秒") {
+	var rateErr *pikpak.PikPakRateLimitError
+	if err == nil || !errors.As(err, &rateErr) || rateErr.RetryAfterSeconds < 30 {
 		t.Fatalf("login error = %v, want explicit cooldown", err)
 	}
 	if signinCalls != 0 {
@@ -267,7 +269,7 @@ func TestPikPakLoginUsesConfiguredCaptchaRedirectURI(t *testing.T) {
 	}
 }
 
-func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
+func TestPikPakLoginDoesNotChainVerifiedCaptcha(t *testing.T) {
 	var initCalls, signinCalls int
 	var previousTokens []string
 	var redirectURIs []string
@@ -301,8 +303,8 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(response)
 		case "/v1/auth/signin":
 			signinCalls++
-			if got := r.Header.Get("X-Captcha-Token"); got != "chain-3" {
-				t.Errorf("X-Captcha-Token = %q", got)
+			if got := r.Header.Get("X-Captcha-Token"); got != "verified-token" {
+				t.Errorf("X-Captcha-Token = %q, want verified-token", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"access_token":  "access-login",
@@ -337,17 +339,11 @@ func TestPikPakLoginChainsVerifiedCaptcha(t *testing.T) {
 	if tok == nil || tok.AccessToken != "access-login" {
 		t.Fatalf("token = %#v", tok)
 	}
-	if initCalls != 3 || signinCalls != 1 {
-		t.Fatalf("captcha/signin calls = %d/%d", initCalls, signinCalls)
+	if initCalls != 0 || signinCalls != 1 {
+		t.Fatalf("captcha/signin calls = %d/%d, want 0/1", initCalls, signinCalls)
 	}
-	wantPrevious := []string{"verified-token", "chain-1", "chain-2"}
-	if strings.Join(previousTokens, ",") != strings.Join(wantPrevious, ",") {
-		t.Fatalf("previous tokens = %v, want %v", previousTokens, wantPrevious)
-	}
-	for i, got := range redirectURIs {
-		if got != callbackURI {
-			t.Fatalf("captcha redirect_uri[%d] = %q, want %q", i, got, callbackURI)
-		}
+	if len(previousTokens) != 0 || len(redirectURIs) != 0 {
+		t.Fatalf("unexpected captcha init requests: previous=%v redirects=%v", previousTokens, redirectURIs)
 	}
 }
 

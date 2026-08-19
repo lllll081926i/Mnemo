@@ -527,12 +527,12 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		},
 	})
 	if err != nil {
-		logging.Warn("provider login failed", "provider", provider, "error", err, "duration", logging.Duration(started))
 		var challenge *pikpak.CaptchaRequiredError
 		if captchaSession != nil && errors.As(err, &challenge) {
-			logging.Info("provider login requires captcha", "provider", provider, "session_id", captchaSession.ID)
+			logging.Info("provider login challenge required", "provider", provider, "session_id", captchaSession.ID)
 			return nil, fmt.Errorf("%w\nsession=%s", err, captchaSession.ID)
 		}
+		logging.Warn("provider login failed", "provider", provider, "error", err, "duration", logging.Duration(started))
 		if captchaSession != nil {
 			captcha.Close()
 		}

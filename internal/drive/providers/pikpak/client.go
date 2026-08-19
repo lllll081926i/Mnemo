@@ -226,9 +226,9 @@ type pikpakCaptchaError struct{ reason string }
 func (e *pikpakCaptchaError) Error() string {
 	switch e.reason {
 	case "captcha_invalid", "captcha_required":
-		return "PikPak 验证失败，请重试登录"
+		return "PikPak captcha validation failed; retry sign-in"
 	default:
-		return "PikPak 验证失败"
+		return "PikPak captcha validation failed"
 	}
 }
 
@@ -288,6 +288,15 @@ func apiURL(path string) string {
 
 const pikpakMinRateLimitSeconds = 30
 
+// PikPakAccessProhibitedError marks a provider-side risk-control block. It is
+// deliberately distinct from ordinary authentication failures so callers do
+// not immediately repeat the same request and extend the block.
+type PikPakAccessProhibitedError struct{}
+
+func (e *PikPakAccessProhibitedError) Error() string {
+	return "PikPak access was prohibited by provider risk control; retry later"
+}
+
 // PikPakRateLimitError tells the UI how long the provider asks the user to
 // wait before trying the request again. The server has returned both 429 and
 // provider-specific "too many" payloads, so status alone is not sufficient.
@@ -300,7 +309,7 @@ func (e *PikPakRateLimitError) Error() string {
 	if seconds < pikpakMinRateLimitSeconds {
 		seconds = pikpakMinRateLimitSeconds
 	}
-	return fmt.Sprintf("PikPak 请求过于频繁，请等待 %d 秒后再试", seconds)
+	return fmt.Sprintf("PikPak login requests are rate limited; retry after %d seconds", seconds)
 }
 
 func parseAPIError(data []byte, status int) error {
@@ -319,10 +328,10 @@ func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 		RetryAfterSecond json.RawMessage `json:"retry_after_seconds"`
 	}
 	_ = json.Unmarshal(data, &e)
-	detail := strings.ToLower(strings.Join([]string{e.Error, e.ErrorDescription, e.Message, e.Reason}, " "))
+	detail := strings.ToLower(strings.Join([]string{e.Error, e.ErrorDescription, e.Message, e.Reason, string(data)}, " "))
 	if status == http.StatusTooManyRequests || e.Code == http.StatusTooManyRequests || e.ErrorCode == http.StatusTooManyRequests ||
 		strings.Contains(detail, "too_many") || strings.Contains(detail, "too many") ||
-		strings.Contains(detail, "too_frequent") || strings.Contains(detail, "request_frequency") ||
+		strings.Contains(detail, "too_frequent") || strings.Contains(detail, "too frequent") || strings.Contains(detail, "request_frequency") ||
 		strings.Contains(detail, "too_fluent") || strings.Contains(detail, "too fluent") || strings.Contains(detail, "too fast") ||
 		strings.Contains(detail, "rate_limit") || strings.Contains(detail, "rate limited") ||
 		strings.Contains(detail, "请求频繁") || strings.Contains(detail, "操作频繁") {
@@ -337,10 +346,14 @@ func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 		}
 		return &PikPakRateLimitError{RetryAfterSeconds: seconds}
 	}
+	if strings.Contains(detail, "accessprohibited") || strings.Contains(detail, "access_prohibited") ||
+		strings.Contains(detail, "access prohibited") {
+		return &PikPakAccessProhibitedError{}
+	}
 	// 常见错误友好化（对齐旧版 parsePikPakError）
 	switch strings.ToLower(e.Error) {
 	case "invalid_account_or_password":
-		return errors.New("PikPak 账号或密码错误")
+		return errors.New("PikPak invalid account or password")
 	case "captcha_invalid", "captcha_required":
 		return &pikpakCaptchaError{reason: strings.ToLower(e.Error)}
 	}

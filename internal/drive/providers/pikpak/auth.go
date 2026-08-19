@@ -62,6 +62,65 @@ var apiCaptchaCache = struct {
 	items map[string]apiCaptchaCacheEntry
 }{items: make(map[string]apiCaptchaCacheEntry)}
 
+// Login requests share one provider/IP risk budget. Once PikPak reports a
+// frequency or access-prohibited block, pause all login attempts briefly,
+// including attempts for a different account.
+var pikpakLoginCooldown struct {
+	sync.Mutex
+	until time.Time
+}
+
+func pikpakLoginCooldownError() error {
+	pikpakLoginCooldown.Lock()
+	defer pikpakLoginCooldown.Unlock()
+	remaining := time.Until(pikpakLoginCooldown.until)
+	if remaining <= 0 {
+		return nil
+	}
+	seconds := int(remaining / time.Second)
+	if remaining%time.Second != 0 {
+		seconds++
+	}
+	if seconds < pikpakMinRateLimitSeconds {
+		seconds = pikpakMinRateLimitSeconds
+	}
+	return &PikPakRateLimitError{RetryAfterSeconds: seconds}
+}
+
+func rememberPikPakLoginCooldown(err error) {
+	var rate *PikPakRateLimitError
+	seconds := 0
+	if errors.As(err, &rate) {
+		seconds = rate.RetryAfterSeconds
+	} else {
+		var prohibited *PikPakAccessProhibitedError
+		if errors.As(err, &prohibited) {
+			seconds = 60
+		}
+	}
+	if seconds <= 0 {
+		return
+	}
+	if seconds < pikpakMinRateLimitSeconds {
+		seconds = pikpakMinRateLimitSeconds
+	}
+	pikpakLoginCooldown.Lock()
+	until := time.Now().Add(time.Duration(seconds) * time.Second)
+	if until.After(pikpakLoginCooldown.until) {
+		pikpakLoginCooldown.until = until
+	}
+	pikpakLoginCooldown.Unlock()
+}
+
+// ResetPikPakLoginCooldown clears the process gate. It is primarily useful
+// for isolated integration tests; normal callers should wait for the server
+// supplied cooldown instead of bypassing it.
+func ResetPikPakLoginCooldown() {
+	pikpakLoginCooldown.Lock()
+	pikpakLoginCooldown.until = time.Time{}
+	pikpakLoginCooldown.Unlock()
+}
+
 type storePath struct{ dir string }
 
 // SetIdentityDir sets the device identity storage dir (app wiring).
@@ -371,35 +430,6 @@ func refreshToken(ctx context.Context, hc *netx.Client, deviceID, refresh string
 	return &res, nil
 }
 
-var pikpakCaptchaExchangeRetryDelays = []time.Duration{
-	600 * time.Millisecond,
-	1200 * time.Millisecond,
-	2000 * time.Millisecond,
-}
-
-// exchangeLoginCaptcha waits for PikPak to register a completed slider and
-// chains the newest token through the legacy retry sequence.
-func exchangeLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken, callbackURI string) (string, string, error) {
-	previous := previousToken
-	for attempt := 0; ; attempt++ {
-		token, challengeURL, err := initCaptchaWithPrev(ctx, hc, deviceID, username, action, previous, callbackURI)
-		if err != nil {
-			return "", "", err
-		}
-		if challengeURL == "" || attempt >= len(pikpakCaptchaExchangeRetryDelays) {
-			return token, challengeURL, nil
-		}
-		timer := time.NewTimer(pikpakCaptchaExchangeRetryDelays[attempt])
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return "", "", ctx.Err()
-		case <-timer.C:
-		}
-		previous = token
-	}
-}
-
 // retryLoginCaptcha mirrors the legacy login flow after signin reports a
 // captcha error. A required captcha reuses the token that was submitted;
 // an invalid captcha starts a fresh chain without reusing that token.
@@ -428,17 +458,21 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		logging.Warn("PikPak sign-in rejected", "reason", "missing credentials")
 		return nil, errors.New("pikpak: 请输入账号和密码")
 	}
+	if err := pikpakLoginCooldownError(); err != nil {
+		logging.Warn("PikPak sign-in blocked by cooldown")
+		return nil, err
+	}
 	deviceID := getOrCreateDeviceID(username)
 	hc := netx.NewClient(60 * time.Second)
 	callbackURI := strings.TrimSpace(req.Config["captcha_redirect_uri"])
 
 	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
-	captchaVerified := strings.EqualFold(strings.TrimSpace(req.Config["captcha_verified"]), "true")
 	if captchaToken == "" {
 		// A failed captcha init must stop here. Continuing with an empty token
 		// turns a transport/rate-limit failure into a misleading login error.
 		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", callbackURI)
 		if err != nil {
+			rememberPikPakLoginCooldown(err)
 			logging.Warn("PikPak captcha initialization failed", "error", err)
 			return nil, err
 		}
@@ -448,23 +482,11 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 			// 需要滑块验证：把验证 URL 与 token 带回前端，用户完成后带 token 重试
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
-	} else if !captchaVerified {
-		// 滑块完成后的重试：链式带 previousToken 重发 init，等服务端登记验证结果
-		// （对齐旧版 loginPikPakWithCaptcha 的退避链）
-		tok, urlValue, err := exchangeLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken, callbackURI)
-		if err != nil {
-			logging.Warn("PikPak captcha exchange failed", "error", err)
-			return nil, err
-		}
-		if urlValue != "" {
-			logging.Info("PikPak captcha exchange returned another challenge")
-			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
-		}
-		captchaToken = tok
 	}
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)
 	if err != nil {
+		rememberPikPakLoginCooldown(err)
 		logging.Warn("PikPak sign-in request failed", "error", err)
 		if !isCaptchaError(err) {
 			return nil, err
@@ -478,6 +500,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// new challenge yet.
 		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken, callbackURI)
 		if retryErr != nil {
+			rememberPikPakLoginCooldown(retryErr)
 			logging.Warn("PikPak captcha retry initialization failed", "error", retryErr)
 			return nil, retryErr
 		}
@@ -489,6 +512,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		auth, err = signIn(ctx, hc, deviceID, username, password, captchaToken)
 	}
 	if err != nil {
+		rememberPikPakLoginCooldown(err)
 		logging.Warn("PikPak sign-in retry failed", "error", err)
 		return nil, err
 	}

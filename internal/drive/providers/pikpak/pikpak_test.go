@@ -1,6 +1,26 @@
 package pikpak
 
-import "testing"
+import (
+	"errors"
+	"net/http"
+	"testing"
+)
+
+func TestParseAPIErrorClassifiesRiskControl(t *testing.T) {
+	err := parseAPIError([]byte(`{"error":"AccessProhibited"}`), http.StatusForbidden)
+	var prohibited *PikPakAccessProhibitedError
+	if !errors.As(err, &prohibited) {
+		t.Fatalf("error = %v, want access-prohibited classification", err)
+	}
+	if err := parseAPIError([]byte(`{"message":"Your operation is too frequent, please try again later"}`), http.StatusBadRequest); err == nil {
+		t.Fatal("too-frequent response returned nil error")
+	} else {
+		var rate *PikPakRateLimitError
+		if !errors.As(err, &rate) || rate.RetryAfterSeconds < pikpakMinRateLimitSeconds {
+			t.Fatalf("error = %v, want rate-limit classification", err)
+		}
+	}
+}
 
 func TestAPIParentIDNormalizesRootSentinels(t *testing.T) {
 	for _, value := range []string{"", "root", RootID, "/", "*"} {

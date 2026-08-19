@@ -42,13 +42,19 @@ function startPikPakCooldown(seconds) {
 }
 function handlePikPakRateLimit(error) {
   const text = String(error || '')
-  if (!/(?:频繁|too[ _-]*(?:many|frequent)|rate[ _-]*limit|request[ _-]*frequency|429)/i.test(text)) return false
+  if (!/(?:频繁|too[ _-]*(?:many|frequent)|rate[ _-]*limit|request[ _-]*frequency|access[ _-]*prohibited|risk[ _-]*control|429)/i.test(text)) return false
   const match = text.match(/(?:等待|wait(?:ing)?(?:\s+for)?)\s*(\d+)\s*(?:秒|second)?/i)
-  startPikPakCooldown(match ? Number(match[1]) : 30)
+  const riskBlocked = /access[ _-]*prohibited|risk[ _-]*control/i.test(text)
+  startPikPakCooldown(match ? Number(match[1]) : (riskBlocked ? 60 : 30))
   errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
   return true
 }
 const errorText = ref('')
+const passwordVisibility = ref({})
+function passwordVisible(key) { return !!passwordVisibility.value[key] }
+function togglePassword(key) {
+  passwordVisibility.value = { ...passwordVisibility.value, [key]: !passwordVisible(key) }
+}
 
 const availableProviders = computed(() => props.providers.filter((p) => p.ID !== 'yike'))
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
@@ -120,6 +126,7 @@ watch(providerId, (v, previous) => {
 	info('login', 'login provider selected', { provider: v, previous_provider: previous || '' })
   localStorage.setItem('login_provider', v)
   form.value = {}
+	passwordVisibility.value = {}
   mountedForm.value = { name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true }
   errorText.value = ''
   resetCaptcha(previous === 'pikpak')
@@ -183,9 +190,10 @@ async function completePikPakCaptcha(payload) {
     form.value.captcha_token = token
     form.value.captcha_verified = 'true'
   } else {
-    // 部分 PikPak 挑战只会跳转，不会返回最终 token。保留初始 token，让
-    // 后端按旧版流程换发已验证 token。
-    delete form.value.captcha_verified
+	    // Some challenge redirects carry no final token. The callback itself is
+	    // the provider's completion signal; use the initial token directly so
+	    // login does not enter a high-frequency exchange loop.
+	    form.value.captcha_verified = 'true'
   }
   errorText.value = ''
 
@@ -409,11 +417,11 @@ async function submit() {
                     <div class="field login-field"><label>连接名称</label><input class="input" v-model="mountedForm.name" placeholder="我的 WebDAV / S3" /></div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}<span v-if="providerId !== 's3'" class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><input class="input" type="password" v-model="mountedForm.password" /></div>
+                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
                     <template v-if="providerId === 's3'">
                       <div class="field login-field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
                       <div class="field login-field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
-                      <div class="field login-field"><label>Session Token (可选)</label><input class="input" type="password" v-model="mountedForm.sessionToken" /></div>
+                      <div class="field login-field"><label>Session Token (可选)</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.sessionToken') ? 'text' : 'password'" v-model="mountedForm.sessionToken" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" :aria-label="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" @click="togglePassword('mounted.sessionToken')"><UiIcon :name="passwordVisible('mounted.sessionToken') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
                       <div class="field login-field">
                         <label>路径风格</label>
                         <div class="switch-row">
@@ -441,6 +449,7 @@ async function submit() {
                     <div v-for="f in visibleFields" :key="f.key" class="field login-field">
                       <label>{{ f.label }}<span v-if="isFieldRequired(f)" class="req">*</span></label>
                       <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
+                      <div v-else-if="f.type === 'password'" class="password-input-wrap"><input class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="16" /></button></div>
                       <input v-else class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
                       <div v-if="providerId === 'pan189' && f.key === 'validate_code' && pan189Captcha" class="captcha-image-row">
                         <img :src="pan189Captcha" alt="图形验证码" />
@@ -514,6 +523,15 @@ async function submit() {
 .login-section { display: grid; gap: 14px; }
 .login-field { margin: 0 !important; }
 .login-field > label { font-weight: 600; }
+.password-input-wrap { position: relative; display: flex; align-items: center; }
+.password-input-wrap > .input { padding-right: 40px; }
+.password-toggle {
+  position: absolute; right: 7px; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-xs);
+  color: var(--text-tertiary); background: transparent; cursor: pointer;
+}
+.password-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
+.password-toggle:focus-visible { outline: none; box-shadow: var(--ring-focus); }
 .req { color: var(--color-error); margin-left: 2px; }
 .switch-row { display: flex; align-items: center; gap: 9px; min-height: 24px; }
 .switch { border: 0; padding: 0; }

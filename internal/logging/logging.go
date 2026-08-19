@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -67,7 +68,9 @@ func Configure(rootDir string) error {
 	dataDir = rootDir
 	configured = true
 	writer := io.MultiWriter(os.Stderr, f)
-	slog.SetDefault(slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{Level: &level, AddSource: true})))
+	// Keep records portable: absolute source paths are noisy and expose the
+	// developer's machine layout, so diagnostics use the event and fields only.
+	slog.SetDefault(slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{Level: &level})))
 	slog.Info("logging initialized", "file", path, "pid", os.Getpid())
 	return nil
 }
@@ -173,8 +176,9 @@ func Clear() error {
 }
 
 var (
-	sensitivePattern     = regexp.MustCompile(`(?i)(password|passwd|cookie|authorization|token|captcha_token|refresh_token)([=:])[^\s&]+`)
-	sensitiveJSONPattern = regexp.MustCompile(`(?i)("(?:password|passwd|cookie|authorization|token|captcha_token|refresh_token)"\s*:\s*")[^"]*(")`)
+	sensitivePattern     = regexp.MustCompile(`(?i)(password|passwd|cookie|authorization|captcha_token|refresh_token|access_token|creditkey|device_id|deviceid|token)([=:])[^\s&|]+`)
+	sensitiveJSONPattern = regexp.MustCompile(`(?i)("(?:password|passwd|cookie|authorization|token|captcha_token|refresh_token|access_token|creditkey|device_id|deviceid)"\s*:\s*")[^"]*(")`)
+	urlPattern           = regexp.MustCompile(`(?i)https?://[^\s|]+`)
 )
 
 func sanitizeArgs(args ...any) []any {
@@ -199,10 +203,27 @@ func sanitizeArgs(args ...any) []any {
 
 func isSensitiveKey(key string) bool {
 	key = strings.ToLower(strings.TrimSpace(key))
-	return strings.Contains(key, "password") || strings.Contains(key, "cookie") || strings.Contains(key, "token") || key == "authorization"
+	return strings.Contains(key, "password") || strings.Contains(key, "cookie") || strings.Contains(key, "token") ||
+		strings.Contains(key, "creditkey") || strings.Contains(key, "device_id") || strings.Contains(key, "deviceid") ||
+		key == "authorization"
 }
 
 func sanitizeText(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	value = urlPattern.ReplaceAllStringFunc(value, func(raw string) string {
+		trimmed := strings.TrimRight(raw, `.,;)]}`)
+		u, err := url.Parse(trimmed)
+		if err != nil || u.Hostname() == "" {
+			return "[URL_REDACTED]"
+		}
+		u.RawQuery = ""
+		u.Fragment = ""
+		return u.String()
+	})
 	value = sensitiveJSONPattern.ReplaceAllString(value, `${1}[REDACTED]${2}`)
-	return sensitivePattern.ReplaceAllString(value, `$1$2[REDACTED]`)
+	value = sensitivePattern.ReplaceAllString(value, `$1$2[REDACTED]`)
+	if len(value) > 512 {
+		return value[:512] + "..."
+	}
+	return value
 }
