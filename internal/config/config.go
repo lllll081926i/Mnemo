@@ -21,11 +21,22 @@ type Secrets struct {
 // LoadSecrets reads secrets.json from dir if present.
 func LoadSecrets(dir string) Secrets {
 	var s Secrets
-	b, err := os.ReadFile(filepath.Join(dir, "secrets.json"))
-	if err != nil {
-		return s
+	dirs := []string{dir}
+	// Packaged builds keep read-only OAuth configuration next to the
+	// executable. This remains available when writable data is redirected to
+	// the per-user fallback directory.
+	if exe, err := os.Executable(); err == nil {
+		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "data"))
 	}
-	_ = json.Unmarshal(b, &s)
+	for _, candidate := range dirs {
+		b, err := os.ReadFile(filepath.Join(candidate, "secrets.json"))
+		if err != nil {
+			continue
+		}
+		if json.Unmarshal(b, &s) == nil {
+			return s
+		}
+	}
 	return s
 }
 
@@ -56,16 +67,32 @@ func DataDir(appName, fallbackDir string) (string, error) {
 	exe, err := os.Executable()
 	if err == nil {
 		dir := filepath.Join(filepath.Dir(exe), "data")
-		if err := os.MkdirAll(dir, 0o755); err == nil {
+		if err := ensureWritableDir(dir); err == nil {
 			return dir, nil
 		}
 	}
 	// fallback: user config dir / data
 	dir := filepath.Join(fallbackDir, "data")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensureWritableDir(dir); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+func ensureWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".mnemo-write-test-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if closeErr := tmp.Close(); closeErr != nil {
+		_ = os.Remove(name)
+		return closeErr
+	}
+	return os.Remove(name)
 }
 
 // UserDataDir is a legacy alias kept for compatibility; returns the user

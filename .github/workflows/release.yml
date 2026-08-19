@@ -1,6 +1,5 @@
-# Mnemo Release (Windows only)
-# - Trigger: tag v* or manual dispatch
-# - Never deletes existing GitHub Releases / assets (upload with --clobber only replaces same filename)
+# Mnemo Release
+# Builds native packages for Windows, Linux and Apple Silicon macOS.
 
 name: Release
 
@@ -32,12 +31,27 @@ jobs:
             os: windows-latest
             platform: windows/amd64
             artifact: Mnemo-windows-x64
-            arch: x64
+            kind: windows
           - name: Windows arm64
             os: windows-latest
             platform: windows/arm64
             artifact: Mnemo-windows-arm64
-            arch: arm64
+            kind: windows
+          - name: Linux x64
+            os: ubuntu-latest
+            platform: linux/amd64
+            artifact: Mnemo-linux-x64
+            kind: linux
+          - name: Linux arm64
+            os: ubuntu-24.04-arm
+            platform: linux/arm64
+            artifact: Mnemo-linux-arm64
+            kind: linux
+          - name: macOS arm64
+            os: macos-14
+            platform: darwin/arm64
+            artifact: Mnemo-macos-arm64
+            kind: macos
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -58,101 +72,107 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install
+        run: npm ci
 
-      - name: Fetch mpv engine (Windows x64)
-        if: matrix.arch == 'x64'
+      - name: Build native application
         shell: bash
-        env:
-          MPV_WIN_X64_URL: ${{ secrets.MPV_WIN_X64_URL }}
-        run: |
-          set -euo pipefail
-          choco install 7zip -y --no-progress || true
-          export PATH="/c/Program Files/7-Zip:$PATH"
-          mkdir -p internal/engine/win32/mpv
-          url="${MPV_WIN_X64_URL}"
-          if [[ -z "${url}" ]]; then echo "MPV_WIN_X64_URL secret not set" >&2; exit 1; fi
-          curl -L --retry 5 -o mpv.7z "${url}"
-          7z x mpv.7z -ompv-extract -y
-          find mpv-extract -name "mpv.exe" -exec cp {} internal/engine/win32/mpv/mpv.exe \;
-          find mpv-extract -name "d3dcompiler_43.dll" -exec cp {} internal/engine/win32/mpv/ \; || true
-          test -f internal/engine/win32/mpv/mpv.exe && echo "mpv.exe OK" || { echo "mpv.exe missing"; exit 1; }
+        run: wails build -platform "${{ matrix.platform }}" -clean
 
-      - name: Fetch mpv engine (Windows arm64)
-        if: matrix.arch == 'arm64'
-        shell: bash
-        env:
-          MPV_WIN_ARM64_URL: ${{ secrets.MPV_WIN_ARM64_URL }}
-        run: |
-          set -euo pipefail
-          choco install 7zip -y --no-progress || true
-          export PATH="/c/Program Files/7-Zip:$PATH"
-          mkdir -p internal/engine/win32/mpv
-          url="${MPV_WIN_ARM64_URL}"
-          if [[ -z "${url}" ]]; then echo "MPV_WIN_ARM64_URL secret not set" >&2; exit 1; fi
-          curl -L --retry 5 -o mpv.7z "${url}"
-          7z x mpv.7z -ompv-extract -y
-          find mpv-extract -name "mpv.exe" -exec cp {} internal/engine/win32/mpv/mpv.exe \;
-          test -f internal/engine/win32/mpv/mpv.exe && echo "mpv.exe OK" || { echo "mpv.exe missing"; exit 1; }
-
-      - name: Generate secrets.json
+      - name: Stage OAuth configuration
         shell: bash
         env:
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
         run: |
           set -euo pipefail
-          if [[ -n "${ONEDRIVE_CLIENT_ID}" || -n "${DROPBOX_APP_KEY}" ]]; then
-            cat > secrets.json <<EOF
+          if [[ -z "${ONEDRIVE_CLIENT_ID}" && -z "${DROPBOX_APP_KEY}" ]]; then
+            exit 0
+          fi
+          case "${{ matrix.kind }}" in
+            macos) data_dir="build/bin/Mnemo.app/Contents/MacOS/data" ;;
+            *) data_dir="build/bin/data" ;;
+          esac
+          mkdir -p "$data_dir"
+          cat > "$data_dir/secrets.json" <<EOF
           {
             "onedrive_client_id": "${ONEDRIVE_CLIENT_ID}",
             "dropbox_app_key": "${DROPBOX_APP_KEY}"
           }
           EOF
-            echo "secrets.json generated"
-          else
-            echo "no OAuth secrets provided, building without secrets.json"
-          fi
 
-      - name: Build with Wails
-        shell: bash
-        run: wails build -platform ${{ matrix.platform }} -clean
-
-      - name: Create Inno Setup installer
+      - name: Package Windows installer and archive
+        if: matrix.kind == 'windows'
         shell: bash
         run: |
           set -euo pipefail
+          choco install 7zip innosetup -y --no-progress
+          export PATH="/c/Program Files/7-Zip:/c/Program Files (x86)/Inno Setup 6:$PATH"
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
-          if [ ! -f "$ISCC" ]; then
-            choco install innosetup -y --no-progress
-            ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
-          fi
           "$ISCC" /DMyArchSuffix="${{ matrix.artifact }}" build/windows/installer.iss
+          inputs=(build/bin/Mnemo.exe)
+          [[ -f build/bin/data/secrets.json ]] && inputs+=(build/bin/data/secrets.json)
+          7z a "${{ matrix.artifact }}.zip" "${inputs[@]}"
 
-      - name: Rename installer
+      - name: Package Linux installer and archive
+        if: matrix.kind == 'linux'
         shell: bash
         run: |
-          mkdir -p build/installer
-          if [ -f build/installer/Mnemo-windows-x64-Setup.exe ] || [ -f build/installer/Mnemo-windows-arm64-Setup.exe ]; then
-            : # already named
-          elif [ -f build/installer/MnemoSetup.exe ]; then
-            mv build/installer/MnemoSetup.exe "build/installer/${{ matrix.artifact }}-Setup.exe"
+          set -euo pipefail
+          binary="build/bin/Mnemo"
+          test -x "$binary"
+          root="$(mktemp -d)"
+          mkdir -p "$root/DEBIAN" "$root/usr/lib/mnemo" "$root/usr/share/applications"
+          cp -a "$binary" "$root/usr/lib/mnemo/Mnemo"
+          if [[ -f build/bin/data/secrets.json ]]; then
+            mkdir -p "$root/usr/lib/mnemo/data"
+            cp -a build/bin/data/secrets.json "$root/usr/lib/mnemo/data/secrets.json"
           fi
+          cat > "$root/DEBIAN/control" <<EOF
+          Package: mnemo
+          Version: ${GITHUB_REF_NAME#v}
+          Section: utils
+          Priority: optional
+          Architecture: ${{ matrix.platform == 'linux/arm64' && 'arm64' || 'amd64' }}
+          Maintainer: Mnemo
+          Description: Mnemo multi-drive file manager
+          EOF
+          cat > "$root/usr/share/applications/mnemo.desktop" <<'EOF'
+          [Desktop Entry]
+          Name=Mnemo
+          Exec=/usr/lib/mnemo/Mnemo
+          Type=Application
+          Categories=Utility;FileTransfer;
+          Terminal=false
+          EOF
+          dpkg-deb --build "$root" "${{ matrix.artifact }}.deb"
+          staging="$(mktemp -d)"
+          cp -a "$binary" "$staging/Mnemo"
+          if [[ -f build/bin/data/secrets.json ]]; then
+            mkdir -p "$staging/data"
+            cp -a build/bin/data/secrets.json "$staging/data/secrets.json"
+          fi
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C "$staging" .
 
-      - name: Package zip
+      - name: Package macOS installer and archive
+        if: matrix.kind == 'macos'
         shell: bash
         run: |
-          cd build/bin
-          7z a "../../${{ matrix.artifact }}.zip" *
+          set -euo pipefail
+          test -d build/bin/Mnemo.app
+          hdiutil create -volname Mnemo -srcfolder build/bin/Mnemo.app -ov -format UDZO "${{ matrix.artifact }}.dmg"
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C build/bin Mnemo.app
 
-      - name: Upload artifacts
+      - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-${{ github.ref_name }}
           path: |
             ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.deb
+            ${{ matrix.artifact }}.dmg
+            ${{ matrix.artifact }}.tar.gz
             build/installer/${{ matrix.artifact }}-Setup.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
@@ -176,9 +196,7 @@ jobs:
         run: |
           set -euo pipefail
           find release-assets -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 \
-            | sort -z \
-            | xargs -0 sha256sum \
-            | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
+            | sort -z | xargs -0 sha256sum | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
 
       - name: Create or update GitHub Release
         env:
@@ -187,35 +205,13 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          release_doc="docs/releases/${GITHUB_REF_NAME}.md"
-          if [[ -f "${release_doc}" ]]; then
-            cp "${release_doc}" release-notes.md
-          else
-            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-              -f tag_name="${GITHUB_REF_NAME}" \
-              --jq .body > release-notes.md || echo "Mnemo ${GITHUB_REF_NAME}" > release-notes.md
-          fi
-
-          is_prerelease='false'
-          if [[ "${GITHUB_REF_NAME}" == *preview* || "${GITHUB_REF_NAME}" == *beta* || "${GITHUB_REF_NAME}" == *rc* || "${GITHUB_REF_NAME}" == *alpha* ]]; then
-            is_prerelease='true'
-          fi
-
-          if ! gh release view "${tag}" >/dev/null 2>&1; then
-            if [[ "${is_prerelease}" == 'true' ]]; then
-              gh release create "${tag}" --verify-tag --title="Mnemo ${tag}" --notes-file=release-notes.md --prerelease
-            else
-              gh release create "${tag}" --verify-tag --title="Mnemo ${tag}" --notes-file=release-notes.md --latest
+          notes="Mnemo ${tag}"
+          if [[ -f "docs/releases/${tag}.md" ]]; then notes="docs/releases/${tag}.md"; fi
+          is_pre='false'
+          [[ "$tag" == *preview* || "$tag" == *beta* || "$tag" == *rc* || "$tag" == *alpha* ]] && is_pre='true'
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            if [[ "$is_pre" == 'true' ]]; then gh release create "$tag" --verify-tag --title="Mnemo $tag" --notes-file="$notes" --prerelease
+            else gh release create "$tag" --verify-tag --title="Mnemo $tag" --notes-file="$notes" --latest
             fi
-          else
-            release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-              -f name="Mnemo ${tag}" \
-              -F body=@release-notes.md \
-              -f draft=false \
-              -f prerelease="${is_prerelease}" \
-              -f make_latest="$([[ "${is_prerelease}" == 'true' ]] && echo false || echo true)" >/dev/null
           fi
-
-          find release-assets -maxdepth 1 -type f -print0 \
-            | xargs -0 gh release upload "${tag}" --clobber
+          find release-assets -maxdepth 1 -type f -print0 | xargs -0 gh release upload "$tag" --clobber
