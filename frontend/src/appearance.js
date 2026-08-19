@@ -23,6 +23,7 @@ export function applyAppearance(theme) {
 
 // ---------- 纯前端偏好（后端 Settings 无对应字段，存 localStorage） ----------
 const PREFS_KEY = 'mnemo.prefs'
+const LAST_DRIVE_KEY = 'mnemo.lastDrive'
 const PREFS_DEFAULTS = {
   viewMode: 'list',       // 网盘默认视图 list | grid
   hoverPreview: true,     // 目录树悬停预览
@@ -49,4 +50,32 @@ export function setPref(key, value) {
   const p = getPrefs()
   p[key] = value
   localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+}
+
+// ---------- 当前网盘（跨应用重启恢复，不包含任何凭据） ----------
+export function getLastDriveSelection() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LAST_DRIVE_KEY) || 'null')
+    if (!value || typeof value !== 'object') return null
+    const userId = String(value.userId || '').trim()
+    const driveId = String(value.driveId || '').trim()
+    return userId ? { userId, driveId } : null
+  } catch {
+    return null
+  }
+}
+
+export function setLastDriveSelection(userId, driveId) {
+  const normalizedUserId = String(userId || '').trim()
+  if (!normalizedUserId) return
+  try {
+    localStorage.setItem(LAST_DRIVE_KEY, JSON.stringify({
+      userId: normalizedUserId,
+      driveId: String(driveId || '').trim(),
+    }))
+  } catch { /* 存储不可用时不影响网盘操作 */ }
+}
+
+export function clearLastDriveSelection() {
+  try { localStorage.removeItem(LAST_DRIVE_KEY) } catch { /* noop */ }
 }

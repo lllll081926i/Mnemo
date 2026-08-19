@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { listAccounts, listProviders, removeAccount, onEvent, GetSettings, SaveSettings, formatSpeed, providerOf, accountName } from './api'
-import { applyAppearance, getPrefs } from './appearance'
+import { applyAppearance, getPrefs, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
 import ShareView from './views/ShareView.vue'
@@ -129,16 +129,29 @@ function refresh() {
   listAccounts().then((list) => {
     if (my !== refreshEpoch) return
     accounts.value = list || []
+    const available = accounts.value
     if (current.value) {
-      const found = accounts.value.find((a) => a.user_id === current.value.user_id)
-      current.value = found || accounts.value[0] || null
-    } else if (accounts.value.length) {
-      current.value = accounts.value[0]
+      const found = available.find((a) => a.user_id === current.value.user_id)
+      current.value = found || available[0] || null
+    } else if (available.length) {
+      const saved = getLastDriveSelection()
+      const preferred = saved
+        ? (available.find((a) => a.user_id === saved.userId && (!saved.driveId || a.drive_id === saved.driveId)) ||
+          available.find((a) => a.user_id === saved.userId))
+        : null
+      current.value = preferred || available[0]
+    }
+    if (current.value) {
+      setLastDriveSelection(current.value.user_id, current.value.drive_id)
     }
   }).catch(() => {})
 }
 
-function select(acc) { current.value = acc }
+function select(acc) {
+  if (!acc) return
+  current.value = acc
+  setLastDriveSelection(acc.user_id, acc.drive_id)
+}
 
 function onPanGo(target) {
   if (target === 'login') showLogin.value = true
@@ -159,6 +172,8 @@ function remove(acc) {
     try {
       await removeAccount(acc.user_id)
       if (current.value && current.value.user_id === acc.user_id) current.value = null
+      const saved = getLastDriveSelection()
+      if (saved && saved.userId === acc.user_id) clearLastDriveSelection()
       refresh()
       toast('账号已移除', 'success')
     } catch (e) { toast(String(e), 'error') }
