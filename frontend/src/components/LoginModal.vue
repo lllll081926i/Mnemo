@@ -10,6 +10,13 @@ const emit = defineEmits(['close', 'toast'])
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 const form = ref({})
 const mountedForm = ref({ name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true })
+const webdavPreset = ref('custom')
+const webdavPresets = [
+  { id: 'custom', label: '自定义 WebDAV', endpoint: '', rootPath: '', hint: '输入服务商提供的 WebDAV 地址。', icon: '' },
+  { id: 'jianguoyun', label: '坚果云', endpoint: 'https://dav.jianguoyun.com/dav/', rootPath: '/', hint: '坚果云 WebDAV：使用坚果云账号和应用密码。', icon: new URL('../assets/drive-icons/jianguoyun.svg', import.meta.url).href },
+  { id: 'infinitycloud', label: 'InfiniCLOUD', endpoint: 'https://cloud.infini-cloud.net/dav/', rootPath: '/', hint: 'InfiniCLOUD WebDAV：使用服务商分配的账号密码。', icon: new URL('../assets/drive-icons/infinitycloud.svg', import.meta.url).href },
+  { id: 'nextcloud', label: 'Nextcloud', endpoint: 'https://your-nextcloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', hint: '请将地址中的域名和 your-username 替换为你的 Nextcloud 信息。', icon: new URL('../assets/drive-icons/nextcloud.svg', import.meta.url).href },
+]
 const busy = ref(false)
 const smsBusy = ref(false)
 const smsCountdown = ref(0)
@@ -58,6 +65,7 @@ function togglePassword(key) {
 
 const availableProviders = computed(() => props.providers.filter((p) => p.ID !== 'yike'))
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
+const selectedWebdavPreset = computed(() => webdavPresets.find((item) => item.id === webdavPreset.value) || webdavPresets[0])
 const fields = computed(() => (provider.value && provider.value.Login && provider.value.Login.fields) || [])
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuthField = (field) => field.type === 'oauth'
@@ -101,6 +109,14 @@ function fieldInputMode(field) {
   return undefined
 }
 
+function applyWebDAVPreset(id) {
+  const preset = webdavPresets.find((item) => item.id === id) || webdavPresets[0]
+  webdavPreset.value = preset.id
+  if (preset.id === 'custom') return
+  mountedForm.value.endpoint = preset.endpoint
+  mountedForm.value.rootPath = preset.rootPath
+}
+
 // Captcha state is initialized before the provider watcher. A stale saved
 // provider can be corrected synchronously as soon as the provider list arrives.
 const captchaUrl = ref('')
@@ -127,6 +143,7 @@ watch(providerId, (v, previous) => {
   localStorage.setItem('login_provider', v)
   form.value = {}
 	passwordVisibility.value = {}
+  webdavPreset.value = 'custom'
   mountedForm.value = { name: '', endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true }
   errorText.value = ''
   resetCaptcha(previous === 'pikpak')
@@ -415,6 +432,16 @@ async function submit() {
                 <template v-if="isMounted">
                   <div class="login-section">
                     <div class="field login-field"><label>连接名称</label><input class="input" v-model="mountedForm.name" placeholder="我的 WebDAV / S3" /></div>
+                    <div v-if="providerId === 'webdav'" class="field login-field">
+                      <label>服务预设</label>
+                      <div class="preset-select-wrap">
+                        <img v-if="selectedWebdavPreset.icon" :src="selectedWebdavPreset.icon" :alt="selectedWebdavPreset.label" class="preset-icon" />
+                        <select class="input preset-select" :value="webdavPreset" @change="applyWebDAVPreset($event.target.value)">
+                          <option v-for="preset in webdavPresets" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+                        </select>
+                      </div>
+                      <div class="hint">{{ selectedWebdavPreset.hint }}</div>
+                    </div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}<span v-if="providerId !== 's3'" class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
@@ -523,6 +550,9 @@ async function submit() {
 .login-section { display: grid; gap: 14px; }
 .login-field { margin: 0 !important; }
 .login-field > label { font-weight: 600; }
+.preset-select-wrap { position: relative; display: flex; align-items: center; }
+.preset-select { appearance: auto; padding-left: 38px; cursor: pointer; }
+.preset-icon { position: absolute; left: 10px; width: 18px; height: 18px; object-fit: contain; pointer-events: none; }
 .password-input-wrap { position: relative; display: flex; align-items: center; }
 .password-input-wrap > .input { padding-right: 40px; }
 .password-toggle {
