@@ -422,15 +422,17 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       />
       <main class="page-host">
         <transition :name="pageTrans" mode="out-in">
-          <KeepAlive>
-            <component
-              :is="pageComponent"
-              :key="tab"
-              :ref="tab === 'pan' ? 'panView' : undefined"
-              v-bind="pageProps"
-              v-on="pageListeners"
-            />
-          </KeepAlive>
+          <div :key="tab" class="page-view">
+            <KeepAlive>
+              <component
+                :is="pageComponent"
+                :key="tab"
+                :ref="tab === 'pan' ? 'panView' : undefined"
+                v-bind="pageProps"
+                v-on="pageListeners"
+              />
+            </KeepAlive>
+          </div>
         </transition>
       </main>
     </div>

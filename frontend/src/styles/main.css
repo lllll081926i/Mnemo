@@ -95,6 +95,8 @@ body {
 /* 页面切换过渡（方向感知） */
 .page-host { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 .page-host > * { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.page-view { flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.page-view > * { flex: 1; display: flex; min-width: 0; min-height: 0; }
 /* 页面切换：左右滑动 */
 .page-slide-left-enter-active, .page-slide-right-enter-active {
   transition: opacity 220ms var(--motion-ease), transform 260ms var(--motion-ease);
@@ -785,6 +787,23 @@ body {
 .toppanbtn { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 0 0 auto; margin-right: 12px; }
 .toppanbtn:last-child { margin-right: 0; }
 .toolbar-spacer { flex: 1 1 auto; }
+/* 通用工具按钮：分享页等非 .toppanbtn 容器也使用同一套按钮规范。 */
+.tbtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 28px; padding: 0 10px; border: 1px solid var(--control-border);
+  border-radius: var(--radius-md); background: var(--control-bg); color: var(--text-secondary);
+  box-shadow: var(--shadow-sm); cursor: pointer; font-family: inherit; font-size: 13.5px;
+  line-height: 20px; white-space: nowrap; transition: background-color var(--motion-fast) var(--motion-ease),
+  color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease),
+  box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+.tbtn:hover { color: var(--color-primary); border-color: var(--color-primary); background: var(--bg-active); }
+.tbtn:active { transform: scale(.96); }
+.tbtn:disabled, .tbtn:disabled:hover { color: var(--text-disabled); background: var(--bg-subtle); border-color: var(--border-lighter); box-shadow: none; transform: none; cursor: not-allowed; opacity: .7; }
+.tbtn.primary { color: var(--text-inverse); background: var(--color-primary-strong); border-color: var(--color-primary-strong); }
+.tbtn.primary:hover { color: var(--text-inverse); background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.tbtn.danger { color: var(--color-error); }
+.tbtn.danger:hover { color: var(--color-error); border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, transparent); }
 /* 描边实体按钮（对齐旧版工具栏）：白底 + 边框，悬停主色描边 + 浅填充，按下微缩 */
 .toppanbtn .tbtn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1102,6 +1121,9 @@ body {
 .share-record-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 0 auto; }
 .share-passcode { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 12%, transparent); padding: 1px 8px; border-radius: var(--radius-full); }
 .share-record-actions { display: flex; gap: 2px; }
+.share-toolbar-actions .tbtn { min-width: 84px; }
+.share-record-actions .tbtn { height: 26px; padding: 0 8px; font-size: 12.5px; box-shadow: none; }
+.share-record-actions .tbtn .icon-check-pop { color: var(--color-success); }
 
 @media (max-width: 720px) {
   .share-page { padding: 14px 12px 24px; }
