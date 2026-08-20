@@ -196,10 +196,34 @@ const listEl = ref(null)
 const scrollMemory = new Map()
 let scrollSaveFrame = 0
 let pendingScrollSeq = 0
+const VIRTUAL_THRESHOLD = 200
+const LIST_ROW_PITCH = 48
+const VIRTUAL_OVERSCAN = 10
+const virtualScrollTop = ref(0)
+const virtualViewportHeight = ref(0)
+const gridColumnCount = ref(1)
+const gridRowPitch = ref(166)
+let listResizeObserver = null
 
 function currentViewKey() { return [mode.value, dirId.value, keyword.value].join('|') }
 
-function onListScroll() {
+function updateVirtualMetrics(el = listEl.value) {
+  if (!el) return
+  virtualViewportHeight.value = el.clientHeight || 0
+  if (!el.classList.contains('gridlist')) return
+  const template = getComputedStyle(el).gridTemplateColumns || ''
+  const tracks = template.match(/(?:^|\s)[\d.]+px(?=\s|$)/g)
+  gridColumnCount.value = Math.max(1, tracks?.length || Math.floor(Math.max(0, el.clientWidth - 24) / 140) || 1)
+  const card = el.querySelector('.griditem')
+  if (card) {
+    const gap = Number.parseFloat(getComputedStyle(el).rowGap || '8') || 8
+    gridRowPitch.value = Math.max(1, card.getBoundingClientRect().height + gap)
+  }
+}
+
+function onListScroll(e) {
+  const el = e?.currentTarget || listEl.value
+  if (el) virtualScrollTop.value = el.scrollTop
   if (scrollSaveFrame) return
   scrollSaveFrame = requestAnimationFrame(() => {
     scrollSaveFrame = 0
@@ -213,7 +237,12 @@ watch([loading, files], () => {
   nextTick(() => {
     if (seq !== loadSeq) return // 期间又跳转了，丢弃
     pendingScrollSeq = 0
-    if (listEl.value) listEl.value.scrollTop = scrollMemory.get(currentViewKey()) || 0
+    if (listEl.value) {
+      const scrollTop = scrollMemory.get(currentViewKey()) || 0
+      listEl.value.scrollTop = scrollTop
+      virtualScrollTop.value = scrollTop
+      updateVirtualMetrics()
+    }
   })
 })
 
@@ -580,6 +609,52 @@ watch(listShown, (list) => {
   const next = selected.value.filter((f) => visible.has(f.file_id))
   if (next.length !== selected.value.length) selected.value = next
 })
+
+// 大目录只保留视口附近的行/卡片，数据排序、选择和事件仍使用完整 listShown。
+// 仅改变渲染数量，不改变现有项目的 CSS 或尺寸。
+const listVirtualized = computed(() => viewMode.value === 'list' && listShown.value.length > VIRTUAL_THRESHOLD)
+const gridVirtualized = computed(() => viewMode.value === 'grid' && listShown.value.length > VIRTUAL_THRESHOLD)
+function virtualRange(total, pitch) {
+  if (!total) return { start: 0, end: 0 }
+  const viewport = Math.max(virtualViewportHeight.value, pitch * 8)
+  const start = Math.max(0, Math.floor(Math.max(0, virtualScrollTop.value) / pitch) - VIRTUAL_OVERSCAN)
+  const end = Math.min(total, Math.max(start + 1, Math.ceil((virtualScrollTop.value + viewport) / pitch) + VIRTUAL_OVERSCAN))
+  return { start, end }
+}
+const listWindow = computed(() => listVirtualized.value ? virtualRange(listShown.value.length, LIST_ROW_PITCH) : { start: 0, end: listShown.value.length })
+const gridWindow = computed(() => {
+  const total = listShown.value.length
+  const cols = Math.max(1, gridColumnCount.value)
+  if (!gridVirtualized.value) return { start: 0, end: total }
+  const rows = virtualRange(Math.ceil(total / cols), gridRowPitch.value)
+  return { start: rows.start * cols, end: Math.min(total, rows.end * cols) }
+})
+const listRenderRows = computed(() => rowsShown.value.slice(listWindow.value.start, listWindow.value.end))
+const gridRenderRows = computed(() => rowsShown.value.slice(gridWindow.value.start, gridWindow.value.end))
+const listVirtualTop = computed(() => listWindow.value.start * LIST_ROW_PITCH)
+const listVirtualBottom = computed(() => Math.max(0, (listShown.value.length - listWindow.value.end) * LIST_ROW_PITCH))
+const gridVirtualTop = computed(() => Math.floor(gridWindow.value.start / Math.max(1, gridColumnCount.value)) * gridRowPitch.value)
+const gridVirtualBottom = computed(() => {
+  const cols = Math.max(1, gridColumnCount.value)
+  const totalRows = Math.ceil(listShown.value.length / cols)
+  const renderedRows = Math.ceil((gridWindow.value.end - gridWindow.value.start) / cols)
+  return Math.max(0, (totalRows - Math.floor(gridWindow.value.start / cols) - renderedRows) * gridRowPitch.value)
+})
+function revealRow(index) {
+  const el = listEl.value
+  if (!el || index < 0) return
+  const isGrid = viewMode.value === 'grid'
+  const virtualized = isGrid ? gridVirtualized.value : listVirtualized.value
+  if (virtualized) {
+    const row = isGrid ? Math.floor(index / Math.max(1, gridColumnCount.value)) : index
+    const top = row * (isGrid ? gridRowPitch.value : LIST_ROW_PITCH)
+    const height = isGrid ? gridRowPitch.value : LIST_ROW_PITCH
+    if (top < el.scrollTop) el.scrollTop = top
+    else if (top + height > el.scrollTop + el.clientHeight) el.scrollTop = Math.max(0, top + height - el.clientHeight)
+    virtualScrollTop.value = el.scrollTop
+  }
+  nextTick(() => el.querySelector('.fileitem.focus, .griditem.focus')?.scrollIntoView({ block: 'nearest' }))
+}
 const allSelected = computed(() => listShown.value.length > 0 && selected.value.length === listShown.value.length)
 
 function selectAll() { selected.value = [...listShown.value] }
@@ -1020,10 +1095,7 @@ function onKey(e) {
     const start = cur >= 0 ? cur : (selected.value.length ? list.findIndex((f) => f.file_id === selected.value[selected.value.length - 1].file_id) : 0)
     const next = e.code === 'ArrowDown' ? Math.min(list.length - 1, start + 1) : Math.max(0, start - 1)
     focusId.value = list[next].file_id
-    nextTick(() => {
-      const el = document.querySelector('.fileitem.focus, .griditem.focus')
-      if (el) el.scrollIntoView({ block: 'nearest' })
-    })
+    revealRow(next)
     e.preventDefault()
   }
   else if (e.code === 'Space' && focusId.value) {
@@ -1078,6 +1150,20 @@ defineExpose({
   },
 })
 
+watch(listEl, (el) => {
+  listResizeObserver?.disconnect()
+  listResizeObserver = null
+  if (!el) return
+  nextTick(() => {
+    if (listEl.value !== el) return
+    updateVirtualMetrics(el)
+    if (typeof ResizeObserver === 'undefined') return
+    listResizeObserver = new ResizeObserver(() => updateVirtualMetrics(el))
+    listResizeObserver.observe(el)
+  })
+}, { flush: 'post' })
+watch([listShown, viewMode], () => nextTick(() => updateVirtualMetrics()), { flush: 'post' })
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', sideMove)
@@ -1094,6 +1180,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', sideUp)
   clearTimeout(filterTimer)
   clearTimeout(hoverTimer)
+  listResizeObserver?.disconnect()
+  if (scrollSaveFrame) cancelAnimationFrame(scrollSaveFrame)
 })
 </script>
 
@@ -1271,8 +1359,9 @@ onBeforeUnmount(() => {
 
           <!-- 列表视图（旧版 fileitem 行） -->
           <div v-else-if="viewMode === 'list'" ref="listEl" class="file-list" @scroll.passive="onListScroll">
+            <div v-if="listVirtualized" aria-hidden="true" :style="{ height: listVirtualTop + 'px' }"></div>
             <div
-              v-for="r in rowsShown"
+              v-for="r in listRenderRows"
               :key="r.f.file_id"
               class="fileitem"
               :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id }"
@@ -1301,6 +1390,7 @@ onBeforeUnmount(() => {
                 <span class="fileclock">{{ r.timeParts.clock }}</span>
               </div>
             </div>
+            <div v-if="listVirtualized" aria-hidden="true" :style="{ height: listVirtualBottom + 'px' }"></div>
             <div v-if="!listShown.length" class="workspace-empty-state">
               <UiIcon :name="mode === 'trash' ? 'trash' : mode === 'search' ? 'search' : mode === 'favorite' ? 'star' : 'folder'" :size="36" style="opacity:.4" />
               <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有匹配的文件' : mode === 'favorite' ? '暂无收藏，右键文件加入收藏' : '空目录' }}</span>
@@ -1309,8 +1399,9 @@ onBeforeUnmount(() => {
 
           <!-- 网格视图（旧版 griditem） -->
           <div v-else ref="listEl" class="file-list gridlist" @scroll.passive="onListScroll">
+            <div v-if="gridVirtualized" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualTop + 'px' }"></div>
             <div
-              v-for="r in rowsShown"
+              v-for="r in gridRenderRows"
               :key="r.f.file_id"
               class="griditem"
               :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id }"
@@ -1336,6 +1427,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="gridinfo">{{ r.f.isDir ? '文件夹' : r.sizeText }}</div>
             </div>
+            <div v-if="gridVirtualized" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualBottom + 'px' }"></div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
               <UiIcon name="folder" :size="36" style="opacity:.4" />
               <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有匹配的文件' : mode === 'favorite' ? '暂无收藏' : '空目录' }}</span>
