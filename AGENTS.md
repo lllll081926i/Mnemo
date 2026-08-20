@@ -29,7 +29,7 @@ go test ./...      # 单元测试
 - **Vue 3.5 + Vite 6**（前端为纯 JavaScript，非 TypeScript；样式 token 复用旧版）
 - 原生 Go HTTP Range 分段下载器（`internal/transfer/dlengine`），不再依赖 aria2c
 - **网页播放器**（HTML5 + HLS.js / dash.js），上游鉴权由 `internal/preview` 播放会话代理隔离
-- 多份原子 JSON 文件持久化（`internal/store`），无 SQLite；账号凭据使用本地 AES-256-GCM 加密，但主密钥尚未绑定系统凭据库
+- 多份原子 JSON 文件持久化（`internal/store`），无 SQLite；账号凭据使用本地 AES-256-GCM 加密，Windows 新密钥绑定 DPAPI，旧格式可迁移；macOS/Linux 暂保留 0600 兼容密钥文件
 - 纯 Go 无 cgo 外部依赖
 
 ## Build order

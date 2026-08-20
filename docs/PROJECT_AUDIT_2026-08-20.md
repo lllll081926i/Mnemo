@@ -126,7 +126,7 @@
 | P1-11（已关闭） | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go` 不启用托盘，旧关闭逻辑却无条件按设置隐藏窗口 | Linux/macOS 用户可能关闭后无法恢复窗口 | 增加编译目标感知的 `TrayAvailable`；无托盘平台即使旧设置为开启也正常退出，Windows 保持原托盘行为。 |
 | P1-12 | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml:206-211` 和 `internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 使用独立离线签名（如 minisign/cosign）、应用内固定公钥验证；Windows Authenticode、macOS Developer ID + notarization；发布密钥与 GitHub token 分离。 |
 | P1-13（主要门禁已关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 已增加 `quality` job，运行 Go test/vet/build 和前端 build；全部平台 build 依赖 quality，publish 依赖全部 build。后续仍应加入 race、前端单测和关键 mock e2e。 |
-| P1-14 | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go:1-58`，账号本身使用 AES-256-GCM | 能阻止只拿到单个 accounts 文件的人直接读取，但无法抵御同一用户权限下同时读取密钥和密文的恶意程序 | Windows DPAPI、macOS Keychain、Linux Secret Service 存主密钥；保留现有格式作为迁移层。注意项目并非“无加密存储”，文档需纠正。 |
+| P1-14（Windows 主要路径已关闭） | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go`、平台适配文件 | Windows 新密钥现在写入 DPAPI 保护文件，旧 `vault.key` 可读取并在运行时尝试迁移；无效旧密钥会 fail-closed，不再静默生成新密钥。macOS Keychain 与 Linux Secret Service 尚未接入，非 Windows 仍保留 0600 兼容文件。 |
 | P1-15（诊断已关闭） | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go:newReq` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 当 `WWW-Authenticate` 不包含 Basic 时，错误现在明确提示“当前仅支持 Basic Auth”，且不盲目重试、不增加请求。Digest/客户端证书属于新的认证实现，需要真实服务需求和单独安全设计。 |
 
 ### 4.3 P2：功能一致性、可维护性和交互
@@ -292,7 +292,7 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 | 架构文档称前端不轮询 | 已关闭 | 已改为“事件优先；外部状态使用去重、缓存、可见性保护后的限频轮询”。 |
 | README WebDAV 模板列表过时 | 已关闭 | 已列出当前模板范围，并注明 Endpoint 和应用密码需按服务商确认。 |
 | Release 流水线没有质量 job | 已关闭主要门禁 | `quality` job 运行 Go test/vet/build 与前端 build，所有平台构建依赖该 job，publish 再依赖全部 build。 |
-| AGENTS 描述“无加密存储”与实际 Vault 不一致 | 已关闭 | 已明确账号凭据使用本地 AES-GCM、主密钥尚未绑定 OS 凭据库。 |
+| AGENTS 描述“无加密存储”与实际 Vault 不一致 | 已关闭 | 已明确账号凭据使用本地 AES-GCM；并补充 Windows DPAPI 与非 Windows 兼容实现的实际边界。 |
 
 ## 11. 后续修复路线
 

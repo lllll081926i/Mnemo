@@ -1,8 +1,8 @@
 // Package vault provides AES-256-GCM encryption for sensitive local data
-// (login credentials). The encryption key is a random 32-byte secret
-// generated on first run and stored as keyfile next to the accounts file in
-// the user config dir. The encrypted file is useless without the keyfile, and
-// the keyfile persists across reinstalls (independent of install path).
+// (login credentials). On Windows the random master key is protected with
+// DPAPI; non-Windows platforms retain the legacy 0600 keyfile until a native
+// Keychain/Secret-Service adapter is added. Existing legacy keyfiles remain
+// readable for migration.
 package vault
 
 import (
@@ -19,13 +19,14 @@ import (
 
 // magic identifies the vault file format version.
 const (
-	magic    = "MNEMOVAULT1"
-	keyfile  = "vault.key"
+	magic   = "MNEMOVAULT1"
+	keyfile = "vault.key"
 )
 
 var (
 	keyCache  [32]byte
 	keyLoaded bool
+	keyDir    string
 	keyMu     sync.Mutex
 )
 
@@ -34,26 +35,53 @@ var (
 func loadKey(dir string) ([32]byte, error) {
 	keyMu.Lock()
 	defer keyMu.Unlock()
-	if keyLoaded {
+	if keyLoaded && keyDir == dir {
 		return keyCache, nil
 	}
 	_ = os.MkdirAll(dir, 0o700)
 	path := filepath.Join(dir, keyfile)
+	protected, protectedErr := readOSProtectedKey(dir)
+	if protectedErr == nil {
+		if len(protected) != len(keyCache) {
+			return [32]byte{}, errors.New("vault: OS protected key has invalid length")
+		}
+		copy(keyCache[:], protected)
+		keyDir = dir
+		keyLoaded = true
+		return keyCache, nil
+	}
 	b, err := os.ReadFile(path)
 	if err == nil && len(b) == 32 {
 		copy(keyCache[:], b)
+		keyDir = dir
 		keyLoaded = true
+		// Migrate an existing legacy key to the OS protection boundary when
+		// the platform adapter is available. Failure is tolerated here because
+		// the legacy file remains the compatibility source for this run.
+		_ = writeOSProtectedKey(dir, b)
 		return keyCache, nil
+	}
+	if err == nil && len(b) != 32 {
+		return [32]byte{}, errors.New("vault: legacy key has invalid length")
+	}
+	if protectedErr != nil && !errors.Is(protectedErr, os.ErrNotExist) && err != nil && !errors.Is(err, os.ErrNotExist) {
+		return [32]byte{}, errors.Join(errors.New("vault: OS protected key unavailable"), protectedErr, err)
 	}
 	// generate new key
 	var k [32]byte
 	if _, err := io.ReadFull(rand.Reader, k[:]); err != nil {
 		return k, err
 	}
-	if err := os.WriteFile(path, k[:], 0o600); err != nil {
-		return k, err
+	if err := writeOSProtectedKey(dir, k[:]); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return k, err
+		}
+		if err := os.WriteFile(path, k[:], 0o600); err != nil {
+			return k, err
+		}
 	}
 	keyCache = k
+	keyDir = dir
 	keyLoaded = true
 	return k, nil
 }
