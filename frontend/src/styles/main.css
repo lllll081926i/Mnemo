@@ -216,6 +216,27 @@ body {
   will-change: transform;
 }
 body.rail-drag-active { cursor: grabbing; user-select: none; }
+/* 内容包裹层：承载碰撞果冻动画（FLIP 平移在外层 button 上，二者分离避免 transform 冲突） */
+.rail-inner {
+  display: flex; align-items: center; justify-content: inherit; gap: inherit;
+  flex: 1; min-width: 0; align-self: stretch; pointer-events: none;
+}
+/* 被挤动的项：先朝移动方向被“顶”一下（压缩），再回弹落位（拉伸过冲），像有体积的碰撞 */
+@keyframes rail-bump-down {
+  0% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(5px) scaleY(.92) scaleX(1.05); }
+  62% { transform: translateY(-2px) scaleY(1.06) scaleX(.97); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes rail-bump-up {
+  0% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-5px) scaleY(.92) scaleX(1.05); }
+  62% { transform: translateY(2px) scaleY(1.06) scaleX(.97); }
+  100% { transform: translateY(0) scale(1); }
+}
+.rail-item.bump-down .rail-inner { animation: rail-bump-down .4s cubic-bezier(.3, 1.35, .5, 1) both; }
+.rail-item.bump-up .rail-inner { animation: rail-bump-up .4s cubic-bezier(.3, 1.35, .5, 1) both; }
+
 .rail-item.active {
   background: var(--listselectbg);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 20%, transparent);

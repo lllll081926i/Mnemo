@@ -22,6 +22,7 @@ onBeforeUnmount(() => { clearTimeout(enterTimer); clearTimeout(leaveTimer) })
 // ---------- 手动拖拽排序（顺序存 localStorage prefs.accountOrder） ----------
 const dragIdx = ref(-1)
 const liveList = ref(null) // 拖拽中的实时顺序
+const bumpMap = ref({})    // 被挤动项的碰撞果冻：user_id -> { dir, delay }
 let suppressClick = false
 
 const orderedAccounts = computed(() => {
@@ -66,11 +67,25 @@ function onItemPointerDown(e, acc) {
       const target = slotAt(ghostY + ghost.offsetHeight / 2)
       const cur = dragIdx.value
       if (target !== cur && cur >= 0) {
-        const list = [...liveList.value]
+        const before = liveList.value
+        const beforeIdx = new Map(before.map((a, i) => [a.user_id, i]))
+        const list = [...before]
         const [moved] = list.splice(cur, 1)
         list.splice(target, 0, moved)
         liveList.value = list
         dragIdx.value = target
+        // 碰撞果冻：被挤动的项朝移动方向“被顶一下”（压缩-回弹），
+        // 延迟与 FLIP 波纹一致；清空再赋值以保证同向连续挤动时动画能重新播放
+        const bumps = {}
+        list.forEach((a, ni) => {
+          if (a.user_id === moved.user_id) return
+          const oi = beforeIdx.get(a.user_id)
+          if (oi !== ni) {
+            bumps[a.user_id] = { dir: ni > oi ? 'down' : 'up', delay: Math.min(Math.abs(ni - target) * 35, 140) }
+          }
+        })
+        bumpMap.value = {}
+        requestAnimationFrame(() => { bumpMap.value = bumps })
       }
     }
     // 弹簧未收敛或拖动中：继续下一帧
@@ -101,6 +116,7 @@ function onItemPointerDown(e, acc) {
     top0 = items[0].getBoundingClientRect().top
     bottomLimit = items[items.length - 1].getBoundingClientRect().bottom
     const r = itemEl.getBoundingClientRect()
+    bumpMap.value = {}
     ghostTop0 = r.top
     ghostY = r.top
     ghost = itemEl.cloneNode(true)
@@ -257,22 +273,24 @@ function onMenu(action) {
         :key="acc.user_id"
         type="button"
         class="rail-item"
-        :class="{ active: current && current.user_id === acc.user_id, dragging: dragIdx === i }"
+        :class="{ active: current && current.user_id === acc.user_id, dragging: dragIdx === i, ['bump-' + (bumpMap[acc.user_id] || {}).dir]: bumpMap[acc.user_id] }"
         :style="dragIdx >= 0 && dragIdx !== i ? { transitionDelay: Math.min(Math.abs(i - dragIdx) * 35, 140) + 'ms' } : null"
         :title="`${labelOfAcc(acc)} · ${accountName(acc)}`"
         @pointerdown="onItemPointerDown($event, acc)"
         @click="onItemClick(acc)"
         @contextmenu.prevent="onCtx($event, acc)"
       >
-        <span class="rail-icon">
-          <img v-if="iconOfAcc(acc)" :src="iconOfAcc(acc)" alt="" />
-          <span v-else class="rail-fallback">{{ (accountName(acc) || '?')[0].toUpperCase() }}</span>
-        </span>
-        <span class="rail-meta">
-          <span class="rail-name">{{ accountName(acc) }}</span>
-          <span class="rail-sub" v-if="hasQuota(acc)">{{ acc.usage.usedStr }} / {{ acc.usage.sizeStr }}</span>
-          <span class="rail-sub" v-else>{{ labelOfAcc(acc) }}</span>
-          <span v-if="hasQuota(acc)" class="rail-quota"><i :style="{ width: quotaPct(acc) + '%' }"></i></span>
+        <span class="rail-inner" :style="bumpMap[acc.user_id] ? { animationDelay: bumpMap[acc.user_id].delay + 'ms' } : null">
+          <span class="rail-icon">
+            <img v-if="iconOfAcc(acc)" :src="iconOfAcc(acc)" alt="" />
+            <span v-else class="rail-fallback">{{ (accountName(acc) || '?')[0].toUpperCase() }}</span>
+          </span>
+          <span class="rail-meta">
+            <span class="rail-name">{{ accountName(acc) }}</span>
+            <span class="rail-sub" v-if="hasQuota(acc)">{{ acc.usage.usedStr }} / {{ acc.usage.sizeStr }}</span>
+            <span class="rail-sub" v-else>{{ labelOfAcc(acc) }}</span>
+            <span v-if="hasQuota(acc)" class="rail-quota"><i :style="{ width: quotaPct(acc) + '%' }"></i></span>
+          </span>
         </span>
       </button>
       <div v-if="!accounts.length" class="rail-empty" key="__empty">
