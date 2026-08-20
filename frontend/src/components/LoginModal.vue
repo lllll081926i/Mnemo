@@ -460,7 +460,7 @@ async function submit() {
                 </div>
               </div>
 
-              <div class="login-form-content">
+              <div class="login-form-content" :key="providerId">
                 <!-- 挂载存储（WebDAV / S3） -->
                 <template v-if="isMounted">
                   <div class="login-section">
@@ -474,31 +474,30 @@ async function submit() {
                       <label>认证方式</label>
                       <UiSelect v-model="mountedForm.authType" :options="webdavAuthOptions" block />
                     </div>
-                    <div class="field login-field">
-                      <label>内网媒体预览</label>
-                      <div class="switch-row">
-                        <button class="switch" :class="{ on: mountedForm.allowPrivateNetwork }" type="button" role="switch" :aria-checked="mountedForm.allowPrivateNetwork" @click="mountedForm.allowPrivateNetwork = !mountedForm.allowPrivateNetwork"></button>
-                      </div>
-                    </div>
                     <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
                     <template v-if="providerId === 's3'">
                       <div class="field login-field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
                       <div class="field login-field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
                       <div class="field login-field"><label>Session Token (可选)</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.sessionToken') ? 'text' : 'password'" v-model="mountedForm.sessionToken" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" :aria-label="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" @click="togglePassword('mounted.sessionToken')"><UiIcon :name="passwordVisible('mounted.sessionToken') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
-                      <div class="field login-field">
-                        <label>路径风格</label>
-                        <div class="switch-row">
-                          <button class="switch" :class="{ on: mountedForm.forcePathStyle }" type="button" role="switch" :aria-checked="mountedForm.forcePathStyle" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></button>
-                        </div>
-                      </div>
-                      <div class="field login-field">
-                        <label>写入权限验证</label>
-                        <div class="switch-row">
-                          <button class="switch" :class="{ on: mountedForm.verifyWrite }" type="button" role="switch" :aria-checked="mountedForm.verifyWrite" @click="mountedForm.verifyWrite = !mountedForm.verifyWrite"></button>
-                        </div>
-                      </div>
                     </template>
+                    <!-- 开关组：全部收成一行 chip，避免每个开关独占一行 -->
+                    <div class="field login-field">
+                      <div class="switch-chips">
+                        <label class="switch-chip">
+                          <button class="switch" :class="{ on: mountedForm.allowPrivateNetwork }" type="button" role="switch" :aria-checked="mountedForm.allowPrivateNetwork" @click="mountedForm.allowPrivateNetwork = !mountedForm.allowPrivateNetwork"></button>
+                          <span>内网媒体预览</span>
+                        </label>
+                        <label v-if="providerId === 's3'" class="switch-chip">
+                          <button class="switch" :class="{ on: mountedForm.forcePathStyle }" type="button" role="switch" :aria-checked="mountedForm.forcePathStyle" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></button>
+                          <span>路径风格</span>
+                        </label>
+                        <label v-if="providerId === 's3'" class="switch-chip">
+                          <button class="switch" :class="{ on: mountedForm.verifyWrite }" type="button" role="switch" :aria-checked="mountedForm.verifyWrite" @click="mountedForm.verifyWrite = !mountedForm.verifyWrite"></button>
+                          <span>写入权限验证</span>
+                        </label>
+                      </div>
+                    </div>
                     <div v-if="providerId === 'webdav'" class="field login-field"><label>根目录 (可选)</label><input class="input" v-model="mountedForm.rootPath" placeholder="/" /></div>
                     <div v-else class="field login-field"><label>挂载路径 (可选)</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
                   </div>
@@ -606,6 +605,17 @@ async function submit() {
 .switch-row { display: flex; align-items: center; gap: 9px; min-height: 24px; }
 .switch { border: 0; padding: 0; }
 .switch-row .hint { margin: 0; line-height: 1.45; }
+
+/* 登录页切换网盘：内容区淡入 + 右滑入位 */
+.login-form-content { animation: login-pane-in 240ms var(--motion-glide); }
+@keyframes login-pane-in {
+  from { opacity: 0; transform: translateX(10px); }
+}
+
+/* 开关组 chip：多个开关收进一行 */
+.switch-chips { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.switch-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+.switch-chip:hover { color: var(--text-primary); }
 .login-state-card {
   display: flex; align-items: flex-start; gap: 12px;
   padding: 16px; border: 1px solid var(--border-light);
