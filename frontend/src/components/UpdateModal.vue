@@ -2,7 +2,8 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
-import { CheckUpdate, DownloadUpdate, ApplyUpdate, onEvent } from '../api'
+import ConfirmModal from './ConfirmModal.vue'
+import { CheckUpdate, DownloadUpdate, ApplyUpdate, getSettings, onEvent } from '../api'
 
 const emit = defineEmits(['close'])
 
@@ -11,6 +12,8 @@ const info = ref(null)
 const progress = ref({ downloaded: 0, total: 0 })
 const updatePath = ref('')
 const errorMsg = ref('')
+const confirmBeforeInstall = ref(true)
+const installConfirmOpen = ref(false)
 let offProgress, offDone, offApplying, offError
 
 function pct() {
@@ -56,6 +59,7 @@ async function startDownload() {
 
 onMounted(() => {
   check()
+  getSettings().then((s) => { confirmBeforeInstall.value = s?.confirmUpdate !== false }).catch(() => {})
   offProgress = onEvent('update:progress', (p) => {
     if (p && p.error) { errorMsg.value = p.error; state.value = 'error'; return }
     progress.value = p || progress.value
@@ -72,6 +76,15 @@ onMounted(() => {
 onBeforeUnmount(() => { offProgress && offProgress(); offDone && offDone(); offApplying && offApplying(); offError && offError() })
 
 async function install() {
+  if (confirmBeforeInstall.value) {
+    installConfirmOpen.value = true
+    return
+  }
+  await applyUpdate()
+}
+
+async function applyUpdate() {
+  installConfirmOpen.value = false
   const path = updatePath.value || progress.value.path || ''
   if (!path) {
     errorMsg.value = '更新文件路径不可用，请重新下载'
@@ -127,6 +140,14 @@ async function install() {
       </div>
     </div>
   </Modal>
+  <ConfirmModal
+    v-if="installConfirmOpen"
+    title="确认安装更新"
+    message="安装更新会关闭并重启 Mnemo，未完成的操作请先确认已保存。"
+    ok-text="安装并重启"
+    @ok="applyUpdate"
+    @cancel="installConfirmOpen = false"
+  />
 </template>
 
 <style scoped>

@@ -68,13 +68,18 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 	}
 	_ = os.MkdirAll(downloadDir, 0o755)
 	maxConc := 3
-	if s, err := st.GetSettings(); err == nil && s.MaxConcurrentDownloads > 0 {
-		maxConc = s.MaxConcurrentDownloads
+	keepTasks := true
+	settings, settingsErr := st.GetSettings()
+	if settingsErr == nil {
+		if settings.MaxConcurrentDownloads > 0 {
+			maxConc = settings.MaxConcurrentDownloads
+		}
+		keepTasks = settings.KeepTasks
 	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	initialRate := int64(0)
-	if s, err := st.GetSettings(); err == nil {
-		initialRate = s.MaxDownloadSpeed
+	if settingsErr == nil {
+		initialRate = settings.MaxDownloadSpeed
 	}
 	m := &Manager{
 		store:              st,
@@ -90,6 +95,11 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		concurrencyChanged: make(chan struct{}),
 		cancel:             rootCancel,
 		speedLimiter:       dlengine.NewSharedLimiter(initialRate),
+	}
+	if !keepTasks {
+		if err := st.ClearDownloadTasks(); err != nil {
+			logging.Warn("download task history cleanup failed", "error", err)
+		}
 	}
 	// restore persisted tasks
 	m.loadPersisted()

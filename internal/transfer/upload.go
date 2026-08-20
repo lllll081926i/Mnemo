@@ -49,9 +49,13 @@ const maxUploadDirectoryCacheEntries = 1024
 // NewUploadQueue creates the upload queue and restores persisted jobs.
 func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 	maxConc := 2
-	if s, err := st.GetSettings(); err == nil && s.MaxConcurrentDownloads > 0 {
+	keepTasks := true
+	if s, err := st.GetSettings(); err == nil {
 		// reuse the concurrency setting as an upper bound for uploads too
-		maxConc = s.MaxConcurrentDownloads
+		if s.MaxConcurrentDownloads > 0 {
+			maxConc = s.MaxConcurrentDownloads
+		}
+		keepTasks = s.KeepTasks
 	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	q := &UploadQueue{
@@ -67,6 +71,11 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 		runs:            map[string]*uploadRun{},
 		generations:     map[string]uint64{},
 		handlerResolver: drive.QueueUploadHandler,
+	}
+	if !keepTasks {
+		if err := st.ClearUploadTasks(); err != nil {
+			logging.Warn("upload task history cleanup failed", "error", err)
+		}
 	}
 	// restore persisted tasks as paused (user must resume manually)
 	if list, err := st.ListUploadTasks(); err == nil {

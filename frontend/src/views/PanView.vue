@@ -45,8 +45,9 @@ watch(filterRaw, (v) => {
   clearTimeout(filterTimer)
   filterTimer = setTimeout(() => { filter.value = v }, 120)
 })
-const sortKey = ref('name')   // name | time | size
-const sortAsc = ref(true)
+const initialPrefs = getPrefs()
+const sortKey = ref(['name', 'time', 'size'].includes(initialPrefs.defaultSortKey) ? initialPrefs.defaultSortKey : 'name') // name | time | size
+const sortAsc = ref(initialPrefs.defaultSortAsc !== false)
 const sortLabel = computed(() => ({ name: '名称', time: '修改时间', size: '大小' }[sortKey.value] + '·' + (sortAsc.value ? '升' : '降')))
 const sortMenuItems = computed(() => [
   { header: '排序方式' },
@@ -67,8 +68,8 @@ function onSortPick(action) {
 // 区间选择模式：开启后点两个行选定区间
 const rangIsSelecting = ref(false)
 const rangAnchor = ref('')
-const viewMode = ref(getPrefs().viewMode || 'list')  // list | grid
-const sideWidth = ref(getPrefs().sideWidth || 220) // 侧边栏宽度
+const viewMode = ref(initialPrefs.viewMode || 'list')  // list | grid
+const sideWidth = ref(initialPrefs.sideWidth || 220) // 侧边栏宽度
 const isSideResizing = ref(false)
 let sideResizing = null
 function sideDown(e) {
@@ -98,6 +99,7 @@ const favExpanded = ref(false)
 // 目录树
 const tree = ref({})          // id -> 子目录数组
 const treeNames = ref({})     // id -> name
+const treeParents = ref({})   // id -> parent id
 const expanded = ref({})
 const treeSelected = ref('root')
 
@@ -276,7 +278,10 @@ async function load(id) {
 function updateTreeSnapshot(id, list, snapUid = uid.value, snapDid = did.value) {
   if (snapUid !== uid.value || snapDid !== did.value) return
   tree.value[id] = (list || []).filter((f) => f.isDir)
-  for (const f of tree.value[id]) treeNames.value[f.file_id] = f.name
+  for (const f of tree.value[id]) {
+    treeNames.value[f.file_id] = f.name
+    treeParents.value[f.file_id] = id
+  }
 }
 
 async function listDirectorySnapshot(id) {
@@ -492,7 +497,17 @@ function selectTreeNode(idOrNode, name) {
   mode.value = 'list'
   selected.value = []
   if (id === rootKey.value) { pathStack.value = [] }
-  else { pathStack.value = [{ id, name }] }
+  else {
+    const chain = []
+    const seen = new Set()
+    let current = id
+    while (current && current !== rootKey.value && !seen.has(current)) {
+      seen.add(current)
+      chain.unshift({ id: current, name: treeNames.value[current] || (current === id ? name : current) })
+      current = treeParents.value[current] || ''
+    }
+    pathStack.value = chain.length ? chain : [{ id, name }]
+  }
   dirId.value = id
   load(id)
   // 双击跳转后展开该节点（加载子目录），便于在树中定位
@@ -545,6 +560,11 @@ function toggleRangSelect() {
 }
 
 const listShown = computed(() => (mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value))
+watch(listShown, (list) => {
+  const visible = new Set(list.map((f) => f.file_id))
+  const next = selected.value.filter((f) => visible.has(f.file_id))
+  if (next.length !== selected.value.length) selected.value = next
+})
 const allSelected = computed(() => listShown.value.length > 0 && selected.value.length === listShown.value.length)
 
 function selectAll() { selected.value = [...listShown.value] }
@@ -1002,6 +1022,7 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
   if (!a) { files.value = []; return }
   tree.value = {}
   expanded.value = {}
+  treeParents.value = {}
   treeNames.value = {}
   thumbErrors.value = {}
   goHome()
@@ -1035,6 +1056,7 @@ defineExpose({
     dirCache.clear()
     tree.value = {}
     expanded.value = {}
+    treeParents.value = {}
     if (props.account) load(dirId.value)
   },
 })

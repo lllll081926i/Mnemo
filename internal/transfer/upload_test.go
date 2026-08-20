@@ -3,6 +3,7 @@ package transfer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -63,6 +64,42 @@ func TestNewUploadQueueRestoresPaused(t *testing.T) {
 	}
 	if r.Upload.DownState != "paused" {
 		t.Errorf("expected paused, got %s", r.Upload.DownState)
+	}
+}
+
+func TestUploadQueueKeepTasksDisabledClearsFinishedHistory(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := store.DefaultSettings()
+	settings.KeepTasks = false
+	if err := st.SetSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	for i, state := range []model.UploadState{{IsCompleted: true}, {IsFailed: true}, {IsStop: true}} {
+		if err := st.SaveUploadTask(&model.UploadingUI{UploadID: fmt.Sprintf("finished-%d", i), Upload: state}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SaveUploadTask(&model.UploadingUI{UploadID: "paused", Upload: model.UploadState{DownState: "paused"}}); err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+	if _, ok := q.jobs["paused"]; !ok {
+		t.Fatal("paused upload should remain resumable when history retention is disabled")
+	}
+	if _, ok := q.jobs["finished-0"]; ok {
+		t.Fatal("finished upload history was restored despite KeepTasks=false")
+	}
+	list, err := st.ListUploadTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].UploadID != "paused" {
+		t.Fatalf("finished upload history was not cleared: %#v", list)
 	}
 }
 

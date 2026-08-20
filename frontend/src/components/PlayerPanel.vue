@@ -460,7 +460,7 @@ function onEnded() {
   if (!looping.value) {
     playbackEnded = true
     clearPlayCursor()
-    showControls.value = true
+    showControls.value = getPrefs().autoCloseOnEnd ? false : true
   }
 }
 function onError() {

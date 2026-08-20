@@ -244,16 +244,23 @@ onMounted(async () => {
 	window.addEventListener('contextmenu', preventNativeContextMenu, true)
 	const removeGlobalErrorLogging = installGlobalErrorLogging()
 	listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
-  refresh()
-  try {
-    const s = await GetSettings()
-    // 颜色模式默认跟随系统；顶栏可手动切换（不出现在设置页）
-    if (s) applyTheme(s.theme || 'system')
-  } catch { /* 默认跟随系统 */ }
-  // 启动后延迟检查更新（静默，仅发现有新版时弹窗）
-  setTimeout(() => {
-    CheckUpdate().then((r) => { if (r && r.available) showUpdate.value = true }).catch(() => {})
-  }, 3000)
+	let autoUpdateEnabled = true
+	try {
+	  const s = await GetSettings()
+	  // 颜色模式默认跟随系统；顶栏可手动切换（不出现在设置页）
+	  if (s) {
+		applyTheme(s.theme || 'system')
+		if (pageComponents[s.defaultTab]) tab.value = s.defaultTab
+		autoUpdateEnabled = s.autoUpdate !== false
+	  }
+	} catch { /* 默认跟随系统 */ }
+	refresh()
+	// 启动后延迟检查更新（静默，仅发现有新版时弹窗）
+	if (autoUpdateEnabled) {
+	  setTimeout(() => {
+		CheckUpdate().then((r) => { if (r && r.available) showUpdate.value = true }).catch(() => {})
+	  }, 3000)
+	}
   window.addEventListener('keydown', onKey)
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => applyAppearance(curTheme.value)

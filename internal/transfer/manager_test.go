@@ -183,6 +183,45 @@ func TestManagerLoadPersistedMarksPaused(t *testing.T) {
 	}
 }
 
+func TestManagerKeepTasksDisabledClearsFinishedHistory(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := store.DefaultSettings()
+	settings.KeepTasks = false
+	if err := st.SetSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"completed", "failed", "canceled"} {
+		if err := st.SaveDownloadTask(&model.DownloadTask{ID: "finished-" + status, Status: status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SaveDownloadTask(&model.DownloadTask{ID: "paused", Status: "paused"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewManager(st, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	if _, ok := m.get("paused"); !ok {
+		t.Fatal("paused task should remain resumable when history retention is disabled")
+	}
+	if _, ok := m.get("finished-completed"); ok {
+		t.Fatal("completed task history was restored despite KeepTasks=false")
+	}
+	list, err := st.ListDownloadTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "paused" {
+		t.Fatalf("finished task history was not cleared: %#v", list)
+	}
+}
+
 func TestManagerProgressPersistenceIsThrottled(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(dir)
