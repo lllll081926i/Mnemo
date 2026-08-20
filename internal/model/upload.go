@@ -18,6 +18,9 @@ type UploadInfo struct {
 	// ConflictPolicy controls behavior when the target path already exists.
 	// Supported: "" | "overwrite" (default, legacy) | "refuse" | "rename" | "skip".
 	ConflictPolicy string `json:"conflictPolicy,omitempty"`
+	// CleanupLocalFile marks an application-owned temporary source that may be
+	// removed only after the remote upload has completed successfully.
+	CleanupLocalFile bool `json:"cleanupLocalFile,omitempty"`
 }
 
 // UploadState is the mutable progress/status of an upload job.

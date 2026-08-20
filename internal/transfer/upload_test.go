@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -117,6 +119,52 @@ func TestUploadQueueResumeNotFound(t *testing.T) {
 	q := NewUploadQueue(st, nil)
 	if err := q.Resume("nonexistent"); err == nil {
 		t.Error("expected error resuming nonexistent job")
+	}
+}
+
+func TestUploadQueueCleansManagedCloudTextTempAfterSuccess(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "mnemo_edit_upload_test_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := filepath.Join(tmpDir, "note.txt")
+	if err := os.WriteFile(tmpPath, []byte("draft"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	job := &model.UploadingUI{
+		UploadID: "up-cleanup",
+		Info:     model.UploadInfo{LocalFilePath: tmpPath, Name: "note.txt"},
+		Upload:   model.UploadState{IsCompleted: true, DownState: "completed"},
+	}
+	q.update(job)
+	if !q.MarkCleanupOnSuccess(job.UploadID, tmpPath) {
+		t.Fatal("expected cleanup marker to attach")
+	}
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("managed temp source still exists, stat error: %v", err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "keep.txt")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outsideJob := &model.UploadingUI{
+		UploadID: "up-no-cleanup",
+		Info:     model.UploadInfo{LocalFilePath: outside, CleanupLocalFile: true},
+	}
+	q.cleanupTemporarySource(outsideJob)
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("unmanaged source should remain, stat error: %v", err)
 	}
 }
 

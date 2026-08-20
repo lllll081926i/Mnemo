@@ -121,6 +121,27 @@ func (q *UploadQueue) update(j *model.UploadingUI) {
 	q.publishSnapshot(snapshot, shouldPersist)
 }
 
+// mutateJob applies a queue-owned change to a job that may not have an active
+// worker. It is used for metadata that is attached immediately after enqueue,
+// while preserving the same persistence and event behavior as update.
+func (q *UploadQueue) mutateJob(id string, mutate func(*model.UploadingUI)) bool {
+	if id == "" || mutate == nil {
+		return false
+	}
+	q.mu.Lock()
+	j, ok := q.jobs[id]
+	if !ok || j == nil {
+		q.mu.Unlock()
+		return false
+	}
+	mutate(j)
+	snapshot := *j
+	shouldPersist := q.shouldPersistLocked(snapshot)
+	q.mu.Unlock()
+	q.publishSnapshot(snapshot, shouldPersist)
+	return true
+}
+
 func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist bool) {
 	if shouldPersist {
 		q.persistMu.Lock()
@@ -259,6 +280,70 @@ func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPa
 		logging.Warn("upload worker could not start", "job_id", j.UploadID, "error", err)
 	}
 	return j
+}
+
+// MarkCleanupOnSuccess marks an application-owned temporary upload source.
+// The source is removed only after the provider reports success; failed or
+// paused jobs keep the file available for retry.
+func (q *UploadQueue) MarkCleanupOnSuccess(id, localPath string) bool {
+	localPath = strings.TrimSpace(localPath)
+	if id == "" || localPath == "" {
+		return false
+	}
+	attached := false
+	marked := q.mutateJob(id, func(j *model.UploadingUI) {
+		if filepath.Clean(j.Info.LocalFilePath) == filepath.Clean(localPath) {
+			j.Info.CleanupLocalFile = true
+			attached = true
+		}
+	})
+	if !marked || !attached {
+		return false
+	}
+	// A very small file may finish before the caller can attach the marker.
+	// Check the terminal state once more so that this race does not leak the
+	// application-owned temporary source.
+	q.mu.Lock()
+	completed := q.jobs[id]
+	var snapshot *model.UploadingUI
+	if completed != nil && completed.Upload.IsCompleted {
+		copy := *completed
+		snapshot = &copy
+	}
+	q.mu.Unlock()
+	q.cleanupTemporarySource(snapshot)
+	return true
+}
+
+func (q *UploadQueue) cleanupTemporarySource(j *model.UploadingUI) {
+	if j == nil || !j.Info.CleanupLocalFile {
+		return
+	}
+	path := filepath.Clean(strings.TrimSpace(j.Info.LocalFilePath))
+	if path == "." || !isMnemoEditTemp(path) {
+		logging.Warn("temporary upload cleanup skipped", "job_id", j.UploadID, "reason", "path outside managed temp directory")
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		logging.Warn("temporary upload file cleanup failed", "job_id", j.UploadID, "error", err)
+		return
+	}
+	if err := os.Remove(filepath.Dir(path)); err != nil && !os.IsNotExist(err) {
+		logging.Debug("temporary upload directory cleanup skipped", "job_id", j.UploadID, "error", err)
+	}
+}
+
+func isMnemoEditTemp(path string) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	tmpRoot, err := filepath.Abs(os.TempDir())
+	if err != nil || filepath.Dir(filepath.Dir(abs)) != tmpRoot {
+		return false
+	}
+	dir := filepath.Dir(abs)
+	return strings.HasPrefix(filepath.Base(dir), "mnemo_edit_")
 }
 
 func (q *UploadQueue) startUpload(id string) error {
@@ -501,7 +586,9 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 	q.mu.Unlock()
 	if handlerErr != nil {
 		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			cleanupLocalFile := j.Info.CleanupLocalFile
 			j.Info = worker.Info
+			j.Info.CleanupLocalFile = cleanupLocalFile || worker.Info.CleanupLocalFile
 			j.Upload.FileID = worker.Upload.FileID
 			j.Upload.UploadID = worker.Upload.UploadID
 			j.Upload.IsDowning = false
@@ -520,7 +607,9 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 	}
 	if wasStopped {
 		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			cleanupLocalFile := j.Info.CleanupLocalFile
 			j.Info = worker.Info
+			j.Info.CleanupLocalFile = cleanupLocalFile || worker.Info.CleanupLocalFile
 			j.Upload.FileID = worker.Upload.FileID
 			j.Upload.UploadID = worker.Upload.UploadID
 			j.Upload.IsDowning = false
@@ -530,8 +619,10 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		logging.Info("upload worker stopped", "job_id", id, "duration", logging.Duration(started))
 		return
 	}
-	q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+	if q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+		cleanupLocalFile := j.Info.CleanupLocalFile
 		j.Info = worker.Info
+		j.Info.CleanupLocalFile = cleanupLocalFile || worker.Info.CleanupLocalFile
 		j.Upload.FileID = worker.Upload.FileID
 		j.Upload.UploadID = worker.Upload.UploadID
 		j.Upload.IsDowning = false
@@ -543,7 +634,17 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		j.Upload.DownState = "completed"
 		j.Upload.FailedCode = 0
 		j.Upload.FailedMessage = ""
-	})
+	}) {
+		q.mu.Lock()
+		completed := q.jobs[id]
+		var snapshot *model.UploadingUI
+		if completed != nil {
+			copy := *completed
+			snapshot = &copy
+		}
+		q.mu.Unlock()
+		q.cleanupTemporarySource(snapshot)
+	}
 	logging.Info("upload worker finished", "job_id", id, "status", "completed", "duration", logging.Duration(started))
 }
 

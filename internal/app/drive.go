@@ -40,6 +40,9 @@ func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content str
 		removeCloudTextUploadTemp(tmpPath)
 		return fmt.Errorf("文件未能加入上传队列")
 	}
+	if !uploads.MarkCleanupOnSuccess(created[0].UploadID, tmpPath) {
+		logging.Warn("cloud text temp cleanup marker could not be attached", "job_id", created[0].UploadID)
+	}
 	logging.Info("cloud text save queued", "job_id", created[0].UploadID, "file_name", name)
 	return nil
 }
