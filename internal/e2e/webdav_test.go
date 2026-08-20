@@ -270,7 +270,7 @@ func TestWebDAVConnectionErrorIncludesSafeServerDiagnostics(t *testing.T) {
 		t.Fatal("expected WebDAV validation error")
 	}
 	message := err.Error()
-	for _, want := range []string{"530", "application password", "Digest", "/correct/dav/"} {
+	for _, want := range []string{"530", "application password", "Digest", "当前仅支持 Basic Auth", "/correct/dav/"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("diagnostic %q missing %q", message, want)
 		}

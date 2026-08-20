@@ -1,8 +1,8 @@
 # 阿里云盘（aliopen）功能详情
 
 > 调研范围：`internal/drive/providers/aliopen/aliopen.go`（单文件，约 2000 行）
-> 对照旧版：`../Mnemo/src/aliopen/`（10 文件）+ `src/drive/providers/aliopen.ts`
-> 整体完成度：✅ ~95%
+> 当前证据：本仓库 `internal/drive/providers/aliopen`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
 

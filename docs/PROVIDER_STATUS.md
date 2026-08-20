@@ -1,6 +1,6 @@
 # 网盘功能支持矩阵（Provider Status）
 
-> 数据来源：对 `internal/drive/providers/*` 全量源码调研 + 旧版 `../Mnemo/src/drive/providers/*` 对照（最近更新：2026-08-17）。
+> 数据来源：当前仓库 `internal/drive/providers/*`、统一能力注册表和本地自动化测试（最近更新：2026-08-20）。本次未读取父目录旧项目，也未使用真实网盘账号做在线验证。
 > 废弃说明：`gofile`、`gdrive` 已按需求移除；`encryption`（加密文件名/加密流）不再支持，相关能力位不再纳入矩阵。
 > 图示：✅ 已实现 · ⚠️ 部分/有差距 · ❌ 缺失/不支持 · ➖ 设计上不适用
 
@@ -8,21 +8,23 @@
 
 ## 一、在役网盘（13 个）
 
-| # | Provider | 登录方式 | 文件数 | Go 测试 | 整体完成度 |
-|---|----------|---------|--------|---------|-----------|
-| 1 | pikpak | 账密 + 验证码 | 5 | ✅(mock/e2e) | ✅ ~96% |
-| 2 | aliopen（阿里云盘） | refresh_token | 1 | ✅(mock/e2e) | ✅ ~95% |
-| 3 | pan123（123 云盘） | 账密 | 2 | ✅ | ✅ ~90% |
-| 4 | pan189（天翼云盘） | 账密 + 验证码 | 11 | ✅ | ✅ ~95% |
-| 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | 1 | ✅(e2e) | ✅ ~92% |
-| 6 | lanzou（蓝奏云） | Cookie / 账密 | 12 | ✅ | ✅ ~98% |
-| 7 | ilanzou（优享版蓝奏云） | 账密 | 12 | ✅ | ✅ ~100% |
-| 8 | onedrive | OAuth PKCE | 4 | ✅(e2e) | ✅ ~90% |
-| 9 | dropbox | OAuth PKCE | 4 | ✅(e2e) | ✅ ~90% |
-| 10 | yike（一刻相册） | BDUSS / Cookie | 2 | ✅(mock/e2e) | ✅ ~90% |
-| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | 2 | ✅(mock/e2e) | ✅ ~98% |
-| 12 | webdav | URL + 账密 | 1 | ✅(e2e) | ✅ ~95% |
-| 13 | s3 | endpoint + AK/SK | 1 | ✅(mock/e2e) | ✅ ~95% |
+| # | Provider | 登录方式 | 能力实现 | 当前自动验证范围 | 已知限制 |
+|---|----------|---------|:--------:|------------------|----------|
+| 1 | pikpak | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 登录可能触发服务端风控；必须遵守冷却 |
+| 2 | aliopen（阿里云盘） | refresh_token | ✅ 已注册 | mock/e2e | 包内覆盖仍不足 |
+| 3 | pan123（123 云盘） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 真实服务未在本轮验证 |
+| 4 | pan189（天翼云盘） | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 部分回收站能力不完整 |
+| 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | ✅ 已注册 | mock/e2e | 容量接口未接入；包内覆盖不足 |
+| 6 | lanzou（蓝奏云） | Cookie / 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 服务端能力有限，无通用配额 |
+| 7 | ilanzou（优享版蓝奏云） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 无通用配额 |
+| 8 | onedrive | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
+| 9 | dropbox | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
+| 10 | yike（一刻相册） | BDUSS / Cookie | ✅ 已注册 | mock/e2e | 不提供可靠配额，不参与跨盘秒传目标 |
+| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e | 包内覆盖仍不足 |
+| 12 | webdav | URL + 账密 | ✅ 已注册 | 本地 HTTP e2e | 仅 Basic Auth；配额取决于 RFC 4331 支持 |
+| 13 | s3 | endpoint + AK/SK | ✅ 已注册 | mock/e2e | 无通用总容量接口；连接校验不证明写权限 |
+
+“已注册/已实现”只表示统一驱动入口和对应代码路径存在，不代表所有真实服务商版本、权限模型和风控条件均已验证；可靠性应以测试范围和已知限制判断，不使用主观完成度百分比。
 
 ---
 
@@ -43,7 +45,7 @@
 | dropbox | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
 | yike | ➖ | ➖ | BDUSS | ➖ | ➖ | ➖ | ✅(无配额) | ❌ |
 | guangya | ➖ | ➖ | refresh_token | ✅ | ➖ | ✅ | ✅ | ✅ |
-| webdav | ➖ | ➖ | 账密 | ➖ | ➖ | ➖ | ➖ | ➖ |
+| webdav | ➖ | ➖ | 账密 | ➖ | ➖ | ➖ | ✅(可选配额) | ✅(RFC 4331) |
 | s3 | ➖ | ➖ | AK/SK | ➖ | ➖ | ➖ | ➖ | ➖ |
 
 > ✅ onedrive/dropbox 的 `RefreshAccount` 已实现：token 自动刷新 + 账号信息/配额拉取。
@@ -246,8 +248,8 @@
 | # | 差距 | 影响范围 | 详情 |
 |---|------|---------|------|
 | 15 | 限速/重试缺失 | 多盘 | aliopen 已覆盖并发限速、401 刷新和 429 退避；pikpak 已覆盖登录/API 429 冷却识别；Dropbox 已支持 429/Retry-After |
-| 16 | 版本历史缺失 | 2 盘 | onedrive/dropbox 旧版有 revisions，新版缺失 |
-| 17 | 缩略图缺失 | 1 盘 | dropbox 旧版有 `get_thumbnail_v2`，新版缺失 |
+| 16 | 版本历史缺失 | 2 盘 | onedrive/dropbox 当前驱动未提供版本历史/恢复能力 |
+| 17 | 缩略图缺失 | 1 盘 | dropbox 当前 `mapItem` 未填充缩略图 |
 | 18 | 上传进度回调已实现 | 2 盘 | ✅ webdav/s3 已实现 ProgressReader + 令牌桶限速（`progress.go:22`） |
 | 19 | yike decryptYikeMd5 | 1 盘 | ✅已实现；yike 按需求不参与跨盘秒传能力路由 |
 

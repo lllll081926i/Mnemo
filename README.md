@@ -10,7 +10,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/lllll081926i/mnemo-go/release.yml?style=flat-square&label=release)](https://github.com/lllll081926i/mnemo-go/actions/workflows/release.yml)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Wails](https://img.shields.io/badge/Wails-v2-e0342f?style=flat-square)](https://wails.io)
-[![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-arm64%2Fx64-lightgrey?style=flat-square)](https://github.com/lllll081926i/mnemo-go/releases/latest)
+[![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux-x64%2Farm64%20%7C%20macOS%20arm64-lightgrey?style=flat-square)](https://github.com/lllll081926i/mnemo-go/releases/latest)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)](LICENSE)
 
 </div>
@@ -44,7 +44,7 @@
 | 🌐 光压云 | 🌍 WebDAV | 🪣 S3 对象存储 |
 | ⚡ 一刻相册 | | |
 
-> WebDAV 预置坚果云 / InfiniCLOUD / Nextcloud，也支持自定义地址；S3 兼容各类对象存储。
+> WebDAV 预置坚果云、InfiniCLOUD、Nextcloud、ownCloud、Seafile、OpenList/AList、群晖、Koofr、Yandex Disk、pCloud 等模板，也支持自定义地址。模板地址仍需按服务商实际配置确认；启用双重验证的服务通常需要应用密码。S3 支持 AWS 及兼容对象存储。
 
 ## 📥 下载安装
 

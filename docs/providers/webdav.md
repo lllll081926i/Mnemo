@@ -1,8 +1,8 @@
 # WebDAV 功能详情
 
 > 调研范围：`internal/drive/providers/webdav/webdav.go` + `internal/provider/webdav/client.go`
-> 对照旧版：`../Mnemo/src/utils/webdavClient.ts`
-> 整体完成度：✅ ~95%
+> 当前证据：本仓库 `internal/drive/providers/webdav`、`internal/provider/webdav` 和本地 HTTP 自动化测试；本次未读取父目录旧项目。
+> 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
 

@@ -1,8 +1,8 @@
 # 光鸭云盘（guangya）功能详情
 
 > 调研范围：`internal/drive/providers/guangya/`（guangya.go ~693 行 + upload.go ~312 行）
-> 对照旧版：`../Mnemo/src/guangya/` + `src/drive/providers/guangya.ts`
-> 整体完成度：✅ ~98%（无明显差距）
+> 当前证据：本仓库 `internal/drive/providers/guangya`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
 

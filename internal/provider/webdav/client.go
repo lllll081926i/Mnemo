@@ -401,6 +401,9 @@ func (c *Client) responseError(method string, resp *http.Response) error {
 	parts := make([]string, 0, 3)
 	if auth := compactDiagnostic(resp.Header.Get("WWW-Authenticate")); auth != "" {
 		parts = append(parts, "WWW-Authenticate: "+auth)
+		if !strings.Contains(strings.ToLower(auth), "basic") {
+			parts = append(parts, "认证方式不兼容：当前仅支持 Basic Auth")
+		}
 	}
 	if location := compactDiagnostic(resp.Header.Get("Location")); location != "" {
 		parts = append(parts, "Location: "+location)

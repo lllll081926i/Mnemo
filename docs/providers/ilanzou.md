@@ -1,8 +1,8 @@
 # 优享版蓝奏云（ilanzou）功能详情
 
 > 调研范围：`internal/drive/providers/ilanzou/`（12 文件）
-> 对照旧版：`../Mnemo/src/ilanzou/` + `src/drive/providers/ilanzou.ts`
-> 整体完成度：✅ 100%（源码级迁移链路）
+> 当前证据：本仓库 `internal/drive/providers/ilanzou`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
 

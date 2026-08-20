@@ -1,8 +1,8 @@
 # PikPak 网盘功能详情
 
 > 调研范围：`internal/drive/providers/pikpak/`（auth.go, client.go, pikpak.go, gcid.go, oss.go）
-> 对照旧版：`../Mnemo/src/pikpak/`（8 文件）+ `src/drive/providers/pikpak.ts`
-> 整体完成度：✅ ~98%（登录、列表、下载、视频预览、上传主链路已完成迁移审计）
+> 当前证据：本仓库 `internal/drive/providers/pikpak`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
 

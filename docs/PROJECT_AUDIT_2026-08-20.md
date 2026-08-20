@@ -2,16 +2,16 @@
 
 ## 1. 审查结论
 
-审查对象为 `D:/Code/Mnemo/Mnemo-Go`，当前代码版本为 `v0.2.0`，审查时 Git 提交为 `2ff6460`。本次没有读取 `D:/Code/Mnemo` 中的旧项目或参考示例，没有登录或请求任何真实网盘账号，也没有使用浏览器做视觉验收。前端结论仅来自源码、数据流、构建结果和 Wails 绑定链路。
+审查对象为 `D:/Code/Mnemo/Mnemo-Go`，审查基线版本为 `v0.2.0`，修复以本报告和本地提交历史为准。本次没有读取 `D:/Code/Mnemo` 中的旧项目或参考示例，没有登录或请求任何真实网盘账号，也没有使用浏览器做视觉验收。前端结论仅来自源码、数据流、构建结果和 Wails 绑定链路。
 
-项目的基础架构已经成形：13 个 Provider 已接入统一驱动层，下载、上传、迁移、同步、预览和本地存储均有可运行实现；全量编译、后端测试、静态检查和核心竞态检查均能通过。审查最初发现的同步路径边界、扫描失败误删、同名下载和分段下载完整性四项 P0 已在本轮关闭并补回归测试；同步任务重入、敏感下载状态、本地预览越权边界和外链协议也已关闭。构建通过仍不能理解为“所有数据链路均已安全”，上传 worker 生命周期、预览代理 DNS rebinding、迁移一致性和发布可信度等 P1 仍需继续修复。
+项目的基础架构已经成形：13 个 Provider 已接入统一驱动层，下载、上传、迁移、同步、预览和本地存储均有可运行实现；全量编译、后端测试、静态检查和核心竞态检查均能通过。审查最初发现的四项 P0 已全部关闭并补回归测试；同步任务重入、上传 worker 生命周期、共享限速、敏感下载状态、本地预览越权、DNS rebinding、外链协议、Provider 主链路取消和迁移部分结果误报也已关闭。构建通过仍不能理解为所有真实网盘和发布链路均已验证，独立更新签名、系统凭据库、WebDAV 非 Basic 认证和真实平台/服务商验证仍受外部条件限制。
 
 总体判断：
 
 - 日常浏览、常规传输和播放链路具备继续迭代的基础。
 - WebDAV/S3 登录兼容性、容量刷新和前端若干确定性功能错误已在本轮修复。
-- 四项 P0 已关闭；同步任务并发互斥/取消、本地预览文件授权和下载敏感状态持久化已关闭。上传 worker 生命周期、Provider 请求级取消、迁移一致性等 P1 仍未关闭，删除传播仍应保持显式启用并继续增加预演能力。
-- `docs/PROVIDER_STATUS.md` 中大量 90%–100% 的“完成度”不能代表可靠性或测试充分度，应改为“能力实现状态 + 已验证范围”。
+- 四项 P0 已关闭；任务并发/取消、上传状态隔离、进程级限速、本地预览授权、下载敏感状态和迁移主要一致性路径已关闭。删除传播仍保持显式启用，同步预演与恢复属于下一阶段产品安全能力。
+- `docs/PROVIDER_STATUS.md` 已删除 90%–100% 的主观完成度，改为“能力实现状态 + 自动验证范围 + 已知限制”，并明确本轮未做真实服务验证。
 - 后续修复必须与补测同时推进，不能继续用 e2e 测试存在这一事实替代关键包的可测覆盖。
 
 ## 2. 范围、方法与限制
@@ -47,7 +47,7 @@
 | 核心包与 e2e `go test -race` | 通过 |
 | `git diff --check` | 通过，仅有 Windows 换行符提示 |
 
-`-race` 通过只说明现有测试实际执行到的路径未报告竞态；上传 Provider 直接修改共享 `UploadingUI` 等未覆盖路径仍不能据此判定安全。
+`-race` 通过只说明现有测试实际执行到的路径未报告竞态；上传 Provider 现使用 worker 私有状态并由队列合并结果，但未使用真实账号执行的 Provider SDK 路径仍不能据此判定完全无竞态。
 
 ## 3. 本轮已经修复的内容
 
@@ -85,6 +85,12 @@
 | F-30 | “全局限速”按下载/上传任务各自独立计算 | 下载 Manager 共享一个可动态调速的进程级 limiter，所有分段和任务共用；WebDAV/S3 等直传上传共用 netx 进程级桶。增加共享计量单测，取消/切换设置仍可及时生效。 |
 | F-31 | 预览代理只做域名/字面 IP 检查，存在 DNS rebinding 和私网自动白名单 | 私网/链路本地/未指定地址不再被 Provider URL 自动加入白名单；真实请求前解析全部地址，拒绝含保留地址的域名；直连 DialContext 使用已解析的公网 IP 并保留原 Host/SNI；重定向重复做 DNS 校验。显式 loopback 仍支持本地测试和本机服务。 |
 | F-32 | 同步、迁移和上传队列的网络操作无法及时响应任务取消 | 新增 `ListDirContext`、`ListDirAllContext`、`GetFileContext`、`GetDownloadURLContext`、`MkdirContext`、`DeleteBatchContext`、`TrashBatchContext`、`RapidUploadByHashContext`、`ResolveTransferHashContext`、`StreamUploadHandlerContext` 和 `QueueUploadHandlerContext` 兼容门面；同步、迁移、上传队列的列表、建目录、下载地址、哈希/秒传、上传准备和删除传播均沿用调用方 Context。已有无 Context 方法保留并继续使用 `context.Background()` 兼容 Wails 调用方。 |
+| F-33 | 多个设置项只保存不生效 | 已接入默认页签、自动更新、安装确认、任务历史保留、默认排序和播放结束控件策略；无法跨平台可靠控制的硬件解码不再承诺已生效。 |
+| F-34 | 播放器字幕资源未统一释放 | 本地字幕 Blob URL 在切源/卸载时统一 revoke；SUP/ASS fetch 可取消；本地 FileReader 在切源、卸载和重新选择时取消；同名云字幕增加播放序列保护。 |
+| F-35 | 传输/云离线刷新失败伪装成空列表 | 增加简短错误状态与重试入口；云离线账号切换增加响应序列保护，旧账号响应不会覆盖新账号。 |
+| F-36 | 容量只有数值/未知两种状态 | Quota 统一记录可用、不支持、限流、失败、未知与更新时间；失败保留上次成功数值，刷新仍受前后端双层去重和冷却保护。 |
+| F-37 | 迁移已产生部分目标结果却可能显示整体失败 | 目录目标创建后源列表/子项失败统一标记“部分完成”，保留失败数和原因；无目标结果的错误仍为失败，取消状态不变。 |
+| F-38 | Provider/架构/README 与当前实现不一致 | 删除主观完成度百分比和旧项目数据源声明，修正 macOS 架构、WebDAV 模板、限频轮询、Vault 加密和 Release quality 状态。 |
 
 ## 4. 风险分级
 
@@ -109,19 +115,19 @@
 |---|---|---|---|
 | P1-01（主链路已关闭） | 同一同步任务可并发运行，缺少任务级取消和互斥 | 手动与调度现已共用按任务 ID 的运行注册表，支持取消、运行状态恢复和应用退出清理；同步、迁移和上传队列主链路的列表、建目录、文件读取、下载 URL、哈希/秒传、上传准备和删除传播均传递调用方 Context。新增本地 WebDAV 阻塞请求回归，确认取消会到达实际 HTTP 请求并及时返回。交互式 Wails 门面继续保留 `context.Background()` 以兼容现有接口。 | 后续为高风险 Provider 增加同类包内取消用例；这属于覆盖补强，不再阻塞任务生命周期主问题关闭。 |
 | P1-02（已关闭） | 同步任务 ID 可进入快照文件名 | 原实现直接拼成 `SyncSnapshot_<id>.json` | 合法旧 ID 保持兼容，危险 ID 映射为固定 SHA-256 文件名；测试确认文件始终位于 Store 目录内。 |
-| P1-03（部分关闭） | 上传取消后可立即恢复旧任务，旧 Provider 未退出前可能出现两个 worker | 每个任务现有 generation/运行句柄，旧 worker 未退出时 Resume 明确返回等待错误；Provider 使用 worker 私有副本，队列独占合并结果并节流进度事件。 | 重复 worker、共享 `UploadingUI` 竞态已关闭；仍需为所有 Provider 补更细的取消/远端会话清理测试。 |
-| P1-04（部分关闭） | “全局限速”实际是每任务限速 | 下载 Manager 和直传上传现均使用进程级共享 limiter；所有下载分片也共享同一桶 | 并发总速率放大问题已关闭；仍需在真实平台测量磁盘/网络缓冲造成的短时突发，并为 Provider 自有上传 SDK 增加端到端节流观测。 |
+| P1-03（主链路已关闭） | 上传取消后可立即恢复旧任务，旧 Provider 未退出前可能出现两个 worker | 每个任务现有 generation/运行句柄，旧 worker 未退出时 Resume 明确返回等待错误；Provider 使用 worker 私有副本，队列独占合并结果并节流进度事件。 | 重复 worker、共享 `UploadingUI` 竞态已关闭；所有 Provider 的远端会话清理仍需随真实服务验证补测试。 |
+| P1-04（主链路已关闭） | “全局限速”实际是每任务限速 | 下载 Manager 和直传上传现均使用进程级共享 limiter；所有下载分片也共享同一桶 | 并发总速率放大问题已关闭；真实平台缓冲突发和 Provider 自有上传 SDK 的端到端观测属于验证补强。 |
 | P1-05（已关闭） | 下载任务会持久化签名 URL 和敏感请求头 | 原任务 JSON 和分段状态曾保存 URL/Headers | 新任务与旧任务迁移均不再落盘 URL/Header；断点状态只保存 URL 指纹；前端列表和事件同样使用脱敏副本。直链任务重启后明确不可恢复。 |
 | P1-06（已关闭） | 本地预览把整个 `dataDir` 作为可访问根 | 原实现把下载目录和数据目录同时作为可访问根，且 URL 直接携带路径 | 只允许当前下载根内的已存在文件，并使用随机文件级授权；不注册应用数据目录、不暴露绝对路径，根目录变更会撤销授权。 |
 | P1-07（已关闭主要路径） | 预览代理存在 DNS rebinding/私网信任缺口 | 真实请求前解析全部 IP，直连连接固定到已验证公网地址；重定向重复解析；初始 Provider URL 只有 loopback 可自动登记，RFC1918 等私网不会自动放行 | DNS rebinding、私网 Provider URL 自动信任和重定向绕过已关闭；若用户明确需要内网媒体服务，仍应设计显式“允许本机/内网”配置和审计提示，不应默认开启。 |
 | P1-08（已关闭） | `OpenBrowser` 是不限制协议的 Wails 绑定，且没有显式 CSP | 原绑定接受任意字符串，前端入口无 CSP | 外链现仅允许 HTTPS 和本机回环 HTTP，拒绝用户信息和危险 scheme；入口已增加显式 CSP，并有允许/拒绝矩阵测试。 |
 | P1-09（主要路径已关闭） | 跨盘迁移绑定层未拒绝源/目标为同一盘或目标在源子树 | 绑定层和引擎拒绝同一账号/同一盘，因此不会进入递归复制；目录目标已创建后源列表或子项失败时，现在准确标记“部分完成”并保留失败数/原因，不再误报整体失败 | 同盘递归和部分结果误报已关闭；不同挂载 ID 的祖先别名无法在通用 Provider 层可靠解析，逐文件恢复/显式清理属于后续产品能力。 |
-| P1-10 | 移除账号只删除账号记录 | `internal/app/app.go:853-865`、`internal/store/accounts.go:154-168` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 已先修正文案：明确只删除账号凭据，下载任务、收藏、同步配置等本地记录保留；自动清理这些数据需要额外的破坏性确认和逐类删除策略，暂不隐式执行。 |
+| P1-10（误导文案已关闭） | 移除账号只删除账号记录 | `internal/app/app.go`、`internal/store/accounts.go` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 已明确只删除账号凭据，下载任务、收藏、同步配置等本地记录保留；自动清理需要额外的破坏性确认和逐类删除策略，暂不隐式执行。 |
 | P1-11（已关闭） | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go` 不启用托盘，旧关闭逻辑却无条件按设置隐藏窗口 | Linux/macOS 用户可能关闭后无法恢复窗口 | 增加编译目标感知的 `TrayAvailable`；无托盘平台即使旧设置为开启也正常退出，Windows 保持原托盘行为。 |
 | P1-12 | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml:206-211` 和 `internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 使用独立离线签名（如 minisign/cosign）、应用内固定公钥验证；Windows Authenticode、macOS Developer ID + notarization；发布密钥与 GitHub token 分离。 |
-| P1-13（部分关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 已增加独立 `quality` job，运行 Go test/vet/build 和前端 build，平台构建矩阵必须等待通过；后续仍应加入 race、前端单测和关键 mock e2e，并让 publish 显式声明同时依赖 quality/build。 |
+| P1-13（主要门禁已关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 已增加 `quality` job，运行 Go test/vet/build 和前端 build；全部平台 build 依赖 quality，publish 依赖全部 build。后续仍应加入 race、前端单测和关键 mock e2e。 |
 | P1-14 | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go:1-58`，账号本身使用 AES-256-GCM | 能阻止只拿到单个 accounts 文件的人直接读取，但无法抵御同一用户权限下同时读取密钥和密文的恶意程序 | Windows DPAPI、macOS Keychain、Linux Secret Service 存主密钥；保留现有格式作为迁移层。注意项目并非“无加密存储”，文档需纠正。 |
-| P1-15 | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go:newReq` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 先基于 `WWW-Authenticate` 提示明确“不支持的认证方式”；若真实需求确认，再加入经过测试的 Digest/客户端证书，不要盲目重试多种认证。 |
+| P1-15（诊断已关闭） | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go:newReq` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 当 `WWW-Authenticate` 不包含 Basic 时，错误现在明确提示“当前仅支持 Basic Auth”，且不盲目重试、不增加请求。Digest/客户端证书属于新的认证实现，需要真实服务需求和单独安全设计。 |
 
 ### 4.3 P2：功能一致性、可维护性和交互
 
@@ -135,7 +141,7 @@
 | P2-06 | 多处加载失败被静默吞掉 | 传输列表、云离线任务刷新失败现在显示错误条与重试按钮，并对云离线账号切换做时序保护；PanView 的目录/收藏、字幕单项失败等非关键静默路径仍需按页面逐步补齐，避免一次性改动过大。 |
 | P2-07 | Modal、ContextMenu、UiSelect、SegTabs 的键盘/ARIA 行为不完整 | 这不是视觉问题，而是键盘用户无法完成操作的功能问题。补 `role`、焦点陷阱/恢复、方向键、Escape、背景滚动锁和可见焦点。 |
 | P2-08 | `PanView.vue`、`PlayerPanel.vue`、`PreviewModal.vue`、`TransferView.vue` 体积过大 | 状态耦合使回归难定位、难做组件测试。按数据加载、选择状态、操作命令、播放器资源生命周期拆 composable/子组件。 |
-| P2-09 | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | 已关闭主要路径：本地 SUP/SRT/VTT Blob URL 统一登记并在切源/卸载时 revoke；SUP/ASS 网盘字幕 fetch 使用 AbortController；本地 FileReader 在切源/卸载或重新选择时取消。仍缺少前端组件级自动化回归测试。 |
+| P2-09（主要路径已关闭） | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | 本地 SUP/SRT/VTT Blob URL 统一登记并在切源/卸载时 revoke；SUP/ASS 网盘字幕 fetch 使用 AbortController；本地 FileReader 在切源/卸载或重新选择时取消。仍缺少前端组件级自动化回归测试。 |
 | P2-10 | S3 连接验证只证明至少一种读权限 | 已在添加成功提示中明确“浏览权限已验证，写入权限将在首次上传时验证”；后端仍不创建测试对象、不主动探测 Put/Delete，实际写入失败需在传输列表展示详细错误。 |
 | P2-11（主要路径已关闭） | 账号容量缺少“更新时间/未知原因” | 统一 Quota 已记录 `available/unsupported/rate_limited/error/unknown` 状态与最近成功刷新时间；头像弹窗会区分服务端不支持、限流冷却和刷新失败，并在失败时保留上次成功容量。刷新仍沿用前后端双层去重、缓存与冷却，不增加请求；后续可增加受同一冷却保护的手动刷新入口。 |
 
@@ -280,13 +286,13 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 
 | 问题 | 证据 | 建议 |
 |---|---|---|
-| Provider “完成度 90%–100%”与覆盖率/风险不相符 | `docs/PROVIDER_STATUS.md:11-25` | 删除主观百分比，改为“实现、mock 验证、真实服务验证日期、已知限制”。 |
-| Provider 状态文档声明以旧项目为数据源 | `docs/PROVIDER_STATUS.md:3` 和多个 `docs/providers/*.md` | 本次审查未读取旧项目；当前文档证据应更新到本仓库代码和测试，不把历史对照当作当前正确性证明。 |
-| README 声称 macOS arm64/x64，但 Release 只构建 arm64 | `README.md:13` 对比 `.github/workflows/release.yml:50-54` | 修 README 或新增真实 x64 构建。 |
-| 架构文档称前端不轮询 | `docs/ARCHITECTURE.md:30`，实际容量、离线任务等存在定时刷新 | 改为“事件优先；无法推送的外部状态使用限频轮询”。 |
-| README/Provider 文档模板列表已过时 | `README.md:47` | 更新为本轮模板，并注明应用密码要求和模板 Endpoint 仍需用户确认。 |
-| Release 流水线没有质量 job | `.github/workflows/release.yml` | 发布前强制测试、vet、前端构建和安全校验。 |
-| AGENTS/架构描述“无加密存储”与实际 Vault 不一致 | `internal/store/accounts.go`、`internal/vault/vault.go` | 明确“账号 JSON 使用本地 AES-GCM，但主密钥尚未绑定 OS 凭据库”。 |
+| Provider “完成度 90%–100%”与覆盖率/风险不相符 | 已关闭 | `docs/PROVIDER_STATUS.md` 已改为能力实现、自动验证范围和已知限制。 |
+| Provider 状态文档声明以旧项目为数据源 | 已关闭当前结论入口 | 状态总表及 13 份 Provider 文档标题只以当前仓库代码/测试为证据；正文既有历史备注未在本轮复核，只保留为背景，不作为当前正确性证明。 |
+| README 声称 macOS arm64/x64，但 Release 只构建 arm64 | 已关闭 | README badge 与下载表统一为 macOS Apple Silicon。 |
+| 架构文档称前端不轮询 | 已关闭 | 已改为“事件优先；外部状态使用去重、缓存、可见性保护后的限频轮询”。 |
+| README WebDAV 模板列表过时 | 已关闭 | 已列出当前模板范围，并注明 Endpoint 和应用密码需按服务商确认。 |
+| Release 流水线没有质量 job | 已关闭主要门禁 | `quality` job 运行 Go test/vet/build 与前端 build，所有平台构建依赖该 job，publish 再依赖全部 build。 |
+| AGENTS 描述“无加密存储”与实际 Vault 不一致 | 已关闭 | 已明确账号凭据使用本地 AES-GCM、主密钥尚未绑定 OS 凭据库。 |
 
 ## 11. 后续修复路线
 
@@ -300,25 +306,25 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 - 已完成：Content-Range、ETag/If-Range 和状态失效。
 - 已完成：同步任务级互斥、取消和运行状态恢复。
 - 已完成：上传取消恢复的 worker generation、等待和共享状态隔离。
-- 仍属 P1：Provider 请求级 Context 传递；同步预演仍属于下一阶段产品安全能力。
+- 已完成：同步、迁移、上传队列 Provider 主链路的请求级 Context 传递；同步预演仍属于下一阶段产品安全能力。
 
 完成标准：Windows 路径边界用例、恶意 WebDAV href、并发同名下载、服务器中途换文件均有自动化测试；删除传播默认仍需显式开启。
 
 ### 批次 B：安全边界和任务一致性
 
 - 已完成：缩小本地预览根，使用不暴露路径的文件级随机授权。
-- 预览代理 DNS/IP 固定和重定向重复校验。
+- 已完成：预览代理 DNS/IP 固定和重定向重复校验。
 - 已完成：限制 `OpenBrowser` 协议并增加 CSP。
 - 已完成：任务和断点状态不持久化 URL/Header。
 - 已完成：上传 worker generation、取消等待、worker 私有状态和节流进度事件。
-- 已完成：迁移同盘/同盘子树入口防护；仍需部分失败清理与逐文件恢复。
+- 已完成：迁移同盘/同盘子树入口防护，以及已产生目标结果时的“部分完成”准确状态；逐文件恢复仍是后续产品能力。
 - 移除账号的关联数据清单和清理选项。
 
 ### 批次 C：测试、CI 与发布可信度
 
 - 建立前端 Vitest 和 mock Wails API。
 - 补关键 Provider 包内测试，让 e2e 与单元覆盖各自承担责任。
-- Release 加 quality 依赖，不通过不得发布。
+- 已完成：Release 增加 quality 依赖，不通过不得发布。
 - 更新产物独立签名、Windows 代码签名、macOS 签名与公证。
 - 增加 Linux/macOS 关闭行为和安装包烟测。
 
@@ -347,9 +353,9 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 | 时间 | 必做 |
 |---|---|
 | 已完成（本轮） | WebDAV/S3 登录兼容、530 诊断、WebDAV 配额、模板与密码眼睛、容量去重/缓存/退避、账号容量映射、上传冲突、迁移能力过滤、四项 P0、同步互斥/取消、敏感下载状态、文件级本地预览授权、外链限制/CSP、上传 worker 生命周期、迁移同盘入口防护、快照 ID 与日志规范化 |
-| 立即下一批 | Provider 请求级 Context 传递、迁移部分失败恢复、显式内网媒体服务授权设计 |
+| 立即下一批 | 迁移逐文件恢复、显式内网媒体服务授权设计、前端关键功能测试框架 |
 | 随后 | 账号关联清理、Provider 自有上传 SDK 的端到端限速观测、不同挂载别名的迁移祖先校验 |
 | 稳定版前 | 前端测试、Release 质量门禁、更新独立签名、跨平台关闭行为 |
 | 体验迭代 | 设置项生效、文本编辑真完成、缓存/虚拟列表/错误状态/键盘操作 |
 
-本报告是修复基线，不是一次性结论。后续每关闭一个编号，应同时补对应自动化测试、更新本报告状态，并在 `docs/PROVIDER_STATUS.md` 中删除已经失真的完成度百分比。
+本报告是修复基线，不是一次性结论。后续每关闭一个编号，应同时补对应自动化测试、更新本报告状态，并在 `docs/PROVIDER_STATUS.md` 中同步自动验证范围和已知限制，避免重新引入主观完成度百分比。

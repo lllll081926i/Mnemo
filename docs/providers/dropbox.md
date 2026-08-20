@@ -1,8 +1,8 @@
 # Dropbox 功能详情
 
 > 调研范围：`internal/drive/providers/dropbox/`（onedrive.go 驱动, auth.go, dropbox.go 客户端, util.go）
-> 对照旧版：`../Mnemo/src/dropbox/` + `src/drive/providers/dropbox.ts`
-> 整体完成度：✅ ~95%（已迁移范围内的登录、列表、下载、预览、上传、分享主链路已收口）
+> 当前证据：本仓库 `internal/drive/providers/dropbox`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
 
