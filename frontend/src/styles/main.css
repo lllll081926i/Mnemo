@@ -191,8 +191,8 @@ body {
   justify-content: flex-start; gap: 10px; padding: 5px 6px;
 }
 .rail-item:hover { background: var(--bg-hover); }
-/* 拖拽换位：邻位让位平滑缓动，被拖项原位隐形占位，幽灵克隆跟随指针 */
-.rail-move { transition: transform .22s cubic-bezier(.25, .8, .35, 1); }
+/* 拖拽换位：邻位让位用带回弹的弹簧缓动，被拖项原位隐形占位，幽灵克隆跟随指针 */
+.rail-move { transition: transform .3s cubic-bezier(.3, 1.45, .45, 1); }
 .rail-leave-active { display: none; }
 .rail-list.reordering { user-select: none; }
 .rail-list.reordering .rail-item { cursor: grabbing; }
@@ -203,9 +203,11 @@ body {
 .account-rail.rail-frozen .rail-item:not(.rail-ghost),
 .account-rail.rail-frozen .rail-icon,
 .account-rail.rail-frozen .rail-icon img {
-  transition: transform .22s cubic-bezier(.25, .8, .35, 1) !important;
+  transition: transform .3s cubic-bezier(.3, 1.45, .45, 1) !important;
 }
 .rail-ghost { transition: none !important; }
+/* 松手落位：带回弹的弹簧过渡弹入槽位 */
+.rail-ghost.dropping { transition: transform .26s cubic-bezier(.25, 1.55, .4, 1) !important; }
 .rail-ghost {
   position: fixed; z-index: 9999; margin: 0; pointer-events: none;
   background: var(--bg-elevated, var(--bg-surface));

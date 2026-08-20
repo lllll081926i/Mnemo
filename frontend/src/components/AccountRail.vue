@@ -47,25 +47,34 @@ function onItemPointerDown(e, acc) {
   let heights = null   // Map<user_id, height>，拖动起点捕获的各项静止高度
   let gapPx = 0
   let top0 = 0         // 首项静止 top
+  let bottomLimit = 0  // 末项静止 bottom（拖动垂直范围上限）
+  let ghostTop0 = 0    // 幽灵初始 top（X 始终锁定，只允许上下）
+  let ghostY = 0       // 弹簧当前位置（top）
+  let dropping = false
   let px = e.clientX
   let py = e.clientY
 
-  // 每帧最多一次：幽灵跟随 + 槽位换位（pointermove 频率高于渲染帧率）
+  // 持续 rAF 循环：幽灵以弹簧插值跟随指针（灵动 lag），并做槽位换位；
+  // 指针停下后弹簧仍收敛到目标，不依赖 pointermove 频率
   const frame = () => {
     rafId = 0
-    if (ghost) {
-      ghost.style.transform = `translate(${px - startX}px, ${py - startY}px) scale(1.06) rotate(-2deg)`
+    if (!ghost || dropping) return
+    const desired = Math.min(Math.max(ghostTop0 + (py - startY), top0), bottomLimit - ghost.offsetHeight)
+    ghostY += (desired - ghostY) * 0.32
+    ghost.style.transform = `translate3d(0, ${ghostY - ghostTop0}px, 0) scale(1.04)`
+    if (heights && liveList.value) {
+      const target = slotAt(ghostY + ghost.offsetHeight / 2)
+      const cur = dragIdx.value
+      if (target !== cur && cur >= 0) {
+        const list = [...liveList.value]
+        const [moved] = list.splice(cur, 1)
+        list.splice(target, 0, moved)
+        liveList.value = list
+        dragIdx.value = target
+      }
     }
-    if (!heights || !liveList.value) return
-    const target = slotAt(py)
-    const cur = dragIdx.value
-    if (target !== cur && cur >= 0) {
-      const list = [...liveList.value]
-      const [moved] = list.splice(cur, 1)
-      list.splice(target, 0, moved)
-      liveList.value = list
-      dragIdx.value = target
-    }
+    // 弹簧未收敛或拖动中：继续下一帧
+    if (dragging && !dropping) rafId = requestAnimationFrame(frame)
   }
 
   // 槽位 = 指针落入哪一项的区间；边界由捕获的各项高度按当前顺序累加，
@@ -90,13 +99,37 @@ function onItemPointerDown(e, acc) {
     items.forEach((el, i) => heights.set(liveList.value[i].user_id, el.getBoundingClientRect().height))
     gapPx = parseFloat(getComputedStyle(listEl).rowGap) || 0
     top0 = items[0].getBoundingClientRect().top
+    bottomLimit = items[items.length - 1].getBoundingClientRect().bottom
     const r = itemEl.getBoundingClientRect()
+    ghostTop0 = r.top
+    ghostY = r.top
     ghost = itemEl.cloneNode(true)
     ghost.className = itemEl.className.replace('dragging', '').trim() + ' rail-ghost'
     ghost.style.width = r.width + 'px'
     ghost.style.left = r.left + 'px'
     ghost.style.top = r.top + 'px'
     listEl.closest('.account-rail').appendChild(ghost)
+    if (!rafId) rafId = requestAnimationFrame(frame)
+  }
+
+  // 松手落位：幽灵以带回弹的过渡弹入目标槽位，落点即真实项位置，随后无缝替换
+  const dropGhost = () => {
+    if (!ghost) return
+    dropping = true
+    let targetTop = top0
+    const list = liveList.value || []
+    for (let i = 0; i < dragIdx.value && i < list.length; i++) {
+      targetTop += (heights?.get(list[i].user_id) || 0) + gapPx
+    }
+    ghost.classList.add('dropping')
+    ghost.style.transform = `translate3d(0, ${targetTop - ghostTop0}px, 0) scale(1)`
+    setTimeout(() => {
+      if (ghost) { ghost.remove(); ghost = null }
+      listEl.closest('.account-rail')?.classList.remove('rail-frozen')
+      liveList.value = null
+      dragIdx.value = -1
+      heights = null
+    }, 260)
   }
 
   const onMove = (ev) => {
@@ -116,26 +149,27 @@ function onItemPointerDown(e, acc) {
       document.body.classList.add('rail-drag-active')
       requestAnimationFrame(startDrag)
     }
-    if (!rafId) rafId = requestAnimationFrame(frame)
   }
   const onUp = () => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
-    if (rafId) cancelAnimationFrame(rafId)
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
     if (dragging && liveList.value) {
       setPref('accountOrder', liveList.value.map((a) => a.user_id))
       // click 紧跟 pointerup 触发，延后一帧清除以吞掉这次拖拽点击
       setTimeout(() => { suppressClick = false }, 0)
     }
-    if (ghost) { ghost.remove(); ghost = null }
-    listEl.closest('.account-rail')?.classList.remove('rail-frozen')
+    if (ghost) dropGhost()
+    else listEl.closest('.account-rail')?.classList.remove('rail-frozen')
     document.body.classList.remove('rail-drag-active')
     dragActive = false
-    liveList.value = null
-    dragIdx.value = -1
+    if (!ghost) {
+      liveList.value = null
+      dragIdx.value = -1
+      heights = null
+    }
     dragging = false
-    heights = null
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
