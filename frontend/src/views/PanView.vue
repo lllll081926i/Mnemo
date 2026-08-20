@@ -669,6 +669,8 @@ async function openFile(file) {
   if (kind === 'video') {
     modalFile.value = file
     modal.value = 'player'
+  } else if (kind === 'pdf') {
+    askConfirm(`“${file.name}”暂不支持在线预览，需要下载后查看，是否下载到本地？`, () => doDownload([file]), { okText: '下载', title: 'PDF 暂不支持预览' })
   } else if (kind === 'download') {
     askConfirm(`“${file.name}”不支持在线预览，是否下载到本地？`, () => doDownload([file]), { okText: '下载', title: '无法预览' })
   } else {
@@ -1358,7 +1360,7 @@ onBeforeUnmount(() => {
           <div v-else-if="error" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>{{ error }}</span><button class="btn sm" @click="refresh">重试</button></div>
 
           <!-- 列表视图（旧版 fileitem 行） -->
-          <div v-else-if="viewMode === 'list'" ref="listEl" class="file-list" @scroll.passive="onListScroll">
+          <div v-else-if="viewMode === 'list'" ref="listEl" :key="currentViewKey()" class="file-list" @scroll.passive="onListScroll">
             <div v-if="listVirtualized" aria-hidden="true" :style="{ height: listVirtualTop + 'px' }"></div>
             <div
               v-for="r in listRenderRows"
@@ -1374,7 +1376,10 @@ onBeforeUnmount(() => {
                   <UiIcon v-if="isSel(r.f)" name="check" :size="11" />
                 </button>
               </div>
-              <div class="fileicon" :class="'ft-' + r.icon"><UiIcon :name="r.icon" :size="20" /></div>
+              <div class="fileicon" :class="!r.thumb ? 'ft-' + r.icon : ''">
+                <img v-if="r.thumb" :src="r.thumb" loading="lazy" :alt="r.f.name" @error="markThumbError(r.f.file_id)" />
+                <UiIcon v-else :name="r.icon" :size="20" />
+              </div>
               <div class="filename">
                 <div :title="r.f.name">
                   <template v-if="r.parts">
@@ -1398,7 +1403,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 网格视图（旧版 griditem） -->
-          <div v-else ref="listEl" class="file-list gridlist" @scroll.passive="onListScroll">
+          <div v-else ref="listEl" :key="currentViewKey()" class="file-list gridlist" @scroll.passive="onListScroll">
             <div v-if="gridVirtualized" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualTop + 'px' }"></div>
             <div
               v-for="r in gridRenderRows"

@@ -40,23 +40,27 @@ function onClick() {
     </span>
     <UiIcon name="folder" :size="14" /><span class="tn-label">{{ node.name }}</span>
   </div>
-  <div v-if="isOpen" class="tree-children">
-    <div v-if="children && !children.length" class="tree-empty-tip">空文件夹</div>
-    <TreeNode
-      v-for="d in children || []"
-      :key="d.file_id"
-      :node="d"
-      :tree="tree"
-      :expanded="expanded"
-      :selected-id="selectedId"
-      :depth="depth + 1"
-      @toggle="(n) => emit('toggle', n)"
-      @select="(n) => emit('select', n)"
-      @enter="(e, n) => emit('enter', e, n)"
-      @leave="emit('leave')"
-      @ctx="(e, n) => emit('ctx', e, n)"
-    />
-  </div>
+  <Transition name="tree-expand">
+    <div v-if="isOpen" class="tree-children">
+      <div class="tree-clip">
+        <div v-if="children && !children.length" class="tree-empty-tip">空文件夹</div>
+        <TreeNode
+          v-for="d in children || []"
+          :key="d.file_id"
+          :node="d"
+          :tree="tree"
+          :expanded="expanded"
+          :selected-id="selectedId"
+          :depth="depth + 1"
+          @toggle="(n) => emit('toggle', n)"
+          @select="(n) => emit('select', n)"
+          @enter="(e, n) => emit('enter', e, n)"
+          @leave="emit('leave')"
+          @ctx="(e, n) => emit('ctx', e, n)"
+        />
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <script>

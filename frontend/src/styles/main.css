@@ -397,8 +397,13 @@ body.rail-drag-active { cursor: grabbing; user-select: none; }
 .tree-node .tn-arrow.open { transform: rotate(90deg); }
 .tree-node .tn-label { overflow: hidden; text-overflow: ellipsis; }
 .tree-node .tn-count { margin-left: auto; font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; }
-.tree-children { margin-left: 16px; border-left: 1px solid var(--border-lighter); padding-left: 2px; animation: tree-in var(--motion-fast) var(--motion-ease); }
-@keyframes tree-in { from { opacity: 0; transform: translateY(-3px); } }
+/* 目录树展开/收起：grid 行高 0fr→1fr 高度动画 + 轻微下滑入位（内容裁切在内层 clip） */
+.tree-children { display: grid; grid-template-rows: 1fr; margin-left: 16px; }
+.tree-clip { overflow: hidden; min-height: 0; border-left: 1px solid var(--border-lighter); padding-left: 2px; }
+.tree-expand-enter-active, .tree-expand-leave-active {
+  transition: grid-template-rows 240ms var(--motion-glide), opacity 180ms var(--motion-ease);
+}
+.tree-expand-enter-from, .tree-expand-leave-to { grid-template-rows: 0fr; opacity: 0; }
 .tree-empty { padding: 4px 8px 4px 22px; font-size: 12.5px; color: var(--text-disabled); }
 
 .pathbar {
