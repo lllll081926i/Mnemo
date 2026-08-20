@@ -14,7 +14,7 @@ function handleGlobalKeydown(e) {
 </script>
 
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue'
+import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -25,15 +25,48 @@ const props = defineProps({
   dialogStyle: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['close'])
+const dialogEl = ref(null)
+let previousActiveElement = null
 
 const handleClose = () => emit('close')
 
+function focusableElements() {
+  if (!dialogEl.value) return []
+  return [...dialogEl.value.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => el.offsetParent !== null || el === document.activeElement)
+}
+
+function onDialogKeydown(e) {
+  if (e.key !== 'Tab') return
+  const items = focusableElements()
+  if (!items.length) {
+    e.preventDefault()
+    dialogEl.value?.focus()
+    return
+  }
+  const first = items[0]
+  const last = items[items.length - 1]
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
 onMounted(() => {
+  previousActiveElement = document.activeElement
   modalStack.push(handleClose)
   if (!globalKeydownBound) {
     window.addEventListener('keydown', handleGlobalKeydown)
     globalKeydownBound = true
   }
+  nextTick(() => {
+    if (!dialogEl.value || dialogEl.value.contains(document.activeElement)) return
+    focusableElements()[0]?.focus()
+    if (!dialogEl.value.contains(document.activeElement)) dialogEl.value.focus()
+  })
 })
 
 onBeforeUnmount(() => {
@@ -43,6 +76,9 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleGlobalKeydown)
     globalKeydownBound = false
   }
+  if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+    nextTick(() => previousActiveElement?.focus?.())
+  }
 })
 </script>
 
@@ -51,9 +87,15 @@ onBeforeUnmount(() => {
     <transition name="modal-fade">
       <div class="modal-mask" @click.self="emit('close')">
         <div
+          ref="dialogEl"
           class="modal"
           :class="dialogClass"
           :style="{ ...(width ? { width } : {}), ...dialogStyle }"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="title || '对话框'"
+          tabindex="-1"
+          @keydown="onDialogKeydown"
         >
           <div v-if="title || $slots.head" class="modal-head">
             <slot name="head">
@@ -61,7 +103,7 @@ onBeforeUnmount(() => {
             </slot>
             <div style="display:flex;align-items:center;gap:4px">
               <slot name="head-extra" />
-              <button class="icon-btn" style="width:28px;height:28px" title="关闭 (Esc)" @click="emit('close')">
+              <button type="button" class="icon-btn" style="width:28px;height:28px" title="关闭 (Esc)" aria-label="关闭对话框" @click="emit('close')">
                 <UiIcon name="close" :size="14" />
               </button>
             </div>

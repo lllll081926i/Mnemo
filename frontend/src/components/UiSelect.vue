@@ -1,8 +1,10 @@
 <script setup>
 // 统一自定义下拉选择器（替代原生 <select>）。
 // props: modelValue, options: [{ value, label, icon?(UiIcon 名), img?(图片URL), disabled }], placeholder, width
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import UiIcon from './UiIcon.vue'
+
+let selectSequence = 0
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
@@ -17,13 +19,18 @@ const open = ref(false)
 const root = ref(null)
 const btn = ref(null)
 const dropStyle = ref({})
+const activeIndex = ref(-1)
+const listId = `uiselect-list-${++selectSequence}`
 
 const current = computed(() => props.options.find((o) => o.value === props.modelValue) || null)
 
 function toggle() {
   if (props.disabled) return
   open.value = !open.value
-  if (open.value) position()
+  if (open.value) {
+    position()
+    activeIndex.value = Math.max(0, props.options.findIndex((o) => o.value === props.modelValue))
+  }
 }
 
 function position() {
@@ -48,12 +55,53 @@ function pick(o) {
   emit('update:modelValue', o.value)
   emit('change', o.value)
   open.value = false
+  activeIndex.value = props.options.findIndex((item) => item.value === o.value)
+  nextTick(() => btn.value?.focus())
 }
 
 function onDown(e) {
   if (open.value && root.value && !root.value.contains(e.target) && !(e.target.closest && e.target.closest('.uiselect-drop'))) open.value = false
 }
-function onKey(e) { if (e.key === 'Escape') open.value = false }
+function focusOption() {
+  nextTick(() => document.getElementById(listId)?.querySelectorAll('.uiselect-opt')[activeIndex.value]?.focus())
+}
+
+function onKey(e) {
+  const available = props.options.filter((o) => !o.disabled)
+  if (e.key === 'Escape') {
+    if (open.value) {
+      e.preventDefault()
+      open.value = false
+      btn.value?.focus()
+    }
+    return
+  }
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    if (!open.value) {
+      toggle()
+      focusOption()
+      return
+    }
+    const option = props.options[activeIndex.value]
+    if (option && !option.disabled) pick(option)
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+  e.preventDefault()
+  if (!open.value) {
+    open.value = true
+    position()
+  }
+  const current = Math.max(0, available.findIndex((o) => o.value === props.options[activeIndex.value]?.value))
+  const next = e.key === 'Home' ? 0
+    : e.key === 'End' ? available.length - 1
+      : e.key === 'ArrowDown' ? Math.min(available.length - 1, current + 1)
+        : Math.max(0, current - 1)
+  const target = available[next]
+  activeIndex.value = target ? props.options.findIndex((o) => o.value === target.value) : -1
+  focusOption()
+}
 function onBlur() { open.value = false }
 
 onMounted(() => {
@@ -69,13 +117,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="uiselect" :class="{ block }">
+  <div ref="root" class="uiselect" :class="{ block }" @keydown.stop="onKey">
     <button
       ref="btn"
       type="button"
       class="uiselect-btn"
       :class="{ open, placeholder: !current }"
       :disabled="disabled"
+      role="combobox"
+      aria-haspopup="listbox"
+      :aria-expanded="open"
+      :aria-controls="listId"
+      :aria-activedescendant="open && activeIndex >= 0 ? `${listId}-option-${activeIndex}` : undefined"
       @click="toggle"
     >
       <img v-if="current && current.img" :src="current.img" class="uiselect-ico" alt="" />
@@ -85,14 +138,19 @@ onBeforeUnmount(() => {
     </button>
     <teleport to="body">
       <transition name="popover-zoom">
-        <div v-if="open" class="uiselect-drop" :style="dropStyle">
+        <div v-if="open" :id="listId" class="uiselect-drop" :style="dropStyle" role="listbox" :aria-label="placeholder || '选项'" @keydown.stop="onKey">
           <div v-if="!options.length" class="uiselect-empty">无可选项</div>
           <button
-            v-for="o in options"
+            v-for="(o, i) in options"
             :key="o.value"
             type="button"
             class="uiselect-opt"
             :class="{ active: o.value === modelValue, disabled: o.disabled }"
+            :id="`${listId}-option-${i}`"
+            role="option"
+            :aria-selected="o.value === modelValue"
+            :aria-disabled="o.disabled || undefined"
+            :tabindex="o.disabled ? -1 : (i === activeIndex ? 0 : -1)"
             @click="pick(o)"
           >
             <img v-if="o.img" :src="o.img" class="uiselect-ico" alt="" />
