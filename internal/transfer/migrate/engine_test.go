@@ -102,3 +102,19 @@ func TestPartialMigrationErrorUnwrapsThroughMigrationError(t *testing.T) {
 		t.Fatalf("failure count = %d, want 1", failureCount(err))
 	}
 }
+
+func TestPartialDirectoryCopyCannotBeReportedAsTotalFailure(t *testing.T) {
+	err := newPartialMigrationError(context.DeadlineExceeded, 3)
+	if !isPartialError(err) {
+		t.Fatal("a created target directory with failed children must be partial")
+	}
+	if failureCount(err) != 3 {
+		t.Fatalf("failure count = %d, want 3", failureCount(err))
+	}
+	if got := migrationResultStatus(3, 0, isPartialError(err)); got != "partial" {
+		t.Fatalf("migration status = %q, want partial", got)
+	}
+	if got := migrationResultStatus(1, 0, false); got != "failed" {
+		t.Fatalf("migration status without copied output = %q, want failed", got)
+	}
+}

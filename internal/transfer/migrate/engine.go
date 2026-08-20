@@ -179,13 +179,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 		e.saveJob(job)
 		e.emit(job)
 	}
-	if job.Failed == 0 {
-		job.Status = "completed"
-	} else if succeeded > 0 || partial {
-		job.Status = "partial"
-	} else {
-		job.Status = "failed"
-	}
+	job.Status = migrationResultStatus(job.Failed, succeeded, partial)
 	job.UpdatedAt = time.Now().Unix()
 	e.saveJob(job)
 	e.emit(job)
@@ -518,7 +512,10 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 	// list source dir
 	children, err := drive.ListDirAllContext(ctx, job.SrcUser, job.SrcDrive, dir.FileID, nil)
 	if err != nil {
-		return newMigrationError(err, 1)
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			return err
+		}
+		return newPartialMigrationError(fmt.Errorf("migrate: target folder %q was created but source listing failed: %w", dir.Name, err), 1)
 	}
 	var childFailures int64
 	var lastChildErr error
@@ -547,7 +544,7 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 		if lastChildErr == nil {
 			lastChildErr = errors.New("migrate: one or more directory children failed")
 		}
-		return newMigrationError(fmt.Errorf("migrate: directory %q has failed children: %w", dir.Name, lastChildErr), childFailures)
+		return newPartialMigrationError(fmt.Errorf("migrate: directory %q was partially copied and has failed children: %w", dir.Name, lastChildErr), childFailures)
 	}
 	if job.Move {
 		if err := e.finalizeMove(ctx, job, dir); err != nil {
@@ -590,6 +587,23 @@ func newMigrationError(err error, failures int64) error {
 		failures = 1
 	}
 	return &migrationError{err: err, failures: failures}
+}
+
+func newPartialMigrationError(err error, failures int64) error {
+	if err == nil {
+		return nil
+	}
+	return newMigrationError(partialError(err.Error()), failures)
+}
+
+func migrationResultStatus(failed, succeeded int64, partial bool) string {
+	if failed == 0 {
+		return "completed"
+	}
+	if succeeded > 0 || partial {
+		return "partial"
+	}
+	return "failed"
 }
 
 func failureCount(err error) int64 {
