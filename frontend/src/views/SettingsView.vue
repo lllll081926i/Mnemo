@@ -2,6 +2,7 @@
 // 设置页：左侧导航 + 右侧平面行式布局，极简干净无冗余说明
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { GetSettings, SaveSettings, ClearCache, PickDirectory, RevealInFolder, GetLogPath, ClearLogs, ExportLogs } from '../api'
+import { Environment } from '../../wailsjs/runtime/runtime'
 import { getPrefs, setPref } from '../appearance'
 import SegTabs from '../components/SegTabs.vue'
 import UiIcon from '../components/UiIcon.vue'
@@ -28,6 +29,8 @@ const defaults = {
 
 const settings = ref({ ...defaults })
 const loaded = ref(false)
+// 传输悬浮球仅 Windows 实现（见 docs/FLOATER.md §2.6），其它平台不显示该设置项
+const isWindows = ref(true)
 const saving = ref(false)
 const clearingCache = ref(false)
 const clearingLogs = ref(false)
@@ -113,6 +116,10 @@ onMounted(async () => {
     }
 		settings.value.logLevel = settings.value.logLevel || 'warning'
 		logPath.value = await GetLogPath()
+		try {
+			const env = await Environment()
+			isWindows.value = !env || !env.platform || env.platform === 'windows'
+		} catch { /* 无 bridge 时默认显示 */ }
   } catch {
     settings.value = { ...defaults }
   }
@@ -454,7 +461,7 @@ async function exportLogs() {
               </div>
             </div>
 
-            <div class="sg-row">
+            <div class="sg-row" v-if="isWindows">
               <div class="sg-text">
                 <span class="sg-label">传输悬浮球</span>
               </div>
