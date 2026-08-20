@@ -121,18 +121,12 @@ jobs:
 
       - name: Build native application
         shell: bash
-        env:
-          MNEMO_UPDATE_SIGNING_PUBLIC_KEY: ${{ secrets.MNEMO_UPDATE_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          ldflags=()
-          if [[ -n "${MNEMO_UPDATE_SIGNING_PUBLIC_KEY:-}" ]]; then
-            ldflags=(-ldflags "-X mnemo-go/internal/updater.updateSigningPublicKey=${MNEMO_UPDATE_SIGNING_PUBLIC_KEY}")
-          fi
           if [[ "${{ matrix.kind }}" == 'linux' ]]; then
-            wails build -platform "${{ matrix.platform }}" -clean -tags webkit2_41 "${ldflags[@]}"
+            wails build -platform "${{ matrix.platform }}" -clean -tags webkit2_41
           else
-            wails build -platform "${{ matrix.platform }}" -clean "${ldflags[@]}"
+            wails build -platform "${{ matrix.platform }}" -clean
           fi
 
       - name: Stage OAuth configuration
@@ -253,32 +247,6 @@ jobs:
           set -euo pipefail
           find release-assets -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 \
             | sort -z | xargs -0 sha256sum | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
-
-      - name: Sign release checksums when signing keys are configured
-        env:
-          MNEMO_UPDATE_SIGNING_PUBLIC_KEY: ${{ secrets.MNEMO_UPDATE_SIGNING_PUBLIC_KEY }}
-          MNEMO_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.MNEMO_UPDATE_SIGNING_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          key_file="$(mktemp)"
-          sig_file="$(mktemp)"
-          trap 'rm -f "$key_file" "$sig_file"' EXIT
-          has_public=false
-          has_private=false
-          [[ -n "${MNEMO_UPDATE_SIGNING_PUBLIC_KEY:-}" ]] && has_public=true
-          [[ -n "${MNEMO_UPDATE_SIGNING_PRIVATE_KEY:-}" ]] && has_private=true
-          if [[ "$has_public" != "$has_private" ]]; then
-            echo "MNEMO_UPDATE_SIGNING_PUBLIC_KEY and MNEMO_UPDATE_SIGNING_PRIVATE_KEY must be configured together" >&2
-            exit 1
-          fi
-          if [[ "$has_private" == false ]]; then
-            echo "MNEMO_UPDATE_SIGNING_PRIVATE_KEY is not configured; publishing unsigned checksum manifest"
-            exit 0
-          fi
-          printf '%s\n' "$MNEMO_UPDATE_SIGNING_PRIVATE_KEY" > "$key_file"
-          openssl pkeyutl -sign -inkey "$key_file" -rawin -in release-assets/SHA256SUMS.txt -out "$sig_file"
-          base64 -w0 "$sig_file" > release-assets/SHA256SUMS.txt.sig
 
       - name: Create or update GitHub Release
         env:

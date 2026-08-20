@@ -5,9 +5,7 @@ package updater
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -26,12 +24,6 @@ const (
 	repoName    = "mnemo-go"
 	apiReleases = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
 )
-
-// updateSigningPublicKey is injected into release builds with -ldflags. It is
-// intentionally empty in local/dev builds; unsigned historical releases keep
-// the SHA-256 compatibility path, while a release that ships a signature is
-// rejected unless this key is present and valid.
-var updateSigningPublicKey string
 
 // Info describes an available update.
 type Info struct {
@@ -98,32 +90,16 @@ func Check(ctx context.Context) (*Info, error) {
 	}
 	suffix := assetSuffix()
 	checksums := ""
-	signatureURL := ""
 	for _, a := range rel.Assets {
 		if a.Name == "SHA256SUMS.txt" {
 			checksums = a.BrowserDownloadURL
 		}
-		if a.Name == "SHA256SUMS.txt.sig" {
-			signatureURL = a.BrowserDownloadURL
-		}
 	}
 	shaByName := map[string]string{}
 	if checksums != "" {
-		values, rawChecksums, checksumErr := fetchChecksums(ctx, checksums)
+		values, checksumErr := fetchChecksums(ctx, checksums)
 		if checksumErr != nil {
 			return nil, fmt.Errorf("fetch release checksums: %w", checksumErr)
-		}
-		if signatureURL == "" && releaseSignatureRequired() {
-			return nil, fmt.Errorf("release signature is missing")
-		}
-		if signatureURL != "" {
-			signature, signatureErr := fetchBody(ctx, signatureURL, 128<<10)
-			if signatureErr != nil {
-				return nil, fmt.Errorf("fetch release signature: %w", signatureErr)
-			}
-			if signatureErr = verifyReleaseSignature(rawChecksums, signature); signatureErr != nil {
-				return nil, fmt.Errorf("release signature verification failed: %w", signatureErr)
-			}
 		}
 		shaByName = values
 	}
@@ -154,11 +130,15 @@ func Check(ctx context.Context) (*Info, error) {
 	return nil, nil
 }
 
-func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, []byte, error) {
+func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, error) {
 	b, err := fetchBody(ctx, rawURL, 2<<20)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	return parseChecksums(b), nil
+}
+
+func parseChecksums(b []byte) map[string]string {
 	result := make(map[string]string)
 	for _, line := range strings.Split(string(b), "\n") {
 		fields := strings.Fields(line)
@@ -166,7 +146,7 @@ func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, []by
 			result[fields[len(fields)-1]] = strings.ToLower(fields[0])
 		}
 	}
-	return result, b, nil
+	return result
 }
 
 func fetchBody(ctx context.Context, rawURL string, limit int64) ([]byte, error) {
@@ -187,29 +167,6 @@ func fetchBody(ctx context.Context, rawURL string, limit int64) ([]byte, error) 
 		return nil, err
 	}
 	return b, nil
-}
-
-func releaseSignatureRequired() bool {
-	return strings.TrimSpace(updateSigningPublicKey) != ""
-}
-
-func verifyReleaseSignature(message, encodedSignature []byte) error {
-	keyText := strings.TrimSpace(updateSigningPublicKey)
-	if keyText == "" {
-		return fmt.Errorf("应用未配置更新签名公钥")
-	}
-	publicKey, err := base64.StdEncoding.DecodeString(keyText)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return fmt.Errorf("更新签名公钥格式无效")
-	}
-	signature, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(encodedSignature)))
-	if err != nil || len(signature) != ed25519.SignatureSize {
-		return fmt.Errorf("更新签名格式无效")
-	}
-	if !ed25519.Verify(ed25519.PublicKey(publicKey), message, signature) {
-		return fmt.Errorf("签名内容不匹配")
-	}
-	return nil
 }
 
 // Progress is emitted during download.

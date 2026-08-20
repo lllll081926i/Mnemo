@@ -4,7 +4,7 @@
 
 审查对象为 `D:/Code/Mnemo/Mnemo-Go`，审查基线版本为 `v0.2.0`，修复以本报告和本地提交历史为准。本次没有读取 `D:/Code/Mnemo` 中的旧项目或参考示例，没有登录或请求任何真实网盘账号，也没有使用浏览器做视觉验收。前端结论仅来自源码、数据流、构建结果和 Wails 绑定链路。
 
-项目的基础架构已经成形：13 个 Provider 已接入统一驱动层，下载、上传、迁移、同步、预览和本地存储均有可运行实现；全量编译、后端测试、静态检查和核心竞态检查均能通过。审查最初发现的四项 P0 已全部关闭并补回归测试；同步任务重入、上传 worker 生命周期、共享限速、敏感下载状态、本地预览越权、DNS rebinding、外链协议、Provider 主链路取消和迁移部分结果误报也已关闭。更新清单的 Ed25519 独立签名代码、发布工作流和本地密钥材料已经就绪，但 GitHub 仓库 secrets 尚未配置；系统凭据库、WebDAV 非 Basic 认证和真实平台/服务商验证仍受外部条件限制。
+项目的基础架构已经成形：13 个 Provider 已接入统一驱动层，下载、上传、迁移、同步、预览和本地存储均有可运行实现；全量编译、后端测试、静态检查和核心竞态检查均能通过。审查最初发现的四项 P0 已全部关闭并补回归测试；同步任务重入、上传 worker 生命周期、共享限速、敏感下载状态、本地预览越权、DNS rebinding、外链协议、Provider 主链路取消和迁移部分结果误报也已关闭。按自用项目要求，更新产物不再使用独立签名密钥或 GitHub Actions 签名 secrets；系统凭据库、WebDAV 非 Basic 认证和真实平台/服务商验证仍受外部条件限制。
 
 总体判断：
 
@@ -126,7 +126,7 @@
 | P1-09（主要路径已关闭） | 跨盘迁移绑定层未拒绝源/目标为同一盘或目标在源子树 | 绑定层和引擎拒绝同一账号/同一盘，因此不会进入递归复制；目录目标已创建后源列表或子项失败时，现在准确标记“部分完成”并保留失败数/原因，不再误报整体失败 | 同盘递归和部分结果误报已关闭；不同挂载 ID 的祖先别名无法在通用 Provider 层可靠解析，逐文件恢复/显式清理属于后续产品能力。 |
 | P1-10（误导文案已关闭） | 移除账号只删除账号记录 | `internal/app/app.go`、`internal/store/accounts.go` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 已明确只删除账号凭据，下载任务、收藏、同步配置等本地记录保留；自动清理需要额外的破坏性确认和逐类删除策略，暂不隐式执行。 |
 | P1-11（已关闭） | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go` 不启用托盘，旧关闭逻辑却无条件按设置隐藏窗口 | Linux/macOS 用户可能关闭后无法恢复窗口 | 增加编译目标感知的 `TrayAvailable`；无托盘平台即使旧设置为开启也正常退出，Windows 保持原托盘行为。 |
-| P1-12（代码与本地密钥已完成） | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml`、`internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 已支持 Ed25519 detached signature：客户端在 Release 提供 `SHA256SUMS.txt.sig` 时强制校验；内置公钥的客户端遇到缺少签名的新 Release 会 fail-closed。Release 工作流从 `MNEMO_UPDATE_SIGNING_PRIVATE_KEY` 生成签名，并从 `MNEMO_UPDATE_SIGNING_PUBLIC_KEY` 注入公钥；两项 secrets 必须同时配置，否则发布失败。当前密钥对保存在仓库外 `D:/Mnemo-private`，未进入 Git，NTFS ACL 已限制为当前用户、`SYSTEM` 和 `Administrators`；真正发布前仍需由仓库管理员配置同名 GitHub Actions secrets 并轮换密钥，旧无签名 Release 仅对未内置公钥的历史客户端保持兼容。Windows Authenticode/macOS notarization 属于平台发布增强。 |
+| P1-12（按自用要求不采用） | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml`、`internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 按项目仅自用的明确要求，已移除 Ed25519 detached signature、`SHA256SUMS.txt.sig`、`MNEMO_UPDATE_SIGNING_PUBLIC_KEY` 与 `MNEMO_UPDATE_SIGNING_PRIVATE_KEY` 的发布链路和客户端校验；发布继续使用 SHA-256 清单。仓库外既有本地密钥未提交、也不再被构建或发布引用。若未来公开分发，应重新评估独立签名、Windows 代码签名和 macOS 公证。 |
 | P1-13（主要门禁已关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | `quality` job 现运行 Go test/vet/build、前端 Vitest 和前端 build；全部平台 build 依赖 quality，publish 依赖全部 build。后续仍应加入 race 和关键 mock e2e。 |
 | P1-14（Windows 主要路径已关闭） | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go`、平台适配文件 | Windows 新密钥现在写入 DPAPI 保护文件，旧 `vault.key` 可读取并在运行时尝试迁移；无效旧密钥会 fail-closed，不再静默生成新密钥。macOS Keychain 与 Linux Secret Service 尚未接入，非 Windows 仍保留 0600 兼容文件。 |
 | P1-15（诊断已关闭） | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go:newReq` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 当 `WWW-Authenticate` 不包含 Basic 时，错误现在明确提示“当前仅支持 Basic Auth”，且不盲目重试、不增加请求。Digest/客户端证书属于新的认证实现，需要真实服务需求和单独安全设计。 |
@@ -272,14 +272,14 @@ Provider 现在可通过 `RetryAfter() time.Duration` 提供精确冷却，账�
 | `onedrive` | 4.8% | 严重不足 |
 | `pikpak` | 3.0% | 与账号风控风险不匹配 |
 
-前端已接入 Vitest，并覆盖账号/provider 解析、能力映射、容量格式化和文件打开类型等纯逻辑；仍没有组件测试或 E2E。Vite 构建和纯逻辑测试都不能替代真实 Wails mock、冲突策略、账号切换、设置生效或弹窗关闭语义测试。
+前端已接入 Vitest：除账号/provider 解析、能力映射、容量格式化和文件打开类型等纯逻辑外，现有 jsdom 组件测试覆盖 Modal 的 Esc/焦点恢复、UiSelect 的键盘跳过禁用项、选择目录弹窗的业务错误提示，并以 mock Wails API 覆盖目录缓存 RPC 串行队列。尚无完整页面级 E2E；Vite 构建和这些组件测试仍不能替代真实账号切换、上传冲突、设置生效和 Wails 桥接端到端验证。
 
 ### 9.2 必须补的测试顺序
 
-1. 数据安全红线：同步安全路径、扫描失败禁止删除、快照 ID、下载同名预留、Content-Range/ETag、同任务互斥和任务取消已完成；上传取消恢复的 worker 生命周期已完成，Provider 请求级 Context 传递仍待补。
+1. 数据安全红线：同步安全路径、扫描失败禁止删除、快照 ID、下载同名预留、Content-Range/ETag、同任务互斥和任务取消已完成；上传取消恢复的 worker 生命周期已完成。WebDAV 的列目录、读取、建目录、删除以及通用 HTTP 阻塞 Transport 已覆盖 Context 取消；高风险 Provider 自有会话的包内取消用例仍待补。
 2. 风控与连接：PikPak 并发刷新合并/429 冷却；WebDAV 尾斜杠、Basic/Digest 诊断、quota 可选属性；S3 Head/List 回退、可选 Put/Delete 写入验证与最大请求次数。
-3. 前端功能：已建立纯逻辑测试基线；继续增加 mock Wails API，覆盖登录模板、自动名称、上传冲突取消、迁移能力过滤、设置项消费、容量刷新时钟；不访问真实网盘。
-4. 故障注入：JSON 原子写失败已覆盖；继续补磁盘满、权限拒绝、网络超时、分页游标重复、服务端返回错误 Range。
+3. 前端功能：已建立纯逻辑、组件与缓存 mock Wails API 基线；继续覆盖登录模板、自动名称、上传冲突取消、迁移能力过滤、设置项消费和容量刷新时钟；不访问真实网盘。
+4. 故障注入：JSON 原子写失败、阻塞 HTTP Transport 的请求取消、服务端错误 Range 已覆盖；继续补磁盘满、权限拒绝、网络超时和分页游标重复。
 5. 发布烟测：各平台启动、关闭/托盘、OAuth 回调、更新校验、安装覆盖。
 
 建议门禁分阶段实施：先要求所有 P0/P1 修改具备回归测试且关键安全模块达到 60%；再把 changed-lines 覆盖率提高到 80%。不要为了总体数字给简单格式化函数堆测试。
@@ -324,10 +324,10 @@ Provider 现在可通过 `RetryAfter() time.Duration` 提供精确冷却，账�
 
 ### 批次 C：测试、CI 与发布可信度
 
-- 已建立前端 Vitest 基线；继续补 mock Wails API 和组件关键路径测试。
+- 已建立前端 Vitest 的纯逻辑、mock Wails API 和关键组件路径基线；继续补页面级 E2E。
 - 补关键 Provider 包内测试，让 e2e 与单元覆盖各自承担责任。
 - 已完成：Release 增加 quality 依赖，不通过不得发布。
-- 更新产物独立签名、Windows 代码签名、macOS 签名与公证。
+- 本项目仅自用，不纳入更新产物独立签名、Windows 代码签名或 macOS 公证；若转为公开分发再单独设计。
 - 增加 Linux/macOS 关闭行为和安装包烟测。
 
 ### 批次 D：功能一致性和可维护性
@@ -357,7 +357,7 @@ Provider 现在可通过 `RetryAfter() time.Duration` 提供精确冷却，账�
 | 已完成（本轮） | WebDAV/S3 登录兼容、530 诊断、WebDAV 配额、模板与密码眼睛、容量去重/缓存/退避、账号容量映射、上传冲突、迁移能力过滤、四项 P0、同步互斥/取消、敏感下载状态、文件级本地预览授权、外链限制/CSP、上传 worker 生命周期、迁移同盘入口防护、快照 ID 与日志规范化 |
 | 立即下一批 | 迁移逐文件恢复、显式内网媒体服务授权设计、前端 mock Wails 关键功能测试 |
 | 随后 | 账号关联清理、Provider 自有上传 SDK 的端到端限速观测、不同挂载别名的迁移祖先校验 |
-| 稳定版前 | 前端组件/E2E 测试、Release secrets 配置、Windows 代码签名、macOS 签名与公证、跨平台关闭行为 |
+| 稳定版前 | 前端组件/E2E 测试、跨平台关闭行为；若转为公开分发，再补 Release secrets、Windows 代码签名和 macOS 签名与公证 |
 | 体验迭代 | 设置项生效、文本编辑真完成、缓存/虚拟列表/错误状态/键盘操作；大组件拆分按需求暂缓 |
 
 本报告是修复基线，不是一次性结论。后续每关闭一个编号，应同时补对应自动化测试、更新本报告状态，并在 `docs/PROVIDER_STATUS.md` 中同步自动验证范围和已知限制，避免重新引入主观完成度百分比。

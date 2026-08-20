@@ -13,7 +13,8 @@ async function createFolder() {
   creatingFolder.value = true
   try {
     const parentId = crumbs.value[crumbs.value.length - 1].id
-    await mkdir(props.account.user_id, props.account.drive_id, parentId, name)
+    const result = await mkdir(props.account.user_id, props.account.drive_id, parentId, name)
+    if (result?.error) throw new Error(result.error)
     newFolderName.value = ''
     await load(parentId)
     emit('toast', '文件夹已创建', 'success')

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,86 @@ func TestListDirContextCancelsInFlightWebDAVRequest(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("ListDirContext did not return after cancellation")
+	}
+}
+
+func TestContextAwareDriveOpsCancelInFlightWebDAVRequests(t *testing.T) {
+	started := make(chan string, 3)
+	previousTransport := netx.TestTransportHook
+	netx.TestTransportHook = cancellationRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		started <- req.Method
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	t.Cleanup(func() { netx.TestTransportHook = previousTransport })
+
+	drive.SetTokenResolver(func(_, _ string) (*model.TokenInfo, error) {
+		return &model.TokenInfo{
+			TokenFrom: model.ProviderWebdav,
+			Conn:      &model.ConnConfig{Endpoint: "http://127.0.0.1:1/"},
+		}, nil
+	})
+	t.Cleanup(func() { drive.SetTokenResolver(nil) })
+
+	tests := []struct {
+		name       string
+		wantMethod string
+		call       func(context.Context) error
+	}{
+		{
+			name:       "读取文件元数据",
+			wantMethod: "PROPFIND",
+			call: func(ctx context.Context) error {
+				_, err := drive.GetFileContext(ctx, "webdav:test", "webdav", "file")
+				return err
+			},
+		},
+		{
+			name:       "创建目录",
+			wantMethod: "MKCOL",
+			call: func(ctx context.Context) error {
+				result, err := drive.MkdirContext(ctx, "webdav:test", "webdav", "/", "folder")
+				if err == nil && result != nil && result.Error != "" {
+					return errors.New(result.Error)
+				}
+				return err
+			},
+		},
+		{
+			name:       "删除文件",
+			wantMethod: http.MethodDelete,
+			call: func(ctx context.Context) error {
+				_, err := drive.DeleteBatchContext(ctx, "webdav:test", "webdav", []drive.FileRef{{ID: "file"}})
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- tt.call(ctx) }()
+
+			select {
+			case got := <-started:
+				if got != tt.wantMethod {
+					t.Fatalf("request method = %q, want %q", got, tt.wantMethod)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("WebDAV request did not start")
+			}
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) && (err == nil || !strings.Contains(err.Error(), context.Canceled.Error())) {
+					t.Fatalf("operation error = %v, want context.Canceled", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("operation did not return after cancellation")
+			}
+		})
 	}
 }
 
