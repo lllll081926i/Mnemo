@@ -117,7 +117,7 @@
 | P1-08（已关闭） | `OpenBrowser` 是不限制协议的 Wails 绑定，且没有显式 CSP | 原绑定接受任意字符串，前端入口无 CSP | 外链现仅允许 HTTPS 和本机回环 HTTP，拒绝用户信息和危险 scheme；入口已增加显式 CSP，并有允许/拒绝矩阵测试。 |
 | P1-09（部分关闭） | 跨盘迁移绑定层未拒绝源/目标为同一盘或目标在源子树 | 绑定层和引擎现在拒绝同一账号/同一盘，因此不会进入递归复制；不同挂载 ID 的祖先关系仍无法在通用 Provider 层可靠解析 | 同盘递归风险已关闭；继续补部分失败清理、逐文件恢复和不同挂载别名的祖先关系校验。 |
 | P1-10 | 移除账号只删除账号记录 | `internal/app/app.go:853-865`、`internal/store/accounts.go:154-168` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 提供“仅移除凭据”和“移除账号及本地关联数据”两种明确选项；删除前列出影响并停止相关任务。 |
-| P1-11 | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go:11-12` 是空实现；`tray.go:46-58` 不区分平台 | Linux/macOS 用户可能关闭后无法恢复窗口 | 非 Windows 默认禁用 Close-to-Tray，或实现对应平台托盘；设置页按平台能力隐藏选项。 |
+| P1-11（已关闭） | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go` 不启用托盘，旧关闭逻辑却无条件按设置隐藏窗口 | Linux/macOS 用户可能关闭后无法恢复窗口 | 增加编译目标感知的 `TrayAvailable`；无托盘平台即使旧设置为开启也正常退出，Windows 保持原托盘行为。 |
 | P1-12 | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml:206-211` 和 `internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 使用独立离线签名（如 minisign/cosign）、应用内固定公钥验证；Windows Authenticode、macOS Developer ID + notarization；发布密钥与 GitHub token 分离。 |
 | P1-13 | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 增加独立 quality job：Go test/vet/race（适当平台）、前端 lint/unit/build、关键 mock e2e；publish 必须依赖 quality。 |
 | P1-14 | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go:1-58`，账号本身使用 AES-256-GCM | 能阻止只拿到单个 accounts 文件的人直接读取，但无法抵御同一用户权限下同时读取密钥和密文的恶意程序 | Windows DPAPI、macOS Keychain、Linux Secret Service 存主密钥；保留现有格式作为迁移层。注意项目并非“无加密存储”，文档需纠正。 |

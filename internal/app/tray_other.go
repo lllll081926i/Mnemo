@@ -9,4 +9,6 @@ func AcquireSingleInstance(string) bool { return true }
 func (a *App) WatchShowRequests() {}
 
 // SetupTray 非 Windows 平台不启用托盘。
+func TrayAvailable() bool { return false }
+
 func (a *App) SetupTray([]byte) {}

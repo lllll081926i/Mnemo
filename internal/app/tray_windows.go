@@ -107,6 +107,8 @@ func activateExistingWindow(title string) {
 // SetupTray 启动系统托盘图标：左键点击或菜单「显示」恢复主窗口，
 // 「退出」强制退出整个应用。Windows 消息循环必须锁定在固定 OS 线程上，
 // 否则 goroutine 迁移后托盘窗口消息泵静默失效。
+func TrayAvailable() bool { return true }
+
 func (a *App) SetupTray(icon []byte) {
 	go func() {
 		runtime.LockOSThread()

@@ -45,7 +45,7 @@ func (a *App) ForceQuit() {
 // 返回 true 表示阻止关闭。
 func (a *App) BeforeClose(ctx context.Context) bool {
 	realQuit := a.forceQuit.Load()
-	if !realQuit {
+	if TrayAvailable() && !realQuit {
 		if st, err := a.storeOrError(); err == nil {
 			if s, serr := st.GetSettings(); serr == nil && !s.CloseToTrayEnabled() {
 				realQuit = true
