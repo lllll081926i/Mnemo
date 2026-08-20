@@ -1,21 +1,21 @@
 <script setup>
-// 网盘账号头像（右上角）：圆形头像(object-fit:cover 裁掉黑边) + provider 小徽章；
-// 悬停弹窗显示已用/剩余/总容量；静默低频刷新配额(RefreshAccount)。
+// 网盘账号头像（右上角）：圆形头像(object-fit:cover 裁掉黑边)；
+// 悬停弹窗显示已用/剩余/总容量；启动时或用户手动触发容量同步。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { refreshAccount, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
+import { refreshAccount, refreshAccountNow, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
 import UiIcon from './UiIcon.vue'
 
-const QUOTA_REFRESH_INTERVAL = 60 * 60 * 1000
+const MANUAL_REFRESH_GAP = 5 * 1000
 const refreshInflight = new Map()
 const refreshLastAttempt = new Map()
 
-function refreshAccountOnce(userID) {
+function refreshAccountOnce(userID, force = false) {
   if (!userID) return Promise.resolve(null)
-  const now = Date.now()
-  if (now - (refreshLastAttempt.get(userID) || 0) < QUOTA_REFRESH_INTERVAL) return Promise.resolve(null)
   if (refreshInflight.has(userID)) return refreshInflight.get(userID)
+  const now = Date.now()
+  if (!force && now - (refreshLastAttempt.get(userID) || 0) < MANUAL_REFRESH_GAP) return Promise.resolve(null)
   refreshLastAttempt.set(userID, now)
-  const promise = refreshAccount(userID).finally(() => refreshInflight.delete(userID))
+  const promise = (force ? refreshAccountNow(userID) : refreshAccount(userID)).finally(() => refreshInflight.delete(userID))
   refreshInflight.set(userID, promise)
   return promise
 }
@@ -84,6 +84,7 @@ const avatarText = computed(() => {
 const rootRef = ref(null)
 const show = ref(false)
 const popStyle = ref({})
+const refreshing = ref(false)
 let enterTimer = null, leaveTimer = null
 
 function updatePos() {
@@ -113,40 +114,36 @@ function onLeave() {
 onBeforeUnmount(() => {
   clearTimeout(enterTimer)
   clearTimeout(leaveTimer)
-  clearTimeout(refreshDelay)
-  clearInterval(refreshTimer)
-  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
-// ---------- 静默低频刷新配额 ----------
-let refreshTimer = null
-let refreshDelay = null
-async function silentRefresh() {
-  if (!props.account || document.hidden) return
+// ---------- 启动/手动同步容量 ----------
+async function syncQuota(force = false) {
+  if (!props.account) return null
   const snapUid = props.account.user_id
   try {
-    const acc = await refreshAccountOnce(snapUid)
+    const acc = await refreshAccountOnce(snapUid, force)
     if (snapUid === (props.account && props.account.user_id) && acc) {
       if (acc.token) tok.value = acc.token
       quota.value = acc.usage || null
     }
+    return acc
   } catch { /* 静默 */ }
 }
-function scheduleRefresh(delay = 30 * 1000) {
-  clearTimeout(refreshDelay)
-  if (!props.account) return
-  refreshDelay = setTimeout(silentRefresh, delay)
-}
-function onVisibilityChange() {
-  if (!document.hidden) scheduleRefresh(10 * 1000)
+
+async function manualRefresh() {
+  if (!props.account || refreshing.value) return
+  refreshing.value = true
+  try {
+    await syncQuota(true)
+  } finally {
+    refreshing.value = false
+  }
 }
 watch(() => props.account && props.account.user_id, (uid) => {
-  if (uid) scheduleRefresh()
+  if (uid) void syncQuota(true)
 })
 onMounted(() => {
-  if (props.account) scheduleRefresh()
-  document.addEventListener('visibilitychange', onVisibilityChange)
-  refreshTimer = setInterval(silentRefresh, QUOTA_REFRESH_INTERVAL)
+  if (props.account) void syncQuota(true)
 })
 </script>
 
@@ -156,7 +153,6 @@ onMounted(() => {
       <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
       <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
       <span v-else class="ava-text">{{ avatarText }}</span>
-      <img v-if="providerIcon" :src="providerIcon" alt="" class="ava-badge" :title="providerLabel" />
     </div>
 
     <teleport to="body">
@@ -196,6 +192,11 @@ onMounted(() => {
             <div v-else class="ap-noquota">{{ quotaStatusText || '该网盘暂未返回容量信息' }}</div>
             <div v-if="hasQuota && quotaStatusText" class="ap-qstatus">{{ quotaStatusText }}</div>
             <div v-if="quotaUpdatedText" class="ap-qupdated">{{ quotaUpdatedText }}</div>
+            <button class="btn sm ap-refresh" type="button" :disabled="refreshing" @click.stop="manualRefresh">
+              <span v-if="refreshing" class="spin"></span>
+              <UiIcon v-else name="refresh" :size="12" />
+              {{ refreshing ? '同步中…' : '手动同步容量' }}
+            </button>
           </div>
         </div>
       </transition>
@@ -215,11 +216,6 @@ onMounted(() => {
 .ava-circle.sm { width: 36px; height: 36px; }
 .ava-img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .ava-text { font-size: 12px; font-weight: 600; }
-.ava-badge {
-  position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px;
-  border-radius: 50%; object-fit: cover; background: var(--bg-surface);
-  border: 1.5px solid var(--bg-surface);
-}
 .acc-pop {
   position: fixed; z-index: 9999; min-width: 260px; padding: 12px;
   background: var(--bg-elevated); border: 1px solid var(--border-light);
@@ -244,4 +240,5 @@ onMounted(() => {
 .ap-noquota { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 6px 0; }
 .ap-qstatus { margin-top: 7px; color: var(--color-warning); font-size: 11px; text-align: center; }
 .ap-qupdated { margin-top: 5px; color: var(--text-tertiary); font-size: 10.5px; text-align: center; }
+.ap-refresh { margin-top: 8px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 </style>

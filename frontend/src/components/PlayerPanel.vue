@@ -5,6 +5,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings, previewUrl } from '../api'
 import { getPrefs } from '../appearance'
 import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
+import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -34,6 +35,15 @@ const src = ref('')
 const streamType = ref('')
 const looping = ref(false)
 const isFullscreen = ref(false)
+// 窗口控制（右上角）：全屏时隐藏
+const winMax = ref(false)
+function winMinimise() { try { WindowMinimise() } catch { /* browser preview */ } }
+function winToggleMax() {
+  try {
+    WindowToggleMaximise()
+    WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {})
+  } catch { /* browser preview */ }
+}
 const pipActive = ref(false)
 const showControls = ref(true)
 const subtitleSources = ref([])
@@ -94,6 +104,7 @@ const episodeIndex = computed(() => episodeFiles.value.findIndex((candidate) => 
 const currentQualityLabel = computed(() => qualities.value.find((quality) => quality.value === currentQuality.value)?.label || currentQuality.value || (streamType.value || '网页播放').toUpperCase())
 
 onMounted(() => {
+  try { WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {}) } catch { /* browser preview */ }
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
@@ -142,11 +153,11 @@ watch(isFullscreen, (full) => {
 })
 
 function isVideoFile(file) {
-  const category = String(file?.category || file?.kind || '').toLowerCase()
-  if (category === 'video') return true
   const name = String(file?.name || '')
   const index = name.lastIndexOf('.')
-  return index > 0 && ['mp4', 'm4v', 'webm', 'ogg', 'ogv', 'mov', 'm3u8', 'mpd', '3gp', 'avi', 'mkv', 'flv', 'm2ts', 'mpg', 'mpeg', 'mts', 'rm', 'rmvb', 'ts', 'wmv'].includes(name.slice(index + 1).toLowerCase())
+  // 与 api.openKindOf 的播放白名单保持一致。目录中的 MKV/AVI 等文件
+  // 仍可下载，但不会被“上一集/下一集”误加入网页播放器。
+  return index > 0 && ['mp4', 'm4v', 'webm', 'ogv', 'm3u8', 'mpd'].includes(name.slice(index + 1).toLowerCase())
 }
 
 async function startPlayback() {
@@ -1192,6 +1203,8 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         <div class="pp-top-actions">
           <button type="button" class="pp-btn" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="19" /></button>
           <button type="button" class="pp-btn" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="20" /></button>
+          <button v-if="!isFullscreen" type="button" class="pp-btn" title="最小化" @click="winMinimise"><UiIcon name="minimize" :size="17" /></button>
+          <button v-if="!isFullscreen" type="button" class="pp-btn" :title="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'restore' : 'maximize'" :size="16" /></button>
           <button type="button" class="pp-btn" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="20" /></button>
         </div>
       </header>

@@ -483,14 +483,6 @@ body.rail-drag-active { cursor: grabbing; user-select: none; }
   max-width: 94vw;
   height: min(760px, 82vh);
   max-height: 82vh;
-  transition: width var(--motion-fast) var(--motion-ease), height var(--motion-fast) var(--motion-ease), max-width var(--motion-fast) var(--motion-ease), max-height var(--motion-fast) var(--motion-ease), border-radius var(--motion-fast) var(--motion-ease);
-}
-.modal.preview-modal.is-maximized {
-  width: 98.5vw;
-  max-width: 98.5vw;
-  height: 96.5vh;
-  max-height: 96.5vh;
-  border-radius: var(--radius-md);
 }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;

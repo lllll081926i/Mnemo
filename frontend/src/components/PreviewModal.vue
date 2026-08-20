@@ -5,6 +5,7 @@
 // 3. 音频播放；PDF 等非白名单格式由文件页提示下载，不会进入此弹窗
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { PreviewURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf } from '../api'
+import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import UiIcon from './UiIcon.vue'
@@ -25,7 +26,14 @@ const editContent = ref('')
 const saving = ref(false)
 const loading = ref(true)
 const error = ref('')
-const isMaximized = ref(false) // 窗口最大化/全屏状态
+const winMax = ref(false) // 应用窗口最大化状态
+function winMinimise() { try { WindowMinimise() } catch { /* browser preview */ } }
+function winToggleMax() {
+  try {
+    WindowToggleMaximise()
+    WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {})
+  } catch { /* browser preview */ }
+}
 
 // ---------- 图片画廊状态 ----------
 const imageList = computed(() => {
@@ -538,6 +546,7 @@ function onKey(e) {
 onMounted(() => {
   loadPreview()
   pokeUI()
+  try { WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {}) } catch { /* browser preview */ }
   window.addEventListener('keydown', onKey)
   if (typeof ResizeObserver !== 'undefined') stageRO = new ResizeObserver(() => computeFit())
 })
@@ -576,14 +585,14 @@ function decodeText(buf) {
 
 <template>
   <Modal
-    :dialog-class="'preview-modal ' + (isMaximized ? 'is-maximized' : '')"
+    :dialog-class="'preview-modal' + (kind === 'image' ? ' immersive' : '')"
     width=""
     @close="handleCloseRequest"
     body-class="preview-body"
   >
-    <!-- 自定义高级弹窗头部 -->
+    <!-- 自定义高级弹窗头部（图片预览为沉浸式浮层，不使用实体头栏） -->
     <template #head>
-      <div class="pv-head-custom">
+      <div v-if="kind !== 'image'" class="pv-head-custom">
         <div class="pv-head-icon" :class="'ft-' + iconOf(activeFile)">
           <UiIcon :name="iconOf(activeFile)" :size="20" />
         </div>
@@ -606,16 +615,16 @@ function decodeText(buf) {
       </div>
     </template>
 
-    <!-- 头部右侧操作扩展（最大化/全屏按钮） -->
+    <!-- 头部右侧窗口控制（最小化 / 最大化还原） -->
     <template #head-extra>
-      <button
-        class="icon-btn"
-        style="width:28px;height:28px"
-        :title="isMaximized ? '还原窗口' : '最大化窗口'"
-        @click="isMaximized = !isMaximized"
-      >
-        <UiIcon :name="isMaximized ? 'minimize' : 'maximize'" :size="14" />
-      </button>
+      <template v-if="kind !== 'image'">
+        <button class="icon-btn" style="width:28px;height:28px" title="最小化" @click="winMinimise">
+          <UiIcon name="minimize" :size="13" />
+        </button>
+        <button class="icon-btn" style="width:28px;height:28px" :title="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax">
+          <UiIcon :name="winMax ? 'restore' : 'maximize'" :size="13" />
+        </button>
+      </template>
     </template>
 
     <!-- 顶部悬浮工具条（仅文本） -->
@@ -754,7 +763,19 @@ function decodeText(buf) {
           <button class="pv-edge right" title="下一张 (→)" @click.stop="switchImage(1)"><UiIcon name="forward" :size="17" /></button>
         </template>
 
-        <div class="pv-topmeta">{{ activeFile.name }}</div>
+        <!-- 顶部浮动栏：渐变遮罩，无实体条（播放器语言） -->
+        <div class="pv-topbar" @pointerdown.stop @dblclick.stop>
+          <div class="pv-topbar-meta">
+            <UiIcon :name="iconOf(activeFile)" :size="15" />
+            <span class="pv-topbar-name">{{ activeFile.name }}</span>
+            <span class="pv-topbar-sub">{{ formatBytes(activeFile.size) }}<template v-if="imageList.length > 1"> · {{ currentImageIdx + 1 }} / {{ imageList.length }}</template></span>
+          </div>
+          <div class="pv-topbar-actions">
+            <button class="pv-ctl-btn" title="最小化" @click="winMinimise"><UiIcon name="minimize" :size="14" /></button>
+            <button class="pv-ctl-btn" :title="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'restore' : 'maximize'" :size="14" /></button>
+            <button class="pv-ctl-btn" title="关闭 (Esc)" @click="handleCloseRequest"><UiIcon name="close" :size="15" /></button>
+          </div>
+        </div>
 
         <!-- 胶卷缩略图条（控制条切换） -->
         <div v-if="showFilm && imageList.length > 1" class="pv-filmstrip" @pointerdown.stop @dblclick.stop>
@@ -1260,14 +1281,22 @@ function decodeText(buf) {
 .pv-stage.grabbing .pv-img-layer img { transition: none; }
 .pv-stage-busy { position: absolute; top: 12px; right: 14px; color: rgba(255,255,255,.7); }
 
-/* 顶部文件名（自动隐藏） */
-.pv-topmeta {
-  position: absolute; top: 10px; left: 16px; right: 16px;
-  text-align: center; font-size: 12px; color: rgba(255, 255, 255, .88);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 0 12px rgba(0, 0, 0, .6);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  pointer-events: none; transition: opacity .25s ease;
+/* 顶部浮动栏：渐变遮罩，无实体条（播放器语言） */
+.pv-topbar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 12px 14px 32px;
+  background: linear-gradient(rgba(0, 0, 0, .55), transparent);
+  transition: opacity .25s ease, transform .25s ease;
 }
+.pv-topbar-meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: rgba(255, 255, 255, .92); padding-top: 2px; }
+.pv-topbar-name {
+  font-size: 13.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .7);
+}
+.pv-topbar-sub { font-size: 11.5px; color: rgba(255, 255, 255, .62); flex: none; }
+.pv-topbar-actions { display: flex; gap: 4px; flex: none; }
 
 /* 左右翻页箭头 */
 .pv-edge {
@@ -1286,16 +1315,13 @@ function decodeText(buf) {
 .pv-edge:hover { opacity: 1; background: rgba(22, 22, 28, .9); }
 .pv-edge:active { transform: translateY(-50%) scale(.93); }
 
-/* 浮动控制条（播放器语言） */
+/* 底部控制条：渐变遮罩条（无实体药丸），控件直接浮在渐变上 */
 .pv-ctl {
-  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 5px;
-  padding: 5px 10px; border-radius: 12px;
-  background: rgba(12, 12, 16, .92);
-  backdrop-filter: blur(20px) saturate(1.2); -webkit-backdrop-filter: blur(20px) saturate(1.2);
-  border: 1px solid rgba(255, 255, 255, .16);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06);
-  transition: opacity .25s ease, transform .25s var(--motion-ease);
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 28px 16px 12px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .62));
+  transition: opacity .25s ease, transform .25s ease;
 }
 .pv-ctl-btn {
   width: 28px; height: 28px; flex: none;
@@ -1315,7 +1341,7 @@ function decodeText(buf) {
 
 /* 胶卷缩略图条（默认隐藏，控制条切换） */
 .pv-filmstrip {
-  position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
   display: flex; gap: 6px; max-width: min(78%, 560px); overflow-x: auto;
   padding: 7px; border-radius: 12px;
   background: rgba(12, 12, 16, .92);
@@ -1341,9 +1367,13 @@ function decodeText(buf) {
 .pv-stage.ui-hidden { cursor: none; }
 .pv-stage.ui-hidden .pv-ctl,
 .pv-stage.ui-hidden .pv-edge,
-.pv-stage.ui-hidden .pv-topmeta,
+.pv-stage.ui-hidden .pv-topbar,
 .pv-stage.ui-hidden .pv-filmstrip { opacity: 0; pointer-events: none; }
-.pv-stage.ui-hidden .pv-ctl { transform: translateX(-50%) translateY(6px); }
+.pv-stage.ui-hidden .pv-ctl { transform: translateY(8px); }
+.pv-stage.ui-hidden .pv-topbar { transform: translateY(-8px); }
+
+/* 沉浸式：隐藏弹窗实体头栏 */
+.modal.preview-modal.immersive .modal-head { display: none; }
 
 /* PDF & Audio */
 .pv-audio-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 36px; }
