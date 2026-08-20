@@ -43,6 +43,28 @@ func TestOpenAndSettings(t *testing.T) {
 	}
 }
 
+func TestAtomicJSONWriteCleansTempAfterRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const name = "blocked.json"
+	if err := os.Mkdir(st.path(name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.writeJSON(name, map[string]string{"state": "new"}); err == nil {
+		t.Fatal("writeJSON unexpectedly replaced a directory")
+	}
+	if _, err := os.Stat(st.path(name + ".tmp")); !os.IsNotExist(err) {
+		t.Fatalf("failed atomic write left a temporary file: %v", err)
+	}
+	info, err := os.Stat(st.path(name))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("existing target was changed after failed rename: info=%#v err=%v", info, err)
+	}
+}
+
 func TestUploadSessionStore(t *testing.T) {
 	dir := t.TempDir()
 	InitUploadSessions(dir)

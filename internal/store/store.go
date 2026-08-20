@@ -150,10 +150,12 @@ func (s *Store) writeJSONUnlocked(name string, v any) error {
 	// Store documents may contain share passwords, proxy credentials, or
 	// transfer metadata. Keep every document private to the current user.
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	target := s.path(name)
 	if err := renameWithRetry(tmp, target); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Chmod(target, 0o600)

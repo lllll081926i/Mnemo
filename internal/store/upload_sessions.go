@@ -75,10 +75,15 @@ func SaveUploadSessionState(key, sessionID string, partNumbers []int) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 // LoadUploadSession returns the persisted uploaded part numbers for a key,
