@@ -33,6 +33,7 @@ import (
 	"mnemo-go/internal/transfer"
 	"mnemo-go/internal/transfer/dlengine"
 	"mnemo-go/internal/transfer/migrate"
+	"mnemo-go/internal/updater"
 	"os"
 	"strings"
 	"time"
@@ -51,6 +52,9 @@ type App struct {
 	secrets    config.Secrets
 	dataDir    string
 
+	updateMu   sync.Mutex
+	updateInfo *updater.Info
+
 	migrate      *migrate.Engine
 	floater      *floater
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
@@ -68,6 +72,7 @@ type App struct {
 
 const (
 	accountRefreshTTL          = 45 * time.Minute
+	accountRefreshManualGap    = 30 * time.Second
 	accountRefreshErrorBackoff = 10 * time.Minute
 	accountRefreshRiskBackoff  = time.Hour
 )
@@ -329,6 +334,8 @@ func (a *App) startup(ctx context.Context) {
 			return secrets.OnedriveClientID
 		case "dropbox_app_key":
 			return secrets.DropboxAppKey
+		case "dropbox_redirect_uri":
+			return secrets.DropboxRedirectURI
 		}
 		return ""
 	})
@@ -590,6 +597,9 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	if secrets.DropboxAppKey != "" {
 		config["dropbox_app_key"] = secrets.DropboxAppKey
 	}
+	if secrets.DropboxRedirectURI != "" {
+		config["dropbox_redirect_uri"] = secrets.DropboxRedirectURI
+	}
 	tok, err := reg.Auth(context.Background(), drive.AuthRequest{
 		Config: config,
 		Open: func(url string) error {
@@ -702,6 +712,44 @@ func (a *App) SaveMountedAccount(provider string, conn model.ConnConfig) (*model
 	return acc, nil
 }
 
+// RenameMountedAccount changes only the local display name of a WebDAV/S3
+// mount. Its stable user/drive ids and encrypted connection credentials are
+// intentionally preserved.
+func (a *App) RenameMountedAccount(userID, name string) (*model.Account, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("网盘名称不能为空")
+	}
+	if len([]rune(name)) > 80 {
+		return nil, fmt.Errorf("网盘名称不能超过 80 个字符")
+	}
+	for _, r := range name {
+		if r == '\r' || r == '\n' || r == '\t' {
+			return nil, fmt.Errorf("网盘名称不能包含换行或制表符")
+		}
+	}
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
+	acc, err := st.GetAccount(strings.TrimSpace(userID))
+	if err != nil || acc == nil {
+		return nil, fmt.Errorf("账号不存在")
+	}
+	provider := acc.Provider()
+	if provider != model.ProviderWebdav && provider != model.ProviderS3 {
+		return nil, fmt.Errorf("仅支持重命名 WebDAV/S3 挂载账号")
+	}
+	updated, err := st.RenameMountedAccount(acc.UserID, name)
+	if err != nil {
+		logging.Warn("mounted account rename failed", "provider", provider, "account_id", redactID(acc.UserID), "error", err)
+		return nil, err
+	}
+	a.emit("account:changed", updated)
+	logging.Info("mounted account renamed", "provider", provider, "account_id", redactID(acc.UserID))
+	return updated, nil
+}
+
 // ValidateMountedWrite performs an explicitly requested S3 write probe. It
 // does not persist an account or run during the normal login check.
 func (a *App) ValidateMountedWrite(provider string, conn model.ConnConfig) error {
@@ -778,15 +826,25 @@ func syncAccountUsage(acc *model.Account) {
 	if acc.Usage == nil {
 		acc.Usage = &model.Quota{Type: "account", Status: "unknown"}
 	}
+	if acc.Provider() == model.ProviderYike || acc.Provider() == model.ProviderLanzou {
+		acc.Usage.Type = "unlimited"
+		acc.Usage.Size = 0
+		acc.Usage.SizeStr = ""
+		acc.Usage.Used = 0
+		acc.Usage.UsedStr = ""
+		acc.Usage.Status = "available"
+		acc.Usage.Description = "无限空间"
+		return
+	}
 	acc.Usage.Type = "account"
 	if acc.Token == nil || acc.Token.TotalSize <= 0 {
 		acc.Usage.Size = 0
 		acc.Usage.SizeStr = ""
 		acc.Usage.Used = 0
 		acc.Usage.UsedStr = ""
-		if acc.Usage.Status == "" || acc.Usage.Status == "available" {
+		if acc.Usage.Status != "rate_limited" && acc.Usage.Status != "error" {
 			acc.Usage.Status = "unsupported"
-			acc.Usage.Description = "服务端未提供容量信息"
+			acc.Usage.Description = "暂无容量信息"
 		}
 		return
 	}
@@ -819,12 +877,18 @@ func markQuotaRefreshSuccess(acc *model.Account) {
 	if acc.Usage == nil {
 		return
 	}
+	if acc.Usage.Type == "unlimited" {
+		acc.Usage.Status = "available"
+		acc.Usage.Description = "无限空间"
+		acc.Usage.UpdatedAt = time.Now().Unix()
+		return
+	}
 	if acc.Usage.Size > 0 {
 		acc.Usage.Status = "available"
 		acc.Usage.Description = ""
 	} else {
 		acc.Usage.Status = "unsupported"
-		acc.Usage.Description = "服务端未提供容量信息"
+		acc.Usage.Description = "暂无容量信息"
 	}
 	acc.Usage.UpdatedAt = time.Now().Unix()
 }
@@ -837,16 +901,19 @@ func markQuotaRefreshFailure(acc *model.Account, err error) {
 	if acc.Usage == nil {
 		return
 	}
+	if acc.Usage.Type == "unlimited" {
+		return
+	}
 	message := strings.ToLower(fmt.Sprint(err))
 	for _, marker := range []string{"429", "too many", "rate limit", "risk", "captcha", "风控", "频繁", "限流"} {
 		if strings.Contains(message, marker) {
 			acc.Usage.Status = "rate_limited"
-			acc.Usage.Description = "服务端触发限流，已进入刷新冷却"
+			acc.Usage.Description = "刷新受限"
 			return
 		}
 	}
 	acc.Usage.Status = "error"
-	acc.Usage.Description = "容量刷新失败，仍显示上次成功数据"
+	acc.Usage.Description = "刷新失败"
 }
 
 func (a *App) accountRefreshCached(userID string) bool {
@@ -897,7 +964,7 @@ func (a *App) markAccountRefreshFailure(userID string, err error) {
 
 // RefreshAccount silently refreshes an account's quota + profile from the
 // provider, persists the updated token, and returns the refreshed account.
-// Frontend polls this at a low frequency for the avatar/quota popover.
+// The frontend calls this during startup or an explicit user refresh.
 func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 	started := time.Now()
 	logging.Debug("account refresh started", "account_id", redactID(userID))
@@ -968,6 +1035,19 @@ func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 	}
 	logging.Debug("account refresh completed", "account_id", redactID(userID), "duration", logging.Duration(started))
 	return acc, nil
+}
+
+// RefreshAccountNow bypasses the normal success TTL for startup/manual refresh.
+// It keeps server cooldowns and a short per-account manual gap.
+func (a *App) RefreshAccountNow(userID string) (*model.Account, error) {
+	now := time.Now()
+	a.accountRefreshMu.Lock()
+	last := a.accountRefreshLast[userID]
+	if last.IsZero() || now.Sub(last) >= accountRefreshManualGap {
+		delete(a.accountRefreshLast, userID)
+	}
+	a.accountRefreshMu.Unlock()
+	return a.RefreshAccount(userID)
 }
 
 // RemoveAccount deletes an account.
@@ -1277,6 +1357,52 @@ func (a *App) UploadFiles(userID, driveID, parentID, conflictPolicy string, loca
 	items := uploads.AddFiles(userID, driveID, parentID, conflictPolicy, localPaths)
 	logging.Info("upload items enqueued", "count", len(items))
 	return items
+}
+
+// ValidateUploadFiles checks selected local files against the optional target
+// provider policy before the frontend opens a conflict dialog or adds queue
+// jobs. UploadOneFile validates again when the worker actually starts.
+func (a *App) ValidateUploadFiles(userID, driveID string, localPaths []string) error {
+	logging.Debug("upload selection validation requested", "account_id", redactID(userID), "drive_id", redactID(driveID), "path_count", len(localPaths))
+	items, err := collectUploadValidationItems(localPaths)
+	if err != nil {
+		return err
+	}
+	return drive.ValidateUploadItems(userID, driveID, items)
+}
+
+func collectUploadValidationItems(localPaths []string) ([]drive.UploadValidationItem, error) {
+	if len(localPaths) == 0 {
+		return nil, errors.New("未选择上传文件")
+	}
+	items := make([]drive.UploadValidationItem, 0, len(localPaths))
+	for _, rawPath := range localPaths {
+		localPath := strings.TrimSpace(rawPath)
+		if localPath == "" {
+			return nil, errors.New("待上传文件无效")
+		}
+		info, err := os.Stat(localPath)
+		if err != nil {
+			return nil, fmt.Errorf("无法读取待上传文件: %w", err)
+		}
+		if !info.IsDir() {
+			items = append(items, drive.UploadValidationItem{Name: info.Name(), Size: info.Size()})
+			continue
+		}
+		if err := filepath.Walk(localPath, func(path string, entry os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry == nil || entry.IsDir() {
+				return nil
+			}
+			items = append(items, drive.UploadValidationItem{Name: filepath.Base(path), Size: entry.Size()})
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("无法读取待上传文件夹: %w", err)
+		}
+	}
+	return items, nil
 }
 
 // ListUploads lists upload jobs.

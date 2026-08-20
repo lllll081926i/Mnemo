@@ -9,13 +9,87 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
 )
 
-const maxLanzouUploadSize = 200 * 1024 * 1024 // 蓝奏单文件上传暂限 200MB
+const (
+	lanzouMiB               int64 = 1024 * 1024
+	lanzouTierV0                  = "v0"
+	lanzouTierV1                  = "v1"
+	lanzouTierV2                  = "v2"
+	lanzouTierV3                  = "v3"
+	lanzouDefaultUploadTier       = lanzouTierV0
+)
+
+var lanzouAllowedUploadExtensions = map[string]struct{}{
+	"doc": {}, "docx": {}, "zip": {}, "rar": {}, "apk": {}, "txt": {}, "exe": {}, "7z": {}, "e": {}, "z": {}, "ct": {}, "ke": {}, "cetrainer": {}, "db": {}, "tar": {}, "pdf": {}, "w3x": {},
+	"epub": {}, "mobi": {}, "azw": {}, "azw3": {}, "osk": {}, "osz": {}, "xpa": {}, "cpk": {}, "lua": {}, "jar": {}, "dmg": {}, "ppt": {}, "pptx": {}, "xls": {}, "xlsx": {}, "mp3": {},
+	"ipa": {}, "iso": {}, "img": {}, "gho": {}, "ttf": {}, "ttc": {}, "txf": {}, "dwg": {}, "bat": {}, "imazingapp": {}, "dll": {}, "crx": {}, "xapk": {}, "conf": {},
+	"deb": {}, "rp": {}, "rpm": {}, "rplib": {}, "mobileconfig": {}, "appimage": {}, "lolgezi": {}, "flac": {},
+	"cad": {}, "hwt": {}, "accdb": {}, "ce": {}, "xmind": {}, "enc": {}, "bds": {}, "bdi": {}, "ssf": {}, "it": {},
+	"pkg": {}, "cfg": {}, "mp4": {}, "avi": {}, "png": {}, "jpeg": {}, "jpg": {}, "gif": {}, "webp": {}, "brushset": {},
+}
+
+func normalizeLanzouUploadTier(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case lanzouTierV1:
+		return lanzouTierV1
+	case lanzouTierV2:
+		return lanzouTierV2
+	case lanzouTierV3:
+		return lanzouTierV3
+	default:
+		return lanzouDefaultUploadTier
+	}
+}
+
+func lanzouUploadLimit(tier string) int64 {
+	switch normalizeLanzouUploadTier(tier) {
+	case lanzouTierV1:
+		return 200 * lanzouMiB
+	case lanzouTierV2:
+		return 300 * lanzouMiB
+	case lanzouTierV3:
+		return 550 * lanzouMiB
+	default:
+		return 100 * lanzouMiB
+	}
+}
+
+func lanzouUploadTier(c drive.Context) string {
+	if c.Token != nil {
+		if cr := parseLanzouCred(c.Token.RefreshToken); cr != nil {
+			return normalizeLanzouUploadTier(cr.UploadTier)
+		}
+	}
+	return lanzouDefaultUploadTier
+}
+
+// ValidateUpload enforces the member-grade limits documented for the ordinary
+// 蓝奏云 account. It is used before enqueueing and again immediately before
+// the provider uploads a local file.
+func (d *Driver) ValidateUpload(_ context.Context, c drive.Context, name string, size int64) error {
+	if size < 0 {
+		return errors.New("蓝奏云文件大小无效")
+	}
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(strings.TrimSpace(name))), ".")
+	if _, ok := lanzouAllowedUploadExtensions[ext]; !ok {
+		if ext == "" {
+			return errors.New("蓝奏云仅支持指定文件格式")
+		}
+		return fmt.Errorf("蓝奏云不支持 .%s 格式", ext)
+	}
+	tier := lanzouUploadTier(c)
+	limit := lanzouUploadLimit(tier)
+	if size > limit {
+		return fmt.Errorf("蓝奏云 %s 单文件最大 %d MB", strings.ToUpper(tier), limit/lanzouMiB)
+	}
+	return nil
+}
 
 // UploadOneFile uploads a whole file via html5up.php. The endpoint does not
 // support chunked upload, so the multipart payload is staged in a temporary
@@ -38,8 +112,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	size := stat.Size()
-	if size > maxLanzouUploadSize {
-		return errors.New("蓝奏单文件上传暂限 200MB（接口不支持分片），请用网页端上传超大文件")
+	if err := d.ValidateUpload(ctx, c, ui.Info.Name, size); err != nil {
+		return err
 	}
 	ui.Info.Size = size
 	ui.Info.SizeStr = model.FormatBytes(size)

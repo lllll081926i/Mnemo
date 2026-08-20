@@ -2,20 +2,15 @@
 // 网盘账号头像（右上角）：圆形头像(object-fit:cover 裁掉黑边)；
 // 悬停弹窗显示已用/剩余/总容量；启动时或用户手动触发容量同步。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { refreshAccount, refreshAccountNow, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
+import { refreshAccountNow, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
 import UiIcon from './UiIcon.vue'
 
-const MANUAL_REFRESH_GAP = 5 * 1000
 const refreshInflight = new Map()
-const refreshLastAttempt = new Map()
 
-function refreshAccountOnce(userID, force = false) {
+function refreshAccountOnce(userID) {
   if (!userID) return Promise.resolve(null)
   if (refreshInflight.has(userID)) return refreshInflight.get(userID)
-  const now = Date.now()
-  if (!force && now - (refreshLastAttempt.get(userID) || 0) < MANUAL_REFRESH_GAP) return Promise.resolve(null)
-  refreshLastAttempt.set(userID, now)
-  const promise = (force ? refreshAccountNow(userID) : refreshAccount(userID)).finally(() => refreshInflight.delete(userID))
+  const promise = refreshAccountNow(userID).finally(() => refreshInflight.delete(userID))
   refreshInflight.set(userID, promise)
   return promise
 }
@@ -58,10 +53,10 @@ const hasQuota = computed(() => total.value > 0)
 const quotaStatus = computed(() => String(quota.value?.status || (hasQuota.value ? 'available' : 'unknown')))
 const quotaStatusText = computed(() => {
   if (quota.value?.description) return quota.value.description
-  if (quotaStatus.value === 'rate_limited') return '服务端触发限流，已进入刷新冷却'
-  if (quotaStatus.value === 'error') return '容量刷新失败，仍显示上次成功数据'
-  if (quotaStatus.value === 'unsupported') return '服务端未提供容量信息'
-  if (quotaStatus.value === 'unknown') return '等待低频刷新容量信息'
+  if (quotaStatus.value === 'rate_limited') return '刷新受限'
+  if (quotaStatus.value === 'error') return '刷新失败'
+  if (quotaStatus.value === 'unsupported') return '暂无容量信息'
+  if (quotaStatus.value === 'unknown') return '暂无容量信息'
   return ''
 })
 const quotaUpdatedText = computed(() => {
@@ -117,11 +112,11 @@ onBeforeUnmount(() => {
 })
 
 // ---------- 启动/手动同步容量 ----------
-async function syncQuota(force = false) {
+async function syncQuota() {
   if (!props.account) return null
   const snapUid = props.account.user_id
   try {
-    const acc = await refreshAccountOnce(snapUid, force)
+    const acc = await refreshAccountOnce(snapUid)
     if (snapUid === (props.account && props.account.user_id) && acc) {
       if (acc.token) tok.value = acc.token
       quota.value = acc.usage || null
@@ -134,16 +129,16 @@ async function manualRefresh() {
   if (!props.account || refreshing.value) return
   refreshing.value = true
   try {
-    await syncQuota(true)
+    await syncQuota()
   } finally {
     refreshing.value = false
   }
 }
 watch(() => props.account && props.account.user_id, (uid) => {
-  if (uid) void syncQuota(true)
+  if (uid) void syncQuota()
 })
 onMounted(() => {
-  if (props.account) void syncQuota(true)
+  if (props.account) void syncQuota()
 })
 </script>
 
@@ -189,13 +184,13 @@ onMounted(() => {
               <div><span class="ap-num-k">剩余</span><span class="ap-num-v">{{ formatBytes(free) }}</span></div>
               <div><span class="ap-num-k">总容量</span><span class="ap-num-v">{{ formatBytes(total) }}</span></div>
             </div>
-            <div v-else class="ap-noquota">{{ quotaStatusText || '该网盘暂未返回容量信息' }}</div>
+            <div v-else class="ap-noquota">{{ quotaStatusText || '暂无容量信息' }}</div>
             <div v-if="hasQuota && quotaStatusText" class="ap-qstatus">{{ quotaStatusText }}</div>
             <div v-if="quotaUpdatedText" class="ap-qupdated">{{ quotaUpdatedText }}</div>
             <button class="btn sm ap-refresh" type="button" :disabled="refreshing" @click.stop="manualRefresh">
               <span v-if="refreshing" class="spin"></span>
               <UiIcon v-else name="refresh" :size="12" />
-              {{ refreshing ? '同步中…' : '手动同步容量' }}
+              {{ refreshing ? '刷新中…' : '刷新' }}
             </button>
           </div>
         </div>

@@ -103,7 +103,10 @@ func TestLoginAndAccountMap(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 200,
-				"map":  map[string]any{"userId": "42", "account": "user@ilanzou"},
+				"map": map[string]any{
+					"userId": "42", "account": "user@ilanzou",
+					"totalSize": "10240", "vipSize": 2048, "rewardSize": "1024", "usedSize": "4096",
+				},
 			})
 		default:
 			http.Error(w, "unexpected path", http.StatusNotFound)
@@ -128,8 +131,52 @@ func TestLoginAndAccountMap(t *testing.T) {
 	if login.userId != "42" || login.account != "user@ilanzou" {
 		t.Errorf("map = %+v", login)
 	}
+	if !login.hasQuota || login.totalSize != (10240+2048+1024)*1024 || login.usedSize != 4096*1024 {
+		t.Errorf("quota = %+v", login)
+	}
 	if len(calls) != 3 {
 		t.Errorf("calls = %v, want 3", calls)
+	}
+}
+
+func TestRefreshAccountUpdatesQuotaFromAccountMap(t *testing.T) {
+	withNoThrottle(t)
+	oldBase := ILANZOU_CONF.Base
+	t.Cleanup(func() { ILANZOU_CONF.Base = oldBase })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/user/account/map") {
+			http.Error(w, "unexpected path", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200,
+			"data": map[string]any{"map": map[string]any{
+				"totalSize": 1024, "vipSize": "2048", "rewardSize": 1024, "usedSize": 512,
+			}},
+		})
+	}))
+	defer srv.Close()
+	ILANZOU_CONF.Base = srv.URL
+
+	token := &model.TokenInfo{AccessToken: "token", DeviceID: "device", TotalSize: 1, UsedSize: 1, FreeSize: 0}
+	updated, err := (&Driver{}).RefreshAccount(context.Background(), drive.Context{Token: token}, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != token || token.TotalSize != (1024+2048+1024)*1024 || token.UsedSize != 512*1024 || token.FreeSize != (1024+2048+1024-512)*1024 {
+		t.Fatalf("updated quota = %+v", token)
+	}
+}
+
+func TestILanzouQuotaRejectsInvalidValuesWithoutClearingCache(t *testing.T) {
+	token := &model.TokenInfo{TotalSize: 4096, UsedSize: 1024, FreeSize: 3072}
+	total, used, ok := ilanzouQuota(map[string]any{"map": map[string]any{"totalSize": "bad", "usedSize": 1}})
+	if ok || total != 0 || used != 0 {
+		t.Fatalf("invalid quota parsed as total=%d used=%d ok=%v", total, used, ok)
+	}
+	applyILanzouQuota(token, total, used, ok)
+	if token.TotalSize != 4096 || token.UsedSize != 1024 || token.FreeSize != 3072 {
+		t.Fatalf("invalid quota cleared cache: %+v", token)
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -40,6 +42,51 @@ func withDropboxTransport(t *testing.T, rt http.RoundTripper) {
 
 func dropboxAPIPath(r *http.Request) string {
 	return strings.TrimPrefix(r.URL.Path, "/2")
+}
+
+func TestDropboxRedirectURIUsesRcloneCompatibleDefault(t *testing.T) {
+	spec, err := resolveRedirectURI(nil)
+	if err != nil {
+		t.Fatalf("resolve default redirect URI: %v", err)
+	}
+	if spec.raw != dbDefaultRedirectURI || spec.host != "localhost" || spec.port != 53682 || spec.path != "/" {
+		t.Fatalf("unexpected default redirect spec: %#v", spec)
+	}
+	if got := spec.listenAddr(); got != "127.0.0.1:53682" {
+		t.Fatalf("listen address = %q", got)
+	}
+}
+
+func TestDropboxRedirectURIAllowsConfiguredLoopbackAndRejectsRemote(t *testing.T) {
+	spec, err := resolveRedirectURI(map[string]string{"dropbox_redirect_uri": "http://127.0.0.1:4242/oauth/callback"})
+	if err != nil {
+		t.Fatalf("resolve custom redirect URI: %v", err)
+	}
+	if spec.raw != "http://127.0.0.1:4242/oauth/callback" || spec.path != "/oauth/callback" || spec.port != 4242 {
+		t.Fatalf("unexpected custom redirect spec: %#v", spec)
+	}
+	if _, err := resolveRedirectURI(map[string]string{"dropbox_redirect_uri": "https://example.com/callback"}); err == nil {
+		t.Fatal("remote redirect URI should be rejected")
+	}
+}
+
+func TestDropboxCallbackValidationUsesConfiguredHostAndPath(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	spec := redirectSpec{host: "localhost", port: port, path: "/oauth/callback"}
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:"+fmt.Sprint(port)+"/oauth/callback?code=x&state=y", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	if !validCallbackRequest(req, ln, spec) {
+		t.Fatal("valid loopback callback was rejected")
+	}
+	req.Host = "127.0.0.1:" + fmt.Sprint(port)
+	if validCallbackRequest(req, ln, spec) {
+		t.Fatal("callback for a different configured host was accepted")
+	}
 }
 
 func TestDropboxRefreshAccountUpdatesExpiryAndRetainsRotatingFields(t *testing.T) {

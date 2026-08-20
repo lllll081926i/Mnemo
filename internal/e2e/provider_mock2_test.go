@@ -1206,7 +1206,7 @@ func TestGuangyaSmsLoginForwardsCaptchaToken(t *testing.T) {
 			})
 		case "/userres/v1/user/space":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{"usedSize": 12, "totalSize": 100},
+				"data": map[string]any{"usedSize": "12", "totalSize": "100"},
 			})
 		default:
 			w.WriteHeader(http.StatusNotFound)

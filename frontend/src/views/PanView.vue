@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import {
   listDir, listTrash, search, mkdir, rename, trash, remove, restore,
-  move, copy, favorite, createShare, uploadFiles, migrateFiles, download,
+  move, copy, favorite, createShare, uploadFiles, validateUploadFiles, migrateFiles, download,
   AddFavorite, RemoveFavorite, ListFavorites, OfflineDownload, PickDirectory, PickFiles,
   formatBytes, formatTime, formatTimeParts, iconOf, extOf, openKindOf, copyText,
   capsOf, providerMetaOf, providerOf, GetDirectoryCache, SaveDirectoryCache, DeleteDirectoryCache,
@@ -937,10 +937,21 @@ async function checkUploadConflict(paths) {
   })
 }
 
+async function validateUploadSelection(paths) {
+  try {
+    await validateUploadFiles(uid.value, did.value, paths)
+    return true
+  } catch (e) {
+    emit('toast', String(e), 'error')
+    return false
+  }
+}
+
 async function pickUploadFiles() {
   let paths
   try { paths = await PickFiles('选择要上传的文件') } catch { return }
   if (!paths || !paths.length) return
+  if (!await validateUploadSelection(paths)) return
   const policy = await checkUploadConflict(paths)
   if (!policy) return
   await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, paths), `已加入上传队列（${paths.length} 项）`)
@@ -949,6 +960,7 @@ async function pickUploadFolder() {
   let dir
   try { dir = await PickDirectory('选择要上传的文件夹', '') } catch { return }
   if (!dir) return
+  if (!await validateUploadSelection([dir])) return
   const policy = await checkUploadConflict([dir])
   if (!policy) return
   await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, [dir]), '已加入上传队列（文件夹）')
@@ -1174,6 +1186,7 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
 
 async function onDropUpload(paths) {
   if (!props.account || mode.value !== 'list' || !caps.value.upload) return
+  if (!paths || !paths.length || !(await validateUploadSelection(paths))) return
   const policy = await checkUploadConflict(paths)
   if (!policy) return
   await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, paths), `已添加拖拽上传（${paths.length} 项）`)

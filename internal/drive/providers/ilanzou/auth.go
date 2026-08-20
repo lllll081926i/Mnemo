@@ -36,7 +36,7 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 		UserID:   login.userId,
 		Account:  login.account,
 	})
-	return &model.TokenInfo{
+	token := &model.TokenInfo{
 		TokenFrom:         model.ProviderIlanzou,
 		AccessToken:       login.token,
 		RefreshToken:      refresh,
@@ -49,5 +49,7 @@ func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, er
 		ProviderAccountID: id,
 		ProviderRootID:    "0",
 		DeviceID:          login.uuid,
-	}, nil
+	}
+	applyILanzouQuota(token, login.totalSize, login.usedSize, login.hasQuota)
+	return token, nil
 }

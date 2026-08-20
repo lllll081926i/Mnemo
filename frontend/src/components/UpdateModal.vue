@@ -5,15 +5,21 @@ import UiIcon from './UiIcon.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import { CheckUpdate, DownloadUpdate, ApplyUpdate, getSettings, onEvent } from '../api'
 
+const props = defineProps({
+  // App.vue 的后台静默检查会把已确认的版本传进来，避免弹窗再次请求
+  // GitHub；从设置页手动打开时为空，才执行一次主动检查。
+  initialInfo: { type: Object, default: null },
+})
 const emit = defineEmits(['close'])
 
-const state = ref('idle') // idle | checking | available | downloading | done | error
-const info = ref(null)
+const state = ref('idle') // idle | checking | available | downloading | done | applying | error
+const info = ref(props.initialInfo ? { ...props.initialInfo } : null)
 const progress = ref({ downloaded: 0, total: 0 })
 const updatePath = ref('')
 const errorMsg = ref('')
 const confirmBeforeInstall = ref(true)
 const installConfirmOpen = ref(false)
+const installAfterDownload = ref(false)
 let offProgress, offDone, offApplying, offError
 
 function pct() {
@@ -23,14 +29,21 @@ function pct() {
 }
 
 function fmtBytes(n) {
-  if (!n) return '0 B'
-  if (n < 1024) return n + ' B'
-  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'
-  return (n / 1048576).toFixed(1) + ' MB'
+  const value = Number(n) || 0
+  if (value < 1024) return `${Math.round(value)} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let scaled = value / 1024
+  let unit = 0
+  while (scaled >= 1024 && unit < units.length - 1) {
+    scaled /= 1024
+    unit++
+  }
+  return `${scaled.toFixed(scaled >= 100 ? 1 : 2)} ${units[unit]}`
 }
 
 async function check() {
   state.value = 'checking'
+  errorMsg.value = ''
   try {
     const r = await CheckUpdate()
     if (r && r.available) {
@@ -46,7 +59,8 @@ async function check() {
   }
 }
 
-async function startDownload() {
+async function startDownload(installAfter = false) {
+  installAfterDownload.value = installAfter
   state.value = 'downloading'
   progress.value = { downloaded: 0, total: info.value?.size || 0 }
   try {
@@ -58,19 +72,25 @@ async function startDownload() {
 }
 
 onMounted(() => {
-  check()
-  getSettings().then((s) => { confirmBeforeInstall.value = s?.confirmUpdate !== false }).catch(() => {})
   offProgress = onEvent('update:progress', (p) => {
     if (p && p.error) { errorMsg.value = p.error; state.value = 'error'; return }
-    progress.value = p || progress.value
+    progress.value = { ...progress.value, ...(p || {}) }
   })
   offDone = onEvent('update:done', (payload) => {
     updatePath.value = payload?.path || ''
-    progress.value = { ...progress.value, path: updatePath.value }
+    const actualSize = Number(payload?.size) || Number(progress.value.total) || Number(info.value?.size) || 0
+    progress.value = { ...progress.value, downloaded: actualSize, total: actualSize, size: actualSize }
     state.value = 'done'
+    if (installAfterDownload.value) void install()
   })
-  offApplying = onEvent('update:applying', () => { state.value = 'done' })
+  offApplying = onEvent('update:applying', () => { state.value = 'applying' })
   offError = onEvent('update:error', (e) => { errorMsg.value = e?.error || '更新失败'; state.value = 'error' })
+  getSettings().then((s) => { confirmBeforeInstall.value = s?.confirmUpdate !== false }).catch(() => {})
+  if (info.value && info.value.available !== false) {
+    state.value = 'available'
+  } else {
+    void check()
+  }
 })
 
 onBeforeUnmount(() => { offProgress && offProgress(); offDone && offDone(); offApplying && offApplying(); offError && offError() })
@@ -92,12 +112,15 @@ async function applyUpdate() {
     return
   }
   try {
+    state.value = 'applying'
     await ApplyUpdate(path)
   } catch (e) {
     errorMsg.value = String(e)
-    state.value = 'error'
+      state.value = 'error'
   }
 }
+
+function closeLater() { emit('close') }
 </script>
 
 <template>
@@ -112,7 +135,11 @@ async function applyUpdate() {
       <div v-else-if="state === 'available'" class="upd-state">
         <UiIcon name="download" :size="32" />
         <p class="upd-title">发现新版本 <b>{{ info.version }}</b></p>
-        <button class="btn primary" @click="startDownload">立即下载</button>
+        <p v-if="info.size" class="upd-meta">安装包大小：{{ fmtBytes(info.size) }}</p>
+        <div class="upd-actions">
+          <button class="btn primary" @click="startDownload(true)">下载并安装</button>
+          <button class="btn" @click="closeLater">稍后</button>
+        </div>
       </div>
 
       <!-- downloading -->
@@ -128,7 +155,15 @@ async function applyUpdate() {
       <div v-else-if="state === 'done'" class="upd-state">
         <UiIcon name="check" :size="32" />
         <p class="upd-title">下载完成</p>
-        <button class="btn primary" @click="install">安装并重启</button>
+        <p v-if="progress.size" class="upd-meta">实际文件大小：{{ fmtBytes(progress.size) }}</p>
+        <div class="upd-actions">
+          <button class="btn primary" @click="install">安装并重启</button>
+          <button class="btn" @click="closeLater">稍后</button>
+        </div>
+      </div>
+
+      <div v-else-if="state === 'applying'" class="upd-state">
+        <span class="spin"></span><span>正在安装更新，应用即将重启…</span>
       </div>
 
       <!-- error -->
@@ -159,5 +194,6 @@ async function applyUpdate() {
 .upd-err { font-size: var(--fs-aux); color: var(--color-danger); margin: 0; word-break: break-all; }
 .upd-progress { width: 100%; height: 6px; background: var(--bg-subtle); border-radius: var(--radius-full); overflow: hidden; }
 .upd-bar { height: 100%; background: var(--color-primary); border-radius: var(--radius-full); transition: width 150ms linear; }
+.upd-actions { display: flex; gap: 8px; justify-content: center; }
 .btn { min-width: 120px; }
 </style>

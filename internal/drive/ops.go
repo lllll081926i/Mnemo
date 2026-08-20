@@ -362,6 +362,37 @@ func RefreshAccount(userID, driveID string) (token *model.TokenInfo, err error) 
 	return token, err
 }
 
+// ValidateUploadItems applies an optional provider upload policy before local
+// files are placed in the asynchronous queue. Providers without a policy are
+// intentionally a no-op.
+func ValidateUploadItems(userID, driveID string, items []UploadValidationItem) (err error) {
+	if len(items) == 0 {
+		return nil
+	}
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return err
+	}
+	defer func() { err = withTokenPersist(err, c) }()
+	validator, ok := d.(UploadValidator)
+	if !ok {
+		return nil
+	}
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return errors.New("drive: 上传文件名为空")
+		}
+		if item.Size < 0 {
+			return fmt.Errorf("drive: 上传文件大小无效: %s", name)
+		}
+		if validationErr := validator.ValidateUpload(context.Background(), c, name, item.Size); validationErr != nil {
+			return validationErr
+		}
+	}
+	return nil
+}
+
 // ValidateConnection lets mounted-storage providers verify a connection
 // before the app persists it as an account.
 func ValidateConnection(provider string, conn *model.ConnConfig) error {

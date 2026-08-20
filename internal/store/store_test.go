@@ -120,6 +120,39 @@ func TestAccountSaveLoad(t *testing.T) {
 	_ = filepath.Join(dir, "unused")
 }
 
+func TestRenameMountedAccountKeepsIdentityAndCredentials(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	forcePath := true
+	acc := &model.Account{
+		UserID:  "webdav:mount-1",
+		DriveID: "webdav:mount-1",
+		Token: &model.TokenInfo{
+			TokenFrom:   model.ProviderWebdav,
+			UserName:    "旧名称",
+			AccessToken: "unused",
+			Conn: &model.ConnConfig{
+				Name: "旧名称", Endpoint: "https://dav.example.test/", Username: "alice", Password: "secret", ForcePathStyle: &forcePath,
+			},
+		},
+	}
+	if err := st.SaveAccount(acc); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.RenameMountedAccount(acc.UserID, "家庭 WebDAV")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.UserID != acc.UserID || updated.DriveID != acc.DriveID {
+		t.Fatalf("identity changed after rename: %#v", updated)
+	}
+	if updated.Token.UserName != "家庭 WebDAV" || updated.Token.Conn.Name != "家庭 WebDAV" || updated.Token.Conn.Password != "secret" {
+		t.Fatalf("rename did not preserve mounted credentials/name: %#v", updated.Token)
+	}
+}
+
 func TestListAccountsIgnoresNullEntries(t *testing.T) {
 	dir := t.TempDir()
 	st, err := Open(dir)

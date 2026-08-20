@@ -57,6 +57,7 @@ export function login(provider, config) {
 export function saveMounted(provider, conn) { return App.SaveMountedAccount(provider, conn) }
 export function validateMountedWrite(provider, conn) { return App.ValidateMountedWrite(provider, conn) }
 export function removeAccount(userId) { return App.RemoveAccount(userId) }
+export function renameMountedAccount(userId, name) { return App.RenameMountedAccount(userId, name) }
 
 export function listDir(userId, driveId, dirId) { return App.ListDir(userId, driveId, dirId) }
 export function search(userId, driveId, kw) { return App.SearchFiles(userId, driveId, kw) }
@@ -74,6 +75,7 @@ export function pinFileSnapshot(userId, driveId, file) { return App.PinFileSnaps
 export function downloadUrl(name, url, headers) { return App.DownloadURL(name, url, headers) }
 export function createShare(userId, driveId, params) { return App.CreateShare(userId, driveId, params) }
 export function uploadFiles(userId, driveId, parentId, conflictPolicy, paths) { return App.UploadFiles(userId, driveId, parentId, conflictPolicy, paths) }
+export function validateUploadFiles(userId, driveId, paths) { return App.ValidateUploadFiles(userId, driveId, paths) }
 export function saveCloudText(userId, driveId, parentId, fileName, content) { return App.SaveCloudTextFile(userId, driveId, parentId, fileName, content) }
 export function migrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move) {
   return App.MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fileIDs, move)
@@ -131,6 +133,7 @@ export function ClearCache() { return enqueueCacheRpc(() => App.ClearCache()) }
 
 // ---------- account ----------
 export function refreshAccount(userId) { return App.RefreshAccount(userId) }
+export function refreshAccountNow(userId) { return App.RefreshAccountNow(userId) }
 
 // ---------- preview / player ----------
 export function previewUrl(userId, driveId, fileId) { return App.PreviewURL(userId, driveId, fileId) }
@@ -311,16 +314,42 @@ const IMAGE_EXTS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tif', 'tiff', 'heic', 'avif',
 ])
 
-/** 文件打开方式判定：video/audio → 播放，image/text/pdf → 预览，其余 → 下载。 */
+// 这里的集合是“浏览器/WebView 已验证可处理”的白名单，而不是文件图标
+// 分类集合。服务端可能把 MKV、HEIC 等文件标成 video/image，但把它们送进
+// 预览会得到一个看似加载、实际无法播放的窗口；未列入白名单的文件统一走
+// 下载提示。GIF 保留在图片白名单中，浏览器会原生播放其动画。
+const VIDEO_PREVIEW_EXTS = new Set(['mp4', 'm4v', 'webm', 'ogv', 'm3u8', 'mpd'])
+const AUDIO_PREVIEW_EXTS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'opus', 'flac'])
+const IMAGE_PREVIEW_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'])
+const VIDEO_PREVIEW_MIMES = new Set(['video/mp4', 'video/webm', 'video/ogg'])
+const AUDIO_PREVIEW_MIMES = new Set(['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/opus', 'audio/flac'])
+const IMAGE_PREVIEW_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/webp'])
+
+function mimeOf(file) {
+  return String(file?.mime_type || file?.mimeType || '').split(';', 1)[0].trim().toLowerCase()
+}
+
+function inPreviewWhitelist(file, extSet, mimeSet, category) {
+  const ext = extOf(file?.name)
+  if (extSet.has(ext)) return true
+  const mime = mimeOf(file)
+  return !ext && (mimeSet.has(mime) || String(file?.category || '').toLowerCase() === category && mimeSet.has(mime))
+}
+
+/**
+ * 文件打开方式判定：仅白名单格式进入在线预览/播放；PDF 明确返回
+ * `pdf` 以便界面给出“暂不支持预览，需要下载”的专门提示，其余返回
+ * `download`。这也避免把浏览器不支持的容器误送到播放器后才失败。
+ */
 export function openKindOf(file) {
   if (file.isDir) return 'dir'
-  const cat = file.category || ''
+  const cat = String(file.category || '').toLowerCase()
   const ext = extOf(file.name)
-  if (cat === 'video' || VIDEO_EXTS.has(ext)) return 'video'
-  if (cat === 'audio' || AUDIO_EXTS.has(ext)) return 'audio'
-  if (cat === 'image' || IMAGE_EXTS.has(ext)) return 'image'
+  if (VIDEO_PREVIEW_EXTS.has(ext) || inPreviewWhitelist(file, VIDEO_PREVIEW_EXTS, VIDEO_PREVIEW_MIMES, 'video')) return 'video'
+  if (AUDIO_PREVIEW_EXTS.has(ext) || inPreviewWhitelist(file, AUDIO_PREVIEW_EXTS, AUDIO_PREVIEW_MIMES, 'audio')) return 'audio'
+  if (IMAGE_PREVIEW_EXTS.has(ext) || inPreviewWhitelist(file, IMAGE_PREVIEW_EXTS, IMAGE_PREVIEW_MIMES, 'image')) return 'image'
   if (cat === 'text' || PREVIEW_TEXT_EXTS.has(ext)) return 'text'
-  if (ext === 'pdf') return 'pdf'
+  if (ext === 'pdf' || mimeOf(file) === 'application/pdf') return 'pdf'
   return 'download'
 }
 

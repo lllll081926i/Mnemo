@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { listAccounts, listProviders, removeAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName } from './api'
+import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName } from './api'
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
@@ -36,7 +36,7 @@ const pageListeners = computed(() => {
   if (tab.value === 'pan') listeners.go = onPanGo
   if (tab.value === 'settings') {
     listeners.theme = applyTheme
-    listeners.update = () => { showUpdate.value = true }
+    listeners.update = () => { pendingUpdateInfo.value = null; showUpdate.value = true }
     listeners.clearCache = clearPanCache
   }
   return listeners
@@ -55,12 +55,21 @@ const current = ref(null)
 const showLogin = ref(false)
 const showQuickOpen = ref(false)
 const showUpdate = ref(false)
+const pendingUpdateInfo = ref(null)
 const infoAcc = ref(null)
+const renameAcc = ref(null)
+const renameName = ref('')
+const renameBusy = ref(false)
 const windowMaximized = ref(false)
 const curTheme = ref('system')
 const isDark = ref(false)
 applyAppearance('system') // 防启动闪白，随后以设置为准
 isDark.value = document.documentElement.classList.contains('dark')
+
+function closeUpdateModal() {
+  showUpdate.value = false
+  pendingUpdateInfo.value = null
+}
 
 function quickToggleTheme() {
   applyTheme(isDark.value ? 'light' : 'dark')
@@ -186,6 +195,32 @@ function remove(acc) {
   }, { danger: true, title: '移除账号' })
 }
 
+function openRename(acc) {
+  if (!acc || !['webdav', 's3'].includes(providerOf(acc.user_id))) return
+  renameAcc.value = acc
+  renameName.value = accountName(acc)
+}
+
+async function saveRename() {
+  const name = renameName.value.trim()
+  if (!renameAcc.value || !name) {
+    toast('请输入网盘名称', 'error')
+    return
+  }
+  renameBusy.value = true
+  try {
+    const updated = await renameMountedAccount(renameAcc.value.user_id, name)
+    accounts.value = accounts.value.map((acc) => acc.user_id === updated.user_id ? updated : acc)
+    if (current.value?.user_id === updated.user_id) current.value = updated
+    renameAcc.value = null
+    toast('网盘名称已更新', 'success')
+  } catch (e) {
+    toast(String(e), 'error')
+  } finally {
+    renameBusy.value = false
+  }
+}
+
 function toast(msg, type = '') {
   const id = Date.now() + Math.random()
   const normalizedType = ['success', 'error', 'warn', 'info'].includes(type) ? type : 'info'
@@ -258,7 +293,12 @@ onMounted(async () => {
 	// 启动后延迟检查更新（静默，仅发现有新版时弹窗）
 	if (autoUpdateEnabled) {
 	  setTimeout(() => {
-		CheckUpdate().then((r) => { if (r && r.available) showUpdate.value = true }).catch(() => {})
+		CheckUpdate().then((r) => {
+		  if (r && r.available) {
+			pendingUpdateInfo.value = r
+			showUpdate.value = true
+		  }
+		}).catch(() => {})
 	  }, 3000)
 	}
   window.addEventListener('keydown', onKey)
@@ -326,6 +366,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         @add="showLogin = true"
         @remove="remove"
         @info="infoAcc = $event"
+        @rename="openRename"
       />
       <main class="page-host">
         <transition :name="pageTrans" mode="out-in">
@@ -371,6 +412,20 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </template>
     </Modal>
 
+    <Modal v-if="renameAcc" title="重命名网盘" width="380px" @close="renameAcc = null">
+      <div class="field">
+        <label for="mounted-account-name">网盘名称</label>
+        <input id="mounted-account-name" v-model="renameName" class="input" maxlength="80" autofocus @keyup.enter="saveRename" />
+      </div>
+      <template #actions>
+        <button class="btn" type="button" :disabled="renameBusy" @click="renameAcc = null">取消</button>
+        <button class="btn primary" type="button" :disabled="renameBusy || !renameName.trim()" @click="saveRename">
+          <span v-if="renameBusy" class="spin spin-on-primary"></span>
+          {{ renameBusy ? '保存中…' : '保存' }}
+        </button>
+      </template>
+    </Modal>
+
     <transition-group name="toast-list" tag="div" class="toast-wrap" role="status" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" role="alert">
         <span class="t-icon" aria-hidden="true"><UiIcon :name="t.type === 'success' ? 'check' : (t.type === 'error' || t.type === 'warn' ? 'warning' : 'info')" :size="17" /></span>
@@ -384,6 +439,6 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
     </transition-group>
 
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
-    <UpdateModal v-if="showUpdate" @close="showUpdate = false" />
+    <UpdateModal v-if="showUpdate" :initial-info="pendingUpdateInfo" @close="closeUpdateModal" />
   </div>
 </template>

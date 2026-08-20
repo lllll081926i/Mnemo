@@ -128,7 +128,8 @@ type FolderSize struct {
 	ReachLimit  bool  `json:"reach_limit,omitempty"`
 }
 
-// Quota models a provider account capacity snapshot.
+// Quota models a provider account capacity snapshot. Type is normally
+// "account" and is "unlimited" for providers with no finite total capacity.
 type Quota struct {
 	Type    string `json:"type"`
 	Size    int64  `json:"size"`

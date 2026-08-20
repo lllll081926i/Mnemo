@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -76,10 +77,13 @@ func parseCred(refresh string) *cred {
 
 // loginResult is the outcome of ilanzouLogin.
 type loginResult struct {
-	token   string
-	uuid    string
-	userId  string
-	account string
+	token     string
+	uuid      string
+	userId    string
+	account   string
+	totalSize int64
+	usedSize  int64
+	hasQuota  bool
 }
 
 // requestOptions controls one ilanzouRequest call.
@@ -288,20 +292,16 @@ func ilanzouLogin(ctx context.Context, username, password, uuid string) (*loginR
 	if err != nil {
 		return nil, err
 	}
+	accountMap := ilanzouAccountMap(mapJSON)
 	userId, account := "", ""
-	if mm := mapVal(mapJSON, "map"); mm != nil {
+	if mm := accountMap; mm != nil {
 		userId = strOf(mm["userId"])
 		account = strOf(mm["account"])
 	}
-	if userId == "" || account == "" {
-		if dm := mapVal(mapVal(mapJSON, "data"), "map"); dm != nil {
-			userId = strOf(dm["userId"])
-			account = strOf(dm["account"])
-		}
-	}
 	userId = firstNonEmpty(userId, username)
 	account = firstNonEmpty(account, username)
-	return &loginResult{token: token, uuid: deviceUuid, userId: userId, account: account}, nil
+	totalSize, usedSize, hasQuota := ilanzouQuota(mapJSON)
+	return &loginResult{token: token, uuid: deviceUuid, userId: userId, account: account, totalSize: totalSize, usedSize: usedSize, hasQuota: hasQuota}, nil
 }
 
 // buildILanzouDownloadUrl builds the signed /unproved/file/redirect URL.
@@ -370,6 +370,87 @@ func mapVal(v any, key string) map[string]any {
 	return nil
 }
 
+func ilanzouAccountMap(payload map[string]any) map[string]any {
+	if accountMap := mapVal(payload, "map"); accountMap != nil {
+		return accountMap
+	}
+	return mapVal(mapVal(payload, "data"), "map")
+}
+
+const maxILanzouQuotaBytes int64 = 1<<63 - 1
+
+func ilanzouNonNegativeInt64(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), typed >= 0
+	case int64:
+		return typed, typed >= 0
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || typed < 0 || typed >= float64(maxILanzouQuotaBytes) || math.Trunc(typed) != typed {
+			return 0, false
+		}
+		return int64(typed), true
+	case json.Number:
+		n, err := typed.Int64()
+		return n, err == nil && n >= 0
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		return n, err == nil && n >= 0
+	default:
+		return 0, false
+	}
+}
+
+// ilanzouQuota extracts KiB-based account-map fields used by the official
+// client: base, purchased VIP, and rewarded capacity together form the total.
+func ilanzouQuota(payload map[string]any) (totalBytes, usedBytes int64, ok bool) {
+	accountMap := ilanzouAccountMap(payload)
+	if accountMap == nil {
+		return 0, 0, false
+	}
+	totalKiB := int64(0)
+	for _, key := range []string{"totalSize", "vipSize", "rewardSize"} {
+		value, exists := accountMap[key]
+		if !exists || value == nil {
+			continue
+		}
+		part, valid := ilanzouNonNegativeInt64(value)
+		if !valid || totalKiB > maxILanzouQuotaBytes-part {
+			return 0, 0, false
+		}
+		totalKiB += part
+	}
+	usedRaw, exists := accountMap["usedSize"]
+	if !exists || usedRaw == nil || totalKiB <= 0 {
+		return 0, 0, false
+	}
+	usedKiB, valid := ilanzouNonNegativeInt64(usedRaw)
+	if !valid || totalKiB > maxILanzouQuotaBytes/1024 || usedKiB > maxILanzouQuotaBytes/1024 {
+		return 0, 0, false
+	}
+	totalBytes = totalKiB * 1024
+	usedBytes = usedKiB * 1024
+	if usedBytes > totalBytes {
+		usedBytes = totalBytes
+	}
+	return totalBytes, usedBytes, true
+}
+
+func applyILanzouQuota(token *model.TokenInfo, totalSize, usedSize int64, hasQuota bool) {
+	if token == nil || !hasQuota || totalSize <= 0 {
+		return
+	}
+	if usedSize < 0 {
+		return
+	}
+	if usedSize > totalSize {
+		usedSize = totalSize
+	}
+	token.TotalSize = totalSize
+	token.UsedSize = usedSize
+	token.FreeSize = totalSize - usedSize
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {
@@ -398,13 +479,15 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	if token == nil {
 		return nil, errors.New("优享版蓝奏云未登录")
 	}
-	_, login, err := d.request(ctx, c, "/user/account/map", requestOptions{method: http.MethodGet})
+	payload, login, err := d.request(ctx, c, "/user/account/map", requestOptions{method: http.MethodGet})
 	if err != nil {
 		return nil, err
 	}
 	if login != nil {
 		applyLoginSession(token, login)
 	}
+	totalSize, usedSize, hasQuota := ilanzouQuota(payload)
+	applyILanzouQuota(token, totalSize, usedSize, hasQuota)
 	return token, nil
 }
 
@@ -426,4 +509,5 @@ func applyLoginSession(token *model.TokenInfo, login *loginResult) {
 	token.AccessToken = login.token
 	token.DeviceID = login.uuid
 	token.RefreshToken = mustJSON(cr)
+	applyILanzouQuota(token, login.totalSize, login.usedSize, login.hasQuota)
 }

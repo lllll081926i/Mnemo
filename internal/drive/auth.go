@@ -27,12 +27,19 @@ type LoginConfig struct {
 
 // LoginField is one login form input.
 type LoginField struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Type     string `json:"type"` // text | password | token | endpoint | bucket | region | code
-	Required bool   `json:"required"`
-	Hint     string `json:"hint,omitempty"`
-	Placeholder string `json:"placeholder,omitempty"`
+	Key         string        `json:"key"`
+	Label       string        `json:"label"`
+	Type        string        `json:"type"` // text | password | token | endpoint | bucket | region | code | select
+	Required    bool          `json:"required"`
+	Hint        string        `json:"hint,omitempty"`
+	Placeholder string        `json:"placeholder,omitempty"`
+	Options     []LoginOption `json:"options,omitempty"`
+}
+
+// LoginOption is one selectable value exposed by a provider login field.
+type LoginOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 // Registration holds the login fields rendered by the login panel.

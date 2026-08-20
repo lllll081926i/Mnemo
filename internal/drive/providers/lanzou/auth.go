@@ -12,16 +12,25 @@ import (
 // authLogin is the registration AuthFunc (port of legacy lanzou auth.ts):
 // it accepts a persisted Cookie directly, or username+password.
 func authLogin(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
+	tier := normalizeLanzouUploadTier(req.Config["upload_tier"])
 	cookie := strings.TrimSpace(req.Config["cookie"])
 	if cookie != "" {
-		return loginLanzouWithCookie(ctx, cookie)
+		token, err := loginLanzouWithCookie(ctx, cookie)
+		if err == nil {
+			setLanzouUploadTier(token, tier)
+		}
+		return token, err
 	}
 	account := strings.TrimSpace(req.Config["username"])
 	password := req.Config["password"]
 	if account == "" || password == "" {
 		return nil, errors.New("请输入蓝奏云 Cookie 或账号密码")
 	}
-	return loginLanzouWithAccount(ctx, account, password)
+	token, err := loginLanzouWithAccount(ctx, account, password)
+	if err == nil {
+		setLanzouUploadTier(token, tier)
+	}
+	return token, err
 }
 
 // loginLanzouWithCookie validates a Cookie and builds the session token.
@@ -59,14 +68,15 @@ func loginLanzouWithAccount(ctx context.Context, account, password string) (*mod
 // buildLanzouToken assembles the TokenInfo (annotations mirror the legacy).
 func buildLanzouToken(kind, cookie, uid, displayName, vei, account, password string) *model.TokenInfo {
 	refresh := mustJSON(cred{
-		Type:     kind,
-		Cookie:   cookie,
-		Account:  account,
-		Password: password,
-		UID:      uid,
-		VEI:      vei,
-		BaseURL:  LANZOU_DEFAULT.BaseURL,
-		ShareURL: LANZOU_DEFAULT.ShareURL,
+		Type:       kind,
+		Cookie:     cookie,
+		Account:    account,
+		Password:   password,
+		UID:        uid,
+		VEI:        vei,
+		UploadTier: lanzouDefaultUploadTier,
+		BaseURL:    LANZOU_DEFAULT.BaseURL,
+		ShareURL:   LANZOU_DEFAULT.ShareURL,
 	})
 	if displayName == "" {
 		displayName = uid
@@ -85,4 +95,16 @@ func buildLanzouToken(kind, cookie, uid, displayName, vei, account, password str
 		ProviderRootID:    "-1",
 		DeviceID:          vei,
 	}
+}
+
+func setLanzouUploadTier(token *model.TokenInfo, tier string) {
+	if token == nil {
+		return
+	}
+	cr := parseLanzouCred(token.RefreshToken)
+	if cr == nil {
+		return
+	}
+	cr.UploadTier = normalizeLanzouUploadTier(tier)
+	token.RefreshToken = mustJSON(cr)
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -336,18 +337,34 @@ func (c *client) Delete(ctx context.Context, fileIDs []string) error {
 	return c.post(ctx, "/userres/v1/file/delete_file", map[string]any{"fileIds": fileIDs}, nil)
 }
 
-// SpaceInfo returns quota.
+// SpaceInfo returns quota. The service returns byte counts as either JSON
+// numbers or strings depending on account/region, so decode both forms.
 func (c *client) SpaceInfo(ctx context.Context) (used, total int64) {
 	var resp struct {
-		Data *struct {
-			UsedSize  int64 `json:"usedSize"`
-			TotalSize int64 `json:"totalSize"`
-		} `json:"data"`
+		Data map[string]any `json:"data"`
 	}
 	if err := c.post(ctx, "/userres/v1/user/space", map[string]any{}, &resp); err == nil && resp.Data != nil {
-		return resp.Data.UsedSize, resp.Data.TotalSize
+		return num(resp.Data["usedSize"], resp.Data["used_size"]), num(resp.Data["totalSize"], resp.Data["total_size"])
 	}
 	return 0, 0
+}
+
+func applySpaceInfo(token *model.TokenInfo, used, total int64) {
+	if token == nil || total <= 0 {
+		return
+	}
+	if used < 0 {
+		used = 0
+	}
+	if used > total {
+		used = total
+	}
+	token.UsedSize = used
+	token.TotalSize = total
+	token.FreeSize = total - used
+	if token.FreeSize < 0 {
+		token.FreeSize = 0
+	}
 }
 
 // ---- driver ----
@@ -546,13 +563,7 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 		}
 	}
 	used, total := cl.SpaceInfo(ctx)
-	if used > 0 || total > 0 {
-		token.UsedSize, token.TotalSize = used, total
-		token.FreeSize = total - used
-		if token.FreeSize < 0 {
-			token.FreeSize = 0
-		}
-	}
+	applySpaceInfo(token, used, total)
 	return token, nil
 }
 
@@ -731,13 +742,7 @@ func enrichLoginToken(ctx context.Context, hc *netx.Client, sess *Session) *mode
 	tok := buildToken(sess)
 	cl := &client{http: hc, sess: sess, token: tok}
 	used, total := cl.SpaceInfo(ctx)
-	if used > 0 || total > 0 {
-		tok.UsedSize, tok.TotalSize = used, total
-		tok.FreeSize = total - used
-		if tok.FreeSize < 0 {
-			tok.FreeSize = 0
-		}
-	}
+	applySpaceInfo(tok, used, total)
 	return tok
 }
 
@@ -831,8 +836,20 @@ func num(vals ...any) int64 {
 		switch t := v.(type) {
 		case float64:
 			return int64(t)
+		case float32:
+			return int64(t)
 		case int:
 			return int64(t)
+		case int64:
+			return t
+		case json.Number:
+			if n, err := strconv.ParseInt(t.String(), 10, 64); err == nil {
+				return n
+			}
+		case string:
+			if n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64); err == nil {
+				return n
+			}
 		}
 	}
 	return 0

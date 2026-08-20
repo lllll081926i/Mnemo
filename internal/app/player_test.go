@@ -129,6 +129,24 @@ func TestSyncAccountUsageBuildsDisplayQuota(t *testing.T) {
 	}
 }
 
+func TestSyncAccountUsageMarksUnlimitedProviders(t *testing.T) {
+	for _, provider := range []string{model.ProviderYike, model.ProviderLanzou} {
+		t.Run(provider, func(t *testing.T) {
+			acc := &model.Account{
+				UserID: model.BuildUserID(provider, "account-1"),
+				Token:  &model.TokenInfo{TokenFrom: provider},
+			}
+			markQuotaRefreshSuccess(acc)
+			if acc.Usage == nil {
+				t.Fatal("syncAccountUsage() did not build unlimited quota")
+			}
+			if acc.Usage.Type != "unlimited" || acc.Usage.Status != "available" || acc.Usage.Description != "无限空间" {
+				t.Fatalf("quota = %#v, want unlimited available", acc.Usage)
+			}
+		})
+	}
+}
+
 func TestQuotaRefreshStatusDistinguishesUnsupportedAndRateLimit(t *testing.T) {
 	unsupported := &model.Account{Token: &model.TokenInfo{}}
 	markQuotaRefreshSuccess(unsupported)
@@ -172,6 +190,38 @@ func TestAccountRefreshHonorsProviderRetryAfter(t *testing.T) {
 	}
 }
 
+func TestRefreshAccountNowKeepsShortManualGap(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	a := NewApp()
+	a.store = st
+	userID := "manual-refresh-gap"
+
+	a.accountRefreshMu.Lock()
+	a.accountRefreshLast = map[string]time.Time{userID: time.Now()}
+	a.accountRefreshMu.Unlock()
+	_, _ = a.RefreshAccountNow(userID)
+	a.accountRefreshMu.Lock()
+	_, kept := a.accountRefreshLast[userID]
+	a.accountRefreshMu.Unlock()
+	if !kept {
+		t.Fatal("short manual gap should keep the cached refresh timestamp")
+	}
+
+	a.accountRefreshMu.Lock()
+	a.accountRefreshLast[userID] = time.Now().Add(-accountRefreshManualGap)
+	a.accountRefreshMu.Unlock()
+	_, _ = a.RefreshAccountNow(userID)
+	a.accountRefreshMu.Lock()
+	_, cleared := a.accountRefreshLast[userID]
+	a.accountRefreshMu.Unlock()
+	if cleared {
+		t.Fatal("manual refresh after the short gap should invalidate the success cache")
+	}
+}
+
 func TestSyncRunRegistryRejectsOverlapAndCancels(t *testing.T) {
 	a := NewApp()
 	ctx, finish, err := a.beginSyncRun(context.Background(), "sync-test", "manual")
@@ -199,6 +249,37 @@ func TestSyncRunRegistryRejectsOverlapAndCancels(t *testing.T) {
 	finish(context.Canceled)
 	if a.isSyncRunning("sync-test") || a.CancelSync("sync-test") {
 		t.Fatal("finished sync job remained active")
+	}
+}
+
+func TestCollectUploadValidationItemsIncludesNestedFiles(t *testing.T) {
+	root := t.TempDir()
+	plain := filepath.Join(root, "plain.txt")
+	nestedDir := filepath.Join(root, "nested")
+	nested := filepath.Join(nestedDir, "archive.zip")
+	if err := os.WriteFile(plain, []byte("abc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nestedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nested, []byte("12345"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := collectUploadValidationItems([]string{plain, nestedDir})
+	if err != nil {
+		t.Fatalf("collectUploadValidationItems: %v", err)
+	}
+	got := map[string]int64{}
+	for _, item := range items {
+		got[item.Name] = item.Size
+	}
+	if len(got) != 2 || got["plain.txt"] != 3 || got["archive.zip"] != 5 {
+		t.Fatalf("validation items = %#v", items)
+	}
+	if _, err := collectUploadValidationItems(nil); err == nil {
+		t.Fatal("empty upload selection should fail")
 	}
 }
 

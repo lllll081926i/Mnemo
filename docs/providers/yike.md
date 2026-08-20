@@ -78,7 +78,7 @@ createDateFolder: false
 
 ## 8. RefreshAccount（yike.go）
 
-✅ `yike.go:624-630` getuinfo 刷新。⚠️ **未获取配额**（一刻相册 API 无配额接口）。
+✅ `yike.go` 继续只刷新会话信息；容量按产品规则固定标记为“无限空间”，不额外调用百度网盘配额接口。
 
 ---
 
@@ -91,6 +91,6 @@ createDateFolder: false
 ## 差距清单
 
 1. ✅ **decryptYikeMd5 已实现**（`yike.go:676-725`）：纯 hex 直接返回，非 hex 执行 XOR+重排解密
-2. 🟡 RefreshAccount 无配额（一刻 API 限制）
+2. ✅ 容量固定展示为无限空间，不额外请求配额接口
 3. albumDirId 改为 album: 前缀方案（功能等价，实现不同）
 4. Move/Copy 不支持——与旧版设计一致，非差距

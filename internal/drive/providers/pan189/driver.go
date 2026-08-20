@@ -36,7 +36,10 @@ func init() {
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "username", Type: "text", Label: "手机号/邮箱", Required: true},
 			{Key: "password", Type: "password", Label: "密码", Required: true},
-			{Key: "cloud_type", Type: "text", Label: "云类型（personal 个人云 / family 家庭云）", Required: false, Hint: "默认个人云；家庭云需先在官方 App 创建或加入"},
+			{Key: "cloud_type", Type: "select", Label: "云空间", Required: false, Options: []drive.LoginOption{
+				{Value: CloudPersonal, Label: "个人云"},
+				{Value: CloudFamily, Label: "家庭云"},
+			}},
 			{Key: "validate_code", Type: "text", Label: "图形验证码（需要时填写）", Required: false, Hint: "登录提示需要验证码时，输入图片中的字符后重试"},
 		}},
 		Factory: func() drive.Driver { return &Driver{} },

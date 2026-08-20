@@ -282,6 +282,10 @@ export function RefreshAccount(arg1) {
   return window['go']['app']['App']['RefreshAccount'](arg1);
 }
 
+export function RefreshAccountNow(arg1) {
+  return window['go']['app']['App']['RefreshAccountNow'](arg1);
+}
+
 export function RefreshOfflineTasks(arg1, arg2) {
   return window['go']['app']['App']['RefreshOfflineTasks'](arg1, arg2);
 }
@@ -304,6 +308,10 @@ export function RenameBatch(arg1, arg2, arg3, arg4) {
 
 export function RenameFile(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RenameFile'](arg1, arg2, arg3, arg4);
+}
+
+export function RenameMountedAccount(arg1, arg2) {
+  return window['go']['app']['App']['RenameMountedAccount'](arg1, arg2);
 }
 
 export function RestoreFiles(arg1, arg2, arg3) {
@@ -392,6 +400,10 @@ export function TrashFiles(arg1, arg2, arg3) {
 
 export function UploadFiles(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['UploadFiles'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function ValidateUploadFiles(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ValidateUploadFiles'](arg1, arg2, arg3);
 }
 
 export function ValidateMountedWrite(arg1, arg2) {

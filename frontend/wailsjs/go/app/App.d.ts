@@ -146,6 +146,8 @@ export function ProviderLogin(arg1:string,arg2:Record<string, string>):Promise<m
 
 export function RefreshAccount(arg1:string):Promise<model.Account>;
 
+export function RefreshAccountNow(arg1:string):Promise<model.Account>;
+
 export function RefreshOfflineTasks(arg1:string,arg2:string):Promise<Array<model.OfflineTask>>;
 
 export function RemoveAccount(arg1:string):Promise<void>;
@@ -157,6 +159,8 @@ export function RemoveFavorite(arg1:string,arg2:string,arg3:string):Promise<void
 export function RenameBatch(arg1:string,arg2:string,arg3:Array<drive.FileRef>,arg4:Array<string>):Promise<Array<drive.RenameResult>>;
 
 export function RenameFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<drive.RenameResult>;
+
+export function RenameMountedAccount(arg1:string,arg2:string):Promise<model.Account>;
 
 export function RestoreFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
@@ -201,6 +205,8 @@ export function StartSyncScheduler():Promise<string>;
 export function TrashFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
 
 export function UploadFiles(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<Array<model.UploadingUI>>;
+
+export function ValidateUploadFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
 
 export function ValidateMountedWrite(arg1:string,arg2:model.ConnConfig):Promise<void>;
 

@@ -11,7 +11,7 @@ const props = defineProps({
   providers: { type: Array, default: () => [] },
   current: { type: Object, default: null },
 })
-const emit = defineEmits(['select', 'add', 'remove', 'info'])
+const emit = defineEmits(['select', 'add', 'remove', 'info', 'rename'])
 
 const expanded = ref(false)
 const menu = ref(null)
@@ -254,9 +254,19 @@ function onCtx(e, acc) {
   menu.value = { x: e.clientX, y: e.clientY, acc }
 }
 
+const menuItems = computed(() => {
+  const acc = menu.value?.acc
+  const mounted = acc && ['webdav', 's3'].includes(providerOf(acc.user_id))
+  const items = [{ icon: 'info', label: '账号信息', action: 'info' }]
+  if (mounted) items.push({ icon: 'pencil', label: '重命名', action: 'rename' })
+  items.push({ icon: 'trash', label: '移除账号', danger: true, action: 'remove' })
+  return items
+})
+
 function onMenu(action) {
   if (action === 'remove') emit('remove', menu.value.acc)
   else if (action === 'info') emit('info', menu.value.acc)
+  else if (action === 'rename') emit('rename', menu.value.acc)
 }
 </script>
 
@@ -307,10 +317,7 @@ function onMenu(action) {
       v-if="menu"
       :x="menu.x"
       :y="menu.y"
-      :items="[
-        { icon: 'info', label: '账号信息', action: 'info' },
-        { icon: 'trash', label: '移除账号', danger: true, action: 'remove' },
-      ]"
+      :items="menuItems"
       @close="menu = null"
       @select="onMenu"
     />

@@ -2,8 +2,10 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/vault"
@@ -188,4 +190,42 @@ func (s *Store) UpdateAccountToken(userID string, token *model.TokenInfo) error 
 		}
 	}
 	return os.ErrNotExist
+}
+
+// RenameMountedAccount updates only the display name of a WebDAV/S3 account.
+// The account and drive ids, endpoint and credentials remain unchanged, so a
+// rename never invalidates cached tasks or references held by the UI.
+func (s *Store) RenameMountedAccount(userID, name string) (*model.Account, error) {
+	userID = strings.TrimSpace(userID)
+	name = strings.TrimSpace(name)
+	if userID == "" || name == "" {
+		return nil, fmt.Errorf("mounted account name is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.readAccountsUnlocked()
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range list {
+		if account == nil || account.UserID != userID {
+			continue
+		}
+		provider := account.Provider()
+		if provider != model.ProviderWebdav && provider != model.ProviderS3 {
+			return nil, fmt.Errorf("仅支持重命名 WebDAV/S3 挂载账号")
+		}
+		if account.Token == nil || account.Token.Conn == nil {
+			return nil, fmt.Errorf("挂载账号连接配置不存在")
+		}
+		account.Token.UserName = name
+		account.Token.Name = name
+		account.Token.NickName = name
+		account.Token.Conn.Name = name
+		if err := s.writeAccountsUnlocked(list); err != nil {
+			return nil, err
+		}
+		return account, nil
+	}
+	return nil, os.ErrNotExist
 }

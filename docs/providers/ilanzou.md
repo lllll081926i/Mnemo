@@ -22,7 +22,7 @@ search, createShare, copy, recycleBin, trashView: false
 | 账密登录 | ✅ | `auth.go:10-25` → `client.go:290-340` ilanzouLogin /unproved/login → /proved/user/account/map | 无 |
 | AES-128-ECB 签名 | ✅ | `crypto.go:12-28` aesEncryptToHex + `client.go:143-155` signParams | 无 |
 | UUID 生成 | ✅ | `crypto.go:38-44` newDeviceUuid v4 + `client.go:257-281` fetchILanzouUuid 服务器 getUuid | 无 |
-| RefreshAccount | ✅ | `client.go:391-415` account/map 校验，过期自动重登 | 无（比旧版更完整） |
+| RefreshAccount | ✅ | `client.go` account/map 校验、过期自动重登并更新容量 | 无（比旧版更完整） |
 | 请求级自动重登 | ✅ | `client.go:86-130` request code -1/-2 或 token 空时重登重放 | 无 |
 | 风控限速 | ✅ | `client.go:22-38` throttle 260ms | 无 |
 | 自动重登持久化 | ✅ | `client.go` 重登成功后更新当前 `TokenInfo`，由 facade 统一落库 | 已覆盖请求级回归测试 |
@@ -68,7 +68,13 @@ search, createShare, copy, recycleBin, trashView: false
 
 ---
 
-## 6. 文件操作（ilanzou.go / filecmd.go）
+## 6. 容量
+
+✅ 登录和手动/启动刷新复用一次 `/proved/user/account/map` 请求，按 `totalSize + vipSize + rewardSize` 计算总量、按 `usedSize` 计算已用量（接口单位 KiB）。不增加独立轮询请求；优享版不使用普通蓝奏的格式或单文件大小拦截。
+
+---
+
+## 7. 文件操作（ilanzou.go / filecmd.go）
 
 | 操作 | 状态 | Go 证据 | 差距 |
 |------|:----:|---------|------|
@@ -80,13 +86,13 @@ search, createShare, copy, recycleBin, trashView: false
 
 ---
 
-## 7. 回收站 / 分享 / 搜索
+## 8. 回收站 / 分享 / 搜索
 
 ❌ 均无（设计）。ilanzou `createShare:false`。
 
 ---
 
-## 8. ProvideHashes / RapidUploadHashes
+## 9. ProvideHashes / RapidUploadHashes
 
 ✅ **已声明**。
 

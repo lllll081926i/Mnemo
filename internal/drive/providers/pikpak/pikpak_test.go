@@ -3,6 +3,7 @@ package pikpak
 import (
 	"errors"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -27,6 +28,38 @@ func TestRateLimitErrorExposesAtLeastMinimumCooldown(t *testing.T) {
 	var _ interface{ RetryAfter() time.Duration } = (*PikPakRateLimitError)(nil)
 	if got := (&PikPakRateLimitError{RetryAfterSeconds: 1}).RetryAfter(); got < time.Duration(pikpakMinRateLimitSeconds)*time.Second {
 		t.Fatalf("RetryAfter() = %v, want at least %ds", got, pikpakMinRateLimitSeconds)
+	}
+}
+
+func TestPikPakCooldownIsScopedToLoginAccount(t *testing.T) {
+	ResetPikPakLoginCooldown()
+	t.Cleanup(ResetPikPakLoginCooldown)
+	rememberPikPakLoginCooldown("first@example.com", &PikPakRateLimitError{RetryAfterSeconds: 60})
+	if err := pikpakLoginCooldownError("first@example.com"); err == nil {
+		t.Fatal("the rate-limited account should remain in cooldown")
+	}
+	if err := pikpakLoginCooldownError("second@example.com"); err != nil {
+		t.Fatalf("a different PikPak account was blocked by the first account: %v", err)
+	}
+}
+
+func TestPikPakDeviceIDIsStableAndIndependentPerAccount(t *testing.T) {
+	dir := t.TempDir()
+	oldStore := deviceStore
+	deviceStore = &storePath{dir: dir}
+	t.Cleanup(func() { deviceStore = oldStore })
+
+	first := getOrCreateDeviceID("First@example.com")
+	firstAgain := getOrCreateDeviceID("first@example.com")
+	second := getOrCreateDeviceID("second@example.com")
+	if len(first) != 32 || !isHex(first) || first != firstAgain {
+		t.Fatalf("device id is not stable per account: first=%q again=%q", first, firstAgain)
+	}
+	if first == second {
+		t.Fatalf("different accounts received the same device id: %q", first)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("device identity directory was not persisted: %v", err)
 	}
 }
 

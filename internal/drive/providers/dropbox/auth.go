@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +24,12 @@ import (
 const (
 	dbAuthorizeURL = "https://www.dropbox.com/oauth2/authorize"
 	dbTokenURL     = "https://api.dropboxapi.com/oauth2/token"
-	dbRedirectPath = "/callback"
+	// Dropbox applications require the redirect URI to exactly match the URI
+	// registered in the app console.  Keep the same fixed loopback endpoint as
+	// rclone so the built-in application credentials work without requiring the
+	// user to register a random port for every login.
+	dbDefaultRedirectURI = "http://localhost:53682/"
+	dbDefaultBindHost    = "127.0.0.1"
 
 	builtinAppKey    = "5jcck7diasz0rqy"
 	builtinAppSecret = "1n9m04y2zx7bf26"
@@ -32,14 +38,17 @@ const (
 // authPKCE performs the Dropbox OAuth2 PKCE flow.
 func authPKCE(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
 	appKey, appSecret := resolveCredentials(req.Config["app_key"], req.Config["app_secret"], req.Config["dropbox_app_key"], req.Config["dropbox_app_secret"])
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	redirect, err := resolveRedirectURI(req.Config)
 	if err != nil {
 		return nil, err
 	}
+
+	ln, err := net.Listen("tcp4", redirect.listenAddr())
+	if err != nil {
+		return nil, fmt.Errorf("dropbox: 无法监听 OAuth 回调 %s（请关闭占用该端口的程序后重试）: %w", redirect.listenAddr(), err)
+	}
 	defer ln.Close()
-	port := ln.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d%s", port, dbRedirectPath)
+	redirectURI := redirect.raw
 
 	verifier, err := pkceVerifier()
 	if err != nil {
@@ -68,7 +77,7 @@ func authPKCE(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, err
 		}
 	}
 
-	code, err := waitToken(ctx, ln, state)
+	code, err := waitToken(ctx, ln, state, redirect)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +144,55 @@ func resolveCredentials(appKey, appSecret, configuredKey, configuredSecret strin
 	return key, secret
 }
 
-func waitToken(ctx context.Context, ln net.Listener, state string) (string, error) {
+type redirectSpec struct {
+	raw  string
+	host string
+	port int
+	path string
+}
+
+func (r redirectSpec) listenAddr() string {
+	return net.JoinHostPort(dbDefaultBindHost, strconv.Itoa(r.port))
+}
+
+// resolveRedirectURI validates an optional custom loopback redirect URI.  A
+// remote host is deliberately rejected: the callback server handles OAuth
+// codes and must never be exposed beyond the local machine.
+func resolveRedirectURI(config map[string]string) (redirectSpec, error) {
+	raw := strings.TrimSpace(config["dropbox_redirect_uri"])
+	if raw == "" {
+		raw = strings.TrimSpace(config["redirect_uri"])
+	}
+	if raw == "" {
+		raw = dbDefaultRedirectURI
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return redirectSpec{}, fmt.Errorf("dropbox: redirect_uri 必须是无查询参数的本机 http 地址")
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host != "localhost" && host != "127.0.0.1" {
+		return redirectSpec{}, fmt.Errorf("dropbox: redirect_uri 只允许 localhost 或 127.0.0.1")
+	}
+	portText := u.Port()
+	if portText == "" {
+		return redirectSpec{}, fmt.Errorf("dropbox: redirect_uri 必须显式指定端口")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return redirectSpec{}, fmt.Errorf("dropbox: redirect_uri 端口无效: %q", portText)
+	}
+	path := u.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		return redirectSpec{}, fmt.Errorf("dropbox: redirect_uri 路径无效")
+	}
+	return redirectSpec{raw: raw, host: host, port: port, path: path}, nil
+}
+
+func waitToken(ctx context.Context, ln net.Listener, state string, redirect redirectSpec) (string, error) {
 	type res struct {
 		code string
 		err  error
@@ -144,7 +201,7 @@ func waitToken(ctx context.Context, ln net.Listener, state string) (string, erro
 	var sendOnce sync.Once
 	send := func(value res) { sendOnce.Do(func() { ch <- value }) }
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !validCallbackRequest(r, ln, dbRedirectPath) {
+		if !validCallbackRequest(r, ln, redirect) {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = io.WriteString(w, "forbidden callback")
 			return
@@ -153,7 +210,7 @@ func waitToken(ctx context.Context, ln net.Listener, state string) (string, erro
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		if r.URL.Path != dbRedirectPath {
+		if r.URL.EscapedPath() != redirect.path {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -238,16 +295,16 @@ func randToken(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func validCallbackRequest(r *http.Request, ln net.Listener, path string) bool {
-	if r == nil || ln == nil || r.URL == nil || r.URL.Path != path {
+func validCallbackRequest(r *http.Request, ln net.Listener, redirect redirectSpec) bool {
+	if r == nil || ln == nil || r.URL == nil || r.URL.EscapedPath() != redirect.path {
 		return false
 	}
 	addr, ok := ln.Addr().(*net.TCPAddr)
-	if !ok || addr.Port == 0 {
+	if !ok || addr.Port == 0 || addr.Port != redirect.port {
 		return false
 	}
 	host, port, err := net.SplitHostPort(r.Host)
-	if err != nil || host != "127.0.0.1" || port != fmt.Sprint(addr.Port) {
+	if err != nil || strings.ToLower(host) != redirect.host || port != strconv.Itoa(redirect.port) {
 		return false
 	}
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)

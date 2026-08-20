@@ -15,8 +15,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"mnemo-go/internal/config"
+	"mnemo-go/internal/netx"
 )
 
 const (
@@ -56,6 +58,68 @@ func currentVersion() string {
 	return "v" + config.AppVersion
 }
 
+// httpClient shares the application proxy/runtime transport with provider
+// requests. When no app proxy is configured, the default Go transport still
+// honors HTTP_PROXY/HTTPS_PROXY/NO_PROXY.
+func httpClient() *http.Client {
+	return netx.NewClient(60 * time.Second).HTTP
+}
+
+func versionParts(value string) ([]int, bool) {
+	value = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(value), "v"))
+	if value == "" {
+		return nil, false
+	}
+	value = strings.SplitN(value, "+", 2)[0]
+	value = strings.SplitN(value, "-", 2)[0]
+	fields := strings.Split(value, ".")
+	if len(fields) == 0 || len(fields) > 3 {
+		return nil, false
+	}
+	result := make([]int, len(fields))
+	for i, field := range fields {
+		if field == "" {
+			return nil, false
+		}
+		n := 0
+		for _, r := range field {
+			if r < '0' || r > '9' {
+				return nil, false
+			}
+			n = n*10 + int(r-'0')
+			if n > 1_000_000 {
+				return nil, false
+			}
+		}
+		result[i] = n
+	}
+	for len(result) < 3 {
+		result = append(result, 0)
+	}
+	return result, true
+}
+
+func isNewerVersion(candidate, current string) bool {
+	candidate = strings.TrimSpace(candidate)
+	current = strings.TrimSpace(current)
+	if strings.EqualFold(candidate, current) {
+		return false
+	}
+	c, cok := versionParts(candidate)
+	p, pok := versionParts(current)
+	if !cok || !pok {
+		// Compatibility for legacy non-semver tags; exact tags were handled
+		// above, and a different tag is conservatively considered available.
+		return true
+	}
+	for i := 0; i < 3; i++ {
+		if c[i] != p[i] {
+			return c[i] > p[i]
+		}
+	}
+	return false
+}
+
 // Check queries GitHub for the latest release and returns an Info if a newer
 // version is available. Returns nil Info (no error) when already up-to-date.
 func Check(ctx context.Context) (*Info, error) {
@@ -64,7 +128,7 @@ func Check(ctx context.Context) (*Info, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +149,7 @@ func Check(ctx context.Context) (*Info, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
 		return nil, err
 	}
-	if rel.TagName == "" || rel.TagName == currentVersion() {
+	if rel.TagName == "" || !isNewerVersion(rel.TagName, currentVersion()) {
 		return nil, nil
 	}
 	suffix := assetSuffix()
@@ -154,7 +218,7 @@ func fetchBody(ctx context.Context, rawURL string, limit int64) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +246,7 @@ func Download(ctx context.Context, url, dest string, onProgress func(Progress)) 
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return "", err
 	}

@@ -9,13 +9,17 @@ import (
 )
 
 // AppVersion is the application version. Should match wails.json and git tags.
-const AppVersion = "0.2.0"
+const AppVersion = "0.2.2"
 
 // Secrets holds OAuth application credentials, loaded from secrets.json in the
 // data dir. Keys match the legacy app.
 type Secrets struct {
 	OnedriveClientID string `json:"onedrive_client_id"`
 	DropboxAppKey    string `json:"dropbox_app_key"`
+	// DropboxRedirectURI must exactly match the URI registered in the Dropbox
+	// app console.  It is optional; the built-in rclone-compatible localhost
+	// endpoint is used when it is empty.
+	DropboxRedirectURI string `json:"dropbox_redirect_uri"`
 }
 
 // LoadSecrets reads secrets.json from dir if present.

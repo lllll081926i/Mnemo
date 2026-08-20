@@ -218,6 +218,62 @@ func TestCloudInfo(t *testing.T) {
 	}
 }
 
+func TestParsePan189Quota(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		payload   string
+		wantUsed  int64
+		wantTotal int64
+		wantOK    bool
+	}{
+		{
+			name:      "string values",
+			payload:   `{"userSizeInfo":{"usedSize":"123","cloudCapacityInfo":{"totalSize":"456"}}}`,
+			wantUsed:  123,
+			wantTotal: 456,
+			wantOK:    true,
+		},
+		{
+			name:      "numeric values and zero used",
+			payload:   `{"userSizeInfo":{"usedSize":0,"cloudCapacityInfo":{"totalSize":1024}}}`,
+			wantUsed:  0,
+			wantTotal: 1024,
+			wantOK:    true,
+		},
+		{
+			name:      "used size is clamped",
+			payload:   `{"userSizeInfo":{"usedSize":"200","cloudCapacityInfo":{"totalSize":"100"}}}`,
+			wantUsed:  100,
+			wantTotal: 100,
+			wantOK:    true,
+		},
+		{
+			name:    "invalid value",
+			payload: `{"userSizeInfo":{"usedSize":"bad","cloudCapacityInfo":{"totalSize":"100"}}}`,
+			wantOK:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			used, total, ok := parsePan189Quota([]byte(tc.payload))
+			if used != tc.wantUsed || total != tc.wantTotal || ok != tc.wantOK {
+				t.Fatalf("parsePan189Quota() = (%d, %d, %v), want (%d, %d, %v)", used, total, ok, tc.wantUsed, tc.wantTotal, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestApplyPan189QuotaKeepsPreviousSnapshotOnInvalidResponse(t *testing.T) {
+	token := &model.TokenInfo{UsedSize: 20, TotalSize: 100, FreeSize: 80}
+	applyPan189Quota(token, 0, 0, false)
+	if token.UsedSize != 20 || token.TotalSize != 100 || token.FreeSize != 80 {
+		t.Fatalf("invalid quota cleared cache: %+v", token)
+	}
+	applyPan189Quota(token, 0, 100, true)
+	if token.UsedSize != 0 || token.TotalSize != 100 || token.FreeSize != 100 {
+		t.Fatalf("zero used quota was not applied: %+v", token)
+	}
+}
+
 func sessionForTest() *Session {
 	return &Session{SessionKey: "skey", SessionSecret: "ssecret", Username: "u", Password: "p"}
 }

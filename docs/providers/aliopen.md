@@ -24,7 +24,7 @@ SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 |--------|:----:|---------|------|
 | refresh_token 粘贴 | ✅ | `authRefreshToken` | 无 |
 | client_id/client_secret | ✅ | `LoginConfig`，client_id 可选走 AList 公共换票 | 无 |
-| token 刷新 | ✅ | `client.refresh`/`refreshToken` | 已覆盖旋转 refresh_token、429 退避、401/业务码自动刷新并重试一次 |
+| token 刷新 | ✅ | `client.refresh`/`refreshToken` | 同步解析 `user_id`、`user_name`、`nick_name`、头像和默认盘 ID；已覆盖旋转 refresh_token、429 退避、401/业务码自动刷新并重试一次 |
 | ensureDrive | ✅ | `ensureDrive`/`getDriveInfo` | 无 |
 | **限速/重试** | ✅ | `aliOpenRateLimiter` + `apiPostWithRetry` | concurrency:2、最小间隔 220ms、429 退避、401/AccessTokenInvalid 重试一次 |
 
@@ -123,7 +123,7 @@ SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 
 ## 11. RefreshAccount（aliopen.go）
 
-✅ `aliopen.go:817-834` refresh + GetSpaceInfo。对齐。
+✅ 刷新后保留账号资料，账号稳定 ID 使用 `user_id`，界面名称优先昵称；`GetSpaceInfo` 兼容数值和字符串容量字段并回填已用、总量、剩余。容量接口失败时保留上次成功值。
 
 ---
 

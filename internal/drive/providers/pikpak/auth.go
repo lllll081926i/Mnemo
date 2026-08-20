@@ -62,18 +62,19 @@ var apiCaptchaCache = struct {
 	items map[string]apiCaptchaCacheEntry
 }{items: make(map[string]apiCaptchaCacheEntry)}
 
-// Login requests share one provider/IP risk budget. Once PikPak reports a
-// frequency or access-prohibited block, pause all login attempts briefly,
-// including attempts for a different account.
+// PikPak risk cooldowns are scoped to the normalized login identifier.  A
+// blocked PikPak account must not disable another PikPak account, and this
+// provider-local state must never gate logins for other providers.
 var pikpakLoginCooldown struct {
 	sync.Mutex
-	until time.Time
+	until map[string]time.Time
 }
 
-func pikpakLoginCooldownError() error {
+func pikpakLoginCooldownError(username string) error {
+	key := idKey(username)
 	pikpakLoginCooldown.Lock()
 	defer pikpakLoginCooldown.Unlock()
-	remaining := time.Until(pikpakLoginCooldown.until)
+	remaining := time.Until(pikpakLoginCooldown.until[key])
 	if remaining <= 0 {
 		return nil
 	}
@@ -87,7 +88,7 @@ func pikpakLoginCooldownError() error {
 	return &PikPakRateLimitError{RetryAfterSeconds: seconds}
 }
 
-func rememberPikPakLoginCooldown(err error) {
+func rememberPikPakLoginCooldown(username string, err error) {
 	var rate *PikPakRateLimitError
 	seconds := 0
 	if errors.As(err, &rate) {
@@ -106,8 +107,12 @@ func rememberPikPakLoginCooldown(err error) {
 	}
 	pikpakLoginCooldown.Lock()
 	until := time.Now().Add(time.Duration(seconds) * time.Second)
-	if until.After(pikpakLoginCooldown.until) {
-		pikpakLoginCooldown.until = until
+	if pikpakLoginCooldown.until == nil {
+		pikpakLoginCooldown.until = make(map[string]time.Time)
+	}
+	key := idKey(username)
+	if until.After(pikpakLoginCooldown.until[key]) {
+		pikpakLoginCooldown.until[key] = until
 	}
 	pikpakLoginCooldown.Unlock()
 }
@@ -117,7 +122,7 @@ func rememberPikPakLoginCooldown(err error) {
 // supplied cooldown instead of bypassing it.
 func ResetPikPakLoginCooldown() {
 	pikpakLoginCooldown.Lock()
-	pikpakLoginCooldown.until = time.Time{}
+	pikpakLoginCooldown.until = nil
 	pikpakLoginCooldown.Unlock()
 }
 
@@ -458,7 +463,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		logging.Warn("PikPak sign-in rejected", "reason", "missing credentials")
 		return nil, errors.New("pikpak: 请输入账号和密码")
 	}
-	if err := pikpakLoginCooldownError(); err != nil {
+	if err := pikpakLoginCooldownError(username); err != nil {
 		logging.Warn("PikPak sign-in blocked by cooldown")
 		return nil, err
 	}
@@ -473,7 +478,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// turns a transport/rate-limit failure into a misleading login error.
 		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", callbackURI)
 		if err != nil {
-			rememberPikPakLoginCooldown(err)
+			rememberPikPakLoginCooldown(username, err)
 			logging.Warn("PikPak captcha initialization failed", "error", err)
 			return nil, err
 		}
@@ -500,7 +505,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)
 	if err != nil {
-		rememberPikPakLoginCooldown(err)
+		rememberPikPakLoginCooldown(username, err)
 		logging.Warn("PikPak sign-in request failed", "error", err)
 		if captchaVerified {
 			return nil, err
@@ -517,7 +522,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		// new challenge yet.
 		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken, callbackURI)
 		if retryErr != nil {
-			rememberPikPakLoginCooldown(retryErr)
+			rememberPikPakLoginCooldown(username, retryErr)
 			logging.Warn("PikPak captcha retry initialization failed", "error", retryErr)
 			return nil, retryErr
 		}
@@ -529,7 +534,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 		auth, err = signIn(ctx, hc, deviceID, username, password, captchaToken)
 	}
 	if err != nil {
-		rememberPikPakLoginCooldown(err)
+		rememberPikPakLoginCooldown(username, err)
 		logging.Warn("PikPak sign-in retry failed", "error", err)
 		return nil, err
 	}

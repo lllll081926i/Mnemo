@@ -13,13 +13,13 @@
 | 1 | pikpak | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 登录可能触发服务端风控；必须遵守冷却 |
 | 2 | aliopen（阿里云盘） | refresh_token | ✅ 已注册 | mock/e2e | 包内覆盖仍不足 |
 | 3 | pan123（123 云盘） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 真实服务未在本轮验证 |
-| 4 | pan189（天翼云盘） | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 部分回收站能力不完整 |
-| 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | ✅ 已注册 | mock/e2e | 容量接口未接入；包内覆盖不足 |
-| 6 | lanzou（蓝奏云） | Cookie / 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 服务端能力有限，无通用配额 |
-| 7 | ilanzou（优享版蓝奏云） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 无通用配额 |
+| 4 | pan189（天翼云盘） | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 个人云可读取容量；家庭云容量与个人云独立，当前不猜测展示 |
+| 5 | pan139（139 云盘） | 手机号/邮箱 + 密码 / Authorization | ✅ 已注册 | 包内配额单测 + mock/e2e | 仅个人云：单次 `getDiskInfo` 容量读取；家庭云需独立协议，当前不暴露 |
+| 6 | lanzou（蓝奏云） | Cookie / 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 无限空间；按 V0–V3 前后端拦截单文件大小和后缀 |
+| 7 | ilanzou（优享版蓝奏云） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 从 account/map 读取基础、会员、奖励及已用容量 |
 | 8 | onedrive | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
 | 9 | dropbox | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
-| 10 | yike（一刻相册） | BDUSS / Cookie | ✅ 已注册 | mock/e2e | 不提供可靠配额，不参与跨盘秒传目标 |
+| 10 | yike（一刻相册） | BDUSS / Cookie | ✅ 已注册 | mock/e2e | 按无限空间展示，不参与跨盘秒传目标 |
 | 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e | 包内覆盖仍不足 |
 | 12 | webdav | URL + 账密 / Bearer Token | ✅ 已注册 | 本地 HTTP e2e（Basic、Digest、动态下载鉴权） | 支持自动 Basic/Digest 协商和显式 Bearer；客户端证书、NTLM 等不支持；配额取决于 RFC 4331 支持 |
 | 13 | s3 | endpoint + AK/SK | ✅ 已注册 | mock/e2e | 无通用总容量接口；连接校验不证明写权限 |
@@ -37,13 +37,13 @@
 | pikpak | ✅ | ➖ | refresh_token | ➖ | ✅ | ✅ | ✅ | ✅ |
 | aliopen | ➖ | ➖ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
 | pan123 | ✅ | ➖ | refresh_token | ➖ | ➖ | ✅(401重登) | ✅ | ✅ |
-| pan189 | ✅ | ➖ | session | ➖ | ✅ | ✅ | ✅ | ✅ |
-| pan139 | ✅ | ➖ | Authorization | ➖ | ➖ | ✅ | ✅ | ➖ |
-| lanzou | ✅ | ➖ | ✅ | ➖ | ➖ | ✅(内联) | ✅ | ➖ |
-| ilanzou | ✅ | ➖ | session | ➖ | ➖ | ✅(内联) | ✅ | ➖ |
+| pan189 | ✅ | ➖ | session | ➖ | ✅ | ✅ | ✅ | ✅（个人云；家庭云未知） |
+| pan139 | ✅ | ➖ | Authorization | ➖ | ➖ | ✅ | ✅ | ✅（个人云） |
+| lanzou | ✅ | ➖ | ✅ | ➖ | ➖ | ✅(内联) | ✅ | 无限空间 |
+| ilanzou | ✅ | ➖ | session | ➖ | ➖ | ✅(内联) | ✅ | ✅ |
 | onedrive | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
 | dropbox | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
-| yike | ➖ | ➖ | BDUSS | ➖ | ➖ | ➖ | ✅(无配额) | ❌ |
+| yike | ➖ | ➖ | BDUSS | ➖ | ➖ | ➖ | ✅ | 无限空间 |
 | guangya | ➖ | ➖ | refresh_token | ✅ | ➖ | ✅ | ✅ | ✅ |
 | webdav | ➖ | ➖ | 账密 | ➖ | ➖ | ➖ | ✅(可选配额) | ✅(RFC 4331) |
 | s3 | ➖ | ➖ | AK/SK | ➖ | ➖ | ➖ | ➖ | ➖ |
@@ -101,7 +101,7 @@
 | pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ✅(1/2 映射) | ✅ | queue |
 | pan189 | ✅ | ✅(10/20MB) | ➖ | ✅ | ✅(MD5) | ➖ | ✅ | queue |
 | pan139 | ✅ | ✅(100/200MB预签名) | ➖ | ✅ | ✅(SHA-256) | ⚠️(服务端auto_rename) | ✅ | queue |
-| lanzou | ✅ | ➖ | ✅(≤200MB) | ➖ | ➖ | ➖ | ➖ | queue |
+| lanzou | ✅ | ➖ | ✅（V0–V3：100/200/300/550MiB；固定后缀白名单） | ➖ | ➖ | ➖ | ➖ | queue |
 | ilanzou | ✅ | ✅(8MB) | ✅(≤8MB) | ➖ | ✅(MD5) | ➖ | ✅ | queue |
 | onedrive | ✅ | ✅(10MB session) | ✅(≤4MB) | ✅ | ➖ | ❌(固定rename) | ✅ | queue |
 | dropbox | ✅ | ✅(8MB session) | ✅(≤150MB) | ➖ | ➖ | ❌(固定add) | ✅ | queue |

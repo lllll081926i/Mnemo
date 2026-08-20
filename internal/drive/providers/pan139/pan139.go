@@ -425,6 +425,16 @@ func (d *Driver) personalPost(ctx context.Context, c drive.Context, pathname str
 	if err != nil {
 		return nil, err
 	}
+	return d.personalPostWithCred(ctx, hc, cr, pathname, data)
+}
+
+// personalPostWithCred reuses an already refreshed personal-cloud session.
+// Account refresh needs this to avoid renewing the same token twice before a
+// single low-frequency quota request.
+func (d *Driver) personalPostWithCred(ctx context.Context, hc *netx.Client, cr *cred, pathname string, data any) (json.RawMessage, error) {
+	if hc == nil || cr == nil {
+		return nil, errors.New("pan139: 会话不存在")
+	}
 	bodyStr, _ := json.Marshal(data)
 	randStr := randomHex(8)
 	ts := formatTs()
@@ -540,6 +550,72 @@ func (n *pan139FlexInt64) UnmarshalJSON(data []byte) error {
 	}
 	*n = pan139FlexInt64(parsed)
 	return nil
+}
+
+// parsePan139Quota accepts the field spellings used by the personal-cloud
+// getDiskInfo response. The endpoint has returned both JSON numbers and
+// strings across service revisions.
+func parsePan139Quota(raw json.RawMessage) (used, total int64, ok bool) {
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return 0, 0, false
+	}
+	if nested, exists := values["data"]; exists {
+		var nestedValues map[string]json.RawMessage
+		if json.Unmarshal(nested, &nestedValues) == nil {
+			values = nestedValues
+		}
+	}
+	used, hasUsed := pan139QuotaInt64(values, "usedSize", "used", "useSize", "used_size")
+	total, hasTotal := pan139QuotaInt64(values, "totalSize", "total", "diskSize", "total_size")
+	if !hasTotal || total <= 0 {
+		return 0, 0, false
+	}
+	if !hasUsed {
+		if free, hasFree := pan139QuotaInt64(values, "freeSize", "free", "availableSize", "available"); hasFree {
+			used = total - free
+			hasUsed = true
+		}
+	}
+	if !hasUsed {
+		return 0, 0, false
+	}
+	if used < 0 {
+		used = 0
+	}
+	if used > total {
+		used = total
+	}
+	return used, total, true
+}
+
+func pan139QuotaInt64(values map[string]json.RawMessage, keys ...string) (int64, bool) {
+	for _, key := range keys {
+		raw, exists := values[key]
+		if !exists || string(raw) == "null" {
+			continue
+		}
+		var value pan139FlexInt64
+		if err := json.Unmarshal(raw, &value); err == nil {
+			return int64(value), true
+		}
+	}
+	return 0, false
+}
+
+func applyPan139Quota(token *model.TokenInfo, used, total int64) {
+	if token == nil || total <= 0 {
+		return
+	}
+	if used < 0 {
+		used = 0
+	}
+	if used > total {
+		used = total
+	}
+	token.UsedSize = used
+	token.TotalSize = total
+	token.FreeSize = total - used
 }
 
 type pan139CreateData struct {
@@ -1326,12 +1402,23 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 		return nil, errors.New("139 云盘未登录")
 	}
 	hc := netx.NewClient(60 * time.Second)
-	// The migrated personal-cloud API has no verified quota endpoint. Keep
-	// RefreshAccount focused on renewing authorization and the resolved host;
-	// do not call the removed legacy /file/getDiskInfo endpoint or silently
-	// report stale quota values as fresh data.
-	if _, err := loadCred(hc, token); err != nil {
+	cr, err := loadCred(hc, token)
+	if err != nil {
 		return nil, err
+	}
+	// getDiskInfo is a single signed account request. A quota failure must not
+	// turn a still-valid 139 session into a login failure or erase its last
+	// successful capacity snapshot.
+	raw, err := d.personalPostWithCred(ctx, hc, cr, "/file/getDiskInfo", map[string]any{
+		"commonAccountInfo": map[string]any{
+			"account":     cr.account,
+			"accountType": 1,
+		},
+	})
+	if err == nil {
+		if used, total, ok := parsePan139Quota(raw); ok {
+			applyPan139Quota(token, used, total)
+		}
 	}
 	return token, nil
 }

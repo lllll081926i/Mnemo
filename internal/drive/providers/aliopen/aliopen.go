@@ -144,9 +144,141 @@ type Session struct {
 	DriveID         string `json:"drive_id"`
 	ResourceDriveID string `json:"resource_drive_id"`
 	BackupDriveID   string `json:"backup_drive_id"`
+	UserID          string `json:"user_id,omitempty"`
+	UserName        string `json:"user_name,omitempty"`
+	NickName        string `json:"nick_name,omitempty"`
+	Avatar          string `json:"avatar,omitempty"`
 	ClientID        string `json:"client_id,omitempty"`
 	ClientSecret    string `json:"client_secret,omitempty"`
 	OAuthTokenURL   string `json:"oauth_token_url,omitempty"`
+}
+
+// aliOpenFlexString accepts identifiers returned by the Open API as either
+// JSON strings or JSON numbers. Default drive IDs are numeric for some apps.
+type aliOpenFlexString string
+
+func (s *aliOpenFlexString) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*s = ""
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err == nil {
+		*s = aliOpenFlexString(value)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+	*s = aliOpenFlexString(number.String())
+	return nil
+}
+
+func (s aliOpenFlexString) String() string { return string(s) }
+
+type aliOpenTokenResponse struct {
+	AccessToken     string            `json:"access_token"`
+	RefreshToken    string            `json:"refresh_token"`
+	UserID          string            `json:"user_id"`
+	UserName        string            `json:"user_name"`
+	NickName        string            `json:"nick_name"`
+	Avatar          string            `json:"avatar"`
+	DefaultDriveID  aliOpenFlexString `json:"default_drive_id"`
+	ResourceDriveID aliOpenFlexString `json:"resource_drive_id"`
+	BackupDriveID   aliOpenFlexString `json:"backup_drive_id"`
+}
+
+func (s *Session) applyTokenProfile(res aliOpenTokenResponse) {
+	if s == nil {
+		return
+	}
+	if value := strings.TrimSpace(res.UserID); value != "" {
+		s.UserID = value
+	}
+	if value := strings.TrimSpace(res.UserName); value != "" {
+		s.UserName = value
+	}
+	if value := strings.TrimSpace(res.NickName); value != "" {
+		s.NickName = value
+	}
+	if value := strings.TrimSpace(res.Avatar); value != "" {
+		s.Avatar = value
+	}
+	// Keep an already resolved drive route stable. A fresh session receives its
+	// default drive directly from the token response and avoids an extra call.
+	if s.DriveID == "" {
+		s.DriveID = strings.TrimSpace(res.DefaultDriveID.String())
+	}
+	if s.ResourceDriveID == "" {
+		s.ResourceDriveID = strings.TrimSpace(res.ResourceDriveID.String())
+	}
+	if s.BackupDriveID == "" {
+		s.BackupDriveID = strings.TrimSpace(res.BackupDriveID.String())
+	}
+}
+
+func (s *Session) accountID() string {
+	if s == nil {
+		return ""
+	}
+	for _, value := range []string{s.UserID, s.DriveID} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *Session) displayName() string {
+	if s == nil {
+		return ""
+	}
+	for _, value := range []string{s.NickName, s.UserName, s.UserID, s.DriveID} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func applyAliOpenProfile(token *model.TokenInfo, sess *Session) {
+	if token == nil || sess == nil {
+		return
+	}
+	if value := strings.TrimSpace(sess.UserName); value != "" {
+		token.UserName = value
+	}
+	if value := strings.TrimSpace(sess.NickName); value != "" {
+		token.NickName = value
+	}
+	if value := strings.TrimSpace(sess.Avatar); value != "" {
+		token.Avatar = value
+	}
+	if value := sess.displayName(); value != "" {
+		token.Name = value
+		if token.UserName == "" {
+			token.UserName = value
+		}
+		if token.NickName == "" {
+			token.NickName = value
+		}
+	}
+}
+
+func applyAliOpenQuota(token *model.TokenInfo, used, total int64) {
+	if token == nil || total <= 0 {
+		return
+	}
+	if used < 0 {
+		used = 0
+	}
+	if used > total {
+		used = total
+	}
+	token.UsedSize = used
+	token.TotalSize = total
+	token.FreeSize = total - used
 }
 
 // Scope is the drive scope: backup or resource (shares).
@@ -351,10 +483,7 @@ func (c *client) refreshToken(ctx context.Context) error {
 	if resp.StatusCode >= 400 {
 		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
 	}
-	var res struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-	}
+	var res aliOpenTokenResponse
 	if err := json.Unmarshal(data, &res); err != nil {
 		return fmt.Errorf("aliopen: refresh response: %w", err)
 	}
@@ -365,33 +494,34 @@ func (c *client) refreshToken(ctx context.Context) error {
 	if res.RefreshToken != "" {
 		c.session.RefreshToken = res.RefreshToken
 	}
+	c.session.applyTokenProfile(res)
 	c.persistSession()
 	return nil
 }
 
 func (c *client) ensureDrive(ctx context.Context) error {
 	type driveInfo struct {
-		DefaultDriveID  string `json:"default_drive_id"`
-		ResourceDriveID string `json:"resource_drive_id"`
-		BackupDriveID   string `json:"backup_drive_id"`
+		DefaultDriveID  aliOpenFlexString `json:"default_drive_id"`
+		ResourceDriveID aliOpenFlexString `json:"resource_drive_id"`
+		BackupDriveID   aliOpenFlexString `json:"backup_drive_id"`
 	}
 	var info driveInfo
 	if err := c.apiPost(ctx, "/adrive/v1.0/user/getDriveInfo", map[string]any{}, &info); err != nil {
 		return err
 	}
-	driveID := strings.TrimSpace(info.DefaultDriveID)
+	driveID := strings.TrimSpace(info.DefaultDriveID.String())
 	if driveID == "" {
-		driveID = strings.TrimSpace(info.ResourceDriveID)
+		driveID = strings.TrimSpace(info.ResourceDriveID.String())
 	}
 	if driveID == "" {
-		driveID = strings.TrimSpace(info.BackupDriveID)
+		driveID = strings.TrimSpace(info.BackupDriveID.String())
 	}
 	if driveID == "" {
 		return errors.New("aliopen: 获取 drive_id 失败")
 	}
 	c.session.DriveID = driveID
-	c.session.ResourceDriveID = strings.TrimSpace(info.ResourceDriveID)
-	c.session.BackupDriveID = strings.TrimSpace(info.BackupDriveID)
+	c.session.ResourceDriveID = strings.TrimSpace(info.ResourceDriveID.String())
+	c.session.BackupDriveID = strings.TrimSpace(info.BackupDriveID.String())
 	c.persistSession()
 	return nil
 }
@@ -1073,18 +1203,50 @@ func (c *client) ResolveHash(ctx context.Context, scope Scope, fileID string) st
 
 // GetSpaceInfo returns quota.
 func (c *client) GetSpaceInfo(ctx context.Context) (used, total int64) {
-	var resp struct {
-		PersonalSpaceInfo struct {
-			UsedSize  string `json:"used_size"`
-			TotalSize string `json:"total_size"`
-		} `json:"personal_space_info"`
-	}
-	if err := c.apiPost(ctx, "/adrive/v1.0/user/getSpaceInfo", map[string]any{}, &resp); err != nil {
+	var raw json.RawMessage
+	if err := c.apiPost(ctx, "/adrive/v1.0/user/getSpaceInfo", map[string]any{}, &raw); err != nil {
 		return 0, 0
 	}
-	fmt.Sscanf(resp.PersonalSpaceInfo.UsedSize, "%d", &used)
-	fmt.Sscanf(resp.PersonalSpaceInfo.TotalSize, "%d", &total)
-	return
+	return parseAliOpenSpaceInfo(raw)
+}
+
+func parseAliOpenSpaceInfo(raw json.RawMessage) (used, total int64) {
+	var response struct {
+		PersonalSpaceInfo map[string]json.RawMessage `json:"personal_space_info"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return 0, 0
+	}
+	used, usedOK := aliOpenInt64(response.PersonalSpaceInfo, "used_size", "usedSize", "used")
+	total, totalOK := aliOpenInt64(response.PersonalSpaceInfo, "total_size", "totalSize", "total")
+	if !usedOK || !totalOK || total <= 0 {
+		return 0, 0
+	}
+	if used < 0 {
+		used = 0
+	}
+	if used > total {
+		used = total
+	}
+	return used, total
+}
+
+func aliOpenInt64(values map[string]json.RawMessage, keys ...string) (int64, bool) {
+	for _, key := range keys {
+		raw, ok := values[key]
+		if !ok || string(raw) == "null" {
+			continue
+		}
+		var value aliOpenFlexString
+		if err := json.Unmarshal(raw, &value); err != nil {
+			continue
+		}
+		parsed, err := strconv.ParseInt(strings.TrimSpace(value.String()), 10, 64)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return 0, false
 }
 
 // mapFile converts an API file to the unified model.
@@ -1872,9 +2034,9 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	token.RefreshToken = mustJSON(sess)
 	token.OpenAPIAccessToken = sess.AccessToken
 	token.OpenAPIRefreshToken = sess.RefreshToken
+	applyAliOpenProfile(token, sess)
 	used, total := cl.GetSpaceInfo(ctx)
-	token.UsedSize = used
-	token.TotalSize = total
+	applyAliOpenQuota(token, used, total)
 	return token, nil
 }
 
@@ -1942,11 +2104,14 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 	if err := cl.refresh(ctx, ""); err != nil {
 		return nil, err
 	}
-	uid := strings.TrimSpace(sess.DriveID)
+	uid := sess.accountID()
 	if uid == "" {
-		return nil, errors.New("aliopen: 登录成功但未返回 drive_id")
+		return nil, errors.New("aliopen: 登录成功但未返回账号标识")
 	}
-	name := uid
+	name := sess.displayName()
+	if name == "" {
+		name = uid
+	}
 	used, total := cl.GetSpaceInfo(ctx)
 
 	tok := &model.TokenInfo{
@@ -1957,18 +2122,28 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 		OpenAPIRefreshToken: sess.RefreshToken,
 		TokenType:           "Bearer",
 		UserID:              model.BuildUserID(providerID, uid),
-		UserName:            name,
-		NickName:            name,
+		UserName:            firstAliOpenProfileValue(sess.UserName, sess.NickName, name),
+		NickName:            firstAliOpenProfileValue(sess.NickName, sess.UserName, name),
 		Name:                name,
 		DefaultDriveID:      model.BuildDriveID(providerID, uid),
 		ProviderAccountID:   uid,
 		ProviderRootID:      "root",
-		UsedSize:            used,
-		TotalSize:           total,
-		FreeSize:            total - used,
 		DeviceID:            "mnemo",
 	}
+	if sess.Avatar != "" {
+		tok.Avatar = sess.Avatar
+	}
+	applyAliOpenQuota(tok, used, total)
 	return tok, nil
+}
+
+func firstAliOpenProfileValue(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func min(a, b int) int {

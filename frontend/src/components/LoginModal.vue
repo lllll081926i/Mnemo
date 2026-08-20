@@ -9,7 +9,12 @@ const props = defineProps({ providers: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'toast'])
 
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
-const form = ref({})
+function defaultLoginForm(id) {
+  if (id === 'lanzou') return { upload_tier: 'v0' }
+  if (id === 'pan189') return { cloud_type: 'personal' }
+  return {}
+}
+const form = ref(defaultLoginForm(providerId.value))
 const initialMountedName = providerId.value === 'webdav' ? 'WebDAV' : (providerId.value === 's3' ? 'S3' : '')
 const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false, allowPrivateNetwork: false })
 const webdavPreset = ref('custom')
@@ -168,9 +173,9 @@ function closePikPakCaptchaSession() {
 }
 
 watch(providerId, (v, previous) => {
-	info('login', 'login provider selected', { provider: v, previous_provider: previous || '' })
+  info('login', 'login provider selected', { provider: v, previous_provider: previous || '' })
   localStorage.setItem('login_provider', v)
-  form.value = {}
+  form.value = defaultLoginForm(v)
 	passwordVisibility.value = {}
   webdavPreset.value = 'custom'
   mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false, allowPrivateNetwork: false }
@@ -354,8 +359,9 @@ function validate() {
     if (isFieldRequired(f) && !value(f.key)) return `请填写${f.label}`
   }
   // 全可选字段的 provider 至少填一项
-  const allOpt = visibleFields.value.length > 0 && visibleFields.value.every((f) => !f.required)
-  if (allOpt && !visibleFields.value.some((f) => value(f.key))) return '至少填写一个字段'
+  const inputFields = visibleFields.value.filter((f) => f.type !== 'select')
+  const allOpt = inputFields.length > 0 && inputFields.every((f) => !f.required)
+  if (allOpt && !inputFields.some((f) => value(f.key))) return '至少填写一个字段'
   return ''
 }
 
@@ -525,6 +531,7 @@ async function submit() {
                     <div v-for="f in visibleFields" :key="f.key" class="field login-field">
                       <label>{{ f.label }}<span v-if="isFieldRequired(f)" class="req">*</span></label>
                       <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
+                      <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
                       <div v-else-if="f.type === 'password'" class="password-input-wrap"><input class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="16" /></button></div>
                       <input v-else class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
                       <div v-if="providerId === 'pan189' && f.key === 'validate_code' && pan189Captcha" class="captcha-image-row">

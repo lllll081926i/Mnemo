@@ -132,6 +132,21 @@ type ShareImportDriver interface {
 // UploadHandler carries a concrete file upload job into the provider.
 type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
 
+// UploadValidationItem is the local metadata a provider needs to validate an
+// upload before it enters the asynchronous queue.
+type UploadValidationItem struct {
+	Name string
+	Size int64
+}
+
+// UploadValidator is an optional provider hook for account-specific upload
+// policies such as an allowed extension set or a single-file size limit.
+// Providers must repeat the same check in UploadOneFile so non-UI entry points
+// cannot bypass it.
+type UploadValidator interface {
+	ValidateUpload(ctx context.Context, c Context, name string, size int64) error
+}
+
 // StreamUploader is an optional capability interface that providers implement
 // to accept an upload directly from an io.Reader, avoiding a local temp-file
 // spool. When the target provider does not implement StreamUploader, the

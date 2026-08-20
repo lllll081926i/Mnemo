@@ -76,7 +76,7 @@ SetHashes(["md5"], nil)
 
 ## 8. RefreshAccount（guangya.go）
 
-✅ 登录完成后和 `RefreshAccount` 均调用 SpaceInfo `/userres/v1/user/space` 获取 usedSize/totalSize；业务请求收到 401/403 时会先刷新会话再重试。
+✅ 登录和手动容量刷新调用 `/userres/v1/user/space`；兼容数字和字符串字节数。业务请求收到 401/403 时仍会刷新会话再重试。
 
 ---
 
@@ -88,4 +88,4 @@ SetHashes(["md5"], nil)
 
 ## 差距清单
 
-无明显差距。guangya 是最忠实的移植之一，登录（短信 captcha、refresh_token、请求级续期）和上传（OSS S3 multipart + 秒传 + directPut 回退 + waitUploadTask 轮询）均与旧版关键链路对齐。
+无明显差距。登录、容量、请求级续期和上传链路均已接入。

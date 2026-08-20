@@ -349,8 +349,8 @@ func pickMatch(text, pattern string) string {
 func login189(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
 	username := strings.TrimSpace(req.Config["username"])
 	password := req.Config["password"]
-	cloudType := req.Config["cloud_type"]
-	if cloudType == "" {
+	cloudType := strings.ToLower(strings.TrimSpace(req.Config["cloud_type"]))
+	if cloudType != CloudFamily {
 		cloudType = CloudPersonal
 	}
 	validateCode := req.Config["validate_code"]

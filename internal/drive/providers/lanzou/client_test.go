@@ -404,6 +404,61 @@ func TestLanzouMoveRejectsCachedFolder(t *testing.T) {
 	}
 }
 
+func TestLanzouUploadPolicyUsesMembershipTierAndExtensionList(t *testing.T) {
+	driver := &Driver{}
+	contextForTier := func(tier string) drive.Context {
+		return drive.Context{Token: &model.TokenInfo{RefreshToken: mustJSON(cred{UploadTier: tier})}}
+	}
+	for _, tc := range []struct {
+		tier  string
+		limit int64
+	}{
+		{tier: "v0", limit: 100 * lanzouMiB},
+		{tier: "V1", limit: 200 * lanzouMiB},
+		{tier: "v2", limit: 300 * lanzouMiB},
+		{tier: "v3", limit: 550 * lanzouMiB},
+	} {
+		t.Run(tc.tier, func(t *testing.T) {
+			ctx := contextForTier(tc.tier)
+			if err := driver.ValidateUpload(context.Background(), ctx, "archive.RAR", tc.limit); err != nil {
+				t.Fatalf("file at tier limit rejected: %v", err)
+			}
+			if err := driver.ValidateUpload(context.Background(), ctx, "archive.rar", tc.limit+1); err == nil || !strings.Contains(err.Error(), "单文件最大") {
+				t.Fatalf("file above tier limit error = %v", err)
+			}
+		})
+	}
+
+	defaultCtx := drive.Context{Token: &model.TokenInfo{RefreshToken: `{}`}}
+	if err := driver.ValidateUpload(context.Background(), defaultCtx, "manual.pdf", 100*lanzouMiB); err != nil {
+		t.Fatalf("legacy credential should default to V0: %v", err)
+	}
+	for _, name := range []string{"archive.rplib", "photo.WEBP", "video.mkv", "README"} {
+		err := driver.ValidateUpload(context.Background(), contextForTier("v3"), name, 1)
+		allowed := strings.EqualFold(name, "archive.rplib") || strings.EqualFold(name, "photo.WEBP")
+		if allowed && err != nil {
+			t.Fatalf("allowed file %q rejected: %v", name, err)
+		}
+		if !allowed && err == nil {
+			t.Fatalf("unsupported file %q accepted", name)
+		}
+	}
+}
+
+func TestLanzouUploadOneFileRechecksPolicy(t *testing.T) {
+	path := t.TempDir() + "/video.mkv"
+	if err := os.WriteFile(path, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := (&Driver{}).UploadOneFile(context.Background(), drive.Context{Token: &model.TokenInfo{
+		AccessToken:  "cookie",
+		RefreshToken: mustJSON(cred{UploadTier: "v3"}),
+	}}, &model.UploadingUI{Info: model.UploadInfo{LocalFilePath: path, Name: "video.mkv"}})
+	if err == nil || !strings.Contains(err.Error(), "不支持") {
+		t.Fatalf("worker policy error = %v", err)
+	}
+}
+
 type lanzouRewriteRT struct{ host string }
 
 func (r lanzouRewriteRT) RoundTrip(req *http.Request) (*http.Response, error) {

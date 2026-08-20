@@ -124,14 +124,15 @@ func fetchTextRaw(ctx context.Context, method, rawURL string, headers map[string
 
 // cred is the parsed refresh_token payload (mirrors legacy parseLanzouCred).
 type cred struct {
-	Type     string `json:"type"`
-	Cookie   string `json:"cookie"`
-	Account  string `json:"account"`
-	Password string `json:"password"`
-	UID      string `json:"uid"`
-	VEI      string `json:"vei"`
-	BaseURL  string `json:"baseUrl"`
-	ShareURL string `json:"shareUrl"`
+	Type       string `json:"type"`
+	Cookie     string `json:"cookie"`
+	Account    string `json:"account"`
+	Password   string `json:"password"`
+	UID        string `json:"uid"`
+	VEI        string `json:"vei"`
+	UploadTier string `json:"upload_tier,omitempty"`
+	BaseURL    string `json:"baseUrl"`
+	ShareURL   string `json:"shareUrl"`
 }
 
 // parseLanzouCred returns nil when the refresh payload is not an object.
