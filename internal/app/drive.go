@@ -18,7 +18,9 @@ import (
 // ---- drive file operations (thin pass-through to the drive facade) ----
 
 // SaveCloudTextFile writes text content to an isolated temporary file and
-// triggers an upload back to the cloud. The upload itself remains asynchronous.
+// waits until the corresponding remote upload reaches a terminal state. The
+// ordinary upload queue remains asynchronous; only this user-facing save flow
+// needs a definitive success/failure result.
 func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content string) error {
 	logging.Info("cloud text save requested", "account_id", redactID(userID), "drive_id", redactID(driveID), "file_name", fileName, "content_bytes", len(content))
 	name := filepath.Base(strings.TrimSpace(fileName))
@@ -43,7 +45,12 @@ func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content str
 	if !uploads.MarkCleanupOnSuccess(created[0].UploadID, tmpPath) {
 		logging.Warn("cloud text temp cleanup marker could not be attached", "job_id", created[0].UploadID)
 	}
-	logging.Info("cloud text save queued", "job_id", created[0].UploadID, "file_name", name)
+	jobID := created[0].UploadID
+	if _, waitErr := uploads.Wait(jobID, 30*time.Minute); waitErr != nil {
+		logging.Warn("cloud text save failed", "job_id", jobID, "file_name", name, "error", waitErr)
+		return fmt.Errorf("云端保存失败: %w", waitErr)
+	}
+	logging.Info("cloud text save completed", "job_id", jobID, "file_name", name)
 	return nil
 }
 

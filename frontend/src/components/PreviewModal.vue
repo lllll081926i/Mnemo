@@ -270,7 +270,7 @@ async function doSaveText() {
       editContent.value
     )
     text.value = editContent.value
-    emit('toast', '修改已加入上传队列，请在传输列表确认结果', 'success')
+    emit('toast', '保存成功，已上传到网盘', 'success')
     emit('saved')
   } catch (e) {
     emit('toast', '保存失败: ' + String(e), 'error')

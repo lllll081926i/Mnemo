@@ -315,6 +315,53 @@ func (q *UploadQueue) MarkCleanupOnSuccess(id, localPath string) bool {
 	return true
 }
 
+// Wait waits for one upload to reach a terminal state. It is used by flows
+// such as online text editing where reporting success before the remote write
+// finishes would be misleading. Ordinary queue uploads remain asynchronous.
+func (q *UploadQueue) Wait(id string, timeout time.Duration) (*model.UploadingUI, error) {
+	if q == nil || strings.TrimSpace(id) == "" {
+		return nil, errors.New("上传任务不存在")
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		q.mu.Lock()
+		job, ok := q.jobs[id]
+		if ok && job != nil {
+			snapshot := *job
+			q.mu.Unlock()
+			switch {
+			case snapshot.Upload.IsCompleted:
+				return &snapshot, nil
+			case snapshot.Upload.IsFailed:
+				message := strings.TrimSpace(snapshot.Upload.FailedMessage)
+				if message == "" {
+					message = "远端上传失败"
+				}
+				return &snapshot, errors.New(message)
+			case snapshot.Upload.IsStop:
+				return &snapshot, errors.New("上传已停止")
+			}
+		} else {
+			q.mu.Unlock()
+			return nil, errors.New("上传任务不存在")
+		}
+
+		select {
+		case <-q.ctx.Done():
+			return nil, errors.New("上传服务已停止")
+		case <-deadline.C:
+			return nil, errors.New("等待上传完成超时")
+		case <-tick.C:
+		}
+	}
+}
+
 func (q *UploadQueue) cleanupTemporarySource(j *model.UploadingUI) {
 	if j == nil || !j.Info.CleanupLocalFile {
 		return

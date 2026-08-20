@@ -122,6 +122,61 @@ func TestUploadQueueResumeNotFound(t *testing.T) {
 	}
 }
 
+func TestUploadQueueWaitReturnsTerminalResult(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+	job := &model.UploadingUI{UploadID: "up-wait", Upload: model.UploadState{DownState: "uploading", IsDowning: true}}
+	q.update(job)
+	resultCh := make(chan struct {
+		job *model.UploadingUI
+		err error
+	}, 1)
+	go func() {
+		got, waitErr := q.Wait(job.UploadID, time.Second)
+		resultCh <- struct {
+			job *model.UploadingUI
+			err error
+		}{got, waitErr}
+	}()
+	time.Sleep(30 * time.Millisecond)
+	if !q.mutateJob(job.UploadID, func(j *model.UploadingUI) {
+		j.Upload.IsDowning = false
+		j.Upload.IsCompleted = true
+		j.Upload.DownState = "completed"
+	}) {
+		t.Fatal("failed to mark upload completed")
+	}
+	select {
+	case result := <-resultCh:
+		if result.err != nil || result.job == nil || !result.job.Upload.IsCompleted {
+			t.Fatalf("Wait result = %#v, want completed job", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Wait did not return after completion")
+	}
+}
+
+func TestUploadQueueWaitReturnsProviderFailure(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+	job := &model.UploadingUI{UploadID: "up-wait-failed", Upload: model.UploadState{DownState: "failed", IsFailed: true, FailedMessage: "服务端拒绝"}}
+	q.update(job)
+	got, waitErr := q.Wait(job.UploadID, time.Second)
+	if got == nil || waitErr == nil || waitErr.Error() != "服务端拒绝" {
+		t.Fatalf("Wait failure = job %#v, err %v", got, waitErr)
+	}
+}
+
 func TestUploadQueueCleansManagedCloudTextTempAfterSuccess(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(dir)
