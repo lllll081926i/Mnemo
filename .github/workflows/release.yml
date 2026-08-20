@@ -21,8 +21,42 @@ permissions:
   contents: read
 
 jobs:
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Build backend
+        run: go build ./...
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
   build:
     name: ${{ matrix.name }}
+    needs: quality
     strategy:
       fail-fast: false
       matrix:

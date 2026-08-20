@@ -119,7 +119,7 @@
 | P1-10 | 移除账号只删除账号记录 | `internal/app/app.go:853-865`、`internal/store/accounts.go:154-168` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 提供“仅移除凭据”和“移除账号及本地关联数据”两种明确选项；删除前列出影响并停止相关任务。 |
 | P1-11（已关闭） | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go` 不启用托盘，旧关闭逻辑却无条件按设置隐藏窗口 | Linux/macOS 用户可能关闭后无法恢复窗口 | 增加编译目标感知的 `TrayAvailable`；无托盘平台即使旧设置为开启也正常退出，Windows 保持原托盘行为。 |
 | P1-12 | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml:206-211` 和 `internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 使用独立离线签名（如 minisign/cosign）、应用内固定公钥验证；Windows Authenticode、macOS Developer ID + notarization；发布密钥与 GitHub token 分离。 |
-| P1-13 | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 增加独立 quality job：Go test/vet/race（适当平台）、前端 lint/unit/build、关键 mock e2e；publish 必须依赖 quality。 |
+| P1-13（部分关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 已增加独立 `quality` job，运行 Go test/vet/build 和前端 build，平台构建矩阵必须等待通过；后续仍应加入 race、前端单测和关键 mock e2e，并让 publish 显式声明同时依赖 quality/build。 |
 | P1-14 | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go:1-58`，账号本身使用 AES-256-GCM | 能阻止只拿到单个 accounts 文件的人直接读取，但无法抵御同一用户权限下同时读取密钥和密文的恶意程序 | Windows DPAPI、macOS Keychain、Linux Secret Service 存主密钥；保留现有格式作为迁移层。注意项目并非“无加密存储”，文档需纠正。 |
 | P1-15 | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go:newReq` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 先基于 `WWW-Authenticate` 提示明确“不支持的认证方式”；若真实需求确认，再加入经过测试的 Digest/客户端证书，不要盲目重试多种认证。 |
 
