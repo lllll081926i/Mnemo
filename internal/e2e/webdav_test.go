@@ -182,7 +182,11 @@ func TestWebDAVEndToEnd(t *testing.T) {
 	}
 
 	// 9. copy
-	if _, err := drive.CopyBatch(uid, driveID, []drive.FileRef{{ID: rootFiles[0].FileID}}, mk.FileID, ""); err != nil {
+	rootFileID := fileIDByName(rootFiles, "renamed.txt")
+	if rootFileID == "" {
+		t.Fatalf("copy source renamed.txt missing: %+v", names(rootFiles))
+	}
+	if _, err := drive.CopyBatch(uid, driveID, []drive.FileRef{{ID: rootFileID}}, mk.FileID, ""); err != nil {
 		t.Fatalf("copy: %v", err)
 	}
 	subFiles, _ := drive.ListDir(uid, driveID, mk.FileID, nil)
@@ -192,7 +196,7 @@ func TestWebDAVEndToEnd(t *testing.T) {
 	copiedID := fileIDByName(subFiles, "renamed.txt")
 
 	// 10. delete both
-	if _, err := drive.DeleteBatch(uid, driveID, []drive.FileRef{{ID: rootFiles[0].FileID}, {ID: copiedID}}); err != nil {
+	if _, err := drive.DeleteBatch(uid, driveID, []drive.FileRef{{ID: rootFileID}, {ID: copiedID}}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	rootFiles, _ = drive.ListDir(uid, driveID, "/", nil)

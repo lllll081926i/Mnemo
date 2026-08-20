@@ -41,6 +41,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Build frontend for Go embed
+        working-directory: frontend
+        run: npm run build
+
       - name: Run Go tests
         run: go test ./...
 
@@ -53,10 +57,6 @@ jobs:
 
       - name: Build backend
         run: go build ./...
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
 
   build:
     name: ${{ matrix.name }}
