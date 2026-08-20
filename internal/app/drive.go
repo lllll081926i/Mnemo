@@ -17,30 +17,52 @@ import (
 
 // ---- drive file operations (thin pass-through to the drive facade) ----
 
-// SaveCloudTextFile writes text content to a temporary file and triggers an upload back to the cloud.
+// SaveCloudTextFile writes text content to an isolated temporary file and
+// triggers an upload back to the cloud. The upload itself remains asynchronous.
 func (a *App) SaveCloudTextFile(userID, driveID, parentID, fileName, content string) error {
 	logging.Info("cloud text save requested", "account_id", redactID(userID), "drive_id", redactID(driveID), "file_name", fileName, "content_bytes", len(content))
 	name := filepath.Base(strings.TrimSpace(fileName))
-	if name == "." || name == "" || name == string(filepath.Separator) {
+	if name == "." || name == ".." || name == "" || name == string(filepath.Separator) {
 		return fmt.Errorf("文件名无效")
 	}
-	tmpDir := filepath.Join(os.TempDir(), "mnemo_edit")
-	_ = os.MkdirAll(tmpDir, 0o755)
-	tmpPath := filepath.Join(tmpDir, name)
-	if err := os.WriteFile(tmpPath, []byte(content), 0o644); err != nil {
+	tmpPath, err := writeCloudTextUploadTemp(name, content)
+	if err != nil {
 		return err
 	}
 	uploads := a.uploadQueue()
 	if uploads == nil {
-		_ = os.Remove(tmpPath)
+		removeCloudTextUploadTemp(tmpPath)
 		return fmt.Errorf("上传服务未启动")
 	}
 	parentID = canonicalUploadParent(userID, driveID, parentID)
-	if created := uploads.AddFiles(userID, driveID, parentID, "overwrite", []string{tmpPath}); len(created) == 0 {
-		_ = os.Remove(tmpPath)
+	created := uploads.AddFiles(userID, driveID, parentID, "overwrite", []string{tmpPath})
+	if len(created) == 0 {
+		removeCloudTextUploadTemp(tmpPath)
 		return fmt.Errorf("文件未能加入上传队列")
 	}
+	logging.Info("cloud text save queued", "job_id", created[0].UploadID, "file_name", name)
 	return nil
+}
+
+func writeCloudTextUploadTemp(fileName, content string) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "mnemo_edit_")
+	if err != nil {
+		return "", fmt.Errorf("创建编辑临时目录失败: %w", err)
+	}
+	tmpPath := filepath.Join(tmpDir, fileName)
+	if err := os.WriteFile(tmpPath, []byte(content), 0o600); err != nil {
+		_ = os.Remove(tmpDir)
+		return "", fmt.Errorf("写入编辑临时文件失败: %w", err)
+	}
+	return tmpPath, nil
+}
+
+func removeCloudTextUploadTemp(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(filepath.Dir(path))
 }
 
 // ListDir lists a directory.

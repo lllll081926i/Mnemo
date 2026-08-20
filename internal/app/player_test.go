@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -132,6 +134,32 @@ func TestValidateExternalBrowserURL(t *testing.T) {
 	for _, rejected := range []string{"http://example.com/help", "file:///C:/Windows/win.ini", "custom:payload", "https://user:password@example.com/", "/relative"} {
 		if _, err := validateExternalBrowserURL(rejected); err == nil {
 			t.Errorf("validateExternalBrowserURL(%q) should reject", rejected)
+		}
+	}
+}
+
+func TestWriteCloudTextUploadTempIsolatesSameNamedEdits(t *testing.T) {
+	first, err := writeCloudTextUploadTemp("notes.txt", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removeCloudTextUploadTemp(first)
+	second, err := writeCloudTextUploadTemp("notes.txt", "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removeCloudTextUploadTemp(second)
+
+	if first == second || filepath.Dir(first) == filepath.Dir(second) {
+		t.Fatalf("same-named edits share a temporary path: %q and %q", first, second)
+	}
+	for path, want := range map[string]string{first: "first", second: "second"} {
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(got) != want {
+			t.Fatalf("temporary content at %q = %q, want %q", path, got, want)
 		}
 	}
 }
