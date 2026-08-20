@@ -158,6 +158,7 @@ func NewServer(roots ...string) (*Server, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = true
 	transport.Proxy = globalProxy
+	transport.DialContext = safeProxyDialContext
 	s.proxyTransport = transport
 	s.proxyClient = &http.Client{
 		Timeout:       0,
@@ -914,6 +915,9 @@ func (s *Server) proxySessionRequest(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (s *Server) doProxyRequest(ctx context.Context, method, target string, headers map[string]string, byteRange string) (*http.Response, error) {
+	if err := s.validateSafeProxyURL(ctx, target); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return nil, err
@@ -1250,8 +1254,8 @@ func (s *Server) checkProxyRedirect(req *http.Request, via []*http.Request) erro
 	if len(via) >= 10 {
 		return fmt.Errorf("too many redirects")
 	}
-	if !s.isSafeProxyURL(req.URL.String()) {
-		return fmt.Errorf("redirect target not allowed")
+	if err := s.validateSafeProxyURL(req.Context(), req.URL.String()); err != nil {
+		return fmt.Errorf("redirect target not allowed: %w", err)
 	}
 	return nil
 }
@@ -1382,6 +1386,9 @@ func (s *Server) rememberProxyHost(raw string) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 		return
 	}
+	if !isExplicitLocalProxyHost(u.Hostname()) {
+		return
+	}
 	key := proxyHostKey(u)
 	s.mu.Lock()
 	if s.allowedProxyHosts == nil {
@@ -1420,6 +1427,94 @@ func globalProxy(_ *http.Request) (*url.URL, error) {
 
 func (s *Server) isSafeProxyURL(raw string) bool {
 	return isSafeProxyURLWithAllow(raw, s.isAllowedProxyHost)
+}
+
+func (s *Server) validateSafeProxyURL(ctx context.Context, raw string) error {
+	if !s.isSafeProxyURL(raw) {
+		return fmt.Errorf("proxy target is not allowed")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("proxy target is invalid")
+	}
+	if isExplicitLocalProxyHost(u.Hostname()) && s.isAllowedProxyHost(raw) {
+		return nil
+	}
+	if err := validateResolvedProxyHost(ctx, u.Hostname()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func safeProxyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	if isExplicitLocalProxyHost(host) {
+		return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, ip := range ips {
+		if isBlockedProxyIP(ip.IP) {
+			lastErr = fmt.Errorf("proxy target resolved to a private address")
+			continue
+		}
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("proxy target has no usable address")
+	}
+	return nil, lastErr
+}
+
+func validateResolvedProxyHost(ctx context.Context, host string) error {
+	if isExplicitLocalProxyHost(host) {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedProxyIP(ip) {
+			return fmt.Errorf("proxy target is a private address")
+		}
+		return nil
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("proxy target DNS lookup failed: %w", err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("proxy target has no address")
+	}
+	for _, ip := range ips {
+		if isBlockedProxyIP(ip.IP) {
+			return fmt.Errorf("proxy target resolves to a private address")
+		}
+	}
+	return nil
+}
+
+func isBlockedProxyIP(ip net.IP) bool {
+	return ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast()
+}
+
+func isExplicitLocalProxyHost(host string) bool {
+	lower := strings.ToLower(strings.TrimSpace(host))
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(lower); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func isSafeProxyURLWithAllow(raw string, allow func(string) bool) bool {

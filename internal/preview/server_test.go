@@ -70,6 +70,22 @@ func TestIsSafeProxyURL(t *testing.T) {
 	}
 }
 
+func TestRememberProxyHostOnlyAllowsExplicitLoopback(t *testing.T) {
+	s, err := NewServer(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.rememberProxyHost("http://192.168.1.20:8080/media")
+	if s.isAllowedProxyHost("http://192.168.1.20:8080/media") {
+		t.Fatal("private network host must not be auto-allowlisted")
+	}
+	s.rememberProxyHost("http://127.0.0.1:45678/media")
+	if !s.isAllowedProxyHost("http://127.0.0.1:45678/media") {
+		t.Fatal("explicit loopback host should remain available for local providers/tests")
+	}
+}
+
 func TestIsWithinRoots(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := NewServer(dir)
