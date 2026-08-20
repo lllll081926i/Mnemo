@@ -1,6 +1,10 @@
 package sync
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +37,68 @@ func TestConfigFields(t *testing.T) {
 	}
 	if !cfg.DeletePropagation {
 		t.Error("DeletePropagation not set")
+	}
+}
+
+func TestSafeLocalPathRejectsTraversalAndAllowsNestedFile(t *testing.T) {
+	root := t.TempDir()
+	path, err := safeLocalPath(root, "album/2026/photo.jpg")
+	if err != nil {
+		t.Fatalf("safeLocalPath(nested): %v", err)
+	}
+	want := filepath.Join(root, "album", "2026", "photo.jpg")
+	if path != want {
+		t.Fatalf("safeLocalPath = %q, want %q", path, want)
+	}
+
+	for _, name := range []string{"../outside.txt", "album/../../outside.txt", "/absolute.txt"} {
+		if _, err := safeLocalPath(root, name); err == nil {
+			t.Errorf("safeLocalPath(%q) should reject unsafe path", name)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if _, err := safeLocalPath(root, `C:\\outside.txt`); err == nil {
+			t.Error("safeLocalPath should reject Windows volume path")
+		}
+	}
+}
+
+func TestSafeLocalPathRejectsExistingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(root, "linked")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+	if _, err := safeLocalPath(root, "linked/outside.txt"); err == nil {
+		t.Fatal("safeLocalPath should reject a path crossing a symbolic link")
+	}
+}
+
+func TestScanLocalFilesReturnsRootError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if _, err := scanLocalFiles(missing); err == nil || !strings.Contains(err.Error(), "scan local directory") {
+		t.Fatalf("scanLocalFiles should expose root scan failure, got %v", err)
+	}
+}
+
+func TestPropagateLocalDeletesCannotEscapeRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "sync")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(parent, "outside.txt")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := NewEngine(nil)
+	err := eng.propagateLocalDeletes(Config{LocalDir: root}, []Entry{{RemoteName: "../outside.txt"}})
+	if err == nil {
+		t.Fatal("propagateLocalDeletes should reject traversal")
+	}
+	if _, statErr := os.Stat(outside); statErr != nil {
+		t.Fatalf("outside file was removed: %v", statErr)
 	}
 }

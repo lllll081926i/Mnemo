@@ -2,8 +2,23 @@
 // 网盘账号头像（右上角）：圆形头像(object-fit:cover 裁掉黑边) + provider 小徽章；
 // 悬停弹窗显示已用/剩余/总容量；静默低频刷新配额(RefreshAccount)。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { RefreshAccount, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
+import { refreshAccount, accountName, providerIconUrl, providerMetaOf, formatBytes } from '../api'
 import UiIcon from './UiIcon.vue'
+
+const QUOTA_REFRESH_INTERVAL = 60 * 60 * 1000
+const refreshInflight = new Map()
+const refreshLastAttempt = new Map()
+
+function refreshAccountOnce(userID) {
+  if (!userID) return Promise.resolve(null)
+  const now = Date.now()
+  if (now - (refreshLastAttempt.get(userID) || 0) < QUOTA_REFRESH_INTERVAL) return Promise.resolve(null)
+  if (refreshInflight.has(userID)) return refreshInflight.get(userID)
+  refreshLastAttempt.set(userID, now)
+  const promise = refreshAccount(userID).finally(() => refreshInflight.delete(userID))
+  refreshInflight.set(userID, promise)
+  return promise
+}
 
 const props = defineProps({
   account: { type: Object, required: false, default: null },
@@ -78,24 +93,40 @@ function onLeave() {
   clearTimeout(enterTimer)
   leaveTimer = setTimeout(() => { show.value = false }, 200)
 }
-onBeforeUnmount(() => { clearTimeout(enterTimer); clearTimeout(leaveTimer); clearInterval(refreshTimer) })
+onBeforeUnmount(() => {
+  clearTimeout(enterTimer)
+  clearTimeout(leaveTimer)
+  clearTimeout(refreshDelay)
+  clearInterval(refreshTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
 
 // ---------- 静默低频刷新配额 ----------
 let refreshTimer = null
+let refreshDelay = null
 async function silentRefresh() {
   if (!props.account || document.hidden) return
   const snapUid = props.account.user_id
   try {
-    const acc = await RefreshAccount(snapUid)
+    const acc = await refreshAccountOnce(snapUid)
     if (snapUid === (props.account && props.account.user_id) && acc && acc.token) tok.value = acc.token
   } catch { /* 静默 */ }
 }
+function scheduleRefresh(delay = 30 * 1000) {
+  clearTimeout(refreshDelay)
+  if (!props.account) return
+  refreshDelay = setTimeout(silentRefresh, delay)
+}
+function onVisibilityChange() {
+  if (!document.hidden) scheduleRefresh(10 * 1000)
+}
 watch(() => props.account && props.account.user_id, (uid) => {
-  if (uid) silentRefresh()
+  if (uid) scheduleRefresh()
 })
 onMounted(() => {
-  if (props.account) silentRefresh()
-  refreshTimer = setInterval(() => { if (!document.hidden && props.account) silentRefresh() }, 10 * 60 * 1000)
+  if (props.account) scheduleRefresh()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  refreshTimer = setInterval(silentRefresh, QUOTA_REFRESH_INTERVAL)
 })
 </script>
 

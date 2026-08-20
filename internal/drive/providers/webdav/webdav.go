@@ -53,6 +53,29 @@ func (d *Driver) ValidateConnection(ctx context.Context, conn *model.ConnConfig)
 	return err
 }
 
+// RefreshAccount reads the optional RFC 4331 quota properties. Servers that
+// do not implement quota discovery keep their capacity as unknown without
+// triggering additional fallback scans.
+func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
+	if token == nil || token.Conn == nil {
+		return nil, errors.New("webdav: 连接不存在，请重新连接")
+	}
+	client, err := clientOf(c)
+	if err != nil {
+		return token, err
+	}
+	used, total, err := client.Quota(ctx, "/")
+	if err != nil {
+		return token, err
+	}
+	if total > 0 {
+		token.UsedSize = used
+		token.TotalSize = total
+		token.FreeSize = total - used
+	}
+	return token, nil
+}
+
 func clientOf(c drive.Context) (*wc.Client, error) {
 	if c.Token == nil || c.Token.Conn == nil {
 		return nil, errors.New("webdav: 连接不存在，请重新连接")

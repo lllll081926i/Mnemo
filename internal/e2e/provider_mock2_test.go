@@ -1456,6 +1456,41 @@ func TestPan139FileOperationsMock(t *testing.T) {
 }
 
 // TestS3ListMock exercises the s3 driver against a mock S3-compatible server.
+func TestS3ValidateFallsBackToPrefixListWhenHeadBucketIsForbidden(t *testing.T) {
+	var methods []string
+	mock := MockAPI(t, "s3-validate.example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusForbidden)
+		case http.MethodGet:
+			if r.URL.Query().Get("list-type") != "2" || r.URL.Query().Get("prefix") != "allowed/" {
+				http.Error(w, "unexpected validation query", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>test-bucket</Name><IsTruncated>false</IsTruncated></ListBucketResult>`)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	_ = mock
+	s3pkg.TransportOverride = netx.TestTransportHook
+	t.Cleanup(func() { s3pkg.TransportOverride = nil })
+
+	err := drive.ValidateConnection(model.ProviderS3, &model.ConnConfig{
+		Endpoint: "s3-validate.example.com", Username: "key", Password: "secret",
+		Bucket: "test-bucket", BasePath: "/allowed/",
+	})
+	if err != nil {
+		t.Fatalf("S3 prefix-scoped validation: %v", err)
+	}
+	if strings.Join(methods, ",") != "HEAD,GET" {
+		t.Fatalf("validation methods = %v, want HEAD then GET", methods)
+	}
+}
+
 func TestS3ListMock(t *testing.T) {
 	s3XML := `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">

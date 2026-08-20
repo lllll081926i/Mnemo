@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -237,6 +238,9 @@ func TestLocalRangeAndHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(req.URL.String(), "sample.mp4") || req.URL.Query().Get("p") != "" {
+		t.Fatalf("local preview URL exposed the filesystem path: %s", req.URL)
+	}
 	req.Header.Set("Range", "bytes=3-6")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -263,6 +267,54 @@ func TestLocalRangeAndHead(t *testing.T) {
 	headResp.Body.Close()
 	if headResp.StatusCode != http.StatusOK || len(headBody) != 0 {
 		t.Fatalf("local head response = %d body=%q", headResp.StatusCode, headBody)
+	}
+}
+
+func TestLocalPreviewRequiresOpaqueGrantAndRootChangesRevokeIt(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	firstPath := firstRoot + "/first.txt"
+	secondPath := secondRoot + "/second.txt"
+	if err := os.WriteFile(firstPath, []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(firstRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	firstURL := s.LocalURL(firstPath)
+	if firstURL == "" {
+		t.Fatal("LocalURL rejected an allowed file")
+	}
+	direct := s.BaseURL() + "/local/?p=" + url.QueryEscape(firstPath) + "&t=" + url.QueryEscape(s.token)
+	resp, err := http.Get(direct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("path-based local request status = %d, want 404", resp.StatusCode)
+	}
+
+	s.SetRoots(secondRoot)
+	resp, err = http.Get(firstURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("revoked local grant status = %d, want 404", resp.StatusCode)
+	}
+	if s.LocalURL(firstPath) != "" {
+		t.Fatal("old root remained available after SetRoots")
+	}
+	if s.LocalURL(secondPath) == "" {
+		t.Fatal("new root file was not registered")
 	}
 }
 

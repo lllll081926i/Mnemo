@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 )
 
@@ -36,18 +37,29 @@ func (s *Store) SaveDownloadTask(t *model.DownloadTask) error {
 	if err != nil {
 		return err
 	}
+	for i := range list {
+		list[i] = safeStoredDownloadTask(list[i])
+	}
+	safeTask := safeStoredDownloadTask(*t)
 	replaced := false
 	for i := range list {
 		if list[i].ID == t.ID {
-			list[i] = *t
+			list[i] = safeTask
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		list = append(list, *t)
+		list = append(list, safeTask)
 	}
 	return s.writeJSONUnlocked(tasksFile, list)
+}
+
+func safeStoredDownloadTask(task model.DownloadTask) model.DownloadTask {
+	task.URL = ""
+	task.Headers = nil
+	task.Error = logging.RedactText(task.Error)
+	return task
 }
 
 // ClearDownloadTasks removes finished tasks (completed/canceled/failed).

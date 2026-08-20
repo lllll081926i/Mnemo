@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mnemo-go/internal/transfer/dlengine"
@@ -22,6 +23,7 @@ func TestSegmentedDownload(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("ETag", `"payload-v1"`)
 		rang := r.Header.Get("Range")
 		if rang == "" {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
@@ -31,7 +33,11 @@ func TestSegmentedDownload(t *testing.T) {
 		}
 		var start, end int64
 		fmt.Sscanf(rang, "bytes=%d-%d", &start, &end)
-		if end == 0 || end >= int64(len(payload)) {
+		if rang != "bytes=0-0" && r.Header.Get("If-Range") != `"payload-v1"` {
+			http.Error(w, "missing If-Range", http.StatusPreconditionRequired)
+			return
+		}
+		if end >= int64(len(payload)) {
 			end = int64(len(payload)) - 1
 		}
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(payload)))
@@ -99,6 +105,75 @@ func TestSegmentedDownload(t *testing.T) {
 	got2, _ := os.ReadFile(dest2)
 	if len(got2) != len(payload) {
 		t.Fatalf("single-stream size: %d", len(got2))
+	}
+}
+
+func TestSegmentedDownloadRejectsInvalidProbeRange(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Range", "bytes 1-1/64")
+		w.Header().Set("Content-Length", "1")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte{1})
+	}))
+	defer srv.Close()
+
+	err := dlengine.Download(context.Background(), dlengine.Options{ChunkSize: 16, MinSize: 1}, srv.URL, filepath.Join(t.TempDir(), "invalid.bin"), nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid probe Content-Range") {
+		t.Fatalf("expected invalid probe range error, got %v", err)
+	}
+}
+
+func TestSegmentedDownloadRejectsMismatchedChunkRange(t *testing.T) {
+	payload := make([]byte, 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var start, end int64
+		_, _ = fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+		if start == 0 && end == 0 {
+			w.Header().Set("Content-Range", "bytes 0-0/64")
+			w.Header().Set("Content-Length", "1")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(payload[:1])
+			return
+		}
+		length := end - start + 1
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/64", start+1, end+1))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", length))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload[:length])
+	}))
+	defer srv.Close()
+
+	err := dlengine.Download(context.Background(), dlengine.Options{Concurrency: 2, ChunkSize: 16, MinSize: 1}, srv.URL, filepath.Join(t.TempDir(), "mismatch.bin"), nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid range response") {
+		t.Fatalf("expected mismatched range error, got %v", err)
+	}
+}
+
+func TestSegmentedDownloadRejectsResourceChangedAfterProbe(t *testing.T) {
+	payload := make([]byte, 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "bytes=0-0" {
+			w.Header().Set("ETag", `"v1"`)
+			w.Header().Set("Content-Range", "bytes 0-0/64")
+			w.Header().Set("Content-Length", "1")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(payload[:1])
+			return
+		}
+		if r.Header.Get("If-Range") != `"v1"` {
+			http.Error(w, "missing validator", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("ETag", `"v2"`)
+		w.Header().Set("Content-Length", "64")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	err := dlengine.Download(context.Background(), dlengine.Options{Concurrency: 2, ChunkSize: 16, MinSize: 1}, srv.URL, filepath.Join(t.TempDir(), "changed.bin"), nil)
+	if err == nil || !strings.Contains(err.Error(), "remote resource changed") {
+		t.Fatalf("expected resource changed error, got %v", err)
 	}
 }
 

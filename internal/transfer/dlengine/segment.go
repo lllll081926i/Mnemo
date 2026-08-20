@@ -6,6 +6,7 @@ package dlengine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,12 +72,24 @@ type Progress struct {
 
 // state is the persisted resume state.
 type state struct {
-	URL          string `json:"url"`
+	URL          string `json:"url,omitempty"` // legacy read-only; never written
+	URLHash      string `json:"url_hash,omitempty"`
 	Total        int64  `json:"total"`
 	Chunk        int64  `json:"chunk"`
 	Done         []bool `json:"done"`
+	ETag         string `json:"etag,omitempty"`
 	LastModified string `json:"last_modified,omitempty"`
 }
+
+type resourceValidator struct {
+	ETag         string
+	LastModified string
+}
+
+var (
+	errResourceChanged      = errors.New("dlengine: remote resource changed")
+	errInvalidRangeResponse = errors.New("dlengine: invalid range response")
+)
 
 // Download fetches url to localPath (plus a .part temp file) using segmented
 // parallel range requests. It resumes from the .part file when present.
@@ -104,22 +117,23 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	defer hc.CloseIdleConnections()
 
 	// Resolve size + range support.
-	total, acceptRanges, lastModified, err := probe(ctx, hc, opts, url)
+	total, acceptRanges, validator, err := probe(ctx, hc, opts, url)
 	if err != nil {
 		return err
 	}
 
-	st := &state{URL: url, Total: total, Chunk: opts.ChunkSize}
+	urlHash := urlFingerprint(url)
+	st := &state{URLHash: urlHash, Total: total, Chunk: opts.ChunkSize, ETag: validator.ETag, LastModified: validator.LastModified}
 	if total == 0 || !acceptRanges || total < opts.MinSize {
 		// single stream
-		return singleStream(ctx, hc, opts, url, localPath, total, onProgress)
+		return singleStream(ctx, hc, opts, url, localPath, total, validator, onProgress)
 	}
 
 	// Resume from state if it matches.
 	if b, err := os.ReadFile(statePath); err == nil {
 		var prev state
-		if json.Unmarshal(b, &prev) == nil && prev.URL == url && prev.Total == total && prev.Chunk == opts.ChunkSize &&
-			(prev.LastModified == "" || lastModified == "" || prev.LastModified == lastModified) {
+		if json.Unmarshal(b, &prev) == nil && stateURLMatches(prev, url, urlHash) && prev.Total == total && prev.Chunk == opts.ChunkSize &&
+			resumeIdentityMatches(prev, validator) {
 			st = &prev
 		}
 	}
@@ -127,7 +141,10 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	if len(st.Done) != numChunks {
 		st.Done = make([]bool, numChunks)
 	}
-	st.LastModified = lastModified
+	st.ETag = validator.ETag
+	st.LastModified = validator.LastModified
+	st.URL = ""
+	st.URLHash = urlHash
 
 	// Ensure part file exists at full size (sparse).
 	if err := ensureFile(partPath, total); err != nil {
@@ -166,8 +183,9 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 			}
 			start := int64(chunkIdx) * opts.ChunkSize
 			length := chunkLen(st, chunkIdx)
+			var lastErr error
 			for attempt := 0; attempt < MaxRetriesPerChunk; attempt++ {
-				err := fetchRange(gctx, hc, opts, url, start, length, f, limiter, func(n int64) {
+				err := fetchRange(gctx, hc, opts, url, start, length, total, validator, f, limiter, func(n int64) {
 					downloaded.Add(n)
 				})
 				if err == nil {
@@ -179,6 +197,10 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 					mu.Unlock()
 					return nil
 				}
+				lastErr = err
+				if errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) {
+					return fmt.Errorf("dlengine: chunk %d rejected: %w", chunkIdx, err)
+				}
 				if gctx.Err() != nil {
 					return gctx.Err()
 				}
@@ -188,7 +210,7 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 					return gctx.Err()
 				}
 			}
-			return fmt.Errorf("dlengine: chunk %d failed", chunkIdx)
+			return fmt.Errorf("dlengine: chunk %d failed after %d attempts: %w", chunkIdx, MaxRetriesPerChunk, lastErr)
 		})
 	}
 
@@ -239,54 +261,123 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	return nil
 }
 
-// probe determines the file size, range support and last-modified.
-func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int64, bool, string, error) {
+// probe determines the file size, range support and resource validators.
+func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int64, bool, resourceValidator, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, false, "", err
+		return 0, false, resourceValidator{}, err
 	}
 	setHeaders(req, opts.Headers, opts.UserAgent)
 	req.Header.Set("Range", "bytes=0-0")
 	resp, err := hc.Do(req)
 	if err != nil {
-		return 0, false, "", err
+		return 0, false, resourceValidator{}, err
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 	// A server advertising Accept-Ranges can still ignore a particular probe.
 	// Only a real 206 response proves that segmented requests are usable.
 	acceptRanges := resp.StatusCode == http.StatusPartialContent
-	lastModified := resp.Header.Get("Last-Modified")
+	validator := resourceValidator{
+		ETag:         strings.TrimSpace(resp.Header.Get("ETag")),
+		LastModified: strings.TrimSpace(resp.Header.Get("Last-Modified")),
+	}
 	var total int64
 	switch {
 	case resp.StatusCode == http.StatusPartialContent:
-		if cr := resp.Header.Get("Content-Range"); cr != "" {
-			total = parseContentRangeTotal(cr)
+		start, end, parsedTotal, ok := parseContentRange(resp.Header.Get("Content-Range"))
+		if !ok || start != 0 || end != 0 {
+			return 0, false, resourceValidator{}, fmt.Errorf("%w: invalid probe Content-Range", errInvalidRangeResponse)
 		}
+		if resp.ContentLength >= 0 && resp.ContentLength != 1 {
+			return 0, false, resourceValidator{}, fmt.Errorf("%w: probe Content-Length is %d, want 1", errInvalidRangeResponse, resp.ContentLength)
+		}
+		total = parsedTotal
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		total = resp.ContentLength
 	default:
-		return 0, false, "", fmt.Errorf("dlengine: probe http %d", resp.StatusCode)
+		return 0, false, resourceValidator{}, fmt.Errorf("dlengine: probe http %d", resp.StatusCode)
 	}
 	if total <= 0 {
-		return 0, false, "", errors.New("dlengine: unknown file size")
+		return 0, false, resourceValidator{}, errors.New("dlengine: unknown file size")
 	}
-	return total, acceptRanges, lastModified, nil
+	return total, acceptRanges, validator, nil
 }
 
-func parseContentRangeTotal(cr string) int64 {
-	// "bytes 0-1/12345"
-	i := strings.LastIndex(cr, "/")
-	if i < 0 {
-		return 0
+func parseContentRange(value string) (start, end, total int64, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(value))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "bytes") {
+		return 0, 0, 0, false
 	}
-	total, _ := strconv.ParseInt(cr[i+1:], 10, 64)
-	return total
+	rangeAndTotal := strings.SplitN(fields[1], "/", 2)
+	if len(rangeAndTotal) != 2 || rangeAndTotal[1] == "*" {
+		return 0, 0, 0, false
+	}
+	bounds := strings.SplitN(rangeAndTotal[0], "-", 2)
+	if len(bounds) != 2 {
+		return 0, 0, 0, false
+	}
+	start, errStart := strconv.ParseInt(bounds[0], 10, 64)
+	end, errEnd := strconv.ParseInt(bounds[1], 10, 64)
+	total, errTotal := strconv.ParseInt(rangeAndTotal[1], 10, 64)
+	if errStart != nil || errEnd != nil || errTotal != nil || start < 0 || end < start || total <= 0 || end >= total {
+		return 0, 0, 0, false
+	}
+	return start, end, total, true
+}
+
+func resumeIdentityMatches(previous state, current resourceValidator) bool {
+	if previous.ETag != "" || current.ETag != "" {
+		return previous.ETag != "" && current.ETag != "" && previous.ETag == current.ETag
+	}
+	if previous.LastModified != "" || current.LastModified != "" {
+		return previous.LastModified != "" && current.LastModified != "" && previous.LastModified == current.LastModified
+	}
+	return true
+}
+
+func strongETag(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || strings.HasPrefix(strings.ToUpper(value), "W/") || value[0] != '"' || value[len(value)-1] != '"' {
+		return ""
+	}
+	return value
+}
+
+func (v resourceValidator) ifRange() string {
+	if etag := strongETag(v.ETag); etag != "" {
+		return etag
+	}
+	return v.LastModified
+}
+
+func (v resourceValidator) setFullRequestCondition(req *http.Request) {
+	if etag := strongETag(v.ETag); etag != "" {
+		req.Header.Set("If-Match", etag)
+		return
+	}
+	if v.LastModified != "" {
+		req.Header.Set("If-Unmodified-Since", v.LastModified)
+	}
+}
+
+func (v resourceValidator) verifyResponse(header http.Header) error {
+	if v.ETag != "" {
+		if responseETag := strings.TrimSpace(header.Get("ETag")); responseETag != "" && responseETag != v.ETag {
+			return fmt.Errorf("%w: ETag no longer matches", errResourceChanged)
+		}
+	}
+	if v.LastModified != "" {
+		if responseModified := strings.TrimSpace(header.Get("Last-Modified")); responseModified != "" && responseModified != v.LastModified {
+			return fmt.Errorf("%w: Last-Modified no longer matches", errResourceChanged)
+		}
+	}
+	return nil
 }
 
 // fetchRange GETs one range and writes it at the file offset.
-func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, start, length int64, f *os.File, limiter *speedLimiter, account func(int64)) error {
-	if length <= 0 {
+func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, start, length, total int64, validator resourceValidator, f *os.File, limiter *speedLimiter, account func(int64)) error {
+	if start < 0 || length <= 0 || total <= 0 || start > total-length {
 		return errors.New("dlengine: invalid range length")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -295,6 +386,9 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	}
 	setHeaders(req, opts.Headers, opts.UserAgent)
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+length-1))
+	if condition := validator.ifRange(); condition != "" {
+		req.Header.Set("If-Range", condition)
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return err
@@ -304,7 +398,21 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 		return fmt.Errorf("dlengine: range http %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusOK {
+		if validator.ifRange() != "" {
+			return fmt.Errorf("%w: server returned the full resource after If-Range", errResourceChanged)
+		}
 		return errors.New("dlengine: server ignored range request")
+	}
+	expectedEnd := start + length - 1
+	gotStart, gotEnd, gotTotal, ok := parseContentRange(resp.Header.Get("Content-Range"))
+	if !ok || gotStart != start || gotEnd != expectedEnd || gotTotal != total {
+		return fmt.Errorf("%w: requested bytes %d-%d/%d", errInvalidRangeResponse, start, expectedEnd, total)
+	}
+	if resp.ContentLength >= 0 && resp.ContentLength != length {
+		return fmt.Errorf("%w: Content-Length is %d, want %d", errInvalidRangeResponse, resp.ContentLength, length)
+	}
+	if err := validator.verifyResponse(resp.Header); err != nil {
+		return err
 	}
 	buf := make([]byte, 256<<10)
 	written := int64(0)
@@ -342,19 +450,26 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	return nil
 }
 
-func singleStream(ctx context.Context, hc *http.Client, opts Options, url, localPath string, total int64, onProgress func(Progress)) error {
+func singleStream(ctx context.Context, hc *http.Client, opts Options, url, localPath string, total int64, validator resourceValidator, onProgress func(Progress)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	setHeaders(req, opts.Headers, opts.UserAgent)
+	validator.setFullRequestCondition(req)
 	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusPreconditionFailed {
+		return errResourceChanged
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("dlengine: http %d", resp.StatusCode)
+	}
+	if err := validator.verifyResponse(resp.Header); err != nil {
+		return err
 	}
 	partPath := localPath + ".part"
 	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -498,11 +613,28 @@ func percent(done, total int64) int {
 }
 
 func persistState(path string, st *state) error {
-	b, err := json.Marshal(st)
+	safeState := *st
+	if safeState.URLHash == "" && safeState.URL != "" {
+		safeState.URLHash = urlFingerprint(safeState.URL)
+	}
+	safeState.URL = ""
+	b, err := json.Marshal(&safeState)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, b, 0o644)
+}
+
+func urlFingerprint(rawURL string) string {
+	digest := sha256.Sum256([]byte(rawURL))
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func stateURLMatches(previous state, rawURL, fingerprint string) bool {
+	if previous.URLHash != "" {
+		return previous.URLHash == fingerprint
+	}
+	return previous.URL == rawURL
 }
 
 // speedLimiter is a token-bucket style throttle (per second).

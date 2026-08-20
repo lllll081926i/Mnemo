@@ -25,6 +25,7 @@ import (
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
 )
 
 const providerID = model.ProviderS3
@@ -70,11 +71,26 @@ func (d *Driver) ValidateConnection(ctx context.Context, cfg *model.ConnConfig) 
 	if err != nil {
 		return err
 	}
-	_, err = c.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(c.bucket)})
-	if err != nil {
-		return fmt.Errorf("s3: bucket 校验失败: %w", err)
+	_, headErr := c.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(c.bucket)})
+	if headErr == nil {
+		return nil
 	}
-	return nil
+	if !canFallbackFromHeadBucket(headErr) {
+		return fmt.Errorf("s3: bucket 校验失败: %w", headErr)
+	}
+	// Prefix-scoped IAM policies frequently permit object listing but deny
+	// s3:ListBucket without a prefix condition, which makes HeadBucket return
+	// 403 even though the configured mount is usable. Only perform this second
+	// request after a compatibility/permission response to keep validation cheap.
+	_, listErr := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(c.bucket),
+		Prefix:  aws.String(c.prefix),
+		MaxKeys: aws.Int32(1),
+	})
+	if listErr == nil {
+		return nil
+	}
+	return fmt.Errorf("s3: bucket 与前缀校验均失败: HeadBucket: %v; ListObjectsV2: %w", headErr, listErr)
 }
 
 type conn struct {
@@ -88,10 +104,24 @@ type conn struct {
 var TransportOverride http.RoundTripper
 
 func httpClientForS3() *http.Client {
+	const timeout = 60 * time.Second
 	if TransportOverride != nil {
-		return &http.Client{Transport: TransportOverride}
+		return &http.Client{Transport: TransportOverride, Timeout: timeout}
 	}
-	return nil
+	return netx.NewClient(timeout).HTTP
+}
+
+func canFallbackFromHeadBucket(err error) bool {
+	var responseErr *awshttp.ResponseError
+	if !errors.As(err, &responseErr) {
+		return false
+	}
+	switch responseErr.HTTPStatusCode() {
+	case http.StatusForbidden, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	default:
+		return false
+	}
 }
 
 func connOf(c drive.Context) (*conn, error) {
@@ -123,10 +153,12 @@ func connOf(c drive.Context) (*conn, error) {
 		usePathStyle = *cc.ForcePathStyle
 	}
 	options := s3.Options{
-		Region:       firstNonEmpty(cc.Region, "us-east-1"),
-		Credentials:  credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, cc.SessionToken),
-		UsePathStyle: usePathStyle,
-		HTTPClient:   httpClientForS3(),
+		Region:           firstNonEmpty(cc.Region, "us-east-1"),
+		Credentials:      credentials.NewStaticCredentialsProvider(firstNonEmpty(cc.Username, "minioadmin"), cc.Password, cc.SessionToken),
+		UsePathStyle:     usePathStyle,
+		HTTPClient:       httpClientForS3(),
+		RetryMaxAttempts: 2,
+		RetryMode:        aws.RetryModeStandard,
 	}
 	// An empty endpoint means the AWS SDK's regional endpoint. Custom S3
 	// compatible services still provide their endpoint explicitly.

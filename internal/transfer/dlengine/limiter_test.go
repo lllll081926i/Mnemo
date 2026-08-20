@@ -3,6 +3,7 @@ package dlengine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,4 +76,52 @@ func TestSpeedLimiterNoNegativeSleep(t *testing.T) {
 		l.waitN(100)
 	}
 	// should complete quickly without sleeping
+}
+
+func TestParseContentRangeStrictly(t *testing.T) {
+	start, end, total, ok := parseContentRange("bytes 16-31/64")
+	if !ok || start != 16 || end != 31 || total != 64 {
+		t.Fatalf("unexpected parsed range: start=%d end=%d total=%d ok=%v", start, end, total, ok)
+	}
+	for _, invalid := range []string{"bytes 16-31/*", "items 16-31/64", "bytes 31-16/64", "bytes 16-64/64", "bytes 16/64"} {
+		if _, _, _, ok := parseContentRange(invalid); ok {
+			t.Errorf("parseContentRange(%q) should fail", invalid)
+		}
+	}
+}
+
+func TestResumeIdentityRequiresSameValidator(t *testing.T) {
+	previous := state{ETag: `"v1"`, LastModified: "Wed, 20 Aug 2026 01:02:03 GMT"}
+	if !resumeIdentityMatches(previous, resourceValidator{ETag: `"v1"`, LastModified: "Wed, 20 Aug 2026 01:02:03 GMT"}) {
+		t.Fatal("same ETag should allow resume")
+	}
+	if resumeIdentityMatches(previous, resourceValidator{ETag: `"v2"`, LastModified: previous.LastModified}) {
+		t.Fatal("changed ETag must invalidate resume state")
+	}
+	if resumeIdentityMatches(previous, resourceValidator{}) {
+		t.Fatal("missing current validator must invalidate validated resume state")
+	}
+}
+
+func TestPersistStateHashesSignedURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "download.state.json")
+	rawURL := "https://download.example/file?access_token=secret123&signature=private"
+	st := &state{URL: rawURL, Total: 64, Chunk: 16, Done: []bool{true, false, false, false}}
+	if err := persistState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret123") || strings.Contains(string(data), "download.example") || strings.Contains(string(data), `"url":`) {
+		t.Fatalf("resume state leaked signed URL: %s", data)
+	}
+	fingerprint := urlFingerprint(rawURL)
+	if !strings.Contains(string(data), fingerprint) {
+		t.Fatalf("resume state missing URL fingerprint: %s", data)
+	}
+	if !stateURLMatches(state{URLHash: fingerprint}, rawURL, fingerprint) {
+		t.Fatal("hashed URL should match the same resource URL")
+	}
 }

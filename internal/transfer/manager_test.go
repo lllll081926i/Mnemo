@@ -2,6 +2,9 @@ package transfer
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,6 +162,7 @@ func TestManagerLoadPersistedMarksPaused(t *testing.T) {
 	// save a downloading task that should be restored as paused
 	task := &model.DownloadTask{
 		ID:     "dl-test1",
+		UserID: "pikpak-test",
 		Status: "downloading",
 		Name:   "test.txt",
 	}
@@ -312,5 +316,83 @@ func TestSafeNameIsCrossPlatform(t *testing.T) {
 		if got := safeName(input); got != want {
 			t.Errorf("safeName(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestManagerAssignsUniqueDownloadTargets(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewManager(st, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+
+	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := &model.DownloadTask{ID: "dl-unique-1", Name: "report.txt", Status: "queued"}
+	second := &model.DownloadTask{ID: "dl-unique-2", Name: "report.txt", Status: "queued"}
+	m.addDownloadTask(first, first.Name)
+	m.addDownloadTask(second, second.Name)
+
+	if want := filepath.Join(dir, "report (1).txt"); first.LocalPath != want {
+		t.Fatalf("first LocalPath = %q, want %q", first.LocalPath, want)
+	}
+	if want := filepath.Join(dir, "report (2).txt"); second.LocalPath != want {
+		t.Fatalf("second LocalPath = %q, want %q", second.LocalPath, want)
+	}
+	if first.LocalPath == second.LocalPath {
+		t.Fatal("same-name downloads share a target path")
+	}
+}
+
+func TestManagerAvoidsOrphanedPartialTarget(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := store.Open(dir)
+	m, _ := NewManager(st, dir, nil)
+	defer m.Shutdown()
+
+	orphaned := filepath.Join(dir, "archive.zip.part")
+	if err := os.WriteFile(orphaned, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.DownloadTask{ID: "dl-partial", Name: "archive.zip", Status: "queued"}
+	m.addDownloadTask(task, task.Name)
+	if want := filepath.Join(dir, "archive (1).zip"); task.LocalPath != want {
+		t.Fatalf("LocalPath = %q, want %q", task.LocalPath, want)
+	}
+}
+
+func TestManagerDoesNotExposeDownloadSecrets(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := store.Open(dir)
+	var emitted TaskEvent
+	m, _ := NewManager(st, dir, func(event TaskEvent) { emitted = event })
+	defer m.Shutdown()
+
+	task := &model.DownloadTask{
+		ID:      "dl-secret",
+		Name:    "secret.bin",
+		Status:  "paused",
+		URL:     "https://download.example/file?signature=secret",
+		Headers: map[string]string{"Authorization": "Bearer secret"},
+		Error:   "password=secret https://download.example/file?signature=secret",
+	}
+	m.addDownloadTask(task, task.Name)
+
+	if emitted.Task.URL != "" || emitted.Task.Headers != nil || strings.Contains(emitted.Task.Error, "secret") {
+		t.Fatalf("event exposed download secret: %#v", emitted.Task)
+	}
+	listed := m.List()
+	if len(listed) != 1 || listed[0].URL != "" || listed[0].Headers != nil || strings.Contains(listed[0].Error, "secret") {
+		t.Fatalf("List exposed download secret: %#v", listed)
+	}
+	persisted, err := st.ListDownloadTasks()
+	if err != nil || len(persisted) != 1 || persisted[0].URL != "" || persisted[0].Headers != nil || strings.Contains(persisted[0].Error, "secret") {
+		t.Fatalf("store exposed download secret: tasks=%#v err=%v", persisted, err)
 	}
 }

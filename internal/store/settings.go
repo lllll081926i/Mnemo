@@ -51,7 +51,7 @@ func DefaultSettings() Settings {
 		ConfirmUpdate:          true,
 		PlaybackResume:         true,
 		KeepTasks:              true,
-		LogLevel:               "warning",
+		LogLevel:               "info",
 	}
 }
 

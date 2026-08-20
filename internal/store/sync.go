@@ -1,8 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"mnemo-go/internal/sync"
 )
@@ -90,7 +94,25 @@ func (s *Store) DeleteSyncConfig(id string) error {
 
 // syncSnapshotFile returns the file name for a given sync job snapshot.
 func syncSnapshotFile(id string) string {
-	return "SyncSnapshot_" + id + ".json"
+	clean := strings.TrimSpace(id)
+	if isSafeSnapshotID(clean) {
+		return "SyncSnapshot_" + clean + ".json"
+	}
+	sum := sha256.Sum256([]byte(id))
+	return "SyncSnapshot_" + hex.EncodeToString(sum[:16]) + ".json"
+}
+
+func isSafeSnapshotID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return id != "." && id != ".."
 }
 
 // SaveSyncSnapshot persists the last-sync file list for a job.

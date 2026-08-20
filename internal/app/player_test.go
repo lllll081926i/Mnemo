@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -66,5 +68,70 @@ func TestVideoStreamType(t *testing.T) {
 				t.Fatalf("videoStreamType(%q, %q) = %q, want %q", tc.declared, tc.filename, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSyncAccountUsageBuildsDisplayQuota(t *testing.T) {
+	acc := &model.Account{Token: &model.TokenInfo{TotalSize: 4096, FreeSize: 3072}}
+	syncAccountUsage(acc)
+	if acc.Usage == nil {
+		t.Fatal("syncAccountUsage() did not build quota")
+	}
+	if acc.Usage.Size != 4096 || acc.Usage.Used != 1024 {
+		t.Fatalf("quota = %#v, want size=4096 used=1024", acc.Usage)
+	}
+	if acc.Usage.SizeStr == "" || acc.Usage.UsedStr == "" {
+		t.Fatalf("formatted quota is incomplete: %#v", acc.Usage)
+	}
+}
+
+func TestAccountRefreshRiskFailureUsesCooldown(t *testing.T) {
+	a := NewApp()
+	a.markAccountRefreshFailure("pikpak_test", errors.New("HTTP 429 rate limited"))
+	if !a.accountRefreshCached("pikpak_test") {
+		t.Fatal("risk-control refresh failure did not enter cooldown")
+	}
+}
+
+func TestSyncRunRegistryRejectsOverlapAndCancels(t *testing.T) {
+	a := NewApp()
+	ctx, finish, err := a.beginSyncRun(context.Background(), "sync-test", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.beginSyncRun(context.Background(), "sync-test", "scheduler"); err == nil {
+		t.Fatal("overlapping sync run should be rejected")
+	}
+	ids := a.ListRunningSyncIDs()
+	if len(ids) != 1 || ids[0] != "sync-test" {
+		t.Fatalf("running sync IDs = %#v", ids)
+	}
+	if !a.CancelSync("sync-test") {
+		t.Fatal("CancelSync should accept an active job")
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("sync context was not canceled")
+	}
+	if !a.isSyncRunning("sync-test") {
+		t.Fatal("registry should retain canceled job until worker exits")
+	}
+	finish(context.Canceled)
+	if a.isSyncRunning("sync-test") || a.CancelSync("sync-test") {
+		t.Fatal("finished sync job remained active")
+	}
+}
+
+func TestValidateExternalBrowserURL(t *testing.T) {
+	for _, allowed := range []string{"https://example.com/help", "http://127.0.0.1:1234/callback", "http://localhost:1234/callback"} {
+		if _, err := validateExternalBrowserURL(allowed); err != nil {
+			t.Errorf("validateExternalBrowserURL(%q): %v", allowed, err)
+		}
+	}
+	for _, rejected := range []string{"http://example.com/help", "file:///C:/Windows/win.ini", "custom:payload", "https://user:password@example.com/", "/relative"} {
+		if _, err := validateExternalBrowserURL(rejected); err == nil {
+			t.Errorf("validateExternalBrowserURL(%q) should reject", rejected)
+		}
 	}
 }

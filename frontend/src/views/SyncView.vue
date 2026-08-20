@@ -1,7 +1,7 @@
 <script setup>
 // 文件夹同步页：本地文件夹与网盘目录的双向/单向同步任务管理。
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, RunSync, onEvent, accountName, PickDirectory } from '../api'
+import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, RunSync, CancelSync, ListRunningSyncIDs, onEvent, accountName, PickDirectory } from '../api'
 import Modal from '../components/Modal.vue'
 import SegTabs from '../components/SegTabs.vue'
 import SelectDirModal from '../components/SelectDirModal.vue'
@@ -21,6 +21,7 @@ const confirmDialog = ref(null)
 const jobs = ref([])
 const progress = ref({}) // id -> { done, total }
 const running = ref(new Set())
+let syncStateVersion = 0
 
 const showEdit = ref(false)
 const showDirPick = ref(false)
@@ -145,7 +146,9 @@ async function run(job) {
     await RunSync(job.id)
     emit('toast', `「${job.name}」同步完成`, 'success')
   } catch (e) {
-    emit('toast', String(e), 'error')
+    const message = String(e)
+    if (/cancel|取消|停止/i.test(message)) emit('toast', `「${job.name}」已停止`, 'info')
+    else emit('toast', message, 'error')
   }
   const s = new Set(running.value)
   s.delete(job.id)
@@ -153,6 +156,16 @@ async function run(job) {
   const p = { ...progress.value }
   delete p[job.id]
   progress.value = p
+}
+
+async function cancel(job) {
+  try {
+    const accepted = await CancelSync(job.id)
+    if (accepted) emit('toast', `正在停止「${job.name}」…`, 'info')
+    else emit('toast', '任务已经结束', 'info')
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  }
 }
 
 function remove(job) {
@@ -184,6 +197,23 @@ onMounted(() => {
     progress.value = { ...progress.value, [ev.id]: { done: ev.done || 0, total: ev.total || 0 } }
   }))
   offs.push(onEvent('account:changed', refresh))
+  offs.push(onEvent('sync:state', (ev) => {
+    if (!ev || !ev.id) return
+    syncStateVersion++
+    const next = new Set(running.value)
+    if (ev.running) next.add(ev.id)
+    else next.delete(ev.id)
+    running.value = next
+    if (!ev.running) {
+      const nextProgress = { ...progress.value }
+      delete nextProgress[ev.id]
+      progress.value = nextProgress
+    }
+  }))
+  const requestedAtVersion = syncStateVersion
+  ListRunningSyncIDs().then((ids) => {
+    if (syncStateVersion === requestedAtVersion) running.value = new Set(ids || [])
+  }).catch(() => {})
 })
 onBeforeUnmount(() => offs.forEach((off) => off && off()))
 </script>
@@ -231,8 +261,8 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
         </div>
         <div class="sync-task-actions">
           <div class="switch" :class="{ on: job.enabled }" :title="job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></div>
-          <button class="btn-circle" :disabled="running.has(job.id) || !accountOf(job)" title="立即同步" @click="run(job)">
-            <span v-if="running.has(job.id)" class="spin"></span><UiIcon v-else name="play" :size="14" />
+          <button class="btn-circle" :disabled="!running.has(job.id) && !accountOf(job)" :title="running.has(job.id) ? '停止同步' : '立即同步'" @click="running.has(job.id) ? cancel(job) : run(job)">
+            <UiIcon :name="running.has(job.id) ? 'close' : 'play'" :size="14" />
           </button>
           <button class="btn-circle" title="编辑" @click="openEdit(job)"><UiIcon name="pencil" :size="14" /></button>
           <button class="btn-circle" title="删除" style="color:var(--color-error)" @click="remove(job)"><UiIcon name="trash" :size="14" /></button>

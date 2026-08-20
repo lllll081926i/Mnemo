@@ -18,6 +18,10 @@ export function CancelMigrate(arg1) {
   return window['go']['app']['App']['CancelMigrate'](arg1);
 }
 
+export function CancelSync(arg1) {
+  return window['go']['app']['App']['CancelSync'](arg1);
+}
+
 export function CancelUpload(arg1) {
   return window['go']['app']['App']['CancelUpload'](arg1);
 }
@@ -176,6 +180,10 @@ export function ListOfflineTasks(arg1) {
 
 export function ListProviders() {
   return window['go']['app']['App']['ListProviders']();
+}
+
+export function ListRunningSyncIDs() {
+  return window['go']['app']['App']['ListRunningSyncIDs']();
 }
 
 export function ListShareHistory(arg1) {

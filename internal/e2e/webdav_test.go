@@ -7,8 +7,10 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/webdav"
@@ -16,6 +18,7 @@ import (
 	"mnemo-go/internal/drive"
 	_ "mnemo-go/internal/drive/providers" // register all providers
 	"mnemo-go/internal/model"
+	webdavclient "mnemo-go/internal/provider/webdav"
 	"mnemo-go/internal/store"
 )
 
@@ -194,6 +197,86 @@ func TestWebDAVEndToEnd(t *testing.T) {
 	subFiles, _ = drive.ListDir(uid, driveID, mk.FileID, nil)
 	if hasFile(rootFiles, "renamed.txt") || hasFile(subFiles, "renamed.txt") {
 		t.Fatalf("delete incomplete: root=%v sub=%v", names(rootFiles), names(subFiles))
+	}
+}
+
+func TestWebDAVConnectionKeepsCollectionSlashAndReportsQuota(t *testing.T) {
+	const response = `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype><D:collection/></D:resourcetype>
+      <D:quota-used-bytes>1024</D:quota-used-bytes>
+      <D:quota-available-bytes>3072</D:quota-available-bytes>
+    </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+  </D:response>
+</D:multistatus>`
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != "PROPFIND" || r.URL.Path != "/dav/" {
+			http.Error(w, "WebDAV collection URL must end with a slash", 530)
+			return
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "alice" || pass != "app-password" {
+			w.Header().Set("WWW-Authenticate", `Basic realm="WebDAV"`)
+			http.Error(w, "application password required", 530)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(srv.Close)
+
+	conn := &model.ConnConfig{
+		Endpoint: srv.URL + "/dav/", Username: "alice", Password: "app-password", RootPath: "/",
+	}
+	if err := drive.ValidateConnection(model.ProviderWebdav, conn); err != nil {
+		t.Fatalf("validate WebDAV collection: %v", err)
+	}
+	client, err := webdavclient.New(conn, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := client.Stat(context.Background(), "/")
+	if err != nil || entry == nil || !entry.IsDir {
+		t.Fatalf("stat collection = %#v, err = %v", entry, err)
+	}
+	used, total, err := client.Quota(context.Background(), "/")
+	if err != nil || used != 1024 || total != 4096 {
+		t.Fatalf("quota = %d/%d, err = %v", used, total, err)
+	}
+	if requests != 3 {
+		t.Fatalf("request count = %d, want 3", requests)
+	}
+}
+
+func TestWebDAVConnectionErrorIncludesSafeServerDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Digest realm="WebDAV"`)
+		w.Header().Set("Location", "/correct/dav/")
+		w.WriteHeader(530)
+		_, _ = w.Write([]byte("use the WebDAV endpoint and an application password"))
+	}))
+	t.Cleanup(srv.Close)
+
+	err := drive.ValidateConnection(model.ProviderWebdav, &model.ConnConfig{
+		Endpoint: srv.URL + "/wrong/", Username: "alice", Password: "secret",
+	})
+	if err == nil {
+		t.Fatal("expected WebDAV validation error")
+	}
+	message := err.Error()
+	for _, want := range []string{"530", "application password", "Digest", "/correct/dav/"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("diagnostic %q missing %q", message, want)
+		}
+	}
+	if strings.Contains(message, "secret") {
+		t.Fatalf("diagnostic leaked password: %q", message)
 	}
 }
 

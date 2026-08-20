@@ -14,6 +14,8 @@ export function CancelDownload(arg1:string):Promise<void>;
 
 export function CancelMigrate(arg1:string):Promise<void>;
 
+export function CancelSync(arg1:string):Promise<boolean>;
+
 export function CancelUpload(arg1:string):Promise<void>;
 
 export function CheckUpdate():Promise<app.CheckUpdateResult>;
@@ -93,6 +95,8 @@ export function ListMigrateJobs():Promise<Array<model.MigrateJob>>;
 export function ListOfflineTasks(arg1:string):Promise<Array<model.OfflineTask>>;
 
 export function ListProviders():Promise<Array<app.ProviderInfo>>;
+
+export function ListRunningSyncIDs():Promise<Array<string>>;
 
 export function ListShareHistory(arg1:string):Promise<Array<model.ShareHistoryEntry>>;
 

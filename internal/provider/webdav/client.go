@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
@@ -71,8 +72,8 @@ func New(conn *model.ConnConfig, timeout time.Duration) (*Client, error) {
 		timeout = 60 * time.Second
 	}
 	return &Client{
-		HTTP:     &http.Client{Timeout: timeout},
-		Endpoint: strings.TrimRight(base.String(), "/"),
+		HTTP:     netx.NewClient(timeout).HTTP,
+		Endpoint: base.String(),
 		Username: conn.Username,
 		Password: conn.Password,
 		UA:       netx.DefaultUA,
@@ -196,32 +197,34 @@ func escapeDAVPath(raw string) (string, error) {
 }
 
 func (c *Client) endpointPath() string {
-	if c == nil || c.base == nil || c.base.Path == "" {
-		if c == nil || c.rootPath == "" || c.rootPath == "/" {
-			return "/"
-		}
-		return strings.TrimRight(c.rootPath, "/")
+	basePath := "/"
+	if c != nil && c.base != nil && c.base.Path != "" {
+		basePath = c.base.Path
 	}
-	base := strings.TrimRight(c.base.Path, "/")
-	if c.rootPath == "" || c.rootPath == "/" {
-		return base
+	if c == nil || c.rootPath == "" || c.rootPath == "/" {
+		return basePath
 	}
-	return base + "/" + strings.Trim(c.rootPath, "/")
+	combined := strings.TrimRight(basePath, "/") + "/" + strings.Trim(c.rootPath, "/")
+	if strings.HasSuffix(c.rootPath, "/") {
+		combined += "/"
+	}
+	return combined
 }
 
 func (c *Client) withEndpointPath(resource string) string {
 	base := c.endpointPath()
-	if base == "/" {
-		return strings.TrimRight(resource, "/")
-	}
-	resource = strings.TrimRight(resource, "/")
-	if resource == "" {
+	if resource == "" || resource == "/" {
 		return base
 	}
-	if resource == base || strings.HasPrefix(resource, base+"/") {
+	if base == "/" {
 		return resource
 	}
-	return base + resource
+	baseClean := strings.TrimRight(base, "/")
+	resourceClean := strings.TrimRight(resource, "/")
+	if resourceClean == baseClean || strings.HasPrefix(resourceClean, baseClean+"/") {
+		return resource
+	}
+	return baseClean + resource
 }
 
 // logicalPath converts a server href to the provider's endpoint-relative id.
@@ -249,9 +252,9 @@ func (c *Client) logicalPath(href string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	base := c.endpointPath()
-	if base != "/" {
-		if p == base {
+	base := strings.TrimRight(c.endpointPath(), "/")
+	if base != "" {
+		if strings.TrimRight(p, "/") == base {
 			return "/", nil
 		}
 		if strings.HasPrefix(p, base+"/") {
@@ -302,7 +305,7 @@ func (e davEntry) davValue(names ...string) string {
 
 func (e davEntry) davBool(names ...string) bool {
 	v := strings.TrimSpace(e.davValue(names...))
-	return v == "1" || strings.EqualFold(v, "true")
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "collection")
 }
 
 // parsePropfind walks a multistatus document namespace-agnostically.
@@ -310,8 +313,10 @@ func parsePropfind(data []byte) ([]davEntry, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var out []davEntry
 	var cur *davEntry
-	var inProp bool
-	var propName, propText string
+	var inHref, inProp bool
+	var hrefText, propText strings.Builder
+	var propName string
+	var propDepth int
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -326,45 +331,99 @@ func parsePropfind(data []byte) ([]davEntry, error) {
 			case "response":
 				cur = &davEntry{Props: map[string]string{}}
 			case "href":
-				propName = ""
-				propText = ""
+				if cur != nil && !inProp {
+					inHref = true
+					hrefText.Reset()
+				}
 			case "prop":
 				inProp = true
 			default:
 				if inProp {
-					propName = t.Name.Local
-					propText = ""
+					if propName == "" {
+						propName = t.Name.Local
+						propDepth = 1
+						propText.Reset()
+					} else {
+						propDepth++
+						if t.Name.Local == "collection" {
+							propText.WriteString("collection")
+						}
+					}
 				}
 			}
 		case xml.CharData:
-			propText += string(t)
+			if inHref {
+				hrefText.Write(t)
+			} else if inProp && propName != "" {
+				propText.Write(t)
+			}
 		case xml.EndElement:
-			switch t.Name.Local {
-			case "href":
+			if inHref && t.Name.Local == "href" {
 				if cur != nil {
-					cur.Href = propText
+					cur.Href = strings.TrimSpace(hrefText.String())
 				}
-				propText = ""
-			case "prop":
-				inProp = false
-			case "response":
-				if cur != nil {
-					out = append(out, *cur)
-					cur = nil
+				inHref = false
+				hrefText.Reset()
+				continue
+			}
+			if inProp && propName != "" {
+				if propDepth > 1 {
+					propDepth--
+					continue
 				}
-			default:
-				if inProp && propName != "" {
+				if propDepth == 1 && t.Name.Local == propName {
 					if cur != nil {
-						cur.Props[propName] = propText
+						cur.Props[propName] = strings.TrimSpace(propText.String())
 					}
 					propName = ""
-					propText = ""
+					propDepth = 0
+					propText.Reset()
+					continue
 				}
+			}
+			if t.Name.Local == "prop" {
+				inProp = false
+				continue
+			}
+			if t.Name.Local == "response" && cur != nil {
+				out = append(out, *cur)
+				cur = nil
 			}
 		}
 	}
 	return out, nil
 }
+
+func (c *Client) responseError(method string, resp *http.Response) error {
+	if resp == nil {
+		return fmt.Errorf("webdav: %s failed without a response", method)
+	}
+	parts := make([]string, 0, 3)
+	if auth := compactDiagnostic(resp.Header.Get("WWW-Authenticate")); auth != "" {
+		parts = append(parts, "WWW-Authenticate: "+auth)
+	}
+	if location := compactDiagnostic(resp.Header.Get("Location")); location != "" {
+		parts = append(parts, "Location: "+location)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if detail := compactDiagnostic(string(body)); detail != "" {
+		parts = append(parts, detail)
+	}
+	for i := range parts {
+		if c != nil && c.Password != "" {
+			parts[i] = strings.ReplaceAll(parts[i], c.Password, "[REDACTED]")
+		}
+		if len(parts[i]) > 512 {
+			parts[i] = parts[i][:512] + "…"
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("webdav: %s %d", method, resp.StatusCode)
+	}
+	return fmt.Errorf("webdav: %s %d: %s", method, resp.StatusCode, strings.Join(parts, "; "))
+}
+
+func compactDiagnostic(raw string) string { return strings.Join(strings.Fields(raw), " ") }
 
 // List PROPFINDs a directory (depth 1) and returns its entries.
 func (c *Client) List(ctx context.Context, href string) ([]Entry, error) {
@@ -381,8 +440,7 @@ func (c *Client) List(ctx context.Context, href string) ([]Entry, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("webdav: PROPFIND %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, c.responseError("PROPFIND", resp)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -439,7 +497,7 @@ func (c *Client) Stat(ctx context.Context, href string) (*Entry, error) {
 		return nil, errors.New("webdav: not found")
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("webdav: PROPFIND %d", resp.StatusCode)
+		return nil, c.responseError("PROPFIND", resp)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -464,6 +522,54 @@ func (c *Client) Stat(ctx context.Context, href string) (*Entry, error) {
 		mod, _ = time.Parse(http.TimeFormat, s)
 	}
 	return &Entry{Name: path.Base(strings.TrimRight(p, "/")), Path: p, IsDir: isDir, Size: size, Modified: mod}, nil
+}
+
+// Quota reads the optional RFC 4331 quota properties for a collection. A
+// server that does not expose these properties is treated as unsupported,
+// rather than as a connection failure.
+func (c *Client) Quota(ctx context.Context, href string) (used, total int64, err error) {
+	req, err := c.newReq(ctx, "PROPFIND", href, strings.NewReader(propfindQuotaBody), map[string]string{
+		"Depth":        "0",
+		"Content-Type": "application/xml",
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		switch resp.StatusCode {
+		case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound,
+			http.StatusMethodNotAllowed, http.StatusConflict, http.StatusNotImplemented:
+			return 0, 0, nil
+		}
+		return 0, 0, c.responseError("PROPFIND quota", resp)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, 0, err
+	}
+	entries, err := parsePropfind(body)
+	if err != nil {
+		return 0, 0, fmt.Errorf("webdav: quota decode: %w", err)
+	}
+	if len(entries) == 0 {
+		return 0, 0, nil
+	}
+	used, usedOK := parseQuotaValue(entries[0].davValue("quota-used-bytes"))
+	available, availableOK := parseQuotaValue(entries[0].davValue("quota-available-bytes"))
+	if !usedOK || !availableOK || available > math.MaxInt64-used {
+		return used, 0, nil
+	}
+	return used, used + available, nil
+}
+
+func parseQuotaValue(raw string) (int64, bool) {
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	return value, err == nil && value >= 0
 }
 
 // Mkcol creates a directory.
@@ -575,3 +681,6 @@ func (c *Client) DownloadURL(href string) (string, error) { return c.resolve(hre
 
 const propfindAllBody = `<?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>`
+
+const propfindQuotaBody = `<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:"><D:prop><D:quota-used-bytes/><D:quota-available-bytes/></D:prop></D:propfind>`

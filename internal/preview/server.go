@@ -5,8 +5,9 @@
 //   - Every /proxy/ and /local/ request must carry a session token (t=...).
 //     The token is generated once at server startup and embedded into URLs
 //     built by ProxyURL/LocalURL, so the frontend never handles it directly.
-//   - /local/ only serves files under the configured root (download dir +
-//     engine dir). Absolute paths outside the root are rejected.
+//   - /local/ only serves individually registered files under configured
+//     download roots. Browser-visible URLs contain an opaque grant id, not a
+//     local absolute path.
 //   - /proxy/ validates the target URL scheme (http/https only) and blocks
 //     private/loopback/link-local addresses to prevent SSRF.
 //   - CORS is restricted to the Wails origin (http://localhost:* /
@@ -15,7 +16,7 @@
 // Routes:
 //
 //	GET /proxy/?u=<url>&h=<base64json>&t=<token>   streaming proxy (Range supported)
-//	GET /local/?p=<path>&t=<token>                 local file serving (Range)
+//	GET /local/<grant-id>?t=<token>                local file serving (Range)
 package preview
 
 import (
@@ -56,6 +57,8 @@ type Server struct {
 	mu                sync.Mutex // guards roots and allowedProxyHosts
 	sessionsMu        sync.Mutex
 	sessions          map[string]*playbackSession
+	localFilesMu      sync.Mutex
+	localFiles        map[string]localFileGrant
 }
 
 // PlaybackSource is a browser-playable source registered with the local
@@ -84,6 +87,11 @@ type playbackSession struct {
 	resourceSeq     uint64
 }
 
+type localFileGrant struct {
+	path     string
+	lastUsed time.Time
+}
+
 type dashPlaybackResource struct {
 	BaseURL       string
 	RawQuery      string
@@ -102,6 +110,8 @@ type playbackResourceRef struct {
 
 const playbackSessionTTL = 12 * time.Hour
 const maxPlaybackResources = 2048
+const localFileGrantTTL = 12 * time.Hour
+const maxLocalFileGrants = 1024
 
 // dashTokenParam keeps the local stream token separate from an upstream DASH
 // URL's query string. Signed query strings stay in the Go-side session and
@@ -143,6 +153,7 @@ func NewServer(roots ...string) (*Server, error) {
 		roots:             cleanRoots,
 		allowedProxyHosts: make(map[string]struct{}),
 		sessions:          make(map[string]*playbackSession),
+		localFiles:        make(map[string]localFileGrant),
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = true
@@ -176,6 +187,31 @@ func (s *Server) AddRoot(dir string) {
 		}
 	}
 	s.roots = append(s.roots, abs)
+}
+
+// SetRoots replaces all local preview roots and revokes existing file grants.
+// Runtime download-directory changes must not leave previous directories
+// permanently readable by the local server.
+func (s *Server) SetRoots(dirs ...string) {
+	cleanRoots := make([]string, 0, len(dirs))
+	seen := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		abs, err := canonicalPath(dir)
+		if err != nil || seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		cleanRoots = append(cleanRoots, abs)
+	}
+	s.mu.Lock()
+	s.roots = cleanRoots
+	s.mu.Unlock()
+	s.localFilesMu.Lock()
+	s.localFiles = make(map[string]localFileGrant)
+	s.localFilesMu.Unlock()
 }
 
 // BaseURL returns http://127.0.0.1:port.
@@ -499,12 +535,66 @@ func (session *playbackSession) resource(id string) (string, bool) {
 	return target, ok
 }
 
-// LocalURL builds a URL for a local file.
+// LocalURL registers one exact local file and returns an opaque local URL.
+// Invalid, missing, directory, or out-of-root paths are never registered.
 func (s *Server) LocalURL(path string) string {
+	resolved, err := canonicalPath(path)
+	if err != nil || !s.isWithinRoots(resolved) {
+		return ""
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	idBytes := make([]byte, 24)
+	if _, err := rand.Read(idBytes); err != nil {
+		return ""
+	}
+	id := base64.RawURLEncoding.EncodeToString(idBytes)
+	now := time.Now()
+	s.localFilesMu.Lock()
+	for key, grant := range s.localFiles {
+		if now.Sub(grant.lastUsed) > localFileGrantTTL {
+			delete(s.localFiles, key)
+		}
+	}
+	for len(s.localFiles) >= maxLocalFileGrants {
+		oldestID := ""
+		var oldest time.Time
+		for key, grant := range s.localFiles {
+			if oldestID == "" || grant.lastUsed.Before(oldest) {
+				oldestID, oldest = key, grant.lastUsed
+			}
+		}
+		if oldestID == "" {
+			break
+		}
+		delete(s.localFiles, oldestID)
+	}
+	s.localFiles[id] = localFileGrant{path: resolved, lastUsed: now}
+	s.localFilesMu.Unlock()
 	q := url.Values{}
-	q.Set("p", path)
 	q.Set("t", s.token)
-	return fmt.Sprintf("%s/local/?%s", s.BaseURL(), q.Encode())
+	return fmt.Sprintf("%s/local/%s?%s", s.BaseURL(), id, q.Encode())
+}
+
+func (s *Server) resolveLocalFile(id string) (string, bool) {
+	if id == "" || strings.ContainsAny(id, `/\\`) {
+		return "", false
+	}
+	s.localFilesMu.Lock()
+	defer s.localFilesMu.Unlock()
+	grant, ok := s.localFiles[id]
+	if !ok {
+		return "", false
+	}
+	if time.Since(grant.lastUsed) > localFileGrantTTL {
+		delete(s.localFiles, id)
+		return "", false
+	}
+	grant.lastUsed = time.Now()
+	s.localFiles[id] = grant
+	return grant.path, true
 }
 
 // validToken checks the session token.
@@ -645,9 +735,10 @@ func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	path := r.URL.Query().Get("p")
-	if path == "" {
-		http.Error(w, "missing path", http.StatusBadRequest)
+	id := strings.TrimPrefix(r.URL.Path, "/local/")
+	path, ok := s.resolveLocalFile(id)
+	if !ok {
+		http.Error(w, "local file grant not found", http.StatusNotFound)
 		return
 	}
 	abs, err := canonicalPath(path)

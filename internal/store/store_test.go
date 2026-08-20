@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -207,6 +208,37 @@ func TestTaskSavesKeepConcurrentRecords(t *testing.T) {
 	}
 }
 
+func TestDownloadTaskPersistenceOmitsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.DownloadTask{
+		ID:      "dl-sensitive",
+		URL:     "https://download.example/file?access_token=secret123",
+		Headers: map[string]string{"Authorization": "Bearer secret123", "Cookie": "sid=secret123"},
+		Error:   "password=secret123 url=https://download.example/file?access_token=secret123",
+	}
+	if err := st.SaveDownloadTask(task); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, tasksFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret123") || strings.Contains(string(raw), "authorization") || strings.Contains(string(raw), "headers") {
+		t.Fatalf("tasks file contains sensitive download state: %s", raw)
+	}
+	list, err := st.ListDownloadTasks()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListDownloadTasks: tasks=%#v err=%v", list, err)
+	}
+	if list[0].URL != "" || list[0].Headers != nil || strings.Contains(list[0].Error, "secret123") {
+		t.Fatalf("persisted task retained secrets: %#v", list[0])
+	}
+}
+
 func TestSyncConfigSavesKeepConcurrentRecords(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
@@ -230,6 +262,27 @@ func TestSyncConfigSavesKeepConcurrentRecords(t *testing.T) {
 	}
 	if len(list) != 20 {
 		t.Fatalf("concurrent sync config saves kept %d records, want 20", len(list))
+	}
+}
+
+func TestSyncSnapshotFileCannotEscapeStore(t *testing.T) {
+	unsafe := syncSnapshotFile("../../outside")
+	if filepath.Base(unsafe) != unsafe || unsafe == "SyncSnapshot_../../outside.json" {
+		t.Fatalf("unsafe snapshot file name: %q", unsafe)
+	}
+	if got := syncSnapshotFile("sync-123_OK"); got != "SyncSnapshot_sync-123_OK.json" {
+		t.Fatalf("safe snapshot ID should remain compatible, got %q", got)
+	}
+
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveSyncSnapshot("../../outside", []syncmodel.Entry{{RemoteName: "safe.txt"}}); err != nil {
+		t.Fatalf("SaveSyncSnapshot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(st.dir, unsafe)); err != nil {
+		t.Fatalf("hashed snapshot was not stored inside data directory: %v", err)
 	}
 }
 

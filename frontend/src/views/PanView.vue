@@ -128,6 +128,12 @@ const uid = computed(() => (props.account ? props.account.user_id : ''))
 const did = computed(() => (props.account ? props.account.drive_id : ''))
 const caps = computed(() => capsOf(props.account, props.providers))
 const meta = computed(() => providerMetaOf(props.account, props.providers))
+function canReceiveMigration(account) {
+  const targetCaps = capsOf(account, props.providers)
+  return !!(targetCaps.upload || (Array.isArray(targetCaps.rapidUploadHashes) && targetCaps.rapidUploadHashes.length))
+}
+const migrateAccounts = computed(() => props.accounts.filter((a) => a.user_id !== uid.value && canReceiveMigration(a)))
+const canMigrate = computed(() => !!caps.value.download && migrateAccounts.value.length > 0)
 
 const rootKey = computed(() => meta.value.rootKey || 'root')
 const rootTitle = computed(() => meta.value.rootTitle || '全部文件')
@@ -635,7 +641,7 @@ function onCtx(e, file) {
     { sep: true },
     caps.value.move && { icon: 'move', label: '移动到…', action: 'move' },
     caps.value.copy && { icon: 'copy', label: '复制到…', action: 'copy' },
-    { icon: 'migrate', label: '迁移到其他网盘…', action: 'migrate' },
+    canMigrate.value && { icon: 'migrate', label: '迁移到其他网盘…', action: 'migrate' },
     caps.value.rename && { icon: 'pencil', label: '重命名', action: 'rename' },
     caps.value.rename && selected.value.length > 1 && { icon: 'pencil', label: `批量重命名 (${selected.value.length})`, action: 'renamemulti' },
     { sep: true },
@@ -681,7 +687,9 @@ function onMenuSelect(action) {
       break
     case 'move': modalFile.value = list; modal.value = 'movedir'; break
     case 'copy': modalFile.value = list; modal.value = 'copydir'; break
-    case 'migrate': modalFile.value = list; migrateTarget.value = ''; migrateDir.value = 'root'; migrateDirName.value = '根目录'; migrateDirPick.value = false; modal.value = 'migrate'; break
+    case 'migrate':
+      if (!canMigrate.value) { emit('toast', '没有支持接收迁移文件的目标账号', 'error'); return }
+      modalFile.value = list; migrateTarget.value = ''; migrateDir.value = 'root'; migrateDirName.value = '根目录'; migrateDirPick.value = false; modal.value = 'migrate'; break
     case 'trash': run(() => trash(uid.value, did.value, ids), '已移入回收站'); break
     case 'delete':
       askConfirm(`彻底删除 ${list.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
@@ -765,9 +773,8 @@ async function checkUploadConflict(paths) {
   const existing = new Set()
   try {
     const res = await listDir(uid.value, did.value, dirId.value)
-    if (res && res.files) {
-      for (const f of res.files) existing.add(f.name)
-    }
+    const remoteFiles = Array.isArray(res) ? res : (Array.isArray(res?.files) ? res.files : [])
+    for (const f of remoteFiles) existing.add(f.name)
   } catch { /* 忽略 */ }
   const clashes = []
   for (const p of paths) {
@@ -788,6 +795,7 @@ async function pickUploadFiles() {
   try { paths = await PickFiles('选择要上传的文件') } catch { return }
   if (!paths || !paths.length) return
   const policy = await checkUploadConflict(paths)
+  if (!policy) return
   await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, paths), `已加入上传队列（${paths.length} 项）`)
 }
 async function pickUploadFolder() {
@@ -795,6 +803,7 @@ async function pickUploadFolder() {
   try { dir = await PickDirectory('选择要上传的文件夹', '') } catch { return }
   if (!dir) return
   const policy = await checkUploadConflict([dir])
+  if (!policy) return
   await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, [dir]), '已加入上传队列（文件夹）')
 }
 
@@ -820,12 +829,12 @@ async function onDirPicked(target) {
   else if (which === 'copydir') await run(() => copy(uid.value, did.value, ids, target.id), '已复制')
 }
 
-const migrateAccounts = computed(() => props.accounts.filter((a) => a.user_id !== uid.value))
 const migrateTargetAcc = computed(() => props.accounts.find((a) => a.user_id === migrateTarget.value) || null)
 
 async function doMigrate() {
   const targetAcc = props.accounts.find((a) => a.user_id === migrateTarget.value)
   if (!targetAcc) { emit('toast', '请选择目标账号', 'error'); return }
+  if (!canReceiveMigration(targetAcc)) { emit('toast', '目标账号不支持上传，无法迁移', 'error'); return }
   const list = modalFile.value
   if (!list || modalBusy.value) return
   modalBusy.value = true
@@ -993,6 +1002,7 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
 async function onDropUpload(paths) {
   if (!props.account || mode.value !== 'list' || !caps.value.upload) return
   const policy = await checkUploadConflict(paths)
+  if (!policy) return
   await run(() => uploadFiles(uid.value, did.value, dirId.value, policy, paths), `已添加拖拽上传（${paths.length} 项）`)
 }
 
@@ -1496,7 +1506,7 @@ onBeforeUnmount(() => {
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
 
     <!-- 上传同名文件冲突选择 -->
-    <Modal v-if="conflictModal" title="同名文件已存在" @close="conflictModal.onPolicy('overwrite')">
+    <Modal v-if="conflictModal" title="同名文件已存在" @close="conflictModal.onPolicy(null)">
       <div class="conflict-body">
         <p class="conflict-msg">目标目录已存在同名文件：</p>
         <div class="conflict-files">
@@ -1505,6 +1515,7 @@ onBeforeUnmount(() => {
         </div>
         <p class="conflict-q">请选择处理方式：</p>
         <div class="conflict-actions">
+          <button class="btn" @click="conflictModal.onPolicy(null)">取消上传</button>
           <button class="btn primary" @click="conflictModal.onPolicy('overwrite')">覆盖</button>
           <button class="btn" @click="conflictModal.onPolicy('rename')">保留两者（新增后缀）</button>
           <button class="btn ghost" @click="conflictModal.onPolicy('skip')">跳过</button>

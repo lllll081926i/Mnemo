@@ -148,6 +148,91 @@ func remoteTree(cfg Config) ([]Entry, error) {
 	return out, nil
 }
 
+// scanLocalFiles returns a complete local snapshot. Walk errors must be
+// propagated: treating an unreadable directory as empty could otherwise turn
+// a transient disk/permission failure into remote deletions.
+func scanLocalFiles(root string) ([]Entry, error) {
+	var local []Entry
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info == nil {
+			return fmt.Errorf("scan local path %s: missing file information", path)
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("resolve local relative path %s: %w", path, err)
+		}
+		local = append(local, Entry{
+			LocalPath:  path,
+			RemoteName: filepath.ToSlash(rel),
+			Size:       info.Size(),
+			ModTime:    info.ModTime().Unix(),
+			IsDir:      false,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan local directory %s: %w", root, err)
+	}
+	return local, nil
+}
+
+// safeLocalPath maps an untrusted remote relative path into root. Besides
+// blocking absolute and parent paths, it rejects existing symlink components
+// so a remote file cannot escape through a link inside the sync directory.
+func safeLocalPath(root, remoteName string) (string, error) {
+	if strings.TrimSpace(remoteName) == "" {
+		return "", errors.New("remote path is empty")
+	}
+	if strings.IndexByte(remoteName, 0) >= 0 {
+		return "", errors.New("remote path contains NUL")
+	}
+
+	localName := filepath.FromSlash(remoteName)
+	if strings.HasPrefix(remoteName, "/") || strings.HasPrefix(remoteName, `\`) || filepath.IsAbs(localName) || filepath.VolumeName(localName) != "" {
+		return "", fmt.Errorf("remote path must be relative: %q", remoteName)
+	}
+	cleanName := filepath.Clean(localName)
+	if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("remote path escapes sync directory: %q", remoteName)
+	}
+
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve sync directory: %w", err)
+	}
+	target := filepath.Join(rootAbs, cleanName)
+	rel, err := filepath.Rel(rootAbs, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("remote path escapes sync directory: %q", remoteName)
+	}
+
+	current := rootAbs
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, part := range parts {
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if os.IsNotExist(statErr) {
+			break
+		}
+		if statErr != nil {
+			return "", fmt.Errorf("inspect local path %s: %w", current, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("remote path crosses symbolic link: %q", remoteName)
+		}
+		if i < len(parts)-1 && !info.IsDir() {
+			return "", fmt.Errorf("remote path parent is not a directory: %q", remoteName)
+		}
+	}
+	return target, nil
+}
+
 // push uploads newer local files to the drive, preserving nested directory
 // structure on the remote side.
 func (e *Engine) push(ctx context.Context, cfg Config) error {
@@ -160,21 +245,7 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 		remoteByName[r.RemoteName] = r
 	}
 
-	var local []Entry
-	err = filepath.Walk(cfg.LocalDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		rel, _ := filepath.Rel(cfg.LocalDir, path)
-		local = append(local, Entry{
-			LocalPath:  path,
-			RemoteName: filepath.ToSlash(rel),
-			Size:       info.Size(),
-			ModTime:    info.ModTime().Unix(),
-			IsDir:      false,
-		})
-		return nil
-	})
+	local, err := scanLocalFiles(cfg.LocalDir)
 	if err != nil {
 		return err
 	}
@@ -227,7 +298,7 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 		}
 		if len(toDelete) > 0 {
 			if ok := e.guardDelete(cfg.ID, len(toDelete), len(snap)); !ok {
-				// safety threshold exceeded — skip deletions
+				return fmt.Errorf("remote deletion paused by safety threshold: %d of %d files", len(toDelete), len(snap))
 			} else {
 				if err := e.propagateRemoteDeletes(ctx, cfg, toDelete); err != nil {
 					return err
@@ -336,7 +407,11 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 		default:
 		}
 		// preserve relative path structure locally
-		localPath := filepath.Join(cfg.LocalDir, filepath.FromSlash(f.RemoteName))
+		localPath, pathErr := safeLocalPath(cfg.LocalDir, f.RemoteName)
+		if pathErr != nil {
+			failures = append(failures, fmt.Errorf("reject remote file %q: %w", f.RemoteName, pathErr))
+			continue
+		}
 		localModTime, localSize := int64(0), int64(-1)
 		if info, statErr := os.Stat(localPath); statErr == nil {
 			localModTime = info.ModTime().Unix()
@@ -364,6 +439,11 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 			e.onProgress(cfg.ID, i+1, total)
 		}
 	}
+	// A partial or unsafe pull must not propagate deletions or advance the
+	// snapshot. Doing either would turn a download/path failure into data loss.
+	if len(failures) > 0 {
+		return errors.Join(failures...)
+	}
 
 	// delete propagation: files in the snapshot but absent on the remote now →
 	// remove them locally.
@@ -380,10 +460,10 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 		}
 		if len(toDelete) > 0 {
 			if ok := e.guardDelete(cfg.ID, len(toDelete), len(snap)); !ok {
-				// safety threshold exceeded — skip deletions
+				return fmt.Errorf("local deletion paused by safety threshold: %d of %d files", len(toDelete), len(snap))
 			} else {
 				if err := e.propagateLocalDeletes(cfg, toDelete); err != nil {
-					failures = append(failures, err)
+					return err
 				}
 			}
 		}
@@ -392,11 +472,8 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 	// persist the new snapshot of remote files for next run's delete detection
 	if e.snapshots != nil {
 		if err := e.snapshots.SaveSyncSnapshot(cfg.ID, remoteFiles); err != nil {
-			failures = append(failures, fmt.Errorf("save sync snapshot: %w", err))
+			return fmt.Errorf("save sync snapshot: %w", err)
 		}
-	}
-	if len(failures) > 0 {
-		return errors.Join(failures...)
 	}
 	return nil
 }
@@ -468,7 +545,11 @@ func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) error {
 	names := make([]string, 0, len(toDelete))
 	var failures []error
 	for _, d := range toDelete {
-		localPath := filepath.Join(cfg.LocalDir, filepath.FromSlash(d.RemoteName))
+		localPath, pathErr := safeLocalPath(cfg.LocalDir, d.RemoteName)
+		if pathErr != nil {
+			failures = append(failures, fmt.Errorf("reject local deletion %q: %w", d.RemoteName, pathErr))
+			continue
+		}
 		if err := os.Remove(localPath); err != nil {
 			failures = append(failures, fmt.Errorf("delete local file %s: %w", d.RemoteName, err))
 			continue
@@ -485,7 +566,11 @@ func (e *Engine) propagateLocalDeletes(cfg Config, toDelete []Entry) error {
 // enabled sync jobs at the given IntervalMin interval. It blocks until stop
 // is closed. When IntervalMin <= 0 the scheduler is a no-op and returns
 // immediately.
-func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, error)) {
+func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, error), runners ...func(context.Context, Config) error) {
+	run := e.Run
+	if len(runners) > 0 && runners[0] != nil {
+		run = runners[0]
+	}
 	go func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -525,7 +610,7 @@ func (e *Engine) StartScheduler(stop <-chan struct{}, configs func() ([]Config, 
 					runningMu.Unlock()
 					job := c
 					go func() {
-						if err := e.Run(ctx, job); err != nil {
+						if err := run(ctx, job); err != nil {
 							e.log(job.ID, "scheduler_error", err.Error())
 						}
 						// The scheduler goroutine owns this map; this callback is

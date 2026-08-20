@@ -24,7 +24,7 @@ const defaults = {
   keepTasks: true,
   closeToTray: true,
   floater: true,
-  logLevel: 'warning',
+  logLevel: 'info',
 }
 
 const settings = ref({ ...defaults })
@@ -114,7 +114,7 @@ onMounted(async () => {
       maxDownloadSpeed: Math.round((Number(s.maxDownloadSpeed) || 0) / 1024),
       maxUploadSpeed: Math.round((Number(s.maxUploadSpeed) || 0) / 1024),
     }
-		settings.value.logLevel = settings.value.logLevel || 'warning'
+		settings.value.logLevel = settings.value.logLevel || 'info'
 		logPath.value = await GetLogPath()
 		try {
 			const env = await Environment()
@@ -599,11 +599,11 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text">
                 <span class="sg-label">日志等级</span>
-                <span class="sg-desc">Debug 会记录详细网络信息，排查问题时临时开启</span>
+                <span class="sg-desc">Info 默认记录关键流程；Debug 会增加网络细节，排查时临时开启</span>
               </div>
               <div class="sg-control">
                 <UiSelect
-                  :modelValue="settings.logLevel || 'warning'"
+                  :modelValue="settings.logLevel || 'info'"
                   :options="[
                     { value: 'error', label: 'Error' },
                     { value: 'warning', label: 'Warning' },

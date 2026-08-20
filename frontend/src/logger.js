@@ -1,8 +1,6 @@
-const prefix = '[mnemo]'
-
 function write(level, scope, message, fields) {
   const method = console[level] || console.log
-  const label = `${prefix}[${scope}] ${message}`
+  const label = `[${String(level || 'info').toUpperCase()}] ${message} | scope=${scope || 'frontend'}`
   if (fields && Object.keys(fields).length) method.call(console, label, fields)
   else method.call(console, label)
   try {

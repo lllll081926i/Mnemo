@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/sync/singleflight"
 
 	"mnemo-go/internal/captcha"
 	"mnemo-go/internal/config"
@@ -54,7 +56,21 @@ type App struct {
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
 	shutdownOnce sync.Once
 	forceQuit    atomic.Bool
+
+	accountRefreshMu         sync.Mutex
+	accountRefreshLast       map[string]time.Time
+	accountRefreshRetryAfter map[string]time.Time
+	accountRefreshGroup      singleflight.Group
+
+	syncRunMu sync.Mutex
+	syncRuns  map[string]*activeSyncRun
 }
+
+const (
+	accountRefreshTTL          = 45 * time.Minute
+	accountRefreshErrorBackoff = 10 * time.Minute
+	accountRefreshRiskBackoff  = time.Hour
+)
 
 func configKeys(config map[string]string) []string {
 	keys := make([]string, 0, len(config))
@@ -257,7 +273,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	if settings, settingsErr := st.GetSettings(); settingsErr == nil {
 		if settings.LogLevel == "" {
-			settings.LogLevel = "warning"
+			settings.LogLevel = "info"
 		}
 		// 前端事件：播放器全屏时抑制悬浮窗
 		runtime.EventsOn(ctx, "app:fullscreen", func(optionalData ...interface{}) {
@@ -267,8 +283,8 @@ func (a *App) startup(ctx context.Context) {
 			}
 		})
 		if levelErr := logging.SetLevel(settings.LogLevel); levelErr != nil {
-			logging.Warn("invalid persisted log level, using warning", "value", settings.LogLevel, "error", levelErr)
-			_ = logging.SetLevel("warning")
+			logging.Warn("invalid persisted log level, using info", "value", settings.LogLevel, "error", levelErr)
+			_ = logging.SetLevel("info")
 		}
 		if a.floater != nil {
 			a.floater.ApplySettings(settings.FloaterEnabled())
@@ -314,10 +330,11 @@ func (a *App) startup(ctx context.Context) {
 	store.InitUploadSessions(dataDir)
 	drive.SetUploadSessionStore(uploadSessionAdapter{})
 
-	// Internal media/preview server. /local/ serving is restricted to the
-	// download and data directories; remote playback uses opaque sessions.
+	// Internal media/preview server. /local/ access is restricted to exact
+	// registered files under the download directory. The application data
+	// directory is excluded because it contains settings, logs and task state.
 	dlDir := transfer.DownloadDir(st)
-	mediaProxy, err := preview.NewServer(dlDir, dataDir)
+	mediaProxy, err := preview.NewServer(dlDir)
 	if err != nil {
 		logging.Error("preview server initialization failed", "error", err)
 		// preview is not optional for media playback; surface the error instead
@@ -415,6 +432,7 @@ func (a *App) Shutdown(ctx context.Context) {
 			close(stop)
 		}
 		a.stateMu.Unlock()
+		a.cancelAllSyncRuns()
 		if migrations != nil {
 			migrations.CancelAll()
 		}
@@ -436,14 +454,38 @@ func (a *App) Shutdown(ctx context.Context) {
 	})
 }
 
-// OpenBrowser opens a URL in the system browser.
-func (a *App) OpenBrowser(url string) {
-	logging.Info("opening external browser", "url_host", urlHost(url))
-	if ctx, ok := a.wailsContext(); ok {
-		runtime.BrowserOpenURL(ctx, url)
-	} else {
-		logging.Warn("external browser request skipped", "reason", "wails context unavailable")
+// OpenBrowser opens a validated web URL in the system browser.
+func (a *App) OpenBrowser(rawURL string) error {
+	validated, err := validateExternalBrowserURL(rawURL)
+	if err != nil {
+		logging.Warn("external browser request rejected", "url_host", urlHost(rawURL), "error", err)
+		return err
 	}
+	logging.Info("opening external browser", "url_host", validated.Hostname())
+	if ctx, ok := a.wailsContext(); ok {
+		runtime.BrowserOpenURL(ctx, validated.String())
+		return nil
+	}
+	logging.Warn("external browser request skipped", "reason", "wails context unavailable")
+	return errors.New("应用界面尚未初始化")
+}
+
+func validateExternalBrowserURL(rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" {
+		return nil, errors.New("外部链接无效")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return parsed, nil
+	case "http":
+		host := strings.ToLower(parsed.Hostname())
+		ip := net.ParseIP(host)
+		if host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			return parsed, nil
+		}
+	}
+	return nil, errors.New("仅允许 HTTPS 链接或本机 HTTP 回调")
 }
 
 // OpenPikPakCaptcha is retained as a legacy external-browser fallback. The
@@ -598,6 +640,7 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	if acc.DriveID == "" {
 		acc.DriveID = model.BuildDriveID(provider, tok.ProviderAccountID)
 	}
+	syncAccountUsage(acc)
 	st, err := a.storeOrError()
 	if err != nil {
 		return nil, err
@@ -606,6 +649,7 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		logging.Error("provider account persistence failed", "provider", provider, "error", err)
 		return nil, err
 	}
+	a.markAccountRefreshSuccess(acc.UserID)
 	logging.Info("provider login completed", "provider", provider, "account_id", redactID(accountID), "duration", logging.Duration(started))
 	a.emit("account:changed", acc)
 	return acc, nil
@@ -697,8 +741,78 @@ func (a *App) ListAccounts() []*model.Account {
 	if err != nil {
 		return nil
 	}
+	for _, acc := range list {
+		syncAccountUsage(acc)
+	}
 	logging.Debug("accounts listed", "count", len(list))
 	return list
+}
+
+func syncAccountUsage(acc *model.Account) {
+	if acc == nil || acc.Token == nil || acc.Token.TotalSize <= 0 {
+		if acc != nil {
+			acc.Usage = nil
+		}
+		return
+	}
+	total := acc.Token.TotalSize
+	used := acc.Token.UsedSize
+	if used <= 0 && acc.Token.FreeSize >= 0 && acc.Token.FreeSize < total {
+		used = total - acc.Token.FreeSize
+	}
+	if used < 0 {
+		used = 0
+	}
+	if used > total {
+		used = total
+	}
+	acc.Usage = &model.Quota{
+		Type:    "account",
+		Size:    total,
+		SizeStr: model.FormatBytes(total),
+		Used:    used,
+		UsedStr: model.FormatBytes(used),
+	}
+}
+
+func (a *App) accountRefreshCached(userID string) bool {
+	now := time.Now()
+	a.accountRefreshMu.Lock()
+	defer a.accountRefreshMu.Unlock()
+	if last := a.accountRefreshLast[userID]; !last.IsZero() && now.Sub(last) < accountRefreshTTL {
+		return true
+	}
+	return now.Before(a.accountRefreshRetryAfter[userID])
+}
+
+func (a *App) markAccountRefreshSuccess(userID string) {
+	a.accountRefreshMu.Lock()
+	defer a.accountRefreshMu.Unlock()
+	if a.accountRefreshLast == nil {
+		a.accountRefreshLast = make(map[string]time.Time)
+	}
+	if a.accountRefreshRetryAfter == nil {
+		a.accountRefreshRetryAfter = make(map[string]time.Time)
+	}
+	a.accountRefreshLast[userID] = time.Now()
+	delete(a.accountRefreshRetryAfter, userID)
+}
+
+func (a *App) markAccountRefreshFailure(userID string, err error) {
+	backoff := accountRefreshErrorBackoff
+	msg := strings.ToLower(fmt.Sprint(err))
+	for _, marker := range []string{"429", "too many", "rate limit", "risk", "captcha", "风控", "频繁", "限流"} {
+		if strings.Contains(msg, marker) {
+			backoff = accountRefreshRiskBackoff
+			break
+		}
+	}
+	a.accountRefreshMu.Lock()
+	defer a.accountRefreshMu.Unlock()
+	if a.accountRefreshRetryAfter == nil {
+		a.accountRefreshRetryAfter = make(map[string]time.Time)
+	}
+	a.accountRefreshRetryAfter[userID] = time.Now().Add(backoff)
 }
 
 // RefreshAccount silently refreshes an account's quota + profile from the
@@ -715,28 +829,52 @@ func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 	if err != nil || acc == nil {
 		return nil, fmt.Errorf("账号不存在")
 	}
-	tok, err := drive.RefreshAccount(userID, acc.DriveID)
+	syncAccountUsage(acc)
+	if a.accountRefreshCached(userID) {
+		return acc, nil
+	}
+	value, err, _ := a.accountRefreshGroup.Do(userID, func() (any, error) {
+		current, getErr := st.GetAccount(userID)
+		if getErr != nil || current == nil {
+			return nil, fmt.Errorf("账号不存在")
+		}
+		if a.accountRefreshCached(userID) {
+			syncAccountUsage(current)
+			return current, nil
+		}
+		tok, refreshErr := drive.RefreshAccount(userID, current.DriveID)
+		if refreshErr != nil {
+			a.markAccountRefreshFailure(userID, refreshErr)
+			logging.Warn("account refresh failed", "account_id", redactID(userID), "error", refreshErr, "duration", logging.Duration(started))
+			return current, refreshErr
+		}
+		if tok != nil {
+			current.Token = tok
+			provider := tok.TokenFrom
+			if provider == "" {
+				provider = model.ResolveProviderFromUserID(current.UserID)
+			}
+			accountID := model.StripUserID(provider, tok.UserID)
+			if accountID == "" {
+				accountID = tok.ProviderAccountID
+			}
+			current.DriveID = normalizedDriveID(provider, accountID, tok.DefaultDriveID)
+		}
+		syncAccountUsage(current)
+		if saveErr := st.SaveAccount(current); saveErr != nil {
+			logging.Error("refreshed account persistence failed", "account_id", redactID(userID), "error", saveErr)
+			return current, fmt.Errorf("保存账号失败: %w", saveErr)
+		}
+		a.markAccountRefreshSuccess(userID)
+		a.emit("account:changed", current)
+		return current, nil
+	})
+	if value != nil {
+		acc = value.(*model.Account)
+	}
 	if err != nil {
-		logging.Warn("account refresh failed", "account_id", redactID(userID), "error", err, "duration", logging.Duration(started))
 		return acc, err
 	}
-	if tok != nil {
-		acc.Token = tok
-		provider := tok.TokenFrom
-		if provider == "" {
-			provider = model.ResolveProviderFromUserID(acc.UserID)
-		}
-		accountID := model.StripUserID(provider, tok.UserID)
-		if accountID == "" {
-			accountID = tok.ProviderAccountID
-		}
-		acc.DriveID = normalizedDriveID(provider, accountID, tok.DefaultDriveID)
-	}
-	if err := st.SaveAccount(acc); err != nil {
-		logging.Error("refreshed account persistence failed", "account_id", redactID(userID), "error", err)
-		return acc, fmt.Errorf("保存账号失败: %w", err)
-	}
-	a.emit("account:changed", acc)
 	logging.Debug("account refresh completed", "account_id", redactID(userID), "duration", logging.Duration(started))
 	return acc, nil
 }
@@ -752,6 +890,10 @@ func (a *App) RemoveAccount(userID string) error {
 		logging.Warn("account removal failed", "account_id", redactID(userID), "error", err)
 		return err
 	}
+	a.accountRefreshMu.Lock()
+	delete(a.accountRefreshLast, userID)
+	delete(a.accountRefreshRetryAfter, userID)
+	a.accountRefreshMu.Unlock()
 	a.emit("account:changed", map[string]string{"removed": userID})
 	logging.Info("account removal completed", "account_id", redactID(userID))
 	return nil
@@ -775,7 +917,7 @@ func (a *App) SaveSettings(s store.Settings) error {
 		return err
 	}
 	if s.LogLevel == "" {
-		s.LogLevel = "warning"
+		s.LogLevel = "info"
 	}
 	if err := logging.SetLevel(s.LogLevel); err != nil {
 		return err
@@ -790,7 +932,7 @@ func (a *App) SaveSettings(s store.Settings) error {
 	if s.DownloadDir != "" && dl != nil {
 		dl.SetDir(s.DownloadDir)
 		if mediaProxy != nil {
-			mediaProxy.AddRoot(s.DownloadDir)
+			mediaProxy.SetRoots(s.DownloadDir)
 		}
 	}
 	// apply concurrency limit at runtime

@@ -42,6 +42,7 @@ type progressPersistState struct {
 type Manager struct {
 	store              *store.Store
 	mu                 sync.Mutex
+	targetMu           sync.Mutex
 	persistMu          sync.Mutex
 	tasks              map[string]*model.DownloadTask
 	cancels            map[string]context.CancelFunc
@@ -158,14 +159,29 @@ func (m *Manager) notifyConcurrencyLocked() {
 func (m *Manager) loadPersisted() {
 	list, err := m.store.ListDownloadTasks()
 	if err != nil {
+		logging.Warn("download task restore failed", "error", err)
 		return
 	}
 	for i := range list {
 		t := list[i]
+		safeTask := safeDownloadTask(t)
+		dirty := t.URL != "" || len(t.Headers) > 0 || t.Error != safeTask.Error
+		t = safeTask
 		if t.Status == "downloading" || t.Status == "queued" {
 			t.Status = "paused" // interrupted on exit
+			dirty = true
+		}
+		if t.UserID == "" && t.Status != "completed" && t.Status != "canceled" {
+			t.Status = "failed"
+			t.Error = "直链任务的地址和请求头不会落盘；应用重启后请重新添加任务"
+			dirty = true
 		}
 		m.tasks[t.ID] = &t
+		if dirty {
+			if err := m.store.SaveDownloadTask(&t); err != nil {
+				logging.Warn("download task security migration failed", "task_id", t.ID, "error", err)
+			}
+		}
 	}
 }
 
@@ -175,7 +191,7 @@ func (m *Manager) List() []model.DownloadTask {
 	defer m.mu.Unlock()
 	out := make([]model.DownloadTask, 0, len(m.tasks))
 	for _, t := range m.tasks {
-		out = append(out, *t)
+		out = append(out, safeDownloadTask(*t))
 	}
 	return out
 }
@@ -205,12 +221,76 @@ func (m *Manager) update(t *model.DownloadTask) {
 		// Store methods read-modify-write one JSON file. Serialize the whole
 		// operation so concurrent task progress cannot lose another task's update.
 		m.persistMu.Lock()
-		_ = m.store.SaveDownloadTask(&snapshot)
+		persisted := safeDownloadTask(snapshot)
+		if err := m.store.SaveDownloadTask(&persisted); err != nil {
+			logging.Warn("download task persistence failed", "task_id", snapshot.ID, "status", snapshot.Status, "error", err)
+		}
 		m.persistMu.Unlock()
 	}
 	if event != nil {
-		event(TaskEvent{Kind: "download", Task: snapshot})
+		event(TaskEvent{Kind: "download", Task: safeDownloadTask(snapshot)})
 	}
+}
+
+func safeDownloadTask(task model.DownloadTask) model.DownloadTask {
+	task.URL = ""
+	task.Headers = nil
+	task.Error = logging.RedactText(task.Error)
+	return task
+}
+
+// addDownloadTask atomically assigns a collision-free final path and publishes
+// the task. Serializing assignment through targetMu prevents two concurrent
+// enqueue calls from selecting the same .part/.state/final file set.
+func (m *Manager) addDownloadTask(t *model.DownloadTask, requestedName string) {
+	m.targetMu.Lock()
+	m.mu.Lock()
+	t.LocalPath = m.nextDownloadPathLocked(safeName(requestedName))
+	m.mu.Unlock()
+	m.update(t)
+	m.targetMu.Unlock()
+}
+
+// nextDownloadPathLocked must be called with m.mu held.
+func (m *Manager) nextDownloadPathLocked(fileName string) string {
+	for index := 0; ; index++ {
+		candidateName := fileName
+		if index > 0 {
+			candidateName = numberedDownloadName(fileName, index)
+		}
+		candidate := filepath.Join(m.dir, candidateName)
+		if !m.downloadPathOccupiedLocked(candidate) {
+			return candidate
+		}
+	}
+}
+
+func (m *Manager) downloadPathOccupiedLocked(candidate string) bool {
+	for _, task := range m.tasks {
+		if task != nil && sameDownloadPath(task.LocalPath, candidate) {
+			return true
+		}
+	}
+	for _, path := range []string{candidate, candidate + ".part", candidate + ".state.json"} {
+		if _, err := os.Lstat(path); err == nil || !os.IsNotExist(err) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDownloadPath(left, right string) bool {
+	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
+}
+
+func numberedDownloadName(fileName string, index int) string {
+	ext := filepath.Ext(fileName)
+	stem := strings.TrimSuffix(fileName, ext)
+	if stem == "" {
+		stem = fileName
+		ext = ""
+	}
+	return fmt.Sprintf("%s (%d)%s", stem, index, ext)
 }
 
 func (m *Manager) shouldPersistLocked(task model.DownloadTask) bool {
@@ -232,21 +312,21 @@ func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.Down
 	// in a later detail response.
 	drive.RememberFile(userID, driveID, f)
 	t := &model.DownloadTask{
-		ID:        newID("dl"),
-		UserID:    userID,
-		DriveID:   driveID,
-		Provider:  provider,
-		FileID:    f.FileID,
-		Name:      f.Name,
-		Size:      f.Size,
-		Status:    "queued",
-		LocalPath: filepath.Join(m.dir, safeName(f.Name)),
-		Created:   time.Now().Unix(),
-		Updated:   time.Now().Unix(),
+		ID:       newID("dl"),
+		UserID:   userID,
+		DriveID:  driveID,
+		Provider: provider,
+		FileID:   f.FileID,
+		Name:     f.Name,
+		Size:     f.Size,
+		Status:   "queued",
+		Created:  time.Now().Unix(),
+		Updated:  time.Now().Unix(),
 	}
-	m.update(t)
+	m.addDownloadTask(t, f.Name)
 	go m.runDownload(t)
-	return t, nil
+	result := safeDownloadTask(*t)
+	return &result, nil
 }
 
 // AddDownloadURL enqueues a download from a direct URL.
@@ -258,18 +338,18 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 		}
 	}
 	t := &model.DownloadTask{
-		ID:        newID("dl"),
-		Name:      name,
-		URL:       url,
-		Status:    "queued",
-		LocalPath: filepath.Join(m.dir, safeName(name)),
-		Headers:   storedHeaders,
-		Created:   time.Now().Unix(),
-		Updated:   time.Now().Unix(),
+		ID:      newID("dl"),
+		Name:    name,
+		URL:     url,
+		Status:  "queued",
+		Headers: storedHeaders,
+		Created: time.Now().Unix(),
+		Updated: time.Now().Unix(),
 	}
-	m.update(t)
+	m.addDownloadTask(t, name)
 	go m.runDownload(t)
-	return t, nil
+	result := safeDownloadTask(*t)
+	return &result, nil
 }
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
@@ -535,7 +615,9 @@ func (m *Manager) Remove(id string) {
 		delete(m.removed, id)
 	}
 	m.mu.Unlock()
-	_ = m.store.DeleteDownloadTask(id)
+	if err := m.store.DeleteDownloadTask(id); err != nil {
+		logging.Warn("download task removal persistence failed", "task_id", id, "error", err)
+	}
 	if ok && !active {
 		removeDownloadTemp(t)
 	}
@@ -591,7 +673,9 @@ func (m *Manager) ClearCompleted() {
 		}
 	}
 	m.mu.Unlock()
-	_ = m.store.ClearDownloadTasks()
+	if err := m.store.ClearDownloadTasks(); err != nil {
+		logging.Warn("completed download task cleanup failed", "error", err)
+	}
 }
 
 // Shutdown stops background work.
