@@ -52,6 +52,10 @@ func (d *Driver) ValidateConnection(ctx context.Context, conn *model.ConnConfig)
 	return err
 }
 
+func connAllowsPrivateNetwork(c drive.Context) bool {
+	return c.Token != nil && c.Token.Conn != nil && c.Token.Conn.AllowPrivateNetwork
+}
+
 // RefreshAccount reads the optional RFC 4331 quota properties. Servers that
 // do not implement quota discovery keep their capacity as unknown without
 // triggering additional fallback scans.
@@ -173,8 +177,9 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 		RequestAuth: requestAuth,
 		// Digest nonce counts are request-specific. Keep the transfer serial
 		// so requests arrive at stricter WebDAV servers in nonce-count order.
-		DownloadMode: "proxy",
-		Concurrency:  1,
+		DownloadMode:        "proxy",
+		Concurrency:         1,
+		AllowPrivateNetwork: connAllowsPrivateNetwork(c),
 	}, nil
 }
 
@@ -184,11 +189,12 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 		return nil, err
 	}
 	return &model.VideoPreview{
-		DriveID:     c.DriveID,
-		FileID:      fileID,
-		Size:        u.Size,
-		Headers:     u.Headers,
-		RequestAuth: u.RequestAuth,
+		DriveID:             c.DriveID,
+		FileID:              fileID,
+		Size:                u.Size,
+		Headers:             u.Headers,
+		RequestAuth:         u.RequestAuth,
+		AllowPrivateNetwork: u.AllowPrivateNetwork,
 		Qualities: []model.VideoQuality{{
 			Quality: "origin", Label: "原画", Value: "origin",
 			URL: u.URL, Headers: u.Headers, RequestAuth: u.RequestAuth, ForceProxy: true,

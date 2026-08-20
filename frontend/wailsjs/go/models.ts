@@ -422,12 +422,14 @@ export namespace model {
 	    endpoint?: string;
 	    username?: string;
 	    password?: string;
+	    authType?: string;
 	    rootPath?: string;
 	    region?: string;
 	    bucket?: string;
 	    basePath?: string;
 	    forcePathStyle?: boolean;
 	    sessionToken?: string;
+	    allowPrivateNetwork?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnConfig(source);
@@ -439,12 +441,14 @@ export namespace model {
 	        this.endpoint = source["endpoint"];
 	        this.username = source["username"];
 	        this.password = source["password"];
+	        this.authType = source["authType"];
 	        this.rootPath = source["rootPath"];
 	        this.region = source["region"];
 	        this.bucket = source["bucket"];
 	        this.basePath = source["basePath"];
 	        this.forcePathStyle = source["forcePathStyle"];
 	        this.sessionToken = source["sessionToken"];
+	        this.allowPrivateNetwork = source["allowPrivateNetwork"];
 	    }
 	}
 	export class TokenInfo {
@@ -645,6 +649,7 @@ export namespace model {
 	    forceLocalProxy?: boolean;
 	    concurrency?: number;
 	    chunkSize?: number;
+	    allow_private_network?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DownloadURL(source);
@@ -662,6 +667,7 @@ export namespace model {
 	        this.forceLocalProxy = source["forceLocalProxy"];
 	        this.concurrency = source["concurrency"];
 	        this.chunkSize = source["chunkSize"];
+	        this.allow_private_network = source["allow_private_network"];
 	    }
 	}
 	export class File {
@@ -758,6 +764,9 @@ export namespace model {
 	    processedBytes: number;
 	    status: string;
 	    message?: string;
+	    completedFileIDs?: string[];
+	    copiedFileIDs?: string[];
+	    targetDirectoryIDs?: Record<string, string>;
 	    createdAt?: number;
 	    updatedAt?: number;
 	
@@ -782,6 +791,9 @@ export namespace model {
 	        this.processedBytes = source["processedBytes"];
 	        this.status = source["status"];
 	        this.message = source["message"];
+	        this.completedFileIDs = source["completedFileIDs"];
+	        this.copiedFileIDs = source["copiedFileIDs"];
+	        this.targetDirectoryIDs = source["targetDirectoryIDs"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
@@ -1099,6 +1111,7 @@ export namespace model {
 	    url?: string;
 	    current_quality?: string;
 	    stream_type?: string;
+	    allow_private_network?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new VideoPreview(source);
@@ -1120,6 +1133,7 @@ export namespace model {
 	        this.url = source["url"];
 	        this.current_quality = source["current_quality"];
 	        this.stream_type = source["stream_type"];
+	        this.allow_private_network = source["allow_private_network"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

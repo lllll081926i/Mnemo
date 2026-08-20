@@ -98,21 +98,26 @@ type VideoPreview struct {
 	// another provider-specific container. It lets the web player choose the
 	// correct loading path instead of guessing from an opaque signed URL.
 	StreamType string `json:"stream_type,omitempty"`
+	// AllowPrivateNetwork is set only for a mounted endpoint whose owner opted
+	// into LAN media preview. It is consumed by the local proxy and is not a
+	// browser-controlled URL permission.
+	AllowPrivateNetwork bool `json:"allow_private_network,omitempty"`
 }
 
 // DownloadURL holds a resolvable direct download source for a file.
 type DownloadURL struct {
-	DriveID         string               `json:"drive_id"`
-	FileID          string               `json:"file_id"`
-	ExpireTime      int64                `json:"expire_time"`
-	URL             string               `json:"url"`
-	Size            int64                `json:"size"`
-	Headers         map[string]string    `json:"headers,omitempty"`
-	RequestAuth     RequestAuthenticator `json:"-"`
-	DownloadMode    string               `json:"downloadMode,omitempty"` // redirect | proxy
-	ForceLocalProxy bool                 `json:"forceLocalProxy,omitempty"`
-	Concurrency     int                  `json:"concurrency,omitempty"`
-	ChunkSize       int64                `json:"chunkSize,omitempty"`
+	DriveID             string               `json:"drive_id"`
+	FileID              string               `json:"file_id"`
+	ExpireTime          int64                `json:"expire_time"`
+	URL                 string               `json:"url"`
+	Size                int64                `json:"size"`
+	Headers             map[string]string    `json:"headers,omitempty"`
+	RequestAuth         RequestAuthenticator `json:"-"`
+	DownloadMode        string               `json:"downloadMode,omitempty"` // redirect | proxy
+	ForceLocalProxy     bool                 `json:"forceLocalProxy,omitempty"`
+	Concurrency         int                  `json:"concurrency,omitempty"`
+	ChunkSize           int64                `json:"chunkSize,omitempty"`
+	AllowPrivateNetwork bool                 `json:"allow_private_network,omitempty"`
 }
 
 // FolderSize aggregates a folder subtree size/count.

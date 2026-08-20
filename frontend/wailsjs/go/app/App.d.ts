@@ -162,6 +162,8 @@ export function RestoreFiles(arg1:string,arg2:string,arg3:Array<string>):Promise
 
 export function ResumeDownload(arg1:string):Promise<void>;
 
+export function ResumeMigrate(arg1:string):Promise<model.MigrateJob>;
+
 export function ResumeUpload(arg1:string):Promise<void>;
 
 export function RevealInFolder(arg1:string):Promise<void>;

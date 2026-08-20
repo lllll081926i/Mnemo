@@ -80,6 +80,10 @@ func TestRememberProxyHostOnlyAllowsExplicitLoopback(t *testing.T) {
 	if s.isAllowedProxyHost("http://192.168.1.20:8080/media") {
 		t.Fatal("private network host must not be auto-allowlisted")
 	}
+	s.rememberProxyHost("http://192.168.1.20:8080/media", true)
+	if !s.isAllowedProxyHost("http://192.168.1.20:8080/media") {
+		t.Fatal("private network host should require explicit opt-in")
+	}
 	s.rememberProxyHost("http://127.0.0.1:45678/media")
 	if !s.isAllowedProxyHost("http://127.0.0.1:45678/media") {
 		t.Fatal("explicit loopback host should remain available for local providers/tests")

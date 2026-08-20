@@ -1328,10 +1328,11 @@ func (a *App) PreviewURL(userID, driveID, fileID string) (string, error) {
 		name = f.Name
 	}
 	return mediaProxy.PlaybackURL(preview.PlaybackSource{
-		URL:         u.URL,
-		Headers:     u.Headers,
-		RequestAuth: u.RequestAuth,
-		Filename:    name,
+		URL:                 u.URL,
+		Headers:             u.Headers,
+		RequestAuth:         u.RequestAuth,
+		AllowPrivateNetwork: u.AllowPrivateNetwork,
+		Filename:            name,
 	})
 }
 

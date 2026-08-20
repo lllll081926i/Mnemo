@@ -68,13 +68,14 @@ type Server struct {
 // expired signed URL, allowing an in-flight video request to recover without
 // exposing provider credentials to JavaScript.
 type PlaybackSource struct {
-	URL         string
-	Headers     map[string]string
-	RequestAuth model.RequestAuthenticator
-	Filename    string
-	StreamType  string
-	ExpiresAt   time.Time
-	Refresh     func(context.Context) (PlaybackSource, error)
+	URL                 string
+	Headers             map[string]string
+	RequestAuth         model.RequestAuthenticator
+	AllowPrivateNetwork bool
+	Filename            string
+	StreamType          string
+	ExpiresAt           time.Time
+	Refresh             func(context.Context) (PlaybackSource, error)
 }
 
 type playbackSession struct {
@@ -160,7 +161,7 @@ func NewServer(roots ...string) (*Server, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = true
 	transport.Proxy = globalProxy
-	transport.DialContext = safeProxyDialContext
+	transport.DialContext = s.safeProxyDialContext
 	s.proxyTransport = transport
 	s.proxyClient = &http.Client{
 		Timeout:       0,
@@ -224,7 +225,7 @@ func (s *Server) BaseURL() string { return fmt.Sprintf("http://127.0.0.1:%d", s.
 // optional display name forwarded to the browser via Content-Disposition so
 // the preview shows the real file name instead of a guessed one.
 func (s *Server) ProxyURL(target string, headers map[string]string, filename string) string {
-	s.rememberProxyHost(target)
+	s.rememberProxyHost(target, false)
 	hdrs, _ := json.Marshal(headers)
 	q := url.Values{}
 	q.Set("u", target)
@@ -248,7 +249,7 @@ func (s *Server) PlaybackURL(source PlaybackSource) (string, error) {
 	// Provider URLs are registered by the Go side. Remembering the initial host
 	// also permits local test/provider endpoints while redirects are still
 	// checked by checkProxyRedirect.
-	s.rememberProxyHost(source.URL)
+	s.rememberProxyHost(source.URL, source.AllowPrivateNetwork)
 	if !s.isSafeProxyURL(source.URL) {
 		return "", fmt.Errorf("playback source host is not allowed")
 	}
@@ -1388,12 +1389,13 @@ func proxyHostKey(u *url.URL) string {
 	return net.JoinHostPort(host, port)
 }
 
-func (s *Server) rememberProxyHost(raw string) {
+func (s *Server) rememberProxyHost(raw string, allowPrivate ...bool) {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 		return
 	}
-	if !isExplicitLocalProxyHost(u.Hostname()) {
+	privateOptIn := len(allowPrivate) > 0 && allowPrivate[0]
+	if !privateOptIn && !isExplicitLocalProxyHost(u.Hostname()) {
 		return
 	}
 	key := proxyHostKey(u)
@@ -1444,7 +1446,7 @@ func (s *Server) validateSafeProxyURL(ctx context.Context, raw string) error {
 	if err != nil || u.Hostname() == "" {
 		return fmt.Errorf("proxy target is invalid")
 	}
-	if isExplicitLocalProxyHost(u.Hostname()) && s.isAllowedProxyHost(raw) {
+	if s.isAllowedProxyHost(raw) {
 		return nil
 	}
 	if err := validateResolvedProxyHost(ctx, u.Hostname()); err != nil {
@@ -1453,12 +1455,12 @@ func (s *Server) validateSafeProxyURL(ctx context.Context, raw string) error {
 	return nil
 }
 
-func safeProxyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func (s *Server) safeProxyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
 	}
-	if isExplicitLocalProxyHost(host) {
+	if isExplicitLocalProxyHost(host) || s.isAllowedProxyHostHostPort(host, port) {
 		return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
 	}
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -1482,6 +1484,17 @@ func safeProxyDialContext(ctx context.Context, network, address string) (net.Con
 		lastErr = fmt.Errorf("proxy target has no usable address")
 	}
 	return nil, lastErr
+}
+
+func (s *Server) isAllowedProxyHostHostPort(host, port string) bool {
+	key := strings.ToLower(strings.TrimSpace(host))
+	if port != "" {
+		key = net.JoinHostPort(key, port)
+	}
+	s.mu.Lock()
+	_, ok := s.allowedProxyHosts[key]
+	s.mu.Unlock()
+	return ok
 }
 
 func validateResolvedProxyHost(ctx context.Context, host string) error {

@@ -94,6 +94,10 @@ func (d *Driver) ValidateConnection(ctx context.Context, cfg *model.ConnConfig) 
 	return fmt.Errorf("s3: bucket 与前缀校验均失败: HeadBucket: %v; ListObjectsV2: %w", headErr, listErr)
 }
 
+func ccAllowsPrivateNetwork(c drive.Context) bool {
+	return c.Token != nil && c.Token.Conn != nil && c.Token.Conn.AllowPrivateNetwork
+}
+
 // ValidateWriteConnection performs an opt-in, low-volume write probe. It
 // writes one empty object under a reserved random key and deletes it before
 // returning. Login validation deliberately does not call this method.
@@ -456,12 +460,13 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 		return nil, err
 	}
 	return &model.DownloadURL{
-		DriveID:      c.DriveID,
-		FileID:       fileID,
-		ExpireTime:   time.Now().Add(time.Duration(expireSec) * time.Second).UnixMilli(),
-		URL:          req.URL,
-		Size:         f.Size,
-		DownloadMode: "redirect",
+		DriveID:             c.DriveID,
+		FileID:              fileID,
+		ExpireTime:          time.Now().Add(time.Duration(expireSec) * time.Second).UnixMilli(),
+		URL:                 req.URL,
+		Size:                f.Size,
+		DownloadMode:        "redirect",
+		AllowPrivateNetwork: ccAllowsPrivateNetwork(c),
 	}, nil
 }
 
@@ -471,9 +476,10 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 		return nil, err
 	}
 	return &model.VideoPreview{
-		DriveID: c.DriveID,
-		FileID:  fileID,
-		Size:    u.Size,
+		DriveID:             c.DriveID,
+		FileID:              fileID,
+		Size:                u.Size,
+		AllowPrivateNetwork: u.AllowPrivateNetwork,
 		Qualities: []model.VideoQuality{{
 			Quality: "origin", Label: "原画", Value: "origin",
 			URL: u.URL, Headers: u.Headers, ForceProxy: true,

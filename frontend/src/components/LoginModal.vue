@@ -11,7 +11,7 @@ const emit = defineEmits(['close', 'toast'])
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 const form = ref({})
 const initialMountedName = providerId.value === 'webdav' ? 'WebDAV' : (providerId.value === 's3' ? 'S3' : '')
-const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false })
+const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false, allowPrivateNetwork: false })
 const webdavPreset = ref('custom')
 const genericWebdavIcon = new URL('../assets/drive-icons/webdav.svg', import.meta.url).href
 const webdavPresets = [
@@ -163,7 +163,7 @@ watch(providerId, (v, previous) => {
   form.value = {}
 	passwordVisibility.value = {}
   webdavPreset.value = 'custom'
-  mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false }
+  mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false, allowPrivateNetwork: false }
   errorText.value = ''
   resetCaptcha(previous === 'pikpak')
   if (v !== 'pikpak') clearPikPakCooldown()
@@ -473,6 +473,13 @@ async function submit() {
                       <label>认证方式</label>
                       <UiSelect v-model="mountedForm.authType" :options="webdavAuthOptions" block />
                       <div class="hint">自动会先保持 Basic 兼容；服务端要求 Digest 时仅协商一次并缓存。Bearer Token 使用下方“密码”字段填写令牌。</div>
+                    </div>
+                    <div class="field login-field">
+                      <label>内网媒体预览</label>
+                      <div class="switch-row">
+                        <button class="switch" :class="{ on: mountedForm.allowPrivateNetwork }" type="button" role="switch" :aria-checked="mountedForm.allowPrivateNetwork" @click="mountedForm.allowPrivateNetwork = !mountedForm.allowPrivateNetwork"></button>
+                        <span class="hint">默认关闭；仅允许此连接已配置主机的局域网媒体地址，避免误访问内网服务</span>
+                      </div>
                     </div>
                     <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>

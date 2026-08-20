@@ -93,6 +93,10 @@ type ConnConfig struct {
 	BasePath       string `json:"basePath,omitempty"`
 	ForcePathStyle *bool  `json:"forcePathStyle,omitempty"`
 	SessionToken   string `json:"sessionToken,omitempty"`
+	// AllowPrivateNetwork permits media preview through explicitly configured
+	// WebDAV/S3 endpoints on a LAN. It does not disable proxy SSRF checks or
+	// allow redirects to arbitrary private hosts.
+	AllowPrivateNetwork bool `json:"allowPrivateNetwork,omitempty"`
 }
 
 // Account is the persisted session record. UserID is the primary key and is
