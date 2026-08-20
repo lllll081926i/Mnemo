@@ -72,6 +72,13 @@ const (
 	accountRefreshRiskBackoff  = time.Hour
 )
 
+// retryAfterError is implemented by providers that return a precise server
+// cooldown. It deliberately lives in the app layer so providers remain
+// independent and no central provider-specific type switch is needed.
+type retryAfterError interface {
+	RetryAfter() time.Duration
+}
+
 func configKeys(config map[string]string) []string {
 	keys := make([]string, 0, len(config))
 	for key := range config {
@@ -871,6 +878,12 @@ func (a *App) markAccountRefreshFailure(userID string, err error) {
 		if strings.Contains(msg, marker) {
 			backoff = accountRefreshRiskBackoff
 			break
+		}
+	}
+	var retryAfter retryAfterError
+	if errors.As(err, &retryAfter) {
+		if requested := retryAfter.RetryAfter(); requested > backoff {
+			backoff = requested
 		}
 	}
 	a.accountRefreshMu.Lock()

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestParseAPIErrorClassifiesRiskControl(t *testing.T) {
@@ -19,6 +20,13 @@ func TestParseAPIErrorClassifiesRiskControl(t *testing.T) {
 		if !errors.As(err, &rate) || rate.RetryAfterSeconds < pikpakMinRateLimitSeconds {
 			t.Fatalf("error = %v, want rate-limit classification", err)
 		}
+	}
+}
+
+func TestRateLimitErrorExposesAtLeastMinimumCooldown(t *testing.T) {
+	var _ interface{ RetryAfter() time.Duration } = (*PikPakRateLimitError)(nil)
+	if got := (&PikPakRateLimitError{RetryAfterSeconds: 1}).RetryAfter(); got < time.Duration(pikpakMinRateLimitSeconds)*time.Second {
+		t.Fatalf("RetryAfter() = %v, want at least %ds", got, pikpakMinRateLimitSeconds)
 	}
 }
 

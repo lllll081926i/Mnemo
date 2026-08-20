@@ -312,6 +312,17 @@ func (e *PikPakRateLimitError) Error() string {
 	return fmt.Sprintf("PikPak login requests are rate limited; retry after %d seconds", seconds)
 }
 
+// RetryAfter exposes the provider-supplied cooldown to generic callers such
+// as the account refresh cache. Keeping the typed duration on the error means
+// callers do not need to parse localized error text to avoid an early retry.
+func (e *PikPakRateLimitError) RetryAfter() time.Duration {
+	seconds := e.RetryAfterSeconds
+	if seconds < pikpakMinRateLimitSeconds {
+		seconds = pikpakMinRateLimitSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func parseAPIError(data []byte, status int) error {
 	return parseAPIErrorWithRetry(data, status, "")
 }

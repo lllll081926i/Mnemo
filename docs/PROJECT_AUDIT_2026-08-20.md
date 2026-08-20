@@ -221,7 +221,7 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 - 普通 Provider 登录成功后立即写入刷新缓存，避免头像组件重复刷新 token 和配额。
 - WebDAV 容量不做多种属性/目录回退；S3 容量不做对象扫描。
 
-后续仍应改进：把 `Retry-After` 解析提升到统一网络层，加入指数退避和随机抖动；缓存“服务端明确不支持容量”状态，避免每小时重复探测；PikPak 的 token 续期与容量读取应彻底解耦，只有 token 接近过期才续期。
+Provider 现在可通过 `RetryAfter() time.Duration` 提供精确冷却，账号刷新会采用默认风控冷却和服务端要求中较长的一项；PikPak 已接入该契约。后续仍应把 `Retry-After` 解析提升到统一网络层，加入指数退避和随机抖动；缓存“服务端明确不支持容量”状态，避免每小时重复探测；PikPak 的 token 续期与容量读取应彻底解耦，只有 token 接近过期才续期。
 
 ## 8. 前端功能审查（不含视觉）
 

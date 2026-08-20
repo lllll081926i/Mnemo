@@ -115,6 +115,24 @@ func TestAccountRefreshRiskFailureUsesCooldown(t *testing.T) {
 	}
 }
 
+type testRetryAfterError struct{ delay time.Duration }
+
+func (e testRetryAfterError) Error() string             { return "rate limited" }
+func (e testRetryAfterError) RetryAfter() time.Duration { return e.delay }
+
+func TestAccountRefreshHonorsProviderRetryAfter(t *testing.T) {
+	a := NewApp()
+	const requested = 2 * time.Hour
+	before := time.Now()
+	a.markAccountRefreshFailure("provider_test", testRetryAfterError{delay: requested})
+	a.accountRefreshMu.Lock()
+	until := a.accountRefreshRetryAfter["provider_test"]
+	a.accountRefreshMu.Unlock()
+	if until.Before(before.Add(requested - time.Second)) {
+		t.Fatalf("retry cooldown = %v, want at least %v", until.Sub(before), requested)
+	}
+}
+
 func TestSyncRunRegistryRejectsOverlapAndCancels(t *testing.T) {
 	a := NewApp()
 	ctx, finish, err := a.beginSyncRun(context.Background(), "sync-test", "manual")
