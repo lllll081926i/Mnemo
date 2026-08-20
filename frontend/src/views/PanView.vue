@@ -142,6 +142,7 @@ const rootTitle = computed(() => meta.value.rootTitle || '全部文件')
 // 目录缓存：按 provider、账号、存储、模式、目录和关键词隔离。
 const dirCache = new Map() // key -> { files: File[], at: number }
 const DIR_CACHE_MAX = 200
+const DIR_CACHE_TTL_MS = 10 * 60 * 1000
 const cacheWrites = new Map()
 function cacheKeyPart(value) { return encodeURIComponent(String(value ?? '')) }
 function dirCacheKey(uidV, didV, modeV, idV, kwV) {
@@ -150,6 +151,15 @@ function dirCacheKey(uidV, didV, modeV, idV, kwV) {
 function cacheDir(key, list) {
   dirCache.set(key, { files: list || [], at: Date.now() })
   if (dirCache.size > DIR_CACHE_MAX) { const first = dirCache.keys().next().value; dirCache.delete(first) }
+}
+function getCachedDir(key) {
+  const cached = dirCache.get(key)
+  if (!cached) return null
+  if (Date.now() - cached.at > DIR_CACHE_TTL_MS) {
+    dirCache.delete(key)
+    return null
+  }
+  return cached
 }
 function queueCacheWrite(key, action) {
   const previous = cacheWrites.get(key) || Promise.resolve()
@@ -212,7 +222,7 @@ async function load(id) {
   const snapUid = uid.value, snapDid = did.value, snapMode = mode.value, snapKw = keyword.value
   const ckey = dirCacheKey(snapUid, snapDid, snapMode, id, snapKw)
   // 快路径：有缓存先立即展示，后台静默刷新
-  const cached = dirCache.get(ckey)
+  const cached = getCachedDir(ckey)
   let displayedCache = Boolean(cached)
   let networkDone = false
   if (cached) {
@@ -273,7 +283,7 @@ async function listDirectorySnapshot(id) {
   const snapUid = uid.value, snapDid = did.value
   const epoch = cacheEpoch
   const key = dirCacheKey(snapUid, snapDid, 'list', id, '')
-  const inMemory = dirCache.get(key)
+  const inMemory = getCachedDir(key)
   if (inMemory) return inMemory.files
   const persisted = await GetDirectoryCache(key).catch(() => null)
   if (epoch !== cacheEpoch || snapUid !== uid.value || snapDid !== did.value) return []

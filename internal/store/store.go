@@ -48,6 +48,8 @@ type directoryCacheDoc struct {
 	Files     []model.File `json:"files"`
 }
 
+const directoryCacheTTL = 10 * time.Minute
+
 // LoadDirectoryCache reads one account-isolated directory snapshot. Cache
 // files live under data/cache, which is co-located with the installation by
 // config.DataDir; missing cache is represented by a nil slice and no error.
@@ -61,6 +63,12 @@ func (s *Store) LoadDirectoryCache(key string) ([]model.File, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if doc.UpdatedAt <= 0 || time.Since(time.Unix(doc.UpdatedAt, 0)) > directoryCacheTTL {
+		if err := os.Remove(s.path(name)); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		return nil, nil
 	}
 	return doc.Files, nil
 }

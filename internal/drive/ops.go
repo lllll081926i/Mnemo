@@ -518,6 +518,9 @@ func DeleteBatchContext(ctx context.Context, userID, driveID string, fileIDs []F
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -594,6 +597,9 @@ func RapidUploadByHashContext(ctx context.Context, userID, driveID string, req R
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -611,6 +617,9 @@ func ResolveTransferHash(userID, driveID, fileID, method string, allowStream boo
 func ResolveTransferHashContext(ctx context.Context, userID, driveID, fileID, method string, allowStream bool) (hash string, err error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
@@ -660,6 +669,9 @@ func StreamUploadHandler(userID, driveID string) (func(ctx context.Context, pare
 func StreamUploadHandlerContext(ctx context.Context, userID, driveID string) (func(context.Context, string, string, int64, io.Reader) error, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {

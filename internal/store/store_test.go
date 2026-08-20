@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"mnemo-go/internal/model"
 	syncmodel "mnemo-go/internal/sync"
@@ -180,6 +181,35 @@ func TestDirectoryCacheIsolationAndClear(t *testing.T) {
 	}
 	if _, err := st.GetSettings(); err != nil {
 		t.Fatalf("ClearCache removed settings: %v", err)
+	}
+}
+
+func TestDirectoryCacheExpiresAndRemovesStaleSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "provider|account-a|drive-a|list|stale|"
+	if err := st.SaveDirectoryCache(key, []model.File{{FileID: "stale"}}); err != nil {
+		t.Fatal(err)
+	}
+	name := directoryCacheName(key)
+	if err := st.writeJSON(name, directoryCacheDoc{
+		UpdatedAt: time.Now().Add(-directoryCacheTTL - time.Second).Unix(),
+		Files:     []model.File{{FileID: "stale"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := st.LoadDirectoryCache(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files != nil {
+		t.Fatalf("expired directory cache returned files: %#v", files)
+	}
+	if _, err := os.Stat(st.path(name)); !os.IsNotExist(err) {
+		t.Fatalf("expired directory cache was not removed: %v", err)
 	}
 }
 
