@@ -237,7 +237,7 @@ func (e *Engine) migrateOne(ctx context.Context, job *Job, fileID string) error 
 
 func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParent string) error {
 	// resolve source file
-	srcFile, err := drive.GetFile(job.SrcUser, job.SrcDrive, fileID)
+	srcFile, err := drive.GetFileContext(ctx, job.SrcUser, job.SrcDrive, fileID)
 	if err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 
 	// resolve the source file's hash (allowStream=true lets the provider
 	// download+hash when no precomputed fingerprint exists).
-	hash, err := drive.ResolveTransferHash(job.SrcUser, job.SrcDrive, srcFile.FileID, method, true)
+	hash, err := drive.ResolveTransferHashContext(ctx, job.SrcUser, job.SrcDrive, srcFile.FileID, method, true)
 	if err != nil {
 		return true, fmt.Errorf("rapid: resolve hash %s failed: %w", method, err)
 	}
@@ -324,7 +324,7 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 	}
 
 	// attempt秒传 on the target.
-	result, err := drive.RapidUploadByHash(job.DstUser, job.DstDrive, drive.RapidUploadRequest{
+	result, err := drive.RapidUploadByHashContext(ctx, job.DstUser, job.DstDrive, drive.RapidUploadRequest{
 		ParentID:  targetParent,
 		FileName:  srcFile.Name,
 		Method:    method,
@@ -378,14 +378,14 @@ func commonHashMethod(provide, rapid []string) string {
 //   - supported=true with a non-nil error when streaming was attempted but
 //     failed; the caller may still fall back to spoolMigrate.
 func (e *Engine) tryStreamMigrate(ctx context.Context, job *Job, srcFile *model.File, targetParent string) (bool, error) {
-	streamUploader, err := drive.StreamUploadHandler(job.DstUser, job.DstDrive)
+	streamUploader, err := drive.StreamUploadHandlerContext(ctx, job.DstUser, job.DstDrive)
 	if err != nil {
 		// target provider does not implement StreamUploader.
 		return false, nil
 	}
 
 	// resolve the source download URL.
-	dl, err := drive.GetDownloadURL(job.SrcUser, job.SrcDrive, srcFile.FileID, 3600)
+	dl, err := drive.GetDownloadURLContext(ctx, job.SrcUser, job.SrcDrive, srcFile.FileID, 3600)
 	if err != nil {
 		return true, fmt.Errorf("stream: resolve download url: %w", err)
 	}
@@ -427,7 +427,7 @@ func (e *Engine) tryStreamMigrate(ctx context.Context, job *Job, srcFile *model.
 // target. This is the legacy/fallback path.
 func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File, targetParent string) error {
 	// resolve download url
-	dl, err := drive.GetDownloadURL(job.SrcUser, job.SrcDrive, srcFile.FileID, 3600)
+	dl, err := drive.GetDownloadURLContext(ctx, job.SrcUser, job.SrcDrive, srcFile.FileID, 3600)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File
 			DriveID: job.DstDrive, Name: srcFile.Name, Size: srcFile.Size,
 		},
 	}
-	handler, err := drive.QueueUploadHandler(job.DstUser, job.DstDrive)
+	handler, err := drive.QueueUploadHandlerContext(ctx, job.DstUser, job.DstDrive)
 	if err != nil {
 		return err
 	}
@@ -483,9 +483,9 @@ func (e *Engine) finalizeMove(ctx context.Context, job *Job, srcFile *model.File
 		err     error
 	)
 	if caps.RecycleBin {
-		removed, err = drive.TrashBatch(job.SrcUser, job.SrcDrive, []string{srcFile.FileID})
+		removed, err = drive.TrashBatchContext(ctx, job.SrcUser, job.SrcDrive, []string{srcFile.FileID})
 	} else {
-		removed, err = drive.DeleteBatch(job.SrcUser, job.SrcDrive, refs)
+		removed, err = drive.DeleteBatchContext(ctx, job.SrcUser, job.SrcDrive, refs)
 	}
 	if err != nil {
 		msg := fmt.Sprintf("move: source upload succeeded but source cleanup failed for %q: %v", srcFile.Name, err)
@@ -501,7 +501,7 @@ func (e *Engine) finalizeMove(ctx context.Context, job *Job, srcFile *model.File
 // migrateDir recursively migrates a folder.
 func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targetParent string) error {
 	// create folder on target
-	mk, err := drive.Mkdir(job.DstUser, job.DstDrive, targetParent, dir.Name)
+	mk, err := drive.MkdirContext(ctx, job.DstUser, job.DstDrive, targetParent, dir.Name)
 	if err != nil {
 		return newMigrationError(err, 1)
 	}
@@ -516,7 +516,7 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 	}
 	targetParent = mk.FileID
 	// list source dir
-	children, err := drive.ListDirAll(job.SrcUser, job.SrcDrive, dir.FileID, nil)
+	children, err := drive.ListDirAllContext(ctx, job.SrcUser, job.SrcDrive, dir.FileID, nil)
 	if err != nil {
 		return newMigrationError(err, 1)
 	}

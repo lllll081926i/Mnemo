@@ -336,7 +336,7 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 			continue
 		}
 
-		items, err := drive.ListDir(userID, driveID, current, nil)
+		items, err := drive.ListDirContext(ctx, userID, driveID, current, nil)
 		if err != nil {
 			return "", fmt.Errorf("查找远端目录 %q 失败: %w", segment, err)
 		}
@@ -348,7 +348,7 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 			}
 		}
 		if found == "" {
-			result, mkdirErr := drive.Mkdir(userID, driveID, current, segment)
+			result, mkdirErr := drive.MkdirContext(ctx, userID, driveID, current, segment)
 			if mkdirErr != nil {
 				return "", fmt.Errorf("创建远端目录 %q 失败: %w", segment, mkdirErr)
 			}

@@ -21,3 +21,15 @@ func TestQueueUploadHandlerContextRejectsCanceledSetup(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+func TestContextAwareDriveOpsStopBeforeProviderRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := drive.ListDirAllContext(ctx, "webdav:test", "webdav", "root", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ListDirAllContext error = %v, want context.Canceled", err)
+	}
+	if _, err := drive.GetFileContext(ctx, "webdav:test", "webdav", "file"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetFileContext error = %v, want context.Canceled", err)
+	}
+}

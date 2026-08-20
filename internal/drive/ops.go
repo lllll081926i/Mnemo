@@ -249,25 +249,44 @@ func ListDirContext(ctx context.Context, userID, driveID, dirID string, opts *Li
 
 // ListDirPage lists one cursor page.
 func ListDirPage(userID, driveID, dirID, marker string, opts *ListOptions) (page *DirPage, err error) {
+	return ListDirPageContext(context.Background(), userID, driveID, dirID, marker, opts)
+}
+
+// ListDirPageContext is the cancellation-aware cursor-page variant.
+func ListDirPageContext(ctx context.Context, userID, driveID, dirID, marker string, opts *ListOptions) (page *DirPage, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.ListPaged(context.Background(), c, dirID, marker, opts)
+	return d.ListPaged(ctx, c, dirID, marker, opts)
 }
 
 // ListDirAll consumes cursor pages when a provider exposes pagination. The
 // guard prevents a broken provider cursor from hanging a migration forever.
 func ListDirAll(userID, driveID, dirID string, opts *ListOptions) ([]model.File, error) {
+	return ListDirAllContext(context.Background(), userID, driveID, dirID, opts)
+}
+
+// ListDirAllContext consumes cursor pages while honoring cancellation.
+func ListDirAllContext(ctx context.Context, userID, driveID, dirID string, opts *ListOptions) ([]model.File, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var out []model.File
 	marker := ""
 	seen := map[string]bool{}
 	for page := 0; page < 10000; page++ {
-		p, err := ListDirPage(userID, driveID, dirID, marker, opts)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p, err := ListDirPageContext(ctx, userID, driveID, dirID, marker, opts)
 		if err != nil {
 			if page == 0 {
-				return ListDir(userID, driveID, dirID, opts)
+				return ListDirContext(ctx, userID, driveID, dirID, opts)
 			}
 			return nil, err
 		}
@@ -353,6 +372,17 @@ func ValidateConnection(provider string, conn *model.ConnConfig) error {
 
 // GetFile returns the unified file model (from cache if present).
 func GetFile(userID, driveID, fileID string) (file *model.File, err error) {
+	return GetFileContext(context.Background(), userID, driveID, fileID)
+}
+
+// GetFileContext resolves a file while honoring cancellation.
+func GetFileContext(ctx context.Context, userID, driveID, fileID string) (file *model.File, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if f, ok := fileCache.Get(userID, driveID, fileID); ok {
 		return &f, nil
 	}
@@ -361,7 +391,7 @@ func GetFile(userID, driveID, fileID string) (file *model.File, err error) {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	file, err = d.GetFile(context.Background(), c, fileID)
+	file, err = d.GetFile(ctx, c, fileID)
 	if err != nil {
 		return nil, err
 	}
@@ -465,12 +495,20 @@ func TrashBatchContext(ctx context.Context, userID, driveID string, fileIDs []st
 
 // DeleteBatch permanently deletes files (skips trash where implemented).
 func DeleteBatch(userID, driveID string, fileIDs []FileRef) (ids []string, err error) {
+	return DeleteBatchContext(context.Background(), userID, driveID, fileIDs)
+}
+
+// DeleteBatchContext permanently deletes files while honoring cancellation.
+func DeleteBatchContext(ctx context.Context, userID, driveID string, fileIDs []FileRef) (ids []string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.Delete(context.Background(), c, fileIDs)
+	return d.Delete(ctx, c, fileIDs)
 }
 
 // RestoreBatch restores files from the recycle bin.
@@ -533,22 +571,38 @@ func CreateShare(userID, driveID string, params ShareParams) (share *model.Share
 
 // RapidUploadByHash attempts fingerprint秒传 on the target drive.
 func RapidUploadByHash(userID, driveID string, req RapidUploadRequest) (result *RapidUploadResult, err error) {
+	return RapidUploadByHashContext(context.Background(), userID, driveID, req)
+}
+
+// RapidUploadByHashContext attempts fingerprint upload while honoring cancellation.
+func RapidUploadByHashContext(ctx context.Context, userID, driveID string, req RapidUploadRequest) (result *RapidUploadResult, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.RapidUploadByHash(context.Background(), c, req)
+	return d.RapidUploadByHash(ctx, c, req)
 }
 
 // ResolveTransferHash computes/reads a content fingerprint.
 func ResolveTransferHash(userID, driveID, fileID, method string, allowStream bool) (hash string, err error) {
+	return ResolveTransferHashContext(context.Background(), userID, driveID, fileID, method, allowStream)
+}
+
+// ResolveTransferHashContext computes a transfer fingerprint while honoring cancellation.
+func ResolveTransferHashContext(ctx context.Context, userID, driveID, fileID, method string, allowStream bool) (hash string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return "", err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.ResolveTransferHash(context.Background(), c, fileID, method, allowStream)
+	return d.ResolveTransferHash(ctx, c, fileID, method, allowStream)
 }
 
 // QueueUploadHandler returns the driver's single-file upload handler for an
@@ -581,6 +635,14 @@ func QueueUploadHandlerContext(ctx context.Context, userID, driveID string) (fun
 // io.Reader into the target provider, or (nil, ErrNotImplemented) when the
 // provider does not implement the StreamUploader capability.
 func StreamUploadHandler(userID, driveID string) (func(ctx context.Context, parentID, name string, size int64, reader io.Reader) error, error) {
+	return StreamUploadHandlerContext(context.Background(), userID, driveID)
+}
+
+// StreamUploadHandlerContext resolves a streaming upload handler while honoring setup cancellation.
+func StreamUploadHandlerContext(ctx context.Context, userID, driveID string) (func(context.Context, string, string, int64, io.Reader) error, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -588,6 +650,9 @@ func StreamUploadHandler(userID, driveID string) (func(ctx context.Context, pare
 	su, ok := d.(StreamUploader)
 	if !ok {
 		return nil, ErrNotImplemented
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return func(ctx context.Context, parentID, name string, size int64, reader io.Reader) error {
 		opErr := su.UploadStream(ctx, c, parentID, name, size, reader)

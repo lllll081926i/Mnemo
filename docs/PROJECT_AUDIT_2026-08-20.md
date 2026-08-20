@@ -84,7 +84,7 @@
 | F-29 | 迁移可把源盘作为目标盘 | 绑定层与迁移引擎统一拒绝同一账号/同一盘；避免目标目录位于源树时递归发现新对象。提示用户改用网盘内 Move/Copy 操作。 |
 | F-30 | “全局限速”按下载/上传任务各自独立计算 | 下载 Manager 共享一个可动态调速的进程级 limiter，所有分段和任务共用；WebDAV/S3 等直传上传共用 netx 进程级桶。增加共享计量单测，取消/切换设置仍可及时生效。 |
 | F-31 | 预览代理只做域名/字面 IP 检查，存在 DNS rebinding 和私网自动白名单 | 私网/链路本地/未指定地址不再被 Provider URL 自动加入白名单；真实请求前解析全部地址，拒绝含保留地址的域名；直连 DialContext 使用已解析的公网 IP 并保留原 Host/SNI；重定向重复做 DNS 校验。显式 loopback 仍支持本地测试和本机服务。 |
-| F-32 | 同步网络操作无法及时响应任务取消 | 新增 `ListDirContext`、`GetDownloadURLContext`、`MkdirContext`、`TrashBatchContext` 和 `QueueUploadHandlerContext` 兼容门面；同步扫描、建目录、上传准备、拉取 URL 和删除传播均沿用同步任务 Context。已有无 Context 方法保留并继续使用 `context.Background()` 兼容 Wails 调用方。 |
+| F-32 | 同步、迁移和上传队列的网络操作无法及时响应任务取消 | 新增 `ListDirContext`、`ListDirAllContext`、`GetFileContext`、`GetDownloadURLContext`、`MkdirContext`、`DeleteBatchContext`、`TrashBatchContext`、`RapidUploadByHashContext`、`ResolveTransferHashContext`、`StreamUploadHandlerContext` 和 `QueueUploadHandlerContext` 兼容门面；同步、迁移、上传队列的列表、建目录、下载地址、哈希/秒传、上传准备和删除传播均沿用调用方 Context。已有无 Context 方法保留并继续使用 `context.Background()` 兼容 Wails 调用方。 |
 
 ## 4. 风险分级
 
@@ -107,7 +107,7 @@
 
 | 编号 | 问题 | 证据/说明 | 建议 |
 |---|---|---|---|
-| P1-01（部分关闭） | 同一同步任务可并发运行，缺少任务级取消和互斥 | 手动与调度现已共用按任务 ID 的运行注册表，支持取消、运行状态恢复和应用退出清理；同步主链路的列表、建目录、下载 URL、上传准备和远端删除已改为传递调用方 Context。迁移引擎及其他通用 drive 门面仍有历史 `context.Background()` 调用。 | 同步任务重入、生命周期和主要网络操作取消已覆盖；继续把 Context 逐步接入迁移及其余长操作，并为 Provider 请求级取消补充 mock 验证。 |
+| P1-01（部分关闭） | 同一同步任务可并发运行，缺少任务级取消和互斥 | 手动与调度现已共用按任务 ID 的运行注册表，支持取消、运行状态恢复和应用退出清理；同步、迁移和上传队列主链路的列表、建目录、文件读取、下载 URL、哈希/秒传、上传准备和删除传播已改为传递调用方 Context。交互式 Wails 门面仍保留 `context.Background()` 兼容调用。 | 任务重入、生命周期和后台长操作取消已覆盖；仍需为各 Provider 的请求级取消补充 mock 验证，并评估交互式调用是否需要 Wails 级超时。 |
 | P1-02（已关闭） | 同步任务 ID 可进入快照文件名 | 原实现直接拼成 `SyncSnapshot_<id>.json` | 合法旧 ID 保持兼容，危险 ID 映射为固定 SHA-256 文件名；测试确认文件始终位于 Store 目录内。 |
 | P1-03（部分关闭） | 上传取消后可立即恢复旧任务，旧 Provider 未退出前可能出现两个 worker | 每个任务现有 generation/运行句柄，旧 worker 未退出时 Resume 明确返回等待错误；Provider 使用 worker 私有副本，队列独占合并结果并节流进度事件。 | 重复 worker、共享 `UploadingUI` 竞态已关闭；仍需为所有 Provider 补更细的取消/远端会话清理测试。 |
 | P1-04（部分关闭） | “全局限速”实际是每任务限速 | 下载 Manager 和直传上传现均使用进程级共享 limiter；所有下载分片也共享同一桶 | 并发总速率放大问题已关闭；仍需在真实平台测量磁盘/网络缓冲造成的短时突发，并为 Provider 自有上传 SDK 增加端到端节流观测。 |
