@@ -227,15 +227,24 @@ func driverAndCtx(userID, driveID string) (Driver, Context, error) {
 
 // ListDir lists a directory (search when opts.Search is set).
 func ListDir(userID, driveID, dirID string, opts *ListOptions) (files []model.File, err error) {
+	return ListDirContext(context.Background(), userID, driveID, dirID, opts)
+}
+
+// ListDirContext is the cancellation-aware variant used by long-running
+// workers. The Wails-compatible ListDir wrapper remains for existing callers.
+func ListDirContext(ctx context.Context, userID, driveID, dirID string, opts *ListOptions) (files []model.File, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
 	if opts != nil && opts.Search != "" {
-		return d.Search(context.Background(), c, opts.Search)
+		return d.Search(ctx, c, opts.Search)
 	}
-	return d.List(context.Background(), c, dirID, opts)
+	return d.List(ctx, c, dirID, opts)
 }
 
 // ListDirPage lists one cursor page.
@@ -362,12 +371,20 @@ func GetFile(userID, driveID, fileID string) (file *model.File, err error) {
 
 // GetDownloadURL resolves a download source.
 func GetDownloadURL(userID, driveID, fileID string, expireSec int) (url *model.DownloadURL, err error) {
+	return GetDownloadURLContext(context.Background(), userID, driveID, fileID, expireSec)
+}
+
+// GetDownloadURLContext is the cancellation-aware download URL resolver.
+func GetDownloadURLContext(ctx context.Context, userID, driveID, fileID string, expireSec int) (url *model.DownloadURL, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.GetDownloadURL(context.Background(), c, fileID, expireSec)
+	return d.GetDownloadURL(ctx, c, fileID, expireSec)
 }
 
 // GetVideoPreview resolves playback sources.
@@ -382,12 +399,20 @@ func GetVideoPreview(userID, driveID, fileID string) (preview *model.VideoPrevie
 
 // Mkdir creates a folder.
 func Mkdir(userID, driveID, parentID, name string) (result *MkdirResult, err error) {
+	return MkdirContext(context.Background(), userID, driveID, parentID, name)
+}
+
+// MkdirContext is the cancellation-aware folder creation variant.
+func MkdirContext(ctx context.Context, userID, driveID, parentID, name string) (result *MkdirResult, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.Mkdir(context.Background(), c, parentID, name)
+	return d.Mkdir(ctx, c, parentID, name)
 }
 
 // RenameBatch renames files one-to-one with names.
@@ -422,12 +447,20 @@ func RenameBatch(userID, driveID string, fileRefs []FileRef, names []string) (ou
 
 // TrashBatch moves files to the recycle bin.
 func TrashBatch(userID, driveID string, fileIDs []string) (ids []string, err error) {
+	return TrashBatchContext(context.Background(), userID, driveID, fileIDs)
+}
+
+// TrashBatchContext is the cancellation-aware recycle-bin variant.
+func TrashBatchContext(ctx context.Context, userID, driveID string, fileIDs []string) (ids []string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.Trash(context.Background(), c, fileIDs)
+	return d.Trash(ctx, c, fileIDs)
 }
 
 // DeleteBatch permanently deletes files (skips trash where implemented).
@@ -521,8 +554,21 @@ func ResolveTransferHash(userID, driveID, fileID, method string, allowStream boo
 // QueueUploadHandler returns the driver's single-file upload handler for an
 // account, or nil when the provider exposes none.
 func QueueUploadHandler(userID, driveID string) (func(ctx context.Context, ui *model.UploadingUI) error, error) {
+	return QueueUploadHandlerContext(context.Background(), userID, driveID)
+}
+
+// QueueUploadHandlerContext resolves a provider handler while honoring the
+// caller's setup context. The returned handler continues to receive its own
+// operation context as before.
+func QueueUploadHandlerContext(ctx context.Context, userID, driveID string) (func(context.Context, *model.UploadingUI) error, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context, ui *model.UploadingUI) error {

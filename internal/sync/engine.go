@@ -112,11 +112,11 @@ func (e *Engine) Run(ctx context.Context, cfg Config) error {
 // remoteTree recursively lists all files under remoteDir, preserving the
 // relative path (slash-joined) in RemoteName. It recurses into IsDir entries
 // returned by drive.ListDir so that nested subdirectories are not skipped.
-func remoteTree(cfg Config) ([]Entry, error) {
+func remoteTree(ctx context.Context, cfg Config) ([]Entry, error) {
 	var out []Entry
 	var walk func(parentID, relPrefix string) error
 	walk = func(parentID, relPrefix string) error {
-		files, err := drive.ListDir(cfg.UserID, cfg.DriveID, parentID, nil)
+		files, err := drive.ListDirContext(ctx, cfg.UserID, cfg.DriveID, parentID, nil)
 		if err != nil {
 			return err
 		}
@@ -236,7 +236,7 @@ func safeLocalPath(root, remoteName string) (string, error) {
 // push uploads newer local files to the drive, preserving nested directory
 // structure on the remote side.
 func (e *Engine) push(ctx context.Context, cfg Config) error {
-	remoteFiles, err := remoteTree(cfg)
+	remoteFiles, err := remoteTree(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -318,7 +318,7 @@ func (e *Engine) push(ctx context.Context, cfg Config) error {
 
 // ensureRemoteDir walks the slash-relative path components and creates each
 // directory level on the remote drive as needed, returning the leaf FileID.
-func ensureRemoteDir(cfg Config, relDir string) (string, error) {
+func ensureRemoteDir(ctx context.Context, cfg Config, relDir string) (string, error) {
 	parentID := cfg.RemoteDir
 	if relDir == "" || relDir == "." {
 		return parentID, nil
@@ -329,7 +329,7 @@ func ensureRemoteDir(cfg Config, relDir string) (string, error) {
 			continue
 		}
 		// check if it already exists under parentID
-		existing, err := drive.ListDir(cfg.UserID, cfg.DriveID, parentID, nil)
+		existing, err := drive.ListDirContext(ctx, cfg.UserID, cfg.DriveID, parentID, nil)
 		if err != nil {
 			return "", err
 		}
@@ -344,7 +344,7 @@ func ensureRemoteDir(cfg Config, relDir string) (string, error) {
 			parentID = found
 			continue
 		}
-		res, err := drive.Mkdir(cfg.UserID, cfg.DriveID, parentID, part)
+		res, err := drive.MkdirContext(ctx, cfg.UserID, cfg.DriveID, parentID, part)
 		if err != nil {
 			return "", err
 		}
@@ -366,7 +366,7 @@ func (e *driveError) Error() string { return e.op + ": " + e.msg }
 func (e *Engine) uploadFile(ctx context.Context, cfg Config, entry Entry) error {
 	// resolve/create remote parent directory so nested paths are preserved
 	relDir := filepath.Dir(entry.RemoteName)
-	parentID, err := ensureRemoteDir(cfg, relDir)
+	parentID, err := ensureRemoteDir(ctx, cfg, relDir)
 	if err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func (e *Engine) uploadFile(ctx context.Context, cfg Config, entry Entry) error 
 			Size:          entry.Size,
 		},
 	}
-	handler, err := drive.QueueUploadHandler(cfg.UserID, cfg.DriveID)
+	handler, err := drive.QueueUploadHandlerContext(ctx, cfg.UserID, cfg.DriveID)
 	if err != nil {
 		return err
 	}
@@ -390,7 +390,7 @@ func (e *Engine) uploadFile(ctx context.Context, cfg Config, entry Entry) error 
 // pull downloads remote files missing or changed locally, recursing into
 // remote subdirectories and preserving relative path structure locally.
 func (e *Engine) pull(ctx context.Context, cfg Config) error {
-	remoteFiles, err := remoteTree(cfg)
+	remoteFiles, err := remoteTree(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -421,7 +421,7 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 		if f.ModTime <= localModTime && f.Size == localSize {
 			continue
 		}
-		u, err := drive.GetDownloadURL(cfg.UserID, cfg.DriveID, f.RemoteID, 14400)
+		u, err := drive.GetDownloadURLContext(ctx, cfg.UserID, cfg.DriveID, f.RemoteID, 14400)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("resolve download URL for %s: %w", f.RemoteName, err))
 			continue
@@ -518,7 +518,7 @@ func (e *Engine) guardDelete(jobID string, deleteCount, snapTotal int) bool {
 
 // propagateRemoteDeletes trashes/deletes the given remote files that no
 // longer exist locally. It uses the drive trash batch for safety.
-func (e *Engine) propagateRemoteDeletes(_ context.Context, cfg Config, toDelete []Entry) error {
+func (e *Engine) propagateRemoteDeletes(ctx context.Context, cfg Config, toDelete []Entry) error {
 	ids := make([]string, 0, len(toDelete))
 	names := make([]string, 0, len(toDelete))
 	for _, d := range toDelete {
@@ -530,7 +530,7 @@ func (e *Engine) propagateRemoteDeletes(_ context.Context, cfg Config, toDelete 
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := drive.TrashBatch(cfg.UserID, cfg.DriveID, ids)
+	_, err := drive.TrashBatchContext(ctx, cfg.UserID, cfg.DriveID, ids)
 	if err != nil {
 		e.log(cfg.ID, "delete_error", fmt.Sprintf("remote trash failed: %v", err))
 		return fmt.Errorf("delete remote files: %w", err)
