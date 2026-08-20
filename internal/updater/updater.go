@@ -5,7 +5,9 @@ package updater
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,6 +26,12 @@ const (
 	repoName    = "mnemo-go"
 	apiReleases = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
 )
+
+// updateSigningPublicKey is injected into release builds with -ldflags. It is
+// intentionally empty in local/dev builds; unsigned historical releases keep
+// the SHA-256 compatibility path, while a release that ships a signature is
+// rejected unless this key is present and valid.
+var updateSigningPublicKey string
 
 // Info describes an available update.
 type Info struct {
@@ -90,40 +98,75 @@ func Check(ctx context.Context) (*Info, error) {
 	}
 	suffix := assetSuffix()
 	checksums := ""
+	signatureURL := ""
 	for _, a := range rel.Assets {
 		if a.Name == "SHA256SUMS.txt" {
 			checksums = a.BrowserDownloadURL
-			break
+		}
+		if a.Name == "SHA256SUMS.txt.sig" {
+			signatureURL = a.BrowserDownloadURL
 		}
 	}
 	shaByName := map[string]string{}
 	if checksums != "" {
-		values, checksumErr := fetchChecksums(ctx, checksums)
-		if checksumErr != nil { return nil, fmt.Errorf("fetch release checksums: %w", checksumErr) }
+		values, rawChecksums, checksumErr := fetchChecksums(ctx, checksums)
+		if checksumErr != nil {
+			return nil, fmt.Errorf("fetch release checksums: %w", checksumErr)
+		}
+		if signatureURL != "" {
+			signature, signatureErr := fetchBody(ctx, signatureURL, 128<<10)
+			if signatureErr != nil {
+				return nil, fmt.Errorf("fetch release signature: %w", signatureErr)
+			}
+			if signatureErr = verifyReleaseSignature(rawChecksums, signature); signatureErr != nil {
+				return nil, fmt.Errorf("release signature verification failed: %w", signatureErr)
+			}
+		}
 		shaByName = values
 	}
 	makeInfo := func(name, downloadURL string, size int64) *Info {
-		if shaByName[name] == "" { return nil }
+		if shaByName[name] == "" {
+			return nil
+		}
 		return &Info{Version: rel.TagName, URL: downloadURL, Size: size, SHA256: shaByName[name], ReleaseURL: rel.HTMLURL, Notes: rel.Body}
 	}
 	// Windows releases intentionally provide only the native installer.
 	if runtime.GOOS == "windows" {
 		for _, a := range rel.Assets {
 			if strings.Contains(a.Name, suffix) && strings.HasSuffix(a.Name, "-Setup.exe") {
-				if info := makeInfo(a.Name, a.BrowserDownloadURL, a.Size); info != nil { return info, nil }
+				if info := makeInfo(a.Name, a.BrowserDownloadURL, a.Size); info != nil {
+					return info, nil
+				}
 			}
 		}
 		return nil, nil
 	}
 	for _, a := range rel.Assets {
 		if strings.Contains(a.Name, suffix) && (strings.HasSuffix(a.Name, ".tar.gz") || strings.HasSuffix(a.Name, ".deb")) {
-			if info := makeInfo(a.Name, a.BrowserDownloadURL, a.Size); info != nil { return info, nil }
+			if info := makeInfo(a.Name, a.BrowserDownloadURL, a.Size); info != nil {
+				return info, nil
+			}
 		}
 	}
 	return nil, nil
 }
 
-func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, error) {
+func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, []byte, error) {
+	b, err := fetchBody(ctx, rawURL, 2<<20)
+	if err != nil {
+		return nil, nil, err
+	}
+	result := make(map[string]string)
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && len(fields[0]) == 64 {
+			result[fields[len(fields)-1]] = strings.ToLower(fields[0])
+		}
+	}
+	return result, b, nil
+}
+
+func fetchBody(ctx context.Context, rawURL string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -134,20 +177,32 @@ func fetchChecksums(ctx context.Context, rawURL string) (map[string]string, erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("checksum download: %s", resp.Status)
+		return nil, fmt.Errorf("download: %s", resp.Status)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]string)
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && len(fields[0]) == 64 {
-			result[fields[len(fields)-1]] = strings.ToLower(fields[0])
-		}
+	return b, nil
+}
+
+func verifyReleaseSignature(message, encodedSignature []byte) error {
+	keyText := strings.TrimSpace(updateSigningPublicKey)
+	if keyText == "" {
+		return fmt.Errorf("应用未配置更新签名公钥")
 	}
-	return result, nil
+	publicKey, err := base64.StdEncoding.DecodeString(keyText)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("更新签名公钥格式无效")
+	}
+	signature, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(encodedSignature)))
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return fmt.Errorf("更新签名格式无效")
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), message, signature) {
+		return fmt.Errorf("签名内容不匹配")
+	}
+	return nil
 }
 
 // Progress is emitted during download.
