@@ -85,6 +85,26 @@ func TestSyncAccountUsageBuildsDisplayQuota(t *testing.T) {
 	if acc.Usage.SizeStr == "" || acc.Usage.UsedStr == "" {
 		t.Fatalf("formatted quota is incomplete: %#v", acc.Usage)
 	}
+	if acc.Usage.Status != "available" {
+		t.Fatalf("quota status = %q, want available", acc.Usage.Status)
+	}
+}
+
+func TestQuotaRefreshStatusDistinguishesUnsupportedAndRateLimit(t *testing.T) {
+	unsupported := &model.Account{Token: &model.TokenInfo{}}
+	markQuotaRefreshSuccess(unsupported)
+	if unsupported.Usage == nil || unsupported.Usage.Status != "unsupported" || unsupported.Usage.UpdatedAt <= 0 {
+		t.Fatalf("unsupported quota status = %#v", unsupported.Usage)
+	}
+
+	limited := &model.Account{Token: &model.TokenInfo{TotalSize: 4096, UsedSize: 1024}}
+	markQuotaRefreshFailure(limited, errors.New("HTTP 429 rate limited"))
+	if limited.Usage == nil || limited.Usage.Status != "rate_limited" {
+		t.Fatalf("rate limited quota status = %#v", limited.Usage)
+	}
+	if limited.Usage.Size != 4096 || limited.Usage.Used != 1024 {
+		t.Fatalf("last known quota was lost: %#v", limited.Usage)
+	}
 }
 
 func TestAccountRefreshRiskFailureUsesCooldown(t *testing.T) {

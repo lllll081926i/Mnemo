@@ -750,9 +750,21 @@ func (a *App) ListAccounts() []*model.Account {
 }
 
 func syncAccountUsage(acc *model.Account) {
-	if acc == nil || acc.Token == nil || acc.Token.TotalSize <= 0 {
-		if acc != nil {
-			acc.Usage = nil
+	if acc == nil {
+		return
+	}
+	if acc.Usage == nil {
+		acc.Usage = &model.Quota{Type: "account", Status: "unknown"}
+	}
+	acc.Usage.Type = "account"
+	if acc.Token == nil || acc.Token.TotalSize <= 0 {
+		acc.Usage.Size = 0
+		acc.Usage.SizeStr = ""
+		acc.Usage.Used = 0
+		acc.Usage.UsedStr = ""
+		if acc.Usage.Status == "" || acc.Usage.Status == "available" {
+			acc.Usage.Status = "unsupported"
+			acc.Usage.Description = "服务端未提供容量信息"
 		}
 		return
 	}
@@ -767,13 +779,52 @@ func syncAccountUsage(acc *model.Account) {
 	if used > total {
 		used = total
 	}
-	acc.Usage = &model.Quota{
-		Type:    "account",
-		Size:    total,
-		SizeStr: model.FormatBytes(total),
-		Used:    used,
-		UsedStr: model.FormatBytes(used),
+	acc.Usage.Size = total
+	acc.Usage.SizeStr = model.FormatBytes(total)
+	acc.Usage.Used = used
+	acc.Usage.UsedStr = model.FormatBytes(used)
+	if acc.Usage.Status == "" || acc.Usage.Status == "unknown" || acc.Usage.Status == "unsupported" {
+		acc.Usage.Status = "available"
+		acc.Usage.Description = ""
 	}
+}
+
+func markQuotaRefreshSuccess(acc *model.Account) {
+	if acc == nil {
+		return
+	}
+	syncAccountUsage(acc)
+	if acc.Usage == nil {
+		return
+	}
+	if acc.Usage.Size > 0 {
+		acc.Usage.Status = "available"
+		acc.Usage.Description = ""
+	} else {
+		acc.Usage.Status = "unsupported"
+		acc.Usage.Description = "服务端未提供容量信息"
+	}
+	acc.Usage.UpdatedAt = time.Now().Unix()
+}
+
+func markQuotaRefreshFailure(acc *model.Account, err error) {
+	if acc == nil {
+		return
+	}
+	syncAccountUsage(acc)
+	if acc.Usage == nil {
+		return
+	}
+	message := strings.ToLower(fmt.Sprint(err))
+	for _, marker := range []string{"429", "too many", "rate limit", "risk", "captcha", "风控", "频繁", "限流"} {
+		if strings.Contains(message, marker) {
+			acc.Usage.Status = "rate_limited"
+			acc.Usage.Description = "服务端触发限流，已进入刷新冷却"
+			return
+		}
+	}
+	acc.Usage.Status = "error"
+	acc.Usage.Description = "容量刷新失败，仍显示上次成功数据"
 }
 
 func (a *App) accountRefreshCached(userID string) bool {
@@ -846,6 +897,17 @@ func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 		tok, refreshErr := drive.RefreshAccount(userID, current.DriveID)
 		if refreshErr != nil {
 			a.markAccountRefreshFailure(userID, refreshErr)
+			// The provider layer may already have persisted a rotated token even
+			// when a later quota request failed. Re-read before saving display
+			// status so a stale account object cannot overwrite that token.
+			if latest, latestErr := st.GetAccount(userID); latestErr == nil && latest != nil {
+				current = latest
+			}
+			markQuotaRefreshFailure(current, refreshErr)
+			if saveErr := st.SaveAccount(current); saveErr != nil {
+				logging.Warn("account refresh failure status persistence failed", "account_id", redactID(userID), "error", saveErr)
+			}
+			a.emit("account:changed", current)
 			logging.Warn("account refresh failed", "account_id", redactID(userID), "error", refreshErr, "duration", logging.Duration(started))
 			return current, refreshErr
 		}
@@ -861,7 +923,7 @@ func (a *App) RefreshAccount(userID string) (*model.Account, error) {
 			}
 			current.DriveID = normalizedDriveID(provider, accountID, tok.DefaultDriveID)
 		}
-		syncAccountUsage(current)
+		markQuotaRefreshSuccess(current)
 		if saveErr := st.SaveAccount(current); saveErr != nil {
 			logging.Error("refreshed account persistence failed", "account_id", redactID(userID), "error", saveErr)
 			return current, fmt.Errorf("保存账号失败: %w", saveErr)

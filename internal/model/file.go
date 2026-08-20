@@ -115,11 +115,15 @@ type FolderSize struct {
 
 // Quota models a provider account capacity snapshot.
 type Quota struct {
-	Type        string `json:"type"`
-	Size        int64  `json:"size"`
-	SizeStr     string `json:"sizeStr"`
-	Used        int64  `json:"used"`
-	UsedStr     string `json:"usedStr"`
+	Type    string `json:"type"`
+	Size    int64  `json:"size"`
+	SizeStr string `json:"sizeStr"`
+	Used    int64  `json:"used"`
+	UsedStr string `json:"usedStr"`
+	// Status is one of available, unsupported, rate_limited, error, unknown.
+	// It lets the UI distinguish an empty quota from a failed refresh.
+	Status      string `json:"status,omitempty"`
+	UpdatedAt   int64  `json:"updated_at,omitempty"`
 	Expired     string `json:"expired,omitempty"`
 	Description string `json:"description,omitempty"`
 }

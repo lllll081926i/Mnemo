@@ -27,7 +27,11 @@ const props = defineProps({
 
 // 本地 token 副本：静默刷新后更新展示，不依赖父组件重传
 const tok = ref(props.account ? (props.account.token || {}) : {})
-watch(() => props.account, (a) => { tok.value = a ? (a.token || {}) : {} })
+const quota = ref(props.account ? (props.account.usage || null) : null)
+watch(() => props.account, (a) => {
+  tok.value = a ? (a.token || {}) : {}
+  quota.value = a ? (a.usage || null) : null
+})
 
 const avatar = computed(() => tok.value.avatar || '')
 const nick = computed(() => accountName(props.account))
@@ -36,9 +40,9 @@ const providerIcon = computed(() => providerIconUrl(providerMeta.value))
 const pid = computed(() => providerMeta.value.key || (props.account ? props.account.user_id : ''))
 const providerLabel = computed(() => providerMeta.value.label || pid.value)
 
-const total = computed(() => Math.max(0, Number(tok.value.total_size) || 0))
+const total = computed(() => Math.max(0, Number(quota.value?.size ?? tok.value.total_size) || 0))
 const used = computed(() => {
-  const u = Math.max(0, Number(tok.value.used_size) || 0)
+  const u = Math.max(0, Number(quota.value?.used ?? tok.value.used_size) || 0)
   if (u > 0) return u
   // used 缺失时用 total - free 推算
   const f = Math.max(0, Number(tok.value.free_size) || 0)
@@ -51,6 +55,19 @@ const free = computed(() => {
 })
 const pct = computed(() => total.value > 0 ? Math.min(100, Math.round((used.value / total.value) * 100)) : 0)
 const hasQuota = computed(() => total.value > 0)
+const quotaStatus = computed(() => String(quota.value?.status || (hasQuota.value ? 'available' : 'unknown')))
+const quotaStatusText = computed(() => {
+  if (quota.value?.description) return quota.value.description
+  if (quotaStatus.value === 'rate_limited') return '服务端触发限流，已进入刷新冷却'
+  if (quotaStatus.value === 'error') return '容量刷新失败，仍显示上次成功数据'
+  if (quotaStatus.value === 'unsupported') return '服务端未提供容量信息'
+  if (quotaStatus.value === 'unknown') return '等待低频刷新容量信息'
+  return ''
+})
+const quotaUpdatedText = computed(() => {
+  const timestamp = Number(quota.value?.updated_at) || 0
+  return timestamp > 0 ? `更新于 ${new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false })}` : ''
+})
 
 const vipName = computed(() => tok.value.vipname || '')
 const vipExpire = computed(() => tok.value.vipexpire || '')
@@ -109,7 +126,10 @@ async function silentRefresh() {
   const snapUid = props.account.user_id
   try {
     const acc = await refreshAccountOnce(snapUid)
-    if (snapUid === (props.account && props.account.user_id) && acc && acc.token) tok.value = acc.token
+    if (snapUid === (props.account && props.account.user_id) && acc) {
+      if (acc.token) tok.value = acc.token
+      quota.value = acc.usage || null
+    }
   } catch { /* 静默 */ }
 }
 function scheduleRefresh(delay = 30 * 1000) {
@@ -173,7 +193,9 @@ onMounted(() => {
               <div><span class="ap-num-k">剩余</span><span class="ap-num-v">{{ formatBytes(free) }}</span></div>
               <div><span class="ap-num-k">总容量</span><span class="ap-num-v">{{ formatBytes(total) }}</span></div>
             </div>
-            <div v-else class="ap-noquota">该网盘暂未返回容量信息</div>
+            <div v-else class="ap-noquota">{{ quotaStatusText || '该网盘暂未返回容量信息' }}</div>
+            <div v-if="hasQuota && quotaStatusText" class="ap-qstatus">{{ quotaStatusText }}</div>
+            <div v-if="quotaUpdatedText" class="ap-qupdated">{{ quotaUpdatedText }}</div>
           </div>
         </div>
       </transition>
@@ -220,4 +242,6 @@ onMounted(() => {
 .ap-num-k { font-size: 11px; color: var(--text-tertiary); }
 .ap-num-v { font-size: 12px; color: var(--text-primary); font-weight: 600; }
 .ap-noquota { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 6px 0; }
+.ap-qstatus { margin-top: 7px; color: var(--color-warning); font-size: 11px; text-align: center; }
+.ap-qupdated { margin-top: 5px; color: var(--text-tertiary); font-size: 10.5px; text-align: center; }
 </style>
