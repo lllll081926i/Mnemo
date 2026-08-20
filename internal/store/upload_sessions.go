@@ -36,7 +36,8 @@ func InitUploadSessions(dir string) {
 	usMu.Lock()
 	defer usMu.Unlock()
 	usStoreDir = filepath.Join(dir, uploadSessionDir)
-	_ = os.MkdirAll(usStoreDir, 0o755)
+	_ = os.MkdirAll(usStoreDir, 0o700)
+	_ = os.Chmod(usStoreDir, 0o700)
 }
 
 // UploadSessionKey computes a stable hash key from the tuple
@@ -62,7 +63,12 @@ func SaveUploadSessionState(key, sessionID string, partNumbers []int) error {
 		return nil
 	}
 	if dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
 	}
 	rec := UploadSessionRecord{
 		Key:                 key,
@@ -79,7 +85,7 @@ func SaveUploadSessionState(key, sessionID string, partNumbers []int) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameWithRetry(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
