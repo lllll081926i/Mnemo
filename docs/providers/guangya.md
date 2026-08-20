@@ -76,7 +76,7 @@ SetHashes(["md5"], nil)
 
 ## 8. RefreshAccount（guangya.go）
 
-✅ 登录和手动容量刷新调用 `/userres/v1/user/space`；兼容数字和字符串字节数。业务请求收到 401/403 时仍会刷新会话再重试。
+✅ 登录和手动容量刷新调用 `/assets/v1/get_assets`，读取 `data.usedSpaceSize` / `data.totalSpaceSize`；兼容数字和字符串字节数，并携带 `Did` / `Dt` 设备头。业务请求收到 401/403 时仍会刷新会话再重试。
 
 ---
 

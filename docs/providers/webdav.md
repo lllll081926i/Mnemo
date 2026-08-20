@@ -29,7 +29,7 @@ UploadMode: direct
 
 ## 2. 文件列表（webdav.go / client.go）
 
-✅ `webdav.go:65-78` client.List → PROPFIND Depth:1 XML 解析。Go 版自研 PROPFIND。
+✅ `webdav.go:65-78` client.List → PROPFIND Depth:1 XML 解析。Go 版自研 PROPFIND；列表和 `Stat(Depth:0)` 均读取 `DAV:getcontentlength` 作为单文件字节数，不额外发送 HEAD 请求。
 
 ---
 

@@ -23,11 +23,12 @@ import (
 )
 
 const (
-	apiHost      = "https://openapi.alipan.com"
-	oauthDefault = "https://api.alistgo.com/alist/ali_open/token"
-	RootID       = "aliopen_root"
-	BackupRoot   = "backup_root"
-	ResourceRoot = "resource_root"
+	apiHost        = "https://openapi.alipan.com"
+	profileAPIHost = "https://api.alipan.com"
+	oauthDefault   = "https://api.alistgo.com/alist/ali_open/token"
+	RootID         = "aliopen_root"
+	BackupRoot     = "backup_root"
+	ResourceRoot   = "resource_root"
 
 	defaultDownloadExpireSec = 14400
 )
@@ -35,6 +36,11 @@ const (
 const (
 	aliOpenMiB = int64(1024 * 1024)
 	aliOpenGiB = int64(1024 * 1024 * 1024)
+
+	// Profile is presentation metadata only. Keep an unavailable profile from
+	// adding a request to every startup, while still allowing a later retry.
+	aliOpenProfileSuccessInterval = 30 * 24 * time.Hour
+	aliOpenProfileRetryInterval   = 24 * time.Hour
 )
 
 const providerID = model.ProviderAliopen
@@ -139,18 +145,20 @@ func init() {
 
 // Session is the raw credential JSON blob.
 type Session struct {
-	AccessToken     string `json:"access_token"`
-	RefreshToken    string `json:"refresh_token"`
-	DriveID         string `json:"drive_id"`
-	ResourceDriveID string `json:"resource_drive_id"`
-	BackupDriveID   string `json:"backup_drive_id"`
-	UserID          string `json:"user_id,omitempty"`
-	UserName        string `json:"user_name,omitempty"`
-	NickName        string `json:"nick_name,omitempty"`
-	Avatar          string `json:"avatar,omitempty"`
-	ClientID        string `json:"client_id,omitempty"`
-	ClientSecret    string `json:"client_secret,omitempty"`
-	OAuthTokenURL   string `json:"oauth_token_url,omitempty"`
+	AccessToken      string `json:"access_token"`
+	RefreshToken     string `json:"refresh_token"`
+	DriveID          string `json:"drive_id"`
+	ResourceDriveID  string `json:"resource_drive_id"`
+	BackupDriveID    string `json:"backup_drive_id"`
+	UserID           string `json:"user_id,omitempty"`
+	UserName         string `json:"user_name,omitempty"`
+	NickName         string `json:"nick_name,omitempty"`
+	Phone            string `json:"phone,omitempty"`
+	Avatar           string `json:"avatar,omitempty"`
+	ProfileCheckedAt int64  `json:"profile_checked_at,omitempty"`
+	ClientID         string `json:"client_id,omitempty"`
+	ClientSecret     string `json:"client_secret,omitempty"`
+	OAuthTokenURL    string `json:"oauth_token_url,omitempty"`
 }
 
 // aliOpenFlexString accepts identifiers returned by the Open API as either
@@ -183,10 +191,24 @@ type aliOpenTokenResponse struct {
 	UserID          string            `json:"user_id"`
 	UserName        string            `json:"user_name"`
 	NickName        string            `json:"nick_name"`
+	Phone           string            `json:"phone"`
+	Mobile          string            `json:"mobile"`
 	Avatar          string            `json:"avatar"`
 	DefaultDriveID  aliOpenFlexString `json:"default_drive_id"`
 	ResourceDriveID aliOpenFlexString `json:"resource_drive_id"`
 	BackupDriveID   aliOpenFlexString `json:"backup_drive_id"`
+}
+
+// aliOpenAccountProfile is returned by the consumer profile endpoint. Open
+// token responses commonly contain only identifiers, while this endpoint
+// exposes the display name / masked phone that should be shown to the user.
+type aliOpenAccountProfile struct {
+	UserID   string `json:"user_id"`
+	UserName string `json:"user_name"`
+	NickName string `json:"nick_name"`
+	Phone    string `json:"phone"`
+	Mobile   string `json:"mobile"`
+	Avatar   string `json:"avatar"`
 }
 
 func (s *Session) applyTokenProfile(res aliOpenTokenResponse) {
@@ -202,6 +224,9 @@ func (s *Session) applyTokenProfile(res aliOpenTokenResponse) {
 	if value := strings.TrimSpace(res.NickName); value != "" {
 		s.NickName = value
 	}
+	if value := firstAliOpenProfileValue(res.Phone, res.Mobile); value != "" {
+		s.Phone = value
+	}
 	if value := strings.TrimSpace(res.Avatar); value != "" {
 		s.Avatar = value
 	}
@@ -215,6 +240,27 @@ func (s *Session) applyTokenProfile(res aliOpenTokenResponse) {
 	}
 	if s.BackupDriveID == "" {
 		s.BackupDriveID = strings.TrimSpace(res.BackupDriveID.String())
+	}
+}
+
+func (s *Session) applyAccountProfile(profile aliOpenAccountProfile) {
+	if s == nil {
+		return
+	}
+	if value := strings.TrimSpace(profile.UserID); value != "" {
+		s.UserID = value
+	}
+	if value := strings.TrimSpace(profile.UserName); value != "" {
+		s.UserName = value
+	}
+	if value := strings.TrimSpace(profile.NickName); value != "" {
+		s.NickName = value
+	}
+	if value := firstAliOpenProfileValue(profile.Phone, profile.Mobile); value != "" {
+		s.Phone = value
+	}
+	if value := strings.TrimSpace(profile.Avatar); value != "" {
+		s.Avatar = value
 	}
 }
 
@@ -234,36 +280,68 @@ func (s *Session) displayName() string {
 	if s == nil {
 		return ""
 	}
-	for _, value := range []string{s.NickName, s.UserName, s.UserID, s.DriveID} {
-		if value = strings.TrimSpace(value); value != "" {
+	if value := s.profileName(); value != "" {
+		return value
+	}
+	return s.accountID()
+}
+
+// profileName returns only a human-facing value. The Open token's user_id and
+// drive_id are stable identifiers, but must not keep winning over a later
+// nickname/phone refresh in the account UI.
+func (s *Session) profileName() string {
+	if s == nil {
+		return ""
+	}
+	for _, value := range []string{s.NickName, s.UserName, s.Phone} {
+		if value = s.profileValue(value); value != "" {
 			return value
 		}
 	}
 	return ""
 }
 
+func (s *Session) profileValue(value string) string {
+	if s == nil {
+		return ""
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || value == strings.TrimSpace(s.UserID) || value == strings.TrimSpace(s.DriveID) {
+		return ""
+	}
+	return value
+}
+
+func (s *Session) profileRefreshDue(now time.Time) bool {
+	if s == nil || s.ProfileCheckedAt <= 0 {
+		return s != nil
+	}
+	interval := aliOpenProfileRetryInterval
+	if s.profileName() != "" {
+		interval = aliOpenProfileSuccessInterval
+	}
+	return now.Sub(time.Unix(s.ProfileCheckedAt, 0)) >= interval
+}
+
 func applyAliOpenProfile(token *model.TokenInfo, sess *Session) {
 	if token == nil || sess == nil {
 		return
 	}
-	if value := strings.TrimSpace(sess.UserName); value != "" {
-		token.UserName = value
-	}
-	if value := strings.TrimSpace(sess.NickName); value != "" {
-		token.NickName = value
-	}
 	if value := strings.TrimSpace(sess.Avatar); value != "" {
 		token.Avatar = value
 	}
-	if value := sess.displayName(); value != "" {
-		token.Name = value
-		if token.UserName == "" {
-			token.UserName = value
-		}
-		if token.NickName == "" {
-			token.NickName = value
-		}
+	name := sess.profileName()
+	if name == "" {
+		return
 	}
+	// Keep all three display fields coherent: the frontend prefers nick_name,
+	// so an old identifier left there would otherwise hide a newly fetched name.
+	userName := sess.profileValue(sess.UserName)
+	nickName := sess.profileValue(sess.NickName)
+	phone := sess.profileValue(sess.Phone)
+	token.UserName = firstAliOpenProfileValue(userName, phone, name)
+	token.NickName = firstAliOpenProfileValue(nickName, userName, phone, name)
+	token.Name = name
 }
 
 func applyAliOpenQuota(token *model.TokenInfo, used, total int64) {
@@ -497,6 +575,46 @@ func (c *client) refreshToken(ctx context.Context) error {
 	c.session.applyTokenProfile(res)
 	c.persistSession()
 	return nil
+}
+
+// refreshAccountProfile obtains display metadata only when it is due. It is
+// deliberately best-effort: a provider's profile endpoint must not make an
+// otherwise healthy token or quota refresh fail. The persisted timestamp keeps
+// an unavailable endpoint from being retried on every application launch.
+func (c *client) refreshAccountProfile(ctx context.Context) {
+	if c == nil || c.http == nil || c.session == nil || !c.session.profileRefreshDue(time.Now()) {
+		return
+	}
+	c.session.ProfileCheckedAt = time.Now().Unix()
+
+	var resp *http.Response
+	err := aliOpenLimiter.run(ctx, func() error {
+		var requestErr error
+		resp, requestErr = c.http.Do(ctx, http.MethodPost, profileAPIHost+"/v2/user/get", map[string]string{
+			"Authorization": "Bearer " + c.session.AccessToken,
+			"Content-Type":  "application/json",
+			"Accept":        "application/json",
+			"Origin":        "https://www.alipan.com",
+			"Referer":       "https://www.alipan.com/",
+		}, netx.JSONBody(map[string]any{}))
+		return requestErr
+	})
+	if err != nil || resp == nil {
+		return
+	}
+	data, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		aliOpenLimiter.penalize(aliOpenRetryAfter(resp, 8*time.Second))
+	}
+	if readErr != nil || resp.StatusCode >= http.StatusBadRequest {
+		return
+	}
+	var profile aliOpenAccountProfile
+	if json.Unmarshal(data, &profile) != nil {
+		return
+	}
+	c.session.applyAccountProfile(profile)
 }
 
 func (c *client) ensureDrive(ctx context.Context) error {
@@ -2029,13 +2147,11 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 	if err := cl.refresh(ctx, c.UserID); err != nil {
 		return nil, err
 	}
-	// persist the updated session
-	token.AccessToken = sess.AccessToken
-	token.RefreshToken = mustJSON(sess)
-	token.OpenAPIAccessToken = sess.AccessToken
-	token.OpenAPIRefreshToken = sess.RefreshToken
-	applyAliOpenProfile(token, sess)
 	used, total := cl.GetSpaceInfo(ctx)
+	cl.refreshAccountProfile(ctx)
+	// Persist the credential rotation and the profile-check cooldown together.
+	cl.persistSession()
+	applyAliOpenProfile(token, sess)
 	applyAliOpenQuota(token, used, total)
 	return token, nil
 }
@@ -2104,6 +2220,8 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 	if err := cl.refresh(ctx, ""); err != nil {
 		return nil, err
 	}
+	used, total := cl.GetSpaceInfo(ctx)
+	cl.refreshAccountProfile(ctx)
 	uid := sess.accountID()
 	if uid == "" {
 		return nil, errors.New("aliopen: 登录成功但未返回账号标识")
@@ -2112,7 +2230,6 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 	if name == "" {
 		name = uid
 	}
-	used, total := cl.GetSpaceInfo(ctx)
 
 	tok := &model.TokenInfo{
 		TokenFrom:           providerID,
@@ -2122,8 +2239,8 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 		OpenAPIRefreshToken: sess.RefreshToken,
 		TokenType:           "Bearer",
 		UserID:              model.BuildUserID(providerID, uid),
-		UserName:            firstAliOpenProfileValue(sess.UserName, sess.NickName, name),
-		NickName:            firstAliOpenProfileValue(sess.NickName, sess.UserName, name),
+		UserName:            firstAliOpenProfileValue(sess.UserName, sess.NickName, sess.Phone, name),
+		NickName:            firstAliOpenProfileValue(sess.NickName, sess.UserName, sess.Phone, name),
 		Name:                name,
 		DefaultDriveID:      model.BuildDriveID(providerID, uid),
 		ProviderAccountID:   uid,

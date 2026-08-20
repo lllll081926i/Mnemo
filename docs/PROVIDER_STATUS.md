@@ -20,7 +20,7 @@
 | 8 | onedrive | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
 | 9 | dropbox | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
 | 10 | yike（一刻相册） | BDUSS / Cookie | ✅ 已注册 | mock/e2e | 按无限空间展示，不参与跨盘秒传目标 |
-| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e | 包内覆盖仍不足 |
+| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e（含 `/assets/v1/get_assets` 容量） | 包内覆盖仍不足 |
 | 12 | webdav | URL + 账密 / Bearer Token | ✅ 已注册 | 本地 HTTP e2e（Basic、Digest、动态下载鉴权） | 支持自动 Basic/Digest 协商和显式 Bearer；客户端证书、NTLM 等不支持；配额取决于 RFC 4331 支持 |
 | 13 | s3 | endpoint + AK/SK | ✅ 已注册 | mock/e2e | 无通用总容量接口；连接校验不证明写权限 |
 

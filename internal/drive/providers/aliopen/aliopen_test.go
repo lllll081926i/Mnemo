@@ -2,14 +2,22 @@ package aliopen
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
+
+type aliOpenRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f aliOpenRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestRefreshTokenStoresProfileAndNumericDriveID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +55,61 @@ func TestRefreshTokenStoresProfileAndNumericDriveID(t *testing.T) {
 	}
 	if token.RefreshToken == "" || token.OpenAPIAccessToken != "access-next" {
 		t.Fatalf("persisted token = %#v", token)
+	}
+}
+
+func TestRefreshAccountProfileReplacesIdentifierDisplayFields(t *testing.T) {
+	previous := netx.TestTransportHook
+	var calls int
+	netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.Method != http.MethodPost || req.URL.Hostname() != "api.alipan.com" || req.URL.Path != "/v2/user/get" {
+			t.Fatalf("profile request = %s %s", req.Method, req.URL)
+		}
+		if req.Header.Get("Authorization") != "Bearer profile-access" {
+			t.Fatalf("profile authorization = %q", req.Header.Get("Authorization"))
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"user_id":"user-001", "user_name":"138***8000",
+				"nick_name":"阿里昵称", "phone":"13800138000",
+				"avatar":"https://example.invalid/profile.png"
+			}`)),
+			Request: req,
+		}, nil
+	})
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	token := &model.TokenInfo{UserName: "user-001", NickName: "user-001", Name: "user-001"}
+	sess := &Session{AccessToken: "profile-access", UserID: "user-001", UserName: "user-001", NickName: "user-001"}
+	cl := &client{http: netx.NewClient(5 * time.Second), session: sess, token: token}
+	cl.refreshAccountProfile(context.Background())
+	applyAliOpenProfile(token, sess)
+
+	if calls != 1 || sess.ProfileCheckedAt == 0 {
+		t.Fatalf("profile fetch calls/check time = %d/%d", calls, sess.ProfileCheckedAt)
+	}
+	if token.Name != "阿里昵称" || token.UserName != "138***8000" || token.NickName != "阿里昵称" {
+		t.Fatalf("profile did not replace identifier fields: %#v", token)
+	}
+	if token.Avatar != "https://example.invalid/profile.png" {
+		t.Fatalf("profile avatar = %q", token.Avatar)
+	}
+
+	cl.refreshAccountProfile(context.Background())
+	if calls != 1 {
+		t.Fatalf("fresh profile should be cached, calls = %d", calls)
+	}
+}
+
+func TestApplyAliOpenProfileSkipsIdentifierFallbacks(t *testing.T) {
+	token := &model.TokenInfo{UserName: "user-001", NickName: "user-001", Name: "user-001"}
+	sess := &Session{UserID: "user-001", UserName: "138***8000", NickName: "user-001", Phone: "13800138000"}
+	applyAliOpenProfile(token, sess)
+	if token.Name != "138***8000" || token.UserName != "138***8000" || token.NickName != "138***8000" {
+		t.Fatalf("identifier fallback still won: %#v", token)
 	}
 }
 

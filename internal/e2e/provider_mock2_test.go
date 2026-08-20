@@ -1192,7 +1192,7 @@ func TestGuangyaSendSmsUsesCaptchaToken(t *testing.T) {
 func TestGuangyaSmsLoginForwardsCaptchaToken(t *testing.T) {
 	var verifyCalls, signInCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/userres/v1/user/space" && r.Header.Get("X-Captcha-Token") != "captcha-login" {
+		if r.URL.Path != "/assets/v1/get_assets" && r.Header.Get("X-Captcha-Token") != "captcha-login" {
 			t.Fatalf("captcha header on %s = %q", r.URL.Path, r.Header.Get("X-Captcha-Token"))
 		}
 		switch r.URL.Path {
@@ -1204,9 +1204,12 @@ func TestGuangyaSmsLoginForwardsCaptchaToken(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"access_token": "sms-access", "refresh_token": "sms-refresh",
 			})
-		case "/userres/v1/user/space":
+		case "/assets/v1/get_assets":
+			if r.Header.Get("Did") != "dev-login" || r.Header.Get("Dt") != "4" {
+				t.Fatalf("asset headers Did/Dt = %q/%q", r.Header.Get("Did"), r.Header.Get("Dt"))
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{"usedSize": "12", "totalSize": "100"},
+				"data": map[string]any{"usedSpaceSize": "12", "totalSpaceSize": "100"},
 			})
 		default:
 			w.WriteHeader(http.StatusNotFound)

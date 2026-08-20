@@ -122,6 +122,9 @@ func (c *client) apiHeaders(extra map[string]string) map[string]string {
 		"X-Device-Sign":   fmt.Sprintf("wdi10.%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", c.sess.DeviceID),
 		"X-Net-Work-Type": "NONE", "X-OS-Version": "MacIntel", "X-Platform-Version": "1",
 		"X-Protocol-Version": "301", "X-Provider-Name": "NONE", "X-SDK-Version": "9.0.2",
+		// The web resource API checks these short-form device headers in
+		// addition to the X-Device-* family for account asset requests.
+		"Did": c.sess.DeviceID, "Dt": "4",
 		"User-Agent": ua,
 	}
 	if c.sess.AccessToken != "" {
@@ -337,14 +340,16 @@ func (c *client) Delete(ctx context.Context, fileIDs []string) error {
 	return c.post(ctx, "/userres/v1/file/delete_file", map[string]any{"fileIds": fileIDs}, nil)
 }
 
-// SpaceInfo returns quota. The service returns byte counts as either JSON
-// numbers or strings depending on account/region, so decode both forms.
+// SpaceInfo returns quota from the web client's asset endpoint. The service
+// returns byte counts as either JSON numbers or strings depending on
+// account/region, so decode both forms.
 func (c *client) SpaceInfo(ctx context.Context) (used, total int64) {
 	var resp struct {
 		Data map[string]any `json:"data"`
 	}
-	if err := c.post(ctx, "/userres/v1/user/space", map[string]any{}, &resp); err == nil && resp.Data != nil {
-		return num(resp.Data["usedSize"], resp.Data["used_size"]), num(resp.Data["totalSize"], resp.Data["total_size"])
+	if err := c.post(ctx, "/assets/v1/get_assets", map[string]any{}, &resp); err == nil && resp.Data != nil {
+		return num(resp.Data["usedSpaceSize"], resp.Data["used_space_size"], resp.Data["usedSize"], resp.Data["used_size"]),
+			num(resp.Data["totalSpaceSize"], resp.Data["total_space_size"], resp.Data["totalSize"], resp.Data["total_size"])
 	}
 	return 0, 0
 }
