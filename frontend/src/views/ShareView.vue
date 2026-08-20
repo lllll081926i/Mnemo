@@ -380,7 +380,6 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       <div class="field">
         <label>目标网盘账号</label>
         <UiSelect v-model="importTargetId" block :disabled="importBusy" :options="importAccountOptions" placeholder="选择账号" />
-        <div class="hint">分享内容将解析并保存到这个账号，不会使用其他账号的会话。</div>
       </div>
       <div class="field">
         <label>分享链接</label>
@@ -399,7 +398,6 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       </div>
       <div class="import-file-toolbar">
         <button class="tbtn xs" @click="toggleAllImportFiles">{{ importSelected.length === importSession?.files?.length ? '取消全选' : '全选' }}</button>
-        <span class="hint">选择要保存到目标账号的文件或文件夹</span>
       </div>
       <div class="import-file-list">
         <label v-for="file in importSession.files" :key="file.fileId" class="import-file-row">

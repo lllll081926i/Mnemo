@@ -15,18 +15,18 @@ const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', 
 const webdavPreset = ref('custom')
 const genericWebdavIcon = new URL('../assets/drive-icons/webdav.svg', import.meta.url).href
 const webdavPresets = [
-  { id: 'custom', name: '', label: '自定义 WebDAV', endpoint: '', rootPath: '/', hint: '输入服务商提供的完整 WebDAV 地址；目录型地址建议保留末尾斜杠。', icon: genericWebdavIcon },
-  { id: 'jianguoyun', name: '坚果云', label: '坚果云', endpoint: 'https://dav.jianguoyun.com/dav/', rootPath: '/', hint: '请使用坚果云账号和在安全选项中生成的应用密码。', icon: new URL('../assets/drive-icons/jianguoyun.svg', import.meta.url).href },
-  { id: 'infinitycloud', name: 'InfiniCLOUD', label: 'InfiniCLOUD', endpoint: 'https://cloud.infini-cloud.net/dav/', rootPath: '/', hint: '请使用 InfiniCLOUD 的 WebDAV 连接账号和密码。', icon: new URL('../assets/drive-icons/infinitycloud.svg', import.meta.url).href },
-  { id: 'nextcloud', name: 'Nextcloud', label: 'Nextcloud', endpoint: 'https://your-nextcloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', hint: '替换域名和 your-username；开启双重验证时请使用应用密码。', icon: new URL('../assets/drive-icons/nextcloud.svg', import.meta.url).href },
-  { id: 'owncloud', name: 'ownCloud', label: 'ownCloud', endpoint: 'https://your-owncloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', hint: '替换域名和用户名；服务器版本较旧时可改用 /remote.php/webdav/。', icon: genericWebdavIcon },
-  { id: 'seafile', name: 'Seafile', label: 'Seafile', endpoint: 'https://your-seafile.example.com/seafdav/', rootPath: '/', hint: '替换域名，并确认服务器管理员已启用 SeafDAV。', icon: genericWebdavIcon },
-  { id: 'openlist', name: 'OpenList', label: 'OpenList / AList', endpoint: 'https://your-openlist.example.com/dav/', rootPath: '/', hint: '替换部署域名；用户名和密码由 OpenList / AList 管理端配置。', icon: genericWebdavIcon },
-  { id: 'synology', name: '群晖 WebDAV', label: '群晖 Synology', endpoint: 'https://your-nas.example.com:5006/', rootPath: '/', hint: '替换 NAS 地址；5006 是 WebDAV Server 常用 HTTPS 端口，请以实际配置为准。', icon: genericWebdavIcon },
-  { id: 'koofr', name: 'Koofr', label: 'Koofr', endpoint: 'https://app.koofr.net/dav/Koofr/', rootPath: '/', hint: '请使用 Koofr 设置中生成的应用密码，不要填写网页登录密码。', icon: genericWebdavIcon },
-  { id: 'yandex', name: 'Yandex Disk', label: 'Yandex Disk', endpoint: 'https://webdav.yandex.com/', rootPath: '/', hint: '启用双重验证时请使用应用密码。', icon: genericWebdavIcon },
-  { id: 'pcloud-eu', name: 'pCloud（EU）', label: 'pCloud（EU 数据区）', endpoint: 'https://ewebdav.pcloud.com/', rootPath: '/', hint: '适用于欧盟数据区账号；WebDAV 可用性取决于账号套餐。', icon: genericWebdavIcon },
-  { id: 'pcloud-us', name: 'pCloud（US）', label: 'pCloud（US 数据区）', endpoint: 'https://webdav.pcloud.com/', rootPath: '/', hint: '适用于美国数据区账号；WebDAV 可用性取决于账号套餐。', icon: genericWebdavIcon },
+  { id: 'custom', name: '', label: '自定义 WebDAV', endpoint: '', rootPath: '/', icon: genericWebdavIcon },
+  { id: 'jianguoyun', name: '坚果云', label: '坚果云', endpoint: 'https://dav.jianguoyun.com/dav/', rootPath: '/', icon: new URL('../assets/drive-icons/jianguoyun.svg', import.meta.url).href },
+  { id: 'infinitycloud', name: 'InfiniCLOUD', label: 'InfiniCLOUD', endpoint: 'https://cloud.infini-cloud.net/dav/', rootPath: '/', icon: new URL('../assets/drive-icons/infinitycloud.svg', import.meta.url).href },
+  { id: 'nextcloud', name: 'Nextcloud', label: 'Nextcloud', endpoint: 'https://your-nextcloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', icon: new URL('../assets/drive-icons/nextcloud.svg', import.meta.url).href },
+  { id: 'owncloud', name: 'ownCloud', label: 'ownCloud', endpoint: 'https://your-owncloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', icon: new URL('../assets/drive-icons/owncloud.svg', import.meta.url).href },
+  { id: 'seafile', name: 'Seafile', label: 'Seafile', endpoint: 'https://your-seafile.example.com/seafdav/', rootPath: '/', icon: new URL('../assets/drive-icons/seafile.svg', import.meta.url).href },
+  { id: 'openlist', name: 'OpenList', label: 'OpenList / AList', endpoint: 'https://your-openlist.example.com/dav/', rootPath: '/', icon: new URL('../assets/drive-icons/openlist.svg', import.meta.url).href },
+  { id: 'synology', name: '群晖 WebDAV', label: '群晖 Synology', endpoint: 'https://your-nas.example.com:5006/', rootPath: '/', icon: new URL('../assets/drive-icons/synology.svg', import.meta.url).href },
+  { id: 'koofr', name: 'Koofr', label: 'Koofr', endpoint: 'https://app.koofr.net/dav/Koofr/', rootPath: '/', icon: new URL('../assets/drive-icons/koofr.svg', import.meta.url).href },
+  { id: 'yandex', name: 'Yandex Disk', label: 'Yandex Disk', endpoint: 'https://webdav.yandex.com/', rootPath: '/', icon: new URL('../assets/drive-icons/yandex.svg', import.meta.url).href },
+  { id: 'pcloud-eu', name: 'pCloud（EU）', label: 'pCloud（EU 数据区）', endpoint: 'https://ewebdav.pcloud.com/', rootPath: '/', icon: new URL('../assets/drive-icons/pcloud-eu.svg', import.meta.url).href },
+  { id: 'pcloud-us', name: 'pCloud（US）', label: 'pCloud（US 数据区）', endpoint: 'https://webdav.pcloud.com/', rootPath: '/', icon: new URL('../assets/drive-icons/pcloud-us.svg', import.meta.url).href },
 ]
 const busy = ref(false)
 const smsBusy = ref(false)
@@ -74,9 +74,9 @@ function togglePassword(key) {
   passwordVisibility.value = { ...passwordVisibility.value, [key]: !passwordVisible(key) }
 }
 
-const availableProviders = computed(() => props.providers)
+// 一刻相册（yike）登录入口暂时隐藏（待平台重新开发完成），后端注册保留
+const availableProviders = computed(() => props.providers.filter((p) => p.ID !== 'yike'))
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
-const selectedWebdavPreset = computed(() => webdavPresets.find((item) => item.id === webdavPreset.value) || webdavPresets[0])
 const webdavPresetOptions = computed(() => webdavPresets.map((item) => ({ value: item.id, label: item.label, img: item.icon })))
 const webdavAuthOptions = [
   { value: 'auto', label: '自动（推荐）' },
@@ -95,7 +95,9 @@ const hasEmailLogin = computed(() => fields.value.some((field) => field.key === 
 const isOAuth = computed(() => !isMounted.value && !hasAccountLogin.value && fields.value.length > 0 && fields.value.every(isOAuthField))
 const visibleFields = computed(() => {
   const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field))
-  return hasAccountLogin.value ? nonOAuthFields.filter((field) => !isCookieField(field)) : nonOAuthFields
+  // 有其它登录方式（账密/OAuth）时隐藏 Cookie 字段
+  const hasAltLogin = hasAccountLogin.value || fields.value.some(isOAuthField)
+  return hasAltLogin ? nonOAuthFields.filter((field) => !isCookieField(field)) : nonOAuthFields
 })
 const isTokenField = (field) => /token|authorization|secret/i.test(`${field.key} ${field.label}`)
 const hasCookieLogin = computed(() => !hasAccountLogin.value && visibleFields.value.some(isCookieField))
@@ -466,19 +468,16 @@ async function submit() {
                     <div v-if="providerId === 'webdav'" class="field login-field">
                       <label>服务预设</label>
                       <UiSelect v-model="webdavPreset" :options="webdavPresetOptions" block @change="applyWebDAVPreset" />
-                      <div class="hint">{{ selectedWebdavPreset.hint }}</div>
                     </div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}<span v-if="providerId !== 's3'" class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
                     <div v-if="providerId === 'webdav'" class="field login-field">
                       <label>认证方式</label>
                       <UiSelect v-model="mountedForm.authType" :options="webdavAuthOptions" block />
-                      <div class="hint">自动会先保持 Basic 兼容；服务端要求 Digest 时仅协商一次并缓存。Bearer Token 使用下方“密码”字段填写令牌。</div>
                     </div>
                     <div class="field login-field">
                       <label>内网媒体预览</label>
                       <div class="switch-row">
                         <button class="switch" :class="{ on: mountedForm.allowPrivateNetwork }" type="button" role="switch" :aria-checked="mountedForm.allowPrivateNetwork" @click="mountedForm.allowPrivateNetwork = !mountedForm.allowPrivateNetwork"></button>
-                        <span class="hint">默认关闭；仅允许此连接已配置主机的局域网媒体地址，避免误访问内网服务</span>
                       </div>
                     </div>
                     <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
@@ -491,14 +490,12 @@ async function submit() {
                         <label>路径风格</label>
                         <div class="switch-row">
                           <button class="switch" :class="{ on: mountedForm.forcePathStyle }" type="button" role="switch" :aria-checked="mountedForm.forcePathStyle" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></button>
-                          <span class="hint">开启用于 MinIO、OSS 等兼容服务；AWS S3 可关闭</span>
                         </div>
                       </div>
                       <div class="field login-field">
                         <label>写入权限验证</label>
                         <div class="switch-row">
                           <button class="switch" :class="{ on: mountedForm.verifyWrite }" type="button" role="switch" :aria-checked="mountedForm.verifyWrite" @click="mountedForm.verifyWrite = !mountedForm.verifyWrite"></button>
-                          <span class="hint">可选：写入并删除一个随机测试对象；写入验证本身发送 2 个请求，默认关闭</span>
                         </div>
                       </div>
                     </template>
@@ -527,7 +524,6 @@ async function submit() {
                         <img :src="pan189Captcha" alt="图形验证码" />
                         <span>请输入图片中的字符</span>
                       </div>
-                      <div v-if="f.hint" class="hint">{{ f.hint }}</div>
                       <div v-if="providerId === 'guangya' && f.key === 'sms_code' && !hasRefreshToken" class="field-action-row">
                         <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendSms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
                       </div>
