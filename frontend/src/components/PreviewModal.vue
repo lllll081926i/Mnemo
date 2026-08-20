@@ -1263,8 +1263,8 @@ function decodeText(buf) {
 /* 顶部文件名（自动隐藏） */
 .pv-topmeta {
   position: absolute; top: 10px; left: 16px; right: 16px;
-  text-align: center; font-size: 12px; color: rgba(255, 255, 255, .72);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, .7);
+  text-align: center; font-size: 12px; color: rgba(255, 255, 255, .88);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 0 12px rgba(0, 0, 0, .6);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   pointer-events: none; transition: opacity .25s ease;
 }
@@ -1274,16 +1274,16 @@ function decodeText(buf) {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 38px; height: 62px;
   display: flex; align-items: center; justify-content: center;
-  color: rgba(255, 255, 255, .85);
-  background: rgba(20, 20, 26, .42);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, .1); border-radius: 10px;
+  color: rgba(255, 255, 255, .95);
+  background: rgba(14, 14, 18, .72);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, .16); border-radius: 10px;
   cursor: pointer; opacity: .3;
   transition: opacity .2s ease, background .18s ease, transform .18s var(--motion-spring);
 }
 .pv-edge.left { left: 14px; }
 .pv-edge.right { right: 14px; }
-.pv-edge:hover { opacity: 1; background: rgba(32, 32, 40, .6); }
+.pv-edge:hover { opacity: 1; background: rgba(22, 22, 28, .9); }
 .pv-edge:active { transform: translateY(-50%) scale(.93); }
 
 /* 浮动控制条（播放器语言） */
@@ -1291,36 +1291,36 @@ function decodeText(buf) {
   position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
   display: flex; align-items: center; gap: 5px;
   padding: 5px 10px; border-radius: 12px;
-  background: rgba(16, 16, 21, .72);
-  backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  border: 1px solid rgba(255, 255, 255, .1);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  background: rgba(12, 12, 16, .92);
+  backdrop-filter: blur(20px) saturate(1.2); -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06);
   transition: opacity .25s ease, transform .25s var(--motion-ease);
 }
 .pv-ctl-btn {
   width: 28px; height: 28px; flex: none;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 8px; color: rgba(255, 255, 255, .85); cursor: pointer;
+  border-radius: 8px; color: rgba(255, 255, 255, .95); cursor: pointer;
   transition: background .16s ease, transform .18s var(--motion-spring), color .16s;
 }
-.pv-ctl-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .13); }
+.pv-ctl-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .16); }
 .pv-ctl-btn:active:not(:disabled) { transform: scale(.88); }
 .pv-ctl-btn:disabled { opacity: .32; cursor: default; }
 .pv-ctl-btn.active { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 20%, transparent); }
 .pv-ctl-text { font-size: 17px; line-height: 1; padding-bottom: 2px; }
-.pv-ctl-counter, .pv-ctl-zoom { font-size: 12px; color: rgba(255, 255, 255, .8); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pv-ctl-counter, .pv-ctl-zoom { font-size: 12px; color: rgba(255, 255, 255, .92); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pv-ctl-zoom { cursor: pointer; min-width: 40px; text-align: center; border-radius: 6px; padding: 3px 4px; }
-.pv-ctl-zoom:hover { background: rgba(255, 255, 255, .1); }
-.pv-ctl-sep { width: 1px; height: 16px; background: rgba(255, 255, 255, .14); flex: none; }
+.pv-ctl-zoom:hover { background: rgba(255, 255, 255, .14); }
+.pv-ctl-sep { width: 1px; height: 16px; background: rgba(255, 255, 255, .2); flex: none; }
 
 /* 胶卷缩略图条（默认隐藏，控制条切换） */
 .pv-filmstrip {
   position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%);
   display: flex; gap: 6px; max-width: min(78%, 560px); overflow-x: auto;
   padding: 7px; border-radius: 12px;
-  background: rgba(16, 16, 21, .72);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(12, 12, 16, .92);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, .16);
   scrollbar-width: none;
   transition: opacity .25s ease;
 }
