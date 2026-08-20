@@ -93,8 +93,16 @@ const hasAccountLogin = computed(() => fields.value.some(isAccountField))
 const hasPhoneLogin = computed(() => fields.value.some((field) => field.key === 'phone' || /手机/.test(field.label)))
 const hasEmailLogin = computed(() => fields.value.some((field) => field.key === 'email' || /邮箱/.test(field.label)))
 const isOAuth = computed(() => !isMounted.value && !hasAccountLogin.value && fields.value.length > 0 && fields.value.every(isOAuthField))
+// 按盘隐藏的可选高级字段（保持界面精简，需要时可从此处移除恢复）
+const HIDDEN_LOGIN_FIELDS = {
+  aliopen: ['client_id', 'client_secret'],
+  guangya: ['refresh_token'],
+  pan139: ['authorization'],
+}
+
 const visibleFields = computed(() => {
-  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field))
+  const hidden = HIDDEN_LOGIN_FIELDS[providerId.value] || []
+  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field) && !hidden.includes(field.key))
   // 有其它登录方式（账密/OAuth）时隐藏 Cookie 字段
   const hasAltLogin = hasAccountLogin.value || fields.value.some(isOAuthField)
   return hasAltLogin ? nonOAuthFields.filter((field) => !isCookieField(field)) : nonOAuthFields
@@ -606,10 +614,10 @@ async function submit() {
 .switch { border: 0; padding: 0; }
 .switch-row .hint { margin: 0; line-height: 1.45; }
 
-/* 登录页切换网盘：内容区淡入 + 右滑入位 */
+/* 登录页切换网盘：内容区淡入 + 下滑入位 */
 .login-form-content { animation: login-pane-in 240ms var(--motion-glide); }
 @keyframes login-pane-in {
-  from { opacity: 0; transform: translateX(10px); }
+  from { opacity: 0; transform: translateY(10px); }
 }
 
 /* 开关组 chip：多个开关收进一行 */
