@@ -170,9 +170,38 @@ function invalidateDirCache(uidV, didV, modeV, idV) {
 }
 let loadSeq = 0
 let cacheEpoch = 0
+
+// ---------- 滚动位置记忆 ----------
+// 每个视图（模式+目录+关键词）记住自己的 scrollTop；返回时恢复，进入新目录归零。
+const listEl = ref(null)
+const scrollMemory = new Map()
+let scrollSaveFrame = 0
+let pendingScrollSeq = 0
+
+function currentViewKey() { return [mode.value, dirId.value, keyword.value].join('|') }
+
+function onListScroll() {
+  if (scrollSaveFrame) return
+  scrollSaveFrame = requestAnimationFrame(() => {
+    scrollSaveFrame = 0
+    if (listEl.value) scrollMemory.set(currentViewKey(), listEl.value.scrollTop)
+  })
+}
+
+watch([loading, files], () => {
+  if (loading.value || !pendingScrollSeq) return
+  const seq = pendingScrollSeq
+  nextTick(() => {
+    if (seq !== loadSeq) return // 期间又跳转了，丢弃
+    pendingScrollSeq = 0
+    if (listEl.value) listEl.value.scrollTop = scrollMemory.get(currentViewKey()) || 0
+  })
+})
+
 async function load(id) {
   if (!props.account) return
   const seq = ++loadSeq
+  pendingScrollSeq = seq
   const epoch = cacheEpoch
   const snapUid = uid.value, snapDid = did.value, snapMode = mode.value, snapKw = keyword.value
   const ckey = dirCacheKey(snapUid, snapDid, snapMode, id, snapKw)
@@ -287,9 +316,10 @@ const displayFiles = computed(() => {
 // 名称高亮：搜索/筛选关键词命中部分拆段（模板用 <mark> 渲染，无关键词时零开销）
 const hlKeyword = computed(() => (mode.value === 'search' ? keyword.value.trim() : filter.value.trim()))
 const thumbErrors = ref({})
+// ref({}) 的属性赋值不是响应式的，必须整体替换才能让行模型重算
+function markThumbError(id) { thumbErrors.value = { ...thumbErrors.value, [id]: true } }
 
-function nameParts(name) {
-  const kw = hlKeyword.value
+function namePartsOf(name, kw) {
   if (!kw) return null
   const str = String(name || '')
   const i = str.toLowerCase().indexOf(kw.toLowerCase())
@@ -300,6 +330,21 @@ function nameParts(name) {
     { text: str.slice(i + kw.length), hit: false },
   ]
 }
+
+// 行展示模型：列表/排序/关键词/缩略图状态变化时统一预计算一次；
+// 选中、焦点等高频交互只改 class，不再触发每行的字符串/时间格式化运算。
+const rowsShown = computed(() => {
+  const kw = hlKeyword.value
+  const errs = thumbErrors.value
+  return listShown.value.map((f) => ({
+    f,
+    icon: iconOf(f),
+    parts: kw ? namePartsOf(f.name, kw) : null,
+    sizeText: f.isDir ? (f.file_count != null ? f.file_count + ' 项' : '-') : formatBytes(f.size),
+    timeParts: formatTimeParts(f.time),
+    thumb: f.thumbnail && !errs[f.file_id] ? f.thumbnail : '',
+  }))
+})
 
 const crumbs = computed(() => [{ id: rootKey.value, name: rootTitle.value }, ...pathStack.value])
 
@@ -439,7 +484,8 @@ function selectTreeNode(idOrNode, name) {
 }
 
 // ---------- 选中 ----------
-function isSel(f) { return selected.value.some((s) => s.file_id === f.file_id) }
+const selSet = computed(() => new Set(selected.value.map((s) => s.file_id)))
+function isSel(f) { return selSet.value.has(f.file_id) }
 
 // 在 listShown 中选中 [fromId, toId] 区间（含端点）
 function selectRange(fromId, toId) {
@@ -566,6 +612,12 @@ async function toggleFav(file) {
 
 // ---------- 右键菜单 ----------
 function onCtx(e, file) {
+  // 标准文件管理器行为：右键未选中项时先将其变为唯一选中并聚焦，
+  // 避免菜单作用于一个没有任何高亮的文件（ targets() 据此取操作对象）
+  if (file && file.file_id && !isSel(file)) {
+    selected.value = [file]
+    focusId.value = file.file_id
+  }
   if (mode.value === 'trash') {
     menu.value = {
       x: e.clientX, y: e.clientY, file,
@@ -1155,35 +1207,35 @@ onBeforeUnmount(() => {
           <div v-else-if="error" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>{{ error }}</span><button class="btn sm" @click="refresh">重试</button></div>
 
           <!-- 列表视图（旧版 fileitem 行） -->
-          <div v-else-if="viewMode === 'list'" class="file-list">
+          <div v-else-if="viewMode === 'list'" ref="listEl" class="file-list" @scroll.passive="onListScroll">
             <div
-              v-for="f in listShown"
-              :key="f.file_id"
+              v-for="r in rowsShown"
+              :key="r.f.file_id"
               class="fileitem"
-              :class="{ selected: isSel(f), focus: focusId === f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === f.file_id }"
-              @click="toggleSel(f, $event)"
-              @dblclick="onRowOpen(f)"
-              @contextmenu.prevent="onCtx($event, f)"
+              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id }"
+              @click="toggleSel(r.f, $event)"
+              @dblclick="onRowOpen(r.f)"
+              @contextmenu.prevent="onCtx($event, r.f)"
             >
               <div class="rangselect">
-                <button class="btn-check" :class="{ on: isSel(f) }" tabindex="-1" @click.stop="toggleSel(f, { ctrlKey: true })">
-                  <UiIcon v-if="isSel(f)" name="check" :size="11" />
+                <button class="btn-check" :class="{ on: isSel(r.f) }" tabindex="-1" @click.stop="toggleSel(r.f, { ctrlKey: true })">
+                  <UiIcon v-if="isSel(r.f)" name="check" :size="11" />
                 </button>
               </div>
-              <div class="fileicon" :class="'ft-' + iconOf(f)"><UiIcon :name="iconOf(f)" :size="20" /></div>
+              <div class="fileicon" :class="'ft-' + r.icon"><UiIcon :name="r.icon" :size="20" /></div>
               <div class="filename">
-                <div :title="f.name">
-                  <template v-if="hlKeyword && nameParts(f.name)">
-                    <template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
+                <div :title="r.f.name">
+                  <template v-if="r.parts">
+                    <template v-for="(p, i) in r.parts" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
                   </template>
-                  <template v-else>{{ f.name }}</template>
+                  <template v-else>{{ r.f.name }}</template>
                 </div>
               </div>
-              <span v-if="f.starred" class="fstar-mark"><UiIcon name="star" :size="13" /></span>
-              <div class="filesize">{{ f.isDir ? (f.file_count != null ? f.file_count + ' 项' : '-') : formatBytes(f.size) }}</div>
+              <span v-if="r.f.starred" class="fstar-mark"><UiIcon name="star" :size="13" /></span>
+              <div class="filesize">{{ r.sizeText }}</div>
               <div class="filetime">
-                <span class="filedate">{{ formatTimeParts(f.time).date }}</span>
-                <span class="fileclock">{{ formatTimeParts(f.time).clock }}</span>
+                <span class="filedate">{{ r.timeParts.date }}</span>
+                <span class="fileclock">{{ r.timeParts.clock }}</span>
               </div>
             </div>
             <div v-if="!listShown.length" class="workspace-empty-state">
@@ -1193,33 +1245,33 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 网格视图（旧版 griditem） -->
-          <div v-else class="file-list gridlist">
+          <div v-else ref="listEl" class="file-list gridlist" @scroll.passive="onListScroll">
             <div
-              v-for="f in listShown"
-              :key="f.file_id"
+              v-for="r in rowsShown"
+              :key="r.f.file_id"
               class="griditem"
-              :class="{ selected: isSel(f), focus: focusId === f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === f.file_id }"
-              @click="toggleSel(f, $event)"
-              @dblclick="onRowOpen(f)"
-              @contextmenu.prevent="onCtx($event, f)"
+              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id }"
+              @click="toggleSel(r.f, $event)"
+              @dblclick="onRowOpen(r.f)"
+              @contextmenu.prevent="onCtx($event, r.f)"
             >
               <span class="gsel">
-                <button class="btn-check" :class="{ on: isSel(f) }" tabindex="-1" @click.stop="toggleSel(f, { ctrlKey: true })">
-                  <UiIcon v-if="isSel(f)" name="check" :size="11" />
+                <button class="btn-check" :class="{ on: isSel(r.f) }" tabindex="-1" @click.stop="toggleSel(r.f, { ctrlKey: true })">
+                  <UiIcon v-if="isSel(r.f)" name="check" :size="11" />
                 </button>
               </span>
-              <span v-if="f.starred" class="gstar"><UiIcon name="star" :size="12" /></span>
-              <div class="gridicon" :class="!(f.thumbnail && !thumbErrors[f.file_id]) ? 'ft-' + iconOf(f) : ''">
-                <img v-if="f.thumbnail && !thumbErrors[f.file_id]" :src="f.thumbnail" loading="lazy" alt="" @error="thumbErrors[f.file_id] = true" />
-                <UiIcon v-else :name="iconOf(f)" :size="32" />
+              <span v-if="r.f.starred" class="gstar"><UiIcon name="star" :size="12" /></span>
+              <div class="gridicon" :class="!r.thumb ? 'ft-' + r.icon : ''">
+                <img v-if="r.thumb" :src="r.thumb" loading="lazy" alt="" @error="markThumbError(r.f.file_id)" />
+                <UiIcon v-else :name="r.icon" :size="32" />
               </div>
-              <div class="gridname" :title="f.name">
-                <template v-if="hlKeyword && nameParts(f.name)">
-                  <template v-for="(p, i) in nameParts(f.name)" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
+              <div class="gridname" :title="r.f.name">
+                <template v-if="r.parts">
+                  <template v-for="(p, i) in r.parts" :key="i"><mark v-if="p.hit" class="hl">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template>
                 </template>
-                <template v-else>{{ f.name }}</template>
+                <template v-else>{{ r.f.name }}</template>
               </div>
-              <div class="gridinfo">{{ f.isDir ? '文件夹' : formatBytes(f.size) }}</div>
+              <div class="gridinfo">{{ r.f.isDir ? '文件夹' : r.sizeText }}</div>
             </div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
               <UiIcon name="folder" :size="36" style="opacity:.4" />
