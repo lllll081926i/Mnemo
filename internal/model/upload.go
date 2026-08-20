@@ -167,6 +167,15 @@ type MigrateJob struct {
 	ProcessedBytes int64  `json:"processedBytes"`
 	Status         string `json:"status"`
 	Message        string `json:"message,omitempty"`
+	// Recovery checkpoints are persisted as each source resource reaches a
+	// durable state. They let a later retry skip already-uploaded files and
+	// reuse target directories instead of copying the whole tree again.
+	//
+	// CopiedFileIDs is only used by move jobs: the target copy exists but the
+	// source cleanup has not finished yet. A retry then performs cleanup only.
+	CompletedFileIDs   []string          `json:"completedFileIDs,omitempty"`
+	CopiedFileIDs      []string          `json:"copiedFileIDs,omitempty"`
+	TargetDirectoryIDs map[string]string `json:"targetDirectoryIDs,omitempty"`
 	// Timestamps for persistence.
 	CreatedAt int64 `json:"createdAt,omitempty"`
 	UpdatedAt int64 `json:"updatedAt,omitempty"`

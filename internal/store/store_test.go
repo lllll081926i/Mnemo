@@ -411,3 +411,38 @@ func TestMigrateJobPersistenceKeepsConcurrentUpdates(t *testing.T) {
 		t.Fatalf("concurrent migrate job saves kept %d records, want 20", len(list))
 	}
 }
+
+func TestMigrateJobPersistenceKeepsRecoveryCheckpoints(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	want := &model.MigrateJob{
+		ID:                 "resume-job",
+		Status:             "partial",
+		FileIDs:            []string{"root"},
+		CompletedFileIDs:   []string{"child-complete"},
+		CopiedFileIDs:      []string{"child-cleanup"},
+		TargetDirectoryIDs: map[string]string{"root": "destination-root"},
+	}
+	if err := st.SaveMigrateJob(want); err != nil {
+		t.Fatalf("SaveMigrateJob: %v", err)
+	}
+	jobs, err := st.ListMigrateJobs()
+	if err != nil {
+		t.Fatalf("ListMigrateJobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("job count = %d, want 1", len(jobs))
+	}
+	got := jobs[0]
+	if len(got.CompletedFileIDs) != 1 || got.CompletedFileIDs[0] != "child-complete" {
+		t.Fatalf("completed checkpoints = %#v", got.CompletedFileIDs)
+	}
+	if len(got.CopiedFileIDs) != 1 || got.CopiedFileIDs[0] != "child-cleanup" {
+		t.Fatalf("copied checkpoints = %#v", got.CopiedFileIDs)
+	}
+	if got.TargetDirectoryIDs["root"] != "destination-root" {
+		t.Fatalf("target directory checkpoints = %#v", got.TargetDirectoryIDs)
+	}
+}

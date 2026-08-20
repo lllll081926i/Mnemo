@@ -74,15 +74,19 @@ func (e *Engine) CancelAll() {
 
 // registerCancel stores the cancel func for a job and returns a derived
 // context that is cancelled by Cancel(jobID) or parent cancellation.
-func (e *Engine) registerCancel(parent context.Context, jobID string) (context.Context, context.CancelFunc) {
+func (e *Engine) registerCancel(parent context.Context, jobID string) (context.Context, context.CancelFunc, bool) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithCancel(parent)
 	e.cancelsMu.Lock()
+	if _, exists := e.cancels[jobID]; exists {
+		e.cancelsMu.Unlock()
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithCancel(parent)
 	e.cancels[jobID] = cancel
 	e.cancelsMu.Unlock()
-	return ctx, cancel
+	return ctx, cancel, true
 }
 
 // releaseCancel drops the cancel entry for a finished job.
@@ -138,15 +142,21 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	if err := ValidateEndpoints(job.SrcUser, job.SrcDrive, job.DstUser, job.DstDrive); err != nil {
 		return err
 	}
-	ctx, cancel := e.registerCancel(ctx, job.ID)
+	ctx, cancel, registered := e.registerCancel(ctx, job.ID)
+	if !registered {
+		return fmt.Errorf("migrate: job %q is already running", job.ID)
+	}
 	defer func() {
 		cancel()
 		e.releaseCancel(job.ID)
 	}()
 
 	job.Total = int64(len(job.FileIDs))
-	job.Processed = 0
+	completedTopLevel := completedTopLevelCount(job)
+	job.Processed = completedTopLevel
 	job.Failed = 0
+	// Byte counters describe the current run. Recomputing them prevents a
+	// retry from double-counting bytes that completed before interruption.
 	job.TotalBytes = 0
 	job.ProcessedBytes = 0
 	job.Status = "running"
@@ -157,11 +167,14 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	job.UpdatedAt = time.Now().Unix()
 	e.saveJob(job)
 	e.emit(job)
-	succeeded := int64(0)
+	succeeded := completedTopLevel
 	partial := false
 	for _, fileID := range job.FileIDs {
 		if ctx.Err() != nil {
 			return e.finishCanceled(job, ctx.Err())
+		}
+		if jobHasID(job.CompletedFileIDs, fileID) {
+			continue
 		}
 		err := e.migrateOne(ctx, job, fileID)
 		if err != nil {
@@ -230,6 +243,9 @@ func (e *Engine) migrateOne(ctx context.Context, job *Job, fileID string) error 
 }
 
 func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParent string) error {
+	if jobHasID(job.CompletedFileIDs, fileID) {
+		return nil
+	}
 	// resolve source file
 	srcFile, err := drive.GetFileContext(ctx, job.SrcUser, job.SrcDrive, fileID)
 	if err != nil {
@@ -238,8 +254,18 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 	if srcFile == nil {
 		return errors.New("migrate: source file is empty")
 	}
+	if job.Move && jobHasID(job.CopiedFileIDs, srcFile.FileID) {
+		if err := e.finalizeMove(ctx, job, srcFile); err != nil {
+			return err
+		}
+		e.markCompleted(job, srcFile.FileID)
+		return nil
+	}
 	if srcFile.IsDir {
-		return e.migrateDir(ctx, job, srcFile, targetParent)
+		if err := e.migrateDir(ctx, job, srcFile, targetParent); err != nil {
+			return err
+		}
+		return e.completeResource(ctx, job, srcFile)
 	}
 	// accumulate total bytes for progress
 	job.TotalBytes += srcFile.Size
@@ -250,7 +276,7 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 	if migrated, err := e.tryRapidMigrate(ctx, job, srcFile, targetParent); migrated {
 		if err == nil {
 			completeBytes(job, progressStart, srcFile.Size)
-			return e.finalizeMove(ctx, job, srcFile)
+			return e.completeResource(ctx, job, srcFile)
 		}
 		// rapid upload failed — fall through to stream/spool.
 		job.ProcessedBytes = progressStart
@@ -266,11 +292,11 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 				return err
 			}
 			completeBytes(job, progressStart, srcFile.Size)
-			return e.finalizeMove(ctx, job, srcFile)
+			return e.completeResource(ctx, job, srcFile)
 		}
 		// streaming succeeded; handle move cleanup.
 		completeBytes(job, progressStart, srcFile.Size)
-		return e.finalizeMove(ctx, job, srcFile)
+		return e.completeResource(ctx, job, srcFile)
 	}
 	// 3) streaming not supported by this provider — use spool.
 	if err := e.spoolMigrate(ctx, job, srcFile, targetParent); err != nil {
@@ -278,7 +304,21 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		return err
 	}
 	completeBytes(job, progressStart, srcFile.Size)
-	return e.finalizeMove(ctx, job, srcFile)
+	return e.completeResource(ctx, job, srcFile)
+}
+
+// completeResource records a successful target copy before attempting source
+// deletion for a move. If cleanup is interrupted or rejected, a later retry
+// performs only the cleanup and never uploads a second destination copy.
+func (e *Engine) completeResource(ctx context.Context, job *Job, srcFile *model.File) error {
+	if job.Move {
+		e.markCopied(job, srcFile.FileID)
+		if err := e.finalizeMove(ctx, job, srcFile); err != nil {
+			return err
+		}
+	}
+	e.markCompleted(job, srcFile.FileID)
+	return nil
 }
 
 // tryRapidMigrate attempts a hash-based秒传: if both the source provider can
@@ -494,21 +534,28 @@ func (e *Engine) finalizeMove(ctx context.Context, job *Job, srcFile *model.File
 
 // migrateDir recursively migrates a folder.
 func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targetParent string) error {
-	// create folder on target
-	mk, err := drive.MkdirContext(ctx, job.DstUser, job.DstDrive, targetParent, dir.Name)
-	if err != nil {
-		return newMigrationError(err, 1)
+	// Reuse a target directory created by an earlier interrupted attempt. The
+	// checkpoint is written immediately after Mkdir succeeds, before listing
+	// children, so a retry cannot create a duplicate folder tree.
+	if existing := strings.TrimSpace(job.TargetDirectoryIDs[dir.FileID]); existing != "" {
+		targetParent = existing
+	} else {
+		mk, err := drive.MkdirContext(ctx, job.DstUser, job.DstDrive, targetParent, dir.Name)
+		if err != nil {
+			return newMigrationError(err, 1)
+		}
+		if mk == nil {
+			return newMigrationError(errors.New("migrate: target folder creation returned empty result"), 1)
+		}
+		if strings.TrimSpace(mk.Error) != "" {
+			return newMigrationError(fmt.Errorf("migrate: create target folder %q: %s", dir.Name, mk.Error), 1)
+		}
+		if strings.TrimSpace(mk.FileID) == "" {
+			return newMigrationError(fmt.Errorf("migrate: create target folder %q returned empty id", dir.Name), 1)
+		}
+		targetParent = mk.FileID
+		e.markTargetDirectory(job, dir.FileID, targetParent)
 	}
-	if mk == nil {
-		return newMigrationError(errors.New("migrate: target folder creation returned empty result"), 1)
-	}
-	if strings.TrimSpace(mk.Error) != "" {
-		return newMigrationError(fmt.Errorf("migrate: create target folder %q: %s", dir.Name, mk.Error), 1)
-	}
-	if strings.TrimSpace(mk.FileID) == "" {
-		return newMigrationError(fmt.Errorf("migrate: create target folder %q returned empty id", dir.Name), 1)
-	}
-	targetParent = mk.FileID
 	// list source dir
 	children, err := drive.ListDirAllContext(ctx, job.SrcUser, job.SrcDrive, dir.FileID, nil)
 	if err != nil {
@@ -524,32 +571,23 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if child.IsDir {
-			if err := e.migrateDir(ctx, job, &child, targetParent); err != nil {
-				childFailures += failureCount(err)
-				lastChildErr = err
-			}
-		} else {
-			if err := e.migrateOneTo(ctx, job, child.FileID, targetParent); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return err
-				}
-				childFailures += failureCount(err)
-				lastChildErr = err
-			}
-			e.emit(job)
+		if jobHasID(job.CompletedFileIDs, child.FileID) {
+			continue
 		}
+		if err := e.migrateOneTo(ctx, job, child.FileID, targetParent); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			childFailures += failureCount(err)
+			lastChildErr = err
+		}
+		e.emit(job)
 	}
 	if childFailures > 0 {
 		if lastChildErr == nil {
 			lastChildErr = errors.New("migrate: one or more directory children failed")
 		}
 		return newPartialMigrationError(fmt.Errorf("migrate: directory %q was partially copied and has failed children: %w", dir.Name, lastChildErr), childFailures)
-	}
-	if job.Move {
-		if err := e.finalizeMove(ctx, job, dir); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -615,12 +653,83 @@ func failureCount(err error) int64 {
 }
 
 func containsID(ids []string, want string) bool {
+	return jobHasID(ids, want)
+}
+
+func jobHasID(ids []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
 	for _, id := range ids {
 		if strings.TrimSpace(id) == want {
 			return true
 		}
 	}
 	return false
+}
+
+func completedTopLevelCount(job *Job) int64 {
+	if job == nil {
+		return 0
+	}
+	var completed int64
+	for _, id := range job.FileIDs {
+		if jobHasID(job.CompletedFileIDs, id) {
+			completed++
+		}
+	}
+	return completed
+}
+
+func removeJobID(ids []string, want string) []string {
+	out := ids[:0]
+	for _, id := range ids {
+		if !jobHasID([]string{id}, want) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// markCopied persists the point at which a destination resource is durable.
+func (e *Engine) markCopied(job *Job, fileID string) {
+	if job == nil || jobHasID(job.CopiedFileIDs, fileID) {
+		return
+	}
+	job.CopiedFileIDs = append(job.CopiedFileIDs, fileID)
+	job.UpdatedAt = time.Now().Unix()
+	e.saveJob(job)
+	e.emit(job)
+}
+
+// markCompleted persists a resource that no longer needs any transfer or
+// source-cleanup work. It is deliberately called for nested files too.
+func (e *Engine) markCompleted(job *Job, fileID string) {
+	if job == nil || jobHasID(job.CompletedFileIDs, fileID) {
+		return
+	}
+	job.CompletedFileIDs = append(job.CompletedFileIDs, fileID)
+	job.CopiedFileIDs = removeJobID(job.CopiedFileIDs, fileID)
+	job.UpdatedAt = time.Now().Unix()
+	e.saveJob(job)
+	e.emit(job)
+}
+
+func (e *Engine) markTargetDirectory(job *Job, sourceID, targetID string) {
+	if job == nil || strings.TrimSpace(sourceID) == "" || strings.TrimSpace(targetID) == "" {
+		return
+	}
+	if job.TargetDirectoryIDs == nil {
+		job.TargetDirectoryIDs = make(map[string]string)
+	}
+	if job.TargetDirectoryIDs[sourceID] == targetID {
+		return
+	}
+	job.TargetDirectoryIDs[sourceID] = targetID
+	job.UpdatedAt = time.Now().Unix()
+	e.saveJob(job)
+	e.emit(job)
 }
 
 // downloadTo streams a download url into a writer.

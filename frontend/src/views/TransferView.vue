@@ -6,7 +6,7 @@ import {
   RemoveDownload, PrioritizeDownload, OpenFile,
   CancelUpload, ClearUploads, DownloadURL, ResumeUpload,
   ListOfflineTasks, OfflineDownload, DeleteOfflineTask,
-  ListMigrateJobs, CancelMigrate, DeleteMigrateJob, ClearMigrateJobs,
+  ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs,
   EventsOn, RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
@@ -668,6 +668,17 @@ async function cancelMigrateJob(job) {
     emit('toast', '取消迁移失败: ' + String(e), 'error')
   }
 }
+async function resumeMigrateJob(job) {
+  if (!job || !job.id || !['partial', 'failed', 'canceled'].includes(job.status)) return
+  try {
+    const updated = await ResumeMigrate(job.id)
+    if (updated) onMigrate(updated)
+    emit('toast', '已恢复迁移，将跳过已完成的资源', 'success')
+  } catch (e) {
+    await refreshMigrateJobs()
+    emit('toast', '恢复迁移失败: ' + String(e), 'error')
+  }
+}
 async function removeMigrateJob(job) {
   if (!job || !job.id || ['pending', 'running'].includes(job.status)) return
   const original = migrateJobs.value
@@ -701,6 +712,8 @@ const migName = (uid) => {
 }
 const migBadge = (s) => ({ completed: 'success', failed: 'error', running: 'primary' }[s] || 'warn')
 const migStatusText = (s) => ({ pending: '等待中', running: '迁移中', completed: '已完成', partial: '部分完成', failed: '失败', canceled: '已取消' }[s] || s)
+const migCompletedTopLevel = (j) => (j.fileIDs || []).filter((id) => (j.completedFileIDs || []).includes(id)).length
+const migRemaining = (j) => Math.max(0, (j.fileIDs || []).length - migCompletedTopLevel(j))
 const migProgress = (j) => j.totalBytes > 0
   ? Math.min(100, Math.round(((j.processedBytes || 0) / j.totalBytes) * 100))
   : (j.total ? Math.min(100, Math.round(((j.processed || 0) / j.total) * 100)) : 0)
@@ -1126,7 +1139,7 @@ onBeforeUnmount(() => {
                 <div class="fileicon"><UiIcon name="migrate" :size="20" style="color:var(--color-primary)" /></div>
                 <div class="filename">
                   <div>{{ migName(j.srcUser) }} → {{ migName(j.dstUser) }}</div>
-                  <div class="fsub">{{ (j.fileIDs || []).length }} 个文件<template v-if="j.failed"> · 失败 {{ j.failed }}</template></div>
+                  <div class="fsub">{{ (j.fileIDs || []).length }} 个文件<template v-if="j.failed"> · 失败 {{ j.failed }}</template><template v-if="['partial', 'failed', 'canceled'].includes(j.status) && migRemaining(j)"> · 可恢复 {{ migRemaining(j) }} 个</template></div>
                 </div>
                 <div class="filesize"></div>
                 <div class="downprogress">
@@ -1141,7 +1154,10 @@ onBeforeUnmount(() => {
                 <div class="downspeed">{{ migProgressText(j) }}</div>
                 <div class="tactions">
                   <button v-if="j.status === 'pending' || j.status === 'running'" class="btn-circle" title="取消迁移" style="color:var(--color-error)" @click="cancelMigrateJob(j)"><UiIcon name="x-circle" :size="14" /></button>
-                  <button v-else class="btn-circle" title="清除记录" style="color:var(--color-error)" @click="removeMigrateJob(j)"><UiIcon name="trash" :size="14" /></button>
+                  <template v-else>
+                    <button v-if="['partial', 'failed', 'canceled'].includes(j.status) && migRemaining(j)" class="btn-circle" title="恢复未完成资源" @click="resumeMigrateJob(j)"><UiIcon name="refresh" :size="14" /></button>
+                    <button class="btn-circle" title="清除记录" style="color:var(--color-error)" @click="removeMigrateJob(j)"><UiIcon name="trash" :size="14" /></button>
+                  </template>
                 </div>
               </div>
             </transition-group>

@@ -314,6 +314,10 @@ export function ResumeDownload(arg1) {
   return window['go']['app']['App']['ResumeDownload'](arg1);
 }
 
+export function ResumeMigrate(arg1) {
+  return window['go']['app']['App']['ResumeMigrate'](arg1);
+}
+
 export function ResumeUpload(arg1) {
   return window['go']['app']['App']['ResumeUpload'](arg1);
 }

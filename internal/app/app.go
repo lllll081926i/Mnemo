@@ -1421,6 +1421,58 @@ func (a *App) CancelMigrate(id string) {
 	}
 }
 
+// ResumeMigrate retries only the resources that did not reach a persisted
+// completion checkpoint. It deliberately requires an explicit user action:
+// jobs interrupted by application shutdown are recovered as canceled rather
+// than silently generating network traffic at the next startup.
+func (a *App) ResumeMigrate(id string) (*migrate.Job, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("迁移任务 ID 不能为空")
+	}
+	eng := a.migrationEngine()
+	if eng == nil {
+		return nil, fmt.Errorf("迁移服务未启动")
+	}
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := st.ListMigrateJobs()
+	if err != nil {
+		return nil, err
+	}
+	for i := range jobs {
+		if jobs[i].ID != id {
+			continue
+		}
+		job := jobs[i]
+		switch job.Status {
+		case "canceled", "partial", "failed":
+			// These terminal states can safely be retried from their durable
+			// per-resource checkpoints.
+		case "pending", "running":
+			return nil, fmt.Errorf("迁移任务正在运行")
+		default:
+			return nil, fmt.Errorf("迁移任务状态 %q 不能恢复", job.Status)
+		}
+		if len(job.FileIDs) == 0 {
+			return nil, fmt.Errorf("迁移任务没有可恢复的文件")
+		}
+		job.Status = "pending"
+		job.Message = "准备恢复未完成资源"
+		if err := st.SaveMigrateJob(&job); err != nil {
+			return nil, err
+		}
+		a.emit("migrate:progress", job)
+		// Derive from the app context so a resumed job is canceled on shutdown.
+		ctx := a.appContext()
+		go func() { _ = eng.Run(ctx, &job) }()
+		return &job, nil
+	}
+	return nil, fmt.Errorf("迁移任务不存在")
+}
+
 // DeleteMigrateJob removes one migration history record.
 func (a *App) DeleteMigrateJob(id string) error {
 	st, err := a.storeOrError()

@@ -80,6 +80,7 @@ export function migrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent, fi
 }
 export function listMigrateJobs() { return App.ListMigrateJobs() }
 export function cancelMigrate(id) { return App.CancelMigrate(id) }
+export function resumeMigrate(id) { return App.ResumeMigrate(id) }
 export function deleteMigrateJob(id) { return App.DeleteMigrateJob(id) }
 export function clearMigrateJobs() { return App.ClearMigrateJobs() }
 

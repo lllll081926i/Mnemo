@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/store"
+	"mnemo-go/internal/transfer/migrate"
 )
 
 func TestExpirationTimeUsesEarliestKnownValue(t *testing.T) {
@@ -27,6 +29,43 @@ func TestSourceExpirationPrefersEarlierQualityExpiry(t *testing.T) {
 	if !got.Equal(want) {
 		t.Fatalf("sourceExpiration() = %v, want %v", got, want)
 	}
+}
+
+func TestResumeMigrateUsesPersistedCheckpoints(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	a := NewApp()
+	a.store = st
+	a.migrate = migrate.NewEngine(st, nil)
+	if err := st.SaveMigrateJob(&migrate.Job{
+		ID:               "resume-checkpoint",
+		Status:           "canceled",
+		FileIDs:          []string{"already-done"},
+		CompletedFileIDs: []string{"already-done"},
+	}); err != nil {
+		t.Fatalf("SaveMigrateJob: %v", err)
+	}
+	if _, err := a.ResumeMigrate("resume-checkpoint"); err != nil {
+		t.Fatalf("ResumeMigrate: %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		jobs, err := st.ListMigrateJobs()
+		if err != nil {
+			t.Fatalf("ListMigrateJobs: %v", err)
+		}
+		if len(jobs) == 1 && jobs[0].Status == "completed" {
+			if jobs[0].Processed != 1 || len(jobs[0].CompletedFileIDs) != 1 {
+				t.Fatalf("recovered job = %#v", jobs[0])
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("resumed migration did not complete from its checkpoint")
 }
 
 func TestSanitizeVideoPreviewHidesProviderCredentials(t *testing.T) {

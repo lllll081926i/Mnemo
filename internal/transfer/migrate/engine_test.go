@@ -58,6 +58,77 @@ func TestEngineRunEmptyFileIDs(t *testing.T) {
 	}
 }
 
+func TestEngineRunSkipsPersistedTopLevelCheckpoints(t *testing.T) {
+	e := NewEngine(nil, nil)
+	job := &Job{
+		ID:               "resume-complete",
+		FileIDs:          []string{"already-done"},
+		CompletedFileIDs: []string{"already-done", "nested-file"},
+		Status:           "canceled",
+	}
+	if err := e.Run(context.Background(), job); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("status = %q, want completed", job.Status)
+	}
+	if job.Processed != 1 || job.Total != 1 {
+		t.Fatalf("processed/total = %d/%d, want 1/1", job.Processed, job.Total)
+	}
+}
+
+func TestRecoveryCheckpointsAreIdempotent(t *testing.T) {
+	e := NewEngine(nil, nil)
+	job := &Job{ID: "checkpoint"}
+
+	e.markTargetDirectory(job, "source-dir", "target-dir")
+	e.markTargetDirectory(job, "source-dir", "target-dir")
+	e.markCopied(job, "source-file")
+	e.markCopied(job, "source-file")
+	e.markCompleted(job, "source-file")
+	e.markCompleted(job, "source-file")
+
+	if got := job.TargetDirectoryIDs["source-dir"]; got != "target-dir" {
+		t.Fatalf("target directory checkpoint = %q, want target-dir", got)
+	}
+	if len(job.CompletedFileIDs) != 1 || job.CompletedFileIDs[0] != "source-file" {
+		t.Fatalf("completed checkpoints = %#v", job.CompletedFileIDs)
+	}
+	if len(job.CopiedFileIDs) != 0 {
+		t.Fatalf("copied checkpoint must be cleared after source cleanup: %#v", job.CopiedFileIDs)
+	}
+}
+
+func TestCompletedTopLevelCountIgnoresNestedCheckpoints(t *testing.T) {
+	job := &Job{
+		FileIDs:          []string{"root-a", "root-b"},
+		CompletedFileIDs: []string{"root-a", "nested-a", "nested-b"},
+	}
+	if got := completedTopLevelCount(job); got != 1 {
+		t.Fatalf("completed top-level count = %d, want 1", got)
+	}
+}
+
+func TestEngineRejectsDuplicateActiveRun(t *testing.T) {
+	e := NewEngine(nil, nil)
+	_, cancel, registered := e.registerCancel(context.Background(), "active")
+	if !registered {
+		t.Fatal("first registration must succeed")
+	}
+	defer func() {
+		cancel()
+		e.releaseCancel("active")
+	}()
+
+	job := &Job{ID: "active"}
+	if err := e.Run(context.Background(), job); err == nil {
+		t.Fatal("duplicate active run must be rejected")
+	}
+	if job.Status != "" {
+		t.Fatalf("duplicate run changed status to %q", job.Status)
+	}
+}
+
 func TestValidateEndpointsRejectsSameDrive(t *testing.T) {
 	if err := ValidateEndpoints("pikpak_user", "pikpak:drive", "pikpak_user", "pikpak:drive"); err == nil {
 		t.Fatal("same source and target drive must be rejected")
