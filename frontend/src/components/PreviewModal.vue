@@ -2,7 +2,7 @@
 // 高级预览弹窗：
 // 1. 图片画廊（缩放/拖拽平移/90度旋转/翻页/胶卷条）
 // 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
-// 3. 音频播放与 PDF 嵌入
+// 3. 音频播放；PDF 等非白名单格式由文件页提示下载，不会进入此弹窗
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { PreviewURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf } from '../api'
 import Modal from './Modal.vue'
@@ -39,11 +39,34 @@ const currentImageIdx = computed(() => {
   return idx >= 0 ? idx : 0
 })
 
-const zoom = ref(1)
+// ---------- 图片查看器（沉浸式重写） ----------
+// 图层转场模型：切图时旧层冻结变换退出、新层解码完成后才淡入，切换无白屏闪烁
+const stageEl = ref(null)
+const layers = ref([]) // [{ key, url, file, w, h, leaving, frozen }]
+const natural = ref({ w: 0, h: 0 })
+const fitScale = ref(1) // 适配视口的基准缩放（不超过原始尺寸）
+const zoom = ref(1) // 1 = 适配窗口
 const rotation = ref(0)
 const pos = ref({ x: 0, y: 0 })
 const isDragging = ref(false)
+const uiHidden = ref(false) // 光标闲置后隐藏控件
+const showFilm = ref(false)
+const imgSwitching = ref(false)
 let dragStart = { x: 0, y: 0, posX: 0, posY: 0 }
+let activeDragCleanup = null
+let idleTimer = null
+let imgSeq = 0
+let stageRO = null
+
+const liveTransform = computed(
+  () => `translate(${pos.value.x}px, ${pos.value.y}px) scale(${(fitScale.value * zoom.value).toFixed(4)}) rotate(${rotation.value}deg)`
+)
+
+function computeFit() {
+  const el = stageEl.value, n = natural.value
+  if (!el || !n.w || !n.h) { fitScale.value = 1; return }
+  fitScale.value = Math.min(1, (el.clientWidth - 24) / n.w, (el.clientHeight - 24) / n.h)
+}
 
 function resetImageTransform() {
   zoom.value = 1
@@ -51,31 +74,48 @@ function resetImageTransform() {
   pos.value = { x: 0, y: 0 }
 }
 
-function zoomBy(delta) {
-  zoom.value = Math.min(5, Math.max(0.2, Number((zoom.value + delta).toFixed(2))))
+function stagePoint(e) {
+  const r = stageEl.value.getBoundingClientRect()
+  return { x: e.clientX - r.left - r.width / 2, y: e.clientY - r.top - r.height / 2 }
 }
 
-function rotateBy(deg) {
-  rotation.value = (rotation.value + deg + 360) % 360
+// 缩放（origin 存在且未旋转时锚定光标位置）
+function zoomTo(next, origin) {
+  const old = zoom.value
+  const nz = Math.min(10, Math.max(0.1, Number(next.toFixed(3))))
+  if (nz === old) return
+  if (origin && rotation.value % 360 === 0) {
+    const k = nz / old
+    pos.value = { x: origin.x - (origin.x - pos.value.x) * k, y: origin.y - (origin.y - pos.value.y) * k }
+  }
+  zoom.value = nz
 }
+function zoomByFactor(f) { zoomTo(zoom.value * f) }
+function rotateBy(deg) { rotation.value = (rotation.value + deg + 360) % 360 }
 
 function onWheel(e) {
   if (kind.value !== 'image') return
   e.preventDefault()
-  const delta = e.deltaY < 0 ? 0.15 : -0.15
-  zoomBy(delta)
+  pokeUI()
+  zoomTo(zoom.value * (e.deltaY < 0 ? 1.18 : 1 / 1.18), stagePoint(e))
+}
+
+// 双击：适配 ↔ 2x（锚定点击点）
+function onDblClick(e) {
+  if (kind.value !== 'image') return
+  if (e.target.closest('.pv-ctl, .pv-edge, .pv-filmstrip')) return
+  if (Math.abs(zoom.value - 1) > 0.01 || pos.value.x || pos.value.y) resetImageTransform()
+  else zoomTo(2, stagePoint(e))
 }
 
 function onPointerDown(e) {
-  if (kind.value !== 'image') return
+  if (kind.value !== 'image' || e.button !== 0) return
+  if (e.target.closest('.pv-ctl, .pv-edge, .pv-filmstrip')) return
   isDragging.value = true
   dragStart = { x: e.clientX, y: e.clientY, posX: pos.value.x, posY: pos.value.y }
   const onMove = (ev) => {
     if (!isDragging.value) return
-    pos.value = {
-      x: dragStart.posX + (ev.clientX - dragStart.x),
-      y: dragStart.posY + (ev.clientY - dragStart.y),
-    }
+    pos.value = { x: dragStart.posX + (ev.clientX - dragStart.x), y: dragStart.posY + (ev.clientY - dragStart.y) }
   }
   const onUp = () => {
     isDragging.value = false
@@ -87,11 +127,18 @@ function onPointerDown(e) {
   window.addEventListener('pointerup', onUp)
   activeDragCleanup = onUp
 }
-let activeDragCleanup = null
+
+// 控件自动隐藏（类播放器）：光标活动 2.4s 后隐藏
+function pokeUI() {
+  uiHidden.value = false
+  clearTimeout(idleTimer)
+  idleTimer = setTimeout(() => { if (!isDragging.value) uiHidden.value = true }, 2400)
+}
 
 function switchImage(step) {
   const total = imageList.value.length
   if (total <= 1) return
+  pokeUI()
   const nextIdx = (currentImageIdx.value + step + total) % total
   activeFile.value = imageList.value[nextIdx]
 }
@@ -99,6 +146,57 @@ function switchImage(step) {
 function selectImage(img) {
   if (activeFile.value.file_id === img.file_id) return
   activeFile.value = img
+}
+
+function loadImageBitmap(url) {
+  return new Promise((resolve, reject) => {
+    const im = new Image()
+    im.onload = () => resolve(im)
+    im.onerror = () => reject(new Error('图片解码失败'))
+    im.src = url
+  })
+}
+
+async function loadImage() {
+  const seq = ++imgSeq
+  const file = activeFile.value
+  imgSwitching.value = true
+  error.value = ''
+  try {
+    await PinFileSnapshot(props.account.user_id, props.account.drive_id, file)
+    const previewUrl = await PreviewURL(props.account.user_id, props.account.drive_id, file.file_id)
+    const im = await loadImageBitmap(previewUrl) // 等像素就绪再换层，避免白屏
+    if (seq !== imgSeq) return
+    const frozen = liveTransform.value
+    layers.value.forEach((l) => { l.leaving = true; l.frozen = frozen })
+    natural.value = { w: im.naturalWidth, h: im.naturalHeight }
+    computeFit()
+    resetImageTransform()
+    layers.value.push({ key: `${file.file_id}-${seq}`, url: previewUrl, file, w: im.naturalWidth, h: im.naturalHeight })
+    setTimeout(() => { layers.value = layers.value.filter((l) => !l.leaving) }, 300)
+    preloadNeighbors()
+  } catch (e) {
+    if (seq !== imgSeq) return
+    // 首次加载失败才全屏报错；切换失败保留当前图
+    if (!layers.value.length) error.value = String(e && e.message ? e.message : e)
+  } finally {
+    if (seq === imgSeq) { imgSwitching.value = false; loading.value = false }
+  }
+}
+
+// 预载相邻两张，切换基本零等待
+async function preloadNeighbors() {
+  const list = imageList.value, idx = currentImageIdx.value
+  for (const step of [1, -1]) {
+    const f = list[(idx + step + list.length) % list.length]
+    if (!f || f.file_id === activeFile.value.file_id) continue
+    try {
+      await PinFileSnapshot(props.account.user_id, props.account.drive_id, f)
+      const u = await PreviewURL(props.account.user_id, props.account.drive_id, f.file_id)
+      const im = new Image()
+      im.src = u
+    } catch { /* 预载失败静默 */ }
+  }
 }
 
 // ---------- 文本与代码专业预览/编辑状态 ----------
@@ -377,12 +475,15 @@ const renderedMarkdown = computed(() => renderMarkdown(text.value))
 // ---------- 加载核心逻辑 ----------
 let loadSeq = 0
 async function loadPreview() {
+  if (kind.value === 'image') return loadImage()
   const seq = ++loadSeq
   loading.value = true
   error.value = ''
   url.value = ''
-  resetImageTransform()
   try {
+    if (!['image', 'text', 'audio'].includes(kind.value)) {
+      throw new Error(kind.value === 'pdf' ? 'PDF 暂不支持在线预览，请下载后查看' : '此文件格式不支持在线预览，请下载后查看')
+    }
     await PinFileSnapshot(
       props.account.user_id,
       props.account.drive_id,
@@ -422,6 +523,10 @@ function onKey(e) {
   if (kind.value === 'image') {
     if (e.key === 'ArrowLeft') switchImage(-1)
     else if (e.key === 'ArrowRight') switchImage(1)
+    else if (e.key === '+' || e.key === '=') zoomByFactor(1.25)
+    else if (e.key === '-' || e.key === '_') zoomByFactor(1 / 1.25)
+    else if (e.key === '0') resetImageTransform()
+    else if (e.key === 'r' || e.key === 'R') rotateBy(90)
   } else if (kind.value === 'text') {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
       e.preventDefault()
@@ -432,10 +537,18 @@ function onKey(e) {
 
 onMounted(() => {
   loadPreview()
+  pokeUI()
   window.addEventListener('keydown', onKey)
+  if (typeof ResizeObserver !== 'undefined') stageRO = new ResizeObserver(() => computeFit())
+})
+watch(stageEl, (el) => {
+  stageRO?.disconnect()
+  if (el && stageRO) { stageRO.observe(el); nextTick(computeFit) }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  clearTimeout(idleTimer)
+  stageRO?.disconnect()
   if (activeDragCleanup) activeDragCleanup()
 })
 
@@ -505,27 +618,10 @@ function decodeText(buf) {
       </button>
     </template>
 
-    <!-- 顶部悬浮工具条 -->
-    <div class="pv-toolbar">
-      <!-- 1. 图片画廊工具 -->
-      <template v-if="kind === 'image'">
-        <button class="tbtn xs" :disabled="imageList.length <= 1" title="上一张 (←)" @click="switchImage(-1)">
-          <UiIcon name="back" :size="12" />上一张
-        </button>
-        <span class="pv-counter">{{ currentImageIdx + 1 }} / {{ imageList.length }}</span>
-        <button class="tbtn xs" :disabled="imageList.length <= 1" title="下一张 (→)" @click="switchImage(1)">
-          下一张<UiIcon name="forward" :size="12" />
-        </button>
-        <span class="pv-sep"></span>
-        <button class="btn-circle sm" title="放大 (滚轮向上)" @click="zoomBy(0.2)"><UiIcon name="plus" :size="13" /></button>
-        <span class="pv-zoom-text">{{ Math.round(zoom * 100) }}%</span>
-        <button class="btn-circle sm" title="缩小 (滚轮向下)" @click="zoomBy(-0.2)"><UiIcon name="close" :size="11" /></button>
-        <button class="btn-circle sm" title="顺时针旋转 90°" @click="rotateBy(90)"><UiIcon name="refresh" :size="13" /></button>
-        <button class="tbtn xs" title="复原" @click="resetImageTransform">重置</button>
-      </template>
-
-      <!-- 2. 文本与代码专业工具 -->
-      <template v-else-if="kind === 'text'">
+    <!-- 顶部悬浮工具条（仅文本） -->
+    <div v-if="kind === 'text'" class="pv-toolbar">
+      <!-- 文本与代码专业工具 -->
+      <template>
         <!-- 模式切换分段按钮 -->
         <div class="pv-mode-seg">
           <button
@@ -626,27 +722,42 @@ function decodeText(buf) {
     </div>
 
     <template v-else>
-      <!-- 1. 图片画廊 -->
+      <!-- 1. 图片画廊（沉浸式舞台） -->
       <div
         v-if="kind === 'image'"
-        class="pv-image-viewport"
+        ref="stageEl"
+        class="pv-stage"
+        :class="{ 'ui-hidden': uiHidden, grabbing: isDragging }"
         @wheel="onWheel"
         @pointerdown="onPointerDown"
+        @pointermove="pokeUI"
+        @dblclick="onDblClick"
       >
-        <img
-          :src="url"
-          :alt="activeFile.name"
-          class="pv-image-element"
-          :class="{ dragging: isDragging }"
-          :style="{
-            transform: `translate(${pos.x}px, ${pos.y}px) scale(${zoom}) rotate(${rotation}deg)`,
-          }"
-          draggable="false"
-          @dblclick="resetImageTransform"
-        />
+        <div
+          v-for="layer in layers"
+          :key="layer.key"
+          class="pv-img-layer"
+          :class="{ leaving: layer.leaving }"
+        >
+          <img
+            :src="layer.url"
+            :alt="layer.file.name"
+            draggable="false"
+            :style="{ transform: layer.frozen || liveTransform, width: layer.w + 'px', height: layer.h + 'px' }"
+          />
+        </div>
 
-        <!-- 底部胶卷缩略图条 -->
-        <div v-if="imageList.length > 1" class="pv-filmstrip" @pointerdown.stop>
+        <div v-if="imgSwitching && layers.length" class="pv-stage-busy"><span class="spin"></span></div>
+
+        <template v-if="imageList.length > 1">
+          <button class="pv-edge left" title="上一张 (←)" @click.stop="switchImage(-1)"><UiIcon name="back" :size="17" /></button>
+          <button class="pv-edge right" title="下一张 (→)" @click.stop="switchImage(1)"><UiIcon name="forward" :size="17" /></button>
+        </template>
+
+        <div class="pv-topmeta">{{ activeFile.name }}</div>
+
+        <!-- 胶卷缩略图条（控制条切换） -->
+        <div v-if="showFilm && imageList.length > 1" class="pv-filmstrip" @pointerdown.stop @dblclick.stop>
           <div
             v-for="img in imageList"
             :key="img.file_id"
@@ -655,16 +766,28 @@ function decodeText(buf) {
             :title="img.name"
             @click="selectImage(img)"
           >
-            <img v-if="img.thumbnail" :src="img.thumbnail" alt="" />
-            <UiIcon v-else name="image" :size="18" />
+            <img v-if="img.thumbnail" :src="img.thumbnail" alt="" draggable="false" />
+            <UiIcon v-else name="image" :size="16" />
           </div>
+        </div>
+
+        <!-- 浮动控制条 -->
+        <div class="pv-ctl" @pointerdown.stop @dblclick.stop>
+          <button class="pv-ctl-btn" :disabled="imageList.length <= 1" title="上一张 (←)" @click="switchImage(-1)"><UiIcon name="back" :size="15" /></button>
+          <span class="pv-ctl-counter">{{ currentImageIdx + 1 }} / {{ imageList.length }}</span>
+          <button class="pv-ctl-btn" :disabled="imageList.length <= 1" title="下一张 (→)" @click="switchImage(1)"><UiIcon name="forward" :size="15" /></button>
+          <span class="pv-ctl-sep"></span>
+          <button class="pv-ctl-btn pv-ctl-text" title="缩小 (-)" @click="zoomByFactor(1 / 1.25)">−</button>
+          <span class="pv-ctl-zoom" title="点击复原（适配窗口）" @click="resetImageTransform">{{ Math.round(fitScale * zoom * 100) }}%</span>
+          <button class="pv-ctl-btn" title="放大 (+)" @click="zoomByFactor(1.25)"><UiIcon name="plus" :size="13" /></button>
+          <button class="pv-ctl-btn" title="适配窗口 (0)" @click="resetImageTransform"><UiIcon name="size" :size="14" /></button>
+          <button class="pv-ctl-btn" title="顺时针旋转 90° (R)" @click="rotateBy(90)"><UiIcon name="refresh" :size="13" /></button>
+          <span class="pv-ctl-sep"></span>
+          <button class="pv-ctl-btn" :class="{ active: showFilm }" :disabled="imageList.length <= 1" title="缩略图" @click="showFilm = !showFilm"><UiIcon name="grid" :size="14" /></button>
         </div>
       </div>
 
-      <!-- 2. PDF 嵌入 -->
-      <iframe v-else-if="kind === 'pdf'" :src="url" class="pv-pdf-frame" title="PDF 预览"></iframe>
-
-      <!-- 3. 音频播放 -->
+      <!-- 2. 音频播放 -->
       <div v-else-if="kind === 'audio'" class="pv-audio-container">
         <div class="pv-audio-disc">
           <UiIcon name="audio" :size="48" style="color:var(--color-primary)" />
@@ -834,9 +957,7 @@ function decodeText(buf) {
   scrollbar-width: thin;
 }
 .pv-toolbar > * { flex: 0 0 auto; }
-.pv-counter { font-size: 12.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 .pv-sep { width: 1px; height: 18px; background: var(--border-light); margin: 0 4px; }
-.pv-zoom-text { font-size: 12px; color: var(--text-secondary); min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
 .pv-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .pv-edit-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
@@ -1113,70 +1234,118 @@ function decodeText(buf) {
   .pv-sb-section { gap: 8px; }
 }
 
-/* 图片画廊 */
-.pv-image-viewport {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(circle, var(--bg-surface) 10%, var(--bg-base) 90%);
-  user-select: none;
-  touch-action: none;
-  cursor: grab;
+/* 图片查看器：沉浸式黑场舞台 */
+.pv-stage {
+  flex: 1; min-height: 0; position: relative; overflow: hidden;
+  background: #050507;
+  user-select: none; touch-action: none; cursor: grab;
 }
-.pv-image-viewport:active { cursor: grabbing; }
-.pv-image-element {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: var(--radius-xs);
-  transition: transform 60ms linear;
-  box-shadow: var(--shadow-modal);
+.pv-stage.grabbing { cursor: grabbing; }
+.pv-img-layer {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
   pointer-events: none;
 }
-.pv-image-element.dragging { transition: none; }
+.pv-img-layer:not(.leaving) { animation: pv-layer-in 260ms var(--motion-ease) both; }
+.pv-img-layer.leaving { animation: pv-layer-out 240ms ease both; }
+@keyframes pv-layer-in { from { opacity: 0; transform: scale(1.015); } }
+@keyframes pv-layer-out { to { opacity: 0; transform: scale(.99); } }
+.pv-img-layer img {
+  display: block; max-width: none; max-height: none;
+  transform-origin: center center;
+  transition: transform 200ms var(--motion-ease);
+  box-shadow: 0 10px 44px rgba(0, 0, 0, .55);
+  border-radius: 2px;
+}
+.pv-stage.grabbing .pv-img-layer img { transition: none; }
+.pv-stage-busy { position: absolute; top: 12px; right: 14px; color: rgba(255,255,255,.7); }
 
-/* 底部胶卷 */
+/* 顶部文件名（自动隐藏） */
+.pv-topmeta {
+  position: absolute; top: 10px; left: 16px; right: 16px;
+  text-align: center; font-size: 12px; color: rgba(255, 255, 255, .72);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .7);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  pointer-events: none; transition: opacity .25s ease;
+}
+
+/* 左右翻页箭头 */
+.pv-edge {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 38px; height: 62px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255, 255, 255, .85);
+  background: rgba(20, 20, 26, .42);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, .1); border-radius: 10px;
+  cursor: pointer; opacity: .3;
+  transition: opacity .2s ease, background .18s ease, transform .18s var(--motion-spring);
+}
+.pv-edge.left { left: 14px; }
+.pv-edge.right { right: 14px; }
+.pv-edge:hover { opacity: 1; background: rgba(32, 32, 40, .6); }
+.pv-edge:active { transform: translateY(-50%) scale(.93); }
+
+/* 浮动控制条（播放器语言） */
+.pv-ctl {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: 12px;
+  background: rgba(16, 16, 21, .72);
+  backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, .1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  transition: opacity .25s ease, transform .25s var(--motion-ease);
+}
+.pv-ctl-btn {
+  width: 28px; height: 28px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; color: rgba(255, 255, 255, .85); cursor: pointer;
+  transition: background .16s ease, transform .18s var(--motion-spring), color .16s;
+}
+.pv-ctl-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .13); }
+.pv-ctl-btn:active:not(:disabled) { transform: scale(.88); }
+.pv-ctl-btn:disabled { opacity: .32; cursor: default; }
+.pv-ctl-btn.active { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 20%, transparent); }
+.pv-ctl-text { font-size: 17px; line-height: 1; padding-bottom: 2px; }
+.pv-ctl-counter, .pv-ctl-zoom { font-size: 12px; color: rgba(255, 255, 255, .8); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pv-ctl-zoom { cursor: pointer; min-width: 40px; text-align: center; border-radius: 6px; padding: 3px 4px; }
+.pv-ctl-zoom:hover { background: rgba(255, 255, 255, .1); }
+.pv-ctl-sep { width: 1px; height: 16px; background: rgba(255, 255, 255, .14); flex: none; }
+
+/* 胶卷缩略图条（默认隐藏，控制条切换） */
 .pv-filmstrip {
-  position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-md);
-  max-width: 80%;
-  overflow-x: auto;
+  position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%);
+  display: flex; gap: 6px; max-width: min(78%, 560px); overflow-x: auto;
+  padding: 7px; border-radius: 12px;
+  background: rgba(16, 16, 21, .72);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, .1);
   scrollbar-width: none;
+  transition: opacity .25s ease;
 }
 .pv-filmstrip::-webkit-scrollbar { display: none; }
 .pv-film-thumb {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  cursor: pointer;
+  width: 56px; height: 40px; flex: none;
+  border-radius: 7px; overflow: hidden; cursor: pointer;
   border: 1.5px solid transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-subtle);
-  flex-shrink: 0;
-  transition: border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .06); color: rgba(255, 255, 255, .5);
+  transition: transform .18s var(--motion-spring), border-color .15s ease;
 }
-.pv-film-thumb:hover { transform: scale(1.1); }
-.pv-film-thumb.active { border-color: var(--color-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent); }
+.pv-film-thumb:hover { transform: translateY(-2px); }
+.pv-film-thumb.active { border-color: var(--color-primary); }
 .pv-film-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
+/* 控件自动隐藏 */
+.pv-stage.ui-hidden { cursor: none; }
+.pv-stage.ui-hidden .pv-ctl,
+.pv-stage.ui-hidden .pv-edge,
+.pv-stage.ui-hidden .pv-topmeta,
+.pv-stage.ui-hidden .pv-filmstrip { opacity: 0; pointer-events: none; }
+.pv-stage.ui-hidden .pv-ctl { transform: translateX(-50%) translateY(6px); }
+
 /* PDF & Audio */
-.pv-pdf-frame { width: 100%; height: 100%; border: none; background: var(--bg-base); }
 .pv-audio-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 36px; }
 .pv-audio-disc { width: 104px; height: 104px; border-radius: 50%; background: var(--bg-subtle); border: 2px solid var(--border-light); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
 .pv-audio-name { font-size: 16px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 520px; }
