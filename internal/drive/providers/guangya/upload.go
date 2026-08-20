@@ -167,8 +167,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
 			return err
 		}
-		ui.Upload.DownSize = ui.Info.Size
-		ui.Upload.DownProcess = 100
+		ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
 		return nil
 	}
 
@@ -240,8 +239,7 @@ func directPut(ctx context.Context, ui *model.UploadingUI, f *os.File, uploadURL
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("上传失败 HTTP %d", resp.StatusCode)
 	}
-	ui.Upload.DownSize = ui.Info.Size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
 	if taskID != "" {
 		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
 			return err
@@ -299,7 +297,7 @@ func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoi
 	}
 
 	for i := 0; i < partCount; i++ {
-		if ui.Upload.IsStop {
+		if ui.IsUploadStopRequested() {
 			abort()
 			return errors.New("已暂停")
 		}
@@ -335,17 +333,14 @@ func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoi
 			}
 			progMu.Lock()
 			uploaded += cur
-			ui.Upload.DownSize = uploaded
-			if size > 0 {
-				ui.Upload.DownProcess = int(100 * uploaded / size)
-			}
+			ui.ReportUploadProgress(uploaded, size)
 			progMu.Unlock()
 		}()
 	}
 	wg.Wait()
 	if firstErr != nil {
 		abort()
-		if ui.Upload.IsStop {
+		if ui.IsUploadStopRequested() {
 			return errors.New("已暂停")
 		}
 		return errors.New("OSS 分片上传失败: " + firstErr.Error())
@@ -361,8 +356,7 @@ func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoi
 	}); err != nil {
 		return errors.New("OSS 分片上传失败: " + err.Error())
 	}
-	ui.Upload.DownSize = size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(size, size)
 	if taskID != "" {
 		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
 			return err

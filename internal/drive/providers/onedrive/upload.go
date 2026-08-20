@@ -173,11 +173,8 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 		pos += int64(n)
 		// Persist progress incrementally (byte offset as single-element part list)
 		_ = drive.SaveUploadSessionState(sessionKey, sess.UploadURL, []int{int(pos)})
-		if ui != nil && ui.Upload.DownSize >= 0 {
-			ui.Upload.DownSize = pos
-			if size > 0 {
-				ui.Upload.DownProcess = int(pos * 100 / size)
-			}
+		if ui != nil {
+			ui.ReportUploadProgress(pos, size)
 		}
 	}
 	drive.ClearUploadSession(sessionKey)

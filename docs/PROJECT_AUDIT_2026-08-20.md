@@ -38,7 +38,7 @@
 
 | 验证 | 结果 |
 |---|---|
-| 定向回归、`go test ./...`、核心包 `-race` | 全部通过 |
+| 定向回归（上传 worker/Provider 包/迁移防护）、`go test ./...`、核心包 `-race` | 全部通过 |
 | WebDAV/S3 专项回归测试 | 通过 |
 | `npm.cmd run build`（`frontend`） | 通过，90 个模块完成生产构建 |
 | `go test ./...` | 通过 |
@@ -80,6 +80,8 @@
 | F-25 | 同一同步任务可由手动执行和调度器并发启动 | 手动与调度统一经过任务运行注册表；同 ID 重入被拒绝，支持取消、运行中 ID 查询、前端状态恢复，应用退出时取消全部同步。 |
 | F-26 | 本地预览可读取整个应用数据目录 | 应用不再把 `dataDir` 注册为预览根；每个已存在且位于允许根内的文件使用随机授权 ID 和令牌访问，URL 不暴露本地路径，切换下载目录会撤销旧授权。 |
 | F-27 | `OpenBrowser` 不限制协议且前端无显式 CSP | 外链仅允许 HTTPS 及本机回环 HTTP，拒绝凭据 URL、远程明文 HTTP、`file:` 和自定义协议；前端入口增加 CSP，限制脚本、连接、对象、表单和 frame 来源。 |
+| F-28 | 上传取消后可立即恢复、旧 Provider 继续写共享任务 | 每个上传任务使用 generation 和运行句柄；恢复必须等旧 worker 完全退出。Provider 只操作 worker 私有副本，进度通过线程安全回调按 500ms 节流合并，队列独占共享状态和最终结果。新增阻塞 worker、回调和 Provider 包竞态回归测试。 |
+| F-29 | 迁移可把源盘作为目标盘 | 绑定层与迁移引擎统一拒绝同一账号/同一盘；避免目标目录位于源树时递归发现新对象。提示用户改用网盘内 Move/Copy 操作。 |
 
 ## 4. 风险分级
 
@@ -104,13 +106,13 @@
 |---|---|---|---|
 | P1-01（部分关闭） | 同一同步任务可并发运行，缺少任务级取消和互斥 | 手动与调度现已共用按任务 ID 的运行注册表，支持取消、运行状态恢复和应用退出清理；但部分 drive 门面仍使用 `context.Background()` | 任务重入和生命周期已关闭；继续让 Provider/drive 长操作接收调用方 Context，使取消可以及时中断正在执行的单次网络请求。 |
 | P1-02（已关闭） | 同步任务 ID 可进入快照文件名 | 原实现直接拼成 `SyncSnapshot_<id>.json` | 合法旧 ID 保持兼容，危险 ID 映射为固定 SHA-256 文件名；测试确认文件始终位于 Store 目录内。 |
-| P1-03 | 上传取消后可立即恢复旧任务，旧 Provider 未退出前可能出现两个 worker | `internal/transfer/upload.go:438-482` 取消后立即允许新 goroutine；Provider 和进度泵共享修改 `*UploadingUI` | 重复上传、状态覆盖和竞态 | 每个 job 增加 generation/worker 状态和 `done`；Resume 必须等待前一代退出；Provider 只上报不可变进度事件，由队列独占修改任务状态。 |
+| P1-03（部分关闭） | 上传取消后可立即恢复旧任务，旧 Provider 未退出前可能出现两个 worker | 每个任务现有 generation/运行句柄，旧 worker 未退出时 Resume 明确返回等待错误；Provider 使用 worker 私有副本，队列独占合并结果并节流进度事件。 | 重复 worker、共享 `UploadingUI` 竞态已关闭；仍需为所有 Provider 补更细的取消/远端会话清理测试。 |
 | P1-04 | “全局限速”实际是每任务限速 | 下载在每次 `Download` 创建 limiter；上传每个 `ProgressReader` 有独立桶 | 并发 N 个任务时总速率可接近设置值的 N 倍 | 在 Manager/UploadQueue 维护进程级共享 limiter，任务和分片统一消费。 |
 | P1-05（已关闭） | 下载任务会持久化签名 URL 和敏感请求头 | 原任务 JSON 和分段状态曾保存 URL/Headers | 新任务与旧任务迁移均不再落盘 URL/Header；断点状态只保存 URL 指纹；前端列表和事件同样使用脱敏副本。直链任务重启后明确不可恢复。 |
 | P1-06（已关闭） | 本地预览把整个 `dataDir` 作为可访问根 | 原实现把下载目录和数据目录同时作为可访问根，且 URL 直接携带路径 | 只允许当前下载根内的已存在文件，并使用随机文件级授权；不注册应用数据目录、不暴露绝对路径，根目录变更会撤销授权。 |
 | P1-07 | 预览代理存在 DNS rebinding/私网信任缺口 | `internal/preview/server.go:1289-1354` 在连接前不解析并固定公网 IP，且 Go 侧注册的初始 Host 会进入允许表 | 被控制的域名可在校验后解析到私网；Provider 返回的私网 URL会被信任 | 自定义 `DialContext`：解析全部 IP、拒绝保留网段、连接已验证 IP，并在 Host/SNI 中保留原域；每次重定向重复校验。私网播放必须由显式用户配置而不是自动放行。 |
 | P1-08（已关闭） | `OpenBrowser` 是不限制协议的 Wails 绑定，且没有显式 CSP | 原绑定接受任意字符串，前端入口无 CSP | 外链现仅允许 HTTPS 和本机回环 HTTP，拒绝用户信息和危险 scheme；入口已增加显式 CSP，并有允许/拒绝矩阵测试。 |
-| P1-09 | 跨盘迁移绑定层未拒绝源/目标为同一盘或目标在源子树 | `internal/app/app.go:MigrateFiles` 只校验账号和能力；迁移引擎会创建目标后递归源目录 | 绕过前端直接调用可能递归复制到自身；失败后留下部分对象，移动语义变成部分复制 | 后端强制不同账号/盘，或在同盘场景解析祖先关系；任务记录逐文件提交状态并提供清理/重试。 |
+| P1-09（部分关闭） | 跨盘迁移绑定层未拒绝源/目标为同一盘或目标在源子树 | 绑定层和引擎现在拒绝同一账号/同一盘，因此不会进入递归复制；不同挂载 ID 的祖先关系仍无法在通用 Provider 层可靠解析 | 同盘递归风险已关闭；继续补部分失败清理、逐文件恢复和不同挂载别名的祖先关系校验。 |
 | P1-10 | 移除账号只删除账号记录 | `internal/app/app.go:853-865`、`internal/store/accounts.go:154-168` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 提供“仅移除凭据”和“移除账号及本地关联数据”两种明确选项；删除前列出影响并停止相关任务。 |
 | P1-11 | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go:11-12` 是空实现；`tray.go:46-58` 不区分平台 | Linux/macOS 用户可能关闭后无法恢复窗口 | 非 Windows 默认禁用 Close-to-Tray，或实现对应平台托盘；设置页按平台能力隐藏选项。 |
 | P1-12 | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml:206-211` 和 `internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 使用独立离线签名（如 minisign/cosign）、应用内固定公钥验证；Windows Authenticode、macOS Developer ID + notarization；发布密钥与 GitHub token 分离。 |
@@ -250,7 +252,7 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 | `internal/drive` | 13.2% | 不足 |
 | `internal/sync` | 16.1% | 已明显提升但仍不足；路径、扫描和删除边界已有直接测试 |
 | `internal/transfer/dlengine` | 13.4% | 已提升但仍不足；错误 Range、资源换版和脱敏断点状态已有本地 HTTP 测试 |
-| `internal/transfer` | 31.4% | 不足；同名目标、孤立断点冲突和任务敏感状态已有测试 |
+| `internal/transfer` | 31.4% | 不足；同名目标、孤立断点冲突、任务敏感状态和上传 worker 生命周期已有测试 |
 | `internal/transfer/migrate` | 20.6% | 不足 |
 | `internal/store` | 37.4% | 尚可但仍需失败注入测试 |
 | `internal/logging` | 36.5% | 格式与脱敏已有测试，文件轮转/并发故障仍需覆盖 |
@@ -263,7 +265,7 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 
 ### 9.2 必须补的测试顺序
 
-1. 数据安全红线：同步安全路径、扫描失败禁止删除、快照 ID、下载同名预留、Content-Range/ETag、同任务互斥和任务取消已完成；Provider 请求级取消与上传取消恢复仍待补。
+1. 数据安全红线：同步安全路径、扫描失败禁止删除、快照 ID、下载同名预留、Content-Range/ETag、同任务互斥和任务取消已完成；上传取消恢复的 worker 生命周期已完成，Provider 请求级 Context 传递仍待补。
 2. 风控与连接：PikPak 并发刷新合并/429 冷却；WebDAV 尾斜杠、Basic/Digest 诊断、quota 可选属性；S3 Head/List 回退与最大请求次数。
 3. 前端功能：登录模板、自动名称、上传冲突取消、迁移能力过滤、设置项消费、容量刷新时钟；全部使用 mock Wails API，不访问真实网盘。
 4. 故障注入：磁盘满、JSON 原子写失败、权限拒绝、网络超时、分页游标重复、服务端返回错误 Range。
@@ -294,6 +296,7 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 - 已完成：下载目标原子去重并隔离断点文件集合。
 - 已完成：Content-Range、ETag/If-Range 和状态失效。
 - 已完成：同步任务级互斥、取消和运行状态恢复。
+- 已完成：上传取消恢复的 worker generation、等待和共享状态隔离。
 - 仍属 P1：Provider 请求级 Context 传递；同步预演仍属于下一阶段产品安全能力。
 
 完成标准：Windows 路径边界用例、恶意 WebDAV href、并发同名下载、服务器中途换文件均有自动化测试；删除传播默认仍需显式开启。
@@ -304,8 +307,8 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 - 预览代理 DNS/IP 固定和重定向重复校验。
 - 已完成：限制 `OpenBrowser` 协议并增加 CSP。
 - 已完成：任务和断点状态不持久化 URL/Header。
-- 上传 worker generation、取消等待和不可变进度事件。
-- 迁移同盘/子树防护、部分失败清理与逐文件恢复。
+- 已完成：上传 worker generation、取消等待、worker 私有状态和节流进度事件。
+- 已完成：迁移同盘/同盘子树入口防护；仍需部分失败清理与逐文件恢复。
 - 移除账号的关联数据清单和清理选项。
 
 ### 批次 C：测试、CI 与发布可信度
@@ -340,9 +343,9 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 
 | 时间 | 必做 |
 |---|---|
-| 已完成（本轮） | WebDAV/S3 登录兼容、530 诊断、WebDAV 配额、模板与密码眼睛、容量去重/缓存/退避、账号容量映射、上传冲突、迁移能力过滤、四项 P0、同步互斥/取消、敏感下载状态、文件级本地预览授权、外链限制/CSP、快照 ID 与日志规范化 |
-| 立即下一批 | 上传取消恢复、迁移同盘/子树防护、预览代理 DNS/IP 固定 |
-| 随后 | 账号关联清理、全局限速、Provider 请求级 Context 传递 |
+| 已完成（本轮） | WebDAV/S3 登录兼容、530 诊断、WebDAV 配额、模板与密码眼睛、容量去重/缓存/退避、账号容量映射、上传冲突、迁移能力过滤、四项 P0、同步互斥/取消、敏感下载状态、文件级本地预览授权、外链限制/CSP、上传 worker 生命周期、迁移同盘入口防护、快照 ID 与日志规范化 |
+| 立即下一批 | 预览代理 DNS/IP 固定、Provider 请求级 Context 传递、迁移部分失败恢复 |
+| 随后 | 账号关联清理、全局限速、不同挂载别名的迁移祖先校验 |
 | 稳定版前 | 前端测试、Release 质量门禁、更新独立签名、跨平台关闭行为 |
 | 体验迭代 | 设置项生效、文本编辑真完成、缓存/虚拟列表/错误状态/键盘操作 |
 

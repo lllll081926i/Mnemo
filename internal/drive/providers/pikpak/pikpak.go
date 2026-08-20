@@ -313,8 +313,7 @@ func (d *Driver) prepareUploadTarget(ctx context.Context, cl *client, ui *model.
 
 func markPikPakUploadComplete(ui *model.UploadingUI, fileID string) {
 	ui.Upload.FileID = fileID
-	ui.Upload.DownSize = ui.Info.Size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
 	ui.Upload.IsDowning = false
 	ui.Upload.IsCompleted = true
 	ui.Upload.IsFailed = false

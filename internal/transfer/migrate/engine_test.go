@@ -58,6 +58,29 @@ func TestEngineRunEmptyFileIDs(t *testing.T) {
 	}
 }
 
+func TestValidateEndpointsRejectsSameDrive(t *testing.T) {
+	if err := ValidateEndpoints("pikpak_user", "pikpak:drive", "pikpak_user", "pikpak:drive"); err == nil {
+		t.Fatal("same source and target drive must be rejected")
+	}
+	if err := ValidateEndpoints("pikpak_user", "pikpak:drive", "pikpak_other", "pikpak:drive"); err != nil {
+		t.Fatalf("different accounts should remain valid: %v", err)
+	}
+}
+
+func TestEngineRunRejectsSameDriveBeforeChangingState(t *testing.T) {
+	e := NewEngine(nil, nil)
+	job := &Job{
+		ID: "same-drive", SrcUser: "user", SrcDrive: "drive",
+		DstUser: "user", DstDrive: "drive", FileIDs: []string{"file"},
+	}
+	if err := e.Run(context.Background(), job); err == nil {
+		t.Fatal("same-drive migration should fail before provider access")
+	}
+	if job.Status != "" {
+		t.Fatalf("job status changed after validation failure: %q", job.Status)
+	}
+}
+
 func TestJobProcessedBytesTracking(t *testing.T) {
 	j := &Job{ID: "t1", Total: 1000}
 	j.ProcessedBytes = 500

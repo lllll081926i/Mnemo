@@ -19,19 +19,30 @@ import (
 
 // UploadQueue manages upload jobs for queue-mode providers.
 type UploadQueue struct {
-	store       *store.Store
-	mu          sync.Mutex
-	dirMu       sync.Mutex
-	jobs        map[string]*model.UploadingUI
-	dirIDs      map[string]string
-	lastPersist map[string]progressPersistState
-	onEvent     OnTaskEvent
-	ctx         context.Context // root context, canceled on Close
-	cancel      context.CancelFunc
-	sem         chan struct{} // global concurrency slot
-	cancels     map[string]context.CancelFunc
-	persistMu   sync.Mutex
+	store           *store.Store
+	mu              sync.Mutex
+	dirMu           sync.Mutex
+	jobs            map[string]*model.UploadingUI
+	dirIDs          map[string]string
+	lastPersist     map[string]progressPersistState
+	lastProgress    map[string]time.Time
+	onEvent         OnTaskEvent
+	ctx             context.Context // root context, canceled on Close
+	cancel          context.CancelFunc
+	sem             chan struct{} // global concurrency slot
+	runs            map[string]*uploadRun
+	generations     map[string]uint64
+	handlerResolver func(userID, driveID string) (func(context.Context, *model.UploadingUI) error, error)
+	persistMu       sync.Mutex
 }
+
+type uploadRun struct {
+	generation uint64
+	cancel     context.CancelFunc
+	done       chan struct{}
+}
+
+var errUploadWorkerStopping = errors.New("上传任务仍在停止中，请稍后重试")
 
 const maxUploadDirectoryCacheEntries = 1024
 
@@ -44,15 +55,18 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	q := &UploadQueue{
-		store:       st,
-		jobs:        map[string]*model.UploadingUI{},
-		dirIDs:      map[string]string{},
-		lastPersist: map[string]progressPersistState{},
-		onEvent:     onEvent,
-		ctx:         rootCtx,
-		cancel:      rootCancel,
-		sem:         make(chan struct{}, maxConc),
-		cancels:     map[string]context.CancelFunc{},
+		store:           st,
+		jobs:            map[string]*model.UploadingUI{},
+		dirIDs:          map[string]string{},
+		lastPersist:     map[string]progressPersistState{},
+		lastProgress:    map[string]time.Time{},
+		onEvent:         onEvent,
+		ctx:             rootCtx,
+		cancel:          rootCancel,
+		sem:             make(chan struct{}, maxConc),
+		runs:            map[string]*uploadRun{},
+		generations:     map[string]uint64{},
+		handlerResolver: drive.QueueUploadHandler,
 	}
 	// restore persisted tasks as paused (user must resume manually)
 	if list, err := st.ListUploadTasks(); err == nil {
@@ -95,6 +109,10 @@ func (q *UploadQueue) update(j *model.UploadingUI) {
 	snapshot := *j
 	shouldPersist := q.shouldPersistLocked(snapshot)
 	q.mu.Unlock()
+	q.publishSnapshot(snapshot, shouldPersist)
+}
+
+func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist bool) {
 	if shouldPersist {
 		q.persistMu.Lock()
 		_ = q.store.SaveUploadTask(&snapshot)
@@ -109,6 +127,46 @@ func (q *UploadQueue) update(j *model.UploadingUI) {
 		}
 		q.onEvent(TaskEvent{Kind: "upload", Task: t})
 	}
+}
+
+func (q *UploadQueue) mutateRunJob(id string, generation uint64, mutate func(*model.UploadingUI)) bool {
+	q.mu.Lock()
+	run := q.runs[id]
+	j, ok := q.jobs[id]
+	if !ok || run == nil || run.generation != generation {
+		q.mu.Unlock()
+		return false
+	}
+	mutate(j)
+	snapshot := *j
+	shouldPersist := q.shouldPersistLocked(snapshot)
+	q.mu.Unlock()
+	q.publishSnapshot(snapshot, shouldPersist)
+	return true
+}
+
+func (q *UploadQueue) reportRunProgress(id string, generation uint64, done int64, percent int) {
+	now := time.Now()
+	q.mu.Lock()
+	run := q.runs[id]
+	j, ok := q.jobs[id]
+	if !ok || run == nil || run.generation != generation || j.Upload.IsStop {
+		q.mu.Unlock()
+		return
+	}
+	j.Upload.DownSize = done
+	j.Upload.DownProcess = percent
+	last := q.lastProgress[id]
+	publish := last.IsZero() || now.Sub(last) >= 500*time.Millisecond || percent >= 100
+	if publish {
+		q.lastProgress[id] = now
+		snapshot := *j
+		shouldPersist := q.shouldPersistLocked(snapshot)
+		q.mu.Unlock()
+		q.publishSnapshot(snapshot, shouldPersist)
+		return
+	}
+	q.mu.Unlock()
 }
 
 func (q *UploadQueue) shouldPersistLocked(job model.UploadingUI) bool {
@@ -188,8 +246,47 @@ func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPa
 		},
 	}
 	q.update(j)
-	go q.runUpload(userID, driveID, j)
+	if err := q.startUpload(j.UploadID); err != nil {
+		logging.Warn("upload worker could not start", "job_id", j.UploadID, "error", err)
+	}
 	return j
+}
+
+func (q *UploadQueue) startUpload(id string) error {
+	q.mu.Lock()
+	j, ok := q.jobs[id]
+	if !ok {
+		q.mu.Unlock()
+		return errors.New("上传任务不存在")
+	}
+	if _, active := q.runs[id]; active {
+		q.mu.Unlock()
+		return errUploadWorkerStopping
+	}
+	q.generations[id]++
+	generation := q.generations[id]
+	ctx, cancel := context.WithCancel(q.ctx)
+	q.runs[id] = &uploadRun{
+		generation: generation,
+		cancel:     cancel,
+		done:       make(chan struct{}),
+	}
+	userID := j.UserID
+	driveID := j.Info.DriveID
+	q.mu.Unlock()
+
+	go q.runUpload(userID, driveID, id, generation, ctx)
+	return nil
+}
+
+func (q *UploadQueue) finishUploadRun(id string, generation uint64) {
+	q.mu.Lock()
+	if run, ok := q.runs[id]; ok && run.generation == generation {
+		delete(q.runs, id)
+		delete(q.lastProgress, id)
+		close(run.done)
+	}
+	q.mu.Unlock()
 }
 
 // normalizeUploadPath keeps the relative path captured by a directory walk
@@ -275,61 +372,67 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 // runUpload executes one job through the provider's UploadOneFile. It waits
 // for a global concurrency slot and runs under a cancelable context so Cancel
 // can stop the provider request, not just flip a UI flag.
-func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
+func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, ctx context.Context) {
+	defer q.finishUploadRun(id, generation)
+	q.mu.Lock()
+	run := q.runs[id]
+	j, ok := q.jobs[id]
+	if !ok || run == nil || run.generation != generation {
+		q.mu.Unlock()
+		return
+	}
+	initial := *j
+	q.mu.Unlock()
+
 	started := time.Now()
-	logging.Info("upload worker started", "job_id", j.UploadID, "name", j.Info.Name, "size", j.Info.Size)
+	logging.Info("upload worker started", "job_id", id, "name", initial.Info.Name, "size", initial.Info.Size)
 	// wait for a slot
 	select {
 	case q.sem <- struct{}{}:
 		defer func() { <-q.sem }()
-	case <-q.ctx.Done():
-		logging.Debug("upload worker canceled before start", "job_id", j.UploadID)
+	case <-ctx.Done():
+		logging.Debug("upload worker canceled before start", "job_id", id)
 		return
 	}
 
-	ctx, cancel := context.WithCancel(q.ctx)
-	q.mu.Lock()
-	q.cancels[j.UploadID] = cancel
-	q.mu.Unlock()
-	defer func() {
-		cancel()
-		q.mu.Lock()
-		delete(q.cancels, j.UploadID)
-		q.mu.Unlock()
-	}()
-
-	// honor a stop requested while the job was queued
-	q.mu.Lock()
-	if j.Upload.IsStop {
-		q.mu.Unlock()
-		logging.Debug("upload worker skipped", "job_id", j.UploadID, "reason", "job already stopped")
+	// The provider receives a worker-local copy. Only immutable progress samples
+	// and the final result are merged back into the queue-owned task.
+	worker := initial
+	canStart := false
+	if !q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+		if j.Upload.IsStop || ctx.Err() != nil {
+			return
+		}
+		j.Upload.IsDowning = true
+		j.Upload.DownState = "uploading"
+		worker = *j
+		canStart = true
+	}) || !canStart {
+		logging.Debug("upload worker skipped", "job_id", id, "reason", "job already stopped")
 		return
 	}
-	j.Upload.IsDowning = true
-	j.Upload.DownState = "uploading"
-	q.mu.Unlock()
-	q.update(j)
 
 	// Directory uploads are queued as files, but remote providers generally do
 	// not interpret a slash in the file name as an implicit mkdir. Resolve the
 	// path before invoking the provider and pass only the leaf name onward.
-	relative := j.Info.Path
+	relative := worker.Info.Path
 	if relative == "" {
-		relative = j.Info.Name
+		relative = worker.Info.Name
 	}
 	relative = normalizeUploadPath(relative)
 	if relative == "" {
-		j.Upload.IsDowning = false
-		j.Upload.IsFailed = true
-		j.Upload.DownState = "failed"
-		j.Upload.FailedMessage = "上传路径无效"
-		q.update(j)
-		logging.Warn("upload path validation failed", "job_id", j.UploadID)
+		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			j.Upload.IsDowning = false
+			j.Upload.IsFailed = true
+			j.Upload.DownState = "failed"
+			j.Upload.FailedMessage = "上传路径无效"
+		})
+		logging.Warn("upload path validation failed", "job_id", id)
 		return
 	}
-	j.Info.Path = relative
-	j.Info.Name = uploadLeaf(relative)
-	parentID := strings.TrimSpace(j.Info.ParentFileID)
+	worker.Info.Path = relative
+	worker.Info.Name = uploadLeaf(relative)
+	parentID := strings.TrimSpace(worker.Info.ParentFileID)
 	provider := drive.ProviderOf(userID, driveID, "")
 	if parentID == "" || drive.IsRootID(provider, parentID) {
 		if root, rootErr := drive.RootID(userID, driveID); rootErr == nil && root != "" {
@@ -338,90 +441,101 @@ func (q *UploadQueue) runUpload(userID, driveID string, j *model.UploadingUI) {
 	}
 	parentID, parentErr := q.ensureRemoteParent(ctx, userID, driveID, parentID, relative)
 	if parentErr != nil {
-		j.Upload.IsDowning = false
-		if errors.Is(ctx.Err(), context.Canceled) {
-			j.Upload.IsStop = true
-			j.Upload.DownState = "stopped"
-		} else {
-			j.Upload.IsFailed = true
-			j.Upload.DownState = "failed"
-		}
-		j.Upload.FailedMessage = parentErr.Error()
-		q.update(j)
-		logging.Warn("remote upload parent resolution failed", "job_id", j.UploadID, "error", parentErr)
+		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			j.Upload.IsDowning = false
+			if errors.Is(ctx.Err(), context.Canceled) {
+				j.Upload.IsStop = true
+				j.Upload.DownState = "stopped"
+			} else {
+				j.Upload.IsFailed = true
+				j.Upload.DownState = "failed"
+			}
+			j.Upload.FailedMessage = parentErr.Error()
+		})
+		logging.Warn("remote upload parent resolution failed", "job_id", id, "error", parentErr)
 		return
 	}
-	j.Info.ParentFileID = parentID
-	q.update(j)
+	worker.Info.ParentFileID = parentID
+	q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+		j.Info.Path = worker.Info.Path
+		j.Info.Name = worker.Info.Name
+		j.Info.ParentFileID = worker.Info.ParentFileID
+	})
 
 	// compute hash for providers that support 秒传 (optional, best-effort)
 	if method := rapidMethod2(drive.ProviderOf(userID, driveID, "")); method != "" {
-		if h, err := netx.HashFile(j.Info.LocalFilePath, netx.HashKind(method)); err == nil {
-			j.Info.SHA1 = h
+		if h, err := netx.HashFile(worker.Info.LocalFilePath, netx.HashKind(method)); err == nil {
+			worker.Info.SHA1 = h
 		}
 	}
 
-	handler, err := drive.QueueUploadHandler(userID, driveID)
+	handler, err := q.handlerResolver(userID, driveID)
 	if err != nil {
-		j.Upload.IsDowning = false
-		j.Upload.IsFailed = true
-		j.Upload.FailedMessage = err.Error()
-		q.update(j)
-		logging.Warn("upload handler lookup failed", "job_id", j.UploadID, "error", err)
+		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			j.Upload.IsDowning = false
+			j.Upload.IsFailed = true
+			j.Upload.DownState = "failed"
+			j.Upload.FailedMessage = err.Error()
+		})
+		logging.Warn("upload handler lookup failed", "job_id", id, "error", err)
 		return
 	}
 
-	// 上传中周期推送进度（handler 内只写字段，事件由这里泵出）
-	done := make(chan struct{})
-	progressStopped := make(chan struct{})
-	go func() {
-		defer close(progressStopped)
-		t := time.NewTicker(500 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-				q.update(j)
-			}
-		}
-	}()
-	handlerErr := handler(ctx, j)
-	close(done)
-	<-progressStopped
+	worker.ConfigureUploadRuntime(
+		func(done int64, percent int) { q.reportRunProgress(id, generation, done, percent) },
+		func() bool { return ctx.Err() != nil },
+	)
+	handlerErr := handler(ctx, &worker)
 	q.mu.Lock()
-	wasStopped := j.Upload.IsStop || ctx.Err() != nil
+	current := q.jobs[id]
+	wasStopped := ctx.Err() != nil || (current != nil && current.Upload.IsStop)
 	q.mu.Unlock()
 	if handlerErr != nil {
-		j.Upload.IsDowning = false
-		if wasStopped || errors.Is(ctx.Err(), context.Canceled) {
-			j.Upload.IsStop = true
-			j.Upload.DownState = "stopped"
-		} else {
-			j.Upload.IsFailed = true
-			j.Upload.FailedCode = 1
-			j.Upload.FailedMessage = handlerErr.Error()
-			j.Upload.DownState = "failed"
-		}
-		q.update(j)
-		logging.Warn("upload worker failed", "job_id", j.UploadID, "error", handlerErr, "duration", logging.Duration(started))
+		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			j.Info = worker.Info
+			j.Upload.FileID = worker.Upload.FileID
+			j.Upload.UploadID = worker.Upload.UploadID
+			j.Upload.IsDowning = false
+			if wasStopped || errors.Is(ctx.Err(), context.Canceled) {
+				j.Upload.IsStop = true
+				j.Upload.DownState = "stopped"
+			} else {
+				j.Upload.IsFailed = true
+				j.Upload.FailedCode = 1
+				j.Upload.FailedMessage = handlerErr.Error()
+				j.Upload.DownState = "failed"
+			}
+		})
+		logging.Warn("upload worker failed", "job_id", id, "error", handlerErr, "duration", logging.Duration(started))
 		return
 	}
 	if wasStopped {
-		j.Upload.IsDowning = false
-		j.Upload.DownState = "stopped"
-		q.update(j)
-		logging.Info("upload worker stopped", "job_id", j.UploadID, "duration", logging.Duration(started))
+		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+			j.Info = worker.Info
+			j.Upload.FileID = worker.Upload.FileID
+			j.Upload.UploadID = worker.Upload.UploadID
+			j.Upload.IsDowning = false
+			j.Upload.IsStop = true
+			j.Upload.DownState = "stopped"
+		})
+		logging.Info("upload worker stopped", "job_id", id, "duration", logging.Duration(started))
 		return
 	}
-	j.Upload.IsDowning = false
-	j.Upload.IsCompleted = true
-	j.Upload.DownProcess = 100
-	j.Upload.DownSize = j.Info.Size
-	j.Upload.DownState = "completed"
-	q.update(j)
-	logging.Info("upload worker finished", "job_id", j.UploadID, "status", "completed", "duration", logging.Duration(started))
+	q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+		j.Info = worker.Info
+		j.Upload.FileID = worker.Upload.FileID
+		j.Upload.UploadID = worker.Upload.UploadID
+		j.Upload.IsDowning = false
+		j.Upload.IsStop = false
+		j.Upload.IsFailed = false
+		j.Upload.IsCompleted = true
+		j.Upload.DownProcess = 100
+		j.Upload.DownSize = j.Info.Size
+		j.Upload.DownState = "completed"
+		j.Upload.FailedCode = 0
+		j.Upload.FailedMessage = ""
+	})
+	logging.Info("upload worker finished", "job_id", id, "status", "completed", "duration", logging.Duration(started))
 }
 
 // rapidMethod returns the fingerprint kind a provider supports for upload.
@@ -438,9 +552,8 @@ func rapidMethod2(provider string) string {
 // Cancel stops a job by canceling its provider request and marking it stopped.
 func (q *UploadQueue) Cancel(id string) {
 	q.mu.Lock()
-	if c, ok := q.cancels[id]; ok {
-		c()
-		delete(q.cancels, id)
+	if run, ok := q.runs[id]; ok {
+		run.cancel()
 	}
 	j, ok := q.jobs[id]
 	if ok {
@@ -462,6 +575,10 @@ func (q *UploadQueue) Resume(id string) error {
 		q.mu.Unlock()
 		return errors.New("上传任务不存在")
 	}
+	if _, active := q.runs[id]; active {
+		q.mu.Unlock()
+		return errUploadWorkerStopping
+	}
 	if j.Upload.IsDowning {
 		q.mu.Unlock()
 		return errors.New("任务正在上传中")
@@ -475,21 +592,23 @@ func (q *UploadQueue) Resume(id string) error {
 	j.Upload.IsFailed = false
 	j.Upload.FailedMessage = ""
 	j.Upload.DownState = "queued"
-	userID := j.UserID
-	driveID := j.Info.DriveID
 	q.mu.Unlock()
 	q.update(j)
-	go q.runUpload(userID, driveID, j)
-	return nil
+	return q.startUpload(id)
 }
 
 // ClearCompleted removes finished uploads.
 func (q *UploadQueue) ClearCompleted() {
 	q.mu.Lock()
 	for id, j := range q.jobs {
+		if _, active := q.runs[id]; active {
+			continue
+		}
 		if j.Upload.IsCompleted || j.Upload.IsFailed || j.Upload.IsStop {
 			delete(q.jobs, id)
 			delete(q.lastPersist, id)
+			delete(q.generations, id)
+			delete(q.lastProgress, id)
 		}
 	}
 	q.mu.Unlock()
@@ -518,8 +637,8 @@ func (q *UploadQueue) Close() {
 	}
 	q.mu.Lock()
 	var pending []*model.UploadingUI
-	for _, c := range q.cancels {
-		c()
+	for _, run := range q.runs {
+		run.cancel()
 	}
 	for _, j := range q.jobs {
 		if !j.Upload.IsCompleted && !j.Upload.IsFailed && !j.Upload.IsStop {

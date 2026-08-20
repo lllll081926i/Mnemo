@@ -362,10 +362,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Info.Size = size
 	// report read progress back to the upload UI
 	pr := driveutil.NewProgressReader(f, size, func(read int64) {
-		ui.Upload.DownSize = read
-		if size > 0 {
-			ui.Upload.DownProcess = int(read * 100 / size)
-		}
+		ui.ReportUploadProgress(read, size)
 	})
 	return client.Put(ctx, target, pr, size)
 }

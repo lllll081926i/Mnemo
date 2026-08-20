@@ -84,8 +84,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		return errors.New(msg)
 	}
-	ui.Upload.DownSize = size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(size, size)
 	ui.Upload.IsDowning = false
 	ui.Upload.IsCompleted = true
 	ui.Upload.DownState = "completed"

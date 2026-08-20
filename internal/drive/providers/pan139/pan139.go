@@ -985,10 +985,7 @@ func hashPan139File(ctx context.Context, f *os.File, ui *model.UploadingUI) (str
 			}
 			hashed += int64(n)
 			if ui != nil {
-				ui.Upload.DownSize = hashed
-				if size > 0 {
-					ui.Upload.DownProcess = int(100 * hashed / size)
-				}
+				ui.ReportUploadProgress(hashed, size)
 			}
 		}
 		if err == io.EOF {
@@ -1142,8 +1139,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return fmt.Errorf("pan139: 上传初始化响应无效: %w", err)
 		}
 		if created.Exist || created.RapidUpload {
-			ui.Upload.DownSize = size
-			ui.Upload.DownProcess = 100
+			ui.ReportUploadProgress(size, size)
 			drive.ClearUploadSession(sessionKey)
 			return nil
 		}
@@ -1179,10 +1175,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			uploaded += part.PartSize
 		}
 	}
-	ui.Upload.DownSize = uploaded
-	if size > 0 {
-		ui.Upload.DownProcess = int(uploaded * 100 / size)
-	}
+	ui.ReportUploadProgress(uploaded, size)
 
 	urls := make(map[int]string, len(created.PartInfos))
 	mergePan139UploadURLs(urls, created.PartInfos)
@@ -1221,12 +1214,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		uploadedSet[part.PartNumber] = true
 		uploaded += part.PartSize
 		_ = drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), drive.SortedUniqueParts(uploadedSet))
-		ui.Upload.DownSize = uploaded
-		if size > 0 {
-			ui.Upload.DownProcess = int(uploaded * 100 / size)
-		} else {
-			ui.Upload.DownProcess = 100
-		}
+		ui.ReportUploadProgress(uploaded, size)
 	}
 
 	if _, err := d.personalPost(ctx, c, "/file/complete", map[string]any{
@@ -1238,8 +1226,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	drive.ClearUploadSession(sessionKey)
-	ui.Upload.DownSize = size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(size, size)
 	return nil
 }
 

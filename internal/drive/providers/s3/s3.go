@@ -946,10 +946,7 @@ func s3ConflictName(name string, index int) string {
 }
 
 func updateUploadProgress(ui *model.UploadingUI, read int64) {
-	ui.Upload.DownSize = read
-	if ui.Info.Size > 0 {
-		ui.Upload.DownProcess = int(read * 100 / ui.Info.Size)
-	}
+	ui.ReportUploadProgress(read, ui.Info.Size)
 }
 
 func uploadMultipart(ctx context.Context, cc *conn, key string, f *os.File, ui *model.UploadingUI) (err error) {

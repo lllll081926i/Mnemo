@@ -146,10 +146,7 @@ func fileMD5(path string, ui *model.UploadingUI) (string, error) {
 			h.Write(buf[:n])
 			read += int64(n)
 			if ui != nil {
-				ui.Upload.DownSize = read
-				if ui.Info.Size > 0 {
-					ui.Upload.DownProcess = int(100 * read / ui.Info.Size)
-				}
+				ui.ReportUploadProgress(read, ui.Info.Size)
 			}
 		}
 		if err == io.EOF {
@@ -266,10 +263,7 @@ func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *mod
 			}
 			// Skip already-uploaded parts (resume).
 			if uploadedSet[int(j)] {
-				ui.Upload.DownSize = offset + cur
-				if size > 0 {
-					ui.Upload.DownProcess = int(100 * (offset + cur) / size)
-				}
+				ui.ReportUploadProgress(offset+cur, size)
 				continue
 			}
 			uploadURL := urls[strconv.FormatInt(j, 10)]
@@ -308,10 +302,7 @@ func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *mod
 			}
 			uploadedSet[int(j)] = true
 			_ = drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), drive.SortedUniqueParts(uploadedSet))
-			ui.Upload.DownSize = offset + cur
-			if size > 0 {
-				ui.Upload.DownProcess = int(100 * (offset + cur) / size)
-			}
+			ui.ReportUploadProgress(offset+cur, size)
 		}
 	}
 	return nil
@@ -392,8 +383,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			if data.Reuse || data.Key == "" {
 				// 本地 MD5 命中秒传
 				ui.Upload.FileID = data.FileID
-				ui.Upload.DownSize = size
-				ui.Upload.DownProcess = 100
+				ui.ReportUploadProgress(size, size)
 				drive.ClearUploadSession(sessionKey)
 				mark(true, false, "")
 				return nil
@@ -424,8 +414,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				savedParts = nil
 				data = UploadRequestData{}
 				resumed = false
-				ui.Upload.DownSize = 0
-				ui.Upload.DownProcess = 0
+				ui.ReportUploadProgress(0, size)
 				continue
 			}
 			mark(false, true, uploadErr.Error())
@@ -451,8 +440,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return err2
 			}
 		}
-		ui.Upload.DownSize = size
-		ui.Upload.DownProcess = 100
+		ui.ReportUploadProgress(size, size)
 		mark(true, false, "")
 		drive.ClearUploadSession(sessionKey)
 		return nil
@@ -462,7 +450,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 
 // stopped reports user cancellation (legacy fileui.IsRunning checks).
 func stopped(ctx context.Context, ui *model.UploadingUI) bool {
-	if ui != nil && ui.Upload.IsStop {
+	if ui != nil && ui.IsUploadStopRequested() {
 		return true
 	}
 	return ctx.Err() != nil

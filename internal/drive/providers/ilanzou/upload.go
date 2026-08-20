@@ -39,10 +39,7 @@ func fileMD5(path string, ui *model.UploadingUI) (string, error) {
 			h.Write(buf[:n])
 			read += int64(n)
 			if ui != nil {
-				ui.Upload.DownSize = read
-				if ui.Info.Size > 0 {
-					ui.Upload.DownProcess = int(100 * read / ui.Info.Size)
-				}
+				ui.ReportUploadProgress(read, ui.Info.Size)
 			}
 		}
 		if err == io.EOF {
@@ -335,7 +332,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return errors.New("上传失败: 七牛响应异常")
 		}
 		commitToken = responseString(j, "token")
-		ui.Upload.DownSize = size
+		ui.ReportUploadProgress(size, size)
 	} else {
 		initURL := fmt.Sprintf("https://upload.qiniup.com/buckets/%s/objects/%s/uploads", ILANZOU_CONF.Bucket, keyB64)
 		j, status, err := qiniuJSON(ctx, http.MethodPost, initURL, upToken, nil)
@@ -374,10 +371,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return errors.New("分片上传未返回 etag")
 			}
 			parts = append(parts, qiniuPart{PartNumber: i, Etag: etag})
-			ui.Upload.DownSize = start + cur
-			if size > 0 {
-				ui.Upload.DownProcess = int(100 * (start + cur) / size)
-			}
+			ui.ReportUploadProgress(start+cur, size)
 		}
 		finURL := fmt.Sprintf("%s/%s", initURL, uploadID)
 		fj, status, err := qiniuJSON(ctx, http.MethodPost, finURL, upToken, map[string]any{
@@ -395,7 +389,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if commitToken == "" {
 		return errors.New("上传完成令牌为空")
 	}
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(size, size)
 
 	for i := 0; i < 10; i++ {
 		if err := ctx.Err(); err != nil {
@@ -471,8 +465,7 @@ func firstOf(m map[string]any, keys ...string) any {
 }
 
 func markUploadDone(ui *model.UploadingUI, size int64, fileID string) {
-	ui.Upload.DownSize = size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(size, size)
 	ui.Upload.IsDowning = false
 	ui.Upload.IsCompleted = true
 	ui.Upload.DownState = "completed"

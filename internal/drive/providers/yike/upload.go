@@ -82,7 +82,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	sliceLeft := int64(yikeSlicePart)
 	blockList := make([]string, 0, count)
 	for i := int64(0); i < count; i++ {
-		if ui.Upload.IsStop {
+		if ui.IsUploadStopRequested() {
 			return errors.New("已暂停")
 		}
 		start := i * yikeUploadPart
@@ -169,8 +169,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return err
 			}
 		}
-		ui.Upload.DownSize = size
-		ui.Upload.DownProcess = 100
+		ui.ReportUploadProgress(size, size)
 		return nil
 	}
 
@@ -190,7 +189,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if partseq < 0 {
 			continue
 		}
-		if ui.Upload.IsStop {
+		if ui.IsUploadStopRequested() {
 			return errors.New("已暂停")
 		}
 		start := int64(partseq) * yikeUploadPart
@@ -241,10 +240,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if resp.StatusCode >= 300 {
 			return fmt.Errorf("分片上传失败 HTTP %d", resp.StatusCode)
 		}
-		ui.Upload.DownSize = start + cur
-		if size > 0 {
-			ui.Upload.DownProcess = int(100 * (start + cur) / size)
-		}
+		ui.ReportUploadProgress(start+cur, size)
 	}
 
 	form.Set("uploadid", uploadID)
@@ -275,7 +271,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return err
 		}
 	}
-	ui.Upload.DownSize = size
-	ui.Upload.DownProcess = 100
+	ui.ReportUploadProgress(size, size)
 	return nil
 }

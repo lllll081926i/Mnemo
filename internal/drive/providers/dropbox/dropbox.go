@@ -482,7 +482,7 @@ func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File
 		pos := startOffset
 		buf := make([]byte, sessionChunkSize)
 		for pos < size {
-			if ui != nil && ui.Upload.IsStop {
+			if ui != nil && ui.IsUploadStopRequested() {
 				return errors.New("已暂停")
 			}
 			n, err := f.ReadAt(buf, pos)
@@ -512,8 +512,7 @@ func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File
 				if err == nil {
 					if ui != nil {
 						ui.Upload.FileID = fileID
-						ui.Upload.DownSize = size
-						ui.Upload.DownProcess = 100
+						ui.ReportUploadProgress(size, size)
 					}
 					drive.ClearUploadSession(key)
 					return nil
@@ -533,8 +532,7 @@ func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File
 			}
 			pos += int64(n)
 			if ui != nil {
-				ui.Upload.DownSize = pos
-				ui.Upload.DownProcess = int(pos * 100 / size)
+				ui.ReportUploadProgress(pos, size)
 			}
 			_ = drive.SaveUploadSessionState(key, sessID, []int{int(pos)})
 			if isLast {
@@ -547,8 +545,7 @@ func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File
 				}
 				if ui != nil {
 					ui.Upload.FileID = fileID
-					ui.Upload.DownSize = size
-					ui.Upload.DownProcess = 100
+					ui.ReportUploadProgress(size, size)
 				}
 				drive.ClearUploadSession(key)
 				return nil

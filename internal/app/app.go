@@ -1271,6 +1271,9 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	if len(fileIDs) == 0 {
 		return nil, fmt.Errorf("请选择要迁移的文件")
 	}
+	if err := migrate.ValidateEndpoints(srcUser, srcDrive, dstUser, dstDrive); err != nil {
+		return nil, err
+	}
 	srcCaps := drive.RegistryCaps(drive.ProviderOf(srcUser, srcDrive, ""))
 	dstCaps := drive.RegistryCaps(drive.ProviderOf(dstUser, dstDrive, ""))
 	if !srcCaps.Download {

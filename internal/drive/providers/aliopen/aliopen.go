@@ -1442,8 +1442,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return err
 		}
 		if exists {
-			ui.Upload.DownSize = size
-			ui.Upload.DownProcess = 100
+			ui.ReportUploadProgress(size, size)
 			return nil
 		}
 	}
@@ -1452,10 +1451,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if contentHash == "" {
 		contentHash, err = netx.HashFileWithProgress(ui.Info.LocalFilePath, netx.HashSHA1, func(read int64) {
 			if ui != nil {
-				ui.Upload.DownSize = read
-				if ui.Info.Size > 0 {
-					ui.Upload.DownProcess = int(100 * read / ui.Info.Size)
-				}
+				ui.ReportUploadProgress(read, ui.Info.Size)
 			}
 		}, 0)
 		if err != nil {
@@ -1519,8 +1515,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return errors.New("aliopen: 秒传响应缺少 file_id")
 			}
 			ui.Upload.FileID = created.FileID
-			ui.Upload.DownSize = size
-			ui.Upload.DownProcess = 100
+			ui.ReportUploadProgress(size, size)
 			return nil
 		}
 		fileID, uploadID = strings.TrimSpace(created.FileID), strings.TrimSpace(created.UploadID)
@@ -1565,10 +1560,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		uploadedSize += length
 	}
-	ui.Upload.DownSize = uploadedSize
-	if size > 0 {
-		ui.Upload.DownProcess = int(uploadedSize * 100 / size)
-	}
+	ui.ReportUploadProgress(uploadedSize, size)
 
 	lastURLRefresh := time.Now()
 	for i := range parts {
@@ -1652,12 +1644,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		uploadedSize += length
 		if ui != nil {
-			ui.Upload.DownSize = uploadedSize
-			if size > 0 {
-				ui.Upload.DownProcess = int(uploadedSize * 100 / size)
-			} else {
-				ui.Upload.DownProcess = 100
-			}
+			ui.ReportUploadProgress(uploadedSize, size)
 		}
 	}
 	err = cl.CompleteUpload(ctx, ref.Scope, fileID, uploadID)

@@ -55,10 +55,7 @@ func computeGCID(path string, ui *model.UploadingUI) (string, error) {
 		offset += int64(n)
 		hashed += int64(n)
 		if ui != nil {
-			ui.Upload.DownSize = hashed
-			if size > 0 {
-				ui.Upload.DownProcess = int(100 * hashed / size)
-			}
+			ui.ReportUploadProgress(hashed, size)
 		}
 	}
 	finalSum := sha1.Sum(chunkHashes)

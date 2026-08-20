@@ -212,7 +212,7 @@ func putPart(ctx context.Context, rawURL string, headers map[string]string, chun
 
 // fileMD5Of computes the whole-file MD5 plus per-slice md5 hex + partInfo.
 // Returns uppercase whole-file md5, per-slice md5 hex list and partInfo list.
-// Progress is reported via ui.Upload.DownSize/DownProcess during hashing.
+// Progress is reported through the upload runtime callback during hashing.
 func fileMD5Of(r io.ReaderAt, size, slice int64, count int, ui *model.UploadingUI) (string, []string, []string, error) {
 	var fileSum = md5.New()
 	sliceHexs := make([]string, 0, count)
@@ -234,10 +234,7 @@ func fileMD5Of(r io.ReaderAt, size, slice int64, count int, ui *model.UploadingU
 		partInfos = append(partInfos, itoa(int64(i))+"-"+base64StdEncode(sliceSum))
 		hashed += cur
 		if ui != nil {
-			ui.Upload.DownSize = hashed
-			if size > 0 {
-				ui.Upload.DownProcess = int(100 * hashed / size)
-			}
+			ui.ReportUploadProgress(hashed, size)
 		}
 	}
 	return strings.ToUpper(hexEncode(fileSum.Sum(nil))), sliceHexs, partInfos, nil
@@ -402,10 +399,5 @@ func setUploadState(ui *model.UploadingUI, done, total int64) {
 	if ui == nil || total <= 0 {
 		return
 	}
-	ui.Upload.DownSize = done
-	pct := int(done * 100 / total)
-	if pct > 100 {
-		pct = 100
-	}
-	ui.Upload.DownProcess = pct
+	ui.ReportUploadProgress(done, total)
 }

@@ -46,6 +46,63 @@ type UploadingUI struct {
 	UserID   string      `json:"user_id"`
 	Info     UploadInfo  `json:"Info"`
 	Upload   UploadState `json:"Upload"`
+
+	progressReporter func(done int64, percent int) `json:"-"`
+	stopRequested    func() bool                   `json:"-"`
+}
+
+// ConfigureUploadRuntime installs queue-owned callbacks on a worker-local
+// upload view. Provider implementations must not retain the callbacks after
+// UploadOneFile returns.
+func (u *UploadingUI) ConfigureUploadRuntime(progress func(done int64, percent int), stopped func() bool) {
+	if u == nil {
+		return
+	}
+	u.progressReporter = progress
+	u.stopRequested = stopped
+}
+
+// ReportUploadProgress updates the provider-local view and forwards an
+// immutable progress sample to the queue. Keeping the provider view private
+// avoids concurrent writes to the task object exposed to the UI.
+func (u *UploadingUI) ReportUploadProgress(done, total int64) {
+	if u == nil {
+		return
+	}
+	if done < 0 {
+		done = 0
+	}
+	percent := 0
+	if total > 0 {
+		if done > total {
+			done = total
+		}
+		percent = int(done * 100 / total)
+		if percent > 100 {
+			percent = 100
+		}
+	} else if total == 0 && done == 0 {
+		// A zero-byte file is complete as soon as the provider reports its
+		// only progress sample.
+		percent = 100
+	}
+	u.Upload.DownSize = done
+	u.Upload.DownProcess = percent
+	if u.progressReporter != nil {
+		u.progressReporter(done, percent)
+	}
+}
+
+// IsUploadStopRequested reports queue cancellation without requiring a
+// provider to read the queue's shared mutable state.
+func (u *UploadingUI) IsUploadStopRequested() bool {
+	if u == nil {
+		return true
+	}
+	if u.stopRequested != nil {
+		return u.stopRequested()
+	}
+	return u.Upload.IsStop
 }
 
 // DownloadTask is a transfer-center download task.

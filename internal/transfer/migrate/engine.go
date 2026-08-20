@@ -135,6 +135,9 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	if job.ID == "" {
 		return errors.New("migrate: job id is empty")
 	}
+	if err := ValidateEndpoints(job.SrcUser, job.SrcDrive, job.DstUser, job.DstDrive); err != nil {
+		return err
+	}
 	ctx, cancel := e.registerCancel(ctx, job.ID)
 	defer func() {
 		cancel()
@@ -186,6 +189,29 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	job.UpdatedAt = time.Now().Unix()
 	e.saveJob(job)
 	e.emit(job)
+	return nil
+}
+
+// ValidateEndpoints rejects migrations whose source and target identify the
+// same mounted drive. A same-drive subtree copy can recursively discover the
+// files it just created; callers should use the provider's Move/Copy operation
+// instead, where the provider can enforce its own parent relationship rules.
+func ValidateEndpoints(srcUser, srcDrive, dstUser, dstDrive string) error {
+	srcUser = strings.TrimSpace(srcUser)
+	srcDrive = strings.TrimSpace(srcDrive)
+	dstUser = strings.TrimSpace(dstUser)
+	dstDrive = strings.TrimSpace(dstDrive)
+	if srcUser == "" && srcDrive == "" && dstUser == "" && dstDrive == "" {
+		// Keep the engine's empty-file-list smoke test and programmatic no-op
+		// jobs backwards-compatible; the app binding validates real requests.
+		return nil
+	}
+	if srcUser == "" || srcDrive == "" || dstUser == "" || dstDrive == "" {
+		return errors.New("migrate: source and target account are incomplete")
+	}
+	if srcUser == dstUser && srcDrive == dstDrive {
+		return errors.New("migrate: source and target cannot be the same drive; use the drive move operation")
+	}
 	return nil
 }
 

@@ -77,10 +77,7 @@ func ossPut(ctx context.Context, c drive.Context, localPath string, params *pikp
 	var body io.Reader = f
 	if ui != nil {
 		body = driveutil.NewProgressReader(f, info.Size(), func(read int64) {
-			ui.Upload.DownSize = read
-			if info.Size() > 0 {
-				ui.Upload.DownProcess = int(read * 100 / info.Size())
-			}
+			ui.ReportUploadProgress(read, info.Size())
 		})
 	}
 
@@ -105,8 +102,7 @@ func ossPut(ctx context.Context, c drive.Context, localPath string, params *pikp
 		return fmt.Errorf("pikpak: oss put %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if ui != nil {
-		ui.Upload.DownSize = info.Size()
-		ui.Upload.DownProcess = 100
+		ui.ReportUploadProgress(info.Size(), info.Size())
 		ui.Upload.IsCompleted = true
 	}
 	return nil
