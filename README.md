@@ -53,10 +53,10 @@
 | 平台 | 架构 | 安装包 |
 |---|---|---|
 | 🪟 Windows | x64 / arm64 | `Mnemo-windows-*-Setup.exe` |
-| 🐧 Linux | x64 / arm64 | `.deb` 或 `.tar.gz` |
+| 🐧 Linux | x64 / arm64 | `.deb`、`.rpm`、`.pkg.tar.zst`（Arch）、`.AppImage` 或 `.tar.gz` |
 | 🍎 macOS | Apple Silicon | `.dmg` 或 `.tar.gz` |
 
-所有产物附带 `SHA256SUMS.txt` 校验文件。Windows 需要 WebView2 Runtime（Win10/11 一般已内置）；Linux 需要 GTK3 / WebKitGTK 4.1 运行库。
+所有产物附带 `SHA256SUMS.txt` 校验文件。Windows 需要 WebView2 Runtime（Win10/11 一般已内置）；Linux 的 `.deb`、`.rpm`、Arch 包会声明 GTK3 / WebKitGTK 4.1 依赖，`.AppImage` 与 `.tar.gz` 仍需要系统提供这两项运行库。
 
 应用启动时会自动检查更新，Windows 支持一键下载安装。
 

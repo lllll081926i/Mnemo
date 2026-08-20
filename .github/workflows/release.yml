@@ -116,8 +116,9 @@ jobs:
         if: matrix.kind == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev rpm squashfs-tools zstd
           pkg-config --modversion webkit2gtk-4.1
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
 
       - name: Build native application
         shell: bash
@@ -159,50 +160,97 @@ jobs:
           choco install innosetup -y --no-progress
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           # MSYS_NO_PATHCONV=1 防止 Git Bash 把 /D 参数误转为 Windows 路径
-          MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" build/windows/installer.iss
+          MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" "/DMyAppVersion=${GITHUB_REF_NAME#v}" build/windows/installer.iss
           test -f "build/installer/${{ matrix.artifact }}-Setup.exe"
           # 拷到根目录再上传，保证 artifact 解包后文件位于顶层（publish 按 maxdepth 1 收集）
           cp "build/installer/${{ matrix.artifact }}-Setup.exe" "${{ matrix.artifact }}-Setup.exe"
 
-      - name: Package Linux installer and archive
+      - name: Package Linux installers and archive
         if: matrix.kind == 'linux'
         shell: bash
         run: |
           set -euo pipefail
           binary="build/bin/Mnemo"
           test -x "$binary"
-          root="$(mktemp -d)"
-          mkdir -p "$root/DEBIAN" "$root/usr/lib/mnemo" "$root/usr/share/applications"
-          cp -a "$binary" "$root/usr/lib/mnemo/Mnemo"
-          if [[ -f build/bin/data/secrets.json ]]; then
-            mkdir -p "$root/usr/lib/mnemo/data"
-            cp -a build/bin/data/secrets.json "$root/usr/lib/mnemo/data/secrets.json"
+          package_stage="$(mktemp -d)"
+          archive_stage="$(mktemp -d)"
+          appdir="$(mktemp -d)"
+          tool_dir="$(mktemp -d)"
+          trap 'rm -rf "$package_stage" "$archive_stage" "$appdir" "$tool_dir"' EXIT
+          package_arch="amd64"
+          appimage_arch="x86_64"
+          if [[ "${{ matrix.platform }}" == 'linux/arm64' ]]; then
+            package_arch="arm64"
+            appimage_arch="aarch64"
           fi
-          cat > "$root/DEBIAN/control" <<EOF
-          Package: mnemo
-          Version: ${GITHUB_REF_NAME#v}
-          Section: utils
-          Priority: optional
-          Architecture: ${{ matrix.platform == 'linux/arm64' && 'arm64' || 'amd64' }}
-          Maintainer: Mnemo
-          Description: Mnemo multi-drive file manager
-          EOF
-          cat > "$root/usr/share/applications/mnemo.desktop" <<'EOF'
+
+          mkdir -p "$package_stage/data" "$archive_stage/data"
+          cp -a "$binary" "$package_stage/Mnemo"
+          cp -a "$binary" "$archive_stage/Mnemo"
+          cp -a build/appicon.png "$package_stage/mnemo.png"
+          if [[ -f build/bin/data/secrets.json ]]; then
+            cp -a build/bin/data/secrets.json "$package_stage/data/secrets.json"
+            cp -a build/bin/data/secrets.json "$archive_stage/data/secrets.json"
+          fi
+          cat > "$package_stage/mnemo.desktop" <<'EOF'
           [Desktop Entry]
           Name=Mnemo
           Exec=/usr/lib/mnemo/Mnemo
+          Icon=mnemo
           Type=Application
           Categories=Utility;FileTransfer;
           Terminal=false
           EOF
-          dpkg-deb --build "$root" "${{ matrix.artifact }}.deb"
-          staging="$(mktemp -d)"
-          cp -a "$binary" "$staging/Mnemo"
+          test "$(grep -E '^Name=Mnemo$' "$package_stage/mnemo.desktop")" = 'Name=Mnemo'
+
+          export NFPM_ARCH="$package_arch"
+          export NFPM_VERSION="${GITHUB_REF_NAME#v}"
+          export NFPM_BINARY_PATH="$package_stage/Mnemo"
+          export NFPM_DATA_DIR="$package_stage/data"
+          export NFPM_DESKTOP_PATH="$package_stage/mnemo.desktop"
+          export NFPM_ICON_PATH="$package_stage/mnemo.png"
+          nfpm package --config build/linux/nfpm.yaml --packager deb --target "${{ matrix.artifact }}.deb"
+          nfpm package --config build/linux/nfpm.yaml --packager rpm --target "${{ matrix.artifact }}.rpm"
+          nfpm package --config build/linux/nfpm.yaml --packager archlinux --target "${{ matrix.artifact }}.pkg.tar.zst"
+          dpkg-deb --info "${{ matrix.artifact }}.deb"
+          rpm -qip "${{ matrix.artifact }}.rpm"
+          tar --zstd -tf "${{ matrix.artifact }}.pkg.tar.zst" >/dev/null
+
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/icons/hicolor/256x256/apps"
+          cp -a "$binary" "$appdir/usr/bin/Mnemo"
+          cp -a build/appicon.png "$appdir/mnemo.png"
+          cp -a build/appicon.png "$appdir/usr/share/icons/hicolor/256x256/apps/mnemo.png"
           if [[ -f build/bin/data/secrets.json ]]; then
-            mkdir -p "$staging/data"
-            cp -a build/bin/data/secrets.json "$staging/data/secrets.json"
+            mkdir -p "$appdir/usr/bin/data"
+            cp -a build/bin/data/secrets.json "$appdir/usr/bin/data/secrets.json"
           fi
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C "$staging" .
+          cat > "$appdir/mnemo.desktop" <<'EOF'
+          [Desktop Entry]
+          Name=Mnemo
+          Exec=Mnemo
+          Icon=mnemo
+          Type=Application
+          Categories=Utility;FileTransfer;
+          Terminal=false
+          EOF
+          test "$(grep -E '^Name=Mnemo$' "$appdir/mnemo.desktop")" = 'Name=Mnemo'
+          cat > "$appdir/AppRun" <<'EOF'
+          #!/bin/sh
+          APPDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          exec "$APPDIR/usr/bin/Mnemo" "$@"
+          EOF
+          chmod 0755 "$appdir/AppRun"
+          appimage_tool="$tool_dir/appimagetool-${appimage_arch}.AppImage"
+          curl --fail --location --retry 3 --retry-delay 2 --output "$appimage_tool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimage_arch}.AppImage"
+          chmod 0755 "$appimage_tool"
+          (
+            cd "$tool_dir"
+            "$appimage_tool" --appimage-extract >/dev/null
+            ARCH="$appimage_arch" ./squashfs-root/AppRun --no-appstream "$appdir" "$GITHUB_WORKSPACE/${{ matrix.artifact }}.AppImage"
+          )
+          test -s "${{ matrix.artifact }}.AppImage"
+
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C "$archive_stage" .
 
       - name: Package macOS installer and archive
         if: matrix.kind == 'macos'
@@ -219,6 +267,9 @@ jobs:
           name: ${{ matrix.artifact }}-${{ github.ref_name }}
           path: |
             ${{ matrix.artifact }}.deb
+            ${{ matrix.artifact }}.rpm
+            ${{ matrix.artifact }}.pkg.tar.zst
+            ${{ matrix.artifact }}.AppImage
             ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}-Setup.exe

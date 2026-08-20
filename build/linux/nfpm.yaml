@@ -1,0 +1,45 @@
+# Linux package definition shared by the Release workflow. The source paths,
+# architecture and version are injected by the native Linux build job.
+name: mnemo
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${NFPM_VERSION}
+release: "1"
+section: utils
+priority: optional
+maintainer: lllll081926
+description: Mnemo multi-drive file manager
+homepage: https://github.com/lllll081926i/mnemo-go
+license: MIT
+
+contents:
+  - src: ${NFPM_BINARY_PATH}
+    dst: /usr/lib/mnemo/Mnemo
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${NFPM_DATA_DIR}/
+    dst: /usr/lib/mnemo/data
+    type: tree
+    expand: true
+  - src: ${NFPM_DESKTOP_PATH}
+    dst: /usr/share/applications/mnemo.desktop
+    expand: true
+  - src: ${NFPM_ICON_PATH}
+    dst: /usr/share/icons/hicolor/256x256/apps/mnemo.png
+    expand: true
+
+# Mnemo's current Linux binary is compiled against the WebKitGTK 4.1 ABI.
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+
+overrides:
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+  archlinux:
+    depends:
+      - gtk3
+      - webkit2gtk-4.1
