@@ -55,6 +55,7 @@ function accLabel(acc) { return accountName(acc) }
 const downloads = ref([])
 const uploads = ref([])
 const loading = ref(true)
+const refreshError = ref('')
 let refreshSeq = 0
 
 // 下载完成提示音
@@ -82,7 +83,10 @@ async function refresh() {
     if (seq !== refreshSeq) return
     downloads.value = d || []
     uploads.value = u || []
-  } catch { /* 静默 */ } finally {
+    refreshError.value = ''
+  } catch (e) {
+    if (seq === refreshSeq) refreshError.value = String(e && e.message ? e.message : e)
+  } finally {
     if (seq === refreshSeq) loading.value = false
     refreshInFlight = false
     if (refreshQueued) {
@@ -563,6 +567,8 @@ async function submitDownload() {
 const offlineUser = ref('')
 const offlineTasks = ref([])
 const offlineLoading = ref(false)
+const offlineError = ref('')
+let offlineRefreshSeq = 0
 const offModal = ref(false)
 const offLinks = ref('')
 let offlineTimer = null
@@ -582,10 +588,20 @@ const offlineDriveId = computed(() => {
 })
 
 async function refreshOffline() {
-  if (!offlineUser.value) { offlineTasks.value = []; return }
+  const seq = ++offlineRefreshSeq
+  const userID = offlineUser.value
+  if (!userID) { offlineTasks.value = []; offlineError.value = ''; return }
   offlineLoading.value = true
-  try { offlineTasks.value = (await ListOfflineTasks(offlineUser.value)) || [] }
-  catch { /* 静默 */ } finally { offlineLoading.value = false }
+  try {
+    const list = (await ListOfflineTasks(userID)) || []
+    if (seq !== offlineRefreshSeq || userID !== offlineUser.value) return
+    offlineTasks.value = list
+    offlineError.value = ''
+  } catch (e) {
+    if (seq === offlineRefreshSeq && userID === offlineUser.value) offlineError.value = String(e && e.message ? e.message : e)
+  } finally {
+    if (seq === offlineRefreshSeq) offlineLoading.value = false
+  }
 }
 watch(offlineUser, refreshOffline)
 watch(menu, (m) => { if (m === 'offline') refreshOffline() })
@@ -797,6 +813,11 @@ onBeforeUnmount(() => {
 
       <!-- 右侧内容区 -->
       <section class="down-content">
+        <div v-if="refreshError" class="transfer-error" role="alert">
+          <UiIcon name="alert" :size="15" />
+          <span>传输列表刷新失败：{{ refreshError }}</span>
+          <button type="button" class="transfer-error-retry" @click="refresh">重试</button>
+        </div>
         <!-- 正在下载 -->
         <template v-if="menu === 'downloading'">
           <div class="toppanbtns">
@@ -1052,6 +1073,11 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+          <div v-if="offlineError" class="transfer-error" role="alert">
+            <UiIcon name="alert" :size="15" />
+            <span>云离线任务刷新失败：{{ offlineError }}</span>
+            <button type="button" class="transfer-error-retry" @click="refreshOffline">重试</button>
+          </div>
           <div class="file-list">
             <transition-group name="task-list">
               <div v-for="t in offlineTasks" :key="t.id || t.task_id" class="taskrow">
@@ -1195,6 +1221,31 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.transfer-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
+  border-radius: 8px;
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  font-size: 12px;
+}
+.transfer-error span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transfer-error-retry {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.transfer-error-retry:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .field { margin-bottom: 14px; }
 .td-row { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--border-lighter); }
 .td-row:last-child { border-bottom: none; }
