@@ -135,7 +135,7 @@
 | P2-06 | 多处加载失败被静默吞掉 | 空列表和请求失败难以区分。统一使用可重试的错误状态，日志仍需脱敏。 |
 | P2-07 | Modal、ContextMenu、UiSelect、SegTabs 的键盘/ARIA 行为不完整 | 这不是视觉问题，而是键盘用户无法完成操作的功能问题。补 `role`、焦点陷阱/恢复、方向键、Escape、背景滚动锁和可见焦点。 |
 | P2-08 | `PanView.vue`、`PlayerPanel.vue`、`PreviewModal.vue`、`TransferView.vue` 体积过大 | 状态耦合使回归难定位、难做组件测试。按数据加载、选择状态、操作命令、播放器资源生命周期拆 composable/子组件。 |
-| P2-09 | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | SUP 本地文件 URL 未统一 revoke；切换/卸载时部分字幕 fetch 无 AbortController。建立统一资源注册表，在切源/卸载时取消和释放。 |
+| P2-09 | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | 已关闭主要路径：本地 SUP/SRT/VTT Blob URL 统一登记并在切源/卸载时 revoke；SUP/ASS 网盘字幕 fetch 使用 AbortController；本地 FileReader 在切源/卸载或重新选择时取消。仍缺少前端组件级自动化回归测试。 |
 | P2-10 | S3 连接验证只证明至少一种读权限 | 回退 `ListObjectsV2` 成功不代表 Put/Delete 权限存在。连接页应展示“浏览权限已验证；写权限将在首次上传时验证”，不能用测试对象做破坏性探测。 |
 | P2-11 | 账号容量缺少“更新时间/未知原因” | 当前只能显示有值或未知。应显示上次成功刷新时间、服务端不支持、刷新冷却、认证失效四种状态，并提供受后端限频保护的手动刷新。 |
 

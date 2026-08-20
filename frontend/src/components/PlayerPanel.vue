@@ -81,6 +81,9 @@ let gainNode = null
 let supRenderer = null
 let fsAnimTimer = null
 let assRenderer = null
+let subtitleFetchController = null
+let localSubtitleReader = null
+const subtitleObjectURLs = new Set()
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const speedOptions = SPEEDS.map((s) => ({ value: s, label: s + 'x' }))
@@ -111,6 +114,9 @@ onBeforeUnmount(() => {
   playbackSeq++
   sourceSeq++
   saveCursor()
+  cancelSubtitleFetch()
+  cancelLocalSubtitleReader()
+  revokeSubtitleObjectURLs()
   destroyAdaptivePlayers()
   if (saveTimer) clearInterval(saveTimer)
   if (controlsTimer) clearTimeout(controlsTimer)
@@ -150,6 +156,9 @@ async function startPlayback() {
     clearInterval(saveTimer)
     saveTimer = null
   }
+  cancelSubtitleFetch()
+  cancelLocalSubtitleReader()
+  revokeSubtitleObjectURLs()
   destroyAdaptivePlayers()
   loading.value = true
   error.value = ''
@@ -708,6 +717,7 @@ function isSubtitleSibling(file, base) {
 }
 
 async function mountCloudSubtitles() {
+  const seq = playbackSeq
   const base = String(props.file.name || '').replace(/\.[^.]+$/, '').toLowerCase()
   if (!base) return
   const siblings = (props.files || []).filter((f) => !f.isDir && f.file_id !== props.file.file_id && isSubtitleSibling(f, base))
@@ -715,7 +725,7 @@ async function mountCloudSubtitles() {
     const ext = extensionOf(sibling.name)
     try {
       const url = await previewUrl(props.account.user_id, props.account.drive_id, sibling.file_id)
-      if (unmounted) return
+      if (unmounted || seq !== playbackSeq) return
       if (ext === 'sup') {
         supTracks.value = [...supTracks.value, { label: sibling.name, url }]
       } else if (ext === 'ass' || ext === 'ssa') {
@@ -729,16 +739,50 @@ async function mountCloudSubtitles() {
 }
 
 function textBlobUrl(text) {
-  return URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
+  return registerSubtitleObjectURL(URL.createObjectURL(new Blob([text], { type: 'text/vtt' })))
+}
+
+function registerSubtitleObjectURL(url) {
+  if (url) subtitleObjectURLs.add(url)
+  return url
+}
+
+function revokeSubtitleObjectURLs() {
+  for (const url of subtitleObjectURLs) {
+    try { URL.revokeObjectURL(url) } catch {}
+  }
+  subtitleObjectURLs.clear()
+}
+
+function cancelSubtitleFetch() {
+  const controller = subtitleFetchController
+  subtitleFetchController = null
+  if (controller) {
+    try { controller.abort() } catch {}
+  }
+}
+
+function cancelLocalSubtitleReader() {
+  const reader = localSubtitleReader
+  localSubtitleReader = null
+  if (reader && reader.readyState === 1) {
+    try { reader.abort() } catch {}
+  }
 }
 
 async function selectSup(index) {
   const track = supTracks.value[index]
   if (!track) return
+  cancelSubtitleFetch()
+  const controller = new AbortController()
+  subtitleFetchController = controller
   selectSubtitle(-1)
   destroyAss()
   try {
-    const buffer = await (await fetch(track.url)).arrayBuffer()
+    const response = await fetch(track.url, { signal: controller.signal })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const buffer = await response.arrayBuffer()
+    if (unmounted || controller.signal.aborted) return
     const sets = parseSup(buffer)
     if (!sets.length) throw new Error('no display sets')
     if (!supRenderer) supRenderer = new SupRenderer(supCanvasEl.value)
@@ -746,8 +790,11 @@ async function selectSup(index) {
     supActive.value = true
     currentSubtitle.value = 'sup:' + index
     renderSupFrame()
-  } catch {
+  } catch (error) {
+    if (unmounted || error?.name === 'AbortError') return
     emit('toast', 'SUP 字幕解析失败', 'error')
+  } finally {
+    if (subtitleFetchController === controller) subtitleFetchController = null
   }
 }
 
@@ -778,19 +825,30 @@ async function getJassub() {
 async function selectAss(index) {
   const track = assTracks.value[index]
   if (!track) return
+  cancelSubtitleFetch()
+  const controller = new AbortController()
+  subtitleFetchController = controller
   selectSubtitle(-1)
   stopSup()
   try {
-    const content = track.content || await (await fetch(track.url)).text()
-    if (unmounted) return
+    let content = track.content
+    if (!content) {
+      const response = await fetch(track.url, { signal: controller.signal })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      content = await response.text()
+    }
+    if (unmounted || controller.signal.aborted) return
     const { JASSUB, workerUrl, wasmUrl, fontUrl } = await getJassub()
-    if (unmounted) return
+    if (unmounted || controller.signal.aborted) return
     destroyAss()
     assRenderer = new JASSUB({ video: videoEl.value, subContent: content, workerUrl, wasmUrl, fonts: [fontUrl] })
     assActive.value = true
     currentSubtitle.value = 'ass:' + index
-  } catch {
+  } catch (error) {
+    if (unmounted || error?.name === 'AbortError') return
     emit('toast', 'ASS 字幕加载失败', 'error')
+  } finally {
+    if (subtitleFetchController === controller) subtitleFetchController = null
   }
 }
 
@@ -836,24 +894,34 @@ function onLocalSubtitlePicked(event) {
   const picked = event.target.files && event.target.files[0]
   event.target.value = ''
   if (!picked) return
+  cancelLocalSubtitleReader()
   const ext = extensionOf(picked.name)
   const label = picked.name + '（本地）'
   if (ext === 'sup') {
-    supTracks.value = [...supTracks.value, { label, url: URL.createObjectURL(picked) }]
+    const url = registerSubtitleObjectURL(URL.createObjectURL(picked))
+    supTracks.value = [...supTracks.value, { label, url }]
     selectSup(supTracks.value.length - 1)
     return
   }
   if (ext === 'ass' || ext === 'ssa') {
     const reader = new FileReader()
+    localSubtitleReader = reader
     reader.onload = () => {
+      if (unmounted || localSubtitleReader !== reader) return
+      localSubtitleReader = null
       assTracks.value = [...assTracks.value, { label, content: String(reader.result || '') }]
       selectAss(assTracks.value.length - 1)
     }
+    reader.onerror = () => { if (localSubtitleReader === reader) localSubtitleReader = null }
+    reader.onabort = () => { if (localSubtitleReader === reader) localSubtitleReader = null }
     reader.readAsText(picked)
     return
   }
   const reader = new FileReader()
+  localSubtitleReader = reader
   reader.onload = () => {
+    if (unmounted || localSubtitleReader !== reader) return
+    localSubtitleReader = null
     const text = String(reader.result || '')
     const vtt = srtToVtt(text)
     const url = textBlobUrl(vtt)
@@ -865,6 +933,8 @@ function onLocalSubtitlePicked(event) {
       if (v && v.textTracks.length > 0) selectSubtitle(v.textTracks.length - 1)
     })
   }
+  reader.onerror = () => { if (localSubtitleReader === reader) localSubtitleReader = null }
+  reader.onabort = () => { if (localSubtitleReader === reader) localSubtitleReader = null }
   reader.readAsText(picked)
 }
 
