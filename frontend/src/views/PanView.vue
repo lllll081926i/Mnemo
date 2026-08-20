@@ -498,6 +498,7 @@ function onSearchKey(e) {
 function treeChildren(id) { return tree.value[id] || [] }
 
 async function toggleTree(idOrNode, name) {
+  suppressHoverPreview()
   const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
   expanded.value[id] = !expanded.value[id]
   const snapUid = uid.value, snapDid = did.value
@@ -535,6 +536,7 @@ async function expandTree(id, name) {
 }
 
 function selectTreeNode(idOrNode, name) {
+  suppressHoverPreview()
   const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
   if (typeof idOrNode === 'object') name = idOrNode.name
   treeSelected.value = id
@@ -1003,6 +1005,7 @@ function onRowOpen(f) {
 
 // ---------- 目录树右键菜单 ----------
 function onTreeCtx(e, node) {
+  suppressHoverPreview()
   const file = { file_id: node.file_id || node.id, name: node.name, isDir: true }
   const isRoot = file.file_id === rootKey.value
   const items = [
@@ -1023,9 +1026,17 @@ function onTreeCtx(e, node) {
 // ---------- 文件夹悬停预览 ----------
 const hoverPreview = ref(null) // { id, name, x, y, items, loading }
 let hoverTimer = null
+let hoverSuppressUntil = 0 // 点击交互后的抑制期：展开/收起动画期间不弹预览
+
+function suppressHoverPreview(ms = 700) {
+  hoverSuppressUntil = Date.now() + ms
+  clearTimeout(hoverTimer)
+  hoverPreview.value = null
+}
 
 function onTreeEnter(e, node) {
   if (!getPrefs().hoverPreview) return
+  if (Date.now() < hoverSuppressUntil) return
   clearTimeout(hoverTimer)
   const id = node.file_id || node.id
   const targetEl = e.currentTarget
