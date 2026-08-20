@@ -1,8 +1,47 @@
 import { mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import Modal from './Modal.vue'
 import UiSelect from './UiSelect.vue'
+
+const api = vi.hoisted(() => ({
+  login: vi.fn(),
+  saveMounted: vi.fn(),
+  validateMountedWrite: vi.fn(),
+  SendGuangyaSms: vi.fn(),
+  providerIconUrl: vi.fn(() => ''),
+  OpenBrowser: vi.fn(),
+  onEvent: vi.fn(() => () => {}),
+  ClosePikPakCaptcha: vi.fn(),
+  refreshAccount: vi.fn(),
+  accountName: vi.fn((account) => account?.user_id || ''),
+  providerMetaOf: vi.fn(() => ({ key: 'webdav', label: 'WebDAV' })),
+  formatBytes: vi.fn((value) => `${value} B`),
+}))
+
+vi.mock('../api', () => api)
+vi.mock('../logger', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  errorText: vi.fn((value) => String(value)),
+  configKeys: vi.fn(() => []),
+}))
+
+import LoginModal from './LoginModal.vue'
+import AccountAvatar from './AccountAvatar.vue'
+
+const storage = new Map()
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: (key) => storage.has(key) ? storage.get(key) : null,
+    setItem: (key, value) => storage.set(String(key), String(value)),
+    removeItem: (key) => storage.delete(String(key)),
+    clear: () => storage.clear(),
+  },
+})
 
 const wrappers = []
 
@@ -12,10 +51,19 @@ function mountAttached(component, options = {}) {
   return wrapper
 }
 
+async function setDomInput(input, value) {
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await nextTick()
+}
+
 afterEach(async () => {
   for (const wrapper of wrappers.splice(0)) wrapper.unmount()
   await nextTick()
   document.body.replaceChildren()
+  localStorage.clear()
+  vi.useRealTimers()
+  vi.clearAllMocks()
 })
 
 describe('关键交互组件', () => {
@@ -67,5 +115,82 @@ describe('关键交互组件', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([['beta']])
     expect(wrapper.emitted('change')).toEqual([['beta']])
     expect(trigger.attributes('aria-expanded')).toBe('false')
+  })
+
+  it('WebDAV 预设会同时填写连接名称和地址，且密码只有一个自定义切换按钮', async () => {
+    localStorage.setItem('login_provider', 'webdav')
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [
+          { ID: 'webdav', Meta: { label: 'WebDAV' }, Login: { fields: [] } },
+        ],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+    const preset = wrapper.findAllComponents(UiSelect)[0]
+    await preset.vm.$emit('update:modelValue', 'jianguoyun')
+    await preset.vm.$emit('change', 'jianguoyun')
+    await nextTick()
+
+    const inputs = [...document.body.querySelectorAll('input')]
+    expect(inputs.find((input) => input.getAttribute('placeholder') === '我的 WebDAV / S3').value).toBe('坚果云')
+    expect(inputs.find((input) => input.getAttribute('placeholder') === 'https://dav.example.com').value).toBe('https://dav.jianguoyun.com/dav/')
+    expect(document.body.querySelectorAll('.password-toggle')).toHaveLength(1)
+    expect(document.body.querySelector('[role="switch"]').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('S3 默认不做写入验证和内网预览授权，保存时只提交一次连接配置', async () => {
+    api.saveMounted.mockResolvedValue(undefined)
+    localStorage.setItem('login_provider', 's3')
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [
+          { ID: 'webdav', Meta: { label: 'WebDAV' }, Login: { fields: [] } },
+          { ID: 's3', Meta: { label: 'S3' }, Login: { fields: [] } },
+        ],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+
+    const values = { endpoint: 'https://s3.example.test', username: 'access-key', password: 'secret-key', bucket: 'mnemo' }
+    const inputs = [...document.body.querySelectorAll('input')]
+    await setDomInput(inputs.find((input) => input.placeholder === 's3.us-east-1.amazonaws.com (可选，默认 AWS)'), values.endpoint)
+    const inputForLabel = (label) => [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent.startsWith(label))
+      ?.querySelector('input')
+    await setDomInput(inputForLabel('Access Key ID'), values.username)
+    await setDomInput(inputForLabel('Secret Access Key'), values.password)
+    await setDomInput(inputForLabel('Bucket'), values.bucket)
+
+    const switches = [...document.body.querySelectorAll('[role="switch"]')]
+    expect(switches).toHaveLength(3)
+    expect(switches[0].getAttribute('aria-checked')).toBe('false')
+    expect(switches[1].getAttribute('aria-checked')).toBe('true')
+    expect(switches[2].getAttribute('aria-checked')).toBe('false')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(api.validateMountedWrite).not.toHaveBeenCalled()
+    expect(api.saveMounted).toHaveBeenCalledTimes(1)
+    expect(api.saveMounted.mock.calls[0][0]).toBe('s3')
+    expect(api.saveMounted.mock.calls[0][1]).toMatchObject({ name: 'S3', endpoint: values.endpoint, username: values.username, password: values.password, bucket: values.bucket, allowPrivateNetwork: false })
+    expect(api.saveMounted.mock.calls[0][1]).not.toHaveProperty('verifyWrite')
+  })
+
+  it('账号容量刷新受到前端账号级低频冷却保护', async () => {
+    vi.useFakeTimers()
+    let resolveRefresh
+    api.refreshAccount.mockReturnValue(new Promise((resolve) => { resolveRefresh = resolve }))
+    const account = { user_id: 'quota-dedupe', token: {}, usage: null }
+    mountAttached(AccountAvatar, { props: { account, providers: [] }, global: { stubs: { UiIcon: true } } })
+
+    await vi.advanceTimersByTimeAsync(30 * 1000)
+    expect(api.refreshAccount).toHaveBeenCalledTimes(1)
+    resolveRefresh({ user_id: 'quota-dedupe', token: {}, usage: { size: 100, used: 20 } })
+    await vi.runAllTicks()
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000)
+    expect(api.refreshAccount).toHaveBeenCalledTimes(1)
   })
 })
