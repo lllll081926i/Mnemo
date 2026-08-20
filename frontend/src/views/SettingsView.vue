@@ -688,24 +688,25 @@ async function exportLogs() {
   gap: 4px;
 }
 .pill-btn {
-  padding: 2px 7px;
+  padding: 3px 10px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border-light);
+  border: 1px solid transparent;
   background: var(--bg-subtle);
-  font-size: 11.5px;
+  font-size: 11.5px; font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--motion-fast) var(--motion-ease);
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
 }
 .pill-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+.pill-btn:active { transform: scale(.94); }
 .pill-btn.active {
-  background: var(--listselectbg);
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-  font-weight: 600;
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-primary); font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 35%, transparent);
+  animation: check-pop 240ms var(--motion-spring);
 }
 .sg-control-grow { flex: 1; min-width: 0; }
 .sg-control-grow .input { flex: 1; min-width: 160px; }

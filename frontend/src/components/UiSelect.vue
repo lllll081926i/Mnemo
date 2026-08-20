@@ -167,46 +167,66 @@ onBeforeUnmount(() => {
 <style>
 .uiselect { display: inline-block; }
 .uiselect.block, .uiselect.block .uiselect-btn { width: 100%; }
+/* 触发器：柔边无底框，悬停浮起，展开时主题色晕环 */
 .uiselect-btn {
   display: inline-flex; align-items: center; gap: 6px;
   width: 100%;
-  height: 28px; padding: 0 8px 0 10px; min-width: 0;
+  height: 30px; padding: 0 8px 0 11px; min-width: 0;
   font-size: 13.5px; color: var(--text-primary);
-  background: var(--control-bg); border: 1px solid var(--control-border);
-  border-radius: var(--radius-sm); cursor: pointer;
-  transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+  background: var(--control-bg); border: 1px solid transparent;
+  border-radius: var(--radius-md); cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
 }
-.uiselect-btn:hover:not(:disabled) { border-color: var(--color-primary); }
+.uiselect-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.uiselect-btn:active:not(:disabled) { transform: scale(.98); }
 .uiselect-btn.open {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: var(--bg-hover);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 .uiselect-btn:disabled { opacity: .55; cursor: not-allowed; }
 .uiselect-btn.placeholder { color: var(--text-tertiary); }
 .uiselect-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .uiselect-ico { width: 15px; height: 15px; object-fit: contain; border-radius: 3px; flex-shrink: 0; }
-.uiselect-arrow { flex-shrink: 0; color: var(--text-tertiary); transition: transform 220ms var(--motion-spring); }
+.uiselect-arrow { flex-shrink: 0; color: var(--text-tertiary); transition: transform 240ms var(--motion-spring); }
 .uiselect-btn.open .uiselect-arrow { transform: rotate(180deg); }
 
+/* 浮层：毛玻璃卡片，选项逐个弹入，选中项打勾弹跳 */
 .uiselect-drop {
-  position: fixed; z-index: 400; overflow-y: auto; padding: 4px;
-  background: var(--bg-elevated); border: 1px solid var(--border-light);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-modal);
+  position: fixed; z-index: 400; overflow-y: auto; padding: 5px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  border: 1px solid var(--border-light);
+  border-radius: 12px; box-shadow: var(--shadow-modal);
   transform-origin: top center;
 }
 .uiselect-opt {
   display: flex; align-items: center; gap: 7px; width: 100%;
-  padding: 6px 9px; border: none; border-radius: var(--radius-sm);
+  padding: 6px 9px; border: none; border-radius: 8px;
   background: transparent; font-size: 13.5px; color: var(--text-primary);
   cursor: pointer; text-align: left;
-  transition: background var(--motion-fast) var(--motion-ease);
+  animation: uiselect-opt-in .24s var(--motion-ease) both;
+  transition: background var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
+}
+/* 前 10 项依次弹入（波纹入场） */
+.uiselect-opt:nth-child(2) { animation-delay: 20ms; }
+.uiselect-opt:nth-child(3) { animation-delay: 40ms; }
+.uiselect-opt:nth-child(4) { animation-delay: 58ms; }
+.uiselect-opt:nth-child(5) { animation-delay: 74ms; }
+.uiselect-opt:nth-child(6) { animation-delay: 88ms; }
+.uiselect-opt:nth-child(7) { animation-delay: 100ms; }
+.uiselect-opt:nth-child(8) { animation-delay: 110ms; }
+.uiselect-opt:nth-child(9) { animation-delay: 118ms; }
+.uiselect-opt:nth-child(n+10) { animation-delay: 124ms; }
+@keyframes uiselect-opt-in {
+  from { opacity: 0; transform: translateY(4px) scale(.98); }
 }
 .uiselect-opt:hover:not(.disabled) { background: var(--bg-hover); }
+.uiselect-opt:active:not(.disabled) { transform: scale(.98); }
 .uiselect-opt.active {
   color: var(--color-primary); font-weight: 600;
-  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 .uiselect-opt.disabled { opacity: .45; cursor: not-allowed; }
-.uiselect-check { flex-shrink: 0; margin-left: auto; }
+.uiselect-check { flex-shrink: 0; margin-left: auto; animation: check-pop 260ms var(--motion-spring); }
 .uiselect-empty { padding: 14px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 </style>
