@@ -695,6 +695,20 @@ func (a *App) SaveMountedAccount(provider string, conn model.ConnConfig) (*model
 	return acc, nil
 }
 
+// ValidateMountedWrite performs an explicitly requested S3 write probe. It
+// does not persist an account or run during the normal login check.
+func (a *App) ValidateMountedWrite(provider string, conn model.ConnConfig) error {
+	if provider != model.ProviderS3 {
+		return fmt.Errorf("当前网盘不支持可选写入验证")
+	}
+	if err := drive.ValidateWriteConnection(provider, &conn); err != nil {
+		logging.Warn("mounted write validation failed", "provider", provider, "endpoint_host", urlHost(conn.Endpoint), "error", err)
+		return err
+	}
+	logging.Info("mounted write validation completed", "provider", provider, "endpoint_host", urlHost(conn.Endpoint))
+	return nil
+}
+
 // mountedAccountID namespaces mounted connections by their non-secret
 // connection identity. Endpoint alone is insufficient when one server has
 // multiple users, and a display name alone can collide as well.

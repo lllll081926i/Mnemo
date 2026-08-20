@@ -142,7 +142,7 @@
 | P2-07（主要路径已关闭） | Modal、ContextMenu、UiSelect、SegTabs 的键盘/ARIA 行为不完整 | Modal 已增加 `role=dialog`、焦点初始定位、Tab 焦点循环、关闭后焦点恢复；ContextMenu 支持菜单语义、方向键/Home/End/Enter；UiSelect 支持 combobox/listbox 语义、方向键和 Escape；SegTabs 支持 tablist、方向键/Home/End 和 roving tabindex。背景滚动锁及更广泛的组件级自动化测试仍可继续补强。 |
 | P2-08（按需求暂缓） | `PanView.vue`、`PlayerPanel.vue`、`PreviewModal.vue`、`TransferView.vue` 体积过大 | 这是可维护性与后续测试效率问题，不影响当前主要功能；按当前要求暂缓大组件拆分，后续与前端测试框架一起处理。 |
 | P2-09（主要路径已关闭） | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | 本地 SUP/SRT/VTT Blob URL 统一登记并在切源/卸载时 revoke；SUP/ASS 网盘字幕 fetch 使用 AbortController；本地 FileReader 在切源/卸载或重新选择时取消。仍缺少前端组件级自动化回归测试。 |
-| P2-10 | S3 连接验证只证明至少一种读权限 | 已在添加成功提示中明确“浏览权限已验证，写入权限将在首次上传时验证”；后端仍不创建测试对象、不主动探测 Put/Delete，实际写入失败需在传输列表展示详细错误。 |
+| P2-10（主要路径已关闭） | S3 连接验证只证明至少一种读权限 | 默认登录仍只发一次 `HeadBucket`（兼容回退时最多再发一次 `ListObjectsV2`），避免无意写入；S3 登录界面新增默认关闭的“写入权限验证”，用户明确开启后才写入并删除一个随机测试对象，固定 2 个请求。实际上传失败仍需在传输列表展示详细错误。 |
 | P2-11（主要路径已关闭） | 账号容量缺少“更新时间/未知原因” | 统一 Quota 已记录 `available/unsupported/rate_limited/error/unknown` 状态与最近成功刷新时间；头像弹窗会区分服务端不支持、限流冷却和刷新失败，并在失败时保留上次成功容量。刷新仍沿用前后端双层去重、缓存与冷却，不增加请求；后续可增加受同一冷却保护的手动刷新入口。 |
 
 ## 5. WebDAV `PROPFIND 530` 专项
@@ -275,7 +275,7 @@ AWS 官方操作语义参考：[HeadBucket](https://docs.aws.amazon.com/AmazonS3
 ### 9.2 必须补的测试顺序
 
 1. 数据安全红线：同步安全路径、扫描失败禁止删除、快照 ID、下载同名预留、Content-Range/ETag、同任务互斥和任务取消已完成；上传取消恢复的 worker 生命周期已完成，Provider 请求级 Context 传递仍待补。
-2. 风控与连接：PikPak 并发刷新合并/429 冷却；WebDAV 尾斜杠、Basic/Digest 诊断、quota 可选属性；S3 Head/List 回退与最大请求次数。
+2. 风控与连接：PikPak 并发刷新合并/429 冷却；WebDAV 尾斜杠、Basic/Digest 诊断、quota 可选属性；S3 Head/List 回退、可选 Put/Delete 写入验证与最大请求次数。
 3. 前端功能：登录模板、自动名称、上传冲突取消、迁移能力过滤、设置项消费、容量刷新时钟；全部使用 mock Wails API，不访问真实网盘。
 4. 故障注入：磁盘满、JSON 原子写失败、权限拒绝、网络超时、分页游标重复、服务端返回错误 Range。
 5. 发布烟测：各平台启动、关闭/托盘、OAuth 回调、更新校验、安装覆盖。

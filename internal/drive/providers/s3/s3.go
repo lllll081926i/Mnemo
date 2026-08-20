@@ -5,6 +5,7 @@ package s3
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -91,6 +92,40 @@ func (d *Driver) ValidateConnection(ctx context.Context, cfg *model.ConnConfig) 
 		return nil
 	}
 	return fmt.Errorf("s3: bucket 与前缀校验均失败: HeadBucket: %v; ListObjectsV2: %w", headErr, listErr)
+}
+
+// ValidateWriteConnection performs an opt-in, low-volume write probe. It
+// writes one empty object under a reserved random key and deletes it before
+// returning. Login validation deliberately does not call this method.
+func (d *Driver) ValidateWriteConnection(ctx context.Context, cfg *model.ConnConfig) error {
+	if cfg == nil {
+		return errors.New("s3: 连接配置为空")
+	}
+	c, err := connOf(drive.Context{Token: &model.TokenInfo{Conn: cfg}})
+	if err != nil {
+		return err
+	}
+	key, err := writeProbeKey(c.prefix)
+	if err != nil {
+		return err
+	}
+	if _, err := c.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(c.bucket), Key: aws.String(key), Body: strings.NewReader(""), ContentLength: aws.Int64(0),
+	}); err != nil {
+		return fmt.Errorf("s3: 写入权限验证失败: %w", err)
+	}
+	if _, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}); err != nil {
+		return fmt.Errorf("s3: 写入验证成功，但清理测试对象失败（对象: %s）: %w", key, err)
+	}
+	return nil
+}
+
+func writeProbeKey(prefix string) (string, error) {
+	var suffix [16]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", fmt.Errorf("s3: 生成写入验证对象名失败: %w", err)
+	}
+	return prefix + ".mnemo-connection-check/" + fmt.Sprintf("%x", suffix[:]), nil
 }
 
 type conn struct {

@@ -200,4 +200,6 @@ export function TrashFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<A
 
 export function UploadFiles(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<Array<model.UploadingUI>>;
 
+export function ValidateMountedWrite(arg1:string,arg2:model.ConnConfig):Promise<void>;
+
 export function WatchShowRequests():Promise<void>;

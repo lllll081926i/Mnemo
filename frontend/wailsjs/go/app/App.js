@@ -390,6 +390,10 @@ export function UploadFiles(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['UploadFiles'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ValidateMountedWrite(arg1, arg2) {
+  return window['go']['app']['App']['ValidateMountedWrite'](arg1, arg2);
+}
+
 export function WatchShowRequests() {
   return window['go']['app']['App']['WatchShowRequests']();
 }

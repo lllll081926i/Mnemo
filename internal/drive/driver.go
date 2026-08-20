@@ -149,6 +149,13 @@ type ConnectionValidator interface {
 	ValidateConnection(ctx context.Context, conn *model.ConnConfig) error
 }
 
+// WriteConnectionValidator is an optional, explicit capability for mounted
+// providers that can verify a write and remove a uniquely named test object.
+// It must never be called as part of the normal login validation path.
+type WriteConnectionValidator interface {
+	ValidateWriteConnection(ctx context.Context, conn *model.ConnConfig) error
+}
+
 // Driver is the plugin contract every provider implements.
 // Only List is required; everything else is capability-gated and optional.
 type Driver interface {

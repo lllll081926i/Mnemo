@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, SendGuangyaSms, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
+import { login, saveMounted, validateMountedWrite, SendGuangyaSms, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
 import UiIcon from './UiIcon.vue'
 import UiSelect from './UiSelect.vue'
 import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
@@ -11,7 +11,7 @@ const emit = defineEmits(['close', 'toast'])
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 const form = ref({})
 const initialMountedName = providerId.value === 'webdav' ? 'WebDAV' : (providerId.value === 's3' ? 'S3' : '')
-const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true })
+const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false })
 const webdavPreset = ref('custom')
 const genericWebdavIcon = new URL('../assets/drive-icons/webdav.svg', import.meta.url).href
 const webdavPresets = [
@@ -157,7 +157,7 @@ watch(providerId, (v, previous) => {
   form.value = {}
 	passwordVisibility.value = {}
   webdavPreset.value = 'custom'
-  mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true }
+  mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false }
   errorText.value = ''
   resetCaptcha(previous === 'pikpak')
   if (v !== 'pikpak') clearPikPakCooldown()
@@ -373,14 +373,18 @@ async function submit() {
   errorText.value = ''
   try {
     if (isMounted.value) {
-      await saveMounted(providerId.value, { ...mountedForm.value })
+      const mountedConfig = { ...mountedForm.value }
+      const verifyWrite = providerId.value === 's3' && mountedConfig.verifyWrite === true
+      delete mountedConfig.verifyWrite
+      if (verifyWrite) await validateMountedWrite(providerId.value, mountedConfig)
+      await saveMounted(providerId.value, mountedConfig)
     } else {
       await login(providerId.value, { ...form.value })
     }
     const successMessage = isOAuth.value
       ? '授权成功'
       : (isMounted.value && providerId.value === 's3'
-        ? 'S3 已添加（浏览权限已验证，写入权限将在首次上传时验证）'
+        ? (mountedForm.value.verifyWrite ? 'S3 已添加（浏览和写入权限已验证）' : 'S3 已添加（浏览权限已验证，写入权限将在首次上传时验证）')
         : '登录成功')
     emit('toast', successMessage, 'success')
 		info('login', 'login form submit completed', { provider: providerId.value })
@@ -467,6 +471,13 @@ async function submit() {
                         <div class="switch-row">
                           <button class="switch" :class="{ on: mountedForm.forcePathStyle }" type="button" role="switch" :aria-checked="mountedForm.forcePathStyle" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></button>
                           <span class="hint">开启用于 MinIO、OSS 等兼容服务；AWS S3 可关闭</span>
+                        </div>
+                      </div>
+                      <div class="field login-field">
+                        <label>写入权限验证</label>
+                        <div class="switch-row">
+                          <button class="switch" :class="{ on: mountedForm.verifyWrite }" type="button" role="switch" :aria-checked="mountedForm.verifyWrite" @click="mountedForm.verifyWrite = !mountedForm.verifyWrite"></button>
+                          <span class="hint">可选：写入并删除一个随机测试对象；写入验证本身发送 2 个请求，默认关闭</span>
                         </div>
                       </div>
                     </template>

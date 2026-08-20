@@ -395,6 +395,8 @@ export namespace model {
 	    sizeStr: string;
 	    used: number;
 	    usedStr: string;
+	    status?: string;
+	    updated_at?: number;
 	    expired?: string;
 	    description?: string;
 	
@@ -409,6 +411,8 @@ export namespace model {
 	        this.sizeStr = source["sizeStr"];
 	        this.used = source["used"];
 	        this.usedStr = source["usedStr"];
+	        this.status = source["status"];
+	        this.updated_at = source["updated_at"];
 	        this.expired = source["expired"];
 	        this.description = source["description"];
 	    }
@@ -946,6 +950,7 @@ export namespace model {
 	    sha1: string;
 	    crc64: string;
 	    conflictPolicy?: string;
+	    cleanupLocalFile?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UploadInfo(source);
@@ -966,6 +971,7 @@ export namespace model {
 	        this.sha1 = source["sha1"];
 	        this.crc64 = source["crc64"];
 	        this.conflictPolicy = source["conflictPolicy"];
+	        this.cleanupLocalFile = source["cleanupLocalFile"];
 	    }
 	}
 	export class UploadState {

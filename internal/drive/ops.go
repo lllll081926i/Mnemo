@@ -376,6 +376,21 @@ func ValidateConnection(provider string, conn *model.ConnConfig) error {
 	return validator.ValidateConnection(context.Background(), conn)
 }
 
+// ValidateWriteConnection performs an explicitly requested mounted-storage
+// write check. Providers must use an isolated temporary object and clean it up
+// before returning; this is intentionally separate from login validation.
+func ValidateWriteConnection(provider string, conn *model.ConnConfig) error {
+	d, ok := Get(provider)
+	if !ok {
+		return ErrUnknownProvider
+	}
+	validator, ok := d.Factory().(WriteConnectionValidator)
+	if !ok {
+		return NotSupported("validateWriteConnection")
+	}
+	return validator.ValidateWriteConnection(context.Background(), conn)
+}
+
 // GetFile returns the unified file model (from cache if present).
 func GetFile(userID, driveID, fileID string) (file *model.File, err error) {
 	return GetFileContext(context.Background(), userID, driveID, fileID)

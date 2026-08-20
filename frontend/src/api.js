@@ -55,6 +55,7 @@ export function login(provider, config) {
   })
 }
 export function saveMounted(provider, conn) { return App.SaveMountedAccount(provider, conn) }
+export function validateMountedWrite(provider, conn) { return App.ValidateMountedWrite(provider, conn) }
 export function removeAccount(userId) { return App.RemoveAccount(userId) }
 
 export function listDir(userId, driveId, dirId) { return App.ListDir(userId, driveId, dirId) }
