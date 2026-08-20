@@ -167,20 +167,21 @@ onBeforeUnmount(() => {
 <style>
 .uiselect { display: inline-block; }
 .uiselect.block, .uiselect.block .uiselect-btn { width: 100%; }
-/* 触发器：柔边无底框，悬停浮起，展开时主题色晕环 */
+/* 触发器：细描边柔底，悬停描边加深，展开时主题色晕环 */
 .uiselect-btn {
   display: inline-flex; align-items: center; gap: 6px;
   width: 100%;
   height: 30px; padding: 0 8px 0 11px; min-width: 0;
   font-size: 13.5px; color: var(--text-primary);
-  background: var(--control-bg); border: 1px solid transparent;
+  background: var(--control-bg); border: 1px solid var(--control-border);
   border-radius: var(--radius-md); cursor: pointer;
   transition: background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
 }
-.uiselect-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.uiselect-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-focus); }
 .uiselect-btn:active:not(:disabled) { transform: scale(.98); }
 .uiselect-btn.open {
   background: var(--bg-hover);
+  border-color: var(--color-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 .uiselect-btn:disabled { opacity: .55; cursor: not-allowed; }
