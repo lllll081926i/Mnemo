@@ -50,6 +50,7 @@ type App struct {
 	dataDir    string
 
 	migrate      *migrate.Engine
+	floater      *floater
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
 	shutdownOnce sync.Once
 	forceQuit    atomic.Bool
@@ -258,9 +259,19 @@ func (a *App) startup(ctx context.Context) {
 		if settings.LogLevel == "" {
 			settings.LogLevel = "warning"
 		}
+		// 前端事件：播放器全屏时抑制悬浮窗
+		runtime.EventsOn(ctx, "app:fullscreen", func(optionalData ...interface{}) {
+			if a.floater != nil && len(optionalData) > 0 {
+				full, _ := optionalData[0].(bool)
+				a.floater.SetPlayerFullscreen(full)
+			}
+		})
 		if levelErr := logging.SetLevel(settings.LogLevel); levelErr != nil {
 			logging.Warn("invalid persisted log level, using warning", "value", settings.LogLevel, "error", levelErr)
 			_ = logging.SetLevel("warning")
+		}
+		if a.floater != nil {
+			a.floater.ApplySettings(settings.FloaterEnabled())
 		}
 	} else {
 		logging.Warn("failed to load persisted log level", "error", settingsErr)
@@ -320,6 +331,9 @@ func (a *App) startup(ctx context.Context) {
 	// download manager + upload queue
 	downloads, err := transfer.NewManager(st, dlDir, func(ev transfer.TaskEvent) {
 		a.emit("transfer:event", ev)
+		if a.floater != nil {
+			a.floater.OnTaskEvent(ev)
+		}
 	})
 	if err != nil {
 		logging.Error("download manager initialization failed", "error", err)
@@ -330,6 +344,9 @@ func (a *App) startup(ctx context.Context) {
 	a.stateMu.Unlock()
 	uploads := transfer.NewUploadQueue(st, func(ev transfer.TaskEvent) {
 		a.emit("transfer:event", ev)
+		if a.floater != nil {
+			a.floater.OnTaskEvent(ev)
+		}
 	})
 	a.stateMu.Lock()
 	a.uploads = uploads
@@ -404,6 +421,9 @@ func (a *App) Shutdown(ctx context.Context) {
 
 		if downloads != nil {
 			downloads.Shutdown()
+		}
+		if a.floater != nil {
+			a.floater.Close()
 		}
 		if uploads != nil {
 			uploads.Close()
@@ -781,6 +801,10 @@ func (a *App) SaveSettings(s store.Settings) error {
 	netx.SetGlobalProxy(s.Proxy)
 	// apply upload speed cap at runtime (direct uploads via ProgressReader)
 	netx.SetGlobalUploadRate(s.MaxUploadSpeed)
+	// apply floater visibility toggle at runtime
+	if a.floater != nil {
+		a.floater.ApplySettings(s.FloaterEnabled())
+	}
 	logging.Info("settings save completed")
 	return nil
 }
@@ -795,7 +819,9 @@ func (a *App) LogFrontend(level, scope, message string, fields map[string]string
 	args := make([]any, 0, len(fields)*2+2)
 	args = append(args, "scope", scope)
 	keys := make([]string, 0, len(fields))
-	for key := range fields { keys = append(keys, key) }
+	for key := range fields {
+		keys = append(keys, key)
+	}
 	sort.Strings(keys)
 	for _, key := range keys {
 		value := fields[key]

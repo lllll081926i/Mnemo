@@ -607,6 +607,8 @@ function toggleFullscreen() {
 
 function onFullscreenChange() {
   isFullscreen.value = document.fullscreenElement === containerEl.value
+  // 通知后端：全屏播放时隐藏桌面悬浮球
+  try { window.runtime?.EventsEmit?.('app:fullscreen', isFullscreen.value) } catch { /* 无 bridge */ }
 }
 
 function onWebkitFullscreenEnter() { isFullscreen.value = true }

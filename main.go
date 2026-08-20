@@ -17,6 +17,9 @@ var assets embed.FS
 //go:embed build/windows/icon.ico
 var trayIcon []byte
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func main() {
 	// 单实例：已有实例时激活其窗口后直接退出
 	if !app.AcquireSingleInstance("Mnemo") {
@@ -25,6 +28,7 @@ func main() {
 	application := app.NewApp()
 	application.WatchShowRequests()
 	application.SetupTray(trayIcon)
+	application.SetupFloater(appIcon)
 
 	err := wails.Run(&options.App{
 		Title:     "Mnemo",

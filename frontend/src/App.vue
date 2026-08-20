@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { listAccounts, listProviders, removeAccount, onEvent, GetSettings, SaveSettings, formatSpeed, providerOf, accountName } from './api'
-import { applyAppearance, getPrefs, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection } from './appearance'
+import { listAccounts, listProviders, removeAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName } from './api'
+import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
 import ShareView from './views/ShareView.vue'
@@ -104,138 +104,6 @@ function handleConfirmOk() {
   closeConfirm()
   if (typeof cb === 'function') cb()
 }
-const ball = ref(null) // { down, up }
-const prefsRevision = ref(0)
-const showTransferBall = computed(() => {
-  // Preferences live in localStorage, so a small revision ref bridges changes
-  // made from SettingsView into this long-lived root component.
-  prefsRevision.value
-  return !!ball.value && getPrefs().transferBall !== false
-})
-const ballPos = ref(null) // { x, y } 拖动后的固定位置
-const isBallDragging = ref(false)
-const transferActivities = new Map()
-let ballUpdateTimer = null
-
-function onPrefsChanged() {
-  prefsRevision.value += 1
-}
-
-function scheduleTransferBallUpdate() {
-  if (ballUpdateTimer) return
-  ballUpdateTimer = setTimeout(() => {
-    ballUpdateTimer = null
-    let down = 0
-    let up = 0
-    let hasDown = false
-    let hasUp = false
-    transferActivities.forEach((activity) => {
-      if (activity.kind === 'download') {
-        hasDown = true
-        down += activity.speed
-      } else if (activity.kind === 'upload') {
-        hasUp = true
-        up += activity.speed
-      }
-    })
-    const next = hasDown || hasUp ? { down, up } : null
-    if (!next || !ball.value || next.down !== ball.value.down || next.up !== ball.value.up) ball.value = next
-  }, 300)
-}
-
-function updateTransferBall(ev) {
-  if (!ev || !ev.task || !ev.task.id) return
-  const task = ev.task
-  const active = task.status === 'downloading' || task.status === 'uploading' || task.status === 'queued'
-  const key = `${ev.kind}:${task.id}`
-  if (active) transferActivities.set(key, { kind: ev.kind, speed: Number(task.speed) || 0 })
-  else transferActivities.delete(key)
-  scheduleTransferBallUpdate()
-}
-
-function onBallPointerDown(e) {
-  if (e.button !== undefined && e.button !== 0) return
-  e.preventDefault()
-  const el = e.currentTarget
-  const rect = el.getBoundingClientRect()
-  const startX = e.clientX, startY = e.clientY
-  const offX = startX - rect.left, offY = startY - rect.top
-  let moved = false
-  let frame = 0
-  let pending = null
-  let current = { x: rect.left, y: rect.top }
-  isBallDragging.value = true
-
-  const applyPending = () => {
-    frame = 0
-    if (!pending) return
-    current = pending
-    pending = null
-    el.style.transform = `translate3d(${current.x - rect.left}px, ${current.y - rect.top}px, 0)`
-  }
-
-  const onMove = (ev) => {
-    const dx = ev.clientX - startX, dy = ev.clientY - startY
-    if (!moved && Math.hypot(dx, dy) < 4) return
-    if (!moved) {
-      // Anchor the element once, then move it on the compositor instead of
-      // updating the Vue tree for every pointer event.
-      el.style.left = `${rect.left}px`
-      el.style.top = `${rect.top}px`
-      el.style.right = 'auto'
-      el.style.bottom = 'auto'
-    }
-    moved = true
-    const maxX = Math.max(4, window.innerWidth - rect.width - 4)
-    const maxY = Math.max(52, window.innerHeight - rect.height - 4)
-    pending = {
-      x: Math.min(Math.max(ev.clientX - offX, 4), maxX),
-      y: Math.min(Math.max(ev.clientY - offY, 52), maxY),
-    }
-    // Pointer events can arrive faster than Vue needs to render. Coalesce them
-    // into one update per frame so dragging does not cause a render storm.
-    if (!frame) frame = requestAnimationFrame(applyPending)
-  }
-  const cleanup = () => {
-    if (frame) cancelAnimationFrame(frame)
-    frame = 0
-    if (pending) {
-      current = pending
-      pending = null
-      el.style.transform = `translate3d(${current.x - rect.left}px, ${current.y - rect.top}px, 0)`
-    }
-    isBallDragging.value = false
-    window.removeEventListener('pointermove', onMove)
-    window.removeEventListener('pointerup', onUp)
-    window.removeEventListener('pointercancel', onCancel)
-    try { el.releasePointerCapture?.(e.pointerId) } catch { /* pointer already released */ }
-  }
-  const onUp = () => {
-    cleanup()
-    if (!moved) {
-      switchTab('transfer')
-      return
-    }
-    ballPos.value = { x: Math.round(current.x), y: Math.round(current.y) }
-    nextTick(() => {
-      if (!isBallDragging.value && el.isConnected) el.style.transform = ''
-    })
-  }
-  const onCancel = () => {
-    cleanup()
-    if (moved) {
-      ballPos.value = { x: Math.round(current.x), y: Math.round(current.y) }
-      nextTick(() => {
-        if (!isBallDragging.value && el.isConnected) el.style.transform = ''
-      })
-    }
-  }
-  try { el.setPointerCapture?.(e.pointerId) } catch { /* unsupported by older WebView */ }
-  window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
-  window.addEventListener('pointercancel', onCancel)
-}
-
 const tabs = [
   { key: 'pan', label: '网盘' },
   { key: 'transfer', label: '传输' },
@@ -387,7 +255,6 @@ onMounted(async () => {
     CheckUpdate().then((r) => { if (r && r.available) showUpdate.value = true }).catch(() => {})
   }, 3000)
   window.addEventListener('keydown', onKey)
-  window.addEventListener('mnemo:prefs-changed', onPrefsChanged)
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => applyAppearance(curTheme.value)
   mq.addEventListener('change', onScheme)
@@ -397,7 +264,8 @@ onMounted(async () => {
     onEvent('share:history-error', (ev) => {
       toast(`分享已创建，但本地历史保存失败：${ev?.error || '未知错误'}`, 'warn')
     }),
-    onEvent('transfer:event', updateTransferBall),
+    // 原生传输悬浮窗点击/菜单「显示主窗口」时跳到传输页
+    onEvent('nav:tab', (key) => { if (typeof key === 'string' && tabOrder.includes(key)) switchTab(key) }),
   ]
   nextTick(updateGlider)
   window.addEventListener('resize', updateGlider)
@@ -406,11 +274,7 @@ onMounted(async () => {
     window.removeEventListener('resize', updateGlider)
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('contextmenu', preventNativeContextMenu, true)
-    window.removeEventListener('mnemo:prefs-changed', onPrefsChanged)
     mq.removeEventListener('change', onScheme)
-    clearTimeout(ballUpdateTimer)
-    ballUpdateTimer = null
-    transferActivities.clear()
     offFns.forEach((fn) => { try { fn && fn() } catch { /* noop */ } })
 	}
 	debug('app', 'frontend initialization tasks scheduled')
@@ -511,27 +375,6 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         <span class="t-timebar" aria-hidden="true"></span>
       </div>
     </transition-group>
-
-    <transition name="popover-zoom">
-      <div
-        v-if="showTransferBall"
-        class="transfer-ball"
-        :class="{ dragging: isBallDragging }"
-        :style="ballPos ? { left: ballPos.x + 'px', top: ballPos.y + 'px', right: 'auto', bottom: 'auto' } : {}"
-        title="传输中，点击打开传输页 (Alt+2)，可拖动"
-        @pointerdown="onBallPointerDown"
-      >
-        <span class="pulse"></span>
-        <span class="transfer-stat" :class="{ idle: !(ball && ball.down) }">
-          <UiIcon name="download" :size="13" />
-          <span>{{ ball && ball.down ? formatSpeed(ball.down) : '—' }}</span>
-        </span>
-        <span class="transfer-stat" :class="{ idle: !(ball && ball.up) }">
-          <UiIcon name="upload" :size="13" />
-          <span>{{ ball && ball.up ? formatSpeed(ball.up) : '—' }}</span>
-        </span>
-      </div>
-    </transition>
 
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
     <UpdateModal v-if="showUpdate" @close="showUpdate = false" />

@@ -358,6 +358,10 @@ export function SendGuangyaSms(arg1) {
   return window['go']['app']['App']['SendGuangyaSms'](arg1);
 }
 
+export function SetupFloater(arg1) {
+  return window['go']['app']['App']['SetupFloater'](arg1);
+}
+
 export function SetupTray(arg1) {
   return window['go']['app']['App']['SetupTray'](arg1);
 }

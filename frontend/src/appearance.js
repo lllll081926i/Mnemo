@@ -27,7 +27,6 @@ const LAST_DRIVE_KEY = 'mnemo.lastDrive'
 const PREFS_DEFAULTS = {
   viewMode: 'list',       // 网盘默认视图 list | grid
   hoverPreview: true,     // 目录树悬停预览
-  transferBall: true,     // 传输悬浮球
   downloadSound: true,    // 传输完成提示音
   defaultVolume: 100,     // 播放器默认音量 0-200
   defaultSpeed: 1,        // 播放器默认倍速

@@ -788,41 +788,6 @@ body.rail-drag-active { cursor: grabbing; user-select: none; }
 .spin-on-primary { border-color: rgba(255,255,255,.4) !important; border-top-color: #fff !important; }
 
 /* ============ 传输球（窗内悬浮，可拖动；固定尺寸，不随内容增长） ============ */
-.transfer-ball {
-  position: fixed; bottom: 22px; right: 22px; z-index: 250;
-  display: inline-flex; align-items: center; gap: 6px;
-  box-sizing: border-box; width: 164px; min-width: 164px; max-width: 164px;
-  height: 38px; padding: 0 10px; overflow: hidden; white-space: nowrap;
-  background: var(--bg-elevated); color: var(--text-primary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-xs);
-  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
-  box-shadow: var(--shadow-md); cursor: grab; user-select: none; touch-action: none;
-  contain: layout paint style;
-  transition: box-shadow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
-}
-.transfer-ball:hover {
-  border-color: var(--border-focus);
-  box-shadow: var(--shadow-md);
-}
-.transfer-ball:active, .transfer-ball.dragging {
-  cursor: grabbing;
-  box-shadow: var(--shadow-md);
-}
-.transfer-ball .pulse {
-  width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
-  background: var(--color-primary);
-}
-.transfer-stat {
-  display: inline-flex; align-items: center; gap: 3px;
-  width: 58px; min-width: 58px; max-width: 58px; min-height: 22px;
-  overflow: hidden; color: var(--text-primary);
-}
-.transfer-stat > span {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.transfer-stat.idle { opacity: .58; }
-
 /* ============ 预览弹窗 ============ */
 .preview-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 12px 20px 18px; background: var(--bg-base); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
 .preview-body img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-sm); }

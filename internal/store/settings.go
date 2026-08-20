@@ -25,10 +25,19 @@ type Settings struct {
 	LogLevel       string `json:"logLevel,omitempty"`
 	// CloseToTray 为 nil 时表示默认开启「关闭不退出」（最小化到系统托盘）
 	CloseToTray *bool `json:"closeToTray,omitempty"`
+	// Floater 为 nil 时表示默认开启「传输悬浮窗」
+	Floater *bool `json:"floater,omitempty"`
+	// FloaterX/FloaterY 为悬浮窗屏幕坐标（物理像素）；FloaterPos 标记用户是否拖拽过
+	FloaterX   int  `json:"floaterX,omitempty"`
+	FloaterY   int  `json:"floaterY,omitempty"`
+	FloaterPos bool `json:"floaterPos,omitempty"`
 }
 
 // CloseToTrayEnabled 返回「关闭窗口时最小化到托盘」是否生效（默认开启）。
 func (s Settings) CloseToTrayEnabled() bool { return s.CloseToTray == nil || *s.CloseToTray }
+
+// FloaterEnabled 返回「传输悬浮窗」是否生效（默认开启）。
+func (s Settings) FloaterEnabled() bool { return s.Floater == nil || *s.Floater }
 
 // DefaultSettings returns sane defaults.
 func DefaultSettings() Settings {

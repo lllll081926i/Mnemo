@@ -22,6 +22,7 @@ const defaults = {
   playbackResume: true,
   keepTasks: true,
   closeToTray: true,
+  floater: true,
   logLevel: 'warning',
 }
 
@@ -305,8 +306,7 @@ async function exportLogs() {
 
             <div class="sg-row">
               <div class="sg-text">
-                <span class="sg-label">关闭时最小化到托盘</span>
-                <span class="sg-hint">关闭窗口后继续在系统托盘运行，点击托盘图标恢复</span>
+                <span class="sg-label">最小化到托盘</span>
               </div>
               <div class="sg-control">
                 <div class="switch" :class="{ on: settings.closeToTray !== false }" @click="toggle('closeToTray')"></div>
@@ -455,9 +455,11 @@ async function exportLogs() {
             </div>
 
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">桌面传输悬浮球</span></div>
+              <div class="sg-text">
+                <span class="sg-label">传输悬浮球</span>
+              </div>
               <div class="sg-control">
-                <div class="switch" :class="{ on: prefs.transferBall }" @click="onPref('transferBall', !prefs.transferBall)"></div>
+                <div class="switch" :class="{ on: settings.floater !== false }" @click="toggle('floater')"></div>
               </div>
             </div>
           </div>
