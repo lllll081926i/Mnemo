@@ -377,7 +377,12 @@ async function submit() {
     } else {
       await login(providerId.value, { ...form.value })
     }
-    emit('toast', isOAuth.value ? '授权成功' : '登录成功', 'success')
+    const successMessage = isOAuth.value
+      ? '授权成功'
+      : (isMounted.value && providerId.value === 's3'
+        ? 'S3 已添加（浏览权限已验证，写入权限将在首次上传时验证）'
+        : '登录成功')
+    emit('toast', successMessage, 'success')
 		info('login', 'login form submit completed', { provider: providerId.value })
     emit('close')
   } catch (e) {

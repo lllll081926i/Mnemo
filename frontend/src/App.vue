@@ -174,7 +174,7 @@ function providerLabel(acc) {
 }
 
 function remove(acc) {
-  askConfirm(`移除账号「${(acc.token && (acc.token.nick_name || acc.token.user_name)) || acc.user_id}」？本地记录将被删除。`, async () => {
+  askConfirm(`移除账号「${(acc.token && (acc.token.nick_name || acc.token.user_name)) || acc.user_id}」？只删除账号凭据，下载任务、收藏和同步配置等本地记录会保留。`, async () => {
     try {
       await removeAccount(acc.user_id)
       if (current.value && current.value.user_id === acc.user_id) current.value = null

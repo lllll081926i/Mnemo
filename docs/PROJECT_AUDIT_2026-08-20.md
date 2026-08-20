@@ -116,7 +116,7 @@
 | P1-07（已关闭主要路径） | 预览代理存在 DNS rebinding/私网信任缺口 | 真实请求前解析全部 IP，直连连接固定到已验证公网地址；重定向重复解析；初始 Provider URL 只有 loopback 可自动登记，RFC1918 等私网不会自动放行 | DNS rebinding、私网 Provider URL 自动信任和重定向绕过已关闭；若用户明确需要内网媒体服务，仍应设计显式“允许本机/内网”配置和审计提示，不应默认开启。 |
 | P1-08（已关闭） | `OpenBrowser` 是不限制协议的 Wails 绑定，且没有显式 CSP | 原绑定接受任意字符串，前端入口无 CSP | 外链现仅允许 HTTPS 和本机回环 HTTP，拒绝用户信息和危险 scheme；入口已增加显式 CSP，并有允许/拒绝矩阵测试。 |
 | P1-09（部分关闭） | 跨盘迁移绑定层未拒绝源/目标为同一盘或目标在源子树 | 绑定层和引擎现在拒绝同一账号/同一盘，因此不会进入递归复制；不同挂载 ID 的祖先关系仍无法在通用 Provider 层可靠解析 | 同盘递归风险已关闭；继续补部分失败清理、逐文件恢复和不同挂载别名的祖先关系校验。 |
-| P1-10 | 移除账号只删除账号记录 | `internal/app/app.go:853-865`、`internal/store/accounts.go:154-168` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 提供“仅移除凭据”和“移除账号及本地关联数据”两种明确选项；删除前列出影响并停止相关任务。 |
+| P1-10 | 移除账号只删除账号记录 | `internal/app/app.go:853-865`、`internal/store/accounts.go:154-168` | 同步配置、收藏、迁移、传输、缓存和上传会话可能成为孤儿；重新添加账号还可能读取旧状态 | 已先修正文案：明确只删除账号凭据，下载任务、收藏、同步配置等本地记录保留；自动清理这些数据需要额外的破坏性确认和逐类删除策略，暂不隐式执行。 |
 | P1-11（已关闭） | 非 Windows 平台没有托盘，但默认关闭逻辑仍隐藏窗口 | `internal/app/tray_other.go` 不启用托盘，旧关闭逻辑却无条件按设置隐藏窗口 | Linux/macOS 用户可能关闭后无法恢复窗口 | 增加编译目标感知的 `TrayAvailable`；无托盘平台即使旧设置为开启也正常退出，Windows 保持原托盘行为。 |
 | P1-12 | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml:206-211` 和 `internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 使用独立离线签名（如 minisign/cosign）、应用内固定公钥验证；Windows Authenticode、macOS Developer ID + notarization；发布密钥与 GitHub token 分离。 |
 | P1-13（部分关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | 已增加独立 `quality` job，运行 Go test/vet/build 和前端 build，平台构建矩阵必须等待通过；后续仍应加入 race、前端单测和关键 mock e2e，并让 publish 显式声明同时依赖 quality/build。 |
@@ -136,7 +136,7 @@
 | P2-07 | Modal、ContextMenu、UiSelect、SegTabs 的键盘/ARIA 行为不完整 | 这不是视觉问题，而是键盘用户无法完成操作的功能问题。补 `role`、焦点陷阱/恢复、方向键、Escape、背景滚动锁和可见焦点。 |
 | P2-08 | `PanView.vue`、`PlayerPanel.vue`、`PreviewModal.vue`、`TransferView.vue` 体积过大 | 状态耦合使回归难定位、难做组件测试。按数据加载、选择状态、操作命令、播放器资源生命周期拆 composable/子组件。 |
 | P2-09 | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | 已关闭主要路径：本地 SUP/SRT/VTT Blob URL 统一登记并在切源/卸载时 revoke；SUP/ASS 网盘字幕 fetch 使用 AbortController；本地 FileReader 在切源/卸载或重新选择时取消。仍缺少前端组件级自动化回归测试。 |
-| P2-10 | S3 连接验证只证明至少一种读权限 | 回退 `ListObjectsV2` 成功不代表 Put/Delete 权限存在。连接页应展示“浏览权限已验证；写权限将在首次上传时验证”，不能用测试对象做破坏性探测。 |
+| P2-10 | S3 连接验证只证明至少一种读权限 | 已在添加成功提示中明确“浏览权限已验证，写入权限将在首次上传时验证”；后端仍不创建测试对象、不主动探测 Put/Delete，实际写入失败需在传输列表展示详细错误。 |
 | P2-11 | 账号容量缺少“更新时间/未知原因” | 当前只能显示有值或未知。应显示上次成功刷新时间、服务端不支持、刷新冷却、认证失效四种状态，并提供受后端限频保护的手动刷新。 |
 
 ## 5. WebDAV `PROPFIND 530` 专项
