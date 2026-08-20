@@ -33,3 +33,17 @@ func TestVerifyReleaseSignatureRequiresKey(t *testing.T) {
 		t.Fatal("signature verification unexpectedly succeeded without public key")
 	}
 }
+
+func TestReleaseSignatureRequiredWhenPublicKeyIsConfigured(t *testing.T) {
+	previous := updateSigningPublicKey
+	defer func() { updateSigningPublicKey = previous }()
+
+	updateSigningPublicKey = ""
+	if releaseSignatureRequired() {
+		t.Fatal("empty public key must keep historical unsigned releases compatible")
+	}
+	updateSigningPublicKey = "test-public-key"
+	if !releaseSignatureRequired() {
+		t.Fatal("configured public key must require a release signature")
+	}
+}

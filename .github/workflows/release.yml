@@ -256,6 +256,7 @@ jobs:
 
       - name: Sign release checksums when signing keys are configured
         env:
+          MNEMO_UPDATE_SIGNING_PUBLIC_KEY: ${{ secrets.MNEMO_UPDATE_SIGNING_PUBLIC_KEY }}
           MNEMO_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.MNEMO_UPDATE_SIGNING_PRIVATE_KEY }}
         shell: bash
         run: |
@@ -263,7 +264,15 @@ jobs:
           key_file="$(mktemp)"
           sig_file="$(mktemp)"
           trap 'rm -f "$key_file" "$sig_file"' EXIT
-          if [[ -z "${MNEMO_UPDATE_SIGNING_PRIVATE_KEY:-}" ]]; then
+          has_public=false
+          has_private=false
+          [[ -n "${MNEMO_UPDATE_SIGNING_PUBLIC_KEY:-}" ]] && has_public=true
+          [[ -n "${MNEMO_UPDATE_SIGNING_PRIVATE_KEY:-}" ]] && has_private=true
+          if [[ "$has_public" != "$has_private" ]]; then
+            echo "MNEMO_UPDATE_SIGNING_PUBLIC_KEY and MNEMO_UPDATE_SIGNING_PRIVATE_KEY must be configured together" >&2
+            exit 1
+          fi
+          if [[ "$has_private" == false ]]; then
             echo "MNEMO_UPDATE_SIGNING_PRIVATE_KEY is not configured; publishing unsigned checksum manifest"
             exit 0
           fi

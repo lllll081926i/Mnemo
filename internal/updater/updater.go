@@ -113,6 +113,9 @@ func Check(ctx context.Context) (*Info, error) {
 		if checksumErr != nil {
 			return nil, fmt.Errorf("fetch release checksums: %w", checksumErr)
 		}
+		if signatureURL == "" && releaseSignatureRequired() {
+			return nil, fmt.Errorf("release signature is missing")
+		}
 		if signatureURL != "" {
 			signature, signatureErr := fetchBody(ctx, signatureURL, 128<<10)
 			if signatureErr != nil {
@@ -184,6 +187,10 @@ func fetchBody(ctx context.Context, rawURL string, limit int64) ([]byte, error) 
 		return nil, err
 	}
 	return b, nil
+}
+
+func releaseSignatureRequired() bool {
+	return strings.TrimSpace(updateSigningPublicKey) != ""
 }
 
 func verifyReleaseSignature(message, encodedSignature []byte) error {
