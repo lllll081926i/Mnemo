@@ -98,12 +98,6 @@ const sortKeyOptions = [
   { value: 'size', label: '大小' },
 ]
 
-const hwDecodeOptions = [
-  { value: 'auto', label: '自动' },
-  { value: 'd3d11va', label: 'D3D11VA 硬解' },
-  { value: 'no', label: '软解' },
-]
-
 onMounted(async () => {
   try {
     const s = (await GetSettings()) || {}
@@ -526,18 +520,6 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">播放完自动收起</span></div>
               <div class="sg-control">
                 <div class="switch" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></div>
-              </div>
-            </div>
-
-            <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">硬件解码加速</span></div>
-              <div class="sg-control">
-                <UiSelect
-                  :modelValue="prefs.hardwareDecode || 'auto'"
-                  :options="hwDecodeOptions"
-                  style="width:140px"
-                  @update:modelValue="(v) => onPref('hardwareDecode', v)"
-                />
               </div>
             </div>
 

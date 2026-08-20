@@ -37,6 +37,7 @@ const selected = ref([]) // file 对象数组
 const focusId = ref('')  // 键盘焦点行
 const loading = ref(false)
 const error = ref('')
+const favoriteError = ref('')
 const keyword = ref('')       // 全盘搜索关键词
 const filterRaw = ref('')     // 当前目录快速筛选（输入原值）
 const filter = ref('')        // 防抖后的筛选值
@@ -306,13 +307,17 @@ async function listDirectorySnapshot(id) {
 }
 
 async function loadFavorites() {
-  if (!props.account) { favorites.value = []; return }
+  if (!props.account) { favorites.value = []; favoriteError.value = ''; return }
   const snapUid = uid.value, snapDid = did.value
   try {
     const list = (await ListFavorites(snapUid, snapDid)) || []
-    if (snapUid === uid.value && snapDid === did.value) favorites.value = list
+    if (snapUid === uid.value && snapDid === did.value) {
+      favorites.value = list
+      favoriteError.value = ''
+    }
+  } catch (e) {
+    if (snapUid === uid.value && snapDid === did.value) favoriteError.value = String(e && e.message ? e.message : e)
   }
-  catch { if (snapUid === uid.value && snapDid === did.value) favorites.value = [] }
 }
 
 const displayFiles = computed(() => {
@@ -472,7 +477,12 @@ async function toggleTree(idOrNode, name) {
       const list = await listDirectorySnapshot(id)
       if (snapUid !== uid.value || snapDid !== did.value) return
       updateTreeSnapshot(id, list, snapUid, snapDid)
-    } catch { if (snapUid === uid.value && snapDid === did.value) tree.value[id] = [] }
+    } catch (e) {
+      if (snapUid === uid.value && snapDid === did.value) {
+        expanded.value[id] = false
+        emit('toast', `目录树加载失败：${String(e && e.message ? e.message : e)}`, 'error')
+      }
+    }
   }
 }
 
@@ -486,7 +496,12 @@ async function expandTree(id, name) {
       const list = await listDirectorySnapshot(id)
       if (snapUid !== uid.value || snapDid !== did.value) return
       updateTreeSnapshot(id, list, snapUid, snapDid)
-    } catch { if (snapUid === uid.value && snapDid === did.value) tree.value[id] = [] }
+    } catch (e) {
+      if (snapUid === uid.value && snapDid === did.value) {
+        expanded.value[id] = false
+        emit('toast', `目录树加载失败：${String(e && e.message ? e.message : e)}`, 'error')
+      }
+    }
   }
 }
 
@@ -1025,6 +1040,8 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
   treeParents.value = {}
   treeNames.value = {}
   thumbErrors.value = {}
+  favorites.value = []
+  favoriteError.value = ''
   goHome()
   expanded.value[rootKey.value] = true
   loadFavorites()
@@ -1107,7 +1124,11 @@ onBeforeUnmount(() => {
             >
               <span class="tn-arrow"></span><UiIcon :name="f.isDir ? 'folder' : iconOf(f)" :size="14" :class="f.isDir ? '' : 'ft-' + iconOf(f)" /><span class="tn-label">{{ f.name }}</span>
             </div>
-            <div v-if="!favorites.length" class="tree-empty">暂无收藏</div>
+            <div v-if="favoriteError" class="tree-load-error" role="alert">
+              <span>收藏加载失败</span>
+              <button type="button" @click.stop="loadFavorites">重试</button>
+            </div>
+            <div v-else-if="!favorites.length" class="tree-empty">暂无收藏</div>
           </div>
           <div
             v-if="caps.trashView"
@@ -1558,6 +1579,24 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.tree-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px 5px 28px;
+  color: var(--color-error);
+  font-size: 11px;
+}
+.tree-load-error button {
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 mark.hl {
   background: color-mix(in srgb, var(--color-warning) 35%, transparent);
   color: inherit;

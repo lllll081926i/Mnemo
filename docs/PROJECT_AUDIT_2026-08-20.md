@@ -133,12 +133,12 @@
 
 | 编号 | 问题 | 影响与建议 |
 |---|---|---|
-| P2-01（部分关闭） | 多个设置项只保存不生效 | 已接入 `defaultTab`、`autoUpdate`、`confirmUpdate`、`keepTasks`、`defaultSortKey/defaultSortAsc`、`autoCloseOnEnd`；上传/下载启动时会按 `keepTasks` 清理已结束历史，更新安装前按 `confirmUpdate` 决定是否确认。`hardwareDecode` 仍未接入，因 WebView/MSE 没有跨平台可靠的强制解码开关，当前应避免展示“已生效”的承诺。 |
+| P2-01（已关闭） | 多个设置项只保存不生效 | 已接入 `defaultTab`、`autoUpdate`、`confirmUpdate`、`keepTasks`、`defaultSortKey/defaultSortAsc`、`autoCloseOnEnd`；上传/下载启动时会按 `keepTasks` 清理已结束历史，更新安装前按 `confirmUpdate` 决定是否确认。WebView/MSE 无法跨平台可靠强制解码模式，因此已移除无效的 `hardwareDecode` 设置入口和默认值。 |
 | P2-02（部分关闭） | 在线文本编辑把“加入上传队列”当成“已保存” | 已改为每次保存使用独立临时目录，同名编辑不再互相覆盖；提示语明确为“已加入上传队列”。现有 Wails 方法签名和异步上传行为保持不变。后续仍应以任务 ID 订阅上传完成事件，并在成功或删除任务后自动清理临时文件。 |
 | P2-03（部分关闭） | 目录缓存没有 TTL/版本，超大目录没有虚拟滚动 | 内存缓存原有 200 项上限，现增加 10 分钟 TTL；持久缓存启用已有 `updatedAt` 字段，过期读取时自动删除，变更事件仍主动失效。超大目录虚拟列表尚未实现。 |
 | P2-04（已关闭） | 筛选后仍保留不可见选择 | `listShown` 变化时会从选择集中移除当前不可见条目；切目录、切模式的原有清理逻辑继续保留。 |
 | P2-05（已关闭主要路径） | 深层目录树跳转可能丢失祖先面包屑 | 目录树快照现在记录父目录关系，跳转节点时沿父链恢复祖先路径；若历史缓存没有父链，仍保留当前节点作为可解释降级。 |
-| P2-06 | 多处加载失败被静默吞掉 | 传输列表、云离线任务刷新失败现在显示错误条与重试按钮，并对云离线账号切换做时序保护；PanView 的目录/收藏、字幕单项失败等非关键静默路径仍需按页面逐步补齐，避免一次性改动过大。 |
+| P2-06（主要路径已关闭） | 多处加载失败被静默吞掉 | 传输列表、云离线任务刷新失败显示错误条与重试按钮，并对账号切换做时序保护；收藏加载失败保留当前数据并显示重试，目录树失败会折回并提示，不再缓存为空目录。字幕单项等非关键、可降级失败仍保持不阻断主流程。 |
 | P2-07 | Modal、ContextMenu、UiSelect、SegTabs 的键盘/ARIA 行为不完整 | 这不是视觉问题，而是键盘用户无法完成操作的功能问题。补 `role`、焦点陷阱/恢复、方向键、Escape、背景滚动锁和可见焦点。 |
 | P2-08 | `PanView.vue`、`PlayerPanel.vue`、`PreviewModal.vue`、`TransferView.vue` 体积过大 | 状态耦合使回归难定位、难做组件测试。按数据加载、选择状态、操作命令、播放器资源生命周期拆 composable/子组件。 |
 | P2-09（主要路径已关闭） | 本地字幕 Object URL 和异步 fetch 生命周期不完整 | 本地 SUP/SRT/VTT Blob URL 统一登记并在切源/卸载时 revoke；SUP/ASS 网盘字幕 fetch 使用 AbortController；本地 FileReader 在切源/卸载或重新选择时取消。仍缺少前端组件级自动化回归测试。 |
