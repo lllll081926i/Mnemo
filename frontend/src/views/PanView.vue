@@ -497,6 +497,29 @@ function onSearchKey(e) {
 // ---------- 目录树 ----------
 function treeChildren(id) { return tree.value[id] || [] }
 
+// ---------- 位置持久化：切走再切回/重启后恢复到之前的目录 ----------
+let locSaveTimer = null
+function persistLocation() {
+  const a = props.account
+  if (!a || mode.value !== 'list') return
+  clearTimeout(locSaveTimer)
+  locSaveTimer = setTimeout(() => {
+    const all = { ...(getPrefs().panLocations || {}) }
+    all[a.user_id] = {
+      dirId: dirId.value,
+      pathStack: pathStack.value,
+      treeSelected: treeSelected.value,
+      expanded: Object.keys(expanded.value).filter((k) => expanded.value[k]),
+    }
+    // 最多保留最近 20 个账号的位置
+    const keys = Object.keys(all)
+    if (keys.length > 20) for (const k of keys.slice(0, keys.length - 20)) delete all[k]
+    setPref('panLocations', all)
+  }, 400)
+}
+
+watch(() => [dirId.value, treeSelected.value, JSON.stringify(pathStack.value), JSON.stringify(expanded.value)], persistLocation)
+
 async function toggleTree(idOrNode, name) {
   suppressHoverPreview()
   const id = typeof idOrNode === 'object' ? idOrNode.file_id : idOrNode
@@ -1127,8 +1150,25 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
   thumbErrors.value = {}
   favorites.value = []
   favoriteError.value = ''
-  goHome()
-  expanded.value[rootKey.value] = true
+  // 恢复该账号上次浏览位置；没有记录时回根目录
+  const saved = (getPrefs().panLocations || {})[a.user_id]
+  if (saved && saved.dirId && saved.dirId !== rootKey.value) {
+    mode.value = 'list'
+    keyword.value = ''
+    selected.value = []
+    dirId.value = saved.dirId
+    pathStack.value = Array.isArray(saved.pathStack) ? saved.pathStack : []
+    treeSelected.value = saved.treeSelected || ''
+    expanded.value = {}
+    for (const id of saved.expanded || []) expanded.value[id] = true
+    expanded.value[rootKey.value] = true
+    // 预载展开节点的子目录，让树直接呈现上次的展开形态
+    for (const id of Object.keys(expanded.value)) if (!tree.value[id]) expandTree(id)
+    load(saved.dirId)
+  } else {
+    goHome()
+    expanded.value[rootKey.value] = true
+  }
   loadFavorites()
 })
 
