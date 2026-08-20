@@ -9,10 +9,16 @@ import (
 // uploadRateGetter is overridden by netx at init time to avoid a circular
 // import (driveutil cannot import netx). It returns the global upload rate.
 var uploadRateGetter func() int64
+var uploadThrottle func(int64)
 
 // SetUploadRateGetter wires the netx global upload rate into the progress
 // reader without creating an import cycle.
 func SetUploadRateGetter(f func() int64) { uploadRateGetter = f }
+
+// SetUploadThrottle wires a process-wide throttle for concurrent direct
+// uploads. The getter remains as a compatibility fallback for tests and
+// embedders that have not installed a throttle callback.
+func SetUploadThrottle(f func(int64)) { uploadThrottle = f }
 
 // ProgressReader wraps an io.Reader and invokes onRead after each Read call
 // with the cumulative byte count. It is a lightweight progress reporter for
@@ -50,6 +56,10 @@ func (p *ProgressReader) Read(b []byte) (int, error) {
 // throttle applies a token-bucket style sleep so the effective read rate
 // stays within the global upload cap. No-op when no cap is set.
 func (p *ProgressReader) throttle(n int64) {
+	if uploadThrottle != nil {
+		uploadThrottle(n)
+		return
+	}
 	var rate int64
 	if uploadRateGetter != nil {
 		rate = uploadRateGetter()

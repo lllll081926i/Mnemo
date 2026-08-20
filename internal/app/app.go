@@ -394,6 +394,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	// wire the upload rate getter so ProgressReader can throttle direct uploads
 	driveutil.SetUploadRateGetter(netx.GlobalUploadRate)
+	driveutil.SetUploadThrottle(netx.WaitGlobalUpload)
 	if s, err := st.GetSettings(); err == nil {
 		netx.SetGlobalUploadRate(s.MaxUploadSpeed)
 	}

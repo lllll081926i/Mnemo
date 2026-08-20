@@ -56,6 +56,7 @@ type Manager struct {
 	maxConcurrent      int
 	activeConcurrent   int
 	concurrencyChanged chan struct{}
+	speedLimiter       *dlengine.SharedLimiter
 	shutdownOnce       sync.Once
 }
 
@@ -71,6 +72,10 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		maxConc = s.MaxConcurrentDownloads
 	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
+	initialRate := int64(0)
+	if s, err := st.GetSettings(); err == nil {
+		initialRate = s.MaxDownloadSpeed
+	}
 	m := &Manager{
 		store:              st,
 		tasks:              map[string]*model.DownloadTask{},
@@ -84,6 +89,7 @@ func NewManager(st *store.Store, downloadDir string, onEvent OnTaskEvent) (*Mana
 		maxConcurrent:      maxConc,
 		concurrencyChanged: make(chan struct{}),
 		cancel:             rootCancel,
+		speedLimiter:       dlengine.NewSharedLimiter(initialRate),
 	}
 	// restore persisted tasks
 	m.loadPersisted()
@@ -405,8 +411,12 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	s, _ := m.store.GetSettings()
 	opts := dlengine.Options{Concurrency: concurrencyFromSettings(s)}
 	if s.MaxDownloadSpeed > 0 {
-		opts.MaxSpeed = s.MaxDownloadSpeed
+		opts.MaxSpeed = 0
+		m.speedLimiter.SetRate(s.MaxDownloadSpeed)
+	} else {
+		m.speedLimiter.SetRate(0)
 	}
+	opts.Limiter = m.speedLimiter
 	if url == "" && t.UserID != "" {
 		u, err := drive.GetDownloadURL(t.UserID, t.DriveID, t.FileID, 14400)
 		if err != nil {

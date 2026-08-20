@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,11 +56,68 @@ func GlobalProxy() string {
 // read it via GlobalUploadRate.
 var globalUploadRate atomic.Int64
 
+var globalUploadThrottle uploadThrottle
+
+type uploadThrottle struct {
+	mu     sync.Mutex
+	rate   int64
+	window int64
+	start  time.Time
+}
+
 // SetGlobalUploadRate sets the upload speed cap (bytes/s). 0 disables the cap.
-func SetGlobalUploadRate(bytesPerSec int64) { globalUploadRate.Store(bytesPerSec) }
+func SetGlobalUploadRate(bytesPerSec int64) {
+	globalUploadRate.Store(bytesPerSec)
+	globalUploadThrottle.mu.Lock()
+	if globalUploadThrottle.rate != bytesPerSec {
+		globalUploadThrottle.rate = bytesPerSec
+		globalUploadThrottle.window = 0
+		globalUploadThrottle.start = time.Now()
+	}
+	globalUploadThrottle.mu.Unlock()
+}
 
 // GlobalUploadRate returns the current upload speed cap.
 func GlobalUploadRate() int64 { return globalUploadRate.Load() }
+
+// WaitGlobalUpload applies the process-wide upload cap to one chunk. It is
+// wired into driveutil.ProgressReader so concurrent direct uploads share one
+// bucket instead of each creating an independent task-level limit.
+func WaitGlobalUpload(n int64) {
+	if n <= 0 {
+		return
+	}
+	for {
+		globalUploadThrottle.mu.Lock()
+		rate := globalUploadThrottle.rate
+		if rate <= 0 {
+			globalUploadThrottle.mu.Unlock()
+			return
+		}
+		now := time.Now()
+		if globalUploadThrottle.start.IsZero() {
+			globalUploadThrottle.start = now
+		}
+		if now.Sub(globalUploadThrottle.start) >= time.Second {
+			globalUploadThrottle.start = now
+			globalUploadThrottle.window = 0
+		}
+		globalUploadThrottle.window += n
+		allowed := float64(rate) * now.Sub(globalUploadThrottle.start).Seconds()
+		wait := time.Duration(0)
+		if float64(globalUploadThrottle.window) > allowed {
+			wait = time.Duration((float64(globalUploadThrottle.window) - allowed) / float64(rate) * float64(time.Second))
+		}
+		globalUploadThrottle.mu.Unlock()
+		if wait <= 0 {
+			return
+		}
+		time.Sleep(wait)
+		// The accounting window is intentionally shared; after sleeping we
+		// return because the bytes were already reserved before the wait.
+		return
+	}
+}
 
 // NewClient builds a client with sane defaults.
 func NewClient(timeout time.Duration) *Client {

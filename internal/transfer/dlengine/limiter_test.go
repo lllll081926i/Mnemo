@@ -1,6 +1,7 @@
 package dlengine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +77,22 @@ func TestSpeedLimiterNoNegativeSleep(t *testing.T) {
 		l.waitN(100)
 	}
 	// should complete quickly without sleeping
+}
+
+func TestSharedLimiterSharesAccountingAcrossCalls(t *testing.T) {
+	l := NewSharedLimiter(1_000_000)
+	if err := l.Wait(context.Background(), 1024); err != nil {
+		t.Fatalf("first shared wait: %v", err)
+	}
+	if err := l.Wait(context.Background(), 2048); err != nil {
+		t.Fatalf("second shared wait: %v", err)
+	}
+	l.mu.Lock()
+	window := l.window
+	l.mu.Unlock()
+	if window != 3072 {
+		t.Fatalf("shared accounting window = %d, want 3072", window)
+	}
 }
 
 func TestParseContentRangeStrictly(t *testing.T) {

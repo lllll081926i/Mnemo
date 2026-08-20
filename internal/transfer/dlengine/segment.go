@@ -42,8 +42,15 @@ type Options struct {
 	ChunkSize   int64 // range chunk size
 	MinSize     int64 // files smaller than this use a single stream
 	MaxSpeed    int64 // global speed cap in bytes/s (0 = unlimited)
+	Limiter     RateLimiter
 	Headers     map[string]string
 	UserAgent   string
+}
+
+// RateLimiter is shared by concurrent downloads so MaxDownloadSpeed is a
+// process-wide cap rather than an independent bucket per task.
+type RateLimiter interface {
+	Wait(ctx context.Context, n int64) error
 }
 
 // Normalize fills zero fields with defaults.
@@ -156,7 +163,10 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	}
 	defer f.Close()
 
-	limiter := newSpeedLimiter(opts.MaxSpeed)
+	var limiter RateLimiter = opts.Limiter
+	if limiter == nil {
+		limiter = newSpeedLimiter(opts.MaxSpeed)
+	}
 	var downloaded atomic.Int64
 	// account already-done bytes
 	for i, done := range st.Done {
@@ -376,7 +386,7 @@ func (v resourceValidator) verifyResponse(header http.Header) error {
 }
 
 // fetchRange GETs one range and writes it at the file offset.
-func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, start, length, total int64, validator resourceValidator, f *os.File, limiter *speedLimiter, account func(int64)) error {
+func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, start, length, total int64, validator resourceValidator, f *os.File, limiter RateLimiter, account func(int64)) error {
 	if start < 0 || length <= 0 || total <= 0 || start > total-length {
 		return errors.New("dlengine: invalid range length")
 	}
@@ -427,7 +437,9 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
-			limiter.waitN(int64(n))
+			if err := limiter.Wait(ctx, int64(n)); err != nil {
+				return err
+			}
 			if _, werr := f.WriteAt(buf[:n], start+written); werr != nil {
 				return werr
 			}
@@ -477,7 +489,10 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 		return err
 	}
 	defer f.Close()
-	limiter := newSpeedLimiter(opts.MaxSpeed)
+	var limiter RateLimiter = opts.Limiter
+	if limiter == nil {
+		limiter = newSpeedLimiter(opts.MaxSpeed)
+	}
 	buf := make([]byte, 256<<10)
 	var written int64
 	last := time.Now()
@@ -485,7 +500,9 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
-			limiter.waitN(int64(n))
+			if err := limiter.Wait(ctx, int64(n)); err != nil {
+				return err
+			}
 			if _, werr := f.Write(buf[:n]); werr != nil {
 				return werr
 			}
@@ -650,11 +667,18 @@ func newSpeedLimiter(rate int64) *speedLimiter {
 }
 
 func (l *speedLimiter) waitN(n int64) {
-	if l.rate <= 0 {
-		return
+	_ = l.Wait(context.Background(), n)
+}
+
+func (l *speedLimiter) Wait(ctx context.Context, n int64) error {
+	if n <= 0 {
+		return nil
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	if l.rate <= 0 {
+		l.mu.Unlock()
+		return nil
+	}
 	now := time.Now()
 	// slide the window: if more than 1s has passed since the last reset,
 	// reset the accumulator and the start timestamp so the limiter keeps
@@ -666,14 +690,42 @@ func (l *speedLimiter) waitN(n int64) {
 	l.window += n
 	elapsed := now.Sub(l.start).Seconds()
 	allowed := float64(l.rate) * elapsed
+	wait := time.Duration(0)
 	if float64(l.window) > allowed {
-		wait := time.Duration((float64(l.window)-allowed)/float64(l.rate)*1000) * time.Millisecond
-		if wait > 0 && wait < 10*time.Second {
-			l.mu.Unlock()
-			time.Sleep(wait)
-			l.mu.Lock()
-		}
+		wait = time.Duration((float64(l.window) - allowed) / float64(l.rate) * float64(time.Second))
 	}
+	l.mu.Unlock()
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SharedLimiter is a process-wide cap shared by all downloads in a Manager.
+type SharedLimiter struct{ speedLimiter }
+
+func NewSharedLimiter(rate int64) *SharedLimiter {
+	return &SharedLimiter{speedLimiter: *newSpeedLimiter(rate)}
+}
+
+func (l *SharedLimiter) SetRate(rate int64) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	if l.rate != rate {
+		l.rate = rate
+		l.window = 0
+		l.start = time.Now()
+	}
+	l.mu.Unlock()
 }
 
 var _ = filepath.Base
