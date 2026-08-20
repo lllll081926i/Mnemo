@@ -11,7 +11,7 @@ const emit = defineEmits(['close', 'toast'])
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 const form = ref({})
 const initialMountedName = providerId.value === 'webdav' ? 'WebDAV' : (providerId.value === 's3' ? 'S3' : '')
-const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false })
+const mountedForm = ref({ name: initialMountedName, endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false })
 const webdavPreset = ref('custom')
 const genericWebdavIcon = new URL('../assets/drive-icons/webdav.svg', import.meta.url).href
 const webdavPresets = [
@@ -78,6 +78,12 @@ const availableProviders = computed(() => props.providers)
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
 const selectedWebdavPreset = computed(() => webdavPresets.find((item) => item.id === webdavPreset.value) || webdavPresets[0])
 const webdavPresetOptions = computed(() => webdavPresets.map((item) => ({ value: item.id, label: item.label, img: item.icon })))
+const webdavAuthOptions = [
+  { value: 'auto', label: '自动（推荐）' },
+  { value: 'basic', label: 'Basic' },
+  { value: 'digest', label: 'Digest' },
+  { value: 'bearer', label: 'Bearer Token' },
+]
 const fields = computed(() => (provider.value && provider.value.Login && provider.value.Login.fields) || [])
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuthField = (field) => field.type === 'oauth'
@@ -157,7 +163,7 @@ watch(providerId, (v, previous) => {
   form.value = {}
 	passwordVisibility.value = {}
   webdavPreset.value = 'custom'
-  mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false }
+  mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false }
   errorText.value = ''
   resetCaptcha(previous === 'pikpak')
   if (v !== 'pikpak') clearPikPakCooldown()
@@ -312,7 +318,9 @@ function validate() {
   if (isMounted.value) {
     const m = mountedForm.value
     if (providerId.value === 'webdav' && !m.endpoint.trim()) return '请填写 WebDAV 地址'
-    if (!m.username.trim()) return providerId.value === 's3' ? '请填写 Access Key ID' : '请填写用户名'
+    if (providerId.value !== 'webdav' || m.authType !== 'bearer') {
+      if (!m.username.trim()) return providerId.value === 's3' ? '请填写 Access Key ID' : '请填写用户名'
+    }
     if (!m.password) return providerId.value === 's3' ? '请填写 Secret Access Key' : '请填写密码'
     if (providerId.value === 's3' && !m.bucket.trim()) return '请填写 Bucket'
     return ''
@@ -374,6 +382,7 @@ async function submit() {
   try {
     if (isMounted.value) {
       const mountedConfig = { ...mountedForm.value }
+      if (providerId.value !== 'webdav') delete mountedConfig.authType
       const verifyWrite = providerId.value === 's3' && mountedConfig.verifyWrite === true
       delete mountedConfig.verifyWrite
       if (verifyWrite) await validateMountedWrite(providerId.value, mountedConfig)
@@ -460,8 +469,13 @@ async function submit() {
                       <div class="hint">{{ selectedWebdavPreset.hint }}</div>
                     </div>
                     <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}<span v-if="providerId !== 's3'" class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : '密码' }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
+                    <div v-if="providerId === 'webdav'" class="field login-field">
+                      <label>认证方式</label>
+                      <UiSelect v-model="mountedForm.authType" :options="webdavAuthOptions" block />
+                      <div class="hint">自动会先保持 Basic 兼容；服务端要求 Digest 时仅协商一次并缓存。Bearer Token 使用下方“密码”字段填写令牌。</div>
+                    </div>
+                    <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
+                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
                     <template v-if="providerId === 's3'">
                       <div class="field login-field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
                       <div class="field login-field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>

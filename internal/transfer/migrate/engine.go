@@ -744,7 +744,19 @@ func downloadToCounted(ctx context.Context, dl *model.DownloadURL, w io.Writer, 
 		return errors.New("migrate: empty download url")
 	}
 	hc := netx.NewClient(0) // honors global proxy; no total timeout for large files
-	resp, err := hc.Do(ctx, http.MethodGet, dl.URL, dl.Headers, nil)
+	req, err := hc.Req(ctx, http.MethodGet, dl.URL, nil)
+	if err != nil {
+		return err
+	}
+	for key, value := range dl.Headers {
+		req.Header.Set(key, value)
+	}
+	if dl.RequestAuth != nil {
+		if err := dl.RequestAuth(req); err != nil {
+			return err
+		}
+	}
+	resp, err := hc.HTTP.Do(req)
 	if err != nil {
 		return err
 	}

@@ -20,7 +20,8 @@ UploadMode: direct
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| URL + 账密 | ✅ | `webdav.go:43-49` clientOf 从 c.Token.Conn 取 Endpoint+Username+Password | 无 |
+| URL + 账密 / Bearer Token | ✅ | `webdav.go:43-49` clientOf 从 c.Token.Conn 取 Endpoint、账号、密码/令牌 | Basic、Digest、Bearer；客户端证书、NTLM 和网页登录流程不支持 |
+| **认证协商** | ✅ | `client.go` 默认先保持 Basic 兼容；仅在服务端明确返回 Digest 挑战时重试一次，并缓存 nonce/计数 | Digest 支持 MD5、SHA-256、SHA-512-256（含 `-sess`）和 `qop=auth`；仅 `auth-int` 的服务端不支持 |
 | 连接持久化 | ✅ | account.go Token.Conn *ConnConfig 持久化 | 无（服务端存储） |
 | **rootPath 前缀** | ✅ | `ConnConfig.RootPath` + client 的 endpointPath/逻辑路径转换；旧 `BasePath` 自动兼容 | 无 |
 
@@ -34,7 +35,7 @@ UploadMode: direct
 
 ## 3. 下载（webdav.go）
 
-✅ `webdav.go:98-114` GetDownloadURL Stat + client.DownloadURL（Endpoint+href 直链）redirect + Basic Auth。
+✅ `webdav.go:98-114` GetDownloadURL Stat + client.DownloadURL（Endpoint+href 直链）。Basic/Bearer 使用静态请求头；Digest 为每一个 Range/播放/迁移请求计算新的 nonce-count，下载保持单连接以兼容严格服务端。
 
 > ✅ 请求 URL 按路径段编码，空格、Unicode、`#`、`?` 等文件名不会被误解析为 URL 控制符。
 
@@ -77,3 +78,4 @@ UploadMode: direct
 4. ✅ Move/Copy 已增加自身/子目录防护
 5. ✅ URL 路径段按 RFC 规则编码
 6. 🟡 当前没有独立的 provider 级递归列出 API；同步引擎通过统一目录接口递归遍历
+7. 🟡 客户端证书、NTLM、Kerberos 和网页登录换 Cookie 等认证方式未实现；遇到这类 `WWW-Authenticate` 会保留脱敏诊断，而不会盲目重试。

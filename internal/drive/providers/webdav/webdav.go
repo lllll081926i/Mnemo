@@ -3,7 +3,6 @@ package webdav
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -161,13 +160,21 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if err != nil {
 		return nil, err
 	}
+	headers, requestAuth, err := client.DownloadAuth()
+	if err != nil {
+		return nil, err
+	}
 	return &model.DownloadURL{
-		DriveID:      c.DriveID,
-		FileID:       fileID,
-		URL:          downloadURL,
-		Size:         entry.Size,
-		Headers:      authHeaders(c),
-		DownloadMode: "redirect",
+		DriveID:     c.DriveID,
+		FileID:      fileID,
+		URL:         downloadURL,
+		Size:        entry.Size,
+		Headers:     headers,
+		RequestAuth: requestAuth,
+		// Digest nonce counts are request-specific. Keep the transfer serial
+		// so requests arrive at stricter WebDAV servers in nonce-count order.
+		DownloadMode: "proxy",
+		Concurrency:  1,
 	}, nil
 }
 
@@ -177,13 +184,14 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 		return nil, err
 	}
 	return &model.VideoPreview{
-		DriveID: c.DriveID,
-		FileID:  fileID,
-		Size:    u.Size,
-		Headers: u.Headers,
+		DriveID:     c.DriveID,
+		FileID:      fileID,
+		Size:        u.Size,
+		Headers:     u.Headers,
+		RequestAuth: u.RequestAuth,
 		Qualities: []model.VideoQuality{{
 			Quality: "origin", Label: "原画", Value: "origin",
-			URL: u.URL, Headers: u.Headers, ForceProxy: true,
+			URL: u.URL, Headers: u.Headers, RequestAuth: u.RequestAuth, ForceProxy: true,
 		}},
 	}, nil
 }
@@ -365,20 +373,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		ui.ReportUploadProgress(read, size)
 	})
 	return client.Put(ctx, target, pr, size)
-}
-
-func authHeaders(c drive.Context) map[string]string {
-	if c.Token != nil && c.Token.Conn != nil {
-		conn := c.Token.Conn
-		if conn.Username != "" || conn.Password != "" {
-			return map[string]string{"Authorization": basicAuth(conn.Username, conn.Password)}
-		}
-	}
-	return nil
-}
-
-func basicAuth(user, pass string) string {
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 }
 
 func idsToRefs(ids []string) []drive.FileRef {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"mnemo-go/internal/transfer/dlengine"
@@ -120,6 +121,62 @@ func TestSegmentedDownloadRejectsInvalidProbeRange(t *testing.T) {
 	err := dlengine.Download(context.Background(), dlengine.Options{ChunkSize: 16, MinSize: 1}, srv.URL, filepath.Join(t.TempDir(), "invalid.bin"), nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid probe Content-Range") {
 		t.Fatalf("expected invalid probe range error, got %v", err)
+	}
+}
+
+func TestSegmentedDownloadAppliesRequestAuthToEveryRequest(t *testing.T) {
+	payload := make([]byte, 64)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	var mu sync.Mutex
+	seen := make(map[string]bool)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonceCount := r.Header.Get("X-Test-Nonce-Count")
+		if nonceCount == "" {
+			http.Error(w, "missing request authentication", http.StatusUnauthorized)
+			return
+		}
+		mu.Lock()
+		duplicate := seen[nonceCount]
+		seen[nonceCount] = true
+		mu.Unlock()
+		if duplicate {
+			http.Error(w, "replayed request authentication", http.StatusUnauthorized)
+			return
+		}
+		var start, end int64
+		_, _ = fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+		if end >= int64(len(payload)) {
+			end = int64(len(payload)) - 1
+		}
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(payload)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload[start : end+1])
+	}))
+	defer srv.Close()
+
+	var next int
+	err := dlengine.Download(context.Background(), dlengine.Options{
+		Concurrency: 1,
+		ChunkSize:   16,
+		MinSize:     1,
+		RequestAuth: func(req *http.Request) error {
+			next++
+			req.Header.Set("X-Test-Nonce-Count", fmt.Sprintf("%08x", next))
+			return nil
+		},
+	}, srv.URL, filepath.Join(t.TempDir(), "authenticated.bin"), nil)
+	if err != nil {
+		t.Fatalf("authenticated download: %v", err)
+	}
+	mu.Lock()
+	count := len(seen)
+	mu.Unlock()
+	if count < 2 {
+		t.Fatalf("request auth applied %d times, want probe plus download request", count)
 	}
 }
 

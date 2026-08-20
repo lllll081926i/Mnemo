@@ -80,20 +80,22 @@ func (a *App) resolveVideoSource(userID, driveID, fileID, requestedQuality strin
 			return previewserver.PlaybackSource{}, errors.New("刷新后的播放地址为空")
 		}
 		return previewserver.PlaybackSource{
-			URL:        freshQuality.URL,
-			Headers:    mergeHeaders(fresh.Headers, freshQuality.Headers),
-			Filename:   filename,
-			StreamType: videoStreamType(freshQuality.Type, filename),
-			ExpiresAt:  sourceExpiration(fresh, freshQuality),
+			URL:         freshQuality.URL,
+			Headers:     mergeHeaders(fresh.Headers, freshQuality.Headers),
+			RequestAuth: selectRequestAuth(fresh.RequestAuth, freshQuality.RequestAuth),
+			Filename:    filename,
+			StreamType:  videoStreamType(freshQuality.Type, filename),
+			ExpiresAt:   sourceExpiration(fresh, freshQuality),
 		}, nil
 	}
 	streamURL, err := mediaProxy.PlaybackURL(previewserver.PlaybackSource{
-		URL:        quality.URL,
-		Headers:    mergeHeaders(preview.Headers, quality.Headers),
-		Filename:   filename,
-		StreamType: streamType,
-		ExpiresAt:  sourceExpiration(preview, quality),
-		Refresh:    refresh,
+		URL:         quality.URL,
+		Headers:     mergeHeaders(preview.Headers, quality.Headers),
+		RequestAuth: selectRequestAuth(preview.RequestAuth, quality.RequestAuth),
+		Filename:    filename,
+		StreamType:  streamType,
+		ExpiresAt:   sourceExpiration(preview, quality),
+		Refresh:     refresh,
 	})
 	if err != nil {
 		return nil, "", err
@@ -204,6 +206,13 @@ func mergeHeaders(base, override map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func selectRequestAuth(base, override model.RequestAuthenticator) model.RequestAuthenticator {
+	if override != nil {
+		return override
+	}
+	return base
 }
 
 // proxyVideoSubtitles gives <track> URLs the same privacy and header handling

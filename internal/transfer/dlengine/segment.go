@@ -45,6 +45,9 @@ type Options struct {
 	Limiter     RateLimiter
 	Headers     map[string]string
 	UserAgent   string
+	// RequestAuth runs after static headers are applied, once per outbound
+	// request. It is used for request-bound schemes such as HTTP Digest.
+	RequestAuth func(*http.Request) error
 }
 
 // RateLimiter is shared by concurrent downloads so MaxDownloadSpeed is a
@@ -277,7 +280,9 @@ func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int6
 	if err != nil {
 		return 0, false, resourceValidator{}, err
 	}
-	setHeaders(req, opts.Headers, opts.UserAgent)
+	if err := setRequestHeaders(req, opts); err != nil {
+		return 0, false, resourceValidator{}, err
+	}
 	req.Header.Set("Range", "bytes=0-0")
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -394,7 +399,9 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	if err != nil {
 		return err
 	}
-	setHeaders(req, opts.Headers, opts.UserAgent)
+	if err := setRequestHeaders(req, opts); err != nil {
+		return err
+	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+length-1))
 	if condition := validator.ifRange(); condition != "" {
 		req.Header.Set("If-Range", condition)
@@ -467,7 +474,9 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	if err != nil {
 		return err
 	}
-	setHeaders(req, opts.Headers, opts.UserAgent)
+	if err := setRequestHeaders(req, opts); err != nil {
+		return err
+	}
 	validator.setFullRequestCondition(req)
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -583,6 +592,14 @@ func setHeaders(req *http.Request, headers map[string]string, ua string) {
 	if ua != "" {
 		req.Header.Set("User-Agent", ua)
 	}
+}
+
+func setRequestHeaders(req *http.Request, opts Options) error {
+	setHeaders(req, opts.Headers, opts.UserAgent)
+	if opts.RequestAuth != nil {
+		return opts.RequestAuth(req)
+	}
+	return nil
 }
 
 func ensureFile(path string, size int64) error {

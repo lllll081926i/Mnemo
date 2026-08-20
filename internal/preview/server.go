@@ -41,6 +41,7 @@ import (
 	"sync"
 	"time"
 
+	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
 
@@ -67,12 +68,13 @@ type Server struct {
 // expired signed URL, allowing an in-flight video request to recover without
 // exposing provider credentials to JavaScript.
 type PlaybackSource struct {
-	URL        string
-	Headers    map[string]string
-	Filename   string
-	StreamType string
-	ExpiresAt  time.Time
-	Refresh    func(context.Context) (PlaybackSource, error)
+	URL         string
+	Headers     map[string]string
+	RequestAuth model.RequestAuthenticator
+	Filename    string
+	StreamType  string
+	ExpiresAt   time.Time
+	Refresh     func(context.Context) (PlaybackSource, error)
 }
 
 type playbackSession struct {
@@ -806,7 +808,7 @@ func filterProxyHeaders(headers map[string]string) map[string]string {
 // proxyRequest streams a remote URL with Range passthrough. It is kept for
 // non-player previews; video playback uses the opaque /stream/ session route.
 func proxyRequest(s *Server, w http.ResponseWriter, r *http.Request, target string, headers map[string]string, filename string) {
-	resp, err := s.doProxyRequest(r.Context(), r.Method, target, headers, r.Header.Get("Range"))
+	resp, err := s.doProxyRequest(r.Context(), r.Method, target, headers, nil, r.Header.Get("Range"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -837,7 +839,7 @@ func (s *Server) proxySessionRequest(w http.ResponseWriter, r *http.Request, ses
 			http.Error(w, "url not allowed", http.StatusBadRequest)
 			return
 		}
-		resp, err := s.doProxyRequest(ctx, r.Method, target, source.Headers, r.Header.Get("Range"))
+		resp, err := s.doProxyRequest(ctx, r.Method, target, source.Headers, source.RequestAuth, r.Header.Get("Range"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -914,7 +916,7 @@ func (s *Server) proxySessionRequest(w http.ResponseWriter, r *http.Request, ses
 	http.Error(w, "upstream playback URL expired", http.StatusBadGateway)
 }
 
-func (s *Server) doProxyRequest(ctx context.Context, method, target string, headers map[string]string, byteRange string) (*http.Response, error) {
+func (s *Server) doProxyRequest(ctx context.Context, method, target string, headers map[string]string, requestAuth model.RequestAuthenticator, byteRange string) (*http.Response, error) {
 	if err := s.validateSafeProxyURL(ctx, target); err != nil {
 		return nil, err
 	}
@@ -927,6 +929,11 @@ func (s *Server) doProxyRequest(ctx context.Context, method, target string, head
 	}
 	if byteRange != "" {
 		req.Header.Set("Range", byteRange)
+	}
+	if requestAuth != nil {
+		if err := requestAuth(req); err != nil {
+			return nil, err
+		}
 	}
 	return s.proxyClient.Do(req)
 }

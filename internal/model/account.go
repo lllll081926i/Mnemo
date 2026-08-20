@@ -80,10 +80,13 @@ type TokenInfo struct {
 
 // ConnConfig describes a mounted storage connection.
 type ConnConfig struct {
-	Name           string `json:"name,omitempty"`
-	Endpoint       string `json:"endpoint,omitempty"`
-	Username       string `json:"username,omitempty"`
-	Password       string `json:"password,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	// AuthType applies to mounted WebDAV storage: auto (default), basic,
+	// digest, or bearer. S3 ignores this field.
+	AuthType       string `json:"authType,omitempty"`
 	RootPath       string `json:"rootPath,omitempty"`
 	Region         string `json:"region,omitempty"`
 	Bucket         string `json:"bucket,omitempty"`

@@ -1,5 +1,12 @@
 package model
 
+import "net/http"
+
+// RequestAuthenticator applies request-scoped authentication immediately
+// before a transport sends the request. It stays in the Go process and is
+// never serialized to the Wails frontend or persisted task state.
+type RequestAuthenticator func(*http.Request) error
+
 // File is the unified list/detail file model surfaced to the frontend.
 // Field JSON keys intentionally mirror the legacy Electron model so the
 // UI layer can reuse shapes without comment.
@@ -48,17 +55,18 @@ func (f *File) SizeString() string {
 
 // VideoQuality is one playable quality variant of a video file.
 type VideoQuality struct {
-	HTML       string            `json:"html"`
-	Quality    string            `json:"quality"`
-	Height     int               `json:"height"`
-	Width      int               `json:"width"`
-	Label      string            `json:"label"`
-	Value      string            `json:"value"`
-	URL        string            `json:"url"`
-	Type       string            `json:"type,omitempty"`
-	ExpireTime int64             `json:"expire_time,omitempty"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	ForceProxy bool              `json:"forceProxy,omitempty"`
+	HTML        string               `json:"html"`
+	Quality     string               `json:"quality"`
+	Height      int                  `json:"height"`
+	Width       int                  `json:"width"`
+	Label       string               `json:"label"`
+	Value       string               `json:"value"`
+	URL         string               `json:"url"`
+	Type        string               `json:"type,omitempty"`
+	ExpireTime  int64                `json:"expire_time,omitempty"`
+	Headers     map[string]string    `json:"headers,omitempty"`
+	ForceProxy  bool                 `json:"forceProxy,omitempty"`
+	RequestAuth RequestAuthenticator `json:"-"`
 }
 
 // Subtitle is an external subtitle stream URL.
@@ -70,17 +78,18 @@ type Subtitle struct {
 
 // VideoPreview holds the resolvable playback sources for a file.
 type VideoPreview struct {
-	DriveID    string            `json:"drive_id"`
-	FileID     string            `json:"file_id"`
-	Size       int64             `json:"size"`
-	Duration   int64             `json:"duration"`
-	ExpireTime int64             `json:"expire_time"`
-	Width      int               `json:"width"`
-	Height     int               `json:"height"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	NoOrigin   bool              `json:"no_origin,omitempty"`
-	Qualities  []VideoQuality    `json:"qualities,omitempty"`
-	Subtitles  []Subtitle        `json:"subtitles,omitempty"`
+	DriveID     string               `json:"drive_id"`
+	FileID      string               `json:"file_id"`
+	Size        int64                `json:"size"`
+	Duration    int64                `json:"duration"`
+	ExpireTime  int64                `json:"expire_time"`
+	Width       int                  `json:"width"`
+	Height      int                  `json:"height"`
+	Headers     map[string]string    `json:"headers,omitempty"`
+	RequestAuth RequestAuthenticator `json:"-"`
+	NoOrigin    bool                 `json:"no_origin,omitempty"`
+	Qualities   []VideoQuality       `json:"qualities,omitempty"`
+	Subtitles   []Subtitle           `json:"subtitles,omitempty"`
 
 	// URL is the local proxy URL the frontend <video> element should load.
 	URL            string `json:"url,omitempty"`
@@ -93,16 +102,17 @@ type VideoPreview struct {
 
 // DownloadURL holds a resolvable direct download source for a file.
 type DownloadURL struct {
-	DriveID         string            `json:"drive_id"`
-	FileID          string            `json:"file_id"`
-	ExpireTime      int64             `json:"expire_time"`
-	URL             string            `json:"url"`
-	Size            int64             `json:"size"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	DownloadMode    string            `json:"downloadMode,omitempty"` // redirect | proxy
-	ForceLocalProxy bool              `json:"forceLocalProxy,omitempty"`
-	Concurrency     int               `json:"concurrency,omitempty"`
-	ChunkSize       int64             `json:"chunkSize,omitempty"`
+	DriveID         string               `json:"drive_id"`
+	FileID          string               `json:"file_id"`
+	ExpireTime      int64                `json:"expire_time"`
+	URL             string               `json:"url"`
+	Size            int64                `json:"size"`
+	Headers         map[string]string    `json:"headers,omitempty"`
+	RequestAuth     RequestAuthenticator `json:"-"`
+	DownloadMode    string               `json:"downloadMode,omitempty"` // redirect | proxy
+	ForceLocalProxy bool                 `json:"forceLocalProxy,omitempty"`
+	Concurrency     int                  `json:"concurrency,omitempty"`
+	ChunkSize       int64                `json:"chunkSize,omitempty"`
 }
 
 // FolderSize aggregates a folder subtree size/count.

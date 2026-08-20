@@ -731,6 +731,7 @@ func mountedAccountID(provider string, conn model.ConnConfig) string {
 		strings.TrimSpace(conn.Name),
 		strings.TrimSpace(conn.Endpoint),
 		strings.TrimSpace(conn.Username),
+		strings.ToLower(strings.TrimSpace(conn.AuthType)),
 		strings.TrimSpace(conn.Region),
 		strings.TrimSpace(conn.Bucket),
 		strings.TrimSpace(pathKey),
@@ -1326,7 +1327,12 @@ func (a *App) PreviewURL(userID, driveID, fileID string) (string, error) {
 	if f, ferr := drive.GetFile(userID, driveID, fileID); ferr == nil {
 		name = f.Name
 	}
-	return mediaProxy.ProxyURL(u.URL, u.Headers, name), nil
+	return mediaProxy.PlaybackURL(preview.PlaybackSource{
+		URL:         u.URL,
+		Headers:     u.Headers,
+		RequestAuth: u.RequestAuth,
+		Filename:    name,
+	})
 }
 
 // LocalPreviewURL builds a local file URL.

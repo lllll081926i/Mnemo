@@ -418,6 +418,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 
 	url := t.URL
 	headers := t.Headers
+	var requestAuth model.RequestAuthenticator
 	s, _ := m.store.GetSettings()
 	opts := dlengine.Options{Concurrency: concurrencyFromSettings(s)}
 	if s.MaxDownloadSpeed > 0 {
@@ -455,6 +456,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		}
 		url = u.URL
 		headers = u.Headers
+		requestAuth = u.RequestAuth
 		m.mu.Lock()
 		if t.Size == 0 {
 			t.Size = u.Size
@@ -489,6 +491,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
 	opts.Headers = headers
+	opts.RequestAuth = requestAuth
 	m.update(t)
 	logging.Info("download started", "task_id", t.ID)
 
@@ -509,6 +512,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		if fresh, refreshErr := drive.GetDownloadURL(t.UserID, t.DriveID, t.FileID, 14400); refreshErr == nil && fresh != nil && fresh.URL != "" {
 			url = fresh.URL
 			opts.Headers = fresh.Headers
+			opts.RequestAuth = fresh.RequestAuth
 			m.mu.Lock()
 			t.URL = url
 			if fresh.Size > 0 {

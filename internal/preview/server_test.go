@@ -424,6 +424,41 @@ func TestPlaybackSessionKeepsUpstreamDetailsPrivate(t *testing.T) {
 	}
 }
 
+func TestPlaybackSessionAppliesRequestScopedAuth(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Digest") != "nonce-1" {
+			http.Error(w, "missing request-scoped auth", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte("video"))
+	}))
+	defer upstream.Close()
+
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	streamURL, err := s.PlaybackURL(PlaybackSource{
+		URL: upstream.URL + "/video.mp4",
+		RequestAuth: func(req *http.Request) error {
+			req.Header.Set("X-Test-Digest", "nonce-1")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(streamURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("playback status = %d", resp.StatusCode)
+	}
+}
+
 func TestPlaybackSessionRewritesNestedHLSResources(t *testing.T) {
 	var segmentAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

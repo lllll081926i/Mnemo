@@ -5,6 +5,8 @@ package e2e
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -254,6 +256,94 @@ func TestWebDAVConnectionKeepsCollectionSlashAndReportsQuota(t *testing.T) {
 	}
 }
 
+func TestWebDAVDigestAuthenticationNegotiatesOnceAndReusesChallenge(t *testing.T) {
+	const response = `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:"><D:response><D:href>/dav/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>`
+	const challenge = `Digest realm="Mnemo", nonce="test-nonce", algorithm=SHA-256, qop="auth"`
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != "PROPFIND" || r.URL.Path != "/dav/" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		authorization := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authorization, "Digest ") {
+			w.Header().Set("WWW-Authenticate", challenge)
+			// Some WebDAV gateways use 530 instead of a standard 401 before
+			// the challenge response. The client must retry only for this
+			// explicit Digest challenge.
+			http.Error(w, "Digest required", 530)
+			return
+		}
+		params := digestTestParams(authorization)
+		if params["username"] != "alice" || params["uri"] != "/dav/" || params["algorithm"] != "SHA-256" || params["qop"] != "auth" || params["nc"] == "" || params["cnonce"] == "" {
+			http.Error(w, "invalid Digest authorization", http.StatusUnauthorized)
+			return
+		}
+		hash := func(value string) string {
+			sum := sha256.Sum256([]byte(value))
+			return fmt.Sprintf("%x", sum[:])
+		}
+		ha1 := hash("alice:Mnemo:app-password")
+		ha2 := hash("PROPFIND:/dav/")
+		wantResponse := hash(ha1 + ":test-nonce:" + params["nc"] + ":" + params["cnonce"] + ":auth:" + ha2)
+		if params["response"] != wantResponse {
+			http.Error(w, "Digest response mismatch", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(srv.Close)
+
+	conn := &model.ConnConfig{Endpoint: srv.URL + "/dav/", Username: "alice", Password: "app-password"}
+	if err := drive.ValidateConnection(model.ProviderWebdav, conn); err != nil {
+		t.Fatalf("validate Digest WebDAV: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("initial Digest negotiation used %d requests, want 2", requests)
+	}
+	client, err := webdavclient.New(conn, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Stat(context.Background(), "/"); err != nil {
+		t.Fatalf("cached Digest stat: %v", err)
+	}
+	if requests != 3 {
+		t.Fatalf("cached Digest request count = %d, want 3", requests)
+	}
+	_, requestAuth, err := client.DownloadAuth()
+	if err != nil || requestAuth == nil {
+		t.Fatalf("DownloadAuth = %v, %v", requestAuth, err)
+	}
+	first, _ := http.NewRequest(http.MethodGet, srv.URL+"/dav/file.txt", nil)
+	second, _ := http.NewRequest(http.MethodGet, srv.URL+"/dav/file.txt", nil)
+	if err := requestAuth(first); err != nil {
+		t.Fatalf("first download auth: %v", err)
+	}
+	if err := requestAuth(second); err != nil {
+		t.Fatalf("second download auth: %v", err)
+	}
+	if first.Header.Get("Authorization") == second.Header.Get("Authorization") {
+		t.Fatal("Digest download authorization must use a fresh nonce count per request")
+	}
+}
+
+func digestTestParams(authorization string) map[string]string {
+	params := make(map[string]string)
+	for _, item := range strings.Split(strings.TrimSpace(strings.TrimPrefix(authorization, "Digest")), ",") {
+		key, value, ok := strings.Cut(strings.TrimSpace(item), "=")
+		if !ok {
+			continue
+		}
+		params[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"`)
+	}
+	return params
+}
+
 func TestWebDAVConnectionErrorIncludesSafeServerDiagnostics(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Digest realm="WebDAV"`)
@@ -270,7 +360,7 @@ func TestWebDAVConnectionErrorIncludesSafeServerDiagnostics(t *testing.T) {
 		t.Fatal("expected WebDAV validation error")
 	}
 	message := err.Error()
-	for _, want := range []string{"530", "application password", "Digest", "当前仅支持 Basic Auth", "/correct/dav/"} {
+	for _, want := range []string{"530", "application password", "Digest", "挑战参数不受支持", "/correct/dav/"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("diagnostic %q missing %q", message, want)
 		}

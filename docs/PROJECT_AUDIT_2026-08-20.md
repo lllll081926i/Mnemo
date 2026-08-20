@@ -4,7 +4,7 @@
 
 审查对象为 `D:/Code/Mnemo/Mnemo-Go`，审查基线版本为 `v0.2.0`，修复以本报告和本地提交历史为准。本次没有读取 `D:/Code/Mnemo` 中的旧项目或参考示例，没有登录或请求任何真实网盘账号，也没有使用浏览器做视觉验收。前端结论仅来自源码、数据流、构建结果和 Wails 绑定链路。
 
-项目的基础架构已经成形：13 个 Provider 已接入统一驱动层，下载、上传、迁移、同步、预览和本地存储均有可运行实现；全量编译、后端测试、静态检查和核心竞态检查均能通过。审查最初发现的四项 P0 已全部关闭并补回归测试；同步任务重入、上传 worker 生命周期、共享限速、敏感下载状态、本地预览越权、DNS rebinding、外链协议、Provider 主链路取消和迁移部分结果误报也已关闭。按自用项目要求，更新产物不再使用独立签名密钥或 GitHub Actions 签名 secrets；系统凭据库、WebDAV 非 Basic 认证和真实平台/服务商验证仍受外部条件限制。
+项目的基础架构已经成形：13 个 Provider 已接入统一驱动层，下载、上传、迁移、同步、预览和本地存储均有可运行实现；全量编译、后端测试、静态检查和核心竞态检查均能通过。审查最初发现的四项 P0 已全部关闭并补回归测试；同步任务重入、上传 worker 生命周期、共享限速、敏感下载状态、本地预览越权、DNS rebinding、外链协议、Provider 主链路取消、迁移恢复和 WebDAV Basic/Digest/Bearer 主路径也已关闭。按自用项目要求，更新产物不再使用独立签名密钥或 GitHub Actions 签名 secrets；系统凭据库、WebDAV 客户端证书/NTLM 等认证和真实平台/服务商验证仍受外部条件限制。
 
 发布安装包的应用显示名统一为 `Mnemo`；版本号仅作为包管理器的独立版本字段和升级比较依据，不拼接到开始菜单、桌面快捷方式、安装目录、卸载项或 Linux desktop/AppImage 的应用名称中。Windows Inno 的版本字段由 release tag 注入，避免继续使用旧的硬编码版本。
 
@@ -132,7 +132,7 @@
 | P1-12（按自用要求不采用） | 更新完整性只有同一 Release 内的 SHA-256 | `.github/workflows/release.yml`、`internal/updater/updater.go` | 若 Release 发布权限/资产同时被篡改，校验文件不能建立独立信任 | 按项目仅自用的明确要求，已移除 Ed25519 detached signature、`SHA256SUMS.txt.sig`、`MNEMO_UPDATE_SIGNING_PUBLIC_KEY` 与 `MNEMO_UPDATE_SIGNING_PRIVATE_KEY` 的发布链路和客户端校验；发布继续使用 SHA-256 清单。仓库外既有本地密钥未提交、也不再被构建或发布引用。若未来公开分发，应重新评估独立签名、Windows 代码签名和 macOS 公证。 |
 | P1-13（主要门禁已关闭） | Release 工作流直接构建发布，不运行测试、vet 或前端测试 | 原 `.github/workflows/release.yml` 只有依赖安装和 `wails build` | 本地没执行验证时，打 tag 可直接发布回归版本 | `quality` job 现运行 Go test/vet/build、前端 Vitest 和前端 build；全部平台 build 依赖 quality，publish 依赖全部 build。后续仍应加入 race 和关键 mock e2e。 |
 | P1-14（Windows 主要路径已关闭） | Vault 密钥与密文同目录，不是 OS 绑定的凭据保护 | `internal/vault/vault.go`、平台适配文件 | Windows 新密钥现在写入 DPAPI 保护文件，旧 `vault.key` 可读取并在运行时尝试迁移；无效旧密钥会 fail-closed，不再静默生成新密钥。macOS Keychain 与 Linux Secret Service 尚未接入，非 Windows 仍保留 0600 兼容文件。 |
-| P1-15（诊断已关闭） | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go:newReq` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 当 `WWW-Authenticate` 不包含 Basic 时，错误现在明确提示“当前仅支持 Basic Auth”，且不盲目重试、不增加请求。Digest/客户端证书属于新的认证实现，需要真实服务需求和单独安全设计。 |
+| P1-15（主要路径已关闭） | WebDAV 仅支持预发送 Basic Auth | `internal/provider/webdav/client.go` | 只提供 Digest、Bearer、客户端证书或特殊登录流程的服务器仍无法连接 | 新增自动 Basic/Digest 协商和显式 Bearer。只有响应显式携带完整 Digest 挑战时，连接校验才额外重试一次（兼容部分服务返回的 530）；挑战按 endpoint+用户名缓存，后续操作不重复协商。Digest 的下载、Range、播放和迁移按请求生成 nonce-count，下载限为单连接以避免乱序。客户端证书、NTLM、Kerberos、仅 `auth-int` 与网页登录 Cookie 流程仍未实现，保留脱敏诊断且不盲目重试。 |
 
 ### 4.3 P2：功能一致性、可维护性和交互
 
@@ -280,7 +280,7 @@ Provider 现在可通过 `RetryAfter() time.Duration` 提供精确冷却，账�
 ### 9.2 必须补的测试顺序
 
 1. 数据安全红线：同步安全路径、扫描失败禁止删除、快照 ID、下载同名预留、Content-Range/ETag、同任务互斥和任务取消、迁移逐资源恢复检查点已完成；上传取消恢复的 worker 生命周期已完成。WebDAV 的列目录、读取、建目录、删除以及通用 HTTP 阻塞 Transport 已覆盖 Context 取消；高风险 Provider 自有会话的包内取消用例仍待补。
-2. 风控与连接：PikPak 并发刷新合并/429 冷却；WebDAV 尾斜杠、Basic/Digest 诊断、quota 可选属性；S3 Head/List 回退、可选 Put/Delete 写入验证与最大请求次数。
+2. 风控与连接：PikPak 并发刷新合并/429 冷却；WebDAV 尾斜杠、Basic/Digest/Bearer 协商、动态请求鉴权、quota 可选属性；S3 Head/List 回退、可选 Put/Delete 写入验证与最大请求次数。客户端证书/NTLM 需有真实服务需求后再单独设计。
 3. 前端功能：已建立纯逻辑、组件与缓存 mock Wails API 基线；继续覆盖登录模板、自动名称、上传冲突取消、迁移能力过滤、设置项消费和容量刷新时钟；不访问真实网盘。
 4. 故障注入：JSON 原子写失败、阻塞 HTTP Transport 的请求取消、服务端错误 Range 已覆盖；继续补磁盘满、权限拒绝、网络超时和分页游标重复。
 5. 发布烟测：各平台启动、关闭/托盘、OAuth 回调、更新校验、安装覆盖。
