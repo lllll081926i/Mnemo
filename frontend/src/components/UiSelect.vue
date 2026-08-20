@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
 .uiselect-btn.placeholder { color: var(--text-tertiary); }
 .uiselect-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .uiselect-ico { width: 15px; height: 15px; object-fit: contain; border-radius: 3px; flex-shrink: 0; }
-.uiselect-arrow { flex-shrink: 0; color: var(--text-tertiary); transition: transform var(--motion-fast) var(--motion-ease); }
+.uiselect-arrow { flex-shrink: 0; color: var(--text-tertiary); transition: transform 220ms var(--motion-spring); }
 .uiselect-btn.open .uiselect-arrow { transform: rotate(180deg); }
 
 .uiselect-drop {
