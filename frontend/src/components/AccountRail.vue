@@ -258,6 +258,7 @@ function onMenu(action) {
         type="button"
         class="rail-item"
         :class="{ active: current && current.user_id === acc.user_id, dragging: dragIdx === i }"
+        :style="dragIdx >= 0 && dragIdx !== i ? { transitionDelay: Math.min(Math.abs(i - dragIdx) * 35, 140) + 'ms' } : null"
         :title="`${labelOfAcc(acc)} · ${accountName(acc)}`"
         @pointerdown="onItemPointerDown($event, acc)"
         @click="onItemClick(acc)"
