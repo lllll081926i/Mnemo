@@ -236,6 +236,9 @@ func ListDirContext(ctx context.Context, userID, driveID, dirID string, opts *Li
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -256,6 +259,9 @@ func ListDirPage(userID, driveID, dirID, marker string, opts *ListOptions) (page
 func ListDirPageContext(ctx context.Context, userID, driveID, dirID, marker string, opts *ListOptions) (page *DirPage, err error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
@@ -409,6 +415,9 @@ func GetDownloadURLContext(ctx context.Context, userID, driveID, fileID string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -436,6 +445,9 @@ func Mkdir(userID, driveID, parentID, name string) (result *MkdirResult, err err
 func MkdirContext(ctx context.Context, userID, driveID, parentID, name string) (result *MkdirResult, err error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
@@ -484,6 +496,9 @@ func TrashBatch(userID, driveID string, fileIDs []string) (ids []string, err err
 func TrashBatchContext(ctx context.Context, userID, driveID string, fileIDs []string) (ids []string, err error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
@@ -617,6 +632,9 @@ func QueueUploadHandler(userID, driveID string) (func(ctx context.Context, ui *m
 func QueueUploadHandlerContext(ctx context.Context, userID, driveID string) (func(context.Context, *model.UploadingUI) error, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
