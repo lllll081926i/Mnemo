@@ -483,17 +483,17 @@ async function submit() {
                       <label>服务预设</label>
                       <UiSelect v-model="webdavPreset" :options="webdavPresetOptions" block @change="applyWebDAVPreset" />
                     </div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}<span v-if="providerId !== 's3'" class="req">*</span></label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
+                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}</label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
                     <div v-if="providerId === 'webdav'" class="field login-field">
                       <label>认证方式</label>
                       <UiSelect v-model="mountedForm.authType" :options="webdavAuthOptions" block />
                     </div>
-                    <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}<span class="req">*</span></label><input class="input" v-model="mountedForm.username" /></div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}<span class="req">*</span></label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
+                    <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}</label><input class="input" v-model="mountedForm.username" :placeholder="providerId === 's3' ? '请输入 Access Key ID' : '请输入用户名'" /></div>
+                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" :placeholder="providerId === 's3' ? '请输入 Secret Access Key' : '请输入密码'" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="15" /></button></div></div>
                     <template v-if="providerId === 's3'">
-                      <div class="field login-field"><label>Bucket<span class="req">*</span></label><input class="input" v-model="mountedForm.bucket" /></div>
+                      <div class="field login-field"><label>Bucket</label><input class="input" v-model="mountedForm.bucket" placeholder="存储桶名称" /></div>
                       <div class="field login-field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
-                      <div class="field login-field"><label>Session Token (可选)</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.sessionToken') ? 'text' : 'password'" v-model="mountedForm.sessionToken" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" :aria-label="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" @click="togglePassword('mounted.sessionToken')"><UiIcon :name="passwordVisible('mounted.sessionToken') ? 'eye-off' : 'eye'" :size="16" /></button></div></div>
+                      <div class="field login-field"><label>Session Token (可选)</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.sessionToken') ? 'text' : 'password'" v-model="mountedForm.sessionToken" placeholder="可选临时令牌" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" :aria-label="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" @click="togglePassword('mounted.sessionToken')"><UiIcon :name="passwordVisible('mounted.sessionToken') ? 'eye-off' : 'eye'" :size="15" /></button></div></div>
                     </template>
                     <!-- 开关组：全部收成一行 chip，避免每个开关独占一行 -->
                     <div class="field login-field">
@@ -519,7 +519,7 @@ async function submit() {
 
                 <!-- OAuth 授权 -->
                 <div v-else-if="isOAuth" class="login-state-card oauth-box">
-                  <div class="login-state-icon"><UiIcon name="external" :size="24" /></div>
+                  <div class="login-state-icon"><UiIcon name="external" :size="20" /></div>
                   <div>
                     <strong>在浏览器中完成授权</strong>
                     <p>点击下方按钮打开授权页面，完成后会自动返回并登录。</p>
@@ -529,10 +529,10 @@ async function submit() {
                 <template v-else>
                   <div v-if="visibleFields.length" class="login-section">
                     <div v-for="f in visibleFields" :key="f.key" class="field login-field">
-                      <label>{{ f.label }}<span v-if="isFieldRequired(f)" class="req">*</span></label>
+                      <label>{{ f.label }}</label>
                       <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
-                      <div v-else-if="f.type === 'password'" class="password-input-wrap"><input class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="16" /></button></div>
+                      <div v-else-if="f.type === 'password'" class="password-input-wrap"><input class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="15" /></button></div>
                       <input v-else class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
                       <div v-if="providerId === 'pan189' && f.key === 'validate_code' && pan189Captcha" class="captcha-image-row">
                         <img :src="pan189Captcha" alt="图形验证码" />
@@ -595,6 +595,22 @@ async function submit() {
 .login-close { width: 28px; height: 28px; }
 .login-side .lp-item {
   width: 100%; border: 0; background: transparent; font: inherit; text-align: left;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; color: var(--text-secondary);
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-spring);
+}
+.login-side .lp-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.login-side .lp-item.active {
+  background: var(--listselectbg);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+.login-side .lp-item.active img { transform: scale(1.06); }
+.login-side .lp-item img {
+  width: 18px; height: 18px; object-fit: contain; flex-shrink: 0;
+  transition: transform var(--motion-spring);
 }
 .login-side .lp-item:focus-visible,
 .switch:focus-visible {
@@ -602,21 +618,28 @@ async function submit() {
 }
 .login-form { display: flex; flex-direction: column; }
 .login-form-content { display: grid; gap: 14px; }
-.login-section { display: grid; gap: 14px; }
+.login-section { display: grid; gap: 13px; }
 .login-field { margin: 0 !important; }
-.login-field > label { font-weight: 600; }
+.login-field > label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
 .password-input-wrap { position: relative; display: flex; align-items: center; }
-.password-input-wrap > .input { padding-right: 40px; }
+.password-input-wrap > .input { padding-right: 38px; }
 .password-input-wrap input::-ms-reveal,
 .password-input-wrap input::-ms-clear { display: none; width: 0; height: 0; }
 .password-toggle {
-  position: absolute; right: 7px; display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-xs);
+  position: absolute; right: 5px; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-xs);
   color: var(--text-tertiary); background: transparent; cursor: pointer;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-spring);
 }
 .password-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
+.password-toggle:active { transform: scale(0.92); }
 .password-toggle:focus-visible { outline: none; box-shadow: var(--ring-focus); }
-.req { color: var(--color-error); margin-left: 2px; }
 .switch-row { display: flex; align-items: center; gap: 9px; min-height: 24px; }
 .switch { border: 0; padding: 0; }
 .switch-row .hint { margin: 0; line-height: 1.45; }
@@ -628,7 +651,7 @@ async function submit() {
 }
 
 /* 开关组 chip：多个开关收进一行 */
-.switch-chips { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.switch-chips { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 2px 0; }
 .switch-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-secondary); cursor: pointer; user-select: none; }
 .switch-chip:hover { color: var(--text-primary); }
 .login-state-card {
