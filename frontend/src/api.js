@@ -55,6 +55,11 @@ export function login(provider, config) {
     throw err
   })
 }
+export function SendPan139SMS(username) {
+  const fn = App.SendPan139SMS || (typeof window !== 'undefined' && window.go?.app?.App?.SendPan139SMS)
+  if (typeof fn !== 'function') return Promise.reject(new Error('139 短信验证暂不可用'))
+  return fn(username)
+}
 export function saveMounted(provider, conn) { return App.SaveMountedAccount(provider, conn) }
 export function validateMountedWrite(provider, conn) { return App.ValidateMountedWrite(provider, conn) }
 export function removeAccount(userId) { return App.RemoveAccount(userId) }

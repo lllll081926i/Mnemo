@@ -378,6 +378,10 @@ export function SendGuangyaSms(arg1) {
   return window['go']['app']['App']['SendGuangyaSms'](arg1);
 }
 
+export function SendPan139SMS(arg1) {
+  return window['go']['app']['App']['SendPan139SMS'](arg1);
+}
+
 export function SetAccountCustomMeta(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetAccountCustomMeta'](arg1, arg2, arg3);
 }

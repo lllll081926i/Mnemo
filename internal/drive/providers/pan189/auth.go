@@ -2,12 +2,14 @@ package pan189
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
@@ -23,6 +25,8 @@ import (
 const (
 	CloudPersonal = "personal"
 	CloudFamily   = "family"
+
+	pan189LoginStateTTL = 5 * time.Minute
 )
 
 // CaptchaError is returned when the account requires a graphical captcha.
@@ -59,17 +63,64 @@ func CaptchaImage() string {
 // pan189LoginState mirrors the pending login parameters that must be reused
 // between fetching the captcha image and submitting the code.
 type pan189LoginState struct {
-	User         string
-	Pass         string
-	CaptchaToken string
-	LT           string
-	ParamID      string
-	ReqID        string
-	RsaUsername  string
-	RsaPassword  string
+	User          string
+	PasswordProof string
+	CaptchaToken  string
+	LT            string
+	ParamID       string
+	ReqID         string
+	RsaUsername   string
+	RsaPassword   string
+	Client        *netx.Client
+	CreatedAt     time.Time
 }
 
-// pendingLogin caches the params of an in-progress login awaiting a captcha.
+func pan189PasswordProof(password string) string {
+	sum := sha256.Sum256([]byte(password))
+	return base64.RawStdEncoding.EncodeToString(sum[:])
+}
+
+func newPan189LoginClient() (*netx.Client, error) {
+	hc := netx.NewClient(60 * time.Second)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	hc.HTTP.Jar = jar
+	return hc, nil
+}
+
+func takePan189PendingLogin(user, password string) (*pan189LoginState, bool) {
+	loginStateMu.Lock()
+	defer loginStateMu.Unlock()
+	for key, state := range pendingLogins {
+		if state == nil || time.Since(state.CreatedAt) > pan189LoginStateTTL {
+			delete(pendingLogins, key)
+		}
+	}
+	state := pendingLogins[user]
+	if state == nil || state.PasswordProof != pan189PasswordProof(password) || state.Client == nil {
+		return nil, false
+	}
+	return state, true
+}
+
+func savePan189PendingLogin(state *pan189LoginState, captcha string) {
+	if state == nil || state.User == "" {
+		return
+	}
+	loginStateMu.Lock()
+	pendingLogins[state.User] = state
+	lastCaptcha = captcha
+	loginStateMu.Unlock()
+}
+
+func deletePan189PendingLogin(user string) {
+	loginStateMu.Lock()
+	delete(pendingLogins, user)
+	loginStateMu.Unlock()
+}
+
 // loginWithCreds runs the 189 account+password login flow. validateCode is the
 // graphical captcha text when retrying after a CaptchaError.
 func loginWithCreds(ctx context.Context, username, password, validateCode string) (*Session, error) {
@@ -97,19 +148,21 @@ func attachLoginCredentials(session *Session, username, password string) *Sessio
 }
 
 func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, error) {
-	loginStateMu.Lock()
-	state := pendingLogins[user]
-	loginStateMu.Unlock()
-	if state == nil || state.User != user || state.Pass != pass || validateCode == "" {
+	var state *pan189LoginState
+	if validateCode != "" {
+		var ok bool
+		state, ok = takePan189PendingLogin(user, pass)
+		if !ok {
+			return nil, errors.New("captcha_expired_189\n189 图形验证码已过期，请重新登录")
+		}
+	} else {
+		deletePan189PendingLogin(user)
 		var err error
 		state, err = prepareLoginParam(ctx, user, pass)
 		if err != nil {
 			return nil, err
 		}
 	}
-	loginStateMu.Lock()
-	delete(pendingLogins, user)
-	loginStateMu.Unlock()
 
 	// needcaptcha: anything other than "0" requires a graphical captcha.
 	if validateCode == "" {
@@ -122,10 +175,7 @@ func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, er
 			if err != nil {
 				return nil, err
 			}
-			loginStateMu.Lock()
-			lastCaptcha = image
-			pendingLogins[user] = state
-			loginStateMu.Unlock()
+			savePan189PendingLogin(state, image)
 			return nil, &CaptchaError{CaptchaImage: image}
 		}
 	}
@@ -134,13 +184,17 @@ func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, er
 	if err != nil {
 		return nil, err
 	}
-	return getSessionForPC(ctx, toURL, user)
+	deletePan189PendingLogin(user)
+	return getSessionForPC(ctx, state, toURL, user)
 }
 
 // prepareLoginParam fetches the init params (captchaToken/lt/paramId/reqId)
 // and the RSA public key, then encrypts the credentials (AList initLoginParam).
 func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginState, error) {
-	hc := netx.NewClient(60 * time.Second)
+	hc, err := newPan189LoginClient()
+	if err != nil {
+		return nil, err
+	}
 	// 1) unifyLoginForPC
 	ts := timestamp()
 	unifyURL := fmt.Sprintf("%s/api/portal/unifyLoginForPC.action?appId=%s&clientType=%s&returnURL=%s&timeStamp=%d",
@@ -152,7 +206,11 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 	if err != nil {
 		return nil, err
 	}
-	html, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		resp.Body.Close()
+		return nil, fmt.Errorf("初始化 189 登录参数失败：HTTP %d", resp.StatusCode)
+	}
+	html, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 	resp.Body.Close()
 	page := string(html)
 	captchaToken := pickMatch(page, `'captchaToken'\s*value='(.+?)'`)
@@ -177,6 +235,10 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 	if err != nil {
 		return nil, err
 	}
+	if cresp.StatusCode < http.StatusOK || cresp.StatusCode >= http.StatusMultipleChoices {
+		cresp.Body.Close()
+		return nil, fmt.Errorf("获取 189 RSA 公钥失败：HTTP %d", cresp.StatusCode)
+	}
 	var conf struct {
 		Data struct {
 			PubKey string `json:"pubKey"`
@@ -200,7 +262,7 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 		return nil, err
 	}
 	return &pan189LoginState{
-		User: user, Pass: pass,
+		User: user, PasswordProof: pan189PasswordProof(pass), Client: hc, CreatedAt: time.Now(),
 		CaptchaToken: captchaToken, LT: lt, ParamID: paramID, ReqID: reqID,
 		RsaUsername: conf.Data.Pre + rsaUser,
 		RsaPassword: conf.Data.Pre + rsaPass,
@@ -209,12 +271,14 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 
 // needCaptcha reports whether the account requires a graphical captcha.
 func needCaptcha(ctx context.Context, st *pan189LoginState) (bool, error) {
-	hc := netx.NewClient(60 * time.Second)
+	if st == nil || st.Client == nil {
+		return false, errors.New("189 登录会话已失效，请重新登录")
+	}
 	form := url.Values{}
 	form.Set("appKey", appID)
 	form.Set("accountType", accountType)
 	form.Set("userName", st.RsaUsername)
-	resp, err := hc.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/needcaptcha.do", map[string]string{
+	resp, err := st.Client.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/needcaptcha.do", map[string]string{
 		"Content-Type": "application/x-www-form-urlencoded",
 		"REQID":        st.ReqID,
 		"User-Agent":   ua189,
@@ -223,24 +287,32 @@ func needCaptcha(ctx context.Context, st *pan189LoginState) (bool, error) {
 		return false, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return false, fmt.Errorf("检查 189 图形验证码失败：HTTP %d", resp.StatusCode)
+	}
 	return strings.TrimSpace(string(body)) != "0", nil
 }
 
 // fetchCaptchaImage returns the captcha image as a base64 data URL.
 func fetchCaptchaImage(ctx context.Context, st *pan189LoginState) (string, error) {
-	hc := netx.NewClient(60 * time.Second)
+	if st == nil || st.Client == nil {
+		return "", errors.New("189 登录会话已失效，请重新登录")
+	}
 	q := url.Values{}
 	q.Set("token", st.CaptchaToken)
 	q.Set("REQID", st.ReqID)
 	q.Set("rnd", fmt.Sprintf("%d", timestamp()))
 	u := authURL + "/api/logbox/oauth2/picCaptcha.do?" + q.Encode()
-	resp, err := hc.Do(ctx, http.MethodGet, u, map[string]string{"User-Agent": ua189}, nil)
+	resp, err := st.Client.Do(ctx, http.MethodGet, u, map[string]string{"User-Agent": ua189}, nil)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	buf, _ := io.ReadAll(resp.Body)
+	buf, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("获取 189 验证码图片失败：HTTP %d", resp.StatusCode)
+	}
 	if len(buf) <= 20 {
 		return "", errors.New("获取 189 验证码图片失败")
 	}
@@ -249,7 +321,9 @@ func fetchCaptchaImage(ctx context.Context, st *pan189LoginState) (string, error
 
 // loginSubmit sends the RSA-encrypted credentials and returns the redirect URL.
 func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string) (string, error) {
-	hc := netx.NewClient(60 * time.Second)
+	if st == nil || st.Client == nil {
+		return "", errors.New("189 登录会话已失效，请重新登录")
+	}
 	form := url.Values{}
 	form.Set("appKey", appID)
 	form.Set("accountType", accountType)
@@ -265,7 +339,7 @@ func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string)
 	form.Set("state", "")
 	form.Set("paramId", st.ParamID)
 
-	resp, err := hc.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/loginSubmit.do", map[string]string{
+	resp, err := st.Client.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/loginSubmit.do", map[string]string{
 		"Content-Type": "application/x-www-form-urlencoded",
 		"REQID":        st.ReqID,
 		"lt":           st.LT,
@@ -276,21 +350,34 @@ func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string)
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("189 登录失败：HTTP %d", resp.StatusCode)
+	}
 	var j map[string]json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
 		return "", errors.New("189 登录失败（响应异常）")
 	}
 	toURL := strVal(j, "toUrl")
 	if toURL == "" {
-		msg := firstNonEmpty(strVal(j, "msg"), strVal(j, "message"), "189 登录失败（未返回 toUrl）")
+		msg := firstNonEmpty(strVal(j, "msg"), strVal(j, "message"), strVal(j, "errorMsg"), strVal(j, "desc"), "189 登录失败（未返回 toUrl）")
+		if isPan189CaptchaFailure(msg) {
+			return "", errors.New("captcha_retry_189\n189 图形验证码不正确，请重新登录")
+		}
 		return "", errors.New(msg)
 	}
 	return toURL, nil
 }
 
+func isPan189CaptchaFailure(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "验证码") || strings.Contains(message, "captcha") || strings.Contains(message, "validatecode")
+}
+
 // getSessionForPC exchanges the redirect URL for the API session key/secret.
-func getSessionForPC(ctx context.Context, toURL, loginName string) (*Session, error) {
-	hc := netx.NewClient(60 * time.Second)
+func getSessionForPC(ctx context.Context, st *pan189LoginState, toURL, loginName string) (*Session, error) {
+	if st == nil || st.Client == nil {
+		return nil, errors.New("189 登录会话已失效，请重新登录")
+	}
 	u, _ := url.Parse(apiURL + "/getSessionForPC.action")
 	q := u.Query()
 	for k, v := range clientSuffix() {
@@ -299,7 +386,7 @@ func getSessionForPC(ctx context.Context, toURL, loginName string) (*Session, er
 	q.Set("redirectURL", toURL)
 	u.RawQuery = q.Encode()
 
-	resp, err := hc.Do(ctx, http.MethodPost, u.String(), map[string]string{
+	resp, err := st.Client.Do(ctx, http.MethodPost, u.String(), map[string]string{
 		"User-Agent": ua189,
 		"Accept":     "application/json;charset=UTF-8",
 		"Referer":    webURL,
@@ -308,6 +395,9 @@ func getSessionForPC(ctx context.Context, toURL, loginName string) (*Session, er
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("获取 189 Session 失败：HTTP %d", resp.StatusCode)
+	}
 	var j map[string]json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
 		return nil, errors.New("获取 189 Session 失败")

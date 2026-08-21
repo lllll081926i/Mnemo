@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   saveMounted: vi.fn(),
   validateMountedWrite: vi.fn(),
   SendGuangyaSms: vi.fn(),
+  SendPan139SMS: vi.fn(),
   providerIconUrl: vi.fn(() => ''),
   OpenBrowser: vi.fn(),
   onEvent: vi.fn(() => () => {}),
@@ -185,6 +186,58 @@ describe('关键交互组件', () => {
     const cloudType = pan189.findComponent(UiSelect)
     expect(cloudType.props('modelValue')).toBe('personal')
     expect(cloudType.props('options')).toContainEqual({ value: 'family', label: '家庭云' })
+  })
+
+  it('139 账密触发安全校验后复用登录会话完成短信验证', async () => {
+    localStorage.setItem('login_provider', 'pan139')
+    api.login
+      .mockRejectedValueOnce(new Error('pan139_sms_required\n139 登录需要短信安全校验'))
+      .mockResolvedValueOnce(undefined)
+    api.SendPan139SMS.mockResolvedValue(undefined)
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [{
+          ID: 'pan139', Meta: { label: '139 云盘' }, Login: { fields: [
+            { key: 'login_mode', type: 'select', label: '登录方式', required: true, options: [] },
+            { key: 'username', type: 'text', label: '手机号/账号', required: true },
+            { key: 'password', type: 'password', label: '密码', required: false },
+            { key: 'sms_code', type: 'text', label: '短信验证码', required: false },
+          ] },
+        }],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+
+    const inputForLabel = (label) => [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent === label)
+      ?.querySelector('input')
+    await setDomInput(inputForLabel('手机号/账号'), '13800138000')
+    await setDomInput(inputForLabel('密码'), 'password')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await Promise.resolve()
+    await nextTick()
+
+    expect(api.login).toHaveBeenCalledTimes(1)
+    expect(document.body.querySelector('.form-error')?.textContent).toContain('请获取并填写短信验证码')
+    const smsField = [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent === '短信验证码')
+    expect(smsField.style.display).not.toBe('none')
+    expect([...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent === '密码').style.display).toBe('none')
+
+    const sendButton = [...smsField.querySelectorAll('button')].find((button) => button.textContent.includes('获取验证码'))
+    await sendButton.click()
+    await Promise.resolve()
+    expect(api.SendPan139SMS).toHaveBeenCalledWith('13800138000')
+
+    await setDomInput(inputForLabel('短信验证码'), '123456')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await Promise.resolve()
+    await nextTick()
+    expect(api.login).toHaveBeenCalledTimes(2)
+    expect(api.login.mock.calls[1][0]).toBe('pan139')
+    expect(api.login.mock.calls[1][1]).toMatchObject({ login_mode: 'sms', username: '13800138000', sms_code: '123456' })
   })
 
   it('S3 默认不做写入验证和内网预览授权，保存时只提交一次连接配置', async () => {

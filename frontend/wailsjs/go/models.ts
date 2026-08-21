@@ -592,6 +592,8 @@ export namespace model {
 	    token?: TokenInfo;
 	    order?: number;
 	    disabled?: boolean;
+	    custom_name?: string;
+	    custom_icon?: string;
 	    usage?: Quota;
 	
 	    static createFrom(source: any = {}) {
@@ -605,6 +607,8 @@ export namespace model {
 	        this.token = this.convertValues(source["token"], TokenInfo);
 	        this.order = source["order"];
 	        this.disabled = source["disabled"];
+	        this.custom_name = source["custom_name"];
+	        this.custom_icon = source["custom_icon"];
 	        this.usage = this.convertValues(source["usage"], Quota);
 	    }
 	

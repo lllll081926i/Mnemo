@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, validateMountedWrite, SendGuangyaSms, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
+import { login, saveMounted, validateMountedWrite, SendGuangyaSms, SendPan139SMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
 import UiIcon from './UiIcon.vue'
 import UiSelect from './UiSelect.vue'
 import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
@@ -12,6 +12,7 @@ const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 function defaultLoginForm(id) {
   if (id === 'lanzou') return { upload_tier: 'v0' }
   if (id === 'pan189') return { cloud_type: 'personal' }
+  if (id === 'pan139') return { login_mode: 'password' }
   return {}
 }
 const form = ref(defaultLoginForm(providerId.value))
@@ -73,6 +74,7 @@ function handlePikPakRateLimit(error) {
   return true
 }
 const errorText = ref('')
+const pan139SMSRequired = ref(false)
 const passwordVisibility = ref({})
 function passwordVisible(key) { return !!passwordVisibility.value[key] }
 function togglePassword(key) {
@@ -102,7 +104,7 @@ const isOAuth = computed(() => !isMounted.value && !hasAccountLogin.value && fie
 const HIDDEN_LOGIN_FIELDS = {
   aliopen: ['client_id', 'client_secret'],
   guangya: ['refresh_token'],
-  pan139: ['authorization'],
+  pan139: ['authorization', 'login_mode'],
 }
 
 const visibleFields = computed(() => {
@@ -132,6 +134,12 @@ const loginSubtitle = computed(() => {
 function isFieldRequired(field) {
   if (isPan139DirectLogin.value && (field.key === 'username' || field.key === 'password')) return false
   return field.required
+}
+function isPan139FieldVisible(field) {
+  if (providerId.value !== 'pan139') return true
+  if (field.key === 'password') return !pan139SMSRequired.value
+  if (field.key === 'sms_code') return pan139SMSRequired.value
+  return true
 }
 function fieldInputType(field) {
   return field.type === 'password' ? 'password' : 'text'
@@ -298,6 +306,20 @@ function parse189Captcha(err) {
   form.value.validate_code = ''
   return true
 }
+function parse189CaptchaExpired(err) {
+  if (!/captcha_expired_189/i.test(String(err))) return false
+  pan189Captcha.value = ''
+  form.value.validate_code = ''
+  errorText.value = '验证码已过期，请重新登录'
+  return true
+}
+function parse189CaptchaRetry(err) {
+  if (!/captcha_retry_189/i.test(String(err))) return false
+  pan189Captcha.value = ''
+  form.value.validate_code = ''
+  errorText.value = '验证码不正确，请重新登录'
+  return true
+}
 
 function resetCaptcha(closeSession = false) {
   captchaSessionId.value = ''
@@ -305,9 +327,11 @@ function resetCaptcha(closeSession = false) {
   captchaFrameReady.value = false
   captchaSubmitting.value = false
   pan189Captcha.value = ''
+  pan139SMSRequired.value = false
   delete form.value.captcha_token
   delete form.value.captcha_verified
   delete form.value.validate_code
+  delete form.value.sms_code
   if (closeSession) void closePikPakCaptchaSession()
 }
 
@@ -329,6 +353,31 @@ async function sendSms() {
   } finally {
     smsBusy.value = false
   }
+}
+
+async function sendPan139Sms() {
+  if (!String(form.value.username || '').trim()) { errorText.value = '请先填写账号'; return }
+  smsBusy.value = true
+  errorText.value = ''
+  try {
+    await SendPan139SMS(String(form.value.username).trim())
+    emit('toast', '验证码已发送', 'success')
+    startSmsCountdown()
+  } catch (e) {
+    warn('login', '139 SMS verification request failed', { error: formatErrorText(e) })
+    errorText.value = String(e)
+  } finally {
+    smsBusy.value = false
+  }
+}
+
+function parsePan139SMSRequired(err) {
+  if (!/pan139_sms_required/i.test(String(err))) return false
+  pan139SMSRequired.value = true
+  form.value.login_mode = 'sms'
+  form.value.sms_code = ''
+  errorText.value = '请获取并填写短信验证码'
+  return true
 }
 
 function validate() {
@@ -356,6 +405,15 @@ function validate() {
   }
   if (providerId.value === 'pan189' && pan189Captcha.value && !value('validate_code')) {
     return '请填写图形验证码'
+  }
+  if (providerId.value === 'pan139') {
+    if (!value('username')) return '请填写手机号/账号'
+    if (pan139SMSRequired.value) {
+      if (!value('sms_code')) return '请填写短信验证码'
+    } else if (!value('password')) {
+      return '请填写密码'
+    }
+    return ''
   }
   for (const f of visibleFields.value) {
     if (isFieldRequired(f) && !value(f.key)) return `请填写${f.label}`
@@ -429,6 +487,12 @@ async function submit() {
         errorText.value = '请在登录窗口内完成安全验证'
       } else if (attemptProvider === 'pan189' && parse189Captcha(e)) {
         errorText.value = '请输入图片中的验证码'
+      } else if (attemptProvider === 'pan189' && parse189CaptchaRetry(e)) {
+        // 清掉旧验证码，下一次提交会重新获取登录参数和图片。
+      } else if (attemptProvider === 'pan189' && parse189CaptchaExpired(e)) {
+        // 清掉失效图片，下一次提交会重新获取登录参数和验证码。
+      } else if (attemptProvider === 'pan139' && parsePan139SMSRequired(e)) {
+        // 账密登录已建立临时会话，切换到短信二次验证，不重复提交密码。
       } else {
         errorText.value = String(e)
       }
@@ -536,7 +600,7 @@ async function submit() {
                 <!-- 常规表单 -->
                 <template v-else>
                   <div v-if="visibleFields.length" class="login-section">
-                    <div v-for="f in visibleFields" :key="f.key" class="field login-field">
+                    <div v-for="f in visibleFields" v-show="isPan139FieldVisible(f)" :key="f.key" class="field login-field">
                       <label>{{ f.label }}</label>
                       <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
@@ -548,6 +612,9 @@ async function submit() {
                       </div>
                       <div v-if="providerId === 'guangya' && f.key === 'sms_code' && !hasRefreshToken" class="field-action-row">
                         <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendSms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
+                      </div>
+                      <div v-if="providerId === 'pan139' && f.key === 'sms_code'" class="field-action-row">
+                        <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendPan139Sms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
                       </div>
                     </div>
                   </div>

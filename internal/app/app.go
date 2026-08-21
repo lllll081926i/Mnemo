@@ -23,6 +23,7 @@ import (
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
 	_ "mnemo-go/internal/drive/providers" // register all plugins
+	"mnemo-go/internal/drive/providers/pan139"
 	"mnemo-go/internal/drive/providers/pan189"
 	"mnemo-go/internal/drive/providers/pikpak"
 	"mnemo-go/internal/logging"
@@ -568,6 +569,11 @@ func (a *App) ListProviders() []ProviderInfo {
 // GetPan189Captcha returns the latest captcha image data URL for 189 cloud.
 func (a *App) GetPan189Captcha() string {
 	return pan189.CaptchaImage()
+}
+
+// SendPan139SMS sends the second-factor code for a pending 139 password login.
+func (a *App) SendPan139SMS(username string) error {
+	return pan139.RequestPan139SMS(context.Background(), username)
 }
 
 // ProviderLogin performs a login for a provider with form config.
