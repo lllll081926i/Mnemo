@@ -22,7 +22,7 @@ const genericWebdavIcon = new URL('../assets/drive-icons/webdav.svg', import.met
 const webdavPresets = [
   { id: 'custom', name: '', label: '自定义 WebDAV', endpoint: '', rootPath: '/', icon: genericWebdavIcon },
   { id: 'jianguoyun', name: '坚果云', label: '坚果云', endpoint: 'https://dav.jianguoyun.com/dav/', rootPath: '/', icon: new URL('../assets/drive-icons/jianguoyun.svg', import.meta.url).href },
-  { id: 'infinitycloud', name: 'InfiniCLOUD', label: 'InfiniCLOUD', endpoint: 'https://cloud.infini-cloud.net/dav/', rootPath: '/', icon: new URL('../assets/drive-icons/infinitycloud.svg', import.meta.url).href },
+  { id: 'infinitycloud', name: 'InfiniCLOUD', label: 'InfiniCLOUD', endpoint: 'https://miya.teracloud.jp/dav/', rootPath: '/', icon: new URL('../assets/drive-icons/infinitycloud.svg', import.meta.url).href },
   { id: 'nextcloud', name: 'Nextcloud', label: 'Nextcloud', endpoint: 'https://your-nextcloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', icon: new URL('../assets/drive-icons/nextcloud.svg', import.meta.url).href },
   { id: 'owncloud', name: 'ownCloud', label: 'ownCloud', endpoint: 'https://your-owncloud.example.com/remote.php/dav/files/your-username/', rootPath: '/', icon: new URL('../assets/drive-icons/owncloud.svg', import.meta.url).href },
   { id: 'seafile', name: 'Seafile', label: 'Seafile', endpoint: 'https://your-seafile.example.com/seafdav/', rootPath: '/', icon: new URL('../assets/drive-icons/seafile.svg', import.meta.url).href },

@@ -54,7 +54,7 @@
 | 服务商预设 | 图标资源 | 识别特征 | 状态 |
 | :--- | :--- | :--- | :---: |
 | 坚果云 (Jianguoyun) | `drive-icons/jianguoyun.svg` | `jianguoyun.com` / 名称含「坚果云」 | ✅ 正常识别 |
-| InfiniCLOUD | `drive-icons/infinitycloud.svg` | `infini-cloud.net` / 名称含「InfiniCLOUD」 | ✅ 正常识别 |
+| InfiniCLOUD | `drive-icons/infinitycloud.svg` | `teracloud.jp` / `infini-cloud.net` / 名称含「InfiniCLOUD」「TeraCLOUD」 | ✅ 正常识别 |
 | Nextcloud | `drive-icons/nextcloud.svg` | `nextcloud` / `remote.php/dav` | ✅ 正常识别 |
 | ownCloud | `drive-icons/owncloud.svg` | `owncloud` | ✅ 正常识别 |
 | Seafile | `drive-icons/seafile.svg` | `seafile` / `seafdav` | ✅ 正常识别 |

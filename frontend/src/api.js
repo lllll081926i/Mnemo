@@ -252,7 +252,7 @@ export function detectWebdavPresetIcon(account) {
   if (endpoint.includes('jianguoyun.com') || name.includes('坚果云') || name.includes('jianguoyun')) {
     return 'drive-icons/jianguoyun.svg'
   }
-  if (endpoint.includes('infini-cloud.net') || name.includes('infinicloud') || name.includes('infini-cloud')) {
+  if (endpoint.includes('teracloud.jp') || endpoint.includes('infini-cloud.net') || name.includes('infinicloud') || name.includes('infini-cloud') || name.includes('teracloud')) {
     return 'drive-icons/infinitycloud.svg'
   }
   if (endpoint.includes('nextcloud') || name.includes('nextcloud')) {
