@@ -50,5 +50,5 @@ func writeOSProtectedKey(dir string, key []byte) error {
 	if out.Size == 0 || out.Data == nil {
 		return errors.New("vault: DPAPI returned empty key")
 	}
-	return os.WriteFile(protectedKeyPath(dir), unsafe.Slice(out.Data, out.Size), 0o600)
+	return writePrivateFileAtomically(protectedKeyPath(dir), unsafe.Slice(out.Data, out.Size))
 }

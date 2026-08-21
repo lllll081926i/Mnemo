@@ -239,6 +239,9 @@ func (a *App) CancelShare(entry model.ShareHistoryEntry) error {
 	if userID == "" || driveID == "" {
 		return fmt.Errorf("分享记录缺少账号信息，无法取消")
 	}
+	if err := validateShareRecordProvider(entry, drive.ProviderOf(userID, driveID, "")); err != nil {
+		return err
+	}
 	logging.Info("share cancellation started", "account_id", redactID(userID), "share_id", redactID(entry.ShareID))
 	if err := drive.CancelShare(userID, driveID, entry); err != nil {
 		logging.Warn("share cancellation failed", "account_id", redactID(userID), "share_id", redactID(entry.ShareID), "error", err)
@@ -254,6 +257,17 @@ func (a *App) CancelShare(entry model.ShareHistoryEntry) error {
 	a.emit("share:history-changed", map[string]string{"account_id": userID, "share_id": entry.ShareID})
 	logging.Info("share cancellation completed", "account_id", redactID(userID), "share_id", redactID(entry.ShareID))
 	return nil
+}
+
+// validateShareRecordProvider rejects a tampered or stale history entry before
+// it can be sent to a different provider's destructive cancellation endpoint.
+// Empty Provider is retained for history records created by older versions.
+func validateShareRecordProvider(entry model.ShareHistoryEntry, accountProvider string) error {
+	recorded := strings.TrimSpace(entry.Provider)
+	if recorded == "" || recorded == accountProvider {
+		return nil
+	}
+	return fmt.Errorf("分享记录与账号网盘不匹配，无法取消")
 }
 
 // shouldPersistShareHistory excludes expiring bearer-style URLs. S3

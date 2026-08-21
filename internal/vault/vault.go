@@ -24,10 +24,12 @@ const (
 )
 
 var (
-	keyCache  [32]byte
-	keyLoaded bool
-	keyDir    string
-	keyMu     sync.Mutex
+	keyCache          [32]byte
+	keyLoaded         bool
+	keyDir            string
+	keyMu             sync.Mutex
+	readProtectedKey  = readOSProtectedKey
+	writeProtectedKey = writeOSProtectedKey
 )
 
 // loadKey loads (or generates on first run) the 32-byte master key from the
@@ -38,9 +40,11 @@ func loadKey(dir string) ([32]byte, error) {
 	if keyLoaded && keyDir == dir {
 		return keyCache, nil
 	}
-	_ = os.MkdirAll(dir, 0o700)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return [32]byte{}, err
+	}
 	path := filepath.Join(dir, keyfile)
-	protected, protectedErr := readOSProtectedKey(dir)
+	protected, protectedErr := readProtectedKey(dir)
 	if protectedErr == nil {
 		if len(protected) != len(keyCache) {
 			return [32]byte{}, errors.New("vault: OS protected key has invalid length")
@@ -55,28 +59,36 @@ func loadKey(dir string) ([32]byte, error) {
 		copy(keyCache[:], b)
 		keyDir = dir
 		keyLoaded = true
-		// Migrate an existing legacy key to the OS protection boundary when
-		// the platform adapter is available. Failure is tolerated here because
-		// the legacy file remains the compatibility source for this run.
-		_ = writeOSProtectedKey(dir, b)
+		// Only create a protected copy when no protected key exists. If DPAPI
+		// has an existing but unreadable blob, the validated legacy key remains
+		// usable; do not overwrite the evidence or create a different key.
+		if errors.Is(protectedErr, os.ErrNotExist) {
+			_ = writeProtectedKey(dir, b)
+		}
 		return keyCache, nil
 	}
 	if err == nil && len(b) != 32 {
 		return [32]byte{}, errors.New("vault: legacy key has invalid length")
 	}
-	if protectedErr != nil && !errors.Is(protectedErr, os.ErrNotExist) && err != nil && !errors.Is(err, os.ErrNotExist) {
-		return [32]byte{}, errors.Join(errors.New("vault: OS protected key unavailable"), protectedErr, err)
+	if protectedErr != nil && !errors.Is(protectedErr, os.ErrNotExist) {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return [32]byte{}, errors.Join(errors.New("vault: OS protected key unavailable"), protectedErr, err)
+		}
+		// The protected file exists but cannot be decrypted and there is no
+		// usable legacy copy. Generating a replacement would make existing
+		// encrypted accounts permanently unreadable, so fail closed instead.
+		return [32]byte{}, errors.Join(errors.New("vault: OS protected key cannot be read; refusing to generate a replacement"), protectedErr)
 	}
 	// generate new key
 	var k [32]byte
 	if _, err := io.ReadFull(rand.Reader, k[:]); err != nil {
 		return k, err
 	}
-	if err := writeOSProtectedKey(dir, k[:]); err != nil {
+	if err := writeProtectedKey(dir, k[:]); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return k, err
 		}
-		if err := os.WriteFile(path, k[:], 0o600); err != nil {
+		if err := writePrivateFileAtomically(path, k[:]); err != nil {
 			return k, err
 		}
 	}
@@ -84,6 +96,42 @@ func loadKey(dir string) ([32]byte, error) {
 	keyDir = dir
 	keyLoaded = true
 	return k, nil
+}
+
+// writePrivateFileAtomically keeps a completed key file intact if the process
+// is interrupted while writing a new key. Callers only use it for a missing
+// destination; an existing unreadable key is never replaced automatically.
+func writePrivateFileAtomically(path string, data []byte) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".vault-key-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	tmpPath = ""
+	return os.Chmod(path, 0o600)
 }
 
 // Encrypt encrypts plaintext bytes and returns a base64-encoded payload
