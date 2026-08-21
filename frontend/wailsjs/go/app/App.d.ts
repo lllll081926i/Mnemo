@@ -194,6 +194,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:string):Promise<Array<m
 
 export function SendGuangyaSms(arg1:string):Promise<Record<string, string>>;
 
+export function SetAccountCustomMeta(arg1:string,arg2:string,arg3:string):Promise<model.Account>;
+
 export function SetupFloater(arg1:Array<number>):Promise<void>;
 
 export function SetupTray(arg1:Array<number>):Promise<void>;
@@ -206,8 +208,8 @@ export function TrashFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<A
 
 export function UploadFiles(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<Array<model.UploadingUI>>;
 
-export function ValidateUploadFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
-
 export function ValidateMountedWrite(arg1:string,arg2:model.ConnConfig):Promise<void>;
+
+export function ValidateUploadFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
 
 export function WatchShowRequests():Promise<void>;

@@ -195,6 +195,20 @@ export namespace drive {
 	        this.isDir = source["isDir"];
 	    }
 	}
+	export class LoginOption {
+	    value: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LoginOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.value = source["value"];
+	        this.label = source["label"];
+	    }
+	}
 	export class LoginField {
 	    key: string;
 	    label: string;
@@ -202,6 +216,7 @@ export namespace drive {
 	    required: boolean;
 	    hint?: string;
 	    placeholder?: string;
+	    options?: LoginOption[];
 	
 	    static createFrom(source: any = {}) {
 	        return new LoginField(source);
@@ -215,7 +230,26 @@ export namespace drive {
 	        this.required = source["required"];
 	        this.hint = source["hint"];
 	        this.placeholder = source["placeholder"];
+	        this.options = this.convertValues(source["options"], LoginOption);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class LoginConfig {
 	    fields: LoginField[];
@@ -247,6 +281,7 @@ export namespace drive {
 		    return a;
 		}
 	}
+	
 	
 	export class Meta {
 	    key: string;

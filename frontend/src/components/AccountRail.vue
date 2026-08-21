@@ -258,7 +258,7 @@ const menuItems = computed(() => {
   if (!acc) return []
   return [
     { icon: 'info', label: '账号信息', action: 'info' },
-    { icon: 'pencil', label: '自定义名称与图标', action: 'rename' },
+    { icon: 'camera', label: '自定义截图', action: 'rename' },
     { icon: 'trash', label: '移除账号', danger: true, action: 'remove' },
   ]
 })

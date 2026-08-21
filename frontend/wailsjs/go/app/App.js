@@ -378,6 +378,10 @@ export function SendGuangyaSms(arg1) {
   return window['go']['app']['App']['SendGuangyaSms'](arg1);
 }
 
+export function SetAccountCustomMeta(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SetAccountCustomMeta'](arg1, arg2, arg3);
+}
+
 export function SetupFloater(arg1) {
   return window['go']['app']['App']['SetupFloater'](arg1);
 }
@@ -402,12 +406,12 @@ export function UploadFiles(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['UploadFiles'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function ValidateUploadFiles(arg1, arg2, arg3) {
-  return window['go']['app']['App']['ValidateUploadFiles'](arg1, arg2, arg3);
-}
-
 export function ValidateMountedWrite(arg1, arg2) {
   return window['go']['app']['App']['ValidateMountedWrite'](arg1, arg2);
+}
+
+export function ValidateUploadFiles(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ValidateUploadFiles'](arg1, arg2, arg3);
 }
 
 export function WatchShowRequests() {

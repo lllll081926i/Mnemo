@@ -102,11 +102,13 @@ type ConnConfig struct {
 // Account is the persisted session record. UserID is the primary key and is
 // namespaced by provider prefix (e.g. pikpak_xxx).
 type Account struct {
-	UserID   string     `json:"user_id"`
-	DriveID  string     `json:"drive_id"`
-	Token    *TokenInfo `json:"token,omitempty"`
-	Order    int64      `json:"order,omitempty"`
-	Disabled bool       `json:"disabled,omitempty"`
+	UserID     string     `json:"user_id"`
+	DriveID    string     `json:"drive_id"`
+	Token      *TokenInfo `json:"token,omitempty"`
+	Order      int64      `json:"order,omitempty"`
+	Disabled   bool       `json:"disabled,omitempty"`
+	CustomName string     `json:"custom_name,omitempty"`
+	CustomIcon string     `json:"custom_icon,omitempty"`
 	// Usage is a cached quota snapshot for display.
 	Usage *Quota `json:"usage,omitempty"`
 }

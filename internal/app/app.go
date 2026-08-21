@@ -759,6 +759,22 @@ func (a *App) RenameMountedAccount(userID, name string) (*model.Account, error) 
 	return updated, nil
 }
 
+// SetAccountCustomMeta saves custom display name and custom icon for any cloud account.
+func (a *App) SetAccountCustomMeta(userID, customName, customIcon string) (*model.Account, error) {
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
+	updated, err := st.UpdateAccountCustomMeta(userID, customName, customIcon)
+	if err != nil {
+		logging.Warn("set account custom meta failed", "account_id", redactID(userID), "error", err)
+		return nil, err
+	}
+	a.emit("account:changed", updated)
+	logging.Info("account custom meta updated", "account_id", redactID(userID))
+	return updated, nil
+}
+
 // ValidateMountedWrite performs an explicitly requested S3 write probe. It
 // does not persist an account or run during the normal login check.
 func (a *App) ValidateMountedWrite(provider string, conn model.ConnConfig) error {

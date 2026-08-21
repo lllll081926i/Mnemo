@@ -229,3 +229,29 @@ func (s *Store) RenameMountedAccount(userID, name string) (*model.Account, error
 	}
 	return nil, os.ErrNotExist
 }
+
+// UpdateAccountCustomMeta sets user-defined custom name and custom icon for any account.
+func (s *Store) UpdateAccountCustomMeta(userID, customName, customIcon string) (*model.Account, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user ID is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.readAccountsUnlocked()
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range list {
+		if account == nil || account.UserID != userID {
+			continue
+		}
+		account.CustomName = strings.TrimSpace(customName)
+		account.CustomIcon = strings.TrimSpace(customIcon)
+		if err := s.writeAccountsUnlocked(list); err != nil {
+			return nil, err
+		}
+		return account, nil
+	}
+	return nil, os.ErrNotExist
+}

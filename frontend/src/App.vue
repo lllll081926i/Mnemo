@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName, providerIconUrl } from './api'
+import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
@@ -261,10 +261,17 @@ async function saveRename() {
     const uid = renameAcc.value.user_id
     const alias = renameName.value.trim()
     const icon = renameIcon.value
+    // 1. 本地 LocalStorage 快速持久化 + 事件分发
     setAccountCustomMeta(uid, alias, icon)
+    // 2. 后端持久化到 accounts.json（双向保证持久）
+    try {
+      await setAccountCustomMetaBackend(uid, alias, icon)
+    } catch (err) {
+      console.warn('Backend custom meta update ignored/failed:', err)
+    }
     // 强制触发一次账号列表浅拷贝以便全局响应式刷新
-    accounts.value = accounts.value.map((a) => (a.user_id === uid ? { ...a } : a))
-    if (current.value?.user_id === uid) current.value = { ...current.value }
+    accounts.value = accounts.value.map((a) => (a.user_id === uid ? { ...a, custom_name: alias, custom_icon: icon } : a))
+    if (current.value?.user_id === uid) current.value = { ...current.value, custom_name: alias, custom_icon: icon }
     renameAcc.value = null
     toast('账号设置已更新', 'success')
   } catch (e) {
@@ -465,8 +472,8 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </template>
     </Modal>
 
-    <!-- 账号自定义名称与图标弹窗 -->
-    <Modal v-if="renameAcc" title="自定义账号名称与图标" width="420px" @close="renameAcc = null">
+    <!-- 账号自定义截图与名称弹窗 -->
+    <Modal v-if="renameAcc" title="自定义截图与名称" width="420px" @close="renameAcc = null">
       <div class="custom-acc-form">
         <div class="field">
           <label>自定义显示昵称</label>
@@ -481,7 +488,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         </div>
 
         <div class="field">
-          <label>自定义网盘图标</label>
+          <label>自定义图标与截图</label>
           <div class="acc-icon-selector">
             <!-- 当前选中的预览图 -->
             <div class="acc-icon-preview">
@@ -499,12 +506,12 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
                 @change="onIconFileSelected"
               />
               <button class="btn sm" type="button" @click="fileInputRef?.click()">
-                <UiIcon name="upload" :size="13" />
-                <span>上传本地图片/SVG</span>
+                <UiIcon name="camera" :size="13" />
+                <span>选择截图/图片/SVG</span>
               </button>
               <button class="btn sm" type="button" @click="showPresetIcons = !showPresetIcons">
                 <UiIcon name="grid" :size="13" />
-                <span>{{ showPresetIcons ? '收起内置预设' : '选择内置预设' }}</span>
+                <span>{{ showPresetIcons ? '收起内置预设' : '内置预设' }}</span>
               </button>
               <button
                 v-if="renameIcon"
@@ -554,15 +561,19 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       @cancel="cropImageSrc = ''"
     />
 
+    <!-- 全局正下方药丸长条通知 (Toast Pills) -->
     <transition-group name="toast-list" tag="div" class="toast-wrap" role="status" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" role="alert">
-        <span class="t-icon" aria-hidden="true"><UiIcon :name="t.type === 'success' ? 'check' : (t.type === 'error' || t.type === 'warn' ? 'warning' : 'info')" :size="17" /></span>
-        <div class="t-content">
-          <div class="t-head"><span class="t-label">{{ t.label }}</span><span class="t-dot">·</span><span class="t-context">Mnemo</span></div>
-          <div class="t-message">{{ t.msg }}</div>
-        </div>
-        <button class="toast-close" type="button" title="关闭通知" aria-label="关闭通知" @click="dismissToast(t.id)"><UiIcon name="close" :size="14" /></button>
-        <span class="t-timebar" aria-hidden="true"></span>
+        <span class="t-icon" aria-hidden="true">
+          <UiIcon
+            :name="t.type === 'success' ? 'check' : (t.type === 'error' ? 'close' : (t.type === 'warn' ? 'warning' : 'info'))"
+            :size="13"
+          />
+        </span>
+        <span class="t-message">{{ t.msg }}</span>
+        <button class="toast-close" type="button" title="关闭通知" aria-label="关闭通知" @click="dismissToast(t.id)">
+          <UiIcon name="close" :size="11" />
+        </button>
       </div>
     </transition-group>
 

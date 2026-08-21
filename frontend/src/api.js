@@ -59,6 +59,13 @@ export function saveMounted(provider, conn) { return App.SaveMountedAccount(prov
 export function validateMountedWrite(provider, conn) { return App.ValidateMountedWrite(provider, conn) }
 export function removeAccount(userId) { return App.RemoveAccount(userId) }
 export function renameMountedAccount(userId, name) { return App.RenameMountedAccount(userId, name) }
+export function setAccountCustomMeta(userId, customName, customIcon) {
+  const fn = App.SetAccountCustomMeta || (typeof window !== 'undefined' && window.go?.app?.App?.SetAccountCustomMeta)
+  if (typeof fn === 'function') {
+    return fn(userId, customName, customIcon)
+  }
+  return Promise.resolve(null)
+}
 
 export function listDir(userId, driveId, dirId) { return App.ListDir(userId, driveId, dirId) }
 export function search(userId, driveId, kw) { return App.SearchFiles(userId, driveId, kw) }
@@ -205,7 +212,8 @@ function displayAccountText(provider, value) {
 
 export function accountName(acc) {
   if (!acc) return ''
-  // 优先使用用户为该账号设置的本地自定义昵称
+  // 优先使用用户为该账号设置的自定义昵称（账号属性或本地偏好）
+  if (acc.custom_name) return acc.custom_name
   const alias = getAccountAlias(acc.user_id)
   if (alias) return alias
 
@@ -303,10 +311,14 @@ export function providerMetaOf(account, providers) {
   const p = (providers || []).find((x) => x.ID === pid)
   const meta = { ...((p && p.Meta) || { key: pid, label: pid, icon: `drive-icons/${pid}.svg` }) }
 
-  // 1. 用户手动为该账号指定的自定义图标优先
-  const customIcon = getAccountCustomIcon(account.user_id)
+  // 1. 用户手动为该账号指定的自定义图标优先（后端字段或本地存储）
+  const customIcon = account.custom_icon || getAccountCustomIcon(account.user_id)
   if (customIcon) {
-    meta.icon = customIcon.startsWith('drive-icons/') ? customIcon : `drive-icons/${customIcon}`
+    if (customIcon.startsWith('data:') || customIcon.startsWith('blob:') || customIcon.startsWith('http://') || customIcon.startsWith('https://')) {
+      meta.icon = customIcon
+    } else {
+      meta.icon = customIcon.startsWith('drive-icons/') ? customIcon : `drive-icons/${customIcon}`
+    }
     return meta
   }
 
