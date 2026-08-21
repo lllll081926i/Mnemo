@@ -53,3 +53,34 @@ func TestShareExpirationOptionsAreDeclaredExplicitly(t *testing.T) {
 		t.Fatalf("share expiration options = %v, want [0 1 7]", got)
 	}
 }
+
+func TestShareCreationDoesNotRequireRemoteCancellation(t *testing.T) {
+	caps := drive.NewCapabilities("test", map[string]bool{
+		"createShare":     true,
+		"shareExpiration": true,
+		"sharePassword":   true,
+		"combinedShare":   true,
+		"shareHistory":    true,
+	}, func(c *drive.Capabilities) {
+		c.SetShareExpirationOptions(0, 1, 7)
+	})
+	if !caps.CreateShare || !caps.ShareExpiration || !caps.SharePassword || !caps.CombinedShare || !caps.ShareHistory {
+		t.Fatalf("share creation capabilities must be retained: %+v", caps)
+	}
+	if got := caps.ShareExpirationOptions; len(got) != 3 || got[0] != 0 || got[1] != 1 || got[2] != 7 {
+		t.Fatalf("share expiration options = %v, want [0 1 7]", got)
+	}
+
+	for _, registration := range drive.All() {
+		caps := registration.Caps
+		if !caps.CancelCreatedShares {
+			continue
+		}
+		if !caps.ManageCreatedShares {
+			t.Errorf("%s advertises cancellation without created-share management: %+v", registration.ID, caps)
+		}
+		if _, ok := drive.New(registration.ID).(drive.ShareCancellationDriver); !ok {
+			t.Errorf("%s advertises cancellation without a cancellation driver", registration.ID)
+		}
+	}
+}

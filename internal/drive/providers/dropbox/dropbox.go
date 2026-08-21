@@ -41,12 +41,14 @@ func init() {
 		ID:   providerID,
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
-			"search":          true,
-			"createShare":     true,
-			"shareExpiration": true,
-			"sharePassword":   true,
-			"shareHistory":    true,
-			"recycleBin":      true,
+			"search":              true,
+			"createShare":         true,
+			"shareExpiration":     true,
+			"sharePassword":       true,
+			"shareHistory":        true,
+			"manageCreatedShares": true,
+			"cancelCreatedShares": true,
+			"recycleBin":          true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"dropbox"}, nil)
 		}),
@@ -175,9 +177,14 @@ func (c *client) ListPage(ctx context.Context, parentID, cursor string) ([]Metad
 	}
 	var resp listFolderResp
 	err := c.rpc(ctx, "/files/list_folder", map[string]any{
+		// Keep the initial listing payload to the stable fields accepted by both
+		// personal and team accounts. Some Dropbox accounts return a server-side
+		// 500 for include_mounted_folders=true even though a normal root listing
+		// is otherwise valid.
 		"path": path, "recursive": false, "include_media_info": false,
 		"include_deleted": false, "include_has_explicit_shared_members": false,
-		"include_mounted_folders": true, "limit": 500,
+		"include_mounted_folders": false, "include_non_downloadable_files": false,
+		"limit": 2000,
 	}, &resp)
 	if err != nil {
 		return nil, "", false, err
@@ -432,6 +439,17 @@ func (c *client) CreateSharedLink(ctx context.Context, path, expiration, passwor
 		return nil, errors.New("dropbox: 分享接口未返回链接")
 	}
 	return mapSharedLink(link, path, password), nil
+}
+
+// RevokeSharedLink permanently disables a Dropbox shared link. The API uses
+// its URL rather than the opaque link id, so the persisted history keeps both
+// values but the URL is authoritative for this operation.
+func (c *client) RevokeSharedLink(ctx context.Context, shareURL string) error {
+	shareURL = strings.TrimSpace(shareURL)
+	if shareURL == "" {
+		return errors.New("dropbox: 分享链接为空")
+	}
+	return c.rpc(ctx, "/sharing/revoke_shared_link", map[string]any{"url": shareURL}, nil)
 }
 
 func mapSharedLink(l sharedLinkMetadata, path, pwd string) *model.ShareItem {

@@ -24,6 +24,7 @@ import (
 
 const (
 	apiHost        = "https://openapi.alipan.com"
+	nativeAPIHost  = "https://api.aliyundrive.com"
 	profileAPIHost = "https://api.alipan.com"
 	oauthDefault   = "https://api.alistgo.com/alist/ali_open/token"
 	RootID         = "aliopen_root"
@@ -119,18 +120,20 @@ func init() {
 		ID:   providerID,
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
-			"search":          true,
-			"createShare":     true,
-			"shareExpiration": true,
-			"sharePassword":   true,
-			"combinedShare":   true,
-			"shareHistory":    true,
-			"importShare":     true,
-			"copy":            true,
-			"recycleBin":      true,
-			"permanentDelete": true,
-			"trashView":       false,
-			"trashRestore":    false,
+			"search":              true,
+			"createShare":         true,
+			"manageCreatedShares": true,
+			"cancelCreatedShares": true,
+			"shareExpiration":     true,
+			"sharePassword":       true,
+			"combinedShare":       true,
+			"shareHistory":        true,
+			"importShare":         true,
+			"copy":                true,
+			"recycleBin":          true,
+			"permanentDelete":     true,
+			"trashView":           false,
+			"trashRestore":        false,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"sha1"}, []string{"sha1"}).SetConflictPolicies("refuse", "rename", "skip", "overwrite")
 		}),
@@ -659,10 +662,21 @@ func (c *client) apiPost(ctx context.Context, path string, body any, out any) er
 
 // apiPostWith is apiPost with extra headers (e.g. x-share-token).
 func (c *client) apiPostWith(ctx context.Context, path string, body any, out any, extraHeaders map[string]string) error {
-	return c.apiPostWithRetry(ctx, path, body, out, extraHeaders, true)
+	return c.apiPostAtWithRetry(ctx, apiHost, path, body, out, extraHeaders, true)
 }
 
-func (c *client) apiPostWithRetry(ctx context.Context, path string, body any, out any, extraHeaders map[string]string, allowRefresh bool) error {
+// apiPostAt calls a compatible Ali endpoint. It is only used for a narrowly
+// scoped fallback when the documented Open endpoint has been retired by an
+// account region; auth refresh and throttling remain identical to apiPost.
+func (c *client) apiPostAt(ctx context.Context, host, path string, body any, out any) error {
+	return c.apiPostAtWithRetry(ctx, host, path, body, out, nil, true)
+}
+
+func (c *client) apiPostAtWithRetry(ctx context.Context, host, path string, body any, out any, extraHeaders map[string]string, allowRefresh bool) error {
+	host = strings.TrimRight(strings.TrimSpace(host), "/")
+	if host == "" {
+		return errors.New("aliopen: API 地址为空")
+	}
 	hdrs := map[string]string{
 		"Authorization": "Bearer " + c.session.AccessToken,
 		"Content-Type":  "application/json",
@@ -678,7 +692,7 @@ func (c *client) apiPostWithRetry(ctx context.Context, path string, body any, ou
 	var resp *http.Response
 	if err := aliOpenLimiter.run(ctx, func() error {
 		var err error
-		resp, err = c.http.Do(ctx, http.MethodPost, apiHost+path, hdrs, netx.JSONBody(body))
+		resp, err = c.http.Do(ctx, http.MethodPost, host+path, hdrs, netx.JSONBody(body))
 		return err
 	}); err != nil {
 		return err
@@ -695,7 +709,7 @@ func (c *client) apiPostWithRetry(ctx context.Context, path string, body any, ou
 		if err := c.refreshToken(ctx); err != nil {
 			return err
 		}
-		return c.apiPostWithRetry(ctx, path, body, out, extraHeaders, false)
+		return c.apiPostAtWithRetry(ctx, host, path, body, out, extraHeaders, false)
 	}
 	if aliOpenRateLimitResponse(resp.StatusCode, data) {
 		fallback := 5 * time.Second
@@ -999,14 +1013,52 @@ func (c *client) CreateShare(ctx context.Context, scope Scope, fileIDs []string,
 		Status     string `json:"status"`
 		DriveID    string `json:"drive_id"`
 	}
-	if err := c.apiPost(ctx, "/adrive/v1.0/openFile/createShareLink", body, &share); err != nil {
+	err := c.apiPost(ctx, "/adrive/v1.0/openFile/createShareLink", body, &share)
+	if err != nil && aliOpenNotFound(err) {
+		// Some personal-drive regions no longer expose the legacy Open endpoint
+		// but retain the compatible consumer route. Only fall back on a definite
+		// not-found result: retrying another endpoint after any other failure
+		// could create duplicate links.
+		err = c.apiPostAt(ctx, nativeAPIHost, "/adrive/v2/share_link/create", body, &share)
+	}
+	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(share.ShareURL) == "" && strings.TrimSpace(share.ShareID) != "" {
+		share.ShareURL = "https://www.alipan.com/s/" + share.ShareID
 	}
 	return &model.ShareItem{
 		ShareID: share.ShareID, ShareURL: share.ShareURL, ShareMsg: share.ShareMsg,
 		Expiration: share.Expiration, Status: share.Status, DriveID: share.DriveID,
 		ShareName: shareName, SharePwd: password,
 	}, nil
+}
+
+// CancelShare revokes a created share remotely. The legacy Open API is kept
+// first for accounts where creation still uses it; regions that retired that
+// route use the compatible consumer API instead.
+func (c *client) CancelShare(ctx context.Context, shareID string) error {
+	shareID = strings.TrimSpace(shareID)
+	if shareID == "" {
+		return errors.New("aliopen: 取消分享缺少分享标识")
+	}
+	body := map[string]any{"share_id": shareID}
+	err := c.apiPost(ctx, "/adrive/v1.0/openFile/cancelShareLink", body, nil)
+	if err != nil && aliOpenNotFound(err) {
+		err = c.apiPostAt(ctx, nativeAPIHost, "/adrive/v2/share_link/cancel", body, nil)
+	}
+	return err
+}
+
+func aliOpenNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") ||
+		strings.Contains(message, "not_found") ||
+		strings.Contains(message, "http 404") ||
+		strings.Contains(message, "status 404")
 }
 
 type aliOpenUploadPart struct {
@@ -1700,6 +1752,21 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	return item, nil
 }
 
+func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.ShareHistoryEntry) error {
+	shareID := strings.TrimSpace(share.ShareID)
+	if shareID == "" {
+		shareID, _ = parseAliShareURL(share.ShareURL)
+	}
+	if shareID == "" {
+		return errors.New("aliopen: 取消分享缺少分享标识")
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	return cl.CancelShare(ctx, shareID)
+}
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
 		return errors.New("aliopen: 上传文件路径为空")
@@ -2153,8 +2220,9 @@ func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *mod
 		return nil, err
 	}
 	used, total := cl.GetSpaceInfo(ctx)
-	cl.refreshAccountProfile(ctx)
-	// Persist the credential rotation and the profile-check cooldown together.
+	// Avoid a separate profile request during a routine quota refresh. Account
+	// identity comes from the refresh-token response, while the refresh path
+	// stays low-frequency and predictable for provider risk control.
 	cl.persistSession()
 	applyAliOpenProfile(token, sess)
 	applyAliOpenQuota(token, used, total)
@@ -2226,7 +2294,6 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 		return nil, err
 	}
 	used, total := cl.GetSpaceInfo(ctx)
-	cl.refreshAccountProfile(ctx)
 	uid := sess.accountID()
 	if uid == "" {
 		return nil, errors.New("aliopen: 登录成功但未返回账号标识")

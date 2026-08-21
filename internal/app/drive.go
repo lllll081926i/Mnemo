@@ -231,6 +231,31 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 	return item, err
 }
 
+// CancelShare revokes a share on the provider before removing its local
+// history item. It never presents a local-only deletion as a cloud revocation.
+func (a *App) CancelShare(entry model.ShareHistoryEntry) error {
+	userID := strings.TrimSpace(entry.AccountID)
+	driveID := strings.TrimSpace(entry.DriveID)
+	if userID == "" || driveID == "" {
+		return fmt.Errorf("分享记录缺少账号信息，无法取消")
+	}
+	logging.Info("share cancellation started", "account_id", redactID(userID), "share_id", redactID(entry.ShareID))
+	if err := drive.CancelShare(userID, driveID, entry); err != nil {
+		logging.Warn("share cancellation failed", "account_id", redactID(userID), "share_id", redactID(entry.ShareID), "error", err)
+		return err
+	}
+	st, err := a.storeOrError()
+	if err != nil {
+		return fmt.Errorf("云端分享已取消，但无法清理本地记录: %w", err)
+	}
+	if err := st.DeleteShareHistory(userID, entry.ShareID, entry.ShareURL); err != nil {
+		return fmt.Errorf("云端分享已取消，但本地记录清理失败: %w", err)
+	}
+	a.emit("share:history-changed", map[string]string{"account_id": userID, "share_id": entry.ShareID})
+	logging.Info("share cancellation completed", "account_id", redactID(userID), "share_id", redactID(entry.ShareID))
+	return nil
+}
+
 // shouldPersistShareHistory excludes expiring bearer-style URLs. S3
 // presigned links contain an access signature and become stale on expiry, so
 // keeping them in the permanent local share log is both misleading and an

@@ -400,6 +400,56 @@ func TestLanzouShareDownloadAndVideoPreview(t *testing.T) {
 	}
 }
 
+func TestLanzouDownloadFallsBackFromStaleShareDomain(t *testing.T) {
+	withNoThrottle(t)
+	oldDefaults := LANZOU_DEFAULT
+	oldManualClient := manualClient
+	t.Cleanup(func() {
+		LANZOU_DEFAULT = oldDefaults
+		manualClient = oldManualClient
+	})
+
+	stale := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("文件不存在"))
+	}))
+	defer stale.Close()
+
+	var serverURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/doupload.php":
+			_ = json.NewEncoder(w).Encode(map[string]any{"zt": 1, "info": map[string]any{
+				"f_id": "share-1", "isnewd": stale.URL,
+			}})
+		case "/share-1":
+			_, _ = w.Write([]byte(`<iframe src="/download-page"></iframe>`))
+		case "/download-page":
+			_, _ = w.Write([]byte(`<script>var x='/ajaxm.php?file=123';</script><script>var data : {'uid':'u'};</script>`))
+		case "/ajaxm.php":
+			_ = json.NewEncoder(w).Encode(map[string]any{"zt": 1, "dom": serverURL, "url": "direct-1"})
+		case "/file/direct-1":
+			w.Header().Set("Location", serverURL+"/media/file.bin")
+			w.WriteHeader(http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	serverURL = srv.URL
+	LANZOU_DEFAULT.BaseURL = srv.URL
+	LANZOU_DEFAULT.ShareURL = srv.URL
+	manualClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	download, err := (&Driver{}).GetDownloadURL(context.Background(), testCtx("lanzou:u", srv.URL, "cookie1"), "file-1", 0)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	if download.URL != srv.URL+"/media/file.bin" || download.Headers["Referer"] != srv.URL+"/" {
+		t.Fatalf("download = %+v", download)
+	}
+}
+
 func TestLanzouMoveRejectsCachedFolder(t *testing.T) {
 	const userID = "lanzou_move-cache-test"
 	const driveID = "lanzou:move-cache-test"

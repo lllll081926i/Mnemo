@@ -38,6 +38,9 @@ func lanzouResolveShareDownload(ctx context.Context, shareID, pwd, shareBase, co
 		return shareDownload{}, err
 	}
 	pageData := removeJSComment(removeNotes(page.text))
+	if page.status == http.StatusNotFound {
+		return shareDownload{}, errors.New("分享链接不存在或已失效")
+	}
 	if strings.Contains(pageData, "取消分享") || strings.Contains(pageData, "文件链接失效") {
 		return shareDownload{}, errors.New("分享已取消或链接失效")
 	}
@@ -204,18 +207,33 @@ func (d *Driver) downloadInfo(ctx context.Context, c drive.Context, fileID strin
 	}
 	fid := strOf(firstOf(info, "f_id", "fid", "id"))
 	pwd := strOf(firstOf(info, "pwd"))
-	isnewd := strOf(firstOf(info, "isnewd"))
-	if isnewd == "" {
-		isnewd = LANZOU_DEFAULT.ShareURL
-	}
 	if fid == "" {
 		return downloadInfo{Error: "无法获取分享信息"}
 	}
 	size := lanzouSizeOf(firstOf(info, "size", "file_size", "filesize", "f_size"))
 	cookie, _, _, _ := sessionOf(c)
-	res, err := lanzouResolveShareDownload(ctx, fid, pwd, isnewd, cookie)
-	if err != nil {
-		return downloadInfo{Error: err.Error()}
+	var (
+		res       shareDownload
+		shareBase string
+		lastErr   error
+	)
+	for _, candidate := range lanzouShareBaseCandidates(strOf(firstOf(info, "isnewd"))) {
+		resolved, err := lanzouResolveShareDownload(ctx, fid, pwd, candidate, cookie)
+		if err == nil {
+			res = resolved
+			shareBase = candidate
+			break
+		}
+		lastErr = err
+		if !isUnavailableLanzouShare(err) {
+			break
+		}
+	}
+	if shareBase == "" {
+		if lastErr == nil {
+			lastErr = errors.New("未解析到下载地址")
+		}
+		return downloadInfo{Error: lastErr.Error()}
 	}
 	return downloadInfo{
 		URL:  res.url,
@@ -223,7 +241,35 @@ func (d *Driver) downloadInfo(ctx context.Context, c drive.Context, fileID strin
 		Headers: map[string]string{
 			"User-Agent":      LANZOU_DEFAULT.UserAgent,
 			"Accept-Language": "zh-CN,zh;q=0.9",
-			"Referer":         isnewd + "/",
+			"Referer":         shareBase + "/",
 		},
 	}
+}
+
+func lanzouShareBaseCandidates(primary string) []string {
+	seen := make(map[string]struct{}, 2)
+	bases := make([]string, 0, 2)
+	for _, candidate := range []string{primary, LANZOU_DEFAULT.ShareURL} {
+		candidate = strings.TrimSuffix(strings.TrimSpace(candidate), "/")
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		bases = append(bases, candidate)
+	}
+	return bases
+}
+
+func isUnavailableLanzouShare(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "文件不存在") ||
+		strings.Contains(message, "分享链接不存在") ||
+		strings.Contains(message, "file not found") ||
+		strings.Contains(message, "http 404")
 }

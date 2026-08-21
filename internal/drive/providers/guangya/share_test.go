@@ -79,6 +79,36 @@ func TestCreateShareUsesGuangyaShareAPI(t *testing.T) {
 	}
 }
 
+func TestGuangyaCancelShareDeletesRemoteShare(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	netx.TestTransportHook = guangyaRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "api.guangyapan.com" || req.URL.Path != guangyaDeleteSharePath {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.String())
+		}
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if strings.Join(body.IDs, ",") != "share-guangya" {
+			return nil, fmt.Errorf("delete body = %+v", body)
+		}
+		return guangyaResponse(req, http.StatusOK, `{"code":0,"data":{}}`), nil
+	})
+
+	sess := &Session{AccessToken: "access-token", RefreshToken: "refresh-token", DeviceID: "device-test", ClientID: "client-test"}
+	err := (&Driver{}).CancelShare(context.Background(), drive.Context{
+		UserID: "guangya:user", DriveID: "guangya:user",
+		Token: &model.TokenInfo{AccessToken: sess.AccessToken, RefreshToken: mustJSON(sess)},
+	}, model.ShareHistoryEntry{ShareID: "share-guangya"})
+	if err != nil {
+		t.Fatalf("CancelShare() error = %v", err)
+	}
+}
+
 func TestGuangyaShareDurationRejectsInvalidValue(t *testing.T) {
 	if _, err := guangyaShareDuration("not-a-time"); err == nil {
 		t.Fatal("invalid duration must be rejected")

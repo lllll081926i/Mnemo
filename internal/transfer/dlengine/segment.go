@@ -47,9 +47,13 @@ type Options struct {
 	ChunkSize   int64 // range chunk size
 	MinSize     int64 // files smaller than this use a single stream
 	MaxSpeed    int64 // global speed cap in bytes/s (0 = unlimited)
-	Limiter     RateLimiter
-	Headers     map[string]string
-	UserAgent   string
+	// ExpectedSize is optional provider metadata. It is used only when the
+	// download server omits Content-Length, so a chunked response can still
+	// report progress and be verified after a single-stream download.
+	ExpectedSize int64
+	Limiter      RateLimiter
+	Headers      map[string]string
+	UserAgent    string
 	// RequestAuth runs after static headers are applied, once per outbound
 	// request. It is used for request-bound schemes such as HTTP Digest.
 	RequestAuth func(*http.Request) error
@@ -202,6 +206,9 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	total, acceptRanges, validator, err := probe(ctx, hc, opts, url)
 	if err != nil {
 		return err
+	}
+	if total <= 0 && opts.ExpectedSize > 0 {
+		total = opts.ExpectedSize
 	}
 
 	urlHash := urlFingerprint(url)
@@ -413,7 +420,10 @@ func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int6
 		return 0, false, resourceValidator{}, fmt.Errorf("dlengine: probe http %d", resp.StatusCode)
 	}
 	if total <= 0 {
-		return 0, false, resourceValidator{}, errors.New("dlengine: unknown file size")
+		// Chunked CDN responses legitimately omit Content-Length. They cannot
+		// be resumed or split safely, but a regular single-stream download is
+		// still valid. The caller may supply ExpectedSize for progress display.
+		return 0, false, validator, nil
 	}
 	return total, acceptRanges, validator, nil
 }

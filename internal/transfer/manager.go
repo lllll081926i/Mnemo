@@ -489,6 +489,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	}
 	t.URL = url
 	t.Updated = time.Now().Unix()
+	opts.ExpectedSize = t.Size
 	m.mu.Unlock()
 	opts.Headers = headers
 	opts.RequestAuth = requestAuth
@@ -498,6 +499,9 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	progress := func(p dlengine.Progress) {
 		m.mu.Lock()
 		t.Downloaded = p.Downloaded
+		if p.Total > 0 {
+			t.Size = p.Total
+		}
 		t.Speed = p.Speed
 		t.Progress = p.Percent
 		t.Updated = time.Now().Unix()
@@ -518,6 +522,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			if fresh.Size > 0 {
 				t.Size = fresh.Size
 			}
+			opts.ExpectedSize = t.Size
 			m.mu.Unlock()
 			if fresh.ForceLocalProxy || fresh.DownloadMode == "proxy" {
 				opts.Concurrency = 1
@@ -547,6 +552,9 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	} else {
 		if !removed && t.Status != "canceled" && t.Status != "paused" {
 			t.Status = "completed"
+			if t.Size <= 0 && t.Downloaded > 0 {
+				t.Size = t.Downloaded
+			}
 			t.Downloaded = t.Size
 			t.Progress = 100
 		}

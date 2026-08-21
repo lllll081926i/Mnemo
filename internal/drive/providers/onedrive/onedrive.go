@@ -22,11 +22,13 @@ func init() {
 		ID:   providerID,
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
-			"search":          true,
-			"createShare":     true,
-			"shareExpiration": true,
-			"sharePassword":   true,
-			"shareHistory":    true,
+			"search":              true,
+			"createShare":         true,
+			"shareExpiration":     true,
+			"sharePassword":       true,
+			"shareHistory":        true,
+			"manageCreatedShares": true,
+			"cancelCreatedShares": true,
 			// Graph DELETE moves an item to the recycle bin. This provider does
 			// not expose a permanent-delete endpoint through the current API.
 			"recycleBin":      true,
@@ -59,6 +61,33 @@ func clientOf(c drive.Context) (*client, error) {
 	return newClient(c.Token.AccessToken), nil
 }
 
+// isGraphAuthenticationFailure only matches the token failures for which a
+// refresh-token retry is safe. Other 401 responses can be caused by tenant,
+// scope, or administrator policy and must remain visible to the caller.
+func isGraphAuthenticationFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "http 401") &&
+		(strings.Contains(message, "invalidauthenticationtoken") ||
+			strings.Contains(message, "invalid authentication token"))
+}
+
+// refreshedClientAfterGraphAuthFailure rotates a stale Graph access token once
+// and returns a client built from the new value. Context.Token is a pointer, so
+// the ops facade persists the rotated credentials after the original operation
+// returns.
+func refreshedClientAfterGraphAuthFailure(ctx context.Context, c drive.Context, requestErr error) (*client, error) {
+	if !isGraphAuthenticationFailure(requestErr) {
+		return nil, requestErr
+	}
+	if err := refreshOneDriveAccessToken(ctx, c.Token); err != nil {
+		return nil, fmt.Errorf("onedrive: 目录请求鉴权失败（%v），刷新访问令牌失败: %w", requestErr, err)
+	}
+	return newClient(c.Token.AccessToken), nil
+}
+
 func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *drive.ListOptions) ([]model.File, error) {
 	cl, err := clientOf(c)
 	if err != nil {
@@ -66,7 +95,14 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 	}
 	items, err := cl.List(ctx, dirID)
 	if err != nil {
-		return nil, err
+		cl, retryErr := refreshedClientAfterGraphAuthFailure(ctx, c, err)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		items, err = cl.List(ctx, dirID)
+		if err != nil {
+			return nil, fmt.Errorf("onedrive: 刷新令牌后目录请求仍失败: %w", err)
+		}
 	}
 	return mapItems(items, c.DriveID, dirID), nil
 }
@@ -78,7 +114,14 @@ func (d *Driver) ListPaged(ctx context.Context, c drive.Context, dirID, marker s
 	}
 	items, next, err := cl.ListPage(ctx, dirID, marker)
 	if err != nil {
-		return nil, err
+		cl, retryErr := refreshedClientAfterGraphAuthFailure(ctx, c, err)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		items, next, err = cl.ListPage(ctx, dirID, marker)
+		if err != nil {
+			return nil, fmt.Errorf("onedrive: 刷新令牌后目录请求仍失败: %w", err)
+		}
 	}
 	return &drive.DirPage{Items: mapItems(items, c.DriveID, dirID), NextMarker: next}, nil
 }
@@ -291,6 +334,22 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	return item, nil
 }
 
+// CancelShare removes the Graph permission returned by createLink, which
+// immediately invalidates the corresponding anonymous sharing URL.
+func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.ShareHistoryEntry) error {
+	if strings.TrimSpace(share.FileID) == "" {
+		return errors.New("onedrive: 分享记录缺少文件标识")
+	}
+	if strings.TrimSpace(share.ShareID) == "" {
+		return errors.New("onedrive: 分享记录缺少权限标识")
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	return cl.DeletePermission(ctx, share.FileID, share.ShareID)
+}
+
 // UploadOneFile uploads one file (simple PUT for small, upload session for large).
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
@@ -406,6 +465,55 @@ func refreshOneDriveToken(ctx context.Context, clientID, clientSecret, refreshTo
 	}, nil
 }
 
+// refreshOneDriveAccessToken renews only the OAuth session. It deliberately
+// does not fetch /me or /me/drive: this helper is used by an in-flight file
+// operation and must not turn one transparent retry into several background
+// account requests.
+func refreshOneDriveAccessToken(ctx context.Context, token *model.TokenInfo) error {
+	if token == nil {
+		return errors.New("OneDrive 未登录")
+	}
+	refreshToken := strings.TrimSpace(token.RefreshToken)
+	if refreshToken == "" {
+		return errors.New("onedrive: missing refresh_token")
+	}
+	configuredID := strings.TrimSpace(drive.Secret("onedrive_client_id"))
+	clientID := strings.TrimSpace(token.DeviceID)
+	// Older builds stored the literal "mnemo" instead of the client id.
+	// Treat it as unset so existing accounts fall back to the configured or
+	// bundled rclone-compatible application.
+	if clientID == "" || clientID == "mnemo" {
+		clientID = configuredID
+	}
+	clientID, clientSecret := resolveCredentials(clientID, "", configuredID, "")
+
+	fresh, err := refreshOneDriveToken(ctx, clientID, clientSecret, refreshToken)
+	if err != nil {
+		return err
+	}
+
+	// Preserve fields that the token endpoint does not return.
+	token.AccessToken = fresh.AccessToken
+	if fresh.RefreshToken != "" {
+		token.RefreshToken = fresh.RefreshToken
+	}
+	expiresIn := fresh.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = token.ExpiresIn
+	}
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	token.ExpiresIn = expiresIn
+	token.ExpireTime = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
+	if fresh.TokenType != "" {
+		token.TokenType = fresh.TokenType
+	}
+	token.TokenFrom = providerID
+	token.DeviceID = clientID
+	return nil
+}
+
 // fetchOneDriveProfile queries /me and /me/drive to populate the token's
 // UserName, quota, and drive id.
 func fetchOneDriveProfile(ctx context.Context, accessToken string, tok *model.TokenInfo) {
@@ -457,47 +565,9 @@ func fetchOneDriveProfile(ctx context.Context, accessToken string, tok *model.To
 // refresh_token, then fetches account profile and drive quota to update the
 // token metadata.
 func (d *Driver) RefreshAccount(ctx context.Context, c drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
-	if token == nil {
-		return nil, errors.New("OneDrive 未登录")
-	}
-	refreshToken := strings.TrimSpace(token.RefreshToken)
-	if refreshToken == "" {
-		return nil, errors.New("onedrive: missing refresh_token")
-	}
-	configuredID := strings.TrimSpace(drive.Secret("onedrive_client_id"))
-	clientID := strings.TrimSpace(token.DeviceID)
-	// Older builds stored the literal "mnemo" instead of the client id.
-	// Treat it as unset so existing accounts fall back to the configured or
-	// bundled rclone-compatible application.
-	if clientID == "" || clientID == "mnemo" {
-		clientID = configuredID
-	}
-	clientID, clientSecret := resolveCredentials(clientID, "", configuredID, "")
-
-	fresh, err := refreshOneDriveToken(ctx, clientID, clientSecret, refreshToken)
-	if err != nil {
+	if err := refreshOneDriveAccessToken(ctx, token); err != nil {
 		return nil, err
 	}
-
-	// preserve fields not returned by the token endpoint
-	token.AccessToken = fresh.AccessToken
-	if fresh.RefreshToken != "" {
-		token.RefreshToken = fresh.RefreshToken
-	}
-	expiresIn := fresh.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = token.ExpiresIn
-	}
-	if expiresIn <= 0 {
-		expiresIn = 3600
-	}
-	token.ExpiresIn = expiresIn
-	token.ExpireTime = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
-	if fresh.TokenType != "" {
-		token.TokenType = fresh.TokenType
-	}
-	token.TokenFrom = providerID
-	token.DeviceID = clientID
 
 	// update account info + quota (non-blocking on error)
 	fetchOneDriveProfile(ctx, token.AccessToken, token)

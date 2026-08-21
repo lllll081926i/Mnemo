@@ -191,3 +191,105 @@ func TestCreateShareUsesAliOpenAPI(t *testing.T) {
 		t.Fatal("Ali Open supports multi-file shares and must advertise combinedShare")
 	}
 }
+
+func TestCreateShareFallsBackToNativeRouteOnlyAfterNotFound(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	var calls []string
+	netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		calls = append(calls, req.URL.Host+req.URL.Path)
+		switch {
+		case req.URL.Host == "openapi.alipan.com" && req.URL.Path == "/adrive/v1.0/openFile/createShareLink":
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"code":"NotFound","message":"not found"}`)),
+				Request:    req,
+			}, nil
+		case req.URL.Host == "api.aliyundrive.com" && req.URL.Path == "/adrive/v2/share_link/create":
+			var body struct {
+				DriveID string   `json:"drive_id"`
+				FileIDs []string `json:"file_id_list"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Errorf("decode fallback body: %v", err)
+			}
+			if body.DriveID != "drive-1" || strings.Join(body.FileIDs, ",") != "file-1" {
+				t.Errorf("fallback share body = %+v", body)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"share_id":"share-fallback"}`)),
+				Request:    req,
+			}, nil
+		default:
+			t.Errorf("unexpected request %s %s", req.Method, req.URL)
+			return &http.Response{StatusCode: http.StatusInternalServerError, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: req}, nil
+		}
+	})
+
+	sess := &Session{AccessToken: "access-token", DriveID: "drive-1"}
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
+		UserID: "aliopen:user", DriveID: "aliopen:user",
+		Token: &model.TokenInfo{AccessToken: sess.AccessToken, RefreshToken: mustJSON(sess)},
+	}, drive.ShareParams{FileIDs: []string{"b:file-1"}})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if strings.Join(calls, ",") != "openapi.alipan.com/adrive/v1.0/openFile/createShareLink,api.aliyundrive.com/adrive/v2/share_link/create" {
+		t.Fatalf("calls = %v", calls)
+	}
+	if item.ShareID != "share-fallback" || item.ShareURL != "https://www.alipan.com/s/share-fallback" {
+		t.Fatalf("fallback share = %+v", item)
+	}
+}
+
+func TestAliOpenCancelShareFallsBackToNativeRoute(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	var calls []string
+	netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		calls = append(calls, req.URL.Host+req.URL.Path)
+		switch {
+		case req.URL.Host == "openapi.alipan.com" && req.URL.Path == "/adrive/v1.0/openFile/cancelShareLink":
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"code":"NotFound","message":"not found"}`)),
+				Request:    req,
+			}, nil
+		case req.URL.Host == "api.aliyundrive.com" && req.URL.Path == "/adrive/v2/share_link/cancel":
+			var body struct {
+				ShareID string `json:"share_id"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Errorf("decode cancel body: %v", err)
+			}
+			if body.ShareID != "share-ali" {
+				t.Errorf("cancel body = %+v", body)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: req}, nil
+		default:
+			t.Errorf("unexpected request %s %s", req.Method, req.URL)
+			return &http.Response{StatusCode: http.StatusInternalServerError, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: req}, nil
+		}
+	})
+
+	sess := &Session{AccessToken: "access-token", DriveID: "drive-1"}
+	err := (&Driver{}).CancelShare(context.Background(), drive.Context{
+		UserID: "aliopen:user", DriveID: "aliopen:user",
+		Token: &model.TokenInfo{AccessToken: sess.AccessToken, RefreshToken: mustJSON(sess)},
+	}, model.ShareHistoryEntry{ShareID: "share-ali"})
+	if err != nil {
+		t.Fatalf("CancelShare() error = %v", err)
+	}
+	if strings.Join(calls, ",") != "openapi.alipan.com/adrive/v1.0/openFile/cancelShareLink,api.aliyundrive.com/adrive/v2/share_link/cancel" {
+		t.Fatalf("calls = %v", calls)
+	}
+	if !(&Driver{}).Capabilities().CancelCreatedShares {
+		t.Fatal("Ali Open must advertise cancelCreatedShares")
+	}
+}

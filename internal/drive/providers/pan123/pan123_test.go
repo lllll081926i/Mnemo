@@ -402,15 +402,17 @@ func TestFormatPan123Time(t *testing.T) {
 }
 
 func TestFormatPan123Expiration(t *testing.T) {
-	if formatPan123Expiration("") != "" {
-		t.Fatal("empty expiration must stay empty")
+	if got := formatPan123Expiration(""); got != pan123PermanentShareExpiration {
+		t.Fatalf("permanent expiration = %q", got)
 	}
 	if formatPan123Expiration("not-a-date") != "" {
 		t.Fatal("invalid expiration must be empty")
 	}
-	// no-zone value parses as local, formats back identically
-	if got := formatPan123Expiration("2026-03-04 05:06:07"); got != "2026-03-04 05:06:07" {
-		t.Fatalf("round trip = %q", got)
+	// Zone-less values are interpreted as local time and normalized to the API's
+	// explicit UTC+08:00 form.
+	want := time.Date(2026, 3, 4, 5, 6, 7, 0, time.Local).In(time.FixedZone("CST", 8*60*60)).Format(time.RFC3339)
+	if got := formatPan123Expiration("2026-03-04 05:06:07"); got != want {
+		t.Fatalf("round trip = %q, want %q", got, want)
 	}
 }
 
@@ -547,11 +549,14 @@ func TestCreateShareUsesPan123API(t *testing.T) {
 	t.Cleanup(func() { netx.TestTransportHook = previous })
 
 	netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost || req.URL.Host != "yun.123pan.com" || req.URL.Path != "/b/api/share/create" {
+		if req.Method != http.MethodPost || req.URL.Host != "www.123pan.com" || req.URL.Path != "/a/api/share/create" {
 			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
 		}
 		if req.Header.Get("Authorization") != "Bearer access-token" {
 			return nil, errors.New("123 share request missing authorization")
+		}
+		if req.Header.Get("Origin") != "https://www.123pan.com" || req.Header.Get("Referer") != "https://www.123pan.com/" {
+			return nil, fmt.Errorf("123 share origin headers = origin:%q referer:%q", req.Header.Get("Origin"), req.Header.Get("Referer"))
 		}
 		query := req.URL.Query()
 		if len(query) != 1 {
@@ -563,15 +568,16 @@ func TestCreateShareUsesPan123API(t *testing.T) {
 			}
 		}
 		var body struct {
-			FileIDs        []int64 `json:"fileIdList"`
-			ShareName      string  `json:"shareName"`
-			SharePwd       string  `json:"sharePwd"`
-			ExpirationTime string  `json:"expirationTime"`
+			FileIDs    string `json:"fileIdList"`
+			ShareName  string `json:"shareName"`
+			SharePwd   string `json:"sharePwd"`
+			Expiration string `json:"expiration"`
+			Event      string `json:"event"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			return nil, err
 		}
-		if len(body.FileIDs) != 2 || body.FileIDs[0] != 101 || body.FileIDs[1] != 202 || body.ShareName != "测试分享" || body.SharePwd != "p4ss" || body.ExpirationTime == "" {
+		if body.FileIDs != "101,202" || body.ShareName != "测试分享" || body.SharePwd != "p4ss" || body.Expiration == "" || body.Event != "shareCreate" {
 			return nil, fmt.Errorf("share body = %+v", body)
 		}
 		return &http.Response{
@@ -592,7 +598,7 @@ func TestCreateShareUsesPan123API(t *testing.T) {
 		t.Fatalf("share = %+v", item)
 	}
 	if !(&Driver{}).Capabilities().CombinedShare {
-		t.Fatal("123 云盘 supports multi-file shares and must advertise combinedShare")
+		t.Fatal("123 云盘支持多文件分享，必须保留创建分享能力")
 	}
 }
 

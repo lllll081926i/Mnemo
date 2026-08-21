@@ -87,6 +87,7 @@ export function download(userId, driveId, file) { return App.DownloadFile(userId
 export function pinFileSnapshot(userId, driveId, file) { return App.PinFileSnapshot(userId, driveId, file) }
 export function downloadUrl(name, url, headers) { return App.DownloadURL(name, url, headers) }
 export function createShare(userId, driveId, params) { return App.CreateShare(userId, driveId, params) }
+export function cancelShare(entry) { return App.CancelShare(entry) }
 export function uploadFiles(userId, driveId, parentId, conflictPolicy, paths) { return App.UploadFiles(userId, driveId, parentId, conflictPolicy, paths) }
 export function validateUploadFiles(userId, driveId, paths) { return App.ValidateUploadFiles(userId, driveId, paths) }
 export function saveCloudText(userId, driveId, parentId, fileName, content) { return App.SaveCloudTextFile(userId, driveId, parentId, fileName, content) }

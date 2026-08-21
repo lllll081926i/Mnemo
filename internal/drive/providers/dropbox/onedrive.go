@@ -246,6 +246,16 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	return item, nil
 }
 
+// CancelShare revokes the remote Dropbox link instead of only forgetting the
+// local record.
+func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.ShareHistoryEntry) error {
+	cl, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	return cl.RevokeSharedLink(ctx, share.ShareURL)
+}
+
 // UploadOneFile uploads one file.
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {

@@ -18,6 +18,10 @@ export function CancelMigrate(arg1) {
   return window['go']['app']['App']['CancelMigrate'](arg1);
 }
 
+export function CancelShare(arg1) {
+  return window['go']['app']['App']['CancelShare'](arg1);
+}
+
 export function CancelSync(arg1) {
   return window['go']['app']['App']['CancelSync'](arg1);
 }

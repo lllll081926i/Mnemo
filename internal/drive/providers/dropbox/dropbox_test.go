@@ -82,6 +82,30 @@ func TestCreateShareUsesDropboxSharingAPI(t *testing.T) {
 	}
 }
 
+func TestDropboxCancelShareRevokesRemoteLink(t *testing.T) {
+	withDropboxTransport(t, dropboxRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "api.dropboxapi.com" || dropboxAPIPath(req) != "/sharing/revoke_shared_link" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
+		}
+		if req.Header.Get("Authorization") != "Bearer access-token" {
+			return nil, fmt.Errorf("authorization = %q", req.Header.Get("Authorization"))
+		}
+		var body map[string]string
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if body["url"] != "https://www.dropbox.com/s/share-1" {
+			return nil, fmt.Errorf("revoke body = %#v", body)
+		}
+		return dropboxResponse(req, http.StatusOK, ``), nil
+	}))
+
+	err := (&Driver{}).CancelShare(context.Background(), drive.Context{Token: &model.TokenInfo{AccessToken: "access-token"}}, model.ShareHistoryEntry{ShareURL: "https://www.dropbox.com/s/share-1"})
+	if err != nil {
+		t.Fatalf("CancelShare() error = %v", err)
+	}
+}
+
 func TestDropboxRedirectURIUsesRcloneCompatibleDefault(t *testing.T) {
 	spec, err := resolveRedirectURI(nil)
 	if err != nil {
@@ -254,6 +278,26 @@ func TestDropboxListRetriesTransientServerError(t *testing.T) {
 	}
 	if calls != 2 || len(items) != 1 || items[0].ID != "id:file" {
 		t.Fatalf("list calls/items = %d/%+v", calls, items)
+	}
+}
+
+func TestDropboxListUsesConservativeFolderPayload(t *testing.T) {
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if dropboxAPIPath(r) != "/files/list_folder" {
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if body["path"] != "" || body["include_mounted_folders"] != false || body["include_non_downloadable_files"] != false || body["limit"] != float64(2000) {
+			return nil, fmt.Errorf("list payload = %#v", body)
+		}
+		return dropboxResponse(r, http.StatusOK, `{"entries":[],"has_more":false}`), nil
+	}))
+
+	if _, err := newClient("access").List(context.Background(), RootID); err != nil {
+		t.Fatalf("List returned error: %v", err)
 	}
 }
 

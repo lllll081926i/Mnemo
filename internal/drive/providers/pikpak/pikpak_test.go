@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -238,5 +239,35 @@ func TestCreateShareUsesPikPakDriveAPI(t *testing.T) {
 	}
 	if item.ShareID != "share-pikpak" || item.ShareURL != "https://mypikpak.com/s/share-pikpak" || item.SharePwd != "p4ss" || len(item.FileIDList) != 2 {
 		t.Fatalf("share = %+v", item)
+	}
+}
+
+func TestPikPakCancelShareUsesBatchDelete(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	netx.TestTransportHook = pikpakRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "api-drive.mypikpak.com" || req.URL.Path != "/drive/v1/share:batchDelete" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
+		}
+		if req.Header.Get("Authorization") != "Bearer access-token" || req.Header.Get("X-Device-Id") != "device-test" {
+			return nil, errors.New("PikPak cancellation missing authentication headers")
+		}
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if strings.Join(body.IDs, ",") != "share-pikpak" {
+			return nil, fmt.Errorf("cancellation body = %+v", body)
+		}
+		return pikpakResponse(req, http.StatusOK, `{}`), nil
+	})
+
+	err := (&Driver{}).CancelShare(context.Background(), drive.Context{
+		Token: &model.TokenInfo{AccessToken: "access-token", DeviceID: "device-test", ProviderAccountID: "account-test"},
+	}, model.ShareHistoryEntry{ShareID: "share-pikpak"})
+	if err != nil {
+		t.Fatalf("CancelShare() error = %v", err)
 	}
 }

@@ -45,7 +45,7 @@ const (
 	apiTrash      = apiMain + "/file/trash"
 	apiDelete     = apiMain + "/file/delete"
 	apiShare      = apiMain + "/file/share_create" // 实际为 /share/create
-	apiShareURL   = "https://yun.123pan.com/b/api/share/create"
+	apiShareURL   = "https://www.123pan.com/a/api/share/create"
 	apiShareGet   = apiMain + "/share/get"
 	apiFileAsync  = apiMain + "/file/async"
 	apiFileDetail = apiMain + "/file/info"
@@ -60,6 +60,10 @@ const (
 )
 
 const providerID = model.ProviderPan123
+
+// The current /a/api/share/create route requires an explicit expiration. The
+// official web client represents a permanent link with this far-future value.
+const pan123PermanentShareExpiration = "2099-12-12T08:00:00+08:00"
 
 func init() {
 	drive.Register(drive.Registration{
@@ -253,6 +257,10 @@ func (a *apiClient) do(ctx context.Context, method, rawURL string, body any, que
 		finalURL = u.String()
 	}
 	headers := pan123Headers(a.token)
+	if parsed, parseErr := url.Parse(finalURL); parseErr == nil && strings.EqualFold(parsed.Hostname(), "www.123pan.com") {
+		headers["origin"] = "https://www.123pan.com"
+		headers["referer"] = "https://www.123pan.com/"
+	}
 	var resp *http.Response
 	var err error
 	if method == http.MethodGet {
@@ -1379,16 +1387,19 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 
 // ---- share (legacy share.ts) ----
 
-// formatPan123Expiration renders expiration as local 'yyyy-MM-dd HH:mm:ss'.
+// formatPan123Expiration normalizes a selected expiration for the current
+// /a/api/share/create contract. An empty selection means a long-lived link;
+// an invalid non-empty value remains empty so CreateShare can reject it before
+// sending a malformed request.
 func formatPan123Expiration(value string) string {
-	if value == "" {
-		return ""
+	if strings.TrimSpace(value) == "" {
+		return pan123PermanentShareExpiration
 	}
 	t := parseFlexibleTime(value)
 	if t.IsZero() {
 		return ""
 	}
-	return formatPan123Time(t)
+	return t.In(time.FixedZone("CST", 8*60*60)).Format(time.RFC3339)
 }
 
 // formatPan123Time renders a time in local wall clock yyyy-MM-dd HH:mm:ss.
@@ -1435,24 +1446,25 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	if shareName == "" {
 		shareName = "分享文件"
 	}
-	fileIDs := make([]int64, 0, len(params.FileIDs))
+	fileIDs := make([]string, 0, len(params.FileIDs))
 	for _, id := range params.FileIDs {
-		fileIDs = append(fileIDs, toPan123Number(id))
+		fileID := toPan123Number(id)
+		if fileID <= 0 {
+			return nil, fmt.Errorf("创建分享失败：无效文件 ID %q", id)
+		}
+		fileIDs = append(fileIDs, strconv.FormatInt(fileID, 10))
+	}
+	expiration := formatPan123Expiration(params.Expiration)
+	if expiration == "" {
+		return nil, errors.New("创建分享失败：有效期格式无效")
 	}
 	body := map[string]any{
-		"driveId":            0,
-		"fileIdList":         fileIDs,
-		"displayStatus":      1,
-		"expirationTime":     formatPan123Expiration(params.Expiration),
-		"isReward":           false,
-		"isEvent":            false,
-		"event":              "shareCreateFile",
-		"shareName":          shareName,
-		"sharePwd":           params.Password,
-		"trafficLimit":       0,
-		"trafficLimitSwitch": false,
-		"renamable":          false,
-		"renameMode":         0,
+		"driveId":    0,
+		"expiration": expiration,
+		"fileIdList": strings.Join(fileIDs, ","),
+		"shareName":  shareName,
+		"sharePwd":   params.Password,
+		"event":      "shareCreate",
 	}
 	resp, err := d.api(ctx, c, http.MethodPost, apiShareURL, body, nil)
 	if err != nil {

@@ -210,6 +210,37 @@ func TestDownloadContinuesAfterServerClampsRange(t *testing.T) {
 	}
 }
 
+func TestDownloadAllowsChunkedResponseWithoutContentLength(t *testing.T) {
+	payload := bytes.Repeat([]byte("mnemo"), 900)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Flushing before writing makes net/http use chunked transfer encoding
+		// instead of synthesizing a Content-Length header.
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	var progress Progress
+	path := filepath.Join(t.TempDir(), "chunked.bin")
+	err := Download(context.Background(), Options{ExpectedSize: int64(len(payload))}, server.URL, path, func(p Progress) {
+		progress = p
+	})
+	if err != nil {
+		t.Fatalf("Download returned error: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("downloaded content differs from source payload")
+	}
+	if progress.Downloaded != int64(len(payload)) || progress.Total != int64(len(payload)) || progress.Percent != 100 {
+		t.Fatalf("final progress = %+v", progress)
+	}
+}
+
 func TestSpeedEstimatorSmoothsShortIdleGap(t *testing.T) {
 	started := time.Unix(0, 0)
 	estimator := newSpeedEstimator(started, 0)

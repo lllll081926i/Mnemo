@@ -258,6 +258,16 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	}, nil
 }
 
+// CancelShare invalidates the remote PikPak sharing link before the app drops
+// its local history record.
+func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.ShareHistoryEntry) error {
+	cl, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	return cl.DeleteShare(ctx, share.ShareID)
+}
+
 func (c *client) findUploadConflict(ctx context.Context, parentID, name string) (*File, error) {
 	items, err := c.List(ctx, rootID(parentID), false)
 	if err != nil {

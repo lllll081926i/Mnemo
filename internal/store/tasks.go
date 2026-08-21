@@ -2,6 +2,7 @@ package store
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"mnemo-go/internal/logging"
@@ -152,6 +153,38 @@ func (s *Store) ListShareHistory(userID string) ([]model.ShareHistoryEntry, erro
 		}
 	}
 	return out, nil
+}
+
+// DeleteShareHistory removes the local record only after its remote share has
+// been revoked. ShareID is authoritative; legacy records without it fall back
+// to the share URL. Account ID is always part of the match so equal provider
+// ids in multiple accounts cannot remove each other.
+func (s *Store) DeleteShareHistory(accountID, shareID, shareURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.ShareHistoryEntry
+	err := s.readJSON(shareHistoryFile, &list)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	shareID = strings.TrimSpace(shareID)
+	shareURL = strings.TrimSpace(shareURL)
+	out := list[:0]
+	for _, entry := range list {
+		match := entry.AccountID == accountID
+		if match && shareID != "" {
+			match = entry.ShareID == shareID
+		} else if match {
+			match = shareURL != "" && entry.ShareURL == shareURL
+		}
+		if !match {
+			out = append(out, entry)
+		}
+	}
+	return s.writeJSONUnlocked(shareHistoryFile, out)
 }
 
 // Offline tasks persistence.

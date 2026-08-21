@@ -410,6 +410,42 @@ func TestShareHistoryReadsDuringConcurrentSaves(t *testing.T) {
 	}
 }
 
+func TestDeleteShareHistoryKeepsOtherAccountAndEntries(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []model.ShareHistoryEntry{
+		{ShareID: "share-1", AccountID: "account-a", ShareURL: "https://example/a"},
+		{ShareID: "share-2", AccountID: "account-a", ShareURL: "https://example/b"},
+		{ShareID: "share-1", AccountID: "account-b", ShareURL: "https://example/c"},
+		{ShareID: "", AccountID: "account-a", ShareURL: "https://example/legacy"},
+	}
+	for _, entry := range entries {
+		if err := st.SaveShareHistory(entry); err != nil {
+			t.Fatalf("SaveShareHistory: %v", err)
+		}
+	}
+	if err := st.DeleteShareHistory("account-a", "share-1", ""); err != nil {
+		t.Fatalf("DeleteShareHistory by id: %v", err)
+	}
+	if err := st.DeleteShareHistory("account-a", "", "https://example/legacy"); err != nil {
+		t.Fatalf("DeleteShareHistory by url: %v", err)
+	}
+	list, err := st.ListShareHistory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("remaining history = %+v, want two entries", list)
+	}
+	for _, entry := range list {
+		if entry.AccountID == "account-a" && (entry.ShareID == "share-1" || entry.ShareURL == "https://example/legacy") {
+			t.Fatalf("deleted entry still present: %+v", entry)
+		}
+	}
+}
+
 func TestMigrateJobPersistenceKeepsConcurrentUpdates(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {

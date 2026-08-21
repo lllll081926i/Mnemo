@@ -633,6 +633,34 @@ func CreateShare(userID, driveID string, params ShareParams) (share *model.Share
 	return d.CreateShare(context.Background(), c, params)
 }
 
+// CancelShare revokes a provider-managed share. Providers that only generate
+// an expiring URL must not advertise this capability because such URLs cannot
+// be individually revoked once issued.
+func CancelShare(userID, driveID string, share model.ShareHistoryEntry) (err error) {
+	if strings.TrimSpace(share.AccountID) == "" {
+		share.AccountID = userID
+	}
+	if strings.TrimSpace(share.DriveID) == "" {
+		share.DriveID = driveID
+	}
+	if strings.TrimSpace(share.ShareID) == "" && strings.TrimSpace(share.ShareURL) == "" {
+		return errors.New("drive: 分享标识不能为空")
+	}
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return err
+	}
+	if !d.Capabilities().CancelCreatedShares {
+		return errors.New("该网盘不支持取消已创建的分享")
+	}
+	canceller, ok := d.(ShareCancellationDriver)
+	if !ok {
+		return errors.New("该网盘未实现分享取消接口")
+	}
+	defer func() { err = withTokenPersist(err, c) }()
+	return canceller.CancelShare(context.Background(), c, share)
+}
+
 // RapidUploadByHash attempts fingerprint秒传 on the target drive.
 func RapidUploadByHash(userID, driveID string, req RapidUploadRequest) (result *RapidUploadResult, err error) {
 	return RapidUploadByHashContext(context.Background(), userID, driveID, req)

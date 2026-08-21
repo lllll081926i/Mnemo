@@ -1255,6 +1255,18 @@ func (c *client) CreateShare(ctx context.Context, fileIDs []string, _ string, pa
 	return &res, nil
 }
 
+// DeleteShare revokes a PikPak share through the provider's batch endpoint.
+// This is a single request and intentionally has no blind endpoint fallback:
+// cancellation is destructive and must never be retried against a different
+// endpoint after an ambiguous response.
+func (c *client) DeleteShare(ctx context.Context, shareID string) error {
+	shareID = strings.TrimSpace(shareID)
+	if shareID == "" {
+		return errors.New("pikpak: 分享标识为空")
+	}
+	return c.jsonDo(ctx, http.MethodPost, "/drive/v1/share:batchDelete", map[string]any{"ids": []string{shareID}}, nil, nil)
+}
+
 func pikpakExpirationDays(expiration string) int {
 	value := strings.TrimSpace(expiration)
 	if value == "" {

@@ -129,7 +129,11 @@ func (c *client) getJSON(ctx context.Context, pathOrURL string, out any) error {
 
 func (c *client) jsonDo(ctx context.Context, method, path string, body any, out any) error {
 	target := graphHost + path
-	resp, err := c.http.Do(ctx, method, target, c.headers(map[string]string{"Content-Type": "application/json"}), netx.JSONBody(body))
+	var reader io.Reader
+	if body != nil {
+		reader = netx.JSONBody(body)
+	}
+	resp, err := c.http.Do(ctx, method, target, c.headers(map[string]string{"Content-Type": "application/json"}), reader)
 	if err != nil {
 		return err
 	}
@@ -424,6 +428,16 @@ func (c *client) CreateLink(ctx context.Context, fileID, expiration, password st
 		Expiration:  perm.ExpirationDateTime,
 		SharePwd:    password,
 	}, nil
+}
+
+// DeletePermission revokes the sharing permission created by CreateLink.
+func (c *client) DeletePermission(ctx context.Context, fileID, permissionID string) error {
+	fileID = strings.TrimSpace(fileID)
+	permissionID = strings.TrimSpace(permissionID)
+	if fileID == "" || permissionID == "" {
+		return errors.New("onedrive: 文件或分享权限标识为空")
+	}
+	return c.jsonDo(ctx, http.MethodDelete, "/me/drive/items/"+url.PathEscape(fileID)+"/permissions/"+url.PathEscape(permissionID), nil, nil)
 }
 
 // DownloadURL returns the item's download url (or the content endpoint).

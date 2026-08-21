@@ -13,7 +13,10 @@ import (
 	"mnemo-go/internal/model"
 )
 
-const guangyaCreateSharePath = "/nd.bizuserres.s/v1/share_file"
+const (
+	guangyaCreateSharePath = "/nd.bizuserres.s/v1/share_file"
+	guangyaDeleteSharePath = "/nd.bizuserres.s/v1/delete_share"
+)
 
 // CreateShare creates a public Guangya share link through the same resource
 // API used by the official web client. Guangya accepts multiple file IDs in
@@ -79,6 +82,27 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 		FileIDList:  fileIDs,
 		ShareMsg:    "创建成功",
 	}, nil
+}
+
+// CancelShare revokes a Guangya share from the remote account. The API accepts
+// a batch, but one history entry must only revoke its own share ID.
+func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.ShareHistoryEntry) error {
+	shareID := strings.TrimSpace(share.ShareID)
+	if shareID == "" {
+		return errors.New("光鸭云盘取消分享缺少分享标识")
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	var response map[string]any
+	if err := cl.post(ctx, guangyaDeleteSharePath, map[string]any{"ids": []string{shareID}}, &response); err != nil {
+		return err
+	}
+	if _, err := guangyaShareResponseData(response); err != nil {
+		return fmt.Errorf("光鸭云盘取消分享失败: %w", err)
+	}
+	return nil
 }
 
 func normalizeGuangyaShareIDs(values []string) []string {

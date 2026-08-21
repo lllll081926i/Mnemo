@@ -1,11 +1,12 @@
 <script setup>
 // 分享记录页：聚合全部账号的分享历史，按网盘 + 账号分组展示。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare } from '../api'
+import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare, cancelShare } from '../api'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import Modal from '../components/Modal.vue'
 import SelectDirModal from '../components/SelectDirModal.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -25,6 +26,8 @@ watch(kwRaw, (v) => {
 onBeforeUnmount(() => clearTimeout(kwTimer))
 const filterProvider = ref('')
 const filterAccount = ref('')
+const canceling = ref(new Set())
+const confirmDialog = ref(null)
 
 // 分享导入始终绑定一个明确的目标账号，避免多账号之间串用会话或目录。
 const importOpen = ref(false)
@@ -272,10 +275,60 @@ function copyAll(h, key) {
   copy(lines.join('\n'), '已复制分享信息', key)
 }
 
+function canCancel(h) {
+  const account = accountOf(h.account_id)
+  return Boolean(account && h.drive_id && h.share_id && capsOf(account, props.providers).cancelCreatedShares)
+}
+
+function isCancelling(h, idx) {
+  return canceling.value.has(itemKey(h, idx))
+}
+
+function askCancel(h, idx) {
+  if (!canCancel(h) || isCancelling(h, idx)) return
+  confirmDialog.value = {
+    title: '取消分享',
+    message: '取消后，分享链接会立即失效。',
+    okText: '取消分享',
+    danger: true,
+    onOk: () => cancelRemote(h, idx),
+  }
+}
+
+async function cancelRemote(h, idx) {
+  const key = itemKey(h, idx)
+  if (canceling.value.has(key)) return
+  canceling.value = new Set([...canceling.value, key])
+  try {
+    await cancelShare(h)
+    history.value = history.value.filter((entry) => {
+      if (entry.account_id !== h.account_id) return true
+      return h.share_id
+        ? entry.share_id !== h.share_id
+        : entry.share_url !== h.share_url
+    })
+    emit('toast', '分享已取消', 'success')
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  } finally {
+    const next = new Set(canceling.value)
+    next.delete(key)
+    canceling.value = next
+  }
+}
+
+function closeConfirm() { confirmDialog.value = null }
+function handleConfirmOk() {
+  const callback = confirmDialog.value?.onOk
+  closeConfirm()
+  if (typeof callback === 'function') callback()
+}
+
 const offs = []
 onMounted(() => {
   refresh()
   offs.push(onEvent('account:changed', refresh))
+  offs.push(onEvent('share:history-changed', refresh))
 })
 onBeforeUnmount(() => offs.forEach((off) => off && off()))
 </script>
@@ -367,6 +420,10 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
                     <UiIcon v-else name="copy" :size="13" />
                     <span>{{ copiedMap['all_' + itemKey(h, idx)] ? '已复制' : '全部' }}</span>
                   </button>
+                  <button v-if="canCancel(h)" class="tbtn danger" :disabled="isCancelling(h, idx)" @click="askCancel(h, idx)">
+                    <span v-if="isCancelling(h, idx)" class="spin"></span>
+                    <template v-else><UiIcon name="trash" :size="13" /><span>取消</span></template>
+                  </button>
                 </div>
               </div>
             </div>
@@ -441,6 +498,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       @select="(dir) => { importDir = dir; importDirPick = false }"
       @toast="(message, type) => emit('toast', message, type)"
     />
+    <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
   </div>
 </template>
 

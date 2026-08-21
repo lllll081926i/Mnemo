@@ -133,6 +133,14 @@ type ShareImportDriver interface {
 	SaveShare(ctx context.Context, c Context, session *ShareImportSession, fileIDs []string, toParentID string) ([]string, error)
 }
 
+// ShareCancellationDriver is the optional capability interface for revoking a
+// share that was created by this application. A provider must implement it
+// before advertising CancelCreatedShares; removing only the local history is
+// deliberately not treated as a successful cancellation.
+type ShareCancellationDriver interface {
+	CancelShare(ctx context.Context, c Context, share model.ShareHistoryEntry) error
+}
+
 // UploadHandler carries a concrete file upload job into the provider.
 type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
 
