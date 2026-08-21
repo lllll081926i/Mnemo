@@ -10,7 +10,7 @@
 
 | # | Provider | 登录方式 | 能力实现 | 当前自动验证范围 | 已知限制 |
 |---|----------|---------|:--------:|------------------|----------|
-| 1 | pikpak | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 登录可能触发服务端风控；必须遵守冷却 |
+| 1 | pikpak | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 登录可能触发服务端风控（见 docs/KNOWN_ISSUES.md）；必须遵守冷却 |
 | 2 | aliopen（阿里云盘） | refresh_token | ✅ 已注册 | mock/e2e | 包内覆盖仍不足 |
 | 3 | pan123（123 云盘） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 真实服务未在本轮验证 |
 | 4 | pan189（天翼云盘） | 账密 + 验证码 | ✅ 已注册 | 包内单测 + mock/e2e | 个人云可读取容量；家庭云容量与个人云独立，当前不猜测展示 |
@@ -18,10 +18,10 @@
 | 6 | lanzou（蓝奏云） | Cookie / 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 无限空间；按 V0–V3 前后端拦截单文件大小和后缀 |
 | 7 | ilanzou（优享版蓝奏云） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 从 account/map 读取基础、会员、奖励及已用容量 |
 | 8 | onedrive | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
-| 9 | dropbox | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
+| 9 | dropbox | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 国内直连受限需配置网络代理（见 docs/KNOWN_ISSUES.md） |
 | 10 | yike（一刻相册） | BDUSS / Cookie | ✅ 已注册 | mock/e2e | 按无限空间展示，不参与跨盘秒传目标 |
 | 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e（含 `/assets/v1/get_assets` 容量） | 包内覆盖仍不足 |
-| 12 | webdav | URL + 账密 / Bearer Token | ✅ 已注册 | 本地 HTTP e2e（Basic、Digest、动态下载鉴权） | 支持自动 Basic/Digest 协商和显式 Bearer；客户端证书、NTLM 等不支持；配额取决于 RFC 4331 支持 |
+| 12 | webdav | URL + 账密 / Bearer Token | ✅ 已注册 | 本地 HTTP e2e（Basic、Digest、动态下载鉴权） | 支持自动 Basic/Digest 协商和显式 Bearer；客户端证书、NTLM 等不支持；配额取决于 RFC 4331 支持；支持各类预设定制图标 |
 | 13 | s3 | endpoint + AK/SK | ✅ 已注册 | mock/e2e | 无通用总容量接口；连接校验不证明写权限 |
 
 “已注册/已实现”只表示统一驱动入口和对应代码路径存在，不代表所有真实服务商版本、权限模型和风控条件均已验证；可靠性应以测试范围和已知限制判断，不使用主观完成度百分比。

@@ -1,7 +1,7 @@
 <script setup>
 // 账号快切栏（复刻旧版 AccountRail）：默认 60px 窄图标栏，悬停展开为 220px 显示名称与用量。
 import { computed, ref, onBeforeUnmount } from 'vue'
-import { providerOf, accountName, providerIconUrl } from '../api'
+import { providerOf, accountName, providerIconUrl, providerMetaOf } from '../api'
 import { getPrefs, setPref } from '../appearance'
 import ContextMenu from './ContextMenu.vue'
 import UiIcon from './UiIcon.vue'
@@ -239,9 +239,8 @@ function quotaPct(acc) {
 function hasQuota(acc) { return acc.usage && acc.usage.size > 0 }
 
 function iconOfAcc(acc) {
-  const pid = providerOf(acc.user_id)
-  const p = props.providers.find((x) => x.ID === pid)
-  return p ? providerIconUrl(p.Meta) : ''
+  const meta = providerMetaOf(acc, props.providers)
+  return providerIconUrl(meta)
 }
 
 function labelOfAcc(acc) {

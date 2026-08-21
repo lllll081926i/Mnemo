@@ -230,6 +230,48 @@ export function accountDetail(acc, providers) {
   return name ? `${label} · ${name}` : label
 }
 
+export function detectWebdavPresetIcon(account) {
+  if (!account) return ''
+  const conn = account.token?.conn || account.conn || {}
+  const endpoint = String(conn.endpoint || '').toLowerCase()
+  const name = String(conn.name || account.token?.user_name || account.user_id || '').toLowerCase()
+
+  if (endpoint.includes('jianguoyun.com') || name.includes('坚果云') || name.includes('jianguoyun')) {
+    return 'drive-icons/jianguoyun.svg'
+  }
+  if (endpoint.includes('infini-cloud.net') || name.includes('infinicloud') || name.includes('infini-cloud')) {
+    return 'drive-icons/infinitycloud.svg'
+  }
+  if (endpoint.includes('nextcloud') || name.includes('nextcloud')) {
+    return 'drive-icons/nextcloud.svg'
+  }
+  if (endpoint.includes('owncloud') || name.includes('owncloud')) {
+    return 'drive-icons/owncloud.svg'
+  }
+  if (endpoint.includes('seafile') || endpoint.includes('seafdav') || name.includes('seafile')) {
+    return 'drive-icons/seafile.svg'
+  }
+  if (endpoint.includes('openlist') || endpoint.includes('alist') || name.includes('openlist') || name.includes('alist')) {
+    return 'drive-icons/openlist.svg'
+  }
+  if (endpoint.includes(':5006') || name.includes('synology') || name.includes('群晖')) {
+    return 'drive-icons/synology.svg'
+  }
+  if (endpoint.includes('koofr.net') || name.includes('koofr')) {
+    return 'drive-icons/koofr.svg'
+  }
+  if (endpoint.includes('yandex.com') || endpoint.includes('yandex.ru') || name.includes('yandex')) {
+    return 'drive-icons/yandex.svg'
+  }
+  if (endpoint.includes('ewebdav.pcloud.com') || name.includes('pcloud (eu)') || name.includes('pcloud（eu')) {
+    return 'drive-icons/pcloud-eu.svg'
+  }
+  if (endpoint.includes('webdav.pcloud.com') || name.includes('pcloud')) {
+    return 'drive-icons/pcloud-us.svg'
+  }
+  return ''
+}
+
 export function providerIconUrl(metaOrIcon) {
   const icon = typeof metaOrIcon === 'string' ? metaOrIcon : (metaOrIcon && metaOrIcon.icon) || ''
   const file = icon.replace(/^drive-icons\//, '')
@@ -249,7 +291,12 @@ export function providerMetaOf(account, providers) {
   if (!account) return {}
   const pid = providerOf(account.user_id)
   const p = (providers || []).find((x) => x.ID === pid)
-  return (p && p.Meta) || {}
+  const meta = { ...((p && p.Meta) || { key: pid, label: pid, icon: `drive-icons/${pid}.svg` }) }
+  if (pid === 'webdav') {
+    const presetIcon = detectWebdavPresetIcon(account)
+    if (presetIcon) meta.icon = presetIcon
+  }
+  return meta
 }
 
 export function formatBytes(n) {
