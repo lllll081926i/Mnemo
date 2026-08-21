@@ -40,6 +40,8 @@ const PREFS_DEFAULTS = {
   defaultSortKey: 'name', // 默认排序键: name | time | size
   defaultSortAsc: true,   // 默认排序方向: true=升序 | false=降序
   sideWidth: 220,         // 网盘侧边栏宽度（px）
+  accountAliases: {},     // 账号本地自定义昵称 { [userId]: alias }
+  accountIcons: {},       // 账号本地自定义图标 { [userId]: iconFileName }
 }
 
 export function getPrefs() {
@@ -56,6 +58,67 @@ export function setPref(key, value) {
   // preference is changed from the settings page.
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('mnemo:prefs-changed', { detail: { key, value } }))
+  }
+}
+
+// ---------- 账号本地自定义昵称与图标（仅在本机显示，不影响远端） ----------
+export function getAccountAlias(userId) {
+  if (!userId) return ''
+  const aliases = getPrefs().accountAliases || {}
+  return String(aliases[userId] || '').trim()
+}
+
+export function setAccountAlias(userId, alias) {
+  if (!userId) return
+  const p = getPrefs()
+  const aliases = { ...(p.accountAliases || {}) }
+  const clean = String(alias || '').trim()
+  if (clean) {
+    aliases[userId] = clean
+  } else {
+    delete aliases[userId]
+  }
+  setPref('accountAliases', aliases)
+}
+
+export function getAccountCustomIcon(userId) {
+  if (!userId) return ''
+  const icons = getPrefs().accountIcons || {}
+  return String(icons[userId] || '').trim()
+}
+
+export function setAccountCustomIcon(userId, iconKey) {
+  if (!userId) return
+  const p = getPrefs()
+  const icons = { ...(p.accountIcons || {}) }
+  const clean = String(iconKey || '').trim()
+  if (clean) {
+    icons[userId] = clean
+  } else {
+    delete icons[userId]
+  }
+  setPref('accountIcons', icons)
+}
+
+export function setAccountCustomMeta(userId, alias, iconKey) {
+  if (!userId) return
+  const p = getPrefs()
+  const aliases = { ...(p.accountAliases || {}) }
+  const icons = { ...(p.accountIcons || {}) }
+  const cleanAlias = String(alias || '').trim()
+  const cleanIcon = String(iconKey || '').trim()
+
+  if (cleanAlias) aliases[userId] = cleanAlias
+  else delete aliases[userId]
+
+  if (cleanIcon) icons[userId] = cleanIcon
+  else delete icons[userId]
+
+  p.accountAliases = aliases
+  p.accountIcons = icons
+  localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mnemo:prefs-changed', { detail: { key: 'accountCustom', value: { aliases, icons } } }))
   }
 }
 

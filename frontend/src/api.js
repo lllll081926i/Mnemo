@@ -2,6 +2,7 @@
 import * as App from '../wailsjs/go/app/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { debug, info, warn, error, errorText, configKeys } from './logger'
+import { getAccountAlias, getAccountCustomIcon } from './appearance'
 
 // re-export the raw binding surface (used by views directly)
 export * from '../wailsjs/go/app/App'
@@ -204,6 +205,10 @@ function displayAccountText(provider, value) {
 
 export function accountName(acc) {
   if (!acc) return ''
+  // 优先使用用户为该账号设置的本地自定义昵称
+  const alias = getAccountAlias(acc.user_id)
+  if (alias) return alias
+
   const t = acc.token || {}
   const provider = accountProvider(acc)
   const candidates = [
@@ -274,6 +279,11 @@ export function detectWebdavPresetIcon(account) {
 
 export function providerIconUrl(metaOrIcon) {
   const icon = typeof metaOrIcon === 'string' ? metaOrIcon : (metaOrIcon && metaOrIcon.icon) || ''
+  if (!icon) return ''
+  // 支持自定义上传的 Data URL / Blob / 网络地址
+  if (icon.startsWith('data:') || icon.startsWith('blob:') || icon.startsWith('http://') || icon.startsWith('https://')) {
+    return icon
+  }
   const file = icon.replace(/^drive-icons\//, '')
   if (!file) return ''
   return new URL(`./assets/drive-icons/${file}`, import.meta.url).href
@@ -292,6 +302,15 @@ export function providerMetaOf(account, providers) {
   const pid = providerOf(account.user_id)
   const p = (providers || []).find((x) => x.ID === pid)
   const meta = { ...((p && p.Meta) || { key: pid, label: pid, icon: `drive-icons/${pid}.svg` }) }
+
+  // 1. 用户手动为该账号指定的自定义图标优先
+  const customIcon = getAccountCustomIcon(account.user_id)
+  if (customIcon) {
+    meta.icon = customIcon.startsWith('drive-icons/') ? customIcon : `drive-icons/${customIcon}`
+    return meta
+  }
+
+  // 2. WebDAV 预设智能图标匹配
   if (pid === 'webdav') {
     const presetIcon = detectWebdavPresetIcon(account)
     if (presetIcon) meta.icon = presetIcon

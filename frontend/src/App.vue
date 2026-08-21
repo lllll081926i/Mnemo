@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName } from './api'
-import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection } from './appearance'
+import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName, providerIconUrl } from './api'
+import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
 import ShareView from './views/ShareView.vue'
@@ -15,6 +15,7 @@ import LoginModal from './components/LoginModal.vue'
 import QuickOpen from './components/QuickOpen.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
+import ImageCropModal from './components/ImageCropModal.vue'
 import { CheckUpdate } from './api'
 import { debug, error, errorText, info, installGlobalErrorLogging } from './logger'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
@@ -59,7 +60,39 @@ const pendingUpdateInfo = ref(null)
 const infoAcc = ref(null)
 const renameAcc = ref(null)
 const renameName = ref('')
+const renameIcon = ref('')
 const renameBusy = ref(false)
+const showPresetIcons = ref(false)
+const cropImageSrc = ref('')
+const cropIsSvg = ref(false)
+const fileInputRef = ref(null)
+
+const PRESET_ICONS = [
+  { id: 'pikpak.svg', label: 'PikPak' },
+  { id: 'aliopen.svg', label: '阿里云盘' },
+  { id: 'onedrive.svg', label: 'OneDrive' },
+  { id: 'dropbox.svg', label: 'Dropbox' },
+  { id: 'pan123.svg', label: '123 云盘' },
+  { id: 'pan189.svg', label: '天翼云盘' },
+  { id: 'pan139.svg', label: '139 云盘' },
+  { id: 'lanzou.svg', label: '蓝奏云' },
+  { id: 'ilanzou.svg', label: '优享蓝奏' },
+  { id: 'guangya.svg', label: '光鸭云' },
+  { id: 'yike.svg', label: '一刻相册' },
+  { id: 'jianguoyun.svg', label: '坚果云' },
+  { id: 'infinitycloud.svg', label: 'InfiniCLOUD' },
+  { id: 'nextcloud.svg', label: 'Nextcloud' },
+  { id: 'owncloud.svg', label: 'ownCloud' },
+  { id: 'seafile.svg', label: 'Seafile' },
+  { id: 'openlist.svg', label: 'OpenList/AList' },
+  { id: 'synology.svg', label: '群晖' },
+  { id: 'koofr.svg', label: 'Koofr' },
+  { id: 'yandex.svg', label: 'Yandex' },
+  { id: 'pcloud-eu.svg', label: 'pCloud (EU)' },
+  { id: 'pcloud-us.svg', label: 'pCloud (US)' },
+  { id: 's3.svg', label: 'S3' },
+  { id: 'webdav.svg', label: 'WebDAV' },
+]
 const windowMaximized = ref(false)
 const curTheme = ref('system')
 const isDark = ref(false)
@@ -196,24 +229,44 @@ function remove(acc) {
 }
 
 function openRename(acc) {
-  if (!acc || !['webdav', 's3'].includes(providerOf(acc.user_id))) return
+  if (!acc) return
   renameAcc.value = acc
-  renameName.value = accountName(acc)
+  renameName.value = getAccountAlias(acc.user_id) || ''
+  renameIcon.value = getAccountCustomIcon(acc.user_id) || ''
+  showPresetIcons.value = false
+}
+
+function onIconFileSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')
+  const reader = new FileReader()
+  reader.onload = () => {
+    cropIsSvg.value = isSvg
+    cropImageSrc.value = String(reader.result || '')
+    if (fileInputRef.value) fileInputRef.value.value = ''
+  }
+  reader.readAsDataURL(file)
+}
+
+function onCropConfirm(croppedDataUrl) {
+  renameIcon.value = croppedDataUrl
+  cropImageSrc.value = ''
 }
 
 async function saveRename() {
-  const name = renameName.value.trim()
-  if (!renameAcc.value || !name) {
-    toast('请输入网盘名称', 'error')
-    return
-  }
+  if (!renameAcc.value) return
   renameBusy.value = true
   try {
-    const updated = await renameMountedAccount(renameAcc.value.user_id, name)
-    accounts.value = accounts.value.map((acc) => acc.user_id === updated.user_id ? updated : acc)
-    if (current.value?.user_id === updated.user_id) current.value = updated
+    const uid = renameAcc.value.user_id
+    const alias = renameName.value.trim()
+    const icon = renameIcon.value
+    setAccountCustomMeta(uid, alias, icon)
+    // 强制触发一次账号列表浅拷贝以便全局响应式刷新
+    accounts.value = accounts.value.map((a) => (a.user_id === uid ? { ...a } : a))
+    if (current.value?.user_id === uid) current.value = { ...current.value }
     renameAcc.value = null
-    toast('网盘名称已更新', 'success')
+    toast('账号设置已更新', 'success')
   } catch (e) {
     toast(String(e), 'error')
   } finally {
@@ -412,19 +465,94 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </template>
     </Modal>
 
-    <Modal v-if="renameAcc" title="重命名网盘" width="380px" @close="renameAcc = null">
-      <div class="field">
-        <label for="mounted-account-name">网盘名称</label>
-        <input id="mounted-account-name" v-model="renameName" class="input" maxlength="80" autofocus @keyup.enter="saveRename" />
+    <!-- 账号自定义名称与图标弹窗 -->
+    <Modal v-if="renameAcc" title="自定义账号名称与图标" width="420px" @close="renameAcc = null">
+      <div class="custom-acc-form">
+        <div class="field">
+          <label>自定义显示昵称</label>
+          <input
+            v-model="renameName"
+            class="input"
+            maxlength="40"
+            placeholder="留空则使用默认账号名称"
+            autofocus
+            @keyup.enter="saveRename"
+          />
+        </div>
+
+        <div class="field">
+          <label>自定义网盘图标</label>
+          <div class="acc-icon-selector">
+            <!-- 当前选中的预览图 -->
+            <div class="acc-icon-preview">
+              <img v-if="renameIcon" :src="providerIconUrl(renameIcon)" alt="" />
+              <img v-else :src="providerIconUrl(providerMetaOf(renameAcc, providers))" alt="" />
+            </div>
+
+            <!-- 图标操作按钮组 -->
+            <div class="acc-icon-actions">
+              <input
+                ref="fileInputRef"
+                type="file"
+                accept="image/*,.svg"
+                style="display: none"
+                @change="onIconFileSelected"
+              />
+              <button class="btn sm" type="button" @click="fileInputRef?.click()">
+                <UiIcon name="upload" :size="13" />
+                <span>上传本地图片/SVG</span>
+              </button>
+              <button class="btn sm" type="button" @click="showPresetIcons = !showPresetIcons">
+                <UiIcon name="grid" :size="13" />
+                <span>{{ showPresetIcons ? '收起内置预设' : '选择内置预设' }}</span>
+              </button>
+              <button
+                v-if="renameIcon"
+                class="btn sm text"
+                type="button"
+                title="恢复为该网盘的默认图标"
+                @click="renameIcon = ''"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
+
+          <!-- 内置预设图标网格展开 -->
+          <div v-if="showPresetIcons" class="preset-icons-grid">
+            <button
+              v-for="p in PRESET_ICONS"
+              :key="p.id"
+              type="button"
+              class="preset-icon-chip"
+              :class="{ active: renameIcon === p.id || (!renameIcon && providerMetaOf(renameAcc, providers).icon === 'drive-icons/' + p.id) }"
+              :title="p.label"
+              @click="renameIcon = p.id; showPresetIcons = false"
+            >
+              <img :src="providerIconUrl(p.id)" :alt="p.label" />
+              <span>{{ p.label }}</span>
+            </button>
+          </div>
+        </div>
       </div>
+
       <template #actions>
         <button class="btn" type="button" :disabled="renameBusy" @click="renameAcc = null">取消</button>
-        <button class="btn primary" type="button" :disabled="renameBusy || !renameName.trim()" @click="saveRename">
+        <button class="btn primary" type="button" :disabled="renameBusy" @click="saveRename">
           <span v-if="renameBusy" class="spin spin-on-primary"></span>
-          {{ renameBusy ? '保存中…' : '保存' }}
+          {{ renameBusy ? '保存中…' : '保存设置' }}
         </button>
       </template>
     </Modal>
+
+    <!-- 图片/SVG 裁剪弹窗 -->
+    <ImageCropModal
+      v-if="cropImageSrc"
+      :src="cropImageSrc"
+      :is-svg="cropIsSvg"
+      @confirm="onCropConfirm"
+      @cancel="cropImageSrc = ''"
+    />
 
     <transition-group name="toast-list" tag="div" class="toast-wrap" role="status" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" role="alert">

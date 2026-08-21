@@ -255,11 +255,12 @@ function onCtx(e, acc) {
 
 const menuItems = computed(() => {
   const acc = menu.value?.acc
-  const mounted = acc && ['webdav', 's3'].includes(providerOf(acc.user_id))
-  const items = [{ icon: 'info', label: '账号信息', action: 'info' }]
-  if (mounted) items.push({ icon: 'pencil', label: '重命名', action: 'rename' })
-  items.push({ icon: 'trash', label: '移除账号', danger: true, action: 'remove' })
-  return items
+  if (!acc) return []
+  return [
+    { icon: 'info', label: '账号信息', action: 'info' },
+    { icon: 'pencil', label: '自定义名称与图标', action: 'rename' },
+    { icon: 'trash', label: '移除账号', danger: true, action: 'remove' },
+  ]
 })
 
 function onMenu(action) {
