@@ -1,5 +1,5 @@
 // 外观应用：主题（明/暗）。强调色固定为品牌紫，不再提供色包切换。
-import { WindowSetDarkTheme, WindowSetLightTheme, WindowSetSystemDefaultTheme } from '../wailsjs/runtime/runtime'
+import { WindowSetDarkTheme, WindowSetLightTheme, WindowSetSystemDefaultTheme, EventsEmit } from '../wailsjs/runtime/runtime'
 
 export function isDarkMode(theme) {
   return theme === 'dark' || (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -18,6 +18,10 @@ export function applyAppearance(theme) {
     else if (theme === 'light') WindowSetLightTheme()
     else WindowSetSystemDefaultTheme()
   } catch { /* 非 Windows 或旧版 runtime 时忽略 */ }
+  // 通知后端原生悬浮窗明暗主题
+  try {
+    EventsEmit('app:theme', dark)
+  } catch { /* 浏览器预览模式忽略 */ }
   return dark
 }
 

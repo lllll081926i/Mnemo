@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"image"
 	"image/png"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -20,25 +21,30 @@ import (
 
 // 传输悬浮窗 Windows 实现：layered window（per-pixel alpha）+ 专属 UI 线程。
 //
-// 关键约束（docs/FLOATER.md §1.5）：
-//   - 拖拽只 SetWindowPos(..., SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)，永不改尺寸；
-//     尺寸唯一计算点是 logicalSize×dpiScale（创建与 WM_DPICHANGED 时），
-//     位图与窗口同源——以此根除「越拖越大」。
-//   - 窗口常驻但隐藏；仅 Present 非隐藏帧时淡入显示，隐藏时无动画定时器、零渲染。
+// 关键约束与升级：
+//   - 尺寸收窄至 138×38 逻辑 px，更加小巧精致；
+//   - 纯色实体背景（100% 不透明），支持跟随系统/应用的深色与浅色双套主题；
+//   - 智能单双行排版：仅下载/仅上传时采用单行大字显示，同时有下载和上传时采用双行紧凑小字；
+//   - Apple 风格弹性弹簧动效（Spring Ease-out + 果冻回弹 Jelly Pulse）；
+//   - 拖拽过程永远保持固定物理尺寸（SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE），位图与窗口尺寸同源，彻底杜绝累加形变。
 
 const (
 	floaterClassName = "MnemoTransferFloater"
 
-	flLogiW    = 176 // 逻辑尺寸 @96DPI（紧凑卡片）
-	flLogiH    = 52
-	flCardR    = 7
-	flLogoSize = 36
-	flLogoR    = 5
-	flTextX    = 52
-	flFontRow  = 12 // 速度行字号（逻辑 px）
-	flFontBig  = 13 // 完成/出错态字号
+	flLogiW      = 138 // 逻辑宽度 @96DPI（超窄紧凑）
+	flLogiH      = 38  // 逻辑高度 @96DPI
+	flCardR      = 8   // 卡片圆角
+	flLogoSize   = 22  // Logo 尺寸
+	flLogoR      = 5   // Logo 圆角
+	flLogoX      = 8   // Logo X 偏移
+	flLogoY      = 8   // Logo Y 偏移
+	flTextX      = 36  // 文字区域 X 起点
+	flFontLarge  = 13  // 单行大字号（逻辑 px）
+	flFontSmall  = 10  // 双行小字号（逻辑 px）
+	flFontStatus = 12  // 状态提示字号（逻辑 px）
 
 	wmFloaterUpdate = 0x0400 + 71 // WM_APP + 71
+	wmFloaterTheme  = 0x0400 + 72 // WM_APP + 72
 
 	wmTimer       = 0x0113
 	wmLButtonDown = 0x0201
@@ -51,8 +57,10 @@ const (
 
 	flTimerAnim       = 1
 	flTimerFullscreen = 2
-	flAnimDuration    = 220.0 // ms
-	flSlidePx         = 6.0
+	flTimerJelly      = 3
+	flAnimDuration    = 260.0 // ms（入场弹簧过渡）
+	flJellyDuration   = 320.0 // ms（状态突变果冻弹动）
+	flSlidePx         = 8.0   // 入场弹性位移
 )
 
 var (
@@ -110,7 +118,6 @@ var (
 	pQueryNotifState    = flShell32.NewProc("SHQueryUserNotificationState")
 )
 
-// flCopyMemory 从系统提供的指针拷贝定长数据（WM_DPICHANGED 的建议矩形）。
 func flCopyMemory(dst, src, n uintptr) {
 	pRtlMoveMemory.Call(dst, src, n)
 }
@@ -143,7 +150,6 @@ type flWndClassEx struct {
 	IconSm    uintptr
 }
 
-// flBitmapInfo：头部 + 4 个位掩码（BI_BITFIELDS 含 alpha 通道）。
 type flBitmapInfo struct {
 	Header struct {
 		Size          uint32
@@ -163,15 +169,44 @@ type flBitmapInfo struct {
 
 type flRGB struct{ R, G, B uint32 }
 
+type flPalette struct {
+	CardBg    flRGB
+	Border    flRGB
+	BorderA   float64
+	TextMain  flRGB
+	TextSub   flRGB
+	DownArrow flRGB
+	UpArrow   flRGB
+	Done      flRGB
+	Error     flRGB
+	Pause     flRGB
+}
+
 var (
-	flColCard   = flRGB{23, 25, 33}    // 卡底（alpha 235/255）
-	flColBorder = flRGB{255, 255, 255} // 描边（alpha ≤ 18/255）
-	flColText   = flRGB{232, 234, 242} // 主文字
-	flColWeak   = flRGB{139, 144, 163} // 弱化（无速度）
-	flColDown   = flRGB{167, 139, 250} // 下载箭头（主题紫）
-	flColUp     = flRGB{110, 231, 183} // 上传箭头
-	flColDone   = flRGB{52, 211, 153}  // 完成
-	flColError  = flRGB{248, 113, 113} // 出错
+	flDarkTheme = flPalette{
+		CardBg:    flRGB{24, 24, 28},    // 实色黑底 #18181c
+		Border:    flRGB{255, 255, 255}, // 细高光描边
+		BorderA:   0.12,
+		TextMain:  flRGB{245, 245, 247}, // 主文字亮白
+		TextSub:   flRGB{156, 163, 175}, // 弱化文字
+		DownArrow: flRGB{167, 139, 250}, // 主题紫
+		UpArrow:   flRGB{52, 211, 153},  // 翠绿
+		Done:      flRGB{52, 211, 153},  // 成功绿
+		Error:     flRGB{248, 113, 113}, // 失败红
+		Pause:     flRGB{251, 191, 36},  // 暂停黄
+	}
+	flLightTheme = flPalette{
+		CardBg:    flRGB{255, 255, 255}, // 纯白实色
+		Border:    flRGB{0, 0, 0},       // 细暗描边
+		BorderA:   0.09,
+		TextMain:  flRGB{17, 24, 39},    // 深灰黑
+		TextSub:   flRGB{107, 114, 128}, // 次级灰
+		DownArrow: flRGB{124, 58, 237},  // 深紫
+		UpArrow:   flRGB{5, 150, 105},   // 深绿
+		Done:      flRGB{5, 150, 105},
+		Error:     flRGB{220, 38, 38},
+		Pause:     flRGB{217, 119, 6},
+	}
 )
 
 // winFloater 为跨线程句柄；mu 保护共享状态，一切 Win32 对象只属于 UI 线程。
@@ -185,6 +220,7 @@ type winFloater struct {
 	mu         sync.Mutex
 	frame      floaterFrame
 	suppressed bool
+	isDark     bool
 
 	hwnd atomic.Uintptr
 	done atomic.Bool
@@ -195,7 +231,16 @@ type winFloater struct {
 var floaterWins sync.Map // hwnd → *winFloater
 
 func newWinFloater(logo []byte, hooks floaterHooks, initial floaterFrame, suppressed bool, x, y int, hasPos bool) floaterView {
-	w := &winFloater{hooks: hooks, logo: logo, posX: x, posY: y, hasPos: hasPos, frame: initial, suppressed: suppressed}
+	w := &winFloater{
+		hooks:      hooks,
+		logo:       logo,
+		posX:       x,
+		posY:       y,
+		hasPos:     hasPos,
+		frame:      initial,
+		suppressed: suppressed,
+		isDark:     initial.Dark,
+	}
 	started := make(chan struct{})
 	go w.run(started)
 	<-started
@@ -208,6 +253,7 @@ func (w *winFloater) Present(f floaterFrame) {
 	}
 	w.mu.Lock()
 	w.frame = f
+	w.isDark = f.Dark
 	w.mu.Unlock()
 	if hwnd := w.hwnd.Load(); hwnd != 0 {
 		pPostMessageW.Call(hwnd, wmFloaterUpdate, 0, 0)
@@ -226,6 +272,19 @@ func (w *winFloater) SetSuppressed(suppressed bool) {
 	}
 }
 
+func (w *winFloater) SetDark(isDark bool) {
+	if w.done.Load() {
+		return
+	}
+	w.mu.Lock()
+	w.isDark = isDark
+	w.frame.Dark = isDark
+	w.mu.Unlock()
+	if hwnd := w.hwnd.Load(); hwnd != 0 {
+		pPostMessageW.Call(hwnd, wmFloaterTheme, 0, 0)
+	}
+}
+
 func (w *winFloater) Close() {
 	if w.done.Swap(true) {
 		return
@@ -237,54 +296,66 @@ func (w *winFloater) Close() {
 
 // ---------- UI 线程 ----------
 
-// flUI 持有全部 GDI 资源，仅在 UI 线程访问。
 type flUI struct {
-	hwnd  uintptr
-	scale float64
-	pxW   int32
-	pxH   int32
-
-	dib     uintptr // 画布 DIB section（BGRA 预乘，top-down）
+	hwnd   uintptr
+	scale  float64
+	pxW    int32
+	pxH    int32
+	memDC  uintptr
+	dib    uintptr
+	oldBmp uintptr
 	dibBits []byte
-	memDC   uintptr
-	oldBmp  uintptr
 
-	stripDC   uintptr // 文字 mask strip（黑底白字，亮度作 alpha）
-	stripBits []byte
+	stripDC   uintptr
 	stripBmp  uintptr
 	stripOld  uintptr
+	stripBits []byte
 	stripW    int32
 	stripH    int32
 	brushBlk  uintptr
-	fontRow   uintptr
-	fontBig   uintptr
 
-	logoTile []byte
+	fontLarge  uintptr // 单行大字号
+	fontSmall  uintptr // 双行小字号
+	fontStatus uintptr // 状态字号
+
 	logoPx   int
+	logoTile []byte
 
-	visible   bool
-	alpha     float64
-	animating bool
-	animStart time.Time
-	animFrom  float64
-	animTo    float64
-	osFull    bool // 前台独占全屏
+	visible    bool
+	animating  bool
+	animFrom   float64
+	animTo     float64
+	animStart  time.Time
+	alpha      float64
+
+	jellyAnim  bool
+	jellyStart time.Time
+	jellyOffY  float64
+
 	fullTmrOn bool
+	osFull    bool
 
 	dragging bool
 	dragOff  flPoint
 	moved    bool
 
 	frame      floaterFrame
+	lastPhase  floaterPhase
 	suppressed bool
+	isDark     bool
 	baseX      int32
 	baseY      int32
 }
 
 func (w *winFloater) run(started chan struct{}) {
-	runtime.LockOSThread() // 与托盘相同：消息泵必须钉在固定 OS 线程
+	runtime.LockOSThread() // 消息泵必须钉在固定 OS 线程
 
-	ui := &flUI{frame: w.frame, suppressed: w.suppressed}
+	ui := &flUI{
+		frame:      w.frame,
+		lastPhase:  w.frame.Phase,
+		suppressed: w.suppressed,
+		isDark:     w.isDark,
+	}
 	if !ui.create(w) {
 		logging.Warn("floater window creation failed; floater disabled")
 		close(started)
@@ -294,10 +365,13 @@ func (w *winFloater) run(started chan struct{}) {
 	w.hwnd.Store(ui.hwnd)
 	close(started)
 
+	ui.applyVisibility()
+	ui.render()
+
 	var msg flMsg
 	for {
 		r, _, _ := pGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
-		if r == 0 || int32(r) == -1 { // 0 = WM_QUIT
+		if int32(r) <= 0 {
 			break
 		}
 		pTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
@@ -322,23 +396,22 @@ func (ui *flUI) create(w *winFloater) bool {
 		ClassName: className,
 	}
 	if r, _, _ := pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wcex))); r == 0 {
-		return false
+		// 允许已注册
 	}
 
-	title, _ := windows.UTF16PtrFromString("Mnemo Floater")
 	const (
-		wsPopup        = 0x80000000
-		wsExLayered    = 0x00080000
-		wsExTopmost    = 0x00000008
-		wsExToolWindow = 0x00000080
-		wsExNoActivate = 0x08000000
+		wsExLayered     = 0x00080000
+		wsExTopmost     = 0x00000008
+		wsExToolwindow  = 0x00000080
+		wsExNoActivate  = 0x08000000
+		wsPopUp         = 0x80000000
 	)
 	hwnd, _, _ := pCreateWindowExW.Call(
-		uintptr(wsExLayered|wsExTopmost|wsExToolWindow|wsExNoActivate),
+		uintptr(wsExLayered|wsExTopmost|wsExToolwindow|wsExNoActivate),
 		uintptr(unsafe.Pointer(className)),
-		uintptr(unsafe.Pointer(title)),
-		uintptr(wsPopup),
-		0, 0, 0, 0, // 尺寸/位置由 setScale/placeInitial 确定（尺寸唯一计算点）
+		0,
+		uintptr(wsPopUp),
+		0, 0, 0, 0,
 		0, 0, hInst, 0,
 	)
 	if hwnd == 0 {
@@ -352,49 +425,50 @@ func (ui *flUI) create(w *winFloater) bool {
 		dpi = 96
 	}
 	ui.setScale(float64(dpi) / 96.0)
-	ui.placeInitial(w)
-	return true
-}
 
-// setScale 按 DPI 重建尺寸相关资源（画布/文字 strip/字体/logo 瓦片）。
-// 窗口尺寸唯一计算点：logical × scale。
-func (ui *flUI) setScale(scale float64) {
-	ui.scale = scale
-	ui.pxW = int32(flLogiW*scale + 0.5)
-	ui.pxH = int32(flLogiH*scale + 0.5)
-	ui.allocCanvas()
-	ui.allocStrip()
-	ui.makeFonts()
-	ui.makeLogoTile()
-	pSetWindowPos.Call(ui.hwnd, 0, 0, 0, uintptr(ui.pxW), uintptr(ui.pxH),
-		uintptr(0x0002|0x0004|0x0010)) // SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE
-}
-
-func (ui *flUI) placeInitial(w *winFloater) {
 	if w.hasPos {
 		ui.baseX = int32(w.posX)
 		ui.baseY = int32(w.posY)
 	} else {
-		// 默认：主显示器右下角，留 24 逻辑 px 边距
-		cx, _, _ := pGetSystemMetrics.Call(0) // SM_CXSCREEN
-		cy, _, _ := pGetSystemMetrics.Call(1) // SM_CYSCREEN
-		m := int32(24*ui.scale + 0.5)
-		ui.baseX = int32(cx) - ui.pxW - m
-		ui.baseY = int32(cy) - ui.pxH - m
+		sw, _, _ := pGetSystemMetrics.Call(0) // SM_CXSCREEN
+		sh, _, _ := pGetSystemMetrics.Call(1) // SM_CYSCREEN
+		ui.baseX = int32(sw) - ui.pxW - int32(24*ui.scale+0.5)
+		ui.baseY = int32(sh) - ui.pxH - int32(72*ui.scale+0.5)
 	}
-	pSetWindowPos.Call(ui.hwnd, 0, uintptr(ui.baseX), uintptr(ui.baseY), 0, 0,
-		uintptr(0x0001|0x0004|0x0010)) // SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE
+
+	ui.clampBasePos()
+	const swpNoSize = 0x0001
+	const swpNoZOrder = 0x0004
+	const swpNoActivate = 0x0010
+	pSetWindowPos.Call(ui.hwnd, 0, uintptr(ui.baseX), uintptr(ui.baseY), uintptr(ui.pxW), uintptr(ui.pxH), swpNoSize|swpNoZOrder|swpNoActivate)
+	return true
+}
+
+func (ui *flUI) setScale(s float64) {
+	if s < 0.5 {
+		s = 1.0
+	}
+	ui.scale = s
+	ui.pxW = int32(float64(flLogiW)*s + 0.5)
+	ui.pxH = int32(float64(flLogiH)*s + 0.5)
+	ui.allocCanvas()
+	ui.allocStrip()
+	ui.makeFonts()
+	ui.makeLogoTile()
 }
 
 func flBitmapInfoFor(w, h int32) flBitmapInfo {
-	bi := flBitmapInfo{}
-	bi.Header.Size = 40
+	var bi flBitmapInfo
+	bi.Header.Size = uint32(unsafe.Sizeof(bi.Header))
 	bi.Header.Width = w
-	bi.Header.Height = -h // top-down
+	bi.Header.Height = -h // top-down DIB
 	bi.Header.Planes = 1
 	bi.Header.BitCount = 32
 	bi.Header.Compression = 3 // BI_BITFIELDS
-	bi.Masks = [4]uint32{0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000}
+	bi.Masks[0] = 0x00FF0000  // R
+	bi.Masks[1] = 0x0000FF00  // G
+	bi.Masks[2] = 0x000000FF  // B
+	bi.Masks[3] = 0xFF000000  // A
 	return bi
 }
 
@@ -427,8 +501,8 @@ func (ui *flUI) allocStrip() {
 		pSetBkMode.Call(ui.stripDC, 1) // TRANSPARENT
 		pSetTextColor.Call(ui.stripDC, 0x00FFFFFF)
 	}
-	ui.stripW = int32(float64(flLogiW-flTextX-10)*ui.scale + 0.5)
-	ui.stripH = int32(20*ui.scale + 0.5)
+	ui.stripW = int32(float64(flLogiW-flTextX-4)*ui.scale + 0.5)
+	ui.stripH = int32(24*ui.scale + 0.5)
 	bi := flBitmapInfoFor(ui.stripW, ui.stripH)
 	var bits unsafe.Pointer
 	bmp, _, _ := pCreateDIBSection.Call(0, uintptr(unsafe.Pointer(&bi)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
@@ -443,15 +517,19 @@ func (ui *flUI) allocStrip() {
 	}
 }
 
-func (ui *flUI) makeFont(px int) uintptr {
+func (ui *flUI) makeFont(px int, bold bool) uintptr {
 	face, _ := windows.UTF16PtrFromString("Microsoft YaHei UI")
+	weight := uintptr(400) // FW_NORMAL
+	if bold {
+		weight = uintptr(600) // FW_SEMIBOLD
+	}
 	h, _, _ := pCreateFontW.Call(
 		uintptr(int32(-px)), 0, 0, 0,
-		uintptr(400), // FW_NORMAL
+		weight,
 		0, 0, 0,
 		uintptr(1), // DEFAULT_CHARSET
 		0, 0,
-		uintptr(5), // ANTIALIASED_QUALITY：灰度，mask 用亮度作 alpha
+		uintptr(5), // ANTIALIASED_QUALITY
 		0,
 		uintptr(unsafe.Pointer(face)),
 	)
@@ -459,17 +537,20 @@ func (ui *flUI) makeFont(px int) uintptr {
 }
 
 func (ui *flUI) makeFonts() {
-	if ui.fontRow != 0 {
-		pDeleteObject.Call(ui.fontRow)
+	if ui.fontLarge != 0 {
+		pDeleteObject.Call(ui.fontLarge)
 	}
-	if ui.fontBig != 0 {
-		pDeleteObject.Call(ui.fontBig)
+	if ui.fontSmall != 0 {
+		pDeleteObject.Call(ui.fontSmall)
 	}
-	ui.fontRow = ui.makeFont(int(flFontRow*ui.scale + 0.5))
-	ui.fontBig = ui.makeFont(int(flFontBig*ui.scale + 0.5))
+	if ui.fontStatus != 0 {
+		pDeleteObject.Call(ui.fontStatus)
+	}
+	ui.fontLarge = ui.makeFont(int(flFontLarge*ui.scale+0.5), true)
+	ui.fontSmall = ui.makeFont(int(flFontSmall*ui.scale+0.5), false)
+	ui.fontStatus = ui.makeFont(int(flFontStatus*ui.scale+0.5), true)
 }
 
-// makeLogoTile 解码 PNG → 双线性缩放到 40s×40s → 圆角遮罩 → 预乘 BGRA。
 func (ui *flUI) makeLogoTile() {
 	ui.logoPx = int(flLogoSize*ui.scale + 0.5)
 	tile := make([]byte, ui.logoPx*ui.logoPx*4)
@@ -487,20 +568,23 @@ func (ui *flUI) makeLogoTile() {
 	b := src.Bounds()
 	sw, sh := b.Dx(), b.Dy()
 	r := float64(flLogoR) * ui.scale
+	N := float64(ui.logoPx)
+
 	for y := 0; y < ui.logoPx; y++ {
 		for x := 0; x < ui.logoPx; x++ {
-			ma := rrectAlpha(float64(x)+0.5, float64(y)+0.5, float64(ui.logoPx), float64(ui.logoPx), r)
-			if ma <= 0 {
+			d := rrectSDF(float64(x)+0.5, float64(y)+0.5, N, N, r)
+			maskA := clamp01(0.5 - d)
+			if maskA <= 0 {
 				continue
 			}
-			fx := (float64(x)+0.5)*float64(sw)/float64(ui.logoPx) - 0.5
-			fy := (float64(y)+0.5)*float64(sh)/float64(ui.logoPx) - 0.5
-			r8, g8, b8, a8 := bilinearRGBA(src, b.Min.X, b.Min.Y, sw, sh, fx, fy)
-			aa := uint32(float64(a8>>8)*ma + 0.5)
+			u := (float64(x) + 0.5) / N * float64(sw)
+			v := (float64(y) + 0.5) / N * float64(sh)
+			cr, cg, cb, ca := sampleBilinear(src, u, v, sw, sh)
+			aa := float64(ca) * maskA
 			o := (y*ui.logoPx + x) * 4
-			tile[o+0] = uint8(uint32(b8>>8) * aa / 255)
-			tile[o+1] = uint8(uint32(g8>>8) * aa / 255)
-			tile[o+2] = uint8(uint32(r8>>8) * aa / 255)
+			tile[o+0] = uint8(float64(cb) * aa / 255.0)
+			tile[o+1] = uint8(float64(cg) * aa / 255.0)
+			tile[o+2] = uint8(float64(cr) * aa / 255.0)
 			tile[o+3] = uint8(aa)
 		}
 	}
@@ -531,10 +615,17 @@ func (ui *flUI) destroy() {
 	if ui.stripDC != 0 {
 		pDeleteDC.Call(ui.stripDC)
 	}
-	for _, h := range []uintptr{ui.brushBlk, ui.fontRow, ui.fontBig} {
-		if h != 0 {
-			pDeleteObject.Call(h)
-		}
+	if ui.brushBlk != 0 {
+		pDeleteObject.Call(ui.brushBlk)
+	}
+	if ui.fontLarge != 0 {
+		pDeleteObject.Call(ui.fontLarge)
+	}
+	if ui.fontSmall != 0 {
+		pDeleteObject.Call(ui.fontSmall)
+	}
+	if ui.fontStatus != 0 {
+		pDeleteObject.Call(ui.fontStatus)
 	}
 }
 
@@ -548,37 +639,46 @@ func floaterWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		return r
 	}
 	ui := w.ui
+
 	switch msg {
 	case wmFloaterUpdate:
+		oldPhase := ui.frame.Phase
 		ui.syncState(w)
+		// 状态突变（Active -> Done / Error / Paused）时触发一次果冻弹性回弹
+		if oldPhase == floaterActive && (ui.frame.Phase == floaterDone || ui.frame.Phase == floaterError || ui.frame.Phase == floaterPaused) {
+			ui.startJelly()
+		}
 		ui.applyVisibility()
+		ui.render()
+		return 0
+	case wmFloaterTheme:
+		ui.syncState(w)
 		ui.render()
 		return 0
 	case wmTimer:
 		ui.onTimer(wParam)
 		return 0
 	case wmLButtonDown:
-		var pt flPoint
-		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-		var rc flRect
-		pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
-		ui.dragOff = flPoint{X: pt.X - rc.Left, Y: pt.Y - rc.Top}
 		ui.dragging = true
 		ui.moved = false
+		var pt flPoint
+		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+		ui.dragOff.X = pt.X - ui.baseX
+		ui.dragOff.Y = pt.Y - ui.baseY
 		pSetCapture.Call(hwnd)
 		return 0
 	case wmMouseMove:
 		if ui.dragging {
 			var pt flPoint
 			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-			nx, ny := pt.X-ui.dragOff.X, pt.Y-ui.dragOff.Y
-			if abs32(nx-ui.baseX) > 4 || abs32(ny-ui.baseY) > 4 {
+			nx := pt.X - ui.dragOff.X
+			ny := pt.Y - ui.dragOff.Y
+			if nx != ui.baseX || ny != ui.baseY {
 				ui.moved = true
+				ui.baseX = nx
+				ui.baseY = ny
+				ui.present()
 			}
-			ui.baseX, ui.baseY = nx, ny
-			// 只移动，不改尺寸——「越拖越大」的硬性防线
-			pSetWindowPos.Call(hwnd, 0, uintptr(nx), uintptr(ny), 0, 0,
-				uintptr(0x0001|0x0004|0x0010)) // SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE
 		}
 		return 0
 	case wmLButtonUp:
@@ -586,12 +686,15 @@ func floaterWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			ui.dragging = false
 			pReleaseCapture.Call()
 			if ui.moved {
-				x, y := int(ui.baseX), int(ui.baseY)
+				ui.clampBasePos()
+				ui.present()
 				if w.hooks.onMove != nil {
-					go w.hooks.onMove(x, y)
+					w.hooks.onMove(int(ui.baseX), int(ui.baseY))
 				}
-			} else if w.hooks.onOpen != nil {
-				go w.hooks.onOpen()
+			} else {
+				if w.hooks.onOpen != nil {
+					w.hooks.onOpen()
+				}
 			}
 		}
 		return 0
@@ -602,7 +705,6 @@ func floaterWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		newDPI := uint32(wParam >> 16)
 		ui.setScale(float64(newDPI) / 96.0)
 		if lParam != 0 {
-			// WM_DPICHANGED 的 lParam 是系统给出的建议 RECT 指针
 			var rc flRect
 			flCopyMemory(uintptr(unsafe.Pointer(&rc)), lParam, unsafe.Sizeof(rc))
 			ui.baseX, ui.baseY = rc.Left, rc.Top
@@ -620,19 +722,11 @@ func floaterWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return r
 }
 
-func abs32(v int32) int32 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-// ---------- 状态同步 / 可见性 / 动画 ----------
-
 func (ui *flUI) syncState(w *winFloater) {
 	w.mu.Lock()
 	ui.frame = w.frame
 	ui.suppressed = w.suppressed
+	ui.isDark = w.isDark
 	w.mu.Unlock()
 }
 
@@ -644,13 +738,13 @@ func (ui *flUI) applyVisibility() {
 	want := ui.wantVisible()
 	if want && !ui.visible && !ui.animating {
 		ui.visible = true
-		pShowWindow.Call(ui.hwnd, 8) // SW_SHOWNOACTIVATE
-		ui.startAnim(1)
+		const swShowNA = 8
+		pShowWindow.Call(ui.hwnd, swShowNA)
 		ui.setFullscreenTimer(true)
+		ui.startAnim(1)
 	} else if !want && ui.visible && !ui.animating {
 		ui.startAnim(0)
 	} else if ui.animating {
-		// 动画中目标翻转
 		if want && ui.animTo == 0 {
 			ui.visible = true
 			ui.startAnim(1)
@@ -666,6 +760,12 @@ func (ui *flUI) startAnim(to float64) {
 	ui.animTo = to
 	ui.animStart = time.Now()
 	pSetTimer.Call(ui.hwnd, flTimerAnim, 16, 0)
+}
+
+func (ui *flUI) startJelly() {
+	ui.jellyAnim = true
+	ui.jellyStart = time.Now()
+	pSetTimer.Call(ui.hwnd, flTimerJelly, 16, 0)
 }
 
 func (ui *flUI) setFullscreenTimer(on bool) {
@@ -689,14 +789,33 @@ func (ui *flUI) onTimer(id uintptr) {
 			ui.animating = false
 			pKillTimer.Call(ui.hwnd, flTimerAnim)
 		}
-		ease := 1 - (1-t)*(1-t)*(1-t) // ease-out cubic
+		// Apple 级弹簧缓动（入场过冲 + 回弹）
+		var ease float64
+		if ui.animTo == 1 {
+			// Spring overshoot: 1 - e^(-6t) * cos(2.8 * pi * t)
+			ease = 1.0 - math.Exp(-6.0*t)*math.Cos(2.8*math.Pi*t)
+		} else {
+			// Cubic ease-in-out for fade out
+			ease = 1.0 - t*t*(3.0-2.0*t)
+		}
 		ui.alpha = ui.animFrom + (ui.animTo-ui.animFrom)*ease
 		if !ui.animating && ui.alpha <= 0 {
 			ui.visible = false
 			pShowWindow.Call(ui.hwnd, 0) // SW_HIDE
 			ui.setFullscreenTimer(false)
 		}
-		ui.render()
+		ui.present()
+	case flTimerJelly:
+		t := float64(time.Since(ui.jellyStart).Milliseconds()) / flJellyDuration
+		if t >= 1 {
+			ui.jellyAnim = false
+			ui.jellyOffY = 0
+			pKillTimer.Call(ui.hwnd, flTimerJelly)
+		} else {
+			// Jelly Pulse 阻尼震颤: sin(2.5 * pi * t) * e^(-4t) * 4px
+			ui.jellyOffY = math.Sin(t*2.5*math.Pi) * math.Exp(-4.0*t) * 4.0 * ui.scale
+		}
+		ui.present()
 	case flTimerFullscreen:
 		if ui.visible {
 			full := ui.foregroundFullscreen()
@@ -708,10 +827,6 @@ func (ui *flUI) onTimer(id uintptr) {
 	}
 }
 
-// foregroundFullscreen 判定前台是否存在全屏窗口：
-// 1) 独占全屏（D3D）：SHQueryUserNotificationState == QUNS_RUNNING_D3D_FULL_SCREEN
-// 2) 无边框全屏：前台窗口覆盖其所在显示器的全部区域且无标题栏
-// 任一成立即隐藏悬浮球，退出全屏后自动恢复。
 func (ui *flUI) foregroundFullscreen() bool {
 	var state uint32
 	if r, _, _ := pQueryNotifState.Call(uintptr(unsafe.Pointer(&state))); r == 0 && state == 3 {
@@ -729,7 +844,7 @@ func (ui *flUI) foregroundFullscreen() bool {
 	style, _, _ := pGetWindowLongW.Call(fg, gwlStyle)
 	const wsCaption = 0x00C00000
 	if style&wsCaption != 0 {
-		return false // 带标题栏的窗口不算全屏
+		return false
 	}
 	mon, _, _ := pMonitorFromWindow.Call(fg, 2) // MONITOR_DEFAULTTONEAREST
 	type monitorInfo struct {
@@ -761,40 +876,84 @@ func (ui *flUI) showMenu(w *winFloater) {
 
 	var pt flPoint
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-	pSetForegroundWin.Call(ui.hwnd) // TrackPopupMenu 前台焦点惯例
+	pSetForegroundWin.Call(ui.hwnd)
 	const tpmReturnCmd = 0x0100
 	const tpmNonNotify = 0x0080
 	cmd, _, _ := pTrackPopupMenuEx.Call(menu, uintptr(tpmReturnCmd|tpmNonNotify), uintptr(pt.X), uintptr(pt.Y), ui.hwnd, 0)
-	pPostMessageW.Call(ui.hwnd, 0, 0, 0) // WM_NULL：菜单退出惯例
+	pPostMessageW.Call(ui.hwnd, 0, 0, 0)
 	switch cmd {
 	case 1:
 		if w.hooks.onOpen != nil {
-			go w.hooks.onOpen()
+			w.hooks.onOpen()
 		}
 	case 2:
 		if w.hooks.onHide != nil {
-			go w.hooks.onHide()
+			w.hooks.onHide()
 		}
 	}
 }
 
-// ---------- 渲染 ----------
+func (ui *flUI) clampBasePos() {
+	mon, _, _ := pMonitorFromWindow.Call(ui.hwnd, 2)
+	if mon == 0 {
+		return
+	}
+	type monitorInfo struct {
+		CbSize    uint32
+		RcMonitor flRect
+		RcWork    flRect
+		DwFlags   uint32
+	}
+	mi := monitorInfo{CbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if r, _, _ := pGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&mi))); r == 0 {
+		return
+	}
+	w := mi.RcWork
+	margin := int32(4 * ui.scale)
+	if ui.baseX < w.Left+margin {
+		ui.baseX = w.Left + margin
+	}
+	if ui.baseX+ui.pxW > w.Right-margin {
+		ui.baseX = w.Right - margin - ui.pxW
+	}
+	if ui.baseY < w.Top+margin {
+		ui.baseY = w.Top + margin
+	}
+	if ui.baseY+ui.pxH > w.Bottom-margin {
+		ui.baseY = w.Bottom - margin - ui.pxH
+	}
+}
+
+// ---------- 渲染管线 ----------
+
+func (ui *flUI) palette() flPalette {
+	if ui.isDark {
+		return flDarkTheme
+	}
+	return flLightTheme
+}
 
 func (ui *flUI) render() {
-	if ui.dib == 0 {
+	if ui.dibBits == nil || ui.pxW <= 0 || ui.pxH <= 0 {
 		return
 	}
-	clear(ui.dibBits)
-	ga := ui.alpha
-	if ga <= 0 {
-		ui.present()
-		return
+	for i := range ui.dibBits {
+		ui.dibBits[i] = 0
 	}
 
-	W, H := float64(ui.pxW), float64(ui.pxH)
+	pal := ui.palette()
+	W := float64(ui.pxW)
+	H := float64(ui.pxH)
 	r := float64(flCardR) * ui.scale
+	ga := ui.alpha
+	if ga < 0 {
+		ga = 0
+	}
+	if ga > 1 {
+		ga = 1
+	}
 
-	// 卡片 + 描边
+	// 100% 实体纯色卡片（非半透明）+ 抗锯齿边缘 + 细内沿描边
 	for y := 0; y < int(ui.pxH); y++ {
 		for x := 0; x < int(ui.pxW); x++ {
 			d := rrectSDF(float64(x)+0.5, float64(y)+0.5, W, H, r)
@@ -803,16 +962,17 @@ func (ui *flUI) render() {
 				continue
 			}
 			o := (y*int(ui.pxW) + x) * 4
-			ui.blendOver(ui.dibBits[o:], flColCard, a*(235.0/255.0)*ga)
-			// 1px 内沿描边
-			ui.blendOver(ui.dibBits[o:], flColBorder, a*clamp01(d+1)*(18.0/255.0)*ga)
+			// 卡片实体纯色填充（100% 不透明）
+			ui.blendOver(ui.dibBits[o:], pal.CardBg, a*ga)
+			// 精致内沿描边（1.2px 平滑过渡）
+			ui.blendOver(ui.dibBits[o:], pal.Border, a*clamp01(d+1.2)*pal.BorderA*ga)
 		}
 	}
 
-	// logo
+	// 绘制精致 Logo
 	ls := ui.logoPx
-	lx := int(8*ui.scale + 0.5)
-	ly := int(8*ui.scale + 0.5)
+	lx := int(float64(flLogoX)*ui.scale + 0.5)
+	ly := int(float64(flLogoY)*ui.scale + 0.5)
 	for y := 0; y < ls; y++ {
 		for x := 0; x < ls; x++ {
 			s := (y*ls + x) * 4
@@ -829,36 +989,49 @@ func (ui *flUI) render() {
 		}
 	}
 
-	// 文字
-	tx := float64(flTextX) * ui.scale
+	// 文字与状态排版
+	tx := int(float64(flTextX)*ui.scale + 0.5)
+
 	switch ui.frame.Phase {
 	case floaterActive:
-		rowH := 20 * ui.scale
-		ui.drawSpeedRow(int(tx), int(7*ui.scale+0.5), "↓", flColDown, ui.frame.Down, rowH, ga)
-		ui.drawSpeedRow(int(tx), int(27*ui.scale+0.5), "↑", flColUp, ui.frame.Up, rowH, ga)
+		hasDown := ui.frame.Down > 0
+		hasUp := ui.frame.Up > 0
+
+		if hasDown && hasUp {
+			// 同时有下载与上传：双行紧凑小字上下排列
+			ui.drawSpeedRow(tx, int(3*ui.scale+0.5), "↓", pal.DownArrow, ui.frame.Down, ui.fontSmall, pal.TextMain, pal.TextSub, ga)
+			ui.drawSpeedRow(tx, int(18*ui.scale+0.5), "↑", pal.UpArrow, ui.frame.Up, ui.fontSmall, pal.TextMain, pal.TextSub, ga)
+		} else if hasUp && !hasDown {
+			// 仅有上传：单行大字
+			ui.drawSpeedRow(tx, int(9*ui.scale+0.5), "↑", pal.UpArrow, ui.frame.Up, ui.fontLarge, pal.TextMain, pal.TextSub, ga)
+		} else {
+			// 仅有下载（或初始任务排队中）：单行大字
+			ui.drawSpeedRow(tx, int(9*ui.scale+0.5), "↓", pal.DownArrow, ui.frame.Down, ui.fontLarge, pal.TextMain, pal.TextSub, ga)
+		}
 	case floaterDone:
-		ui.drawStatusLine(int(tx), int(16*ui.scale+0.5), "下载完成", flColDone, ga)
+		ui.drawStatusLine(tx, int(9*ui.scale+0.5), "✓ 传输完成", pal.Done, ga)
 	case floaterError:
-		ui.drawStatusLine(int(tx), int(16*ui.scale+0.5), "下载出错", flColError, ga)
+		ui.drawStatusLine(tx, int(9*ui.scale+0.5), "✕ 传输失败", pal.Error, ga)
+	case floaterPaused:
+		ui.drawStatusLine(tx, int(9*ui.scale+0.5), "⏸ 传输已暂停", pal.Pause, ga)
 	}
 
 	ui.present()
 }
 
-func (ui *flUI) drawSpeedRow(x, y int, arrow string, arrowCol flRGB, speed int64, rowH float64, ga float64) {
-	aw := ui.drawText(x, y, arrow, ui.fontRow, arrowCol, ga)
-	spCol := flColText
+func (ui *flUI) drawSpeedRow(x, y int, arrow string, arrowCol flRGB, speed int64, font uintptr, textCol, weakCol flRGB, ga float64) {
+	aw := ui.drawText(x, y, arrow, font, arrowCol, ga)
+	spCol := textCol
 	if speed <= 0 {
-		spCol = flColWeak
+		spCol = weakCol
 	}
-	ui.drawText(x+aw+int(4*ui.scale+0.5), y, model.FormatSpeed(speed), ui.fontRow, spCol, ga)
+	ui.drawText(x+aw+int(4*ui.scale+0.5), y, model.FormatSpeed(speed), font, spCol, ga)
 }
 
 func (ui *flUI) drawStatusLine(x, y int, text string, col flRGB, ga float64) {
-	ui.drawText(x, y, text, ui.fontBig, col, ga)
+	ui.drawText(x, y, text, ui.fontStatus, col, ga)
 }
 
-// drawText 用 GDI 把文字画进黑底 strip，亮度作 alpha 合成到画布；返回文字宽度（px）。
 func (ui *flUI) drawText(dx, dy int, text string, font uintptr, col flRGB, ga float64) int {
 	if ui.stripDC == 0 || ui.stripBmp == 0 || font == 0 {
 		return 0
@@ -873,7 +1046,7 @@ func (ui *flUI) drawText(dx, dy int, text string, font uintptr, col flRGB, ga fl
 	tp := &u16[0]
 	const dtSingleLine = 0x0020
 	const dtNoPrefix = 0x0800
-	pDrawTextW.Call(ui.stripDC, uintptr(unsafe.Pointer(tp)), ^uintptr(0), // -1 = NUL 结尾
+	pDrawTextW.Call(ui.stripDC, uintptr(unsafe.Pointer(tp)), ^uintptr(0),
 		uintptr(unsafe.Pointer(&rc)), uintptr(dtSingleLine|dtNoPrefix))
 
 	var sz flSize
@@ -889,7 +1062,7 @@ func (ui *flUI) drawText(dx, dy int, text string, font uintptr, col flRGB, ga fl
 			if dxX < 0 || dxX >= int(ui.pxW) {
 				continue
 			}
-			ma := uint32(ui.stripBits[(y*int(ui.stripW)+x)*4]) // 灰度：取 B 通道
+			ma := uint32(ui.stripBits[(y*int(ui.stripW)+x)*4])
 			if ma == 0 {
 				continue
 			}
@@ -900,26 +1073,27 @@ func (ui *flUI) drawText(dx, dy int, text string, font uintptr, col flRGB, ga fl
 	return int(sz.Cx)
 }
 
-// present 把画布推给 layered window。
 func (ui *flUI) present() {
 	if ui.dib == 0 {
 		return
 	}
 	screen, _, _ := pGetDC.Call(0)
 	defer pReleaseDC.Call(0, screen)
+
 	size := flSize{Cx: ui.pxW, Cy: ui.pxH}
 	slide := int32(0)
 	if ui.alpha < 1 {
-		slide = int32((1 - ui.alpha) * flSlidePx * ui.scale)
+		slide = int32((1.0 - ui.alpha) * flSlidePx * ui.scale)
 	}
-	ptDst := flPoint{X: ui.baseX, Y: ui.baseY + slide}
+	jellyY := int32(ui.jellyOffY)
+
+	ptDst := flPoint{X: ui.baseX, Y: ui.baseY + slide + jellyY}
 	ptSrc := flPoint{0, 0}
 	blend := [4]byte{0, 0, 255, 1} // AC_SRC_OVER, 0, 255, AC_SRC_ALPHA
 	pUpdateLayeredWin.Call(ui.hwnd, screen, uintptr(unsafe.Pointer(&ptDst)), uintptr(unsafe.Pointer(&size)),
 		ui.memDC, uintptr(unsafe.Pointer(&ptSrc)), 0, uintptr(unsafe.Pointer(&blend)), 2) // ULW_ALPHA
 }
 
-// blendOver：在预乘 BGRA 像素上以 a（0..1）叠一个纯色。
 func (ui *flUI) blendOver(dst []byte, c flRGB, a float64) {
 	if a <= 0 {
 		return
@@ -927,74 +1101,40 @@ func (ui *flUI) blendOver(dst []byte, c flRGB, a float64) {
 	if a > 1 {
 		a = 1
 	}
-	ca := uint32(a*255 + 0.5)
-	inv := 255 - ca
-	dst[0] = uint8((c.B*ca + uint32(dst[0])*inv) / 255)
-	dst[1] = uint8((c.G*ca + uint32(dst[1])*inv) / 255)
-	dst[2] = uint8((c.R*ca + uint32(dst[2])*inv) / 255)
-	dst[3] = uint8((ca*255 + uint32(dst[3])*inv) / 255)
+	srcR := uint32(float64(c.R)*a + 0.5)
+	srcG := uint32(float64(c.G)*a + 0.5)
+	srcB := uint32(float64(c.B)*a + 0.5)
+	srcA := uint32(a*255.0 + 0.5)
+	invA := 255 - srcA
+
+	dst[0] = uint8(srcB + (uint32(dst[0])*invA+127)/255)
+	dst[1] = uint8(srcG + (uint32(dst[1])*invA+127)/255)
+	dst[2] = uint8(srcR + (uint32(dst[2])*invA+127)/255)
+	dst[3] = uint8(srcA + (uint32(dst[3])*invA+127)/255)
 }
 
-// blendOverPremul：叠一个已预乘的 BGRA 像素，附加全局透明度 ga。
 func (ui *flUI) blendOverPremul(dst, src []byte, ga float64) {
-	g := uint32(ga*255 + 0.5)
-	sb := uint32(src[0]) * g / 255
-	sg := uint32(src[1]) * g / 255
-	sr := uint32(src[2]) * g / 255
-	sa := uint32(src[3]) * g / 255
-	inv := 255 - sa
-	dst[0] = uint8(sb + uint32(dst[0])*inv/255)
-	dst[1] = uint8(sg + uint32(dst[1])*inv/255)
-	dst[2] = uint8(sr + uint32(dst[2])*inv/255)
-	dst[3] = uint8(sa + uint32(dst[3])*inv/255)
+	sa := float64(src[3]) * ga
+	if sa <= 0 {
+		return
+	}
+	invA := uint32(255.0 - sa + 0.5)
+	k := ga
+	dst[0] = uint8(uint32(float64(src[0])*k+0.5) + (uint32(dst[0])*invA+127)/255)
+	dst[1] = uint8(uint32(float64(src[1])*k+0.5) + (uint32(dst[1])*invA+127)/255)
+	dst[2] = uint8(uint32(float64(src[2])*k+0.5) + (uint32(dst[2])*invA+127)/255)
+	dst[3] = uint8(uint32(sa+0.5) + (uint32(dst[3])*invA+127)/255)
 }
 
-// ---------- 几何 ----------
-
-// rrectSDF 圆角矩形有向距离（像素中心坐标，<0 在内部）。
 func rrectSDF(px, py, w, h, r float64) float64 {
-	cx, cy := w/2, h/2
-	qx := abs64(px-cx) - (cx - r)
-	qy := abs64(py-cy) - (cy - r)
-	ax, ay := qx, qy
-	if ax < 0 {
-		ax = 0
-	}
-	if ay < 0 {
-		ay = 0
-	}
-	outside := sqrt64(ax*ax + ay*ay)
-	inside := qx
-	if qy > inside {
-		inside = qy
-	}
-	if inside > 0 {
-		inside = 0
-	}
+	hw, hh := w/2, h/2
+	x := math.Abs(px-hw) - (hw - r)
+	y := math.Abs(py-hh) - (hh - r)
+	dx := math.Max(x, 0)
+	dy := math.Max(y, 0)
+	outside := math.Sqrt(dx*dx + dy*dy)
+	inside := math.Min(math.Max(x, y), 0)
 	return outside + inside - r
-}
-
-func rrectAlpha(px, py, w, h, r float64) float64 {
-	return clamp01(0.5 - rrectSDF(px, py, w, h, r))
-}
-
-func abs64(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func sqrt64(v float64) float64 {
-	// 避免 math 包导入链差异；牛顿迭代足够精度
-	if v <= 0 {
-		return 0
-	}
-	x := v
-	for i := 0; i < 8; i++ {
-		x = (x + v/x) / 2
-	}
-	return x
 }
 
 func clamp01(v float64) float64 {
@@ -1007,36 +1147,39 @@ func clamp01(v float64) float64 {
 	return v
 }
 
-// bilinearRGBA 对源图做双线性采样（返回 16bit 通道值）。
-func bilinearRGBA(src image.Image, ox, oy, sw, sh int, fx, fy float64) (r, g, b, a uint32) {
-	x0 := int(fx)
-	y0 := int(fy)
-	tx := fx - float64(x0)
-	ty := fy - float64(y0)
-	sample := func(x, y int) (uint32, uint32, uint32, uint32) {
-		if x < 0 {
-			x = 0
-		}
-		if y < 0 {
-			y = 0
-		}
-		if x >= sw {
-			x = sw - 1
-		}
-		if y >= sh {
-			y = sh - 1
-		}
-		return src.At(ox+x, oy+y).RGBA()
+func sampleBilinear(src image.Image, u, v float64, w, h int) (r, g, b, a uint32) {
+	u = math.Max(0, math.Min(u, float64(w-1)))
+	v = math.Max(0, math.Min(v, float64(h-1)))
+	x0 := int(u)
+	y0 := int(v)
+	x1 := x0 + 1
+	if x1 >= w {
+		x1 = w - 1
 	}
-	r00, g00, b00, a00 := sample(x0, y0)
-	r10, g10, b10, a10 := sample(x0+1, y0)
-	r01, g01, b01, a01 := sample(x0, y0+1)
-	r11, g11, b11, a11 := sample(x0+1, y0+1)
-	lerp := func(c00, c10, c01, c11 uint32) uint32 {
-		top := float64(c00)*(1-tx) + float64(c10)*tx
-		bot := float64(c01)*(1-tx) + float64(c11)*tx
-		return uint32(top*(1-ty) + bot*ty)
+	y1 := y0 + 1
+	if y1 >= h {
+		y1 = h - 1
 	}
+	fx := u - float64(x0)
+	fy := v - float64(y0)
+
+	c00r, c00g, c00b, c00a := src.At(x0, y0).RGBA()
+	c10r, c10g, c10b, c10a := src.At(x1, y0).RGBA()
+	c01r, c01g, c01b, c01a := src.At(x0, y1).RGBA()
+	c11r, c11g, c11b, c11a := src.At(x1, y1).RGBA()
+
+	to8 := func(v uint32) float64 { return float64(v >> 8) }
+	lerp := func(v00, v10, v01, v11 float64) uint32 {
+		top := v00*(1-fx) + v10*fx
+		bot := v01*(1-fx) + v11*fx
+		return uint32(top*(1-fy) + bot*fy + 0.5)
+	}
+
+	r00, r10, r01, r11 := to8(c00r), to8(c10r), to8(c01r), to8(c11r)
+	g00, g10, g01, g11 := to8(c00g), to8(c10g), to8(c01g), to8(c11g)
+	b00, b10, b01, b11 := to8(c00b), to8(c10b), to8(c01b), to8(c11b)
+	a00, a10, a01, a11 := to8(c00a), to8(c10a), to8(c01a), to8(c11a)
+
 	return lerp(r00, r10, r01, r11), lerp(g00, g10, g01, g11), lerp(b00, b10, b01, b11), lerp(a00, a10, a01, a11)
 }
 

@@ -7,6 +7,7 @@ type stubFloaterView struct{}
 
 func (stubFloaterView) Present(floaterFrame) {}
 func (stubFloaterView) SetSuppressed(bool)   {}
+func (stubFloaterView) SetDark(bool)         {}
 func (stubFloaterView) Close()               {}
 
 func (f *floater) newView() floaterView { return stubFloaterView{} }

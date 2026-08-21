@@ -1,116 +1,162 @@
-# Mnemo-Go 前端设计规范
+# Mnemo-Go 全局设计与交互规范 (DESIGN.md)
 
-Mnemo-Go 的设计语言：**轻盈、流动、内容至上**。界面是一块安静的画布，文件与任务是唯一的主角；所有交互反馈通过柔和的色块流动与弹性动效传达，不使用生硬的线条、厚重的边框或装饰性元素。
+Mnemo-Go 的设计语言：**轻盈、克制、流动、沉浸**。
+界面是一块安静优雅的深色画布，文件、内容与传输任务是唯一的主角；全局交互反馈遵循 **Apple 级物理质感与弹簧阻尼动效**，杜绝生硬线条、冗余说明文案和厚重杂乱的修饰。
 
-## 设计原则
+---
 
-1. **内容为中心**：页面服务于文件、任务与设置项，不为装饰增加多余元素。
-2. **零说明文案**：界面不放置介绍/引导/提示条；无法避免的说明必须极简（一行以内）。
-3. **语义令牌唯一**：所有颜色、圆角、阴影、间距、动效一律引用 `design-tokens.css` 的语义变量，组件不硬编码任何颜色值或近似数值。
-4. **层级用"轻"表达**：层级只由文字权重、间距、细分隔线（`--border-lighter`）与定位表达；不堆叠卡片、不加粗描边。
-5. **一处一样**：同类控件在全局只有一套实现（见「控件规格」），页面 `<style scoped>` 只解决内容特有的排列。
+## 1. 核心设计原则
 
-## 图标与 Emoji 禁令
+1. **内容至上 (Content-First)**：所有设计服务于文件浏览、多网盘管理、媒体播放与高速传输，不堆砌无意义的装饰卡片。
+2. **极简零说明 (Zero Explanatory Clutter)**：界面严禁大段引导文字、冗余说明标签与无用 Hint。依靠清晰的布局、现代的控件与自然的动效传达状态与逻辑。
+3. **Apple 级物理动效 (Physical Motion & Elasticity)**：动效具备质量感、弹性和空间体积（例如：拖拽避让的波纹传播、元素挤压碰撞的果冻回弹、展开收起的平滑过冲）。
+4. **单一样式事实源 (Single Source of Truth)**：所有颜色、间距、圆角、阴影与动效曲线统一由 `frontend/src/styles/design-tokens.css` 驱动，组件禁止随意硬编码数值。
+5. **严禁 Emoji (Strict No-Emoji Rule)**：所有按钮、状态提示、文件标识和菜单严禁使用 Emoji 字符。功能图标统一采用 `UiIcon.vue` 的精致 SVG 矢量线条图标（`currentColor` 继承）。
 
-- **所有界面禁止使用 Emoji**（含带 `FE0F` 变体选择符的符号）。按钮、菜单、空状态、文件类型、状态标识一律不得使用 Emoji 字符。
-- 功能图标统一使用 `frontend/src/components/UiIcon.vue`（内联 SVG、stroke 风格、`currentColor` 继承文字色）。新增图标先在 `UiIcon.vue` 的 `PATHS` 中登记命名，再以 `<UiIcon name="…" />` 引用。
-- 允许少量纯排版符号：箭头 `↑ ↓`、勾号 `✓`、星级 `★`；其余图形一律走 SVG。
-- 网盘 provider 图标使用 `frontend/src/assets/drive-icons/` 资源，经 `api.js` 的 `providerIconUrl()` 解析。
+---
 
-## 选中态与强调：流动色块（Selection Language）
+## 2. 主题与色彩系统 (Theming & Tokens)
 
-**选中/激活的视觉表达只有一种：浅色块 + 主色文字。禁止使用任何形式的小线条指示器**（底部 2px 条、左侧 3px 条、右侧竖条等均不允许）。
+Mnemo-Go 原生支持 **深色 (Dark)** 与 **浅色 (Light)** 两套完整的主题调色板，并支持跟随操作系统自动切换。
 
-- 色块底色：`color-mix(in srgb, var(--color-primary) 11-13%, transparent)`，圆角 `--radius-md`，
-  可叠 1px 内描边 `color-mix(in srgb, var(--color-primary) 18-22%, transparent)`。
-- **可移动的选中容器**（顶栏页签、分段控件）使用**滑动 glider**：一个绝对定位的圆角色块，跟随激活项改变 `transform: translateX()` 与 `width`，缓动用带轻微回弹的 `cubic-bezier(0.22, 1.25, 0.36, 1)`，时长 320ms——切换时色块"灵动地滑动过去"。
-- **列表项选中**（菜单、树节点、下拉项）使用静态色块 + 入场微动效 `sel-in`（scale .97 → 1，spring 缓动）。
-- 悬停态一律 `--bg-hover` 圆角底面，不位移、不加阴影（文件/任务行除外，见下）。
+### 2.1 品牌与强调色 (Brand & Accents)
+- **品牌强调色**：固定紫罗兰色调，深浅模式具备对应适配，不提供混乱的第三方色包：
+  - **Light 强调色**：`#7c3aed`（`--color-primary`，符合 WCAG AA 对比度）
+  - **Dark 强调色**：`#a78bfa`（`--color-primary`，暗场柔和高亮）
+  - **实心按钮强主色**：`--color-primary-strong: #7c3aed`
+  - **焦点光环**：`--ring-focus: rgba(124, 58, 237, 0.28)`
 
-## 动效标尺
+### 2.2 背景与表面层级 (Surfaces & Elevations)
+| 语义 Token | 浅色模式 (Light) | 深色模式 (Dark) | 适用场景 |
+| :--- | :--- | :--- | :--- |
+| `--bg-base` | `#ffffff` | `#0f1015` | 应用底层视窗背景 |
+| `--bg-surface` | `#f8f9fc` | `#161820` | 内容主区域、列表区底面 |
+| `--bg-hover` | `rgba(0, 0, 0, 0.045)` | `rgba(255, 255, 255, 0.065)` | 列表项、按钮悬停底面 |
+| `--bg-subtle` | `rgba(0, 0, 0, 0.03)` | `rgba(255, 255, 255, 0.035)` | 次级弱化区域底色 |
+| `--bg-elevated` | `rgba(255, 255, 255, 0.94)` | `rgba(24, 26, 35, 0.92)` | 弹窗、下拉浮层（含毛玻璃） |
 
-| 令牌 | 值 | 用途 |
-| --- | --- | --- |
-| `--motion-fast` | 140ms | 颜色、底色、透明度 |
-| `--motion-normal` | 240ms | 位移、展开收起 |
-| `--motion-slow` | 380ms | 弹层、页面级过渡 |
-| `--motion-ease` | cubic-bezier(0.22, 1, 0.36, 1) | 通用 |
-| `--motion-ease-out` | cubic-bezier(0.16, 1, 0.3, 1) | 入场 |
-| `--motion-spring` | cubic-bezier(0.34, 1.3, 0.64, 1) | 按压回弹、选中入场 |
-| glider 缓动 | cubic-bezier(0.22, 1.25, 0.36, 1) | 滑动色块（带回弹） |
+### 2.3 文字与排版层级 (Typography)
+- 基准字族：`system-ui, -apple-system, "Segoe UI", Roboto, "Microsoft YaHei UI", sans-serif`
+- **主标题 / 正文**：`--text-primary`（Light: `#111827` / Dark: `#f3f4f6`）
+- **次要信息 / 辅助**：`--text-secondary`（Light: `#4b5563` / Dark: `#9ca3af`）
+- **弱化标注 / 占位符**：`--text-tertiary`（Light: `#6b7280` / Dark: `#6b7280`）
+- **禁用态**：`--text-disabled`（Light: `#9ca3af` / Dark: `#4b5563`）
 
-规则：悬停不加位移（`translateY`）也不加阴影——只有可点击的卡片/按钮允许 `scale(.96-.98)` 按压反馈。页面切换用左右滑动（`page-slide-left/right`，12px 位移 + 淡入）。弹层入场统一 `ctx-in`（.12s）。尊重 `prefers-reduced-motion`。
+### 2.4 语义状态色 (Status Colors)
+- **成功 / 传输完成**：`--color-success`（Light `#059669` / Dark `#34d399`）
+- **警告 / 传输暂停**：`--color-warning`（Light `#d97706` / Dark `#fbbf24`）
+- **错误 / 传输失败**：`--color-error`（Light `#dc2626` / Dark `#f87171`）
+- **信息 / 提示**：`--color-info`（Light `#2563eb` / Dark `#60a5fa`）
 
-## 排版与间距
+---
 
-- 基准字号 `14px`（body），界面正文 `13px`，辅助 `12px`，弱化说明 `11-11.5px`。
-- 列表行高：文件行 `46px`（fileitem）、任务行 `52px`（taskrow）、树/菜单节点 `28-32px`。
-- 圆角阶梯：`--radius-xs 4` / `sm 6` / `md 8` / `lg 10` / `xl 12` / `full 999`。
-- 间距只取 `--space-1..6`（4/8/12/16/20/24）。
+## 3. 动效物理体系 (Motion & Physics)
 
-## 颜色
+全应用的动效统一采用拟物与弹簧物理曲线，杜绝呆板的线性过渡。
 
-只使用语义变量：`--bg-base/surface/hover/subtle/elevated`、`--text-primary/secondary/tertiary/disabled`、`--border-light/lighter`、`--color-primary(+hover/active)`、`--color-success/warning/error`、`--listselectbg`、`--ring-focus`。暗色主题下同一套变量自动切换（`html.dark`）。强调色为固定品牌紫：浅色 `#7c3aed` / 深色 `#a78bfa`，不提供色包切换；压白字的实心按钮用 `--color-primary-strong`（#7c3aed，过 WCAG AA）。
+### 3.1 动效标尺 (Motion Tokens)
+| Token | 时间 | 缓动曲线 | 典型用途 |
+| :--- | :--- | :--- | :--- |
+| `--motion-fast` | `130ms` | `cubic-bezier(0.2, 0, 0, 1)` | 颜色、透明度、轻微高亮 |
+| `--motion-normal` | `240ms` | `cubic-bezier(0.22, 1, 0.36, 1)` | 位移、列表过渡、尺寸变换 |
+| `--motion-slow` | `360ms` | `cubic-bezier(0.22, 1, 0.36, 1)` | 弹层出现、全屏展开 |
+| `--motion-spring` | `320ms` | `cubic-bezier(0.34, 1.45, 0.64, 1)` | 按钮按压回弹、图标弹跳、选中入场 |
+| `--motion-bounce` | `380ms` | `cubic-bezier(0.28, 1.65, 0.52, 1)` | 强弹性入场、开关滑块过冲 |
+| `--motion-glide` | `240ms` | `cubic-bezier(0.22, 1.25, 0.36, 1)` | 表单切换滑入、树节点展开 |
 
-## 控件规格
+### 3.2 核心物理交互模型
 
-| 控件 | 实现 | 规格 |
-| --- | --- | --- |
-| 按钮 | `.btn` / `.primary` / `.danger` / `.text` / `.sm` | 高 30px（sm 26px），圆角 `--radius-sm`，按压 scale(.97) |
-| 幽灵按钮 | `.tbtn`（工具条内） | 无边框透明底，悬停出 `--bg-hover` 底面 |
-| 圆形钮 | `.btn-circle` | 26px 圆钮，用于行内操作/选择，按压 scale(.9) |
-| 输入框 | `.input` / `.textarea` | 高 30px，聚焦 `--ring-focus` 光环 |
-| 下拉选择 | `UiSelect.vue` | **禁止原生 `<select>`**；按钮 + 浮层列表，选中项带勾，支持图标 |
-| 开关 | `.switch` | 38×21 滑块，滑块位移用 `transform`（不用 left），按压滑块拉长 |
-| 分段切换 | `SegTabs.vue` | 滑块 glider 式（`--seg-index` 驱动 translateX） |
-| 徽标 | `.badge` | `.primary/.success/.warn/.error` |
-| 模态框 | `Modal.vue` | `.modal-mask` 遮罩 + `.modal`，Esc 关闭 |
-| 菜单 | `ContextMenu.vue` | `.ctx-menu` 浮层，`.ctx-item` 行，danger 红色 |
-| 空状态 | `.workspace-empty-state` | 居中图标 + 标题 +（可选）一行描述 |
-| 搜索框 | `.search-quick` | 填充式圆角，聚焦变宽 168→200px |
-| Toast | `.toast` | 右上角浮层，左缘 3px 状态色，3.2s 自动消失 |
+#### ① 流动色块 (Selection Glider)
+- 激活态禁止使用底部小横条或侧边竖线；
+- 顶栏页签与分段控件统一使用**绝对定位的滑动色块**（Glider），跟随激活项平滑移动与自适应伸缩，缓动使用 `cubic-bezier(0.22, 1.25, 0.36, 1)`，产生灵动的滑动落位质感。
 
-## 页面结构
+#### ② 账号栏拖拽波纹与果冻碰撞 (Wave Ripple & Jelly Collision)
+- **列内锁定**：拖拽幽灵 X 轴锁死在列内，Y 轴弹性阻尼跟随（`0.32` 弹簧插值）；
+- **逐级波纹避让**：被挤开的网盘项按与拖拽点的距离逐级延迟反应（每远一档延迟 `35ms`，上限 `140ms`），形成像水波一样荡开的流动感；
+- **碰撞果冻（Jelly Bump）**：被挤压的项在 FLIP 平移的同时，内部层执行垂直方向 `5px` 挤压位移 + `scale(1.05, 0.92)` 弹性形变，具有真实的物理实体感。
 
-### 应用壳（App.vue）
-- 顶栏 `topbar` 高 **42px**，整块窗口拖动区（`--wails-draggable: drag`），控件 `no-drag`。
-- 左侧页签组 `top-tabs`：pill 形按钮 + `.top-tab-glider` 滑动色块（JS 测量激活项 offsetLeft/offsetWidth，resize 时重算）；右侧为明暗切换与设置入口图标钮。
-- 页面容器 `page-host`，切换用左右滑动过渡（按页签索引定方向）。
-- 传输中右下角 `.transfer-ball` 悬浮速度球（可拖动固定尺寸，点击跳传输页）。
+#### ③ 目录树 Grid 高度展开动效 (Smooth Tree Expansion)
+- 目录树子层展开/收起采用 `grid-template-rows: 0fr ↔ 1fr` 方案；
+- 配合内层 `overflow: hidden` 与 `240ms --motion-glide` 弹簧缓动，实现无需预知高度的无缝丝滑展开与收起。
 
-### 网盘页（PanView）
-- 最左 `account-rail` 账号栏：**60px 窄图标栏，悬停 300ms 展开为 220px**（图标 36px 盒 + 名称/用量条渐显）；底部添加账号按钮；右键账号出菜单。
-- 内部左侧 `pan-left`（216px）：收藏（可展开内联列表）+ 回收站 + 目录树（`TreeNode.vue` 递归懒加载，任意层级，悬停预览浮层）。
-- 右侧 `pan-right`：`toppanbtns` 幽灵工具条 → `toppanarea` 信息条（全选/计数/排序列头/视图切换，高 40px）→ `file-list`。
-- 文件行 `fileitem`：46px flex 行，文件名两行 clamp 悬停主色；网格视图 `griditem` 76px 图标底面。
-- 搜索关键词用 `<mark class="hl">` 高亮，Esc 返回目录。
+#### ④ 悬停预览防打架机制 (Hover Preview Suppression)
+- 文件夹悬停预览具备交互感知保护；
+- 当用户执行展开/折叠/单击导航/右键菜单时，立即关闭已显示的预览卡片，并在后续 `700ms` 抑制重新弹出，彻底杜绝悬停卡片与展开动画在视觉上的冲突。
 
-### 传输页（TransferView）
-- 左侧 `down-side` 菜单（选中为流动色块）+ 账号筛选；右侧六分区列表。
-- 任务行 `taskrow`：52px 平铺行——选择圆钮 34px / 图标 26px / 名称+副行 / 大小 76px / 进度 200px（状态文字+5px 细条）/ 速度 86px / 操作钮。
-- 进度条 `progress-total` + `progress-current`（`.active/.succeed/.error` 三色）。
+---
 
-### 分享页（ShareView）
-- `share-page` 单滚动容器：`share-toolbar`（搜索 + UiSelect 筛选 + 刷新）→ `share-group` 分组（网盘图标+账号+条数）→ `share-record` 记录行（名称/时间/链接 + 提取码 chip + 操作钮）。
+## 4. 核心组件系统规范 (Component Specifications)
 
-### 同步页（SyncView）
-- `syncpage` 容器：`syncpage-head` 标题栏 → `sync-task` 任务卡（名称+方向徽标、本地⇄网盘路径行、运行进度条、switch+操作钮组）。
+### 4.1 下拉选择器 (`UiSelect.vue`)
+- **禁止使用原生 `<select>`**；
+- **触发器**：`30px` 紧凑高度，`1px solid var(--control-border)` 细描边与柔和背景；悬停描边加深至 `--border-focus`，展开时呈现主题色微晕环；
+- **浮层面板**：毛玻璃材质（`backdrop-filter: blur(16px)` + `--bg-elevated`），带轻微缩放入场；
+- **选项列表**：支持自定义 SVG 图标或图片，选项加载时呈现轻微波纹级联进入；选中项右侧带 `icon-check-pop` 弹性弹跳对勾。
 
-### 设置页（SettingsView）
-- 左 `settings-nav` 图标导航（选中为流动色块，滚动 spy）+ 右 `settings-body` 长页。
-- 设置项 `sg-row` 平面行：132-168px 加粗标签列 + 控件区。
-- 改动即时静默保存，底部保留「立即保存」。
+### 4.2 开关控件 (`Switch`)
+- **规格尺寸**：`42px × 24px`，完全符合 iOS 深度感与触觉标准；
+- **轨道**：关闭时带内阴影（`inset 0 1px 2px rgba(0,0,0,.15)`），开启时填充主题强调色；
+- **滑块**：圆形滑块带双层外投影与高光描边，滑动采用 `300ms --motion-bounce` 弹性过冲；
+- **触觉按压**：在 `:active` 按压时，滑块沿滑动方向自动拉长（`width: 23px`），呈现如同实体硅胶按键的形变手感。
 
-### 视频播放（PlayerPanel.vue）
-- 视频统一由网页播放器沉浸式覆盖层播放；原生 HTML5/WebView 解码 MP4、WebM、Ogg，HLS 使用 HLS.js，DASH 使用 dash.js。上游签名 URL 和鉴权头只保留在 Go 侧播放会话中。
-- 控制层采用顶部文件信息栏 + 底部悬浮控制区：进度条、播放/暂停、快退/快进、时间、音量、清晰度、字幕、倍速、循环、画中画、截图与全屏均使用线条图标；窄屏将次要控件收进“更多”。
-- 起播时按 `GetPlayCursor` 续播，播放中定时保存并在关闭/结束时调用 `SavePlayCursor`；短期签名地址失效时由会话代理刷新一次并保留 Range。
-- MKV/AVI/WMV/FLV/RMVB 等浏览器无法稳定解码的容器明确提示下载，除非 provider 提供 HLS/DASH 转码源。
+### 4.3 按钮体系 (Buttons & Pills)
+- **标准按钮 (`.btn`)**：高 `30px`（小号 `.sm` `26px`），圆角 `--radius-sm`，`:active` 缩放到 `0.97`；
+- **幽灵按钮 (`.tbtn`)**：用于工具条，平时透明无框，悬停浮现 `--bg-hover`，按压 `scale(0.96)`；
+- **预设药丸按钮 (`.pill-btn`)**：用于限速、字号等快速预设，胶囊全圆角，激活态为主题色微晕浅色块 + 加粗文字；
+- **圆钮 (`.btn-circle`)**：`26px` 正圆，用于表格行内操作与快捷关闭，按压缩放到 `0.90`。
 
-## 文件清单
+### 4.4 沉浸式视频播放器 (`PlayerPanel.vue`)
+- **播放架构**：原生 HTML5 + HLS.js + DASH.js 统一管道，上游鉴权与签名由 Go 会话代理隔离；
+- **沉浸式界面**：顶栏与底栏均为纯渐变遮罩（`linear-gradient`），光标闲置 `2.4s` 自动全隐；
+- **全功能控制**：多清晰度无缝切流、三轨字幕体系（WebVTT 文本、SUP 原生图形渲染、ASS/SSA jassub 渲染）、精准帧级快进快退、画中画与截图；
+- **真实窗口控制**：右上角集成标准窗口三件套（**最小化 / 最大化·还原 / 关闭**），全屏播放时自适应隐藏。
 
-| 文件 | 职责 |
-| --- | --- |
-| `frontend/src/styles/design-tokens.css` | 颜色/文字/边框/阴影/间距/动效语义变量（唯一事实源） |
-| `frontend/src/styles/main.css` | 应用壳 + 全部共用控件与页面布局规则 |
-| 页面 `<style scoped>` | 该页面独有的排布细节 |
+### 4.5 沉浸式图片查看器 (`PreviewModal.vue`)
+- **黑场舞台**：深邃纯黑背景展示，默认完美适配视口（小图不强行模糊放大）；
+- **图层转场模型 (Layer Crossfade)**：图片切换时，新图**完全解码就绪后**才平滑淡入，旧图冻结上一瞬的变换状态并淡出，彻底告别切图白屏闪烁；
+- **光标锚定缩放**：滚轮缩放以鼠标光标所在像素点为几何中心进行乘法步进（`0.1× ~ 10×`）；
+- **双击交互**：双击在「窗口适配 ↔ 200% 细节」之间平滑切换并锚定点击点；
+- **相邻图片预载**：当前图显示后自动预载上一张与下一张图片，翻页零延迟；
+- **浮动控制栏**：底部半透明渐变控制条（翻页/计数/缩放/适配/旋转/缩略图胶卷），闲置 `2.4s` 自动隐去。
+
+### 4.6 桌面传输悬浮球 (`Floater`)
+- **架构基础**：专属 OS UI 线程驱动的 Win32 Layered Window（纯 Go 无 cgo），绝不占用主线程资源；
+- **超窄紧凑卡片**：`138px × 38px` 精致尺寸，圆角 `8px`，屏幕占用率极低；
+- **100% 纯色实体材质**：非半透明，采用实色卡底 + 抗锯齿边缘 + 细内沿描边，支持跟随应用当前主题的 **深色 (`#18181c`) / 浅色 (`#ffffff`)** 双套配色；
+- **智能单双行布局**：
+  - 单向传输（仅下载或仅上传）：单行大字居中显示（`↓ 15.6 MB/s` 或 `↑ 4.2 MB/s`，字号 `13px`）；
+  - 双向传输（同时有上传与下载）：上下两行紧凑小字排列（`10px`）；
+  - 终态提示：单行清晰呈现 `✓ 传输完成`、`✕ 传输失败`、`⏸ 传输已暂停`；
+- **Apple 级弹簧动画**：
+  - 弹出显现：`1 - e^(-6t) * cos(2.8πt)` 阻尼弹簧入场，带轻快过冲与回弹；
+  - 状态跳变：进入完成/出错/暂停时触发 `Jelly Pulse`（果冻震颤回弹，持续 `320ms`）；
+- **物理防形变保障**：拖拽与重绘过程尺寸严格固定，位图与窗口物理像素一一对应，杜绝形变漂移。
+
+---
+
+## 5. 交互规范与状态记忆 (Interaction Standards)
+
+### 5.1 路径与状态持久化
+- **网盘位置记忆**：用户浏览网盘时，系统自动按账号防抖记录当前 `dirId`、面包屑路径层级、目录树选中项与展开节点（`prefs.panLocations`）；
+- **无缝恢复**：无论是在不同功能页之间切换，还是重启应用，重新进入网盘页时均会自动定位到上次打开的目录层级，并预载对应的目录树展开形态。
+
+### 5.2 列表性能与虚拟化
+- **O(1) 选择集校验**：长列表选择采用 `Set` 结构，避免在万级文件渲染时进行全量 `some()` 扫描；
+- **响应式计算解耦**：文件名、大小、时间等展示字符串在数据装载与排序时一次性预计算，点击选中操作不再触发全表文本重构。
+
+---
+
+## 6. 文件结构清单 (Directory Map)
+
+| 文件 / 路径 | 核心职责 |
+| :--- | :--- |
+| `frontend/src/styles/design-tokens.css` | 全局颜色、字体、边框、阴影、动效变量（唯一事实源） |
+| `frontend/src/styles/main.css` | 应用外壳、通用控件库（按钮/开关/表单/卡片）、布局容器 |
+| `frontend/src/appearance.js` | 明暗主题计算、偏好配置存储、Wails 窗口主题与悬浮球同步 |
+| `frontend/src/components/UiIcon.vue` | 全局统一 SVG 线条图标库（严禁引入 Emoji） |
+| `frontend/src/components/UiSelect.vue` | 自定义现代化下拉选择器 |
+| `frontend/src/components/AccountRail.vue` | 账号侧边栏（展开收起、波纹让位、碰撞果冻、拖拽排序） |
+| `frontend/src/components/PlayerPanel.vue` | 沉浸式网页多媒体播放器 |
+| `frontend/src/components/PreviewModal.vue` | 沉浸式图片查看器与专业多模式代码/Markdown 预览器 |
+| `internal/app/floater.go` | 平台无关传输悬浮窗状态机与速度聚合器 |
+| `internal/app/floater_windows.go` | Win32 原生 138×38 纯色双主题弹性桌面悬浮球 |

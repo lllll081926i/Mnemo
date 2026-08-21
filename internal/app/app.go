@@ -294,12 +294,21 @@ func (a *App) startup(ctx context.Context) {
 				a.floater.SetPlayerFullscreen(full)
 			}
 		})
+		// 前端事件：主题变化时同步悬浮窗明暗
+		runtime.EventsOn(ctx, "app:theme", func(optionalData ...interface{}) {
+			if a.floater != nil && len(optionalData) > 0 {
+				if isDark, ok := optionalData[0].(bool); ok {
+					a.floater.SetDark(isDark)
+				}
+			}
+		})
 		if levelErr := logging.SetLevel(settings.LogLevel); levelErr != nil {
 			logging.Warn("invalid persisted log level, using info", "value", settings.LogLevel, "error", levelErr)
 			_ = logging.SetLevel("info")
 		}
 		if a.floater != nil {
 			a.floater.ApplySettings(settings.FloaterEnabled())
+			a.floater.SetDark(settings.Theme != "light")
 		}
 	} else {
 		logging.Warn("failed to load persisted log level", "error", settingsErr)
@@ -1114,9 +1123,10 @@ func (a *App) SaveSettings(s store.Settings) error {
 	netx.SetGlobalProxy(s.Proxy)
 	// apply upload speed cap at runtime (direct uploads via ProgressReader)
 	netx.SetGlobalUploadRate(s.MaxUploadSpeed)
-	// apply floater visibility toggle at runtime
+	// apply floater visibility & theme at runtime
 	if a.floater != nil {
 		a.floater.ApplySettings(s.FloaterEnabled())
+		a.floater.SetDark(s.Theme != "light")
 	}
 	logging.Info("settings save completed")
 	return nil

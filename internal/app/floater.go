@@ -17,6 +17,7 @@ type floaterPhase int
 const (
 	floaterHidden floaterPhase = iota
 	floaterActive
+	floaterPaused
 	floaterDone
 	floaterError
 )
@@ -26,6 +27,7 @@ type floaterFrame struct {
 	Phase floaterPhase
 	Down  int64 // bytes/s
 	Up    int64 // bytes/s
+	Dark  bool  // 是否深色主题
 }
 
 // floaterHooks 由原生视图回调控制器/应用层。
@@ -39,29 +41,34 @@ type floaterHooks struct {
 type floaterView interface {
 	Present(f floaterFrame)
 	SetSuppressed(suppressed bool)
+	SetDark(isDark bool)
 	Close()
 }
 
 const (
-	floaterDoneHold  = 3 * time.Second
-	floaterErrorHold = 6 * time.Second
-	floaterPushEvery = 250 * time.Millisecond // 速度刷新节流 4Hz
+	floaterDoneHold   = 3 * time.Second
+	floaterErrorHold  = 6 * time.Second
+	floaterPausedHold = 4 * time.Second
+	floaterPushEvery  = 250 * time.Millisecond // 速度刷新节流 4Hz
 )
 
 type floater struct {
 	a    *App
 	logo []byte
 
-	mu       sync.Mutex
-	down     map[string]int64
-	up       map[string]int64
-	live     map[string]bool
-	phase    floaterPhase
-	sawError bool // 本轮活跃期是否出现过失败
-	playerFS bool // 播放器全屏抑制
-	enabled  bool
+	mu         sync.Mutex
+	down       map[string]int64
+	up         map[string]int64
+	live       map[string]bool
+	paused     map[string]bool
+	phase      floaterPhase
+	sawError   bool // 本轮活跃期是否出现过失败
+	sawPause   bool // 本轮活跃期是否暂停
+	playerFS   bool // 播放器全屏抑制
+	enabled    bool
+	isDark     bool
 
-	timer    *time.Timer // done/error 自动隐藏
+	timer    *time.Timer // done/error/pause 自动隐藏
 	throttle *time.Timer // 尾随刷新
 	lastPush time.Time
 
@@ -76,7 +83,9 @@ func newFloater(a *App, logo []byte) *floater {
 		down:    make(map[string]int64),
 		up:      make(map[string]int64),
 		live:    make(map[string]bool),
+		paused:  make(map[string]bool),
 		enabled: true,
+		isDark:  true,
 	}
 }
 
@@ -99,10 +108,12 @@ func (f *floater) OnTaskEvent(ev transfer.TaskEvent) {
 	t := ev.Task
 	key := ev.Kind + ":" + t.ID
 	active := t.Status == "downloading" || t.Status == "uploading" || t.Status == "queued"
+	paused := t.Status == "paused" || t.Status == "stopped"
 
 	f.mu.Lock()
 	if active {
 		f.live[key] = true
+		delete(f.paused, key)
 		if ev.Kind == "upload" {
 			f.up[key] = t.Speed
 			delete(f.down, key)
@@ -113,6 +124,13 @@ func (f *floater) OnTaskEvent(ev transfer.TaskEvent) {
 	} else {
 		if f.live[key] && t.Status == "failed" {
 			f.sawError = true
+		} else if f.live[key] && paused {
+			f.sawPause = true
+		}
+		if paused {
+			f.paused[key] = true
+		} else {
+			delete(f.paused, key)
 		}
 		delete(f.live, key)
 		delete(f.down, key)
@@ -132,46 +150,54 @@ func (f *floater) OnTaskEvent(ev transfer.TaskEvent) {
 		if f.phase != floaterActive {
 			f.phase = floaterActive
 			f.sawError = false
+			f.sawPause = false
 		}
 		if f.timer != nil {
 			f.timer.Stop()
 			f.timer = nil
 		}
 	case f.phase == floaterActive:
-		// 活跃任务刚清零：按本轮结局进入完成/出错态
-		if f.sawError {
+		// 活跃任务刚清零：按本轮结局进入完成/暂停/出错态
+		switch {
+		case f.sawError:
 			f.phase = floaterError
-		} else {
+		case f.sawPause:
+			f.phase = floaterPaused
+		default:
 			f.phase = floaterDone
 		}
 		hold := floaterDoneHold
 		if f.phase == floaterError {
 			hold = floaterErrorHold
+		} else if f.phase == floaterPaused {
+			hold = floaterPausedHold
 		}
 		f.timer = time.AfterFunc(hold, func() { f.transitionToHidden() })
 	default:
-		// 已是 done/error/hidden，任务删除等事件不改变现状
+		// 已是 done/error/paused/hidden，任务删除等事件不改变现状
 	}
 	phase := f.phase
+	isDark := f.isDark
 	f.mu.Unlock()
 
-	f.push(floaterFrame{Phase: phase, Down: downSum, Up: upSum}, phase != floaterActive)
+	f.push(floaterFrame{Phase: phase, Down: downSum, Up: upSum, Dark: isDark}, phase != floaterActive)
 }
 
-// transitionToHidden 完成/出错态停留结束后淡出。
+// transitionToHidden 完成/出错/暂停态停留结束后淡出。
 func (f *floater) transitionToHidden() {
 	f.mu.Lock()
-	if f.phase == floaterDone || f.phase == floaterError {
+	if f.phase == floaterDone || f.phase == floaterError || f.phase == floaterPaused {
 		f.phase = floaterHidden
 	}
+	isDark := f.isDark
 	f.mu.Unlock()
-	f.push(floaterFrame{Phase: floaterHidden}, true)
+	f.push(floaterFrame{Phase: floaterHidden, Dark: isDark}, true)
 }
 
-// DismissTerminal 用户在完成/出错态点击：立即隐藏并打开传输页。
+// DismissTerminal 用户在完成/出错/暂停态点击：立即隐藏并打开传输页。
 func (f *floater) dismissTerminal() {
 	f.mu.Lock()
-	terminal := f.phase == floaterDone || f.phase == floaterError
+	terminal := f.phase == floaterDone || f.phase == floaterError || f.phase == floaterPaused
 	if terminal {
 		f.phase = floaterHidden
 		if f.timer != nil {
@@ -179,10 +205,38 @@ func (f *floater) dismissTerminal() {
 			f.timer = nil
 		}
 	}
+	isDark := f.isDark
 	f.mu.Unlock()
 	if terminal {
-		f.push(floaterFrame{Phase: floaterHidden}, true)
+		f.push(floaterFrame{Phase: floaterHidden, Dark: isDark}, true)
 	}
+}
+
+// SetDark 设置明暗主题（深色/浅色）。
+func (f *floater) SetDark(isDark bool) {
+	f.mu.Lock()
+	if f.isDark == isDark {
+		f.mu.Unlock()
+		return
+	}
+	f.isDark = isDark
+	phase := f.phase
+	var downSum, upSum int64
+	for _, v := range f.down {
+		downSum += v
+	}
+	for _, v := range f.up {
+		upSum += v
+	}
+	f.mu.Unlock()
+
+	f.viewMu.Lock()
+	v := f.view
+	f.viewMu.Unlock()
+	if v != nil {
+		v.SetDark(isDark)
+	}
+	f.push(floaterFrame{Phase: phase, Down: downSum, Up: upSum, Dark: isDark}, true)
 }
 
 // SetPlayerFullscreen 前端播放器全屏变化时抑制/恢复悬浮窗。
@@ -302,7 +356,7 @@ func (f *floater) initialFrame() floaterFrame {
 	for _, v := range f.up {
 		up += v
 	}
-	return floaterFrame{Phase: f.phase, Down: down, Up: up}
+	return floaterFrame{Phase: f.phase, Down: down, Up: up, Dark: f.isDark}
 }
 
 func (f *floater) suppressed() bool {
