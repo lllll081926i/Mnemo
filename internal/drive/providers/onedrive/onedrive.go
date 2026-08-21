@@ -277,7 +277,18 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	if err != nil {
 		return nil, err
 	}
-	return cl.CreateLink(ctx, params.FileIDs[0], params.Expiration, params.Password)
+	item, err := cl.CreateLink(ctx, params.FileIDs[0], params.Expiration, params.Password)
+	if err != nil || item == nil {
+		return item, err
+	}
+	item.AccountID = c.UserID
+	item.DriveID = c.DriveID
+	item.FileID = params.FileIDs[0]
+	item.FileIDList = []string{params.FileIDs[0]}
+	if name := strings.TrimSpace(params.ShareName); name != "" {
+		item.ShareName = name
+	}
+	return item, nil
 }
 
 // UploadOneFile uploads one file (simple PUT for small, upload session for large).

@@ -9,8 +9,9 @@
 ## 能力声明（guangya.go:36-43）
 
 ```
-copy, permanentDelete: true
+copy, permanentDelete, createShare, shareExpiration, sharePassword, combinedShare, shareHistory: true
 SetHashes(["md5"], nil)
+ShareExpirationOptions: [0, 1, 7, 30]
 ```
 
 ---
@@ -74,13 +75,19 @@ SetHashes(["md5"], nil)
 
 ---
 
-## 8. RefreshAccount（guangya.go）
+## 8. 分享（share.go）
+
+✅ `POST /nd.bizuserres.s/v1/share_file`；支持多文件/文件夹、永久或 1/7/30 天、可选自定义提取码。响应必须返回分享链接，业务失败会保留服务端错误。
+
+---
+
+## 9. RefreshAccount（guangya.go）
 
 ✅ 登录和手动容量刷新调用 `/assets/v1/get_assets`，读取 `data.usedSpaceSize` / `data.totalSpaceSize`；兼容数字和字符串字节数，并携带 `Did` / `Dt` 设备头。业务请求收到 401/403 时仍会刷新会话再重试。
 
 ---
 
-## 9. ProvideHashes（guangya.go）
+## 10. ProvideHashes（guangya.go）
 
 ✅ `guangya.go:42-43, 243-279` SetHashes(["md5"], nil)，详情兼容旧版 `data.fileInfo` 与列表形态并读取 MD5。`ResolveTransferHash` 支持 md5（`:500-513`）。
 

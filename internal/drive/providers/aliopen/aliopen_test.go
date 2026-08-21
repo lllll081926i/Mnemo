@@ -2,6 +2,7 @@ package aliopen
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
@@ -139,5 +141,53 @@ func TestApplyAliOpenQuotaPreservesLastKnownValueOnMissingQuota(t *testing.T) {
 	applyAliOpenQuota(token, 0, 0)
 	if token.UsedSize != 2 || token.TotalSize != 10 || token.FreeSize != 8 {
 		t.Fatalf("missing quota replaced last known values: %#v", token)
+	}
+}
+
+func TestCreateShareUsesAliOpenAPI(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "openapi.alipan.com" || req.URL.Path != "/adrive/v1.0/openFile/createShareLink" {
+			t.Errorf("request = %s %s", req.Method, req.URL)
+		}
+		if req.Header.Get("Authorization") != "Bearer access-token" {
+			t.Errorf("authorization = %q", req.Header.Get("Authorization"))
+		}
+		var body struct {
+			DriveID    string   `json:"drive_id"`
+			FileIDs    []string `json:"file_id_list"`
+			ShareName  string   `json:"share_name"`
+			SharePwd   string   `json:"share_pwd"`
+			Expiration string   `json:"expiration"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		if body.DriveID != "drive-1" || strings.Join(body.FileIDs, ",") != "file-1,file-2" || body.ShareName != "测试分享" || body.SharePwd != "p4ss" || body.Expiration != "2030-01-01T00:00:00Z" {
+			t.Errorf("share body = %+v", body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"share_id":"share-ali","share_url":"https://www.aliyundrive.com/s/share-ali","share_msg":"分享链接","expiration":"2030-01-01T00:00:00Z","status":"enabled","drive_id":"drive-1"}`)),
+			Request:    req,
+		}, nil
+	})
+
+	sess := &Session{AccessToken: "access-token", DriveID: "drive-1"}
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
+		UserID: "aliopen:user", DriveID: "aliopen:user",
+		Token: &model.TokenInfo{AccessToken: sess.AccessToken, RefreshToken: mustJSON(sess)},
+	}, drive.ShareParams{FileIDs: []string{"b:file-1", "b:file-2"}, ShareName: "测试分享", Expiration: "2030-01-01T00:00:00Z", Password: "p4ss"})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if item.ShareID != "share-ali" || item.ShareURL != "https://www.aliyundrive.com/s/share-ali" || item.FileID != "b:file-1" || len(item.FileIDList) != 2 || item.AccountID != "aliopen:user" {
+		t.Fatalf("share = %+v", item)
+	}
+	if !(&Driver{}).Capabilities().CombinedShare {
+		t.Fatal("Ali Open supports multi-file shares and must advertise combinedShare")
 	}
 }

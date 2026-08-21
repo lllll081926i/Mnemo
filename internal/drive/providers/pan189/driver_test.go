@@ -1,10 +1,14 @@
 package pan189
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
+	"mnemo-go/internal/netx"
 )
 
 func TestRegistration(t *testing.T) {
@@ -54,8 +58,14 @@ func TestCapabilities(t *testing.T) {
 	if caps.Search {
 		t.Error("search must stay disabled (legacy: search: false)")
 	}
-	if caps.CreateShare {
-		t.Error("createShare must stay disabled (legacy: createShare: false)")
+	if !caps.CreateShare || !caps.ShareExpiration || !caps.ShareHistory {
+		t.Errorf("share capabilities = %+v", caps)
+	}
+	if caps.SharePassword {
+		t.Error("天翼云盘分享提取码由服务端生成，不能声明自定义密码能力")
+	}
+	if got := caps.ShareExpirationOptions; len(got) != 3 || got[0] != 0 || got[1] != 1 || got[2] != 7 {
+		t.Errorf("shareExpirationOptions = %v, want [0 1 7]", got)
 	}
 	if caps.TrashView {
 		t.Error("trashView must stay disabled")
@@ -131,5 +141,51 @@ func TestGetInfoPseudoEntries(t *testing.T) {
 	f := info.(model.File)
 	if f.IsDir || f.FileID != "file-1" {
 		t.Fatalf("GetInfo(file-1) = %+v", info)
+	}
+}
+
+func TestCreateShareUsesPersonalShareEndpoint(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	var requests int
+	netx.TestTransportHook = pan189AuthRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Method != http.MethodGet || req.URL.Host != "cloud.189.cn" || req.URL.Path != "/api/open/share/createShareLink.action" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.String())
+		}
+		query := req.URL.Query()
+		if query.Get("fileId") != "file-1" || query.Get("expireTime") != "7" || query.Get("shareType") != "3" || query.Get("noCache") == "" {
+			return nil, fmt.Errorf("share query = %s", query.Encode())
+		}
+		if req.Header.Get("SessionKey") != "session-key" {
+			return nil, fmt.Errorf("session key = %q", req.Header.Get("SessionKey"))
+		}
+		return pan189AuthResponse(req, http.StatusOK, nil, `{"res_code":0,"shareLinkList":[{"shareId":12345,"accessCode":"p4ss","accessUrl":"https://cloud.189.cn/t/test-share"}]}`), nil
+	})
+
+	sess := &Session{SessionKey: "session-key", SessionSecret: "session-secret", CloudType: CloudPersonal}
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
+		UserID: "pan189:user", DriveID: "pan189:user",
+		Token: &model.TokenInfo{AccessToken: sess.SessionKey, RefreshToken: mustJSON(sess)},
+	}, drive.ShareParams{FileIDs: []string{"file-1"}, ShareName: "测试分享", Expiration: "7"})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("request count = %d, want 1", requests)
+	}
+	if item.ShareID != "12345" || item.ShareURL != "https://cloud.189.cn/t/test-share" || item.SharePwd != "p4ss" || item.FileID != "file-1" {
+		t.Fatalf("share = %+v", item)
+	}
+}
+
+func TestCreateShareRejectsFamilyCloud(t *testing.T) {
+	sess := &Session{
+		SessionKey: "session-key", SessionSecret: "session-secret", CloudType: CloudFamily,
+		FamilySessionKey: "family-key", FamilySessionSecret: "family-secret",
+	}
+	_, err := (&Driver{}).CreateShare(t.Context(), drive.Context{Token: &model.TokenInfo{AccessToken: sess.SessionKey, RefreshToken: mustJSON(sess)}}, drive.ShareParams{FileIDs: []string{"file-1"}})
+	if err == nil {
+		t.Fatal("family cloud share must be rejected before a request")
 	}
 }

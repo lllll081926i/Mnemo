@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -539,6 +540,60 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestCreateShareUsesPan123API(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "yun.123pan.com" || req.URL.Path != "/b/api/share/create" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
+		}
+		if req.Header.Get("Authorization") != "Bearer access-token" {
+			return nil, errors.New("123 share request missing authorization")
+		}
+		query := req.URL.Query()
+		if len(query) != 1 {
+			return nil, fmt.Errorf("123 share request sign query = %v", query)
+		}
+		for key, values := range query {
+			if !regexp.MustCompile(`^\d+$`).MatchString(key) || len(values) != 1 || !numPartsRe.MatchString(values[0]) {
+				return nil, fmt.Errorf("123 share request invalid sign %q=%v", key, values)
+			}
+		}
+		var body struct {
+			FileIDs        []int64 `json:"fileIdList"`
+			ShareName      string  `json:"shareName"`
+			SharePwd       string  `json:"sharePwd"`
+			ExpirationTime string  `json:"expirationTime"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if len(body.FileIDs) != 2 || body.FileIDs[0] != 101 || body.FileIDs[1] != 202 || body.ShareName != "测试分享" || body.SharePwd != "p4ss" || body.ExpirationTime == "" {
+			return nil, fmt.Errorf("share body = %+v", body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"code":0,"data":{"ShareKey":"share-123","SharePwd":"p4ss"}}`)),
+			Request:    req,
+		}, nil
+	})
+
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
+		UserID: "pan123:user", DriveID: "pan123:user", Token: &model.TokenInfo{AccessToken: "access-token"},
+	}, drive.ShareParams{FileIDs: []string{"101", "202"}, ShareName: "测试分享", Expiration: time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339), Password: "p4ss"})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if item.ShareID != "share-123" || item.ShareURL != "https://www.123pan.com/s/share-123" || item.FileID != "101" || len(item.FileIDList) != 2 || item.AccountID != "pan123:user" {
+		t.Fatalf("share = %+v", item)
+	}
+	if !(&Driver{}).Capabilities().CombinedShare {
+		t.Fatal("123 云盘 supports multi-file shares and must advertise combinedShare")
+	}
 }
 
 func TestPan123LoginAcceptsNumericStringCode(t *testing.T) {

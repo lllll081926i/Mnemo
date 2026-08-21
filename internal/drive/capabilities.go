@@ -28,16 +28,19 @@ type Capabilities struct {
 	TrashPurge      bool `json:"trashPurge"`
 	TrashClear      bool `json:"trashClear"`
 
-	CreateShare          bool `json:"createShare"`
-	ShareExpiration      bool `json:"shareExpiration"`
-	SharePassword        bool `json:"sharePassword"`
-	CombinedShare        bool `json:"combinedShare"`
-	ImportShare          bool `json:"importShare"`
-	ManageCreatedShares  bool `json:"manageCreatedShares"`
-	EditCreatedShares    bool `json:"editCreatedShares"`
-	CancelCreatedShares  bool `json:"cancelCreatedShares"`
-	ManageImportedShares bool `json:"manageImportedShares"`
-	ShareHistory         bool `json:"shareHistory"`
+	CreateShare     bool `json:"createShare"`
+	ShareExpiration bool `json:"shareExpiration"`
+	// ShareExpirationOptions lists the provider-supported durations in days.
+	// Zero means no expiration. An empty list keeps the legacy common options.
+	ShareExpirationOptions []int `json:"shareExpirationOptions,omitempty"`
+	SharePassword          bool  `json:"sharePassword"`
+	CombinedShare          bool  `json:"combinedShare"`
+	ImportShare            bool  `json:"importShare"`
+	ManageCreatedShares    bool  `json:"manageCreatedShares"`
+	EditCreatedShares      bool  `json:"editCreatedShares"`
+	CancelCreatedShares    bool  `json:"cancelCreatedShares"`
+	ManageImportedShares   bool  `json:"manageImportedShares"`
+	ShareHistory           bool  `json:"shareHistory"`
 
 	QuickTransfer   bool `json:"quickTransfer"`
 	Favorite        bool `json:"favorite"`
@@ -209,6 +212,15 @@ func (c *Capabilities) SetUploadMode(mode string) *Capabilities { c.UploadMode =
 func (c *Capabilities) SetHashes(provide, rapid []string) *Capabilities {
 	c.ProvideHashes = provide
 	c.RapidUploadHashes = rapid
+	return c
+}
+
+// SetShareExpirationOptions declares the exact expiration choices supported
+// by the provider. Zero represents a permanent link. Keeping this on the
+// capability contract prevents the UI from offering options the remote API
+// cannot honor (for example 189/139 only expose 1 day, 7 days and forever).
+func (c *Capabilities) SetShareExpirationOptions(days ...int) *Capabilities {
+	c.ShareExpirationOptions = append([]int(nil), days...)
 	return c
 }
 

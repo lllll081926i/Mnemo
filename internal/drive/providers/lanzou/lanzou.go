@@ -19,7 +19,7 @@ func init() {
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
 			"search":          false,
 			"createShare":     true,
-			"sharePassword":   true,
+			"sharePassword":   false,
 			"shareHistory":    true,
 			"copy":            false,
 			"move":            true,

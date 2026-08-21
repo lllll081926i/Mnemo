@@ -26,11 +26,15 @@ func init() {
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
 			"copy":            true,
+			"createShare":     true,
+			"shareExpiration": true,
+			"shareHistory":    true,
 			"recycleBin":      true,
 			"permanentDelete": true,
 			"trashRestore":    false,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"md5"}, []string{"md5"})
+			c.SetShareExpirationOptions(0, 1, 7)
 		}),
 		Auth: login189,
 		Login: drive.LoginConfig{Fields: []drive.LoginField{

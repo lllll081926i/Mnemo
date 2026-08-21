@@ -211,7 +211,7 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 	if err != nil {
 		logging.Warn("share creation failed", "error", err)
 	}
-	if err == nil && item != nil {
+	if err == nil && shouldPersistShareHistory(item) {
 		st, storeErr := a.storeOrError()
 		if storeErr != nil {
 			a.emit("share:history-error", map[string]string{"error": storeErr.Error()})
@@ -229,6 +229,14 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 		logging.Info("share creation completed", "share_id", redactID(item.ShareID))
 	}
 	return item, err
+}
+
+// shouldPersistShareHistory excludes expiring bearer-style URLs. S3
+// presigned links contain an access signature and become stale on expiry, so
+// keeping them in the permanent local share log is both misleading and an
+// unnecessary credential exposure.
+func shouldPersistShareHistory(item *model.ShareItem) bool {
+	return item != nil && strings.TrimSpace(item.SharePolicy) != "presigned"
 }
 
 // ListShareHistory lists persisted share history.

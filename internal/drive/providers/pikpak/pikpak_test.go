@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
 
@@ -199,5 +200,43 @@ func pikpakResponse(req *http.Request, status int, body string) *http.Response {
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
+	}
+}
+
+func TestCreateShareUsesPikPakDriveAPI(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	netx.TestTransportHook = pikpakRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "api-drive.mypikpak.com" || req.URL.Path != "/drive/v1/share" {
+			return nil, errors.New("unexpected PikPak share request")
+		}
+		if req.Header.Get("Authorization") != "Bearer access-token" || req.Header.Get("X-Device-Id") != "device-test" {
+			return nil, errors.New("PikPak share request missing authentication headers")
+		}
+		var body struct {
+			FileIDs        []string `json:"file_ids"`
+			ShareTo        string   `json:"share_to"`
+			ExpirationDays int      `json:"expiration_days"`
+			PassCodeOption string   `json:"pass_code_option"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if strings.Join(body.FileIDs, ",") != "file-1,folder-1" || body.ShareTo != "encryptedlink" || body.ExpirationDays != 7 || body.PassCodeOption != "REQUIRED" {
+			return nil, errors.New("unexpected PikPak share body")
+		}
+		return pikpakResponse(req, http.StatusOK, `{"share_id":"share-pikpak","share_url":"https://mypikpak.com/s/share-pikpak","pass_code":"p4ss","expiration":"2030-01-01T00:00:00Z","file_ids":["file-1","folder-1"]}`), nil
+	})
+
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
+		UserID: "pikpak:account-test", DriveID: "pikpak:account-test",
+		Token: &model.TokenInfo{AccessToken: "access-token", DeviceID: "device-test", ProviderAccountID: "account-test"},
+	}, drive.ShareParams{FileIDs: []string{"file-1", "folder-1"}, ShareName: "测试分享", Expiration: "7", Password: "p4ss"})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if item.ShareID != "share-pikpak" || item.ShareURL != "https://mypikpak.com/s/share-pikpak" || item.SharePwd != "p4ss" || len(item.FileIDList) != 2 {
+		t.Fatalf("share = %+v", item)
 	}
 }

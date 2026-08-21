@@ -70,6 +70,7 @@ func init() {
 			"createShare":     true,
 			"shareExpiration": true,
 			"sharePassword":   true,
+			"combinedShare":   true,
 			"shareHistory":    true,
 			"importShare":     true,
 			"trashView":       true,
@@ -1471,15 +1472,17 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 		pwd = params.Password
 	}
 	item := &model.ShareItem{
-		ShareID:    shareKey,
-		ShareURL:   shareURL,
-		SharePwd:   pwd,
-		ShareName:  shareName,
-		Expiration: params.Expiration,
-		DriveID:    c.DriveID,
-		FileID:     params.FileIDs[0],
-		FileIDList: params.FileIDs,
-		ShareMsg:   "创建成功",
+		AccountID:   c.UserID,
+		ShareID:     shareKey,
+		ShareURL:    shareURL,
+		SharePwd:    pwd,
+		ShareName:   shareName,
+		Expiration:  params.Expiration,
+		DriveID:     c.DriveID,
+		FileID:      params.FileIDs[0],
+		FileIDList:  params.FileIDs,
+		SharePolicy: "public",
+		ShareMsg:    "创建成功",
 	}
 	return item, nil
 }

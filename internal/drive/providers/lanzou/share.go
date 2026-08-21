@@ -15,6 +15,9 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	if len(params.FileIDs) != 1 {
 		return nil, errors.New("蓝奏分享一次只能选择一个文件或文件夹")
 	}
+	if strings.TrimSpace(params.Password) != "" {
+		return nil, errors.New("蓝奏分享提取码由服务端生成，暂不支持自定义")
+	}
 	info, _ := d.fileShare(ctx, c, params.FileIDs[0], false)
 	if fidOf(info) == "" {
 		info, _ = d.fileShare(ctx, c, params.FileIDs[0], true)
@@ -34,15 +37,16 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 		shareName = "蓝奏分享"
 	}
 	return &model.ShareItem{
-		AccountID:  c.UserID,
-		DriveID:    c.DriveID,
-		ShareID:    fid,
-		ShareURL:   base + "/" + fid,
-		SharePwd:   pwd,
-		ShareName:  shareName,
-		FileID:     params.FileIDs[0],
-		FileIDList: params.FileIDs,
-		Icon:       "iconwenjian",
+		AccountID:   c.UserID,
+		DriveID:     c.DriveID,
+		ShareID:     fid,
+		ShareURL:    base + "/" + fid,
+		SharePwd:    pwd,
+		ShareName:   shareName,
+		SharePolicy: "public",
+		FileID:      params.FileIDs[0],
+		FileIDList:  params.FileIDs,
+		Icon:        "iconwenjian",
 	}, nil
 }
 

@@ -131,6 +131,24 @@ const uid = computed(() => (props.account ? props.account.user_id : ''))
 const did = computed(() => (props.account ? props.account.drive_id : ''))
 const caps = computed(() => capsOf(props.account, props.providers))
 const meta = computed(() => providerMetaOf(props.account, props.providers))
+const defaultShareExpirationOptions = [
+  { value: '', label: '永久有效' },
+  { value: '1', label: '1 天' },
+  { value: '7', label: '7 天' },
+  { value: '30', label: '30 天' },
+]
+const shareExpirationOptions = computed(() => {
+  const values = Array.isArray(caps.value.shareExpirationOptions)
+    ? caps.value.shareExpirationOptions.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0)
+    : []
+  if (!values.length) return defaultShareExpirationOptions
+  return values.map((days) => days === 0
+    ? { value: '', label: '永久有效' }
+    : { value: String(days), label: days === 365 ? '1 年' : `${days} 天` })
+})
+function defaultShareExpiration() {
+  return shareExpirationOptions.value[0]?.value ?? ''
+}
 function canReceiveMigration(account) {
   const targetCaps = capsOf(account, props.providers)
   return !!(targetCaps.upload || (Array.isArray(targetCaps.rapidUploadHashes) && targetCaps.rapidUploadHashes.length))
@@ -816,11 +834,7 @@ function onMenuSelect(action) {
     }
     case 'download': doDownload([file]); break
     case 'open': openFile(file); break
-    case 'share':
-      shareForm.value = { name: list.length === 1 ? list[0].name : `${list.length} 个文件`, expiration: '', password: '' }
-      modalFile.value = list
-      modal.value = 'share'
-      break
+    case 'share': openShareDialog(list); break
     case 'fav': toggleFav(file); break
     case 'rename':
       if (list.length !== 1) { emit('toast', '重命名仅支持单个文件', 'error'); return }
@@ -893,6 +907,7 @@ async function doShare() {
     if (await run(async () => {
       const item = await createShare(uid.value, did.value, {
         fileIds: list.map((f) => f.file_id),
+        fileRefs: list.map((f) => ({ id: f.file_id, isDir: !!f.isDir })),
         shareName: shareForm.value.name,
         expiration: shareExpireAt(shareForm.value.expiration),
         password: shareForm.value.password || undefined,
@@ -1008,11 +1023,17 @@ async function doMigrate() {
 }
 
 // ---------- 工具条分享 ----------
-function openShareModal() {
-  shareForm.value = { name: selected.value.length === 1 ? selected.value[0].name : `${selected.value.length} 个文件`, expiration: '', password: '' }
-  modalFile.value = [...selected.value]
+function openShareDialog(list) {
+  if (!caps.value.combinedShare && list.length > 1) {
+    emit('toast', '该网盘一次只能分享一个文件或文件夹', 'warn')
+    return
+  }
+  shareForm.value = { name: list.length === 1 ? list[0].name : `${list.length} 个文件`, expiration: defaultShareExpiration(), password: '' }
+  modalFile.value = [...list]
   modal.value = 'share'
 }
+
+function openShareModal() { openShareDialog(selected.value) }
 
 function confirmDeleteSelected() {
   if (!selected.value.length) return
@@ -1589,12 +1610,7 @@ onBeforeUnmount(() => {
           v-model="shareForm.expiration"
           block
           :disabled="modalBusy"
-          :options="[
-            { value: '', label: '永久有效' },
-            { value: '1', label: '1 天' },
-            { value: '7', label: '7 天' },
-            { value: '30', label: '30 天' },
-          ]"
+          :options="shareExpirationOptions"
         />
       </div>
       <div class="field" v-if="caps.sharePassword">

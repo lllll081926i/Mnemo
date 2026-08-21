@@ -44,3 +44,12 @@ func TestRenameBatchRejectsMismatchedInput(t *testing.T) {
 		t.Fatal("RenameBatch should reject mismatched refs and names")
 	}
 }
+
+func TestShareExpirationOptionsAreDeclaredExplicitly(t *testing.T) {
+	caps := drive.NewCapabilities("test", nil, func(c *drive.Capabilities) {
+		c.SetShareExpirationOptions(0, 1, 7)
+	})
+	if got := caps.ShareExpirationOptions; len(got) != 3 || got[0] != 0 || got[1] != 1 || got[2] != 7 {
+		t.Fatalf("share expiration options = %v, want [0 1 7]", got)
+	}
+}

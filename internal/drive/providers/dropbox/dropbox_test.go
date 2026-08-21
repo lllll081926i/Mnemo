@@ -2,6 +2,7 @@ package dropbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +44,42 @@ func withDropboxTransport(t *testing.T, rt http.RoundTripper) {
 
 func dropboxAPIPath(r *http.Request) string {
 	return strings.TrimPrefix(r.URL.Path, "/2")
+}
+
+func TestCreateShareUsesDropboxSharingAPI(t *testing.T) {
+	withDropboxTransport(t, dropboxRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "api.dropboxapi.com" || dropboxAPIPath(req) != "/sharing/create_shared_link_with_settings" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
+		}
+		if req.Header.Get("Authorization") != "Bearer access-token" {
+			return nil, fmt.Errorf("authorization = %q", req.Header.Get("Authorization"))
+		}
+		var body struct {
+			Path     string `json:"path"`
+			Settings struct {
+				Visibility string `json:"requested_visibility"`
+				Password   string `json:"link_password"`
+				Expires    string `json:"expires"`
+			} `json:"settings"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if body.Path != "/movie.mkv" || body.Settings.Visibility != "password" || body.Settings.Password != "p4ss" || body.Settings.Expires != "2030-01-01T00:00:00Z" {
+			return nil, fmt.Errorf("share body = %+v", body)
+		}
+		return dropboxResponse(req, http.StatusOK, `{"id":"sl-1","url":"https://www.dropbox.com/s/share-1","name":"movie.mkv","link_access_level":"password","expires":"2030-01-01T00:00:00Z"}`), nil
+	}))
+
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
+		UserID: "dropbox:user", DriveID: "dropbox:user", Token: &model.TokenInfo{AccessToken: "access-token"},
+	}, drive.ShareParams{FileIDs: []string{"/movie.mkv"}, Expiration: "2030-01-01T00:00:00Z", Password: "p4ss"})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if item.ShareID != "sl-1" || item.ShareURL != "https://www.dropbox.com/s/share-1" || item.FileID != "/movie.mkv" || item.AccountID != "dropbox:user" {
+		t.Fatalf("share = %+v", item)
+	}
 }
 
 func TestDropboxRedirectURIUsesRcloneCompatibleDefault(t *testing.T) {

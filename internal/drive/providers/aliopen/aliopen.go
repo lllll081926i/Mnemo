@@ -123,6 +123,7 @@ func init() {
 			"createShare":     true,
 			"shareExpiration": true,
 			"sharePassword":   true,
+			"combinedShare":   true,
 			"shareHistory":    true,
 			"importShare":     true,
 			"copy":            true,
@@ -1692,6 +1693,10 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	if item == nil || (item.ShareID == "" && item.ShareURL == "" && item.ShareMsg == "" && item.FullShareMsg == "") {
 		return nil, errors.New("aliopen: 创建分享未返回链接")
 	}
+	item.AccountID = c.UserID
+	item.DriveID = c.DriveID
+	item.FileID = params.FileIDs[0]
+	item.FileIDList = append([]string(nil), params.FileIDs...)
 	return item, nil
 }
 

@@ -60,10 +60,14 @@ type RenameResult struct {
 
 // ShareParams carries share creation parameters.
 type ShareParams struct {
-	FileIDs    []string `json:"fileIds"`
-	ShareName  string   `json:"shareName"`
-	Expiration string   `json:"expiration,omitempty"`
-	Password   string   `json:"password,omitempty"`
+	FileIDs []string `json:"fileIds"`
+	// FileRefs optionally preserves whether each id is a folder. Providers
+	// that support mixed file/folder shares can use it; FileIDs remains the
+	// required backwards-compatible source of ids.
+	FileRefs   []FileRef `json:"fileRefs,omitempty"`
+	ShareName  string    `json:"shareName"`
+	Expiration string    `json:"expiration,omitempty"`
+	Password   string    `json:"password,omitempty"`
 }
 
 // FileRef optionally distinguishes folder vs file for batch write ops where

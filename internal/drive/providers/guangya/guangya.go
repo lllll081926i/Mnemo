@@ -37,10 +37,16 @@ func init() {
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
 			"copy":            true,
+			"createShare":     true,
+			"shareExpiration": true,
+			"sharePassword":   true,
+			"combinedShare":   true,
+			"shareHistory":    true,
 			"recycleBin":      false,
 			"permanentDelete": true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"md5"}, nil)
+			c.SetShareExpirationOptions(0, 1, 7, 30)
 		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "phone", Type: "text", Label: "手机号", Required: false},

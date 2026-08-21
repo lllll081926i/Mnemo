@@ -253,7 +253,8 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	return &model.ShareItem{
 		AccountID: c.UserID, DriveID: c.DriveID,
 		ShareID: res.ShareID, ShareURL: res.ShareURL, SharePwd: res.PassCode,
-		ShareName: params.ShareName, Expiration: expiration, FileIDList: fileIDs,
+		ShareName: params.ShareName, SharePolicy: "public", Expiration: expiration,
+		FileID: fileIDs[0], FileIDList: fileIDs, ShareMsg: "创建成功",
 	}, nil
 }
 

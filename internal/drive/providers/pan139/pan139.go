@@ -66,10 +66,15 @@ func init() {
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
 			"copy":            true,
+			"createShare":     true,
+			"shareExpiration": true,
+			"combinedShare":   true,
+			"shareHistory":    true,
 			"recycleBin":      true,
 			"permanentDelete": true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"sha256"}, []string{"sha256"})
+			c.SetShareExpirationOptions(0, 1, 7)
 		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "login_mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "账号密码"}, {Value: "sms", Label: "短信验证码"}}},

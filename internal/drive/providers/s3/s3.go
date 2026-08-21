@@ -44,11 +44,14 @@ func init() {
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
 			"mountedStorage":  true,
+			"createShare":     true,
+			"shareExpiration": true,
 			"permanentDelete": true,
 			"recycleBin":      false,
 			"trashView":       false,
 		}, func(c *drive.Capabilities) {
 			c.SetUploadMode(drive.UploadModeDirect)
+			c.SetShareExpirationOptions(1, 7)
 		}),
 		Factory: func() drive.Driver { return &Driver{} },
 	})

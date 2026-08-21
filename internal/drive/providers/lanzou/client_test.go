@@ -338,7 +338,7 @@ func TestLanzouShareDownloadAndVideoPreview(t *testing.T) {
 				t.Errorf("share task = %q", r.Form.Get("task"))
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"zt": 1, "info": map[string]any{
-				"f_id": "share-1", "pwd": "", "isnewd": serverURL, "size": "2M",
+				"f_id": "share-1", "pwd": "s3rv", "isnewd": serverURL, "size": "2M",
 			}})
 		case "/share-1":
 			if r.Header.Get("Cookie") != "cookie1" {
@@ -368,8 +368,14 @@ func TestLanzouShareDownloadAndVideoPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create share: %v", err)
 	}
-	if share.ShareID != "share-1" || share.ShareURL != srv.URL+"/share-1" || share.ShareName != "测试分享" {
+	if share.ShareID != "share-1" || share.ShareURL != srv.URL+"/share-1" || share.ShareName != "测试分享" || share.SharePwd != "s3rv" || share.SharePolicy != "public" {
 		t.Fatalf("share = %+v", share)
+	}
+	if d.Capabilities().SharePassword {
+		t.Fatal("蓝奏分享提取码由服务端生成，不能声明自定义密码能力")
+	}
+	if _, err := d.CreateShare(context.Background(), c, drive.ShareParams{FileIDs: []string{"file-1"}, Password: "custom"}); err == nil {
+		t.Fatal("蓝奏分享不得静默忽略自定义提取码")
 	}
 	download, err := d.GetDownloadURL(context.Background(), c, "file-1", 0)
 	if err != nil {

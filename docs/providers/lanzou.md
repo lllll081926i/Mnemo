@@ -9,7 +9,8 @@
 ## 能力声明（lanzou.go:14-21）
 
 ```
-createShare, sharePassword, shareHistory: true
+createShare, shareHistory: true
+sharePassword: false（提取码由服务端返回）
 move, permanentDelete: true
 search, copy, recycleBin, trashView: false
 ```
@@ -88,9 +89,9 @@ search, copy, recycleBin, trashView: false
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | CreateShare | ✅ | `share.go:14-49` fileShare task=22/18 取 f_id+pwd → 构造 ShareURL | 无 |
-| 密码 | ✅ | API 返回的 pwd（用户不可自定义） | 无 |
+| 提取码 | ✅ | API 返回的 pwd；自定义输入会被明确拒绝 | 无 |
 
-> 限单文件/文件夹（fileIds.length != 1 报错），与旧版一致。
+> 限单文件/文件夹（fileIds.length != 1 报错），与旧版一致；前端不会显示自定义提取码输入框。
 
 ---
 

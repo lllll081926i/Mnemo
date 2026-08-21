@@ -13,7 +13,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
@@ -242,5 +244,65 @@ func TestPan139PasswordUpgradeUsesOneCookieSessionForSMS(t *testing.T) {
 	}
 	if loadPan139LoginState(username) != nil {
 		t.Fatal("completed SMS login left a reusable password login state")
+	}
+}
+
+func TestCreateShareUsesPersonalOutlinkAPI(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	const authorization = "dGVzdDoxMzgwMDEzODAwMDp0b2tlbnxhfGJ8Y3w0MTAyNDQ0ODAwMDAw"
+	var requests int
+	netx.TestTransportHook = pan139RoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Method != http.MethodPost || req.URL.Host != "api.139.test" || req.URL.Path != "/orchestration/personalCloud-rebuild/outlink/v1.0/getOutLink" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL.String())
+		}
+		if req.Header.Get("Authorization") != "Basic "+authorization {
+			return nil, fmt.Errorf("authorization = %q", req.Header.Get("Authorization"))
+		}
+		var payload struct {
+			GetOutLinkReq struct {
+				Period  int      `json:"period"`
+				CAIDLst []string `json:"caIDLst"`
+				COIDLst []string `json:"coIDLst"`
+				Encrypt int      `json:"encrypt"`
+			} `json:"getOutLinkReq"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			return nil, err
+		}
+		if payload.GetOutLinkReq.Period != 7 || strings.Join(payload.GetOutLinkReq.CAIDLst, ",") != "folder-1" || strings.Join(payload.GetOutLinkReq.COIDLst, ",") != "file-1" || payload.GetOutLinkReq.Encrypt != 1 {
+			return nil, fmt.Errorf("outlink payload = %+v", payload.GetOutLinkReq)
+		}
+		return pan139Response(req, http.StatusOK, nil, `{"success":true,"data":{"getOutLinkRes":{"getOutLinkResSet":[{"linkID":"share-139","linkUrl":"https://yun.139.com/w/i/share-139","passwd":"a1b2"}]}}}`), nil
+	})
+
+	folder := true
+	token := &model.TokenInfo{
+		AccessToken:  authorization,
+		RefreshToken: `{"authorization":"dGVzdDoxMzgwMDEzODAwMDp0b2tlbnxhfGJ8Y3w0MTAyNDQ0ODAwMDAw","account":"13800138000","personalCloudHost":"https://api.139.test"}`,
+	}
+	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{UserID: "pan139:13800138000", DriveID: "pan139:13800138000", Token: token}, drive.ShareParams{
+		FileIDs:    []string{"file-1", "folder-1"},
+		FileRefs:   []drive.FileRef{{ID: "file-1"}, {ID: "folder-1", IsDir: &folder}},
+		ShareName:  "测试分享",
+		Expiration: "7",
+	})
+	if err != nil {
+		t.Fatalf("CreateShare() error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("request count = %d, want 1", requests)
+	}
+	if item.ShareID != "share-139" || item.ShareURL != "https://yun.139.com/w/i/share-139" || item.SharePwd != "a1b2" || len(item.FileIDList) != 2 {
+		t.Fatalf("share = %+v", item)
+	}
+}
+
+func TestPan139ShareExpirationRejectsUnsupportedDuration(t *testing.T) {
+	_, err := (&Driver{}).CreateShare(context.Background(), drive.Context{}, drive.ShareParams{FileIDs: []string{"file-1"}, Expiration: time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)})
+	if err == nil || !strings.Contains(err.Error(), "1 天、7 天或永久") {
+		t.Fatalf("unsupported expiration error = %v", err)
 	}
 }
