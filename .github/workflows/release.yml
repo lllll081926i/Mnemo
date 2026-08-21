@@ -309,13 +309,17 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          notes="Mnemo ${tag}"
-          if [[ -f "docs/releases/${tag}.md" ]]; then notes="docs/releases/${tag}.md"; fi
+          # 发版说明优先取 docs/releases/<tag>.md，缺失时退国内联文本（--notes-file 只接受路径）
+          if [[ -f "docs/releases/${tag}.md" ]]; then
+            notes_args=(--notes-file "docs/releases/${tag}.md")
+          else
+            notes_args=(--notes "Mnemo ${tag}")
+          fi
           is_pre='false'
           [[ "$tag" == *preview* || "$tag" == *beta* || "$tag" == *rc* || "$tag" == *alpha* ]] && is_pre='true'
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            if [[ "$is_pre" == 'true' ]]; then gh release create "$tag" --verify-tag --title="Mnemo $tag" --notes-file="$notes" --prerelease
-            else gh release create "$tag" --verify-tag --title="Mnemo $tag" --notes-file="$notes" --latest
+            if [[ "$is_pre" == 'true' ]]; then gh release create "$tag" --verify-tag --title="Mnemo $tag" "${notes_args[@]}" --prerelease
+            else gh release create "$tag" --verify-tag --title="Mnemo $tag" "${notes_args[@]}" --latest
             fi
           fi
           find release-assets -maxdepth 1 -type f -print0 | xargs -0 gh release upload "$tag" --clobber
