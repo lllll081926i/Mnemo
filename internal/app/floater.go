@@ -328,17 +328,20 @@ func (f *floater) hooks() floaterHooks {
 			f.a.emit("nav:tab", "transfer")
 		},
 		onMove: func(x, y int) {
-			s := f.a.GetSettings()
-			s.FloaterX, s.FloaterY, s.FloaterPos = x, y, true
-			if err := f.a.SaveSettings(s); err != nil {
+			st, err := f.a.storeOrError()
+			if err != nil {
+				return
+			}
+			if err := st.SetFloaterPosition(x, y); err != nil {
 				logging.Warn("floater position persistence failed", "error", err)
 			}
 		},
 		onHide: func() {
-			disable := false
-			s := f.a.GetSettings()
-			s.Floater = &disable
-			if err := f.a.SaveSettings(s); err != nil {
+			st, err := f.a.storeOrError()
+			if err != nil {
+				return
+			}
+			if err := st.SetFloaterEnabled(false); err != nil {
 				logging.Warn("floater disable persistence failed", "error", err)
 			}
 		},

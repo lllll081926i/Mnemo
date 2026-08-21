@@ -72,6 +72,34 @@ func (s *Store) SetSettings(st Settings) error {
 	return s.writeJSON(settingsFile, st)
 }
 
+// SetFloaterPosition updates only the floater position and pos flag.
+func (s *Store) SetFloaterPosition(x, y int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := DefaultSettings()
+	err := s.readJSON(settingsFile, &st)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	st.FloaterX = x
+	st.FloaterY = y
+	st.FloaterPos = true
+	return s.writeJSON(settingsFile, st)
+}
+
+// SetFloaterEnabled updates only the floater enabled state.
+func (s *Store) SetFloaterEnabled(enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := DefaultSettings()
+	err := s.readJSON(settingsFile, &st)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	st.Floater = &enabled
+	return s.writeJSON(settingsFile, st)
+}
+
 // LocalTag is a user-defined colored label attached to a file path locally.
 type LocalTag struct {
 	UserID  string `json:"user_id"`

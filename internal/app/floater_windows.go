@@ -31,17 +31,17 @@ import (
 const (
 	floaterClassName = "MnemoTransferFloater"
 
-	flLogiW      = 102 // 逻辑宽度 @96DPI（在原 138 基础上下裁约 1/3，极致精致紧凑）
-	flLogiH      = 36  // 逻辑高度 @96DPI
+	flLogiW      = 112 // 逻辑宽度 @96DPI（稍微加宽 10px，留足呼吸边距）
+	flLogiH      = 34  // 逻辑高度 @96DPI
 	flCardR      = 7   // 卡片圆角
-	flLogoSize   = 20  // Logo 尺寸
-	flLogoR      = 5   // Logo 圆角
+	flLogoSize   = 18  // Logo 尺寸
+	flLogoR      = 4   // Logo 圆角
 	flLogoX      = 7   // Logo X 偏移
 	flLogoY      = 8   // Logo Y 偏移
-	flTextX      = 32  // 文字区域 X 起点
-	flFontLarge  = 12  // 单行大字号（逻辑 px）
-	flFontSmall  = 9   // 双行小字号（逻辑 px）
-	flFontStatus = 11  // 状态提示字号（逻辑 px）
+	flTextX      = 30  // 文字区域 X 起点
+	flFontLarge  = 10  // 单行大字号（原 12 小 2 个字号，更加精巧）
+	flFontSmall  = 8   // 双行小字号（原 9/10 小 2 个字号）
+	flFontStatus = 10  // 状态提示字号（原 11/12 小 2 个字号）
 
 	wmFloaterUpdate = 0x0400 + 71 // WM_APP + 71
 	wmFloaterTheme  = 0x0400 + 72 // WM_APP + 72
@@ -1000,20 +1000,20 @@ func (ui *flUI) render() {
 		if hasDown && hasUp {
 			// 同时有下载与上传：双行紧凑小字上下排列
 			ui.drawSpeedRow(tx, int(3*ui.scale+0.5), "↓", pal.DownArrow, ui.frame.Down, ui.fontSmall, pal.TextMain, pal.TextSub, ga)
-			ui.drawSpeedRow(tx, int(18*ui.scale+0.5), "↑", pal.UpArrow, ui.frame.Up, ui.fontSmall, pal.TextMain, pal.TextSub, ga)
+			ui.drawSpeedRow(tx, int(17*ui.scale+0.5), "↑", pal.UpArrow, ui.frame.Up, ui.fontSmall, pal.TextMain, pal.TextSub, ga)
 		} else if hasUp && !hasDown {
 			// 仅有上传：单行大字
-			ui.drawSpeedRow(tx, int(9*ui.scale+0.5), "↑", pal.UpArrow, ui.frame.Up, ui.fontLarge, pal.TextMain, pal.TextSub, ga)
+			ui.drawSpeedRow(tx, int(8*ui.scale+0.5), "↑", pal.UpArrow, ui.frame.Up, ui.fontLarge, pal.TextMain, pal.TextSub, ga)
 		} else {
 			// 仅有下载（或初始任务排队中）：单行大字
-			ui.drawSpeedRow(tx, int(9*ui.scale+0.5), "↓", pal.DownArrow, ui.frame.Down, ui.fontLarge, pal.TextMain, pal.TextSub, ga)
+			ui.drawSpeedRow(tx, int(8*ui.scale+0.5), "↓", pal.DownArrow, ui.frame.Down, ui.fontLarge, pal.TextMain, pal.TextSub, ga)
 		}
 	case floaterDone:
-		ui.drawStatusLine(tx, int(9*ui.scale+0.5), "✓ 传输完成", pal.Done, ga)
+		ui.drawStatusLine(tx, int(8*ui.scale+0.5), "✓ 传输完成", pal.Done, ga)
 	case floaterError:
-		ui.drawStatusLine(tx, int(9*ui.scale+0.5), "✕ 传输失败", pal.Error, ga)
+		ui.drawStatusLine(tx, int(8*ui.scale+0.5), "✕ 传输失败", pal.Error, ga)
 	case floaterPaused:
-		ui.drawStatusLine(tx, int(9*ui.scale+0.5), "⏸ 传输已暂停", pal.Pause, ga)
+		ui.drawStatusLine(tx, int(8*ui.scale+0.5), "⏸ 传输已暂停", pal.Pause, ga)
 	}
 
 	ui.present()
