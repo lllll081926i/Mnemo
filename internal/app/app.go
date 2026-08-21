@@ -57,7 +57,6 @@ type App struct {
 	updateInfo *updater.Info
 
 	migrate      *migrate.Engine
-	floater      *floater
 	schedStop    chan struct{} // sync scheduler stop, closed on Shutdown
 	shutdownOnce sync.Once
 	forceQuit    atomic.Bool
@@ -288,28 +287,9 @@ func (a *App) startup(ctx context.Context) {
 		if settings.LogLevel == "" {
 			settings.LogLevel = "info"
 		}
-		// 前端事件：播放器全屏时抑制悬浮窗
-		runtime.EventsOn(ctx, "app:fullscreen", func(optionalData ...interface{}) {
-			if a.floater != nil && len(optionalData) > 0 {
-				full, _ := optionalData[0].(bool)
-				a.floater.SetPlayerFullscreen(full)
-			}
-		})
-		// 前端事件：主题变化时同步悬浮窗明暗
-		runtime.EventsOn(ctx, "app:theme", func(optionalData ...interface{}) {
-			if a.floater != nil && len(optionalData) > 0 {
-				if isDark, ok := optionalData[0].(bool); ok {
-					a.floater.SetDark(isDark)
-				}
-			}
-		})
 		if levelErr := logging.SetLevel(settings.LogLevel); levelErr != nil {
 			logging.Warn("invalid persisted log level, using info", "value", settings.LogLevel, "error", levelErr)
 			_ = logging.SetLevel("info")
-		}
-		if a.floater != nil {
-			a.floater.ApplySettings(settings.FloaterEnabled())
-			a.floater.SetDark(settings.Theme != "light")
 		}
 	} else {
 		logging.Warn("failed to load persisted log level", "error", settingsErr)
@@ -372,9 +352,6 @@ func (a *App) startup(ctx context.Context) {
 	// download manager + upload queue
 	downloads, err := transfer.NewManager(st, dlDir, func(ev transfer.TaskEvent) {
 		a.emit("transfer:event", ev)
-		if a.floater != nil {
-			a.floater.OnTaskEvent(ev)
-		}
 	})
 	if err != nil {
 		logging.Error("download manager initialization failed", "error", err)
@@ -385,9 +362,6 @@ func (a *App) startup(ctx context.Context) {
 	a.stateMu.Unlock()
 	uploads := transfer.NewUploadQueue(st, func(ev transfer.TaskEvent) {
 		a.emit("transfer:event", ev)
-		if a.floater != nil {
-			a.floater.OnTaskEvent(ev)
-		}
 	})
 	a.stateMu.Lock()
 	a.uploads = uploads
@@ -464,9 +438,6 @@ func (a *App) Shutdown(ctx context.Context) {
 
 		if downloads != nil {
 			downloads.Shutdown()
-		}
-		if a.floater != nil {
-			a.floater.Close()
 		}
 		if uploads != nil {
 			uploads.Close()
@@ -1148,11 +1119,6 @@ func (a *App) SaveSettings(s store.Settings) error {
 	netx.SetGlobalProxy(s.Proxy)
 	// apply upload speed cap at runtime (direct uploads via ProgressReader)
 	netx.SetGlobalUploadRate(s.MaxUploadSpeed)
-	// apply floater visibility & theme at runtime
-	if a.floater != nil {
-		a.floater.ApplySettings(s.FloaterEnabled())
-		a.floater.SetDark(s.Theme != "light")
-	}
 	logging.Info("settings save completed")
 	return nil
 }

@@ -23,14 +23,11 @@ const defaults = {
   playbackResume: true,
   keepTasks: true,
   closeToTray: true,
-  floater: true,
   logLevel: 'info',
 }
 
 const settings = ref({ ...defaults })
 const loaded = ref(false)
-// 传输悬浮球仅 Windows 实现（见 docs/FLOATER.md §2.6），其它平台不显示该设置项
-const isWindows = ref(true)
 const saving = ref(false)
 const clearingCache = ref(false)
 const clearingLogs = ref(false)
@@ -110,10 +107,6 @@ onMounted(async () => {
     }
 		settings.value.logLevel = settings.value.logLevel || 'info'
 		logPath.value = await GetLogPath()
-		try {
-			const env = await Environment()
-			isWindows.value = !env || !env.platform || env.platform === 'windows'
-		} catch { /* 无 bridge 时默认显示 */ }
   } catch {
     settings.value = { ...defaults }
   }
@@ -452,15 +445,6 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">保留传输记录</span></div>
               <div class="sg-control">
                 <div class="switch" :class="{ on: settings.keepTasks }" @click="toggle('keepTasks')"></div>
-              </div>
-            </div>
-
-            <div class="sg-row" v-if="isWindows">
-              <div class="sg-text">
-                <span class="sg-label">传输悬浮球</span>
-              </div>
-              <div class="sg-control">
-                <div class="switch" :class="{ on: settings.floater !== false }" @click="toggle('floater')"></div>
               </div>
             </div>
           </div>

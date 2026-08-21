@@ -28,7 +28,6 @@ func main() {
 	application := app.NewApp()
 	application.WatchShowRequests()
 	application.SetupTray(trayIcon)
-	application.SetupFloater(appIcon)
 
 	err := wails.Run(&options.App{
 		Title:     "Mnemo",

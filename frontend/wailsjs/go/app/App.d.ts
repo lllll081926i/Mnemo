@@ -198,8 +198,6 @@ export function SendPan139SMS(arg1:string):Promise<void>;
 
 export function SetAccountCustomMeta(arg1:string,arg2:string,arg3:string):Promise<model.Account>;
 
-export function SetupFloater(arg1:Array<number>):Promise<void>;
-
 export function SetupTray(arg1:Array<number>):Promise<void>;
 
 export function ShowMainWindow():Promise<void>;

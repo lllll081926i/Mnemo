@@ -121,19 +121,6 @@ Mnemo-Go 原生支持 **深色 (Dark)** 与 **浅色 (Light)** 两套完整的�
 - **相邻图片预载**：当前图显示后自动预载上一张与下一张图片，翻页零延迟；
 - **浮动控制栏**：底部半透明渐变控制条（翻页/计数/缩放/适配/旋转/缩略图胶卷），闲置 `2.4s` 自动隐去。
 
-### 4.6 桌面传输悬浮球 (`Floater`)
-- **架构基础**：专属 OS UI 线程驱动的 Win32 Layered Window（纯 Go 无 cgo），绝不占用主线程资源；
-- **超窄紧凑卡片**：`138px × 38px` 精致尺寸，圆角 `8px`，屏幕占用率极低；
-- **100% 纯色实体材质**：非半透明，采用实色卡底 + 抗锯齿边缘 + 细内沿描边，支持跟随应用当前主题的 **深色 (`#18181c`) / 浅色 (`#ffffff`)** 双套配色；
-- **智能单双行布局**：
-  - 单向传输（仅下载或仅上传）：单行大字居中显示（`↓ 15.6 MB/s` 或 `↑ 4.2 MB/s`，字号 `13px`）；
-  - 双向传输（同时有上传与下载）：上下两行紧凑小字排列（`10px`）；
-  - 终态提示：单行清晰呈现 `✓ 传输完成`、`✕ 传输失败`、`⏸ 传输已暂停`；
-- **Apple 级弹簧动画**：
-  - 弹出显现：`1 - e^(-6t) * cos(2.8πt)` 阻尼弹簧入场，带轻快过冲与回弹；
-  - 状态跳变：进入完成/出错/暂停时触发 `Jelly Pulse`（果冻震颤回弹，持续 `320ms`）；
-- **物理防形变保障**：拖拽与重绘过程尺寸严格固定，位图与窗口物理像素一一对应，杜绝形变漂移。
-
 ---
 
 ## 5. 交互规范与状态记忆 (Interaction Standards)
@@ -154,11 +141,9 @@ Mnemo-Go 原生支持 **深色 (Dark)** 与 **浅色 (Light)** 两套完整的�
 | :--- | :--- |
 | `frontend/src/styles/design-tokens.css` | 全局颜色、字体、边框、阴影、动效变量（唯一事实源） |
 | `frontend/src/styles/main.css` | 应用外壳、通用控件库（按钮/开关/表单/卡片）、布局容器 |
-| `frontend/src/appearance.js` | 明暗主题计算、偏好配置存储、Wails 窗口主题与悬浮球同步 |
+| `frontend/src/appearance.js` | 明暗主题计算、偏好配置存储、Wails 窗口主题同步 |
 | `frontend/src/components/UiIcon.vue` | 全局统一 SVG 线条图标库（严禁引入 Emoji） |
 | `frontend/src/components/UiSelect.vue` | 自定义现代化下拉选择器 |
 | `frontend/src/components/AccountRail.vue` | 账号侧边栏（展开收起、波纹让位、碰撞果冻、拖拽排序） |
 | `frontend/src/components/PlayerPanel.vue` | 沉浸式网页多媒体播放器 |
 | `frontend/src/components/PreviewModal.vue` | 沉浸式图片查看器与专业多模式代码/Markdown 预览器 |
-| `internal/app/floater.go` | 平台无关传输悬浮窗状态机与速度聚合器 |
-| `internal/app/floater_windows.go` | Win32 原生 138×38 纯色双主题弹性桌面悬浮球 |

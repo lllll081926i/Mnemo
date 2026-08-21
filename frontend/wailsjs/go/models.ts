@@ -1280,10 +1280,6 @@ export namespace store {
 	    keepTasks: boolean;
 	    logLevel?: string;
 	    closeToTray?: boolean;
-	    floater?: boolean;
-	    floaterX?: number;
-	    floaterY?: number;
-	    floaterPos?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -1304,10 +1300,6 @@ export namespace store {
 	        this.keepTasks = source["keepTasks"];
 	        this.logLevel = source["logLevel"];
 	        this.closeToTray = source["closeToTray"];
-	        this.floater = source["floater"];
-	        this.floaterX = source["floaterX"];
-	        this.floaterY = source["floaterY"];
-	        this.floaterPos = source["floaterPos"];
 	    }
 	}
 

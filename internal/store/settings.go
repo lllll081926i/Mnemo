@@ -25,19 +25,10 @@ type Settings struct {
 	LogLevel       string `json:"logLevel,omitempty"`
 	// CloseToTray 为 nil 时表示默认开启「关闭不退出」（最小化到系统托盘）
 	CloseToTray *bool `json:"closeToTray,omitempty"`
-	// Floater 为 nil 时表示默认开启「传输悬浮窗」
-	Floater *bool `json:"floater,omitempty"`
-	// FloaterX/FloaterY 为悬浮窗屏幕坐标（物理像素）；FloaterPos 标记用户是否拖拽过
-	FloaterX   int  `json:"floaterX,omitempty"`
-	FloaterY   int  `json:"floaterY,omitempty"`
-	FloaterPos bool `json:"floaterPos,omitempty"`
 }
 
 // CloseToTrayEnabled 返回「关闭窗口时最小化到托盘」是否生效（默认开启）。
 func (s Settings) CloseToTrayEnabled() bool { return s.CloseToTray == nil || *s.CloseToTray }
-
-// FloaterEnabled 返回「传输悬浮窗」是否生效（默认开启）。
-func (s Settings) FloaterEnabled() bool { return s.Floater == nil || *s.Floater }
 
 // DefaultSettings returns sane defaults.
 func DefaultSettings() Settings {
@@ -69,34 +60,6 @@ func (s *Store) GetSettings() (Settings, error) {
 
 // SetSettings persists settings.
 func (s *Store) SetSettings(st Settings) error {
-	return s.writeJSON(settingsFile, st)
-}
-
-// SetFloaterPosition updates only the floater position and pos flag.
-func (s *Store) SetFloaterPosition(x, y int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st := DefaultSettings()
-	err := s.readJSON(settingsFile, &st)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	st.FloaterX = x
-	st.FloaterY = y
-	st.FloaterPos = true
-	return s.writeJSON(settingsFile, st)
-}
-
-// SetFloaterEnabled updates only the floater enabled state.
-func (s *Store) SetFloaterEnabled(enabled bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st := DefaultSettings()
-	err := s.readJSON(settingsFile, &st)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	st.Floater = &enabled
 	return s.writeJSON(settingsFile, st)
 }
 
