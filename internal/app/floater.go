@@ -46,9 +46,9 @@ type floaterView interface {
 }
 
 const (
-	floaterDoneHold   = 3 * time.Second
-	floaterErrorHold  = 6 * time.Second
-	floaterPausedHold = 4 * time.Second
+	floaterDoneHold   = 1200 * time.Millisecond // 传输完成后 1.2 秒优雅淡出
+	floaterErrorHold  = 2500 * time.Millisecond
+	floaterPausedHold = 2000 * time.Millisecond
 	floaterPushEvery  = 250 * time.Millisecond // 速度刷新节流 4Hz
 )
 

@@ -31,17 +31,17 @@ import (
 const (
 	floaterClassName = "MnemoTransferFloater"
 
-	flLogiW      = 138 // 逻辑宽度 @96DPI（超窄紧凑）
-	flLogiH      = 38  // 逻辑高度 @96DPI
-	flCardR      = 8   // 卡片圆角
-	flLogoSize   = 22  // Logo 尺寸
+	flLogiW      = 102 // 逻辑宽度 @96DPI（在原 138 基础上下裁约 1/3，极致精致紧凑）
+	flLogiH      = 36  // 逻辑高度 @96DPI
+	flCardR      = 7   // 卡片圆角
+	flLogoSize   = 20  // Logo 尺寸
 	flLogoR      = 5   // Logo 圆角
-	flLogoX      = 8   // Logo X 偏移
+	flLogoX      = 7   // Logo X 偏移
 	flLogoY      = 8   // Logo Y 偏移
-	flTextX      = 36  // 文字区域 X 起点
-	flFontLarge  = 13  // 单行大字号（逻辑 px）
-	flFontSmall  = 10  // 双行小字号（逻辑 px）
-	flFontStatus = 12  // 状态提示字号（逻辑 px）
+	flTextX      = 32  // 文字区域 X 起点
+	flFontLarge  = 12  // 单行大字号（逻辑 px）
+	flFontSmall  = 9   // 双行小字号（逻辑 px）
+	flFontStatus = 11  // 状态提示字号（逻辑 px）
 
 	wmFloaterUpdate = 0x0400 + 71 // WM_APP + 71
 	wmFloaterTheme  = 0x0400 + 72 // WM_APP + 72
@@ -184,25 +184,25 @@ type flPalette struct {
 
 var (
 	flDarkTheme = flPalette{
-		CardBg:    flRGB{24, 24, 28},    // 实色黑底 #18181c
-		Border:    flRGB{255, 255, 255}, // 细高光描边
-		BorderA:   0.12,
-		TextMain:  flRGB{245, 245, 247}, // 主文字亮白
+		CardBg:    flRGB{22, 22, 28},    // 高质感深邃暗色
+		Border:    flRGB{255, 255, 255}, // 细高光倒角描边
+		BorderA:   0.16,
+		TextMain:  flRGB{248, 248, 250}, // 主文字亮白
 		TextSub:   flRGB{156, 163, 175}, // 弱化文字
-		DownArrow: flRGB{167, 139, 250}, // 主题紫
+		DownArrow: flRGB{167, 139, 250}, // 霓虹紫
 		UpArrow:   flRGB{52, 211, 153},  // 翠绿
 		Done:      flRGB{52, 211, 153},  // 成功绿
 		Error:     flRGB{248, 113, 113}, // 失败红
 		Pause:     flRGB{251, 191, 36},  // 暂停黄
 	}
 	flLightTheme = flPalette{
-		CardBg:    flRGB{255, 255, 255}, // 纯白实色
-		Border:    flRGB{0, 0, 0},       // 细暗描边
-		BorderA:   0.09,
-		TextMain:  flRGB{17, 24, 39},    // 深灰黑
+		CardBg:    flRGB{252, 252, 254}, // 珠光白
+		Border:    flRGB{0, 0, 0},       // 细柔暗描边
+		BorderA:   0.10,
+		TextMain:  flRGB{17, 24, 39},    // 高清深灰黑
 		TextSub:   flRGB{107, 114, 128}, // 次级灰
-		DownArrow: flRGB{124, 58, 237},  // 深紫
-		UpArrow:   flRGB{5, 150, 105},   // 深绿
+		DownArrow: flRGB{124, 58, 237},  // 品牌紫
+		UpArrow:   flRGB{5, 150, 105},   // 森林绿
 		Done:      flRGB{5, 150, 105},
 		Error:     flRGB{220, 38, 38},
 		Pause:     flRGB{217, 119, 6},

@@ -69,6 +69,10 @@ const supActive = ref(false)
 const assTracks = ref([])     // ASS/SSA 特效字幕：{ label, url | content }
 const assActive = ref(false)
 const fsAnim = ref('') // 'in' | 'out'：全屏切换过渡动画
+const isBuffering = ref(false) // 播放过程中卡顿缓冲状态
+const loadingSpeed = ref('') // 实时缓冲网速
+let lastLoadedBytes = 0
+let lastSpeedCalcTime = Date.now()
 
 let unmounted = false
 let playbackSeq = 0
@@ -464,7 +468,28 @@ function onTimeUpdate() {
 
 function onProgress() {
   const v = videoEl.value
-  if (v) updateBuffered(v)
+  if (!v) return
+  updateBuffered(v)
+  // 计算缓冲实时网速
+  try {
+    if (v.buffered.length > 0) {
+      const now = Date.now()
+      const dt = (now - lastSpeedCalcTime) / 1000
+      if (dt >= 0.5) {
+        // 估算缓冲字节速率：按当前 buffer 秒数 × 比特率估算
+        const bufEnd = v.buffered.end(v.buffered.length - 1)
+        const dur = v.duration || 1
+        const fSize = props.file?.size || 0
+        if (fSize > 0 && dur > 0) {
+          const approxBytes = (bufEnd / dur) * fSize
+          const speedBps = Math.max(0, (approxBytes - lastLoadedBytes) / dt)
+          lastLoadedBytes = approxBytes
+          lastSpeedCalcTime = now
+          loadingSpeed.value = formatSpeed(speedBps)
+        }
+      }
+    }
+  } catch {}
 }
 
 function updateBuffered(v) {
@@ -473,8 +498,12 @@ function updateBuffered(v) {
   } catch {}
 }
 
-function onPlay() { playbackEnded = false; playing.value = true; scheduleHideControls() }
-function onPause() { playing.value = false; showControls.value = true }
+function onPlay() { playbackEnded = false; playing.value = true; isBuffering.value = false; scheduleHideControls() }
+function onPause() { playing.value = false; isBuffering.value = false; showControls.value = true }
+function onWaiting() { isBuffering.value = true }
+function onPlaying() { isBuffering.value = false }
+function onCanPlay() { isBuffering.value = false }
+function onCanPlayThrough() { isBuffering.value = false }
 function onEnded() {
   playing.value = false
   if (!looping.value) {
@@ -1145,6 +1174,10 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
           @progress="onProgress"
           @play="onPlay"
           @pause="onPause"
+          @waiting="onWaiting"
+          @playing="onPlaying"
+          @canplay="onCanPlay"
+          @canplaythrough="onCanPlayThrough"
           @ended="onEnded"
           @error="onError"
           @volumechange="onVolumeChange"
@@ -1171,7 +1204,14 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
           />
         </video>
         <canvas v-show="supActive" ref="supCanvasEl" class="pp-sup-canvas"></canvas>
-        <div v-if="loading" class="pp-state"><span class="pp-spinner"></span></div>
+        <!-- 初始加载或卡顿缓冲状态（带光晕脉冲与实时速度） -->
+        <div v-if="loading || isBuffering" class="pp-state pp-buffering-state">
+          <div class="pp-loader-box">
+            <span class="pp-spinner"></span>
+            <span class="pp-loader-text">{{ loading ? '正在载入视频…' : '正在缓冲…' }}</span>
+            <span v-if="loadingSpeed" class="pp-loader-speed">{{ loadingSpeed }}</span>
+          </div>
+        </div>
         <div v-else-if="error" class="pp-state pp-error">
           <UiIcon name="warning" :size="28" />
           <span class="pp-error-text">{{ error }}</span>
@@ -1203,9 +1243,9 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         <div class="pp-top-actions">
           <button type="button" class="pp-btn" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="19" /></button>
           <button type="button" class="pp-btn" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="20" /></button>
-          <button v-if="!isFullscreen" type="button" class="pp-btn" title="最小化" @click="winMinimise"><UiIcon name="minimize" :size="17" /></button>
-          <button v-if="!isFullscreen" type="button" class="pp-btn" :title="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'restore' : 'maximize'" :size="16" /></button>
-          <button type="button" class="pp-btn" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="20" /></button>
+          <button v-if="!isFullscreen" type="button" class="pp-btn pp-win-btn" title="最小化" @click="winMinimise"><UiIcon name="window-minimize" :size="14" /></button>
+          <button v-if="!isFullscreen" type="button" class="pp-btn pp-win-btn" :title="winMax ? '向下还原' : '最大化'" @click="winToggleMax"><UiIcon :name="winMax ? 'window-restore' : 'window-maximize'" :size="14" /></button>
+          <button type="button" class="pp-btn pp-win-btn pp-win-close" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
         </div>
       </header>
 
@@ -1399,16 +1439,65 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   color: var(--pp-dim);
   font-size: 14px;
   text-align: center;
+  pointer-events: none;
+}
+.pp-buffering-state {
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 200ms ease;
+}
+.pp-loader-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 24px;
+  background: rgba(20, 20, 26, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+.pp-loader-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.88);
+}
+.pp-loader-speed {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-primary, #a78bfa);
+  font-weight: 600;
+  background: rgba(167, 139, 250, 0.15);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.3);
 }
 .pp-spinner {
-  width: 34px;
-  height: 34px;
-  border: 2.5px solid rgba(255, 255, 255, .18);
-  border-top-color: #fff;
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, .15);
+  border-top-color: var(--color-primary, #a78bfa);
+  border-right-color: var(--color-primary, #a78bfa);
   border-radius: 50%;
-  animation: pp-spin 800ms linear infinite;
+  animation: pp-spin 700ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes pp-spin { to { transform: rotate(360deg); } }
+
+/* 顶栏独立窗口三件套按钮 */
+.pp-win-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  transition: all 150ms ease;
+}
+.pp-win-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.pp-win-close:hover {
+  background: #e81123 !important;
+  color: #ffffff !important;
+}
 .pp-error { color: rgba(255, 130, 130, .95); }
 .pp-error-text { max-width: 480px; line-height: 1.6; }
 .pp-retry {
