@@ -53,7 +53,7 @@ jobs:
           app_version="$(sed -nE 's/^const AppVersion = "([^"]+)"/\1/p' internal/config/config.go)"
           wails_version="$(node -p "require('./wails.json').version")"
           frontend_version="$(node -p "require('./frontend/package.json').version")"
-          installer_version="$(sed -nE 's/^#define MyAppVersion "([^"]+)"/\1/p' build/windows/installer.iss)"
+          installer_version="$(sed -nE 's/^[[:space:]]*#define MyAppVersion "([^"]+)"/\1/p' build/windows/installer.iss)"
           test -n "$app_version"
           test "$app_version" = "$wails_version"
           test "$app_version" = "$frontend_version"
