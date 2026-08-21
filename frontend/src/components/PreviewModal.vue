@@ -4,7 +4,8 @@
 // 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
 // 3. 音频播放；PDF 等非白名单格式由文件页提示下载，不会进入此弹窗
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { PreviewURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf } from '../api'
+import { PreviewURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf, getPlayCursor, savePlayCursor } from '../api'
+import { getPrefs } from '../appearance'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
@@ -19,6 +20,7 @@ const emit = defineEmits(['close', 'toast', 'saved'])
 
 const activeFile = ref(props.file)
 const kind = computed(() => openKindOf(activeFile.value))
+const isImmersive = computed(() => kind.value === 'image' || kind.value === 'audio')
 
 const url = ref('')
 const text = ref('')
@@ -31,6 +33,7 @@ function winMinimise() { try { WindowMinimise() } catch { /* browser preview */ 
 function winToggleMax() {
   try {
     WindowToggleMaximise()
+    winMax.value = !winMax.value
     WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {})
   } catch { /* browser preview */ }
 }
@@ -146,6 +149,7 @@ function pokeUI() {
 function switchImage(step) {
   const total = imageList.value.length
   if (total <= 1) return
+  if (slideshow.value && step !== 0) stopSlideshow()
   pokeUI()
   const nextIdx = (currentImageIdx.value + step + total) % total
   activeFile.value = imageList.value[nextIdx]
@@ -153,8 +157,19 @@ function switchImage(step) {
 
 function selectImage(img) {
   if (activeFile.value.file_id === img.file_id) return
+  if (slideshow.value) stopSlideshow()
   activeFile.value = img
 }
+
+// 1:1 实际像素（zoom 相对适配基准，1:1 即 fitScale*zoom = 1）
+function zoomToOne() {
+  const el = stageEl.value
+  if (!el) return
+  if (Math.abs(fitScale.value * zoom.value - 1) < 0.01) { resetImageTransform(); return }
+  resetImageTransform()
+  zoomTo(1 / (fitScale.value || 1))
+}
+const isOneToOne = computed(() => Math.abs(fitScale.value * zoom.value - 1) < 0.01)
 
 function loadImageBitmap(url) {
   return new Promise((resolve, reject) => {
@@ -205,6 +220,242 @@ async function preloadNeighbors() {
       im.src = u
     } catch { /* 预载失败静默 */ }
   }
+}
+
+// ---------- 音频播放器（沉浸式重写） ----------
+const audioList = computed(() => {
+  const list = props.fileList && props.fileList.length ? props.fileList : [props.file]
+  return list.filter((f) => !f.isDir && openKindOf(f) === 'audio')
+})
+const audioIdx = computed(() => audioList.value.findIndex((f) => f.file_id === activeFile.value.file_id))
+const audioEl = ref(null)
+const audioPlaying = ref(false)
+const audioPos = ref(0)
+const audioDur = ref(0)
+const audioBuffered = ref(0)
+const audioVolume = ref(Math.min(200, Math.max(0, getPrefs().defaultVolume ?? 100)))
+const audioMuted = ref(false)
+const audioSpeed = ref(getPrefs().defaultSpeed || 1)
+const audioLoop = ref(false)
+const audioMenu = ref('') // 'speed' | 'playlist' | ''
+const audioError = ref('')
+const AUDIO_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+let audioCtx = null
+let audioGain = null
+let audioSaveTimer = null
+let pendingAudioResume = 0
+
+const audioCover = computed(() => String(activeFile.value?.thumbnail || '').trim())
+const audioExt = computed(() => {
+  const n = String(activeFile.value?.name || '')
+  const i = n.lastIndexOf('.')
+  return i > 0 ? n.slice(i + 1).toUpperCase() : 'AUDIO'
+})
+const audioPct = computed(() => (audioDur.value ? (audioPos.value / audioDur.value) * 100 : 0))
+const audioBufPct = computed(() => (audioDur.value ? Math.min(100, (audioBuffered.value / audioDur.value) * 100) : 0))
+
+function fmtClock(seconds) {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = String(s % 60).padStart(2, '0')
+  return (h > 0 ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + sec
+}
+
+// 音量 0–200%：100% 以内走原生 volume，超过后接 WebAudio 增益链（对齐 PlayerPanel）
+// 注意：切曲时 <audio> 元素会被重建，MediaElementSource 必须针对新元素重建，
+// 否则增益链仍挂在旧元素上，>100% 音量会静默失效。
+let audioSourceEl = null
+function ensureAudioGain() {
+  const el = audioEl.value
+  if (!el) return
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    audioCtx = audioCtx || new Ctx()
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    if (!audioGain) {
+      audioGain = audioCtx.createGain()
+      audioGain.connect(audioCtx.destination)
+    }
+    if (audioSourceEl !== el) {
+      const source = audioCtx.createMediaElementSource(el)
+      source.connect(audioGain)
+      audioSourceEl = el
+    }
+  } catch {
+    audioGain = null
+    audioSourceEl = null
+  }
+}
+
+function applyAudioVolume() {
+  const el = audioEl.value
+  if (!el) return
+  const level = audioVolume.value
+  if (level > 100) ensureAudioGain()
+  if (audioGain) {
+    el.volume = 1
+    audioGain.gain.value = level / 100
+  } else {
+    el.volume = Math.min(100, level) / 100
+  }
+  if (level > 0) el.muted = false
+}
+
+function onAudioVolume(e) { audioVolume.value = Number(e.target.value); applyAudioVolume() }
+
+function toggleAudioMute() {
+  const el = audioEl.value
+  if (el) el.muted = !el.muted
+}
+
+function onAudioVolChange() {
+  const el = audioEl.value
+  if (el) audioMuted.value = !!el.muted
+}
+
+function onAudioSpeed(v) {
+  audioSpeed.value = Number(v)
+  const el = audioEl.value
+  if (el) el.playbackRate = audioSpeed.value
+  audioMenu.value = ''
+}
+
+function toggleAudioPlay() {
+  const el = audioEl.value
+  if (!el) return
+  if (el.paused) el.play().catch(() => {})
+  else el.pause()
+}
+
+function audioSeekBy(delta) {
+  const el = audioEl.value
+  if (!el || !audioDur.value) return
+  el.currentTime = Math.min(Math.max(0, audioDur.value - 0.2), Math.max(0, el.currentTime + delta))
+  audioPos.value = el.currentTime
+}
+
+function onAudioSeekInput(e) {
+  const el = audioEl.value
+  if (!el) return
+  el.currentTime = Number(e.target.value)
+  audioPos.value = el.currentTime
+}
+
+function onAudioTime() {
+  const el = audioEl.value
+  if (!el) return
+  audioPos.value = el.currentTime
+  try {
+    if (el.buffered.length) audioBuffered.value = el.buffered.end(el.buffered.length - 1)
+  } catch { /* ignore */ }
+}
+
+function onAudioMeta() {
+  const el = audioEl.value
+  if (!el) return
+  audioDur.value = el.duration || 0
+  el.playbackRate = audioSpeed.value
+  applyAudioVolume()
+  if (pendingAudioResume > 0 && audioDur.value > 5 && pendingAudioResume < audioDur.value - 3) {
+    el.currentTime = pendingAudioResume
+  }
+  pendingAudioResume = 0
+  updateAudioMediaSession()
+}
+
+function onAudioError() {
+  const el = audioEl.value
+  if (!el || !el.src || el.src === window.location.href) return
+  audioError.value = '音频加载失败，请重试或下载后播放'
+}
+
+function switchAudio(step) {
+  const total = audioList.value.length
+  if (total <= 1) return
+  const nextIdx = ((audioIdx.value + step) % total + total) % total
+  saveAudioCursor(activeFile.value?.file_id)
+  activeFile.value = audioList.value[nextIdx]
+}
+
+function selectAudioFile(f) {
+  audioMenu.value = ''
+  if (!f || f.file_id === activeFile.value.file_id) return
+  saveAudioCursor(activeFile.value?.file_id)
+  activeFile.value = f
+}
+
+function onAudioEnded() {
+  audioPlaying.value = false
+  if (audioLoop.value) {
+    const el = audioEl.value
+    if (el) { el.currentTime = 0; el.play().catch(() => {}) }
+    return
+  }
+  if (audioList.value.length > 1) switchAudio(1)
+}
+
+function saveAudioCursor(fileId = activeFile.value?.file_id) {
+  const el = audioEl.value
+  if (!fileId || !el) return
+  const pos = el.currentTime || 0
+  if (pos > 3 && audioDur.value > 0 && pos < audioDur.value - 3) {
+    savePlayCursor(props.account.user_id, props.account.drive_id, fileId, pos).catch(() => {})
+  } else if (pos <= 3) {
+    savePlayCursor(props.account.user_id, props.account.drive_id, fileId, 0).catch(() => {})
+  }
+}
+
+function onAudioPlay() {
+  audioPlaying.value = true
+  audioError.value = ''
+  setupAudioMediaSession()
+  updateAudioMediaSession()
+  if (!audioSaveTimer) audioSaveTimer = setInterval(() => saveAudioCursor(), 5000)
+}
+
+function onAudioPause() {
+  audioPlaying.value = false
+  saveAudioCursor()
+  clearInterval(audioSaveTimer)
+  audioSaveTimer = null
+}
+
+// ---- MediaSession：系统媒体键 / 锁屏信息 ----
+function updateAudioMediaSession() {
+  if (!('mediaSession' in navigator)) return
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: activeFile.value?.name || '',
+      artist: 'Mnemo' + (props.account?.name ? ' · ' + props.account.name : ''),
+      album: audioExt.value,
+      artwork: audioCover.value ? [{ src: audioCover.value, sizes: '256x256' }] : [],
+    })
+  } catch { /* ignore */ }
+}
+
+function setupAudioMediaSession() {
+  if (!('mediaSession' in navigator)) return
+  try {
+    const ms = navigator.mediaSession
+    ms.setActionHandler('play', () => audioEl.value?.play().catch(() => {}))
+    ms.setActionHandler('pause', () => audioEl.value?.pause())
+    ms.setActionHandler('previoustrack', () => switchAudio(-1))
+    ms.setActionHandler('nexttrack', () => switchAudio(1))
+    ms.setActionHandler('seekbackward', () => audioSeekBy(-10))
+    ms.setActionHandler('seekforward', () => audioSeekBy(10))
+  } catch { /* ignore */ }
+}
+
+function clearAudioMediaSession() {
+  if (!('mediaSession' in navigator)) return
+  try {
+    navigator.mediaSession.metadata = null
+    for (const action of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekbackward', 'seekforward']) {
+      navigator.mediaSession.setActionHandler(action, null)
+    }
+  } catch { /* ignore */ }
 }
 
 // ---------- 文本与代码专业预览/编辑状态 ----------
@@ -485,7 +736,8 @@ let loadSeq = 0
 async function loadPreview() {
   if (kind.value === 'image') return loadImage()
   const seq = ++loadSeq
-  loading.value = true
+  // 切曲/换图时保留已渲染舞台，避免整屏闪烁；仅首次或空态才展示全屏 loading
+  if (!url.value) loading.value = true
   error.value = ''
   url.value = ''
   try {
@@ -503,6 +755,13 @@ async function loadPreview() {
       activeFile.value.file_id
     )
     if (seq !== loadSeq) return
+    if (kind.value === 'audio') {
+      pendingAudioResume = await getPlayCursor(props.account.user_id, props.account.drive_id, activeFile.value.file_id).catch(() => 0)
+      if (seq !== loadSeq) return
+      audioPos.value = 0
+      audioDur.value = 0
+      audioBuffered.value = 0
+    }
     url.value = previewUrl
     if (kind.value === 'text') {
       const resp = await fetch(previewUrl)
@@ -535,6 +794,14 @@ function onKey(e) {
     else if (e.key === '-' || e.key === '_') zoomByFactor(1 / 1.25)
     else if (e.key === '0') resetImageTransform()
     else if (e.key === 'r' || e.key === 'R') rotateBy(90)
+  } else if (kind.value === 'audio') {
+    if (e.code === 'Space') { e.preventDefault(); toggleAudioPlay() }
+    else if (e.key === 'ArrowLeft') audioSeekBy(-10)
+    else if (e.key === 'ArrowRight') audioSeekBy(10)
+    else if (e.key === 'ArrowUp') { e.preventDefault(); audioVolume.value = Math.min(200, audioVolume.value + 5); applyAudioVolume() }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); audioVolume.value = Math.max(0, audioVolume.value - 5); applyAudioVolume() }
+    else if (e.key === 'm' || e.key === 'M') toggleAudioMute()
+    else if (e.key === 'l' || e.key === 'L') audioLoop.value = !audioLoop.value
   } else if (kind.value === 'text') {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
       e.preventDefault()
@@ -559,7 +826,40 @@ onBeforeUnmount(() => {
   clearTimeout(idleTimer)
   stageRO?.disconnect()
   if (activeDragCleanup) activeDragCleanup()
+  // 音频播放器清理：保存进度、停表、释放 WebAudio、注销 MediaSession
+  if (kind.value === 'audio') {
+    saveAudioCursor()
+    clearInterval(audioSaveTimer)
+    audioSaveTimer = null
+    clearAudioMediaSession()
+    try { audioCtx?.close() } catch { /* ignore */ }
+    audioCtx = null
+    audioGain = null
+  }
+  stopSlideshow()
 })
+
+// ---------- 图片幻灯片放映 ----------
+const slideshow = ref(false)
+let slideshowTimer = null
+function toggleSlideshow() {
+  if (slideshow.value) { stopSlideshow(); return }
+  if (imageList.value.length <= 1) return
+  slideshow.value = true
+  // 定时器直接推进，不走 switchImage（用户手动导航才会停止放映）
+  slideshowTimer = setInterval(() => {
+    if (document.hidden) return
+    const total = imageList.value.length
+    if (total <= 1) { stopSlideshow(); return }
+    pokeUI()
+    activeFile.value = imageList.value[(currentImageIdx.value + 1) % total]
+  }, 3000)
+}
+function stopSlideshow() {
+  slideshow.value = false
+  clearInterval(slideshowTimer)
+  slideshowTimer = null
+}
 
 // 文本编码探测
 function decodeText(buf) {
@@ -585,14 +885,15 @@ function decodeText(buf) {
 
 <template>
   <Modal
-    :dialog-class="'preview-modal' + (kind === 'image' ? ' immersive' : '')"
+    :dialog-class="'preview-modal' + (isImmersive ? ' immersive' : '')"
+    :hide-head="isImmersive"
     width=""
     @close="handleCloseRequest"
     body-class="preview-body"
   >
-    <!-- 自定义高级弹窗头部（图片预览为沉浸式浮层，不使用实体头栏） -->
+    <!-- 自定义高级弹窗头部（图片/音频为沉浸式浮层，不使用实体头栏） -->
     <template #head>
-      <div v-if="kind !== 'image'" class="pv-head-custom">
+      <div v-if="kind !== 'image' && kind !== 'audio'" class="pv-head-custom">
         <div class="pv-head-icon" :class="'ft-' + iconOf(activeFile)">
           <UiIcon :name="iconOf(activeFile)" :size="20" />
         </div>
@@ -613,18 +914,6 @@ function decodeText(buf) {
           </div>
         </div>
       </div>
-    </template>
-
-    <!-- 头部右侧窗口控制（最小化 / 最大化还原） -->
-    <template #head-extra>
-      <template v-if="kind !== 'image'">
-        <button class="icon-btn" style="width:28px;height:28px" title="最小化" @click="winMinimise">
-          <UiIcon name="minimize" :size="13" />
-        </button>
-        <button class="icon-btn" style="width:28px;height:28px" :title="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax">
-          <UiIcon :name="winMax ? 'restore' : 'maximize'" :size="13" />
-        </button>
-      </template>
     </template>
 
     <!-- 顶部悬浮工具条（仅文本） -->
@@ -742,6 +1031,8 @@ function decodeText(buf) {
         @pointermove="pokeUI"
         @dblclick="onDblClick"
       >
+        <!-- 氛围背景：当前图放大模糊填充，消除黑场单调感 -->
+        <div v-if="layers.length" class="pv-amb" :style="{ backgroundImage: 'url(' + layers[layers.length - 1].url + ')' }"></div>
         <div
           v-for="layer in layers"
           :key="layer.key"
@@ -768,12 +1059,12 @@ function decodeText(buf) {
           <div class="pv-topbar-meta">
             <UiIcon :name="iconOf(activeFile)" :size="15" />
             <span class="pv-topbar-name">{{ activeFile.name }}</span>
-            <span class="pv-topbar-sub">{{ formatBytes(activeFile.size) }}<template v-if="imageList.length > 1"> · {{ currentImageIdx + 1 }} / {{ imageList.length }}</template></span>
+            <span class="pv-topbar-sub">{{ formatBytes(activeFile.size) }}<template v-if="natural.w"> · {{ natural.w }}×{{ natural.h }}</template><template v-if="imageList.length > 1"> · {{ currentImageIdx + 1 }} / {{ imageList.length }}</template></span>
           </div>
           <div class="pv-topbar-actions">
-            <button class="pv-ctl-btn" title="最小化" @click="winMinimise"><UiIcon name="minimize" :size="14" /></button>
-            <button class="pv-ctl-btn" :title="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'restore' : 'maximize'" :size="14" /></button>
-            <button class="pv-ctl-btn" title="关闭 (Esc)" @click="handleCloseRequest"><UiIcon name="close" :size="15" /></button>
+            <button class="pv-ctl-btn pv-window-btn" title="最小化" aria-label="最小化窗口" @click="winMinimise"><UiIcon name="window-minimize" :size="14" /></button>
+            <button class="pv-ctl-btn pv-window-btn" :title="winMax ? '还原窗口' : '最大化窗口'" :aria-label="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'window-restore' : 'window-maximize'" :size="14" /></button>
+            <button class="pv-ctl-btn pv-window-btn pv-window-close" title="关闭 (Esc)" aria-label="关闭预览" @click="handleCloseRequest"><UiIcon name="close" :size="15" /></button>
           </div>
         </div>
 
@@ -799,22 +1090,123 @@ function decodeText(buf) {
           <button class="pv-ctl-btn" :disabled="imageList.length <= 1" title="下一张 (→)" @click="switchImage(1)"><UiIcon name="forward" :size="15" /></button>
           <span class="pv-ctl-sep"></span>
           <button class="pv-ctl-btn pv-ctl-text" title="缩小 (-)" @click="zoomByFactor(1 / 1.25)">−</button>
-          <span class="pv-ctl-zoom" title="点击复原（适配窗口）" @click="resetImageTransform">{{ Math.round(fitScale * zoom * 100) }}%</span>
+          <button type="button" class="pv-ctl-zoom" title="点击复原（适配窗口）" @click="resetImageTransform">{{ Math.round(fitScale * zoom * 100) }}%</button>
           <button class="pv-ctl-btn" title="放大 (+)" @click="zoomByFactor(1.25)"><UiIcon name="plus" :size="13" /></button>
           <button class="pv-ctl-btn" title="适配窗口 (0)" @click="resetImageTransform"><UiIcon name="size" :size="14" /></button>
+          <button class="pv-ctl-btn pv-ctl-text pv-ctl-ratio" :class="{ active: isOneToOne }" title="实际大小 (双击百分比)" @click="zoomToOne">1:1</button>
           <button class="pv-ctl-btn" title="顺时针旋转 90° (R)" @click="rotateBy(90)"><UiIcon name="refresh" :size="13" /></button>
           <span class="pv-ctl-sep"></span>
+          <button v-if="imageList.length > 1" class="pv-ctl-btn" :class="{ active: slideshow }" :title="slideshow ? '暂停幻灯片' : '幻灯片放映（3 秒/张）'" @click="toggleSlideshow"><UiIcon :name="slideshow ? 'pause' : 'play'" :size="14" /></button>
           <button class="pv-ctl-btn" :class="{ active: showFilm }" :disabled="imageList.length <= 1" title="缩略图" @click="showFilm = !showFilm"><UiIcon name="grid" :size="14" /></button>
         </div>
       </div>
 
-      <!-- 2. 音频播放 -->
-      <div v-else-if="kind === 'audio'" class="pv-audio-container">
-        <div class="pv-audio-disc">
-          <UiIcon name="audio" :size="48" style="color:var(--color-primary)" />
+      <!-- 2. 音频播放（沉浸式播放器） -->
+      <div v-else-if="kind === 'audio'" class="pv-audio-stage" @pointerdown="audioMenu && (audioMenu = '')">
+        <!-- 氛围背景：封面放大模糊 / 品牌辉光 -->
+        <div class="pv-audio-amb" :style="audioCover ? { backgroundImage: 'url(' + audioCover + ')' } : {}"></div>
+        <div class="pv-audio-veil"></div>
+
+        <!-- 顶部浮动栏 -->
+        <div class="pv-topbar" @pointerdown.stop>
+          <div class="pv-topbar-meta">
+            <UiIcon name="audio" :size="15" />
+            <span class="pv-topbar-name">{{ activeFile.name }}</span>
+            <span class="pv-topbar-sub">{{ formatBytes(activeFile.size) }}<template v-if="audioList.length > 1"> · {{ audioIdx + 1 }} / {{ audioList.length }}</template></span>
+          </div>
+          <div class="pv-topbar-actions">
+            <button class="pv-ctl-btn pv-window-btn" title="最小化" aria-label="最小化窗口" @click="winMinimise"><UiIcon name="window-minimize" :size="14" /></button>
+            <button class="pv-ctl-btn pv-window-btn" :title="winMax ? '还原窗口' : '最大化窗口'" :aria-label="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'window-restore' : 'window-maximize'" :size="14" /></button>
+            <button class="pv-ctl-btn pv-window-btn pv-window-close" title="关闭 (Esc)" aria-label="关闭预览" @click="handleCloseRequest"><UiIcon name="close" :size="15" /></button>
+          </div>
         </div>
-        <div class="pv-audio-name">{{ activeFile.name }}</div>
-        <audio :src="url" controls autoplay class="pv-audio-player"></audio>
+
+        <!-- 中部：唱片 + 曲目信息 -->
+        <div class="pv-audio-center">
+          <div class="pv-disc" :class="{ spin: audioPlaying, empty: !audioCover }">
+            <img v-if="audioCover" :src="audioCover" alt="" draggable="false" />
+            <UiIcon v-else name="audio" :size="46" />
+          </div>
+          <div class="pv-audio-title" :title="activeFile.name">{{ activeFile.name }}</div>
+          <div class="pv-audio-sub">
+            <span>{{ audioExt }}</span><i>·</i><span>{{ formatBytes(activeFile.size) }}</span>
+            <template v-if="audioList.length > 1"><i>·</i><span>{{ audioIdx + 1 }} / {{ audioList.length }}</span></template>
+          </div>
+        </div>
+
+        <!-- 底部玻璃控制条 -->
+        <div class="pv-audio-dock" @pointerdown.stop @dblclick.stop>
+          <div class="pv-audio-progress">
+            <div class="pv-audio-track">
+              <div class="pv-audio-buffer" :style="{ width: audioBufPct + '%' }"></div>
+              <div class="pv-audio-fill" :style="{ width: audioPct + '%' }"><span class="pv-audio-thumb"></span></div>
+            </div>
+            <input type="range" min="0" :max="audioDur || 0" step="0.1" :value="audioPos" aria-label="播放进度" @input="onAudioSeekInput" />
+          </div>
+          <div class="pv-audio-times">
+            <span>{{ fmtClock(audioPos) }}</span>
+            <span>{{ fmtClock(audioDur) }}</span>
+          </div>
+          <div class="pv-audio-controls">
+            <div class="pv-audio-group">
+              <button v-if="audioList.length > 1" class="pv-abtn" :class="{ active: audioMenu === 'playlist' }" title="播放列表" @click.stop="audioMenu = audioMenu === 'playlist' ? '' : 'playlist'"><UiIcon name="list" :size="17" /></button>
+              <button v-if="audioList.length > 1" class="pv-abtn" title="上一曲" @click="switchAudio(-1)"><UiIcon name="rewind" :size="18" /></button>
+              <button class="pv-abtn pv-abtn-main" :title="audioPlaying ? '暂停 (空格)' : '播放 (空格)'" @click="toggleAudioPlay"><UiIcon :name="audioPlaying ? 'pause' : 'play'" :size="22" /></button>
+              <button v-if="audioList.length > 1" class="pv-abtn" title="下一曲" @click="switchAudio(1)"><UiIcon name="forward" :size="18" /></button>
+              <button class="pv-abtn" :class="{ active: audioLoop }" title="单曲循环 (L)" @click="audioLoop = !audioLoop"><UiIcon name="refresh" :size="16" /></button>
+            </div>
+            <div class="pv-audio-group pv-audio-right">
+              <button class="pv-abtn pv-abtn-text" :class="{ active: audioMenu === 'speed' }" title="播放速度" @click.stop="audioMenu = audioMenu === 'speed' ? '' : 'speed'">{{ audioSpeed }}x</button>
+              <div class="pv-audio-vol">
+                <button class="pv-abtn" :title="audioMuted ? '取消静音 (M)' : '静音 (M)'" @click="toggleAudioMute"><UiIcon :name="audioMuted || audioVolume === 0 ? 'volume-x' : 'volume'" :size="17" /></button>
+                <input type="range" class="pv-audio-vol-range" min="0" max="200" :value="audioVolume" title="音量（最高 200%）" @input="onAudioVolume" />
+                <span class="pv-audio-vol-val">{{ audioMuted ? 0 : audioVolume }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 弹层：倍速 -->
+          <div v-if="audioMenu === 'speed'" class="pv-audio-pop" @pointerdown.stop>
+            <div class="pv-audio-pop-title">播放速度</div>
+            <button v-for="s in AUDIO_SPEEDS" :key="s" class="pv-audio-pop-item" :class="{ on: s === audioSpeed }" @click.stop="onAudioSpeed(s)">
+              <span class="pv-audio-pop-check"><UiIcon v-if="s === audioSpeed" name="check" :size="13" /></span>{{ s }}x
+            </button>
+          </div>
+          <!-- 弹层：播放列表 -->
+          <div v-if="audioMenu === 'playlist'" class="pv-audio-pop pv-audio-pop-list" @pointerdown.stop>
+            <div class="pv-audio-pop-title">播放列表 <span>{{ audioIdx + 1 }}/{{ audioList.length }}</span></div>
+            <button v-for="(t, i) in audioList" :key="t.file_id" class="pv-audio-pop-item pv-audio-track-item" :class="{ on: t.file_id === activeFile.file_id }" :title="t.name" @click.stop="selectAudioFile(t)">
+              <span class="pv-audio-track-no">{{ i + 1 }}</span>
+              <span class="pv-audio-track-name">{{ t.name }}</span>
+              <span v-if="t.file_id === activeFile.file_id" class="pv-audio-eq" :class="{ paused: !audioPlaying }"><i></i><i></i><i></i></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 错误态 -->
+        <div v-if="audioError" class="pv-audio-err">
+          <UiIcon name="warning" :size="18" />
+          <span>{{ audioError }}</span>
+          <button class="btn sm" @click="loadPreview">重试</button>
+        </div>
+
+        <audio
+          v-if="url"
+          ref="audioEl"
+          :src="url"
+          class="pv-audio-el"
+          crossorigin="anonymous"
+          preload="metadata"
+          autoplay
+          @play="onAudioPlay"
+          @pause="onAudioPause"
+          @ended="onAudioEnded"
+          @timeupdate="onAudioTime"
+          @progress="onAudioTime"
+          @loadedmetadata="onAudioMeta"
+          @volumechange="onAudioVolChange"
+          @error="onAudioError"
+        ></audio>
       </div>
 
       <!-- 4. 文本/代码/Markdown 专业展示区 -->
@@ -906,6 +1298,47 @@ function decodeText(buf) {
 </template>
 
 <style scoped>
+/* 沉浸式媒体的控件始终以实体表面与画面分离。浅色主题使用亮面+深色图标，
+   深色主题反转为深面+浅色图标；无论封面/图片本身明暗如何都保持可读。 */
+:global(.modal.preview-modal.immersive) {
+  --pv-media-surface: rgba(255, 255, 255, .96);
+  --pv-media-surface-hover: #ffffff;
+  --pv-media-fg: #182235;
+  --pv-media-muted: #667085;
+  --pv-media-border: rgba(15, 23, 42, .28);
+  --pv-media-shadow: 0 10px 28px rgba(15, 23, 42, .28);
+  --pv-media-dock: rgba(255, 255, 255, .94);
+  --pv-media-dock-border: rgba(15, 23, 42, .18);
+  --pv-media-active: #6d28d9;
+  --pv-media-active-fg: #ffffff;
+  --pv-audio-base: #e9edf5;
+  --pv-audio-fg: #172033;
+  --pv-audio-muted: #5f6f86;
+  --pv-audio-veil: linear-gradient(180deg, rgba(255, 255, 255, .44), rgba(232, 237, 246, .88));
+  overflow: hidden;
+  background: var(--pv-audio-base);
+}
+:global(html.dark .modal.preview-modal.immersive) {
+  --pv-media-surface: rgba(22, 20, 32, .94);
+  --pv-media-surface-hover: #2d293d;
+  --pv-media-fg: #f8f7ff;
+  --pv-media-muted: #b6b0cb;
+  --pv-media-border: rgba(255, 255, 255, .28);
+  --pv-media-shadow: 0 12px 32px rgba(0, 0, 0, .52);
+  --pv-media-dock: rgba(17, 15, 26, .95);
+  --pv-media-dock-border: rgba(255, 255, 255, .16);
+  --pv-media-active: #a78bfa;
+  --pv-media-active-fg: #17121f;
+  --pv-audio-base: #0d0b13;
+  --pv-audio-fg: #f7f5ff;
+  --pv-audio-muted: #b5afc8;
+  --pv-audio-veil: linear-gradient(180deg, rgba(8, 7, 13, .28), rgba(8, 7, 13, .82));
+}
+:global(.modal.preview-modal.immersive .preview-body) {
+  border-radius: inherit;
+  background: transparent;
+}
+
 /* 弹窗头部自适应高级排布 */
 .pv-head-custom {
   display: flex;
@@ -1262,8 +1695,16 @@ function decodeText(buf) {
   user-select: none; touch-action: none; cursor: grab;
 }
 .pv-stage.grabbing { cursor: grabbing; }
+/* 氛围背景：当前图放大模糊填充 */
+.pv-amb {
+  position: absolute; inset: -48px; z-index: 0;
+  background-size: cover; background-position: center;
+  filter: blur(64px) saturate(1.25) brightness(.5);
+  transform: scale(1.2); opacity: .42;
+  transition: background-image .3s ease;
+}
 .pv-img-layer {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; z-index: 1;
   display: flex; align-items: center; justify-content: center;
   pointer-events: none;
 }
@@ -1279,15 +1720,16 @@ function decodeText(buf) {
   border-radius: 2px;
 }
 .pv-stage.grabbing .pv-img-layer img { transition: none; }
-.pv-stage-busy { position: absolute; top: 12px; right: 14px; color: rgba(255,255,255,.7); }
+.pv-stage-busy { position: absolute; z-index: 10; top: 12px; right: 14px; color: rgba(255,255,255,.7); }
 
 /* 顶部浮动栏：渐变遮罩，无实体条（播放器语言） */
 .pv-topbar {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+  position: absolute; top: 0; left: 0; right: 0; z-index: 8;
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
-  padding: 12px 14px 32px;
+  padding: 10px 12px 34px;
   background: linear-gradient(rgba(0, 0, 0, .55), transparent);
   transition: opacity .25s ease, transform .25s ease;
+  --wails-draggable: drag;
 }
 .pv-topbar-meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: rgba(255, 255, 255, .92); padding-top: 2px; }
 .pv-topbar-name {
@@ -1295,58 +1737,81 @@ function decodeText(buf) {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   text-shadow: 0 1px 4px rgba(0, 0, 0, .7);
 }
-.pv-topbar-sub { font-size: 11.5px; color: rgba(255, 255, 255, .62); flex: none; }
-.pv-topbar-actions { display: flex; gap: 4px; flex: none; }
+.pv-topbar-sub { font-size: 11.5px; color: rgba(255, 255, 255, .68); flex: none; }
+.pv-topbar-actions {
+  display: flex; gap: 0; flex: none; overflow: hidden;
+  border: 1px solid var(--pv-media-border); border-radius: 8px;
+  background: var(--pv-media-surface); box-shadow: var(--pv-media-shadow);
+  --wails-draggable: no-drag;
+}
 
 /* 左右翻页箭头 */
 .pv-edge {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 38px; height: 62px;
+  position: absolute; z-index: 6; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 64px;
   display: flex; align-items: center; justify-content: center;
-  color: rgba(255, 255, 255, .95);
-  background: rgba(14, 14, 18, .72);
+  color: var(--pv-media-fg);
+  background: var(--pv-media-surface);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, .16); border-radius: 10px;
-  cursor: pointer; opacity: .3;
+  border: 1px solid var(--pv-media-border); border-radius: 10px;
+  box-shadow: var(--pv-media-shadow);
+  cursor: pointer; opacity: .9;
   transition: opacity .2s ease, background .18s ease, transform .18s var(--motion-spring);
 }
 .pv-edge.left { left: 14px; }
 .pv-edge.right { right: 14px; }
-.pv-edge:hover { opacity: 1; background: rgba(22, 22, 28, .9); }
+.pv-edge:hover { opacity: 1; background: var(--pv-media-surface-hover); }
 .pv-edge:active { transform: translateY(-50%) scale(.93); }
 
 /* 底部控制条：渐变遮罩条（无实体药丸），控件直接浮在渐变上 */
 .pv-ctl {
-  position: absolute; left: 0; right: 0; bottom: 0;
+  position: absolute; z-index: 9; left: 50%; bottom: 14px;
   display: flex; align-items: center; justify-content: center; gap: 5px;
-  padding: 28px 16px 12px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, .62));
+  width: max-content; max-width: calc(100% - 28px); overflow-x: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--pv-media-dock-border); border-radius: 13px;
+  color: var(--pv-media-fg); background: var(--pv-media-dock);
+  backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  box-shadow: var(--pv-media-shadow);
+  transform: translateX(-50%);
   transition: opacity .25s ease, transform .25s ease;
+  scrollbar-width: none;
+  --wails-draggable: no-drag;
 }
+.pv-ctl::-webkit-scrollbar { display: none; }
 .pv-ctl-btn {
-  width: 28px; height: 28px; flex: none;
+  width: 34px; height: 34px; flex: none;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 8px; color: rgba(255, 255, 255, .95); cursor: pointer;
-  transition: background .16s ease, transform .18s var(--motion-spring), color .16s;
+  margin: 0; padding: 0;
+  border: 1px solid transparent; border-radius: 9px;
+  color: var(--pv-media-fg); background: transparent; cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, transform .18s var(--motion-spring), color .16s;
 }
-.pv-ctl-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .16); }
+.pv-ctl-btn:hover:not(:disabled) { background: var(--pv-media-surface-hover); border-color: var(--pv-media-border); }
 .pv-ctl-btn:active:not(:disabled) { transform: scale(.88); }
-.pv-ctl-btn:disabled { opacity: .32; cursor: default; }
-.pv-ctl-btn.active { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 20%, transparent); }
+.pv-ctl-btn:disabled { opacity: .38; cursor: not-allowed; }
+.pv-ctl-btn:focus-visible, .pv-edge:focus-visible, .pv-ctl-zoom:focus-visible { outline: 2px solid var(--pv-media-active); outline-offset: 2px; }
+.pv-ctl-btn.active { color: var(--pv-media-active-fg); background: var(--pv-media-active); border-color: transparent; }
+.pv-window-btn { width: 40px; height: 34px; border: 0; border-left: 1px solid var(--pv-media-border); border-radius: 0; }
+.pv-window-btn:first-child { border-left: 0; }
+.pv-window-btn:hover:not(:disabled) { color: var(--pv-media-fg); background: var(--pv-media-surface-hover); border-color: var(--pv-media-border); }
+.pv-window-close:hover:not(:disabled) { color: #fff; background: #c43d4b; border-color: #c43d4b; }
 .pv-ctl-text { font-size: 17px; line-height: 1; padding-bottom: 2px; }
-.pv-ctl-counter, .pv-ctl-zoom { font-size: 12px; color: rgba(255, 255, 255, .92); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pv-ctl-zoom { cursor: pointer; min-width: 40px; text-align: center; border-radius: 6px; padding: 3px 4px; }
-.pv-ctl-zoom:hover { background: rgba(255, 255, 255, .14); }
-.pv-ctl-sep { width: 1px; height: 16px; background: rgba(255, 255, 255, .2); flex: none; }
+.pv-ctl-ratio { font-size: 11px; font-weight: 700; letter-spacing: .04em; width: auto; min-width: 34px; padding: 0 7px; }
+.pv-ctl-counter, .pv-ctl-zoom { font-size: 12px; color: var(--pv-media-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pv-ctl-zoom { min-width: 44px; min-height: 28px; margin: 0; padding: 3px 5px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; text-align: center; }
+.pv-ctl-zoom:hover { background: var(--pv-media-surface-hover); border-color: var(--pv-media-border); }
+.pv-ctl-sep { width: 1px; height: 18px; background: var(--pv-media-dock-border); flex: none; }
 
 /* 胶卷缩略图条（默认隐藏，控制条切换） */
 .pv-filmstrip {
-  position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
+  position: absolute; z-index: 8; left: 50%; bottom: 66px; transform: translateX(-50%);
   display: flex; gap: 6px; max-width: min(78%, 560px); overflow-x: auto;
   padding: 7px; border-radius: 12px;
-  background: rgba(12, 12, 16, .92);
+  background: var(--pv-media-dock);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, .16);
+  border: 1px solid var(--pv-media-dock-border);
+  box-shadow: var(--pv-media-shadow);
   scrollbar-width: none;
   transition: opacity .25s ease;
 }
@@ -1356,11 +1821,11 @@ function decodeText(buf) {
   border-radius: 7px; overflow: hidden; cursor: pointer;
   border: 1.5px solid transparent;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255, 255, 255, .06); color: rgba(255, 255, 255, .5);
+  background: var(--pv-media-surface); color: var(--pv-media-muted);
   transition: transform .18s var(--motion-spring), border-color .15s ease;
 }
 .pv-film-thumb:hover { transform: translateY(-2px); }
-.pv-film-thumb.active { border-color: var(--color-primary); }
+.pv-film-thumb.active { border-color: var(--pv-media-active); }
 .pv-film-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
 /* 控件自动隐藏 */
@@ -1369,15 +1834,189 @@ function decodeText(buf) {
 .pv-stage.ui-hidden .pv-edge,
 .pv-stage.ui-hidden .pv-topbar,
 .pv-stage.ui-hidden .pv-filmstrip { opacity: 0; pointer-events: none; }
-.pv-stage.ui-hidden .pv-ctl { transform: translateY(8px); }
+.pv-stage.ui-hidden .pv-ctl { transform: translateX(-50%) translateY(8px); }
 .pv-stage.ui-hidden .pv-topbar { transform: translateY(-8px); }
 
-/* 沉浸式：隐藏弹窗实体头栏 */
-.modal.preview-modal.immersive .modal-head { display: none; }
+/* ---------- 音频沉浸式播放器（对齐 PlayerPanel 暗场语言） ---------- */
+.pv-audio-stage {
+  flex: 1; min-height: 0; position: relative; overflow: hidden;
+  background: var(--pv-audio-base);
+  color: var(--pv-audio-fg); user-select: none;
+}
+.pv-audio-amb {
+  position: absolute; z-index: 0; inset: -60px;
+  background-size: cover; background-position: center;
+  filter: blur(72px) saturate(1.15) brightness(.72);
+  transform: scale(1.25);
+  opacity: .4;
+}
+.pv-audio-stage .pv-audio-amb:not([style]) {
+  background: radial-gradient(ellipse at 30% 20%, rgba(124, 58, 237, .38), transparent 55%),
+              radial-gradient(ellipse at 75% 80%, rgba(16, 185, 129, .2), transparent 50%);
+  filter: none; transform: none; opacity: 1;
+}
+.pv-audio-veil {
+  position: absolute; z-index: 1; inset: 0;
+  background: var(--pv-audio-veil);
+}
 
-/* PDF & Audio */
-.pv-audio-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 36px; }
-.pv-audio-disc { width: 104px; height: 104px; border-radius: 50%; background: var(--bg-subtle); border: 2px solid var(--border-light); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
-.pv-audio-name { font-size: 16px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 520px; }
-.pv-audio-player { width: min(480px, 90%); }
+/* 曲目封面：播放时仅做轻微弹性呼吸，避免干扰内容。 */
+.pv-audio-center {
+  position: absolute; z-index: 2; inset: 0 0 164px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 24px; pointer-events: none;
+}
+.pv-disc {
+  width: 156px; height: 156px; border-radius: 26px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative; flex: none;
+  background: var(--pv-media-surface);
+  border: 1px solid var(--pv-media-border);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, .28);
+  animation: pv-cover-breathe 2.6s var(--motion-spring) infinite;
+  animation-play-state: paused;
+}
+.pv-disc.spin { animation-play-state: running; }
+.pv-disc img { width: 100%; height: 100%; object-fit: cover; }
+.pv-disc.empty {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pv-media-active) 88%, #1e1740), color-mix(in srgb, var(--pv-media-active) 42%, #15203b));
+  color: var(--pv-media-active-fg);
+}
+@keyframes pv-cover-breathe { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.018); } }
+.pv-audio-title {
+  max-width: min(640px, 82%); color: var(--pv-audio-fg); font-size: 18px; font-weight: 720; letter-spacing: .01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pv-audio-sub {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--pv-audio-muted); font-variant-numeric: tabular-nums;
+}
+.pv-audio-sub i { font-style: normal; opacity: .45; }
+
+/* 底部实体控制条 */
+.pv-audio-dock {
+  position: absolute; z-index: 9; left: 50%; bottom: 16px;
+  width: min(760px, calc(100% - 32px));
+  padding: 12px 14px 11px;
+  border-radius: 16px;
+  color: var(--pv-media-fg); background: var(--pv-media-dock);
+  transform: translateX(-50%);
+  backdrop-filter: blur(22px) saturate(1.15); -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  border: 1px solid var(--pv-media-dock-border);
+  box-shadow: var(--pv-media-shadow);
+  --wails-draggable: no-drag;
+}
+.pv-audio-progress { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; }
+.pv-audio-track {
+  position: relative; width: 100%; height: 4px; border-radius: 999px;
+  background: color-mix(in srgb, var(--pv-media-muted) 28%, transparent); overflow: visible;
+}
+.pv-audio-buffer { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: color-mix(in srgb, var(--pv-media-muted) 48%, transparent); }
+.pv-audio-fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+  background: var(--pv-media-active);
+}
+.pv-audio-thumb {
+  position: absolute; right: -6px; top: 50%; translate: 0 -50%;
+  width: 12px; height: 12px; border-radius: 50%; background: var(--pv-media-active-fg);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .5);
+  opacity: 0; transition: opacity .15s ease, scale .15s var(--motion-spring);
+}
+.pv-audio-progress:hover .pv-audio-thumb, .pv-audio-progress:focus-within .pv-audio-thumb { opacity: 1; }
+.pv-audio-progress:hover .pv-audio-track { height: 5px; }
+.pv-audio-progress input[type='range'] {
+  position: absolute; inset: 0; width: 100%; margin: 0; opacity: 0; cursor: pointer;
+}
+.pv-audio-times {
+  display: flex; justify-content: space-between; margin-top: 5px;
+  font-size: 11.5px; color: var(--pv-media-muted); font-variant-numeric: tabular-nums;
+}
+.pv-audio-controls {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px;
+}
+.pv-audio-group { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pv-audio-right { justify-content: flex-end; gap: 10px; }
+.pv-abtn {
+  width: 36px; height: 36px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin: 0; padding: 0;
+  border: 1px solid var(--pv-media-border); border-radius: 10px; cursor: pointer;
+  color: var(--pv-media-fg); background: var(--pv-media-surface);
+  transition: background .16s ease, border-color .16s ease, transform .18s var(--motion-spring), color .16s;
+}
+.pv-abtn:hover { background: var(--pv-media-surface-hover); }
+.pv-abtn:active { transform: scale(.9); }
+.pv-abtn:focus-visible { outline: 2px solid var(--pv-media-active); outline-offset: 2px; }
+.pv-abtn.active { color: var(--pv-media-active-fg); background: var(--pv-media-active); border-color: var(--pv-media-active); }
+.pv-abtn-main {
+  width: 46px; height: 46px; border-radius: 50%;
+  border-color: var(--pv-media-active);
+  color: var(--pv-media-active-fg); background: var(--pv-media-active);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--pv-media-active) 38%, transparent);
+}
+.pv-abtn-main:hover { color: var(--pv-media-active-fg); background: var(--pv-media-active); transform: scale(1.06); }
+.pv-abtn-text { width: auto; min-width: 40px; padding: 0 9px; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.pv-audio-vol { display: flex; align-items: center; gap: 7px; }
+.pv-audio-vol-range {
+  width: 86px; accent-color: var(--pv-media-active); height: 3px; cursor: pointer;
+}
+.pv-audio-vol-val { font-size: 11.5px; color: var(--pv-media-muted); min-width: 36px; font-variant-numeric: tabular-nums; }
+
+/* 弹层：倍速 / 播放列表 */
+.pv-audio-pop {
+  position: absolute; right: 14px; bottom: calc(100% + 10px); z-index: 6;
+  min-width: 148px; max-height: 300px; overflow-y: auto;
+  padding: 6px; border-radius: 14px;
+  color: var(--pv-media-fg); background: var(--pv-media-dock);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--pv-media-dock-border);
+  box-shadow: var(--pv-media-shadow);
+  animation: pv-pop-in 160ms var(--motion-spring) both;
+}
+@keyframes pv-pop-in { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+.pv-audio-pop-list { left: 14px; right: auto; width: min(340px, 80%); }
+.pv-audio-pop-title {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px 5px; font-size: 12px; font-weight: 700; color: var(--pv-media-fg);
+}
+.pv-audio-pop-title span { color: var(--pv-media-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pv-audio-pop-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border: 1px solid transparent; border-radius: 9px; cursor: pointer;
+  background: transparent; color: var(--pv-media-fg); font-size: 12.5px; text-align: left;
+  transition: background .14s ease;
+}
+.pv-audio-pop-item:hover { background: var(--pv-media-surface-hover); border-color: var(--pv-media-border); }
+.pv-audio-pop-item.on { color: var(--pv-media-active-fg); background: var(--pv-media-active); border-color: var(--pv-media-active); }
+.pv-audio-pop-check { width: 15px; flex: none; display: inline-flex; }
+.pv-audio-track-no { width: 20px; flex: none; text-align: right; color: var(--pv-media-muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.pv-audio-track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-audio-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.pv-audio-eq i { width: 3px; border-radius: 2px; background: currentColor; animation: pv-eq 900ms ease-in-out infinite; }
+.pv-audio-eq i:nth-child(1) { height: 60%; animation-delay: -200ms; }
+.pv-audio-eq i:nth-child(2) { height: 100%; animation-delay: -500ms; }
+.pv-audio-eq i:nth-child(3) { height: 45%; animation-delay: -800ms; }
+.pv-audio-eq.paused i { animation-play-state: paused; opacity: .5; }
+@keyframes pv-eq { 0%, 100% { transform: scaleY(.4); } 50% { transform: scaleY(1); } }
+
+.pv-audio-el { display: none; }
+.pv-audio-err {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 20px 26px; border-radius: 14px;
+  background: var(--pv-media-dock); border: 1px solid var(--pv-media-dock-border);
+  box-shadow: var(--pv-media-shadow); color: #c43d4b; font-size: 13px;
+}
+
+@media (max-width: 680px) {
+  .pv-audio-center { bottom: 182px; }
+  .pv-audio-dock { width: calc(100% - 20px); bottom: 10px; padding: 10px; }
+  .pv-audio-controls { gap: 6px; }
+  .pv-audio-group { gap: 2px; }
+  .pv-audio-vol-range { width: 54px; }
+  .pv-audio-vol-val { display: none; }
+  .pv-audio-title { max-width: calc(100% - 32px); font-size: 16px; }
+  .pv-disc { width: 132px; height: 132px; border-radius: 22px; }
+}
 </style>

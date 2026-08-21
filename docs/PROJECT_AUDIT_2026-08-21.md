@@ -20,7 +20,7 @@
 | `go vet ./...` | ❌ `onedrive_test.go:166` 编译失败（N-01） |
 | `go test ./...` | ❌ 仅 onedrive 包构建失败，其余 26 包全部通过 |
 | `go test -race`（transfer/sync/store/vault/e2e） | ✅ 通过 |
-| 前端 `npm test`（Vitest） | ✅ 15/15 通过 |
+| 前端 `npm test`（Vitest） | ✅ 16/16 通过 |
 | 前端 `npm run build` | ✅ 通过（chunk >500kB 警告，非阻塞） |
 | `gofmt -l` | ⚠️ 10 个文件未格式化 |
 | `git diff --check` | 仅 CRLF 提示 |
@@ -32,6 +32,7 @@
 | `0bb2725` | 分享创建/取消、蓝奏下载、`go test ./...`、`go vet ./...`、`go build ./...`、Wails 生产打包 | 通过 |
 | `f05a10b` | Vault fail-closed、分享记录 Provider 校验、`go test ./...`、`go vet ./...`、`go build ./...` | 通过 |
 | `12b5cda` | OneDrive/阿里结构化错误、下载断点状态原子写、全仓 gofmt、CI 格式门禁、后端全量测试、前端 15 项测试与生产构建 | 通过 |
+| 本次媒体预览修复 | 图片/音频沉浸式无实体标题栏、控件层级与对比、视频前后集禁用态、通用经典窗口三键、前端 16 项测试与生产构建 | 通过 |
 
 ## 3. 上轮修复抽查验证（全部属实）
 

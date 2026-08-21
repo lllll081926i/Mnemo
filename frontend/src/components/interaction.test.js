@@ -94,6 +94,24 @@ describe('关键交互组件', () => {
     expect(document.activeElement).toBe(opener)
   })
 
+  it('普通弹窗统一提供经典三键，沉浸式弹窗不渲染实体标题栏', async () => {
+    const standard = mountAttached(Modal, { props: { title: '窗口控制' } })
+    await nextTick()
+
+    const controls = [...document.querySelectorAll('.modal-window-btn')]
+    expect(controls).toHaveLength(3)
+    expect(controls.map((button) => button.getAttribute('aria-label'))).toEqual(['最小化窗口', '最大化窗口', '关闭对话框'])
+
+    standard.unmount()
+    wrappers.splice(wrappers.indexOf(standard), 1)
+    await nextTick()
+
+    mountAttached(Modal, { props: { title: '图片预览', hideHead: true } })
+    await nextTick()
+    expect(document.querySelector('.modal-head')).toBeNull()
+    expect(document.querySelectorAll('.modal-window-btn')).toHaveLength(0)
+  })
+
   it('下拉框以键盘跳过禁用项并提交当前可选项', async () => {
     const wrapper = mountAttached(UiSelect, {
       props: {

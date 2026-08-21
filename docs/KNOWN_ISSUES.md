@@ -64,3 +64,20 @@
 | Yandex Disk | `drive-icons/yandex.svg` | `yandex.com` / `yandex.ru` | ✅ 正常识别 |
 | pCloud (EU/US) | `pcloud-eu.svg` / `pcloud-us.svg` | `ewebdav.pcloud.com` / `webdav.pcloud.com` | ✅ 正常识别 |
 | 自定义 WebDAV | `drive-icons/webdav.svg` | 通用兜底 | ✅ 正常 |
+
+---
+
+## 四、Dropbox 根目录列表不显示挂载的共享文件夹
+
+### 4.1 现象描述
+
+在官网可见的 Dropbox 挂载型共享文件夹（team/shared folder mounts）不出现在 Mnemo 的根目录列表中；进入具体路径与搜索不受影响。
+
+### 4.2 根本原因
+
+部分 Dropbox 账号（个人版 + 团队挂载组合）在 `include_mounted_folders=true` 时会对正常的 `/files/list_folder` 请求返回服务端 500。为保住大多数账号的根目录可用性，Mnemo 在 `internal/drive/providers/dropbox/dropbox.go` 中改为 `include_mounted_folders=false`，并顺带关闭 `include_non_downloadable_files`、将单页 limit 提升到 2000（有回归测试 `TestDropboxListUsesConservativeFolderPayload` 锁定请求形状）。
+
+### 4.3 规避与解决方案
+
+1. 需要访问挂载文件夹内容时，使用 Dropbox 官网把该文件夹的**内容**复制/移动到主目录，或在 Mnemo 中通过分享导入/迁移进入；
+2. 后续若 Dropbox 服务端修复该 500，可恢复 `include_mounted_folders=true` 并保留回归测试对照。

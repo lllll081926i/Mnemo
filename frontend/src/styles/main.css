@@ -486,9 +486,37 @@ body.rail-drag-active { cursor: grabbing; user-select: none; }
 }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px 0;
+  min-height: 52px;
+  padding: 12px 0 0 20px;
 }
 .modal-head h3 { font-size: 16px; font-weight: 700; }
+.modal-window-controls {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: stretch;
+  flex: none;
+  margin-top: -12px;
+  --wails-draggable: no-drag;
+}
+.modal-window-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--border-lighter);
+  border-radius: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+.modal-window-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.modal-window-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -3px; }
+.modal-window-btn.modal-window-close:hover { color: #fff; background: #c43d4b; }
 .modal-body { padding: 14px 20px; overflow-y: auto; }
 .modal .field { margin-bottom: 14px; }
 .modal .field > label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 5px; }

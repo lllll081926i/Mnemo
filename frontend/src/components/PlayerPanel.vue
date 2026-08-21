@@ -2,7 +2,7 @@
 // 网页播放器只保留浏览器/WebView 可解码路径：原生 MP4/WebM/Ogg，按需加载
 // HLS.js 和 dash.js 的 MSE 流。所有远程请求都经 Go 侧本地会话代理。
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings, previewUrl } from '../api'
+import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings, previewUrl, download } from '../api'
 import { getPrefs } from '../appearance'
 import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
@@ -41,6 +41,7 @@ function winMinimise() { try { WindowMinimise() } catch { /* browser preview */ 
 function winToggleMax() {
   try {
     WindowToggleMaximise()
+    winMax.value = !winMax.value
     WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {})
   } catch { /* browser preview */ }
 }
@@ -1004,6 +1005,25 @@ function selectEpisode(file) {
   emit('select-file', file)
 }
 
+// 底部控制条上一集/下一集快捷切换
+function switchEpisode(step) {
+  const list = episodeFiles.value
+  if (list.length <= 1) return
+  const next = episodeIndex.value + step
+  if (next < 0 || next >= list.length) return
+  selectEpisode(list[next])
+}
+
+// 播放失败时的下载兜底（不支持容器 / 资源失效均可直接取回）
+async function downloadCurrent() {
+  try {
+    await download(props.account.user_id, props.account.drive_id, props.file)
+    emit('toast', '已加入下载队列', 'success')
+  } catch (e) {
+    emit('toast', String(e), 'error')
+  }
+}
+
 // ---- popover menus ----
 function toggleMenu(name) {
   activeMenu.value = activeMenu.value === name ? '' : name
@@ -1215,7 +1235,10 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         <div v-else-if="error" class="pp-state pp-error">
           <UiIcon name="warning" :size="28" />
           <span class="pp-error-text">{{ error }}</span>
-          <button class="pp-retry" type="button" @click="startPlayback"><UiIcon name="refresh" :size="14" />重新加载</button>
+          <div class="pp-error-actions">
+            <button class="pp-retry" type="button" @click="startPlayback"><UiIcon name="refresh" :size="14" />重新加载</button>
+            <button class="pp-retry pp-retry-solid" type="button" @click="downloadCurrent"><UiIcon name="download" :size="14" />下载文件</button>
+          </div>
         </div>
         <transition name="pp-osd">
           <div v-if="osdVisible" class="pp-osd">
@@ -1243,9 +1266,14 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         <div class="pp-top-actions">
           <button type="button" class="pp-btn" title="截图 (S)" @click="screenshot"><UiIcon name="camera" :size="19" /></button>
           <button type="button" class="pp-btn" :class="{ active: pipActive }" title="画中画 (P)" @click="togglePip"><UiIcon name="picture-in-picture" :size="20" /></button>
-          <button v-if="!isFullscreen" type="button" class="pp-btn pp-win-btn" title="最小化" @click="winMinimise"><UiIcon name="window-minimize" :size="14" /></button>
-          <button v-if="!isFullscreen" type="button" class="pp-btn pp-win-btn" :title="winMax ? '向下还原' : '最大化'" @click="winToggleMax"><UiIcon :name="winMax ? 'window-restore' : 'window-maximize'" :size="14" /></button>
-          <button type="button" class="pp-btn pp-win-btn pp-win-close" title="关闭 (Esc)" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
+          <div v-if="!isFullscreen" class="pp-window-controls" aria-label="窗口控制">
+            <button type="button" class="pp-btn pp-win-btn" title="最小化" aria-label="最小化窗口" @click="winMinimise"><UiIcon name="window-minimize" :size="14" /></button>
+            <button type="button" class="pp-btn pp-win-btn" :title="winMax ? '还原窗口' : '最大化窗口'" :aria-label="winMax ? '还原窗口' : '最大化窗口'" @click="winToggleMax"><UiIcon :name="winMax ? 'window-restore' : 'window-maximize'" :size="14" /></button>
+            <button type="button" class="pp-btn pp-win-btn pp-win-close" title="关闭 (Esc)" aria-label="关闭播放器" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
+          </div>
+          <div v-else class="pp-window-controls" aria-label="窗口控制">
+            <button type="button" class="pp-btn pp-win-btn pp-win-close" title="关闭 (Esc)" aria-label="关闭播放器" @click="emit('close')"><UiIcon name="close" :size="14" /></button>
+          </div>
         </div>
       </header>
 
@@ -1268,9 +1296,11 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 
         <div class="pp-controls">
           <div class="pp-group">
+            <button type="button" class="pp-btn pp-skip pp-episode-nav" :disabled="episodeFiles.length <= 1 || episodeIndex <= 0" :title="episodeFiles.length <= 1 || episodeIndex <= 0 ? '没有上一集' : '上一集'" @click="switchEpisode(-1)"><UiIcon name="back" :size="19" /></button>
             <button type="button" class="pp-btn pp-skip" :title="`快退 ${seekStep}s (←)`" @click="seek(-seekStep)"><UiIcon name="rewind" :size="21" /></button>
             <button type="button" class="pp-btn pp-play-main" :title="playing ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay"><UiIcon :name="playing ? 'pause' : 'play'" :size="24" /></button>
             <button type="button" class="pp-btn pp-skip" :title="`快进 ${seekStep}s (→)`" @click="seek(seekStep)"><UiIcon name="fast-forward" :size="21" /></button>
+            <button type="button" class="pp-btn pp-skip pp-episode-nav" :disabled="episodeFiles.length <= 1 || episodeIndex < 0 || episodeIndex >= episodeFiles.length - 1" :title="episodeFiles.length <= 1 || episodeIndex < 0 || episodeIndex >= episodeFiles.length - 1 ? '没有下一集' : '下一集'" @click="switchEpisode(1)"><UiIcon name="forward" :size="19" /></button>
             <div class="pp-vol">
               <button type="button" class="pp-btn" :title="muted ? '取消静音 (M)' : '静音 (M)'" @click="toggleMute"><UiIcon :name="muted || volume === 0 ? 'volume-x' : 'volume'" :size="20" /></button>
               <div class="pp-vol-slider">
@@ -1366,6 +1396,13 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   --pp-dim: rgba(255, 255, 255, .55);
   --pp-glass: rgba(16, 16, 16, .78);
   --pp-hover: rgba(255, 255, 255, .12);
+  --pp-control-bg: rgba(255, 255, 255, .96);
+  --pp-control-hover: #ffffff;
+  --pp-control-fg: #172033;
+  --pp-control-border: rgba(15, 23, 42, .28);
+  --pp-control-shadow: 0 8px 20px rgba(0, 0, 0, .24);
+  --pp-control-active: #6d28d9;
+  --pp-control-active-fg: #ffffff;
   --subtitle-scale: 1;
   position: fixed;
   z-index: 520;
@@ -1377,6 +1414,15 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   font-family: inherit;
   letter-spacing: 0;
   user-select: none;
+}
+:global(html.dark) .player-panel {
+  --pp-control-bg: rgba(23, 21, 33, .95);
+  --pp-control-hover: #2d293d;
+  --pp-control-fg: #f8f7ff;
+  --pp-control-border: rgba(255, 255, 255, .28);
+  --pp-control-shadow: 0 10px 24px rgba(0, 0, 0, .42);
+  --pp-control-active: #a78bfa;
+  --pp-control-active-fg: #17121f;
 }
 .player-panel.cursor-hidden { cursor: none; }
 
@@ -1485,18 +1531,13 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 @keyframes pp-spin { to { transform: rotate(360deg); } }
 
 /* 顶栏独立窗口三件套按钮 */
-.pp-win-btn {
-  width: 32px;
-  height: 32px;
+.pp-window-controls {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--pp-control-border);
   border-radius: 8px;
-  transition: all 150ms ease;
-}
-.pp-win-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
-.pp-win-close:hover {
-  background: #e81123 !important;
-  color: #ffffff !important;
+  background: var(--pp-control-bg);
+  box-shadow: var(--pp-control-shadow);
 }
 .pp-error { color: rgba(255, 130, 130, .95); }
 .pp-error-text { max-width: 480px; line-height: 1.6; }
@@ -1516,6 +1557,13 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   transition: background .16s ease, border-color .16s ease;
 }
 .pp-retry:hover { background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .5); }
+.pp-error-actions { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+.pp-retry-solid {
+  background: var(--color-primary-strong, #7c3aed);
+  border-color: transparent;
+  color: #fff;
+}
+.pp-retry-solid:hover { background: var(--color-primary-hover, #6d28d9); border-color: transparent; }
 
 /* 悬浮大按钮 */
 .pp-center {
@@ -1579,28 +1627,41 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
   text-shadow: 0 1px 8px rgba(0, 0, 0, .6);
 }
 .pp-sub { margin-top: 2px; color: var(--pp-dim); font-size: 12px; }
-.pp-top-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.pp-top-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 /* 通用图标按钮 */
 .pp-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   margin: 0;
   padding: 0;
-  border: 0;
-  border-radius: 50%;
-  color: rgba(255, 255, 255, .82);
-  background: transparent;
+  border: 1px solid var(--pp-control-border);
+  border-radius: 10px;
+  color: var(--pp-control-fg);
+  background: var(--pp-control-bg);
   cursor: pointer;
   flex-shrink: 0;
-  transition: color .15s ease, background .15s ease, transform .15s ease;
+  box-shadow: var(--pp-control-shadow);
+  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
 }
-.pp-btn:hover { color: #fff; background: var(--pp-hover); }
-.pp-btn:active { transform: scale(.92); }
-.pp-btn.active { color: #fff; background: rgba(255, 255, 255, .2); }
+.pp-btn:hover:not(:disabled) { color: var(--pp-control-fg); background: var(--pp-control-hover); }
+.pp-btn:active:not(:disabled) { transform: scale(.92); }
+.pp-btn:focus-visible { outline: 2px solid var(--pp-control-active); outline-offset: 2px; }
+.pp-btn:disabled { color: rgba(255, 255, 255, .32); background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .13); box-shadow: none; cursor: not-allowed; }
+.pp-btn.active { color: var(--pp-control-active-fg); background: var(--pp-control-active); border-color: var(--pp-control-active); }
+.pp-btn.pp-win-btn {
+  width: 40px;
+  height: 34px;
+  border: 0;
+  border-left: 1px solid var(--pp-control-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+.pp-window-controls .pp-win-btn:first-child { border-left: 0; }
+.pp-btn.pp-win-close:hover:not(:disabled) { color: #ffffff; background: #c43d4b; border-color: #c43d4b; }
 .pp-text-btn {
   width: auto;
   min-width: 40px;
@@ -1676,8 +1737,8 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 .pp-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
 .pp-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .pp-right { justify-content: flex-end; gap: 4px; }
-.pp-play-main { width: 46px; height: 46px; color: #fff; }
-.pp-play-main:hover { transform: scale(1.08); background: var(--pp-hover); }
+.pp-play-main { width: 46px; height: 46px; border-radius: 50%; color: var(--pp-control-active-fg); background: var(--pp-control-active); border-color: var(--pp-control-active); }
+.pp-play-main:hover:not(:disabled) { color: var(--pp-control-active-fg); background: var(--pp-control-active); transform: scale(1.08); }
 .pp-time {
   margin-left: 10px;
   color: rgba(255, 255, 255, .78);

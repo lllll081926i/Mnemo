@@ -15,6 +15,7 @@ function handleGlobalKeydown(e) {
 
 <script setup>
 import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
+import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -23,9 +24,12 @@ const props = defineProps({
   bodyClass: { type: String, default: 'modal-body' },
   dialogClass: { type: String, default: '' },
   dialogStyle: { type: Object, default: () => ({}) },
+  // 沉浸式媒体预览在自身舞台中提供关闭/窗口控制，不渲染通用实体标题栏。
+  hideHead: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close'])
 const dialogEl = ref(null)
+const windowMaximized = ref(false)
 let previousActiveElement = null
 
 const handleClose = () => emit('close')
@@ -55,8 +59,21 @@ function onDialogKeydown(e) {
   }
 }
 
+function minimiseWindow() {
+  try { WindowMinimise() } catch { /* 浏览器预览环境没有 Wails runtime。 */ }
+}
+
+function toggleWindowMaximise() {
+  try {
+    WindowToggleMaximise()
+    windowMaximized.value = !windowMaximized.value
+    WindowIsMaximised().then((value) => { windowMaximized.value = !!value }).catch(() => {})
+  } catch { /* 浏览器预览环境没有 Wails runtime。 */ }
+}
+
 onMounted(() => {
   previousActiveElement = document.activeElement
+  try { WindowIsMaximised().then((value) => { windowMaximized.value = !!value }).catch(() => {}) } catch { /* browser preview */ }
   modalStack.push(handleClose)
   if (!globalKeydownBound) {
     window.addEventListener('keydown', handleGlobalKeydown)
@@ -97,14 +114,20 @@ onBeforeUnmount(() => {
           tabindex="-1"
           @keydown="onDialogKeydown"
         >
-          <div v-if="title || $slots.head" class="modal-head">
+          <div v-if="!hideHead && (title || $slots.head)" class="modal-head">
             <slot name="head">
               <h3>{{ title }}</h3>
             </slot>
-            <div style="display:flex;align-items:center;gap:4px">
+            <div class="modal-window-controls" aria-label="窗口控制">
               <slot name="head-extra" />
-              <button type="button" class="icon-btn" style="width:28px;height:28px" title="关闭 (Esc)" aria-label="关闭对话框" @click="emit('close')">
-                <UiIcon name="close" :size="14" />
+              <button type="button" class="modal-window-btn" title="最小化" aria-label="最小化窗口" @click="minimiseWindow">
+                <UiIcon name="window-minimize" :size="14" />
+              </button>
+              <button type="button" class="modal-window-btn" :title="windowMaximized ? '还原窗口' : '最大化窗口'" :aria-label="windowMaximized ? '还原窗口' : '最大化窗口'" @click="toggleWindowMaximise">
+                <UiIcon :name="windowMaximized ? 'window-restore' : 'window-maximize'" :size="14" />
+              </button>
+              <button type="button" class="modal-window-btn modal-window-close" title="关闭 (Esc)" aria-label="关闭对话框" @click="emit('close')">
+                <UiIcon name="close" :size="15" />
               </button>
             </div>
           </div>

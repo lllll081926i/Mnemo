@@ -46,6 +46,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Verify release version consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_version="$(sed -nE 's/^const AppVersion = "([^"]+)"/\1/p' internal/config/config.go)"
+          wails_version="$(node -p "require('./wails.json').version")"
+          frontend_version="$(node -p "require('./frontend/package.json').version")"
+          installer_version="$(sed -nE 's/^#define MyAppVersion "([^"]+)"/\1/p' build/windows/installer.iss)"
+          test -n "$app_version"
+          test "$app_version" = "$wails_version"
+          test "$app_version" = "$frontend_version"
+          test "$app_version" = "$installer_version"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            test "v$app_version" = "${GITHUB_REF_NAME}"
+          fi
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
