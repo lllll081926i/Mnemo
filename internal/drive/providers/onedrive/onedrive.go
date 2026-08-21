@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -65,13 +66,10 @@ func clientOf(c drive.Context) (*client, error) {
 // refresh-token retry is safe. Other 401 responses can be caused by tenant,
 // scope, or administrator policy and must remain visible to the caller.
 func isGraphAuthenticationFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "http 401") &&
-		(strings.Contains(message, "invalidauthenticationtoken") ||
-			strings.Contains(message, "invalid authentication token"))
+	var graphErr *graphAPIError
+	return errors.As(err, &graphErr) &&
+		graphErr.StatusCode == http.StatusUnauthorized &&
+		strings.EqualFold(strings.TrimSpace(graphErr.Code), "InvalidAuthenticationToken")
 }
 
 // refreshedClientAfterGraphAuthFailure rotates a stale Graph access token once

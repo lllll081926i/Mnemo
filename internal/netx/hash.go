@@ -16,7 +16,7 @@ import (
 type HashKind string
 
 const (
-	HashMD5 HashKind = "md5"
+	HashMD5  HashKind = "md5"
 	HashSHA1 HashKind = "sha1"
 )
 

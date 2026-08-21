@@ -3,8 +3,8 @@ package registrycheck
 import (
 	"testing"
 
-	_ "mnemo-go/internal/drive/providers"
 	"mnemo-go/internal/drive"
+	_ "mnemo-go/internal/drive/providers"
 	"mnemo-go/internal/model"
 )
 

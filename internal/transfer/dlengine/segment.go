@@ -783,7 +783,44 @@ func persistState(path string, st *state) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return writeStateAtomically(path, b)
+}
+
+// writeStateAtomically keeps a valid resume state on disk if the process exits
+// during a checkpoint. commitPart provides the Windows-safe replacement path.
+func writeStateAtomically(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".mnemo-state-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	// Keep the existing state-file mode for compatibility while making the
+	// content durable before it becomes visible at its final path.
+	if err := tmp.Chmod(0o644); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := commitPart(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func urlFingerprint(rawURL string) string {

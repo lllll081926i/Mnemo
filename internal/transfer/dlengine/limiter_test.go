@@ -3,6 +3,7 @@ package dlengine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -306,5 +307,30 @@ func TestPersistStateHashesSignedURL(t *testing.T) {
 	}
 	if !stateURLMatches(state{URLHash: fingerprint}, rawURL, fingerprint) {
 		t.Fatal("hashed URL should match the same resource URL")
+	}
+
+	updated := &state{URL: rawURL, Total: 64, Chunk: 16, Done: []bool{true, true, false, false}}
+	if err := persistState(path, updated); err != nil {
+		t.Fatalf("overwrite state: %v", err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read overwritten state: %v", err)
+	}
+	var got state
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode overwritten state: %v", err)
+	}
+	if len(got.Done) != 4 || !got.Done[0] || !got.Done[1] || got.Done[2] || got.Done[3] {
+		t.Fatalf("overwritten checkpoint = %+v", got.Done)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("read state directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".mnemo-state-") {
+			t.Fatalf("temporary state file was not cleaned up: %s", entry.Name())
+		}
 	}
 }

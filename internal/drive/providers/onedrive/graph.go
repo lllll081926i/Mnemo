@@ -163,6 +163,28 @@ func (c *client) rawDo(ctx context.Context, method, target string, body any, hea
 	return c.http.Do(ctx, method, target, c.headers(headers), reader)
 }
 
+// graphAPIError preserves Graph's machine-readable error code for callers
+// that need a safe retry decision. Its Error text remains concise for logs/UI.
+type graphAPIError struct {
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+func (e *graphAPIError) Error() string {
+	if e == nil {
+		return "onedrive: request failed"
+	}
+	msg := "onedrive: http " + fmt.Sprint(e.StatusCode)
+	if e.Code != "" {
+		msg += ": " + e.Code
+	}
+	if e.Message != "" {
+		msg += ": " + e.Message
+	}
+	return msg
+}
+
 func graphError(body []byte, status int) error {
 	var g struct {
 		Error *struct {
@@ -171,16 +193,12 @@ func graphError(body []byte, status int) error {
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &g)
-	msg := "onedrive: http " + fmt.Sprint(status)
+	result := &graphAPIError{StatusCode: status}
 	if g.Error != nil {
-		if g.Error.Code != "" {
-			msg += ": " + g.Error.Code
-		}
-		if g.Error.Message != "" {
-			msg += ": " + g.Error.Message
-		}
+		result.Code = strings.TrimSpace(g.Error.Code)
+		result.Message = strings.TrimSpace(g.Error.Message)
 	}
-	return errors.New(msg)
+	return result
 }
 
 // listPath builds the children endpoint with $select/$expand.

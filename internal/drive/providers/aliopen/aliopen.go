@@ -563,14 +563,14 @@ func (c *client) refreshToken(ctx context.Context) error {
 		aliOpenLimiter.penalize(aliOpenRetryAfter(resp, 8*time.Second))
 	}
 	if resp.StatusCode >= 400 {
-		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+		return aliOpenRequestErrorOf(data, resp.StatusCode)
 	}
 	var res aliOpenTokenResponse
 	if err := json.Unmarshal(data, &res); err != nil {
 		return fmt.Errorf("aliopen: refresh response: %w", err)
 	}
 	if res.AccessToken == "" {
-		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+		return aliOpenRequestErrorOf(data, resp.StatusCode)
 	}
 	c.session.AccessToken = res.AccessToken
 	if res.RefreshToken != "" {
@@ -704,7 +704,7 @@ func (c *client) apiPostAtWithRetry(ctx context.Context, host, path string, body
 	}
 	if aliOpenAuthResponse(resp.StatusCode, data) {
 		if !allowRefresh {
-			return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+			return aliOpenRequestErrorOf(data, resp.StatusCode)
 		}
 		if err := c.refreshToken(ctx); err != nil {
 			return err
@@ -719,10 +719,10 @@ func (c *client) apiPostAtWithRetry(ctx context.Context, host, path string, body
 		aliOpenLimiter.penalize(aliOpenRetryAfter(resp, fallback))
 	}
 	if resp.StatusCode >= 400 {
-		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+		return aliOpenRequestErrorOf(data, resp.StatusCode)
 	}
 	if aliOpenAPIError(data) {
-		return errors.New(aliOpenErrorMessage(data, resp.StatusCode))
+		return aliOpenRequestErrorOf(data, resp.StatusCode)
 	}
 	if out == nil {
 		return nil
@@ -737,10 +737,44 @@ type aliOpenErrorBody struct {
 	ErrorDescription string `json:"error_description"`
 }
 
+// aliOpenRequestError keeps HTTP status and the provider error code separate
+// from display text. Endpoint fallbacks must be driven by this structured
+// information instead of by translated or reformatted error strings.
+type aliOpenRequestError struct {
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+func (e *aliOpenRequestError) Error() string {
+	if e == nil {
+		return "aliopen: request failed"
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Code != "" {
+		return e.Code
+	}
+	if e.StatusCode > 0 {
+		return fmt.Sprintf("aliopen: http %d", e.StatusCode)
+	}
+	return "aliopen: request failed"
+}
+
 func aliOpenErrorBodyOf(data []byte) aliOpenErrorBody {
 	var body aliOpenErrorBody
 	_ = json.Unmarshal(data, &body)
 	return body
+}
+
+func aliOpenRequestErrorOf(data []byte, status int) *aliOpenRequestError {
+	body := aliOpenErrorBodyOf(data)
+	return &aliOpenRequestError{
+		StatusCode: status,
+		Code:       strings.TrimSpace(body.Code),
+		Message:    aliOpenErrorMessage(data, status),
+	}
 }
 
 func aliOpenAuthResponse(status int, data []byte) bool {
@@ -1051,14 +1085,8 @@ func (c *client) CancelShare(ctx context.Context, shareID string) error {
 }
 
 func aliOpenNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "not found") ||
-		strings.Contains(message, "not_found") ||
-		strings.Contains(message, "http 404") ||
-		strings.Contains(message, "status 404")
+	var requestErr *aliOpenRequestError
+	return errors.As(err, &requestErr) && requestErr.StatusCode == http.StatusNotFound
 }
 
 type aliOpenUploadPart struct {

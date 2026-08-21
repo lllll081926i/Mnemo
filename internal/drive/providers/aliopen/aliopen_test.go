@@ -3,6 +3,7 @@ package aliopen
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -291,5 +292,17 @@ func TestAliOpenCancelShareFallsBackToNativeRoute(t *testing.T) {
 	}
 	if !(&Driver{}).Capabilities().CancelCreatedShares {
 		t.Fatal("Ali Open must advertise cancelCreatedShares")
+	}
+}
+
+func TestAliOpenNotFoundRequiresStructuredStatus(t *testing.T) {
+	if !aliOpenNotFound(aliOpenRequestErrorOf([]byte(`{"code":"NotFound","message":"not found"}`), http.StatusNotFound)) {
+		t.Fatal("structured HTTP 404 should enable the narrow endpoint fallback")
+	}
+	if aliOpenNotFound(errors.New("aliopen: http 404: not found")) {
+		t.Fatal("formatted error text alone must not enable an endpoint fallback")
+	}
+	if aliOpenNotFound(aliOpenRequestErrorOf([]byte(`{"code":"NotFound","message":"not found"}`), http.StatusOK)) {
+		t.Fatal("provider error code without HTTP 404 must not enable an endpoint fallback")
 	}
 }

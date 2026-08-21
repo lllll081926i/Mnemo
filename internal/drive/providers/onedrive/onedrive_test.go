@@ -170,3 +170,18 @@ func TestOneDriveListRefreshesInvalidAccessTokenWithoutSurfacingInitial401(t *te
 		t.Fatalf("rotated token = %+v", token)
 	}
 }
+
+func TestGraphAuthenticationFailureUsesStructuredError(t *testing.T) {
+	authErr := graphError([]byte(`{"error":{"code":"InvalidAuthenticationToken","message":"JWT is not well formed"}}`), http.StatusUnauthorized)
+	if !isGraphAuthenticationFailure(fmt.Errorf("list root: %w", authErr)) {
+		t.Fatal("structured InvalidAuthenticationToken should allow one refresh retry")
+	}
+
+	accessErr := graphError([]byte(`{"error":{"code":"AccessDenied","message":"policy blocked"}}`), http.StatusUnauthorized)
+	if isGraphAuthenticationFailure(accessErr) {
+		t.Fatal("unrelated Graph 401 must not refresh the token")
+	}
+	if isGraphAuthenticationFailure(fmt.Errorf("onedrive: http 401: InvalidAuthenticationToken")) {
+		t.Fatal("formatted error text alone must not trigger a refresh retry")
+	}
+}

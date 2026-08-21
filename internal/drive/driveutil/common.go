@@ -13,13 +13,13 @@ import (
 
 // Category kinds aligned with the legacy frontend.
 const (
-	CatVideo  = "video"
-	CatAudio  = "audio"
-	CatImage  = "image"
-	CatDoc    = "doc"
+	CatVideo   = "video"
+	CatAudio   = "audio"
+	CatImage   = "image"
+	CatDoc     = "doc"
 	CatArchive = "archive"
-	CatText   = "text"
-	CatOther  = "other"
+	CatText    = "text"
+	CatOther   = "other"
 )
 
 var videoExts = map[string]bool{"mp4": true, "mkv": true, "avi": true, "mov": true, "wmv": true, "flv": true, "webm": true, "m4v": true, "ts": true, "m3u8": true, "rmvb": true, "rm": true, "3gp": true, "mpg": true, "mpeg": true, "m2ts": true}
