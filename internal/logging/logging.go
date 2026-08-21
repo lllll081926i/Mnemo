@@ -379,7 +379,7 @@ func Clear() error {
 var (
 	sensitivePattern     = regexp.MustCompile(`(?i)(password|passwd|cookie|authorization|captcha_token|refresh_token|access_token|creditkey|device_id|deviceid|token)([=:])[^\s&|]+`)
 	sensitiveJSONPattern = regexp.MustCompile(`(?i)("(?:password|passwd|cookie|authorization|token|captcha_token|refresh_token|access_token|creditkey|device_id|deviceid)"\s*:\s*")[^"]*(")`)
-	urlPattern           = regexp.MustCompile(`(?i)https?://[^\s|]+`)
+	urlPattern           = regexp.MustCompile(`(?i)https?://[^\s|"'<>]+`)
 )
 
 func sanitizeArgs(args ...any) []any {

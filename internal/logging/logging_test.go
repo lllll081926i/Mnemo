@@ -30,6 +30,13 @@ func TestSanitizeArgsRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestSanitizeTextKeepsQuotedURLBoundary(t *testing.T) {
+	input := `Post "https://api.dropboxapi.com/oauth2/token": dial tcp`
+	if got := sanitizeText(input); got != input {
+		t.Fatalf("sanitizeText() = %q, want %q", got, input)
+	}
+}
+
 func TestCompactHandlerStartsWithLevelAndKeepsDiagnosticFields(t *testing.T) {
 	previousLocal := time.Local
 	time.Local = time.FixedZone("HKT", 8*60*60)

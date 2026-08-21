@@ -286,15 +286,34 @@ func apiURL(path string) string {
 	return apiHost + "/" + strings.TrimPrefix(path, "/")
 }
 
-const pikpakMinRateLimitSeconds = 30
+const (
+	pikpakMinRateLimitSeconds        = 30
+	pikpakRiskControlCooldownSeconds = 10 * 60
+)
 
 // PikPakAccessProhibitedError marks a provider-side risk-control block. It is
 // deliberately distinct from ordinary authentication failures so callers do
 // not immediately repeat the same request and extend the block.
-type PikPakAccessProhibitedError struct{}
+type PikPakAccessProhibitedError struct {
+	RetryAfterSeconds int
+}
 
 func (e *PikPakAccessProhibitedError) Error() string {
-	return "PikPak access was prohibited by provider risk control; retry later"
+	return fmt.Sprintf("PikPak access was prohibited by provider risk control; retry after %d seconds", e.retryAfterSeconds())
+}
+
+func (e *PikPakAccessProhibitedError) retryAfterSeconds() int {
+	seconds := e.RetryAfterSeconds
+	if seconds < pikpakRiskControlCooldownSeconds {
+		seconds = pikpakRiskControlCooldownSeconds
+	}
+	return seconds
+}
+
+// RetryAfter keeps provider-side risk control on the affected account only,
+// while preventing a quick manual retry from extending the block.
+func (e *PikPakAccessProhibitedError) RetryAfter() time.Duration {
+	return time.Duration(e.retryAfterSeconds()) * time.Second
 }
 
 // PikPakRateLimitError tells the UI how long the provider asks the user to
@@ -359,7 +378,16 @@ func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 	}
 	if strings.Contains(detail, "accessprohibited") || strings.Contains(detail, "access_prohibited") ||
 		strings.Contains(detail, "access prohibited") {
-		return &PikPakAccessProhibitedError{}
+		seconds := pikpakRiskControlCooldownSeconds
+		for _, raw := range []json.RawMessage{e.RetryAfter, e.RetryAfterSecond} {
+			if value := parseRetryAfterSeconds(raw); value > seconds {
+				seconds = value
+			}
+		}
+		if value := parseRetryAfterHeader(retryAfter); value > seconds {
+			seconds = value
+		}
+		return &PikPakAccessProhibitedError{RetryAfterSeconds: seconds}
 	}
 	// 常见错误友好化（对齐旧版 parsePikPakError）
 	switch strings.ToLower(e.Error) {

@@ -135,6 +135,96 @@ func NewClient(timeout time.Duration) *Client {
 	return c
 }
 
+// NewClientWithSystemProxy builds a client that prefers the application's
+// explicit proxy setting and otherwise uses a configured Windows manual proxy.
+// It intentionally leaves PAC/WPAD resolution to the operating system/browser;
+// callers can still configure an application proxy when a PAC is in use.
+func NewClientWithSystemProxy(timeout time.Duration) *Client {
+	c := NewClient(timeout)
+	if TestTransportHook != nil || c.Proxy != "" {
+		return c
+	}
+	if proxyURL := systemProxyURL(); proxyURL != "" {
+		return c.WithProxy(proxyURL)
+	}
+	return c
+}
+
+// normalizeSystemProxy converts the ProxyServer registry formats used by
+// Windows into a URL accepted by http.Transport. HTTPS is preferred for an
+// HTTPS request, followed by HTTP and SOCKS entries.
+func normalizeSystemProxy(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	var httpsProxy, httpProxy, socksProxy, directProxy string
+	for _, part := range strings.Split(raw, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.Contains(part, "://") {
+			if directProxy == "" {
+				directProxy = part
+			}
+			continue
+		}
+		key, value, hasMapping := strings.Cut(part, "=")
+		if !hasMapping {
+			if directProxy == "" {
+				directProxy = part
+			}
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "https":
+			httpsProxy = value
+		case "http":
+			httpProxy = value
+		case "socks", "socks5":
+			socksProxy = value
+		}
+	}
+
+	for _, candidate := range []struct {
+		value         string
+		defaultScheme string
+	}{
+		{httpsProxy, "http"},
+		{httpProxy, "http"},
+		{socksProxy, "socks5"},
+		{directProxy, "http"},
+	} {
+		if normalized := normalizeProxyEndpoint(candidate.value, candidate.defaultScheme); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func normalizeProxyEndpoint(raw, defaultScheme string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = defaultScheme + "://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil || parsed.Hostname() == "" {
+		return ""
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+		return parsed.String()
+	default:
+		return ""
+	}
+}
+
 // WithProxy returns a client that routes traffic through proxyURL.
 func (c *Client) WithProxy(proxyURL string) *Client {
 	clone := *c

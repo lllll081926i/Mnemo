@@ -66,7 +66,7 @@ function startPikPakCooldown(seconds) {
 function handlePikPakRateLimit(error) {
   const text = String(error || '')
   if (!/(?:频繁|too[ _-]*(?:many|frequent)|rate[ _-]*limit|request[ _-]*frequency|access[ _-]*prohibited|risk[ _-]*control|429)/i.test(text)) return false
-  const match = text.match(/(?:等待|wait(?:ing)?(?:\s+for)?)\s*(\d+)\s*(?:秒|second)?/i)
+	const match = text.match(/(?:等待|wait(?:ing)?(?:\s+for)?|retry\s+after)\s*(\d+)\s*(?:秒|second)?/i)
   const riskBlocked = /access[ _-]*prohibited|risk[ _-]*control/i.test(text)
   startPikPakCooldown(match ? Number(match[1]) : (riskBlocked ? 60 : 30))
   errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
@@ -240,11 +240,11 @@ async function completePikPakCaptcha(payload) {
   if (token) {
     form.value.captcha_token = token
     form.value.captcha_verified = 'true'
+    delete form.value.captcha_requires_confirmation
   } else {
-	    // Some challenge redirects carry no final token. The callback itself is
-	    // the provider's completion signal; use the initial token directly so
-	    // login does not enter a high-frequency exchange loop.
-	    form.value.captcha_verified = 'true'
+    // 部分回调不会携带最终 token；后端会用初始 token 做一次受限确认。
+    form.value.captcha_verified = 'true'
+    form.value.captcha_requires_confirmation = 'true'
   }
   errorText.value = ''
 
@@ -269,6 +269,7 @@ function parseCaptcha(err) {
   captchaSessionId.value = session ? session[1] : ''
   form.value.captcha_token = m[2]
   delete form.value.captcha_verified
+  delete form.value.captcha_requires_confirmation
   captchaFrameReady.value = false
   return true
 }
@@ -279,6 +280,7 @@ async function reloadCaptcha() {
   captchaUrl.value = ''
   delete form.value.captcha_token
   delete form.value.captcha_verified
+  delete form.value.captcha_requires_confirmation
   try {
 	info('captcha', 'PikPak captcha reload requested')
     await closePikPakCaptchaSession()
@@ -367,69 +369,74 @@ function validate() {
 
 async function submit() {
   if (busy.value) return
-	debug('login', 'login form submit started', { provider: providerId.value, config_keys: configKeys(isMounted.value ? mountedForm.value : form.value), has_captcha: !!captchaUrl.value })
+  const attemptProvider = providerId.value
+  const attemptMounted = isMounted.value
+  const attemptOAuth = isOAuth.value
+  busy.value = true
+  captchaSubmitting.value = true
+  errorText.value = ''
+  try {
+	  debug('login', 'login form submit started', { provider: attemptProvider, config_keys: configKeys(attemptMounted ? mountedForm.value : form.value), has_captcha: !!captchaUrl.value })
   // The callback normally resumes login automatically. Keep a manual
   // fallback for dev WebView/browser environments where the event bridge can
   // be delayed or unavailable after the challenge redirects.
-  if (providerId.value === 'pikpak' && captchaUrl.value) {
+    if (attemptProvider === 'pikpak' && captchaUrl.value) {
     captchaSessionId.value = ''
     captchaFrameReady.value = false
     captchaUrl.value = ''
     delete form.value.captcha_verified
+    delete form.value.captcha_requires_confirmation
     await closePikPakCaptchaSession()
   }
-  if (providerId.value === 'pikpak') {
+    if (attemptProvider === 'pikpak') {
     await captchaClosePromise
-    if (loginModalDisposed || providerId.value !== 'pikpak' || captchaUrl.value || busy.value) return
+      if (loginModalDisposed || providerId.value !== attemptProvider || captchaUrl.value) return
   }
-  if (providerId.value === 'pikpak' && pikpakCooldownSeconds.value > 0) {
+    if (attemptProvider === 'pikpak' && pikpakCooldownSeconds.value > 0) {
     errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
     return
   }
   const err = validate()
   if (err) {
-		warn('login', 'login form validation failed', { provider: providerId.value, reason: err })
+		warn('login', 'login form validation failed', { provider: attemptProvider, reason: err })
 		errorText.value = err
 		return
 	}
-  busy.value = true
-  captchaSubmitting.value = true
-  errorText.value = ''
-  try {
-    if (isMounted.value) {
+    if (attemptMounted) {
       const mountedConfig = { ...mountedForm.value }
-      if (providerId.value !== 'webdav') delete mountedConfig.authType
-      const verifyWrite = providerId.value === 's3' && mountedConfig.verifyWrite === true
+      if (attemptProvider !== 'webdav') delete mountedConfig.authType
+      const verifyWrite = attemptProvider === 's3' && mountedConfig.verifyWrite === true
       delete mountedConfig.verifyWrite
-      if (verifyWrite) await validateMountedWrite(providerId.value, mountedConfig)
-      await saveMounted(providerId.value, mountedConfig)
+      if (verifyWrite) await validateMountedWrite(attemptProvider, mountedConfig)
+      await saveMounted(attemptProvider, mountedConfig)
     } else {
-      await login(providerId.value, { ...form.value })
+      await login(attemptProvider, { ...form.value })
     }
-    const successMessage = isOAuth.value
+    if (loginModalDisposed || providerId.value !== attemptProvider) return
+    const successMessage = attemptOAuth
       ? '授权成功'
-      : (isMounted.value && providerId.value === 's3'
+      : (attemptMounted && attemptProvider === 's3'
         ? (mountedForm.value.verifyWrite ? 'S3 已添加（浏览和写入权限已验证）' : 'S3 已添加（浏览权限已验证，写入权限将在首次上传时验证）')
         : '登录成功')
     emit('toast', successMessage, 'success')
-		info('login', 'login form submit completed', { provider: providerId.value })
+		info('login', 'login form submit completed', { provider: attemptProvider })
     emit('close')
   } catch (e) {
     try {
-      if (providerId.value === 'pikpak' && handlePikPakRateLimit(e)) {
+      if (attemptProvider === 'pikpak' && handlePikPakRateLimit(e)) {
         // Keep the challenge state intact while the provider cooldown runs.
-      } else if (providerId.value === 'pikpak' && parseCaptcha(e)) {
+      } else if (attemptProvider === 'pikpak' && parseCaptcha(e)) {
         errorText.value = '请在登录窗口内完成安全验证'
-      } else if (providerId.value === 'pan189' && parse189Captcha(e)) {
+      } else if (attemptProvider === 'pan189' && parse189Captcha(e)) {
         errorText.value = '请输入图片中的验证码'
       } else {
         errorText.value = String(e)
       }
-		warn('login', 'login form submit failed', { provider: providerId.value, error: formatErrorText(e) })
+		warn('login', 'login form submit failed', { provider: attemptProvider, error: formatErrorText(e) })
     } catch (handlerError) {
       // Error rendering must never leave the submit button stuck in busy state.
 			errorText.value = String(handlerError)
-			error('login', 'login error handler failed', { provider: providerId.value, error: formatErrorText(handlerError) })
+			error('login', 'login error handler failed', { provider: attemptProvider, error: formatErrorText(handlerError) })
     }
   } finally {
     busy.value = false
@@ -458,6 +465,7 @@ async function submit() {
                 :class="{ active: p.ID === providerId }"
                 :aria-selected="p.ID === providerId"
                 :title="p.Meta.label"
+				:disabled="busy"
                 @click="providerId = p.ID"
               >
                 <img :src="providerIconUrl(p.Meta)" alt="" />

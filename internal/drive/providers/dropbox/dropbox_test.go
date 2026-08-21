@@ -2,6 +2,7 @@ package dropbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -54,6 +55,22 @@ func TestDropboxRedirectURIUsesRcloneCompatibleDefault(t *testing.T) {
 	}
 	if got := spec.listenAddr(); got != "127.0.0.1:53682" {
 		t.Fatalf("listen address = %q", got)
+	}
+}
+
+func TestDropboxTokenNetworkFailureExplainsProxy(t *testing.T) {
+	cause := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection blocked")}
+	err := explainDropboxTokenExchangeError(cause)
+	if !strings.Contains(err.Error(), "系统/应用代理") {
+		t.Fatalf("network error = %v, want proxy guidance", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("network error does not retain cause: %v", err)
+	}
+
+	apiErr := errors.New("http 400: invalid_grant")
+	if got := explainDropboxTokenExchangeError(apiErr); got != apiErr {
+		t.Fatalf("API error was incorrectly classified as network failure: %v", got)
 	}
 }
 

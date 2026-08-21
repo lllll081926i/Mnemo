@@ -588,7 +588,10 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		config = map[string]string{}
 	}
 	var captchaSession *captcha.Session
-	if provider == model.ProviderPikpak && !strings.EqualFold(strings.TrimSpace(config["captcha_verified"]), "true") {
+	captchaVerified := strings.EqualFold(strings.TrimSpace(config["captcha_verified"]), "true")
+	captchaNeedsConfirmation := strings.EqualFold(strings.TrimSpace(config["captcha_requires_confirmation"]), "true")
+	if provider == model.ProviderPikpak && (!captchaVerified || captchaNeedsConfirmation) {
+		// The bounded post-slider confirmation may ask for one fresh challenge.
 		session, err := a.startPikPakCaptchaSession()
 		if err != nil {
 			logging.Error("PikPak captcha session initialization failed", "error", err)

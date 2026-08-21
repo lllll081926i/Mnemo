@@ -226,6 +226,35 @@ describe('关键交互组件', () => {
     expect(api.saveMounted.mock.calls[0][1]).not.toHaveProperty('verifyWrite')
   })
 
+  it('登录请求期间锁定服务商，避免异步结果串到另一个网盘', async () => {
+    localStorage.setItem('login_provider', 'dropbox')
+    let resolveLogin
+    api.login.mockImplementation(() => new Promise((resolve) => { resolveLogin = resolve }))
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [
+          { ID: 'dropbox', Meta: { label: 'Dropbox' }, Login: { fields: [{ key: 'oauth', type: 'oauth', label: '浏览器授权' }] } },
+          { ID: 'pikpak', Meta: { label: 'PikPak' }, Login: { fields: [{ key: 'username', type: 'text', label: '账号', required: true }] } },
+        ],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(api.login).toHaveBeenCalledWith('dropbox', {})
+    const providerButtons = [...document.body.querySelectorAll('.lp-item')]
+    const pikpakButton = providerButtons.find((button) => button.textContent.includes('PikPak'))
+    expect(pikpakButton.disabled).toBe(true)
+    expect(api.login).toHaveBeenCalledTimes(1)
+    expect(providerButtons.find((button) => button.classList.contains('active')).textContent).toContain('Dropbox')
+
+    resolveLogin()
+    await Promise.resolve()
+    await nextTick()
+  })
+
   it('账号容量在启动同步，并支持右上角手动同步', async () => {
     vi.useFakeTimers()
     api.refreshAccountNow.mockResolvedValue({ user_id: 'quota-dedupe', token: {}, usage: { size: 100, used: 20 } })

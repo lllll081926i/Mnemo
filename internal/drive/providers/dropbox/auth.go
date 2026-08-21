@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	dbAuthorizeURL = "https://www.dropbox.com/oauth2/authorize"
-	dbTokenURL     = "https://api.dropboxapi.com/oauth2/token"
+	dbAuthorizeURL         = "https://www.dropbox.com/oauth2/authorize"
+	dbTokenURL             = "https://api.dropboxapi.com/oauth2/token"
+	dbTokenExchangeTimeout = 20 * time.Second
 	// Dropbox applications require the redirect URI to exactly match the URI
 	// registered in the app console.  Keep the same fixed loopback endpoint as
 	// rclone so the built-in application credentials work without requiring the
@@ -93,14 +94,13 @@ func authPKCE(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, err
 		form.Set("code_verifier", verifier)
 	}
 
-	cl := netx.NewClient(60 * time.Second)
 	var raw struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int64  `json:"expires_in"`
 		TokenType    string `json:"token_type"`
 	}
-	if err := cl.PostForm(ctx, dbTokenURL, nil, form, &raw); err != nil {
+	if err := exchangeDropboxAuthorizationCode(ctx, form, &raw); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(raw.AccessToken) == "" {
@@ -124,6 +124,46 @@ func authPKCE(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, err
 	applyDropboxIdentity(tok)
 	tok.DeviceID = appKey
 	return tok, nil
+}
+
+// exchangeDropboxAuthorizationCode keeps the single-use code exchange short
+// and never retries it. A completed local callback and this outbound request
+// are separate stages, so a connection failure must not be reported as a
+// callback error.
+func exchangeDropboxAuthorizationCode(ctx context.Context, form url.Values, out any) error {
+	exchangeCtx, cancel := context.WithTimeout(ctx, dbTokenExchangeTimeout)
+	defer cancel()
+	if err := netx.NewClientWithSystemProxy(dbTokenExchangeTimeout).PostForm(exchangeCtx, dbTokenURL, nil, form, out); err != nil {
+		return explainDropboxTokenExchangeError(err)
+	}
+	return nil
+}
+
+func explainDropboxTokenExchangeError(err error) error {
+	if err == nil || !isDropboxTokenNetworkFailure(err) {
+		return err
+	}
+	return fmt.Errorf("dropbox: 无法连接授权服务，请检查网络或系统/应用代理: %w", err)
+}
+
+func isDropboxTokenNetworkFailure(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return true
+	}
+	var operationErr *net.OpError
+	if !errors.As(err, &operationErr) {
+		return false
+	}
+	switch operationErr.Op {
+	case "dial", "read", "write":
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveCredentials(appKey, appSecret, configuredKey, configuredSecret string) (string, string) {

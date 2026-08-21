@@ -1,11 +1,18 @@
 package pikpak
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"mnemo-go/internal/drive"
+	"mnemo-go/internal/netx"
 )
 
 func TestParseAPIErrorClassifiesRiskControl(t *testing.T) {
@@ -40,6 +47,82 @@ func TestPikPakCooldownIsScopedToLoginAccount(t *testing.T) {
 	}
 	if err := pikpakLoginCooldownError("second@example.com"); err != nil {
 		t.Fatalf("a different PikPak account was blocked by the first account: %v", err)
+	}
+}
+
+func TestPikPakRiskCooldownIsLongAndScopedToLoginAccount(t *testing.T) {
+	ResetPikPakLoginCooldown()
+	t.Cleanup(ResetPikPakLoginCooldown)
+	rememberPikPakLoginCooldown("first@example.com", &PikPakAccessProhibitedError{})
+
+	err := pikpakLoginCooldownError("first@example.com")
+	var rate *PikPakRateLimitError
+	if !errors.As(err, &rate) || rate.RetryAfterSeconds < pikpakRiskControlCooldownSeconds {
+		t.Fatalf("risk cooldown = %v, want at least %d seconds", err, pikpakRiskControlCooldownSeconds)
+	}
+	if err := pikpakLoginCooldownError("second@example.com"); err != nil {
+		t.Fatalf("a different PikPak account was blocked by risk control: %v", err)
+	}
+}
+
+func TestPikPakVerifiedCaptchaConfirmsOnceBeforeSignIn(t *testing.T) {
+	ResetPikPakLoginCooldown()
+	t.Cleanup(ResetPikPakLoginCooldown)
+
+	oldWait := pikpakVerifiedCaptchaWait
+	pikpakVerifiedCaptchaWait = 0
+	t.Cleanup(func() { pikpakVerifiedCaptchaWait = oldWait })
+	oldStore := deviceStore
+	deviceStore = &storePath{dir: t.TempDir()}
+	t.Cleanup(func() { deviceStore = oldStore })
+	oldTransport := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = oldTransport })
+
+	confirmCalls := 0
+	signInCalls := 0
+	netx.TestTransportHook = pikpakRoundTripper(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host + req.URL.Path {
+		case "user.mypikpak.com/v1/shield/captcha/init":
+			confirmCalls++
+			var body struct {
+				CaptchaToken string `json:"captcha_token"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Errorf("decode captcha confirmation: %v", err)
+			}
+			if body.CaptchaToken != "initial-token" {
+				t.Errorf("confirmation token = %q, want initial-token", body.CaptchaToken)
+			}
+			return pikpakResponse(req, http.StatusOK, `{"captcha_token":"confirmed-token"}`), nil
+		case "user.mypikpak.com/v1/auth/signin":
+			signInCalls++
+			if got := req.Header.Get("X-Captcha-Token"); got != "confirmed-token" {
+				t.Errorf("signin captcha token = %q, want confirmed-token", got)
+			}
+			return pikpakResponse(req, http.StatusOK, `{"access_token":"access","refresh_token":"refresh","expires_in":3600,"token_type":"Bearer","sub":"account-1","user_name":"Tester"}`), nil
+		case "api-drive.mypikpak.com/drive/v1/about":
+			return pikpakResponse(req, http.StatusOK, `{"quota":{"limit":100,"used":25}}`), nil
+		default:
+			return pikpakResponse(req, http.StatusNotFound, `{}`), nil
+		}
+	})
+
+	token, err := authSignIn(context.Background(), drive.AuthRequest{Config: map[string]string{
+		"username":                      "first@example.com",
+		"password":                      "secret",
+		"captcha_token":                 "initial-token",
+		"captcha_verified":              "true",
+		"captcha_requires_confirmation": "true",
+		"captcha_redirect_uri":          "http://127.0.0.1:9000/callback",
+	}})
+	if err != nil {
+		t.Fatalf("authSignIn returned error: %v", err)
+	}
+	if confirmCalls != 1 || signInCalls != 1 {
+		t.Fatalf("request counts = confirmation:%d signin:%d, want one each", confirmCalls, signInCalls)
+	}
+	if token == nil || token.ProviderAccountID != "account-1" || token.UsedSize != 25 || token.TotalSize != 100 {
+		t.Fatalf("token = %+v", token)
 	}
 }
 
@@ -100,5 +183,21 @@ func TestStreamTypeUsesExplicitHintsAndExtensions(t *testing.T) {
 				t.Fatalf("streamType(%q, %q) = %q, want %q", tc.url, tc.hint, got, tc.want)
 			}
 		})
+	}
+}
+
+type pikpakRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f pikpakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func pikpakResponse(req *http.Request, status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
 	}
 }

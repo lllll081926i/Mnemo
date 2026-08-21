@@ -62,6 +62,10 @@ var apiCaptchaCache = struct {
 	items map[string]apiCaptchaCacheEntry
 }{items: make(map[string]apiCaptchaCacheEntry)}
 
+// pikpakVerifiedCaptchaWait gives the provider a brief window to persist the
+// completed challenge before the single bounded confirmation request.
+var pikpakVerifiedCaptchaWait = 1500 * time.Millisecond
+
 // PikPak risk cooldowns are scoped to the normalized login identifier.  A
 // blocked PikPak account must not disable another PikPak account, and this
 // provider-local state must never gate logins for other providers.
@@ -96,7 +100,7 @@ func rememberPikPakLoginCooldown(username string, err error) {
 	} else {
 		var prohibited *PikPakAccessProhibitedError
 		if errors.As(err, &prohibited) {
-			seconds = 60
+			seconds = prohibited.retryAfterSeconds()
 		}
 	}
 	if seconds <= 0 {
@@ -473,6 +477,7 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 
 	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
 	captchaVerified := strings.EqualFold(strings.TrimSpace(req.Config["captcha_verified"]), "true")
+	captchaNeedsConfirmation := captchaVerified && strings.EqualFold(strings.TrimSpace(req.Config["captcha_requires_confirmation"]), "true")
 	if captchaToken == "" {
 		// A failed captcha init must stop here. Continuing with an empty token
 		// turns a transport/rate-limit failure into a misleading login error.
@@ -489,18 +494,28 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 	}
-	if captchaVerified {
-		// The callback is the provider's completion signal. Give the service a
-		// short window to persist the result, then submit exactly once. Do not
-		// exchange or re-initialize another token here: that loop is interpreted
-		// as high-frequency abuse by PikPak.
-		timer := time.NewTimer(1500 * time.Millisecond)
+	if captchaNeedsConfirmation {
+		// The callback can arrive before the provider has registered the slider
+		// result. Confirm the prior token exactly once, never in an automatic
+		// retry loop, then submit the login request.
+		timer := time.NewTimer(pikpakVerifiedCaptchaWait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
+		tok, urlValue, confirmErr := initCaptchaWithPrev(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken, callbackURI)
+		if confirmErr != nil {
+			rememberPikPakLoginCooldown(username, confirmErr)
+			logging.Warn("PikPak captcha completion confirmation failed", "error", confirmErr)
+			return nil, confirmErr
+		}
+		if urlValue != "" {
+			logging.Info("PikPak captcha completion requires another visual challenge")
+			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
+		}
+		captchaToken = tok
 	}
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)

@@ -75,7 +75,7 @@ type client struct {
 }
 
 func newClient(token string) *client {
-	return &client{http: netx.NewClient(90 * time.Second), token: token}
+	return &client{http: netx.NewClientWithSystemProxy(90 * time.Second), token: token}
 }
 
 func clientOf(c drive.Context) (*client, error) {
@@ -790,7 +790,7 @@ func refreshDropboxToken(ctx context.Context, appKey, appSecret, refreshToken st
 		form.Set("client_secret", appSecret)
 	}
 
-	cl := netx.NewClient(60 * time.Second)
+	cl := netx.NewClientWithSystemProxy(60 * time.Second)
 	var raw struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
