@@ -196,6 +196,70 @@ func TestDropboxExistingSharedLinkUsesObjectPagination(t *testing.T) {
 	}
 }
 
+func TestDropboxListRetriesTransientServerError(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if dropboxAPIPath(r) != "/files/list_folder" {
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+		calls++
+		if calls == 1 {
+			resp := dropboxResponse(r, http.StatusInternalServerError, `{"error_summary":"internal_error/"}`)
+			resp.Header.Set("Retry-After", "0")
+			return resp, nil
+		}
+		return dropboxResponse(r, http.StatusOK, `{"entries":[{".tag":"file","id":"id:file","name":"file.txt","path_display":"/file.txt","size":4}],"has_more":false}`), nil
+	}))
+
+	items, err := newClient("access").List(context.Background(), RootID)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if calls != 2 || len(items) != 1 || items[0].ID != "id:file" {
+		t.Fatalf("list calls/items = %d/%+v", calls, items)
+	}
+}
+
+func TestDropboxListServerErrorPreservesEndpointAndRequestID(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		calls++
+		resp := dropboxResponse(r, http.StatusInternalServerError, `{"error_summary":"internal_error/"}`)
+		resp.Header.Set("Retry-After", "0")
+		resp.Header.Set("X-Dropbox-Request-Id", "dbx-request-123")
+		return resp, nil
+	}))
+
+	_, err := newClient("access").List(context.Background(), RootID)
+	if err == nil {
+		t.Fatal("List unexpectedly succeeded")
+	}
+	if calls != rpcRetryAttempts {
+		t.Fatalf("server error calls = %d, want %d", calls, rpcRetryAttempts)
+	}
+	for _, want := range []string{"/files/list_folder", "http 500", "request_id=dbx-request-123"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err, want)
+		}
+	}
+}
+
+func TestDropboxListDoesNotRetryClientError(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return dropboxResponse(r, http.StatusConflict, `{"error_summary":"path/not_found/"}`), nil
+	}))
+
+	_, err := newClient("access").List(context.Background(), RootID)
+	if err == nil {
+		t.Fatal("List unexpectedly succeeded")
+	}
+	if calls != 1 {
+		t.Fatalf("client error calls = %d, want 1", calls)
+	}
+}
+
 func TestDropboxUploadRequiresRemoteFileID(t *testing.T) {
 	body := `{".tag":"file","name":"x.txt"}`
 	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {

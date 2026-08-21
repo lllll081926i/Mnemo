@@ -84,7 +84,7 @@ func (a *App) ListDir(userID, driveID, dirID string) ([]model.File, error) {
 		drive.RememberListedFiles(userID, driveID, dirID, files)
 		logging.Debug("directory listing completed", "count", len(files), "duration", logging.Duration(started))
 	} else {
-		logging.Warn("directory listing failed", "error", err, "duration", logging.Duration(started))
+		logging.Warn("directory listing failed", "provider", drive.ProviderOf(userID, driveID, ""), "error", err, "duration", logging.Duration(started))
 	}
 	return files, err
 }

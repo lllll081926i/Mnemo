@@ -34,6 +34,11 @@ const (
 	DefaultChunkSize   = 16 << 20 // 16 MiB per chunk
 	DefaultMinSize     = 32 << 20 // below this: single stream
 	MaxRetriesPerChunk = 5
+	progressInterval   = 500 * time.Millisecond
+	speedSampleWindow  = 2 * time.Second
+	// MaxPartialRangeRequests prevents a broken server that returns only a
+	// handful of bytes per response from causing an unbounded request loop.
+	MaxPartialRangeRequests = 64
 )
 
 // Options tunes the download behaviour.
@@ -99,7 +104,70 @@ type resourceValidator struct {
 var (
 	errResourceChanged      = errors.New("dlengine: remote resource changed")
 	errInvalidRangeResponse = errors.New("dlengine: invalid range response")
+	errShortRangeResponse   = errors.New("dlengine: server returned a shorter valid range")
 )
+
+// partialRangeReadError reports bytes that were safely written before the
+// remote side ended a valid range response. The caller can continue from the
+// next byte instead of discarding the whole chunk and downloading it again.
+type partialRangeReadError struct {
+	err     error
+	written int64
+}
+
+func (e *partialRangeReadError) Error() string {
+	return fmt.Sprintf("dlengine: partial range read after %d bytes: %v", e.written, e.err)
+}
+
+func (e *partialRangeReadError) Unwrap() error { return e.err }
+
+// speedEstimator reports a short rolling-window average. Download sources can
+// deliver bytes in bursts even while a request remains healthy; a rolling
+// window avoids advertising a false zero-speed pause between adjacent bursts.
+type speedEstimator struct {
+	samples []speedSample
+}
+
+type speedSample struct {
+	at         time.Time
+	downloaded int64
+}
+
+func newSpeedEstimator(now time.Time, downloaded int64) *speedEstimator {
+	return &speedEstimator{samples: []speedSample{{at: now, downloaded: downloaded}}}
+}
+
+func (s *speedEstimator) Observe(now time.Time, downloaded int64) int64 {
+	if s == nil {
+		return 0
+	}
+	if len(s.samples) == 0 {
+		s.samples = append(s.samples, speedSample{at: now, downloaded: downloaded})
+		return 0
+	}
+	if downloaded < s.samples[len(s.samples)-1].downloaded {
+		// A failed chunk can roll back in-flight accounting. Start a fresh
+		// sampling window rather than emitting a negative speed.
+		s.samples = []speedSample{{at: now, downloaded: downloaded}}
+		return 0
+	}
+	s.samples = append(s.samples, speedSample{at: now, downloaded: downloaded})
+
+	cutoff := now.Add(-speedSampleWindow)
+	baseline := 0
+	for baseline+1 < len(s.samples) && !s.samples[baseline+1].at.After(cutoff) {
+		baseline++
+	}
+	if baseline > 0 {
+		s.samples = append([]speedSample(nil), s.samples[baseline:]...)
+	}
+	first := s.samples[0]
+	elapsed := now.Sub(first.at)
+	if elapsed <= 0 || downloaded <= first.downloaded {
+		return 0
+	}
+	return int64(float64(downloaded-first.downloaded) / elapsed.Seconds())
+}
 
 // Download fetches url to localPath (plus a .part temp file) using segmented
 // parallel range requests. It resumes from the .part file when present.
@@ -122,6 +190,10 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 			MaxIdleConns:          64,
 			MaxIdleConnsPerHost:   32,
 			IdleConnTimeout:       90 * time.Second,
+			// A custom DialContext otherwise makes net/http conservatively
+			// disable HTTP/2. Let CDN endpoints use HTTP/2 when available while
+			// retaining HTTP/1.1 fallback for every existing provider.
+			ForceAttemptHTTP2: true,
 		},
 	}
 	defer hc.CloseIdleConnections()
@@ -196,9 +268,12 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 			}
 			start := int64(chunkIdx) * opts.ChunkSize
 			length := chunkLen(st, chunkIdx)
+			remainingStart := start
+			remainingLength := length
 			var lastErr error
-			for attempt := 0; attempt < MaxRetriesPerChunk; attempt++ {
-				err := fetchRange(gctx, hc, opts, url, start, length, total, validator, f, limiter, func(n int64) {
+			partialRequests := 0
+			for attempt := 0; attempt < MaxRetriesPerChunk; {
+				err := fetchRange(gctx, hc, opts, url, remainingStart, remainingLength, total, validator, f, limiter, func(n int64) {
 					downloaded.Add(n)
 				})
 				if err == nil {
@@ -212,16 +287,43 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 				}
 				lastErr = err
 				if errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) {
+					if resumed := remainingStart - start; resumed > 0 {
+						downloaded.Add(-resumed)
+					}
 					return fmt.Errorf("dlengine: chunk %d rejected: %w", chunkIdx, err)
 				}
 				if gctx.Err() != nil {
+					if resumed := remainingStart - start; resumed > 0 {
+						downloaded.Add(-resumed)
+					}
 					return gctx.Err()
+				}
+				var partial *partialRangeReadError
+				if errors.As(err, &partial) && partial.written > 0 && partial.written < remainingLength {
+					remainingStart += partial.written
+					remainingLength -= partial.written
+					partialRequests++
+					if partialRequests <= MaxPartialRangeRequests {
+						// This is a continuation, not a blind retry: the next request
+						// starts exactly after the already persisted bytes.
+						continue
+					}
+				}
+				attempt++
+				if attempt >= MaxRetriesPerChunk {
+					break
 				}
 				select {
-				case <-time.After(time.Duration(500*(attempt+1)) * time.Millisecond):
+				case <-time.After(time.Duration(500*attempt) * time.Millisecond):
 				case <-gctx.Done():
+					if resumed := remainingStart - start; resumed > 0 {
+						downloaded.Add(-resumed)
+					}
 					return gctx.Err()
 				}
+			}
+			if resumed := remainingStart - start; resumed > 0 {
+				downloaded.Add(-resumed)
 			}
 			return fmt.Errorf("dlengine: chunk %d failed after %d attempts: %w", chunkIdx, MaxRetriesPerChunk, lastErr)
 		})
@@ -229,10 +331,9 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 
 	// progress ticker
 	done := make(chan struct{})
-	var lastBytes int64
-	var speed int64
+	speed := newSpeedEstimator(time.Now(), downloaded.Load())
 	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(progressInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -240,10 +341,8 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 				return
 			case <-ticker.C:
 				cur := downloaded.Load()
-				speed = (cur - lastBytes) * 2
-				lastBytes = cur
 				if onProgress != nil {
-					onProgress(Progress{Downloaded: cur, Total: total, Speed: speed, Percent: percent(cur, total)})
+					onProgress(Progress{Downloaded: cur, Total: total, Speed: speed.Observe(time.Now(), cur), Percent: percent(cur, total)})
 				}
 			}
 		}
@@ -422,11 +521,12 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	}
 	expectedEnd := start + length - 1
 	gotStart, gotEnd, gotTotal, ok := parseContentRange(resp.Header.Get("Content-Range"))
-	if !ok || gotStart != start || gotEnd != expectedEnd || gotTotal != total {
+	if !ok || gotStart != start || gotEnd > expectedEnd || gotTotal != total {
 		return fmt.Errorf("%w: requested bytes %d-%d/%d", errInvalidRangeResponse, start, expectedEnd, total)
 	}
-	if resp.ContentLength >= 0 && resp.ContentLength != length {
-		return fmt.Errorf("%w: Content-Length is %d, want %d", errInvalidRangeResponse, resp.ContentLength, length)
+	responseLength := gotEnd - gotStart + 1
+	if resp.ContentLength >= 0 && resp.ContentLength != responseLength {
+		return fmt.Errorf("%w: Content-Length is %d, want %d", errInvalidRangeResponse, resp.ContentLength, responseLength)
 	}
 	if err := validator.verifyResponse(resp.Header); err != nil {
 		return err
@@ -434,15 +534,17 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	buf := make([]byte, 256<<10)
 	written := int64(0)
 	committed := false
+	preservePartial := false
 	defer func() {
-		if !committed && written > 0 && account != nil {
-			// A retry overwrites the same range. Roll back bytes reported by a
-			// failed attempt so progress reflects committed content only.
+		if !committed && !preservePartial && written > 0 && account != nil {
+			// A retry from the original offset overwrites the same range. Roll
+			// back bytes reported by this failed attempt.
 			account(-written)
 		}
 	}()
+	body := io.LimitReader(resp.Body, responseLength)
 	for {
-		n, err := resp.Body.Read(buf)
+		n, err := body.Read(buf)
 		if n > 0 {
 			if err := limiter.Wait(ctx, int64(n)); err != nil {
 				return err
@@ -459,11 +561,27 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 			break
 		}
 		if err != nil {
+			if written > 0 {
+				preservePartial = true
+				return &partialRangeReadError{err: err, written: written}
+			}
 			return err
 		}
 	}
-	if written != length {
-		return fmt.Errorf("dlengine: short read %d != %d", written, length)
+	if written != responseLength {
+		err := fmt.Errorf("dlengine: short read %d != %d", written, responseLength)
+		if written > 0 {
+			preservePartial = true
+			return &partialRangeReadError{err: err, written: written}
+		}
+		return err
+	}
+	if responseLength < length {
+		// Some CDNs cap an otherwise valid requested range. Continue from the
+		// exact next byte instead of retrying the original range or waiting for
+		// a backoff interval.
+		preservePartial = true
+		return &partialRangeReadError{err: errShortRangeResponse, written: written}
 	}
 	committed = true
 	return nil
@@ -505,7 +623,7 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	buf := make([]byte, 256<<10)
 	var written int64
 	last := time.Now()
-	var lastBytes int64
+	speed := newSpeedEstimator(last, 0)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
@@ -516,11 +634,10 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 				return werr
 			}
 			written += int64(n)
-			if onProgress != nil && time.Since(last) >= 500*time.Millisecond {
-				speed := (written - lastBytes) * 1000 / int64(time.Since(last)/time.Millisecond)
-				lastBytes = written
-				last = time.Now()
-				onProgress(Progress{Downloaded: written, Total: total, Speed: speed, Percent: percent(written, total)})
+			if onProgress != nil && time.Since(last) >= progressInterval {
+				now := time.Now()
+				last = now
+				onProgress(Progress{Downloaded: written, Total: total, Speed: speed.Observe(now, written), Percent: percent(written, total)})
 			}
 		}
 		if rerr == io.EOF {

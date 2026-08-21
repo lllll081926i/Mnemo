@@ -1,9 +1,14 @@
 package dlengine
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +110,136 @@ func TestParseContentRangeStrictly(t *testing.T) {
 			t.Errorf("parseContentRange(%q) should fail", invalid)
 		}
 	}
+}
+
+func TestDownloadContinuesAfterShortRangeResponse(t *testing.T) {
+	payload := bytes.Repeat([]byte("mnemo"), 900)
+	var rangeStarts []int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, end, ok := parseTestRange(r.Header.Get("Range"))
+		if !ok {
+			t.Errorf("invalid Range header: %q", r.Header.Get("Range"))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if start == 0 && end == 0 {
+			writeTestRange(w, start, end, int64(len(payload)), payload[:1])
+			return
+		}
+		rangeStarts = append(rangeStarts, start)
+		if start == 0 {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Errorf("test server does not support connection hijacking")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			conn, writer, err := hijacker.Hijack()
+			if err != nil {
+				t.Errorf("hijack response: %v", err)
+				return
+			}
+			defer conn.Close()
+			length := end - start + 1
+			_, _ = fmt.Fprintf(writer, "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes %d-%d/%d\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", start, end, len(payload), length)
+			_, _ = writer.Write(payload[:1024])
+			_ = writer.Flush()
+			return
+		}
+		writeTestRange(w, start, end, int64(len(payload)), payload[start:end+1])
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "short-range.bin")
+	err := Download(context.Background(), Options{Concurrency: 1, ChunkSize: int64(len(payload)), MinSize: 1}, server.URL, path, nil)
+	if err != nil {
+		t.Fatalf("Download returned error: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("downloaded content differs from source payload")
+	}
+	if len(rangeStarts) != 2 || rangeStarts[0] != 0 || rangeStarts[1] != 1024 {
+		t.Fatalf("range starts = %v, want [0 1024]", rangeStarts)
+	}
+}
+
+func TestDownloadContinuesAfterServerClampsRange(t *testing.T) {
+	payload := bytes.Repeat([]byte("mnemo"), 900)
+	var rangeStarts []int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, end, ok := parseTestRange(r.Header.Get("Range"))
+		if !ok {
+			t.Errorf("invalid Range header: %q", r.Header.Get("Range"))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if start == 0 && end == 0 {
+			writeTestRange(w, start, end, int64(len(payload)), payload[:1])
+			return
+		}
+		rangeStarts = append(rangeStarts, start)
+		cappedEnd := min(end, start+1023)
+		writeTestRange(w, start, cappedEnd, int64(len(payload)), payload[start:cappedEnd+1])
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "capped-range.bin")
+	err := Download(context.Background(), Options{Concurrency: 1, ChunkSize: int64(len(payload)), MinSize: 1}, server.URL, path, nil)
+	if err != nil {
+		t.Fatalf("Download returned error: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("downloaded content differs from source payload")
+	}
+	wantStarts := []int64{0, 1024, 2048, 3072, 4096}
+	if len(rangeStarts) != len(wantStarts) {
+		t.Fatalf("range starts = %v, want %v", rangeStarts, wantStarts)
+	}
+	for i, want := range wantStarts {
+		if rangeStarts[i] != want {
+			t.Fatalf("range starts = %v, want %v", rangeStarts, wantStarts)
+		}
+	}
+}
+
+func TestSpeedEstimatorSmoothsShortIdleGap(t *testing.T) {
+	started := time.Unix(0, 0)
+	estimator := newSpeedEstimator(started, 0)
+	if got := estimator.Observe(started.Add(500*time.Millisecond), 512<<10); got < 1_000_000 {
+		t.Fatalf("initial speed = %d, want about 1 MiB/s", got)
+	}
+	if got := estimator.Observe(started.Add(time.Second), 512<<10); got < 500_000 || got > 550_000 {
+		t.Fatalf("smoothed speed = %d, want about 512 KiB/s instead of zero", got)
+	}
+	if got := estimator.Observe(started.Add(4*time.Second), 512<<10); got != 0 {
+		t.Fatalf("idle speed = %d, want 0", got)
+	}
+}
+
+func parseTestRange(value string) (int64, int64, bool) {
+	value = strings.TrimPrefix(value, "bytes=")
+	parts := strings.SplitN(value, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	start, startErr := strconv.ParseInt(parts[0], 10, 64)
+	end, endErr := strconv.ParseInt(parts[1], 10, 64)
+	return start, end, startErr == nil && endErr == nil && start >= 0 && end >= start
+}
+
+func writeTestRange(w http.ResponseWriter, start, end, total int64, body []byte) {
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(body)), 10))
+	w.WriteHeader(http.StatusPartialContent)
+	_, _ = w.Write(body)
 }
 
 func TestResumeIdentityRequiresSameValidator(t *testing.T) {

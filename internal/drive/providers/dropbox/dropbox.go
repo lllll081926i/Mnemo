@@ -29,6 +29,9 @@ const (
 	RootID            = "dropbox_root"
 	uploadSingleLimit = 150 * 1024 * 1024 // Dropbox single upload cap
 	sessionChunkSize  = 8 * 1024 * 1024
+	rpcRetryAttempts  = 3
+	maxErrorBodyBytes = 8 * 1024
+	maxErrorDetailLen = 200
 )
 
 const providerID = model.ProviderDropbox
@@ -87,28 +90,68 @@ func clientOf(c drive.Context) (*client, error) {
 
 // rpc posts a JSON body to an RPC endpoint and decodes the JSON response.
 func (c *client) rpc(ctx context.Context, endpoint string, body any, out any) error {
-	resp, err := c.http.Do(ctx, http.MethodPost, apiHost+endpoint,
-		map[string]string{"Authorization": "Bearer " + c.token, "Content-Type": "application/json"},
-		netx.JSONBody(body))
-	if err != nil {
-		return err
+	headers := map[string]string{
+		"Authorization": "Bearer " + c.token,
+		"Content-Type":  "application/json",
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		var errBody struct {
-			ErrorSummary string `json:"error_summary"`
+	for attempt := 0; attempt < rpcRetryAttempts; attempt++ {
+		resp, err := c.http.Do(ctx, http.MethodPost, apiHost+endpoint, headers, netx.JSONBody(body))
+		if err != nil {
+			return fmt.Errorf("dropbox: %s request failed: %w", endpoint, err)
 		}
-		_ = json.Unmarshal(data, &errBody)
-		if errBody.ErrorSummary != "" {
-			return errors.New(strings.TrimPrefix(errBody.ErrorSummary, "path/"))
+
+		reader := io.Reader(resp.Body)
+		if resp.StatusCode >= http.StatusBadRequest {
+			reader = io.LimitReader(resp.Body, maxErrorBodyBytes)
 		}
-		return fmt.Errorf("dropbox: http %d", resp.StatusCode)
+		data, readErr := io.ReadAll(reader)
+		status := resp.StatusCode
+		requestID := compactDropboxDetail(resp.Header.Get("X-Dropbox-Request-Id"))
+		delay := retryAfter(resp, attempt)
+		resp.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("dropbox: %s response read failed: %w", endpoint, readErr)
+		}
+		if status < http.StatusBadRequest {
+			if out == nil {
+				return nil
+			}
+			return json.Unmarshal(data, out)
+		}
+
+		apiErr := newDropboxRPCError(endpoint, status, requestID, data)
+		if !retryableDropboxStatus(status) || attempt == rpcRetryAttempts-1 {
+			return apiErr
+		}
+		if err := waitRetry(ctx, delay); err != nil {
+			return err
+		}
 	}
-	if out == nil {
-		return nil
+	return errors.New("dropbox: RPC request failed")
+}
+
+func newDropboxRPCError(endpoint string, status int, requestID string, body []byte) error {
+	message := fmt.Sprintf("dropbox: %s http %d", endpoint, status)
+	var errBody struct {
+		ErrorSummary string `json:"error_summary"`
 	}
-	return json.Unmarshal(data, out)
+	if json.Unmarshal(body, &errBody) == nil {
+		if summary := compactDropboxDetail(strings.TrimPrefix(errBody.ErrorSummary, "path/")); summary != "" {
+			message += ": " + summary
+		}
+	}
+	if requestID != "" {
+		message += " (request_id=" + requestID + ")"
+	}
+	return errors.New(message)
+}
+
+func compactDropboxDetail(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len([]rune(value)) <= maxErrorDetailLen {
+		return value
+	}
+	return string([]rune(value)[:maxErrorDetailLen]) + "…"
 }
 
 type listFolderResp struct {
@@ -445,7 +488,7 @@ func (c *client) UploadSmall(ctx context.Context, path string, r io.Reader, size
 			}
 			return item.ID, nil
 		}
-		if !retryableUploadStatus(status) || attempt == 2 {
+		if !retryableDropboxStatus(status) || attempt == 2 {
 			return "", fmt.Errorf("dropbox: upload http %d: %s", status, strings.TrimSpace(string(data)))
 		}
 		if err := waitRetry(ctx, delay); err != nil {
@@ -638,7 +681,7 @@ func (c *client) contentJSON(ctx context.Context, endpoint string, apiArg []byte
 			}
 			return nil
 		}
-		if !retryableUploadStatus(status) || attempt == 2 {
+		if !retryableDropboxStatus(status) || attempt == 2 {
 			return fmt.Errorf("dropbox: %s http %d: %s", endpoint, status, strings.TrimSpace(string(data)))
 		}
 		if err := waitRetry(ctx, delay); err != nil {
@@ -654,7 +697,7 @@ type uploadPolicy struct {
 	strictConflict bool
 }
 
-func retryableUploadStatus(status int) bool {
+func retryableDropboxStatus(status int) bool {
 	return status == http.StatusTooManyRequests || status >= 500
 }
 
