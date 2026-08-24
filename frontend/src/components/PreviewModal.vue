@@ -3,13 +3,16 @@
 // 1. 图片画廊（缩放/拖拽平移/90度旋转/翻页/胶卷条）
 // 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
 // 3. 音频播放；PDF 等非白名单格式由文件页提示下载，不会进入此弹窗
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { PreviewURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf, getPlayCursor, savePlayCursor } from '../api'
+import { ref, computed, nextTick } from 'vue'
+import { openKindOf, formatBytes, formatTime, iconOf, savePlayCursor } from '../api'
 import { getPrefs } from '../appearance'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import UiIcon from './UiIcon.vue'
+import { usePreviewTextEditor } from '../composables/usePreviewTextEditor'
+import { usePreviewLoader } from '../composables/usePreviewLoader'
+import { usePreviewLifecycle, usePreviewShortcuts } from '../composables/usePreviewLifecycle'
 
 const props = defineProps({
   account: { type: Object, required: true },
@@ -18,16 +21,31 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'toast', 'saved'])
 
-const activeFile = ref(props.file)
-const kind = computed(() => openKindOf(activeFile.value))
-const isImmersive = computed(() => kind.value === 'image' || kind.value === 'audio')
-
-const url = ref('')
-const text = ref('')
-const editContent = ref('')
-const saving = ref(false)
-const loading = ref(true)
-const error = ref('')
+const {
+  activeFile,
+  kind,
+  isImmersive,
+  url,
+  loading,
+  error,
+  loadPreview,
+} = usePreviewLoader({
+  props,
+  loadImage: () => loadImage(),
+  onAudioPrepared: (cursor) => {
+    pendingAudioResume = cursor
+    audioPos.value = 0
+    audioDur.value = 0
+    audioBuffered.value = 0
+  },
+  onTextLoaded: (buf) => {
+    const decoded = decodeText(buf)
+    text.value = decoded.text
+    encoding.value = decoded.encoding
+    editContent.value = text.value
+    textMode.value = isMarkdownFile.value ? 'markdown' : 'preview'
+  },
+})
 const winMax = ref(false) // 应用窗口最大化状态
 function winMinimise() { try { WindowMinimise() } catch { /* browser preview */ } }
 function winToggleMax() {
@@ -67,7 +85,6 @@ let dragStart = { x: 0, y: 0, posX: 0, posY: 0 }
 let activeDragCleanup = null
 let idleTimer = null
 let imgSeq = 0
-let stageRO = null
 
 const liveTransform = computed(
   () => `translate(${pos.value.x}px, ${pos.value.y}px) scale(${(fitScale.value * zoom.value).toFixed(4)}) rotate(${rotation.value}deg)`
@@ -458,385 +475,84 @@ function clearAudioMediaSession() {
   } catch { /* ignore */ }
 }
 
-// ---------- 文本与代码专业预览/编辑状态 ----------
-const isMarkdownFile = computed(() => {
-  const name = (activeFile.value.name || '').toLowerCase()
-  return name.endsWith('.md') || name.endsWith('.markdown')
+const {
+  text,
+  editContent,
+  saving,
+  isMarkdownFile,
+  textMode,
+  fontSize,
+  wordWrap,
+  showLineNumbers,
+  encoding,
+  copiedFull,
+  showSearch,
+  searchKw,
+  searchInputEl,
+  cursorPos,
+  gutterEl,
+  viewEl,
+  editorEl,
+  confirmLeaveDialog,
+  currentText,
+  textLines,
+  isModified,
+  langMeta,
+  onContentScroll,
+  charCount,
+  lineEnding,
+  searchParts,
+  matchCount,
+  toggleSearch,
+  copyAllText,
+  updateCursorPos,
+  onEditorKeyDown,
+  doSaveText,
+  handleCloseRequest,
+  renderedMarkdown,
+  decodeText,
+} = usePreviewTextEditor({ account: props.account, activeFile, emit })
+
+const onKey = usePreviewShortcuts({
+  textMode,
+  kind,
+  switchImage,
+  zoomByFactor,
+  resetImageTransform,
+  rotateBy,
+  toggleAudioPlay,
+  audioSeekBy,
+  audioVolume,
+  applyAudioVolume,
+  toggleAudioMute,
+  audioLoop,
+  toggleSearch,
 })
 
-// 文本模式：'preview' (代码/文本预览) | 'markdown' (文档渲染) | 'edit' (在线编辑)
-const textMode = ref('preview')
-const fontSize = ref(13.5)
-const wordWrap = ref(false) // 默认不自动换行，保持宽敞横向滚动，避免长行频繁被折断
-const showLineNumbers = ref(true)
-const encoding = ref('UTF-8')
-const copiedFull = ref(false)
-const showSearch = ref(false)
-const searchKw = ref('')
-const searchInputEl = ref(null)
-
-// 光标位置
-const cursorPos = ref({ line: 1, col: 1 })
-const gutterEl = ref(null)
-const viewEl = ref(null)
-const editorEl = ref(null)
-const confirmLeaveDialog = ref(false)
-
-const currentText = computed(() => (textMode.value === 'edit' ? editContent.value : text.value))
-const textLines = computed(() => currentText.value.split('\n'))
-const isModified = computed(() => textMode.value === 'edit' && editContent.value !== text.value)
-
-// 语言标签识别
-const langMeta = computed(() => {
-  const name = (activeFile.value.name || '').toLowerCase()
-  const ext = name.includes('.') ? name.split('.').pop() : ''
-  const map = {
-    js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
-    ts: 'TypeScript', tsx: 'TypeScript React', jsx: 'React JSX',
-    vue: 'Vue Component',
-    json: 'JSON', json5: 'JSON5', jsonc: 'JSON with Comments',
-    html: 'HTML', htm: 'HTML',
-    css: 'CSS', scss: 'SCSS', sass: 'SASS', less: 'LESS',
-    go: 'Go',
-    py: 'Python', pyw: 'Python',
-    rs: 'Rust',
-    java: 'Java', kt: 'Kotlin',
-    c: 'C', cpp: 'C++', cc: 'C++', h: 'C/C++ Header', hpp: 'C++ Header',
-    cs: 'C#',
-    php: 'PHP',
-    rb: 'Ruby',
-    sh: 'Shell Script', bash: 'Bash Script', zsh: 'Zsh Script', ps1: 'PowerShell', bat: 'Batch', cmd: 'Batch',
-    sql: 'SQL Database',
-    yaml: 'YAML', yml: 'YAML',
-    xml: 'XML', svg: 'SVG Image/XML',
-    toml: 'TOML', ini: 'INI Config', conf: 'Config', env: 'Environment',
-    md: 'Markdown', markdown: 'Markdown',
-    txt: 'Plain Text', log: 'Log File',
-  }
-  return map[ext] || (ext ? ext.toUpperCase() : 'Plain Text')
-})
-
-// 滚动同步（行号与内容区 100% 像素级对齐）
-function onContentScroll(e) {
-  if (gutterEl.value) {
-    gutterEl.value.scrollTop = e.target.scrollTop
-  }
-}
-
-// 统计字符数/字数
-const charCount = computed(() => currentText.value.length)
-const lineEnding = computed(() => (currentText.value.includes('\r\n') ? 'CRLF' : 'LF'))
-
-// 搜索匹配拆分
-function searchParts(line) {
-  const kw = searchKw.value.trim()
-  if (!kw) return null
-  const str = String(line || '')
-  const i = str.toLowerCase().indexOf(kw.toLowerCase())
-  if (i < 0) return null
-  return [
-    { text: str.slice(0, i), hit: false },
-    { text: str.slice(i, i + kw.length), hit: true },
-    { text: str.slice(i + kw.length), hit: false },
-  ]
-}
-
-const matchCount = computed(() => {
-  const kw = searchKw.value.trim()
-  if (!kw) return 0
-  let count = 0
-  const kwLower = kw.toLowerCase()
-  for (const line of textLines.value) {
-    let p = 0
-    const lower = line.toLowerCase()
-    while ((p = lower.indexOf(kwLower, p)) !== -1) {
-      count++
-      p += kwLower.length
-    }
-  }
-  return count
-})
-
-function toggleSearch() {
-  showSearch.value = !showSearch.value
-  if (showSearch.value) {
-    nextTick(() => searchInputEl.value?.focus())
-  } else {
-    searchKw.value = ''
-  }
-}
-
-// 复制全部文本
-async function copyAllText() {
-  const ok = await copyText(currentText.value)
-  if (ok) {
-    copiedFull.value = true
-    emit('toast', '已复制全部文本内容', 'success')
-    setTimeout(() => { copiedFull.value = false }, 1800)
-  } else {
-    emit('toast', '复制失败', 'error')
-  }
-}
-
-// 编辑器光标与按键事件
-function updateCursorPos(e) {
-  const el = e.target
-  if (!el || typeof el.selectionStart !== 'number') return
-  const val = el.value.slice(0, el.selectionStart)
-  const lines = val.split('\n')
-  cursorPos.value = {
-    line: lines.length,
-    col: lines[lines.length - 1].length + 1,
-  }
-}
-
-function onEditorKeyDown(e) {
-  if (e.key === 'Tab') {
-    e.preventDefault()
-    const el = e.target
-    const start = el.selectionStart
-    const end = el.selectionEnd
-    const val = editContent.value
-    editContent.value = val.substring(0, start) + '  ' + val.substring(end)
-    nextTick(() => {
-      el.selectionStart = el.selectionEnd = start + 2
-      updateCursorPos(e)
-    })
-  } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.code === 'KeyS')) {
-    e.preventDefault()
-    doSaveText()
-  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
-    e.preventDefault()
-    toggleSearch()
-  } else {
-    nextTick(() => updateCursorPos(e))
-  }
-}
-
-// 保存修改回传云端
-async function doSaveText() {
-  if (saving.value || !isModified.value) return
-  saving.value = true
-  try {
-    const parentId = activeFile.value.parent_file_id || 'root'
-    await saveCloudText(
-      props.account.user_id,
-      props.account.drive_id,
-      parentId,
-      activeFile.value.name,
-      editContent.value
-    )
-    text.value = editContent.value
-    emit('toast', '保存成功，已上传到网盘', 'success')
-    emit('saved')
-  } catch (e) {
-    emit('toast', '保存失败: ' + String(e), 'error')
-  } finally {
-    saving.value = false
-  }
-}
-
-// 关闭前未保存检查
-function handleCloseRequest() {
-  if (isModified.value) {
-    confirmLeaveDialog.value = true
-  } else {
-    emit('close')
-  }
-}
-
-// ---------- 轻量安全 Markdown 解析器 ----------
-function escapeHtml(str) {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function sanitizeUrl(rawUrl) {
-  const trimmed = String(rawUrl || '').trim()
-  if (/^(https?:\/\/|mailto:|\/|\.\/|#)/i.test(trimmed)) {
-    return escapeHtml(trimmed)
-  }
-  return '#'
-}
-
-function renderMarkdown(src) {
-  if (!src) return ''
-
-  // 代码块提取 (```lang ... ```)
-  const codeBlocks = []
-  let md = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const idx = codeBlocks.length
-    const safeLang = escapeHtml(lang || 'code')
-    const safeCode = escapeHtml(code.trim())
-    codeBlocks.push(
-      `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${safeLang}</span></div><pre><code>${safeCode}</code></pre></div>`
-    )
-    return `<!--CODEBLOCK_${idx}-->`
-  })
-
-  // 转义 HTML 字符
-  md = escapeHtml(md)
-
-  // 行内代码
-  md = md.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-
-  // 标题
-  md = md.replace(/^###### (.*$)/gim, '<h6 class="md-h6">$1</h6>')
-  md = md.replace(/^##### (.*$)/gim, '<h5 class="md-h5">$1</h5>')
-  md = md.replace(/^#### (.*$)/gim, '<h4 class="md-h4">$1</h4>')
-  md = md.replace(/^### (.*$)/gim, '<h3 class="md-h3">$1</h3>')
-  md = md.replace(/^## (.*$)/gim, '<h2 class="md-h2">$1</h2>')
-  md = md.replace(/^# (.*$)/gim, '<h1 class="md-h1">$1</h1>')
-
-  // 分割线
-  md = md.replace(/^---$/gim, '<hr class="md-hr" />')
-
-  // 引用块 (转义后为 &gt;)
-  md = md.replace(/^&gt;\s?(.*$)/gim, '<blockquote class="md-quote">$1</blockquote>')
-
-  // 格式
-  md = md.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
-  md = md.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-  md = md.replace(/\*(.*?)\*/g, '<em>$1</em>')
-  md = md.replace(/~~(.*?)~~/g, '<del>$1</del>')
-
-  // 任务列表
-  md = md.replace(/^- \[x\] (.*$)/gim, '<li class="md-task-item"><span class="md-task-box checked">✓</span> <span>$1</span></li>')
-  md = md.replace(/^- \[ \] (.*$)/gim, '<li class="md-task-item"><span class="md-task-box"></span> <span>$1</span></li>')
-
-  // 列表
-  md = md.replace(/^[-\*] (.*$)/gim, '<li class="md-list-item">$1</li>')
-
-  // 链接（严格白名单与 URL 属性清洗）
-  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, link) => {
-    const href = sanitizeUrl(link)
-    return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="md-link">${label}</a>`
-  })
-
-  // 段落
-  md = md.replace(/\n\n/g, '<div class="md-gap"></div>')
-  md = md.replace(/\n/g, '<br />')
-
-  // 还原代码块
-  codeBlocks.forEach((block, idx) => {
-    md = md.replace(`<!--CODEBLOCK_${idx}-->`, block)
-  })
-
-  return md
-}
-
-const renderedMarkdown = computed(() => renderMarkdown(text.value))
-
-// ---------- 加载核心逻辑 ----------
-let loadSeq = 0
-async function loadPreview() {
-  if (kind.value === 'image') return loadImage()
-  const seq = ++loadSeq
-  // 切曲/换图时保留已渲染舞台，避免整屏闪烁；仅首次或空态才展示全屏 loading
-  if (!url.value) loading.value = true
-  error.value = ''
-  url.value = ''
-  try {
-    if (!['image', 'text', 'audio'].includes(kind.value)) {
-      throw new Error(kind.value === 'pdf' ? 'PDF 暂不支持在线预览，请下载后查看' : '此文件格式不支持在线预览，请下载后查看')
-    }
-    await PinFileSnapshot(
-      props.account.user_id,
-      props.account.drive_id,
-      activeFile.value
-    )
-    const previewUrl = await PreviewURL(
-      props.account.user_id,
-      props.account.drive_id,
-      activeFile.value.file_id
-    )
-    if (seq !== loadSeq) return
+usePreviewLifecycle({
+  loadPreview,
+  pokeUI,
+  syncWindowState: () => {
+    try { WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {}) } catch { /* browser preview */ }
+  },
+  stageEl,
+  computeFit,
+  onKey,
+  cleanup: () => {
+    clearTimeout(idleTimer)
+    if (activeDragCleanup) activeDragCleanup()
+    // 音频播放器清理：保存进度、停表、释放 WebAudio、注销 MediaSession
     if (kind.value === 'audio') {
-      pendingAudioResume = await getPlayCursor(props.account.user_id, props.account.drive_id, activeFile.value.file_id).catch(() => 0)
-      if (seq !== loadSeq) return
-      audioPos.value = 0
-      audioDur.value = 0
-      audioBuffered.value = 0
+      saveAudioCursor()
+      clearInterval(audioSaveTimer)
+      audioSaveTimer = null
+      clearAudioMediaSession()
+      try { audioCtx?.close() } catch { /* ignore */ }
+      audioCtx = null
+      audioGain = null
     }
-    url.value = previewUrl
-    if (kind.value === 'text') {
-      const resp = await fetch(previewUrl)
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
-      const buf = await resp.arrayBuffer()
-      if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，不支持在线预览，请下载后查看')
-      const decoded = decodeText(buf)
-      text.value = decoded.text
-      encoding.value = decoded.encoding
-      editContent.value = text.value
-      textMode.value = isMarkdownFile.value ? 'markdown' : 'preview'
-    }
-  } catch (e) {
-    if (seq !== loadSeq) return
-    error.value = String(e && e.message ? e.message : e)
-  } finally {
-    if (seq === loadSeq) loading.value = false
-  }
-}
-
-watch(() => props.file, (f) => { if (f) activeFile.value = f })
-watch(() => activeFile.value.file_id, loadPreview)
-
-function onKey(e) {
-  if (textMode.value === 'edit') return
-  if (kind.value === 'image') {
-    if (e.key === 'ArrowLeft') switchImage(-1)
-    else if (e.key === 'ArrowRight') switchImage(1)
-    else if (e.key === '+' || e.key === '=') zoomByFactor(1.25)
-    else if (e.key === '-' || e.key === '_') zoomByFactor(1 / 1.25)
-    else if (e.key === '0') resetImageTransform()
-    else if (e.key === 'r' || e.key === 'R') rotateBy(90)
-  } else if (kind.value === 'audio') {
-    if (e.code === 'Space') { e.preventDefault(); toggleAudioPlay() }
-    else if (e.key === 'ArrowLeft') audioSeekBy(-10)
-    else if (e.key === 'ArrowRight') audioSeekBy(10)
-    else if (e.key === 'ArrowUp') { e.preventDefault(); audioVolume.value = Math.min(200, audioVolume.value + 5); applyAudioVolume() }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); audioVolume.value = Math.max(0, audioVolume.value - 5); applyAudioVolume() }
-    else if (e.key === 'm' || e.key === 'M') toggleAudioMute()
-    else if (e.key === 'l' || e.key === 'L') audioLoop.value = !audioLoop.value
-  } else if (kind.value === 'text') {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
-      e.preventDefault()
-      toggleSearch()
-    }
-  }
-}
-
-onMounted(() => {
-  loadPreview()
-  pokeUI()
-  try { WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {}) } catch { /* browser preview */ }
-  window.addEventListener('keydown', onKey)
-  if (typeof ResizeObserver !== 'undefined') stageRO = new ResizeObserver(() => computeFit())
-})
-watch(stageEl, (el) => {
-  stageRO?.disconnect()
-  if (el && stageRO) { stageRO.observe(el); nextTick(computeFit) }
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKey)
-  clearTimeout(idleTimer)
-  stageRO?.disconnect()
-  if (activeDragCleanup) activeDragCleanup()
-  // 音频播放器清理：保存进度、停表、释放 WebAudio、注销 MediaSession
-  if (kind.value === 'audio') {
-    saveAudioCursor()
-    clearInterval(audioSaveTimer)
-    audioSaveTimer = null
-    clearAudioMediaSession()
-    try { audioCtx?.close() } catch { /* ignore */ }
-    audioCtx = null
-    audioGain = null
-  }
-  stopSlideshow()
+    stopSlideshow()
+  },
 })
 
 // ---------- 图片幻灯片放映 ----------
@@ -861,26 +577,6 @@ function stopSlideshow() {
   slideshowTimer = null
 }
 
-// 文本编码探测
-function decodeText(buf) {
-  const u8 = new Uint8Array(buf)
-  if (u8.length >= 3 && u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) {
-    return { text: new TextDecoder('utf-8').decode(u8.subarray(3)), encoding: 'UTF-8 (BOM)' }
-  }
-  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(u8)
-  let replacements = 0
-  for (let i = 0; i < utf8.length; i++) {
-    if (utf8.charCodeAt(i) === 0xfffd) replacements++
-  }
-  if (replacements > utf8.length / 100) {
-    try {
-      return { text: new TextDecoder('gbk').decode(u8), encoding: 'GBK' }
-    } catch {
-      // 回退
-    }
-  }
-  return { text: utf8, encoding: 'UTF-8' }
-}
 </script>
 
 <template>

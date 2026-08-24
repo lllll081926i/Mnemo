@@ -46,6 +46,7 @@ UploadMode: direct
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
 | direct PUT | ✅ | `webdav.go:196-208` client.Put HTTP PUT Content-Length | 无 |
+| 跨盘流式 PUT | ✅ | `Driver.UploadStream` 直接消费迁移管道；已知长度会校验实际读取字节数 | 默认 rename；上传器提前返回时迁移引擎会关闭 reader，避免下载 goroutine 阻塞 |
 | **冲突策略** | ✅ | `webdav.go:256` ResolveConflictPolicy refuse/rename/overwrite | 无 |
 | **进度回调** | ✅ | `webdav.go:275` NewProgressReader 实时 DownSize/DownProcess | 无 |
 | **递归目录上传** | ✅ | `internal/transfer/upload.go` 目录遍历 + `ensureRemoteParent` | 队列上传会先创建远端目录 |
@@ -68,6 +69,10 @@ UploadMode: direct
 
 ❌ 均无（设计）。永久删除。
 
+### 跨盘秒传边界
+
+通用 WebDAV 不声明 `ProvideHashes` 或 `RapidUploadHashes`。HTTP/WebDAV `ETag` 是不透明的实体标签，不能假定为 MD5/SHA1；协议本身也没有“仅凭内容哈希创建文件”的统一目标端接口。因此 WebDAV 作为迁移目标时使用流式 PUT，作为源且目标支持秒传时也不会伪造 ETag 参与哈希协商。若未来对特定服务增加私有 checksum/dedup 扩展，必须以独立 provider 能力声明并验证真实内容哈希。
+
 ---
 
 ## 差距清单
@@ -79,3 +84,4 @@ UploadMode: direct
 5. ✅ URL 路径段按 RFC 规则编码
 6. 🟡 当前没有独立的 provider 级递归列出 API；同步引擎通过统一目录接口递归遍历
 7. 🟡 客户端证书、NTLM、Kerberos 和网页登录换 Cookie 等认证方式未实现；遇到这类 `WWW-Authenticate` 会保留脱敏诊断，而不会盲目重试。
+8. ✅ 跨盘迁移实现 `StreamUploader`，秒传不可用时无需先写本地临时文件。

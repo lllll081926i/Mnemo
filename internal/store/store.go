@@ -21,7 +21,10 @@ import (
 type Store struct {
 	dir         string
 	accountsDir string
-	mu          sync.Mutex
+	// mu 保护账户、任务、设置等共享 JSON 集合；目录缓存采用独立文件，
+	// 使用 cacheMu 以免一次大任务持久化阻塞文件页的本机缓存首屏。
+	mu      sync.Mutex
+	cacheMu sync.Mutex
 }
 
 // Open creates (if needed) and opens the store directory.
@@ -54,8 +57,8 @@ const directoryCacheTTL = 10 * time.Minute
 // files live under data/cache, which is co-located with the installation by
 // config.DataDir; missing cache is represented by a nil slice and no error.
 func (s *Store) LoadDirectoryCache(key string) ([]model.File, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	name := directoryCacheName(key)
 	var doc directoryCacheDoc
 	if err := s.readJSON(name, &doc); err != nil {
@@ -76,8 +79,8 @@ func (s *Store) LoadDirectoryCache(key string) ([]model.File, error) {
 // SaveDirectoryCache persists one directory snapshot without mixing it with
 // accounts, transfer history, settings, or playback state.
 func (s *Store) SaveDirectoryCache(key string, files []model.File) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	name := directoryCacheName(key)
 	if err := os.MkdirAll(filepath.Dir(s.path(name)), 0o755); err != nil {
 		return err
@@ -87,8 +90,8 @@ func (s *Store) SaveDirectoryCache(key string, files []model.File) error {
 
 // DeleteDirectoryCache removes one directory snapshot after a file mutation.
 func (s *Store) DeleteDirectoryCache(key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	err := os.Remove(s.path(directoryCacheName(key)))
 	if os.IsNotExist(err) {
 		return nil
@@ -99,8 +102,8 @@ func (s *Store) DeleteDirectoryCache(key string) error {
 // ClearCache removes only the application cache directory. It deliberately
 // leaves credentials and all user-visible persistent state untouched.
 func (s *Store) ClearCache() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	target := filepath.Join(s.dir, "cache")
 	if err := os.RemoveAll(target); err != nil {
 		return err

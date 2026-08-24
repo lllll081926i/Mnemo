@@ -16,6 +16,7 @@ const defaults = {
   proxy: '',
   downloadDir: '',
   maxConcurrentDownloads: 3,
+  maxConcurrentUploads: 2,
   maxDownloadSpeed: 0,
   maxUploadSpeed: 0,
   autoUpdate: true,
@@ -388,6 +389,21 @@ async function exportLogs() {
                   min="1"
                   max="8"
                   v-model.number="settings.maxConcurrentDownloads"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">最大并发上传数</span></div>
+              <div class="sg-control">
+                <input
+                  class="input input-sm"
+                  type="number"
+                  min="1"
+                  max="8"
+                  v-model.number="settings.maxConcurrentUploads"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
                 />

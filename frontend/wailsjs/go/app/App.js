@@ -242,10 +242,6 @@ export function OpenFile(arg1) {
   return window['go']['app']['App']['OpenFile'](arg1);
 }
 
-export function OpenPikPakCaptcha(arg1) {
-  return window['go']['app']['App']['OpenPikPakCaptcha'](arg1);
-}
-
 export function PauseDownload(arg1) {
   return window['go']['app']['App']['PauseDownload'](arg1);
 }
@@ -384,6 +380,10 @@ export function SendGuangyaSms(arg1) {
 
 export function SendPan139SMS(arg1) {
   return window['go']['app']['App']['SendPan139SMS'](arg1);
+}
+
+export function SendPan189SMS(arg1) {
+  return window['go']['app']['App']['SendPan189SMS'](arg1);
 }
 
 export function SetAccountCustomMeta(arg1, arg2, arg3) {

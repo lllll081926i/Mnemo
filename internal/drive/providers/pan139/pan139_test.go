@@ -63,6 +63,50 @@ func TestPan139SMSPublicKeyEncryptsAccountName(t *testing.T) {
 	}
 }
 
+func TestPan139PrecomputedSHA256Validation(t *testing.T) {
+	valid := strings.Repeat("A1", 32)
+	got, ok := pan139PrecomputedSHA256(model.UploadInfo{
+		ContentHash: valid, ContentHashAlgorithm: "SHA256",
+	})
+	if !ok || got != strings.ToLower(valid) {
+		t.Fatalf("pan139PrecomputedSHA256() = %q, %v", got, ok)
+	}
+	for _, info := range []model.UploadInfo{
+		{ContentHash: valid, ContentHashAlgorithm: "md5"},
+		{ContentHash: "abc", ContentHashAlgorithm: "sha256"},
+		{ContentHash: strings.Repeat("z", 64), ContentHashAlgorithm: "sha256"},
+	} {
+		if got, ok := pan139PrecomputedSHA256(info); ok || got != "" {
+			t.Fatalf("invalid precomputed hash accepted: %#v", info)
+		}
+	}
+}
+
+func TestExtractPan139SIDSupportsBodyJSONAndURLFragment(t *testing.T) {
+	resp := pan139Response(nil, http.StatusOK, nil, "")
+	if got := extractPan139SID("https://mail.10086.cn/default.html#sid=fragment-sid", resp, nil); got != "fragment-sid" {
+		t.Fatalf("fragment SID = %q, want %q", got, "fragment-sid")
+	}
+
+	body := []byte(`{"data":{"sid":"body-sid"}}`)
+	if got := extractPan139SID("https://mail.10086.cn/default.html", resp, body); got != "body-sid" {
+		t.Fatalf("JSON body SID = %q, want %q", got, "body-sid")
+	}
+}
+
+func TestExtractPan139SIDSupportsSessionCookieVariants(t *testing.T) {
+	for _, cookieName := range []string{"SSO_SID", "sid"} {
+		t.Run(cookieName, func(t *testing.T) {
+			headers := make(http.Header)
+			headers.Add("Set-Cookie", cookieName+"=cookie-sid; Path=/; Secure")
+			resp := pan139Response(nil, http.StatusFound, headers, "")
+			if got := extractPan139SID("", resp, nil); got != "cookie-sid" {
+				t.Fatalf("%s SID = %q, want %q", cookieName, got, "cookie-sid")
+			}
+		})
+	}
+}
+
 type pan139RoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn pan139RoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -79,6 +123,132 @@ func pan139Response(req *http.Request, status int, headers http.Header, body str
 		Header:     headers,
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
+	}
+}
+
+type pan139MemoryUploadStore struct {
+	sessionID string
+	parts     []int
+	cleared   bool
+	saveErr   error
+}
+
+func (s *pan139MemoryUploadStore) SaveUploadSession(string, []int) error { return nil }
+func (s *pan139MemoryUploadStore) LoadUploadSession(string) []int        { return nil }
+func (s *pan139MemoryUploadStore) ClearUploadSession(string) {
+	s.cleared = true
+	s.sessionID = ""
+	s.parts = nil
+}
+func (s *pan139MemoryUploadStore) SaveUploadSessionState(_ string, sessionID string, parts []int) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.sessionID = sessionID
+	s.parts = append([]int(nil), parts...)
+	return nil
+}
+func (s *pan139MemoryUploadStore) LoadUploadSessionState(string) (string, []int) {
+	return s.sessionID, append([]int(nil), s.parts...)
+}
+
+func TestPan139RapidUploadCapabilitiesAndConflictLimit(t *testing.T) {
+	caps := (&Driver{}).Capabilities()
+	if len(caps.ProvideHashes) != 1 || caps.ProvideHashes[0] != "sha256" || len(caps.RapidUploadHashes) != 1 || caps.RapidUploadHashes[0] != "sha256" {
+		t.Fatalf("hash capabilities = provide %v rapid %v", caps.ProvideHashes, caps.RapidUploadHashes)
+	}
+	if got := caps.UploadConflictPolicies; len(got) != 1 || got[0] != "rename" {
+		t.Fatalf("pan139 only implements auto-rename rapid-upload conflicts, got %v", got)
+	}
+}
+
+func TestPan139RapidUploadHitMissSessionResolveAndDuplicate(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	const authorization = "dGVzdDoxMzgwMDEzODAwMDp0b2tlbnxhfGJ8Y3w0MTAyNDQ0ODAwMDAw"
+	c := drive.Context{UserID: "pan139:rapid", DriveID: "pan139:rapid", Token: &model.TokenInfo{
+		AccessToken:  authorization,
+		RefreshToken: `{"personalCloudHost":"https://api.139.test"}`,
+	}}
+	hashValue := strings.Repeat("a", 64)
+
+	for _, tc := range []struct {
+		name      string
+		duplicate int
+		response  string
+		wantReuse bool
+		wantSaved bool
+	}{
+		{name: "hit", response: `{"success":true,"data":{"fileId":"file-1","rapidUpload":true}}`, wantReuse: true},
+		{name: "miss", duplicate: 2, response: `{"success":true,"data":{"fileId":"pending-1","uploadId":"upload-1","rapidUpload":false,"exist":false}}`, wantSaved: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &pan139MemoryUploadStore{}
+			drive.SetUploadSessionStore(store)
+			t.Cleanup(func() { drive.SetUploadSessionStore(nil) })
+			netx.TestTransportHook = pan139RoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path != "/file/create" {
+					return nil, fmt.Errorf("unexpected request %s", req.URL.String())
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+					return nil, err
+				}
+				if payload["fileRenameMode"] != "auto_rename" || payload["parentFileId"] != "/" || payload["contentHash"] != hashValue {
+					return nil, fmt.Errorf("rapid payload = %+v", payload)
+				}
+				return pan139Response(req, http.StatusOK, nil, tc.response), nil
+			})
+			result, err := (&Driver{}).RapidUploadByHash(t.Context(), c, drive.RapidUploadRequest{
+				ParentID: RootID, FileName: "movie.mp4", Method: "sha256", Hash: hashValue, Size: 4096, Duplicate: tc.duplicate,
+			})
+			if err != nil || result == nil || result.Reuse != tc.wantReuse {
+				t.Fatalf("RapidUploadByHash() = %+v, %v", result, err)
+			}
+			if tc.wantSaved {
+				session, ok := decodePan139UploadSession(store.sessionID)
+				if !ok || session.FileID != "pending-1" || session.UploadID != "upload-1" || session.ContentHash != hashValue {
+					t.Fatalf("saved session = %q / %+v", store.sessionID, session)
+				}
+			} else if !store.cleared {
+				t.Fatal("rapid hit did not clear stale upload session")
+			}
+		})
+	}
+
+	t.Run("miss session save failure cleans pending object", func(t *testing.T) {
+		store := &pan139MemoryUploadStore{saveErr: errors.New("store unavailable")}
+		drive.SetUploadSessionStore(store)
+		t.Cleanup(func() { drive.SetUploadSessionStore(nil) })
+		var paths []string
+		netx.TestTransportHook = pan139RoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			paths = append(paths, req.URL.Path)
+			switch req.URL.Path {
+			case "/file/create":
+				return pan139Response(req, http.StatusOK, nil, `{"success":true,"data":{"fileId":"pending-2","uploadId":"upload-2","rapidUpload":false,"exist":false}}`), nil
+			case "/file/batchDelete":
+				return pan139Response(req, http.StatusOK, nil, `{"success":true,"data":{}}`), nil
+			default:
+				return nil, fmt.Errorf("unexpected request %s", req.URL.String())
+			}
+		})
+		result, err := (&Driver{}).RapidUploadByHash(t.Context(), c, drive.RapidUploadRequest{
+			ParentID: RootID, FileName: "movie.mp4", Method: "sha256", Hash: hashValue, Size: 4096,
+		})
+		if err == nil || result != nil || strings.Join(paths, ",") != "/file/create,/file/batchDelete" {
+			t.Fatalf("RapidUploadByHash() = %+v, %v, paths=%v", result, err, paths)
+		}
+	})
+
+	netx.TestTransportHook = pan139RoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/file/get" {
+			return nil, fmt.Errorf("unexpected request %s", req.URL.String())
+		}
+		return pan139Response(req, http.StatusOK, nil, `{"success":true,"data":{"contentHash":"`+strings.ToUpper(hashValue)+`","contentHashAlgorithm":"SHA256"}}`), nil
+	})
+	resolved, err := (&Driver{}).ResolveTransferHash(t.Context(), c, "file-1", "sha256", false)
+	if err != nil || resolved != hashValue {
+		t.Fatalf("ResolveTransferHash() = %q, %v", resolved, err)
 	}
 }
 

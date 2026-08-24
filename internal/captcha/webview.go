@@ -1,5 +1,5 @@
-// Package captcha opens the PikPak challenge in the system default browser
-// and receives the verified token via a local HTTP callback server.
+// Package captcha receives the result of an embedded PikPak challenge through
+// a short-lived local HTTP callback server.
 //
 // PikPak's captcha flow redirects to a callback URL after the user completes
 // the slider. The callback carries the captcha_token as a query parameter.
@@ -15,8 +15,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,35 +56,6 @@ func Start(onComplete CompletedFunc) (*Session, error) {
 		logging.Debug("captcha callback server started", "session_id", session.ID, "callback_host", "127.0.0.1")
 	}
 	return session, err
-}
-
-// Open launches the system browser at the challenge URL and starts a local
-// HTTP server to receive the captcha callback. It remains as a legacy fallback;
-// the normal login flow keeps the challenge embedded in the login page.
-func Open(rawURL string, onComplete CompletedFunc) error {
-	mu.Lock()
-	defer mu.Unlock()
-
-	session, err := startLocked(onComplete)
-	if err != nil {
-		logging.Warn("captcha browser session start failed", "error", err)
-		return err
-	}
-
-	// The challenge URL points to PikPak's captcha page. After the user
-	// completes the slider, PikPak redirects to a callback. We intercept by
-	// opening the challenge in the system browser — the redirect will land on
-	// our local server if PikPak uses a localhost redirect_uri, or we extract
-	// the token from the final URL via the /redirect helper.
-	challengeURL := buildChallengeURL(rawURL, session.CallbackURL)
-
-	if err := openBrowser(challengeURL); err != nil {
-		logging.Warn("captcha browser launch failed", "error", err)
-		stopLocked()
-		return fmt.Errorf("captcha: 无法打开浏览器: %w", err)
-	}
-	logging.Info("captcha browser challenge opened", "session_id", session.ID)
-	return nil
 }
 
 func startLocked(onComplete CompletedFunc) (*Session, error) {
@@ -163,22 +132,6 @@ func shutdownServer(srv *http.Server) {
 	_ = srv.Shutdown(ctx)
 }
 
-// buildChallengeURL appends our callback as a redirect parameter for the
-// legacy browser fallback. Normal login supplies the same callback URI during
-// PikPak's captcha-init request, before the challenge URL is issued.
-func buildChallengeURL(rawURL, callbackURL string) string {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	q := parsed.Query()
-	if callbackURL != "" {
-		q.Set("redirect_uri", callbackURL)
-	}
-	parsed.RawQuery = q.Encode()
-	return parsed.String()
-}
-
 // handleCallback receives the redirect from PikPak after captcha completion.
 func handleCallback(w http.ResponseWriter, r *http.Request) {
 	token := extractToken(r)
@@ -253,16 +206,4 @@ func normalizeToken(raw string) string {
 		return t
 	}
 	return ""
-}
-
-// openBrowser opens the system default browser at url.
-func openBrowser(rawURL string) error {
-	switch runtime.GOOS {
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start()
-	case "darwin":
-		return exec.Command("open", rawURL).Start()
-	default:
-		return exec.Command("xdg-open", rawURL).Start()
-	}
 }

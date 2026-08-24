@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
-import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta } from './appearance'
+import { listAccounts, listProviders, removeAccount, renameMountedAccount, onEvent, notifyFileChange, GetSettings, SaveSettings, providerOf, accountName, providerIconUrl, providerMetaOf, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
+import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta, orderAccounts } from './appearance'
 import PanView from './views/PanView.vue'
 import TransferView from './views/TransferView.vue'
 import ShareView from './views/ShareView.vue'
@@ -17,8 +17,9 @@ import ConfirmModal from './components/ConfirmModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import ImageCropModal from './components/ImageCropModal.vue'
 import { CheckUpdate } from './api'
-import { debug, error, errorText, info, installGlobalErrorLogging } from './logger'
+import { debug, error, errorText, info, installGlobalErrorLogging, warn } from './logger'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
+import appLogo from './assets/logo/icon.svg'
 
 const tab = ref('pan')
 const tabOrder = ['pan', 'transfer', 'sync', 'share', 'settings']
@@ -34,7 +35,10 @@ const pageProps = computed(() => {
 })
 const pageListeners = computed(() => {
   const listeners = { toast }
-  if (tab.value === 'pan') listeners.go = onPanGo
+  if (tab.value === 'pan') {
+    listeners.go = onPanGo
+    listeners.ready = runPendingPanAction
+  }
   if (tab.value === 'settings') {
     listeners.theme = applyTheme
     listeners.update = () => { pendingUpdateInfo.value = null; showUpdate.value = true }
@@ -44,11 +48,13 @@ const pageListeners = computed(() => {
 })
 function switchTab(key) {
 	if (key === tab.value) return
-	info('navigation', 'page switch requested', { from: tab.value, to: key })
+  const from = tab.value
+	info('navigation', '页面切换开始', { from, to: key })
   const ni = tabOrder.indexOf(key)
   pageTrans.value = ni >= tabOrder.indexOf(tab.value) ? 'page-slide-left' : 'page-slide-right'
   prevTabIdx.value = tabOrder.indexOf(tab.value)
   tab.value = key
+  nextTick(() => info('navigation', '页面切换完成', { from, to: key }))
 }
 const accounts = ref([])
 const providers = ref([])
@@ -66,6 +72,92 @@ const showPresetIcons = ref(false)
 const cropImageSrc = ref('')
 const cropIsSvg = ref(false)
 const fileInputRef = ref(null)
+let pendingPanAction = ''
+const completedUploadChanges = new Set()
+const migrationChangeVersions = new Map()
+const syncChangeVersions = new Map()
+
+function rootDirectoryOf(userId, driveId) {
+  const account = accounts.value.find((item) => item.user_id === userId && item.drive_id === driveId)
+  return providerMetaOf(account, providers.value)?.rootKey || 'root'
+}
+
+function normalizeRootDirectory(userId, driveId, directory) {
+  const value = String(directory || '').trim()
+  const root = rootDirectoryOf(userId, driveId)
+  // 同步/迁移后台任务历史上会使用通用 root，而文件页对 PikPak、WebDAV
+  // 等使用各自的根 ID；统一后才能命中对应的局部缓存。
+  return !value || value === 'root' || value === '/' ? root : value
+}
+
+function onGlobalTransferEvent(ev) {
+  const task = ev?.task
+  if (ev?.kind !== 'upload' || task?.status !== 'completed' || !task?.id) return
+  if (completedUploadChanges.has(task.id)) return
+  completedUploadChanges.add(task.id)
+  if (completedUploadChanges.size > 1000) completedUploadChanges.delete(completedUploadChanges.values().next().value)
+  if (!task.user_id || !task.drive_id || !task.parent_id) return
+  notifyFileChange({
+    userId: task.user_id,
+    driveId: task.drive_id,
+    directories: [normalizeRootDirectory(task.user_id, task.drive_id, task.parent_id)],
+    refreshSearch: true,
+    delay: 1200,
+    minimumInterval: 5000,
+  })
+}
+
+function onGlobalMigrateEvent(job) {
+  const id = String(job?.id || '')
+  const targetUser = String(job?.dstUser || job?.dst_user || '')
+  const targetDrive = String(job?.dstDrive || job?.dst_drive || '')
+  const targetParent = String(job?.dstParent || job?.dst_parent || '')
+  if (!id || !targetUser || !targetDrive || !targetParent) return
+  const status = String(job.status || '')
+  const version = `${status}|${Number(job.processed || 0)}|${Number(job.failed || 0)}`
+  if (migrationChangeVersions.get(id) === version) return
+  migrationChangeVersions.set(id, version)
+  if (migrationChangeVersions.size > 1000) migrationChangeVersions.delete(migrationChangeVersions.keys().next().value)
+  const terminal = ['completed', 'partial'].includes(status)
+  if (!terminal && Number(job.processed || 0) <= 0) return
+  notifyFileChange({
+    userId: targetUser,
+    driveId: targetDrive,
+    directories: [normalizeRootDirectory(targetUser, targetDrive, targetParent)],
+    refreshSearch: terminal,
+    delay: 1200,
+    minimumInterval: 5000,
+  })
+}
+
+function onGlobalSyncState(ev) {
+  const id = String(ev?.id || '')
+  const status = String(ev?.status || '')
+  if (!id || ev?.running || status !== 'completed') return
+
+  // pull 只会写入本机，不会改变云端目录；push/two-way 才需要失效网盘缓存。
+  const direction = String(ev.direction || 'two-way').toLowerCase()
+  if (direction === 'pull') return
+  const userId = String(ev.user_id || ev.userId || '')
+  const driveId = String(ev.drive_id || ev.driveId || '')
+  if (!userId || !driveId) return
+
+  const version = `${status}|${String(ev.startedAt || '')}`
+  if (syncChangeVersions.get(id) === version) return
+  syncChangeVersions.set(id, version)
+  if (syncChangeVersions.size > 1000) syncChangeVersions.delete(syncChangeVersions.keys().next().value)
+
+  const remoteDir = normalizeRootDirectory(userId, driveId, ev.remote_dir || ev.remoteDir)
+  notifyFileChange({
+    userId,
+    driveId,
+    directories: [remoteDir],
+    refreshTrash: Boolean(ev.delete_propagation || ev.deletePropagation),
+    refreshSearch: true,
+    delay: 800,
+    minimumInterval: 5000,
+  })
+}
 
 const PRESET_ICONS = [
   { id: 'pikpak.svg', label: 'PikPak' },
@@ -172,15 +264,31 @@ function updateGlider() {
 watch(tab, () => nextTick(updateGlider))
 
 let refreshEpoch = 0
+function applyGlobalAccountOrder() {
+  const ordered = orderAccounts(accounts.value)
+  const changed = ordered.length !== accounts.value.length || ordered.some((account, index) => account !== accounts.value[index])
+  if (!changed) return
+  accounts.value = ordered
+  debug('account', '账号顺序已同步', { count: ordered.length })
+}
+
+function onPreferencesChanged(event) {
+  if (event?.detail?.key === 'accountOrder') applyGlobalAccountOrder()
+}
+
 function refresh() {
   const my = ++refreshEpoch
+  debug('account', '刷新账号列表')
   listAccounts().then((list) => {
     if (my !== refreshEpoch) return
-    accounts.value = list || []
+    accounts.value = orderAccounts(list || [])
     const available = accounts.value
     if (current.value) {
-      const found = available.find((a) => a.user_id === current.value.user_id)
-      current.value = found || available[0] || null
+      // user_id 是主键，但同时保留 drive_id 匹配，避免旧数据/挂载盘的
+      // 同账号多存储记录在后台刷新时把用户刚选择的目标覆盖回去。
+      const found = available.find((a) => a.user_id === current.value.user_id && a.drive_id === current.value.drive_id) ||
+        available.find((a) => a.user_id === current.value.user_id)
+      current.value = found ? { ...found } : (available[0] ? { ...available[0] } : null)
     } else if (available.length) {
       const saved = getLastDriveSelection()
       const preferred = saved
@@ -192,13 +300,28 @@ function refresh() {
     if (current.value) {
       setLastDriveSelection(current.value.user_id, current.value.drive_id)
     }
-  }).catch(() => {})
+    // 账号变更、后台刷新都会触发这里；只在 debug 级记录，避免轮询刷屏。
+    debug('account', '账号列表已更新', { count: accounts.value.length })
+  }).catch((e) => warn('account', '账号列表更新失败', { error: errorText(e) }))
+}
+
+function accountSelectionKey(acc) {
+  return [acc?.user_id || '', acc?.drive_id || ''].join('\u0000')
 }
 
 function select(acc) {
   if (!acc) return
-  current.value = acc
+  const nextKey = accountSelectionKey(acc)
+  // 使用独立对象而不是复用列表项，确保每次侧栏选择都会向 KeepAlive 中的
+  // 文件页提交一次明确的响应式更新。
+  current.value = { ...acc }
   setLastDriveSelection(acc.user_id, acc.drive_id)
+  info('account', '网盘切换完成', { provider: providerOf(acc.user_id) })
+  nextTick(() => {
+    // watcher 是主路径；这里是页面过渡/KeepAlive 下的无副作用兜底。
+    // syncAccountView 内部会按账号 key 去重，因此不会产生重复请求。
+    if (accountSelectionKey(current.value) === nextKey) panView.value?.syncAccountView?.()
+  })
 }
 
 function onPanGo(target) {
@@ -206,8 +329,26 @@ function onPanGo(target) {
   else switchTab(target)
 }
 
+function runPendingPanAction() {
+  const action = pendingPanAction
+  if (!action) return
+  const view = panView.value
+  const handler = view && view[action]
+  if (typeof handler !== 'function') return
+  pendingPanAction = ''
+  handler.call(view)
+}
+
+function queuePanAction(action) {
+  pendingPanAction = action
+  if (tab.value !== 'pan') switchTab('pan')
+  // 已经挂载的文件页可在同一轮更新后立即执行；首次进入则由 PanView
+  // 的 ready 事件兜底，避免 transition 的 out-in 阶段丢失快捷操作。
+  nextTick(runPendingPanAction)
+}
+
 function clearPanCache() {
-  panView.value?.clearCache?.()
+  queuePanAction('clearCache')
 }
 
 function providerLabel(acc) {
@@ -216,7 +357,7 @@ function providerLabel(acc) {
 }
 
 function remove(acc) {
-  askConfirm(`移除账号「${(acc.token && (acc.token.nick_name || acc.token.user_name)) || acc.user_id}」？只删除账号凭据，下载任务、收藏和同步配置等本地记录会保留。`, async () => {
+  askConfirm(`移除账号「${accountName(acc) || acc.user_id}」？只删除账号凭据，下载任务、收藏和同步配置等本地记录会保留。`, async () => {
     try {
       await removeAccount(acc.user_id)
       if (current.value && current.value.user_id === acc.user_id) current.value = null
@@ -231,9 +372,15 @@ function remove(acc) {
 function openRename(acc) {
   if (!acc) return
   renameAcc.value = acc
-  renameName.value = getAccountAlias(acc.user_id) || ''
-  renameIcon.value = getAccountCustomIcon(acc.user_id) || ''
+  // 后端账户存储是跨重启的主来源；LocalStorage 作为旧数据和写入失败时的本机兜底。
+  renameName.value = String(acc.custom_name || getAccountAlias(acc.user_id) || '')
+  renameIcon.value = String(acc.custom_icon || getAccountCustomIcon(acc.user_id) || '')
   showPresetIcons.value = false
+  info('account', '打开账号自定义', {
+    provider: providerOf(acc.user_id),
+    has_name: Boolean(renameName.value),
+    has_icon: Boolean(renameIcon.value),
+  })
 }
 
 function onIconFileSelected(e) {
@@ -266,15 +413,23 @@ async function saveRename() {
     // 2. 后端持久化到 accounts.json（双向保证持久）
     try {
       await setAccountCustomMetaBackend(uid, alias, icon)
-    } catch (err) {
-      console.warn('Backend custom meta update ignored/failed:', err)
+    } catch {
+      // 本地昵称/图标不依赖云端，后端持久化失败时仍保留当前设备的设置。
+      info('account', '账号自定义本机完成', {
+        provider: providerOf(uid),
+        has_name: !!alias,
+        has_icon: !!icon,
+        backend_saved: false,
+      })
     }
     // 强制触发一次账号列表浅拷贝以便全局响应式刷新
     accounts.value = accounts.value.map((a) => (a.user_id === uid ? { ...a, custom_name: alias, custom_icon: icon } : a))
     if (current.value?.user_id === uid) current.value = { ...current.value, custom_name: alias, custom_icon: icon }
+    // 后端成功时已经记录统一的开始/完成日志；仅本机兜底时在上方补充完成记录。
     renameAcc.value = null
     toast('账号设置已更新', 'success')
   } catch (e) {
+    error('account', '账号自定义保存失败', { error: errorText(e) })
     toast(String(e), 'error')
   } finally {
     renameBusy.value = false
@@ -322,21 +477,15 @@ function preventNativeContextMenu(e) {
 
 function onQuickAction(action) {
   if (action === 'toggle-theme') quickToggleTheme()
-  else if (action === 'refresh') {
-    switchTab('pan')
-    panView.value?.refresh()
-  } else if (action === 'mkdir') {
-    switchTab('pan')
-    panView.value?.openMkdirModal()
-  } else if (action === 'upload') {
-    switchTab('pan')
-    panView.value?.openUploadModal()
-  }
+  else if (action === 'refresh') queuePanAction('refresh')
+  else if (action === 'mkdir') queuePanAction('openMkdirModal')
+  else if (action === 'upload') queuePanAction('openUploadModal')
 }
 
 onMounted(async () => {
-	info('app', 'frontend mounted')
+	info('app', '前端初始化完成')
 	window.addEventListener('contextmenu', preventNativeContextMenu, true)
+	window.addEventListener('mnemo:prefs-changed', onPreferencesChanged)
 	const removeGlobalErrorLogging = installGlobalErrorLogging()
 	listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
 	let autoUpdateEnabled = true
@@ -371,16 +520,23 @@ onMounted(async () => {
     onEvent('share:history-error', (ev) => {
       toast(`分享已创建，但本地历史保存失败：${ev?.error || '未知错误'}`, 'warn')
     }),
+    // 即使文件页尚未挂载，传输/迁移完成也应先记录受影响目录，
+    // 等用户进入对应目录时再按缓存策略刷新。
+    onEvent('transfer:event', onGlobalTransferEvent),
+    onEvent('migrate:progress', onGlobalMigrateEvent),
+    onEvent('sync:state', onGlobalSyncState),
     // 原生传输悬浮窗点击/菜单「显示主窗口」时跳到传输页
     onEvent('nav:tab', (key) => { if (typeof key === 'string' && tabOrder.includes(key)) switchTab(key) }),
   ]
-  nextTick(updateGlider)
+	nextTick(updateGlider)
+	info('navigation', '页面进入', { page: tab.value })
   window.addEventListener('resize', updateGlider)
 	cleanupFns = () => {
 		removeGlobalErrorLogging()
     window.removeEventListener('resize', updateGlider)
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('contextmenu', preventNativeContextMenu, true)
+		window.removeEventListener('mnemo:prefs-changed', onPreferencesChanged)
     mq.removeEventListener('change', onScheme)
     offFns.forEach((fn) => { try { fn && fn() } catch { /* noop */ } })
 	}
@@ -393,7 +549,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <div class="app-brand">Mnemo</div>
+      <div class="app-brand"><img :src="appLogo" alt="" />Mnemo</div>
       <div ref="tabStrip" class="top-tabs">
         <span class="top-tab-glider" :style="gliderStyle"></span>
         <button
@@ -459,7 +615,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
 
     <Modal v-if="infoAcc" title="账号信息" width="420px" @close="infoAcc = null">
       <div class="kv-row"><span class="kv-label">账号</span><span style="user-select:text">{{ accountName(infoAcc) }}</span></div>
-      <div class="kv-row"><span class="kv-label">网盘</span><span>{{ providerLabel(infoAcc) }}</span></div>
+      <div class="kv-row"><span class="kv-label">网盘</span><span style="display:inline-flex;align-items:center;gap:5px"><img v-if="providerIconUrl(providerMetaOf(infoAcc, providers))" :src="providerIconUrl(providerMetaOf(infoAcc, providers))" alt="" style="width:15px;height:15px;object-fit:contain" />{{ providerLabel(infoAcc) }}</span></div>
       <div class="kv-row" v-if="infoAcc.usage && infoAcc.usage.size">
         <span class="kv-label">容量</span><span>{{ infoAcc.usage.usedStr }} / {{ infoAcc.usage.sizeStr }}</span>
       </div>
@@ -472,8 +628,8 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       </template>
     </Modal>
 
-    <!-- 账号自定义截图与名称弹窗 -->
-    <Modal v-if="renameAcc" title="自定义截图与名称" width="420px" @close="renameAcc = null">
+    <!-- 账号本地自定义昵称与图标弹窗 -->
+    <Modal v-if="renameAcc" title="账号自定义" width="420px" @close="renameAcc = null">
       <div class="custom-acc-form">
         <div class="field">
           <label>自定义显示昵称</label>
@@ -488,7 +644,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         </div>
 
         <div class="field">
-          <label>自定义图标与截图</label>
+           <label>自定义图标</label>
           <div class="acc-icon-selector">
             <!-- 当前选中的预览图 -->
             <div class="acc-icon-preview">
@@ -507,7 +663,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
               />
               <button class="btn sm" type="button" @click="fileInputRef?.click()">
                 <UiIcon name="camera" :size="13" />
-                <span>选择截图/图片/SVG</span>
+                <span>自定义</span>
               </button>
               <button class="btn sm" type="button" @click="showPresetIcons = !showPresetIcons">
                 <UiIcon name="grid" :size="13" />

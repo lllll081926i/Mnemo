@@ -38,7 +38,7 @@ internal/netx      HTTP/上传/哈希/限速 工具
 | 下载 | app.Download → transfer/manager → driver.GetDownloadURL → dlengine 分段下载 |
 | 上传 | app.Upload → transfer/upload → driver.UploadOneFile（queue/direct 按能力） |
 | 播放 | app.PlayVideo → driver.GetVideoPreview → preview 播放会话代理 → HTML5 `<video>`；HLS/DASH 由按需加载的 HLS.js/dash.js 驱动 |
-| 迁移 | app.Migrate → transfer/migrate（server/stream/spool 策略） |
+| 迁移 | app.Migrate → transfer/migrate（共同哈希秒传 → StreamUploader → spool）；仅明确未命中可降级，目标状态不确定错误停止以防重复对象；move 删除源前先持久化 copied checkpoint |
 
 ## 依赖方向
 

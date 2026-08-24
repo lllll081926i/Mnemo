@@ -3,6 +3,7 @@ package pan189
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -25,6 +26,9 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	fileMD5 := strings.ToUpper(strings.TrimSpace(req.Hash))
 	if !regexp.MustCompile(`^[A-F0-9]{32}$`).MatchString(fileMD5) {
 		return &drive.RapidUploadResult{Reuse: false, Message: "无效的 MD5 指纹"}, nil
+	}
+	if req.Size < 0 {
+		return &drive.RapidUploadResult{Reuse: false, Message: "文件大小不能为负数"}, nil
 	}
 	sess, err := sessionOf(c.Token)
 	if err != nil {
@@ -70,7 +74,9 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 			FileDataExists int             `json:"fileDataExists"`
 		} `json:"data"`
 	}
-	_ = json.Unmarshal(raw, &created)
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return nil, fmt.Errorf("pan189: 秒传初始化响应无效: %w", err)
+	}
 	if created.Data.FileDataExists != 1 {
 		return &drive.RapidUploadResult{Reuse: false, Message: "未命中秒传"}, nil
 	}
@@ -105,7 +111,9 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	var committed struct {
 		ID string `json:"id"`
 	}
-	_ = json.Unmarshal(raw, &committed)
+	if err := json.Unmarshal(raw, &committed); err != nil {
+		return nil, fmt.Errorf("pan189: 秒传提交响应无效: %w", err)
+	}
 	if committed.ID == "" {
 		return &drive.RapidUploadResult{Reuse: true, Message: "秒传命中"}, nil
 	}
@@ -123,8 +131,9 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 	if err != nil {
 		return "", err
 	}
-	if strings.ToLower(f.ContentHashName) == "md5" && f.ContentHash != "" {
-		return strings.ToLower(f.ContentHash), nil
+	hashValue := strings.ToLower(strings.TrimSpace(f.ContentHash))
+	if strings.EqualFold(strings.TrimSpace(f.ContentHashName), "md5") && regexp.MustCompile(`^[a-f0-9]{32}$`).MatchString(hashValue) {
+		return hashValue, nil
 	}
 	return "", nil
 }

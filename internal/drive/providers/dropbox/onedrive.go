@@ -32,8 +32,27 @@ func pathOf(ref drive.FileRef) string {
 	return ref.ID
 }
 
-func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *drive.ListOptions) ([]model.File, error) {
+// client hydrates the persisted root namespace for legacy Dropbox accounts
+// before their first filesystem request. Newly authorized and refreshed
+// accounts already carry ProviderRootID, so this path makes no additional
+// request in the usual case.
+func (d *Driver) client(ctx context.Context, c drive.Context) (*client, error) {
+	if c.Token == nil || strings.TrimSpace(c.Token.AccessToken) == "" {
+		return nil, drive.ErrUnauthorized
+	}
+	ensureDropboxRootNamespace(ctx, c.Token)
 	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	cl.onRootNamespaceChange = func(root string) {
+		c.Token.ProviderRootID = root
+	}
+	return cl, nil
+}
+
+func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *drive.ListOptions) ([]model.File, error) {
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +64,7 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 }
 
 func (d *Driver) ListPaged(ctx context.Context, c drive.Context, dirID, marker string, _ *drive.ListOptions) (*drive.DirPage, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +80,7 @@ func (d *Driver) ListPaged(ctx context.Context, c drive.Context, dirID, marker s
 }
 
 func (d *Driver) Search(ctx context.Context, c drive.Context, keyword string) ([]model.File, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +103,7 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 }
 
 func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*model.File, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +116,7 @@ func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*
 }
 
 func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID string, _ int) (*model.DownloadURL, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +148,7 @@ func (d *Driver) GetVideoPreview(ctx context.Context, c drive.Context, fileID st
 }
 
 func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name string) (*drive.MkdirResult, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +156,7 @@ func (d *Driver) Mkdir(ctx context.Context, c drive.Context, parentID, name stri
 }
 
 func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name string) (*drive.RenameResult, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +172,7 @@ func (d *Driver) Rename(ctx context.Context, c drive.Context, fileID, name strin
 }
 
 func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +189,7 @@ func (d *Driver) Trash(ctx context.Context, c drive.Context, fileIDs []string) (
 }
 
 func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileRef) ([]string, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +210,7 @@ func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string)
 }
 
 func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +227,7 @@ func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef
 }
 
 func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +247,7 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 	if len(params.FileIDs) != 1 {
 		return nil, errors.New("Dropbox 分享链接一次只能选择一个文件或文件夹")
 	}
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +268,7 @@ func (d *Driver) CreateShare(ctx context.Context, c drive.Context, params drive.
 // CancelShare revokes the remote Dropbox link instead of only forgetting the
 // local record.
 func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.ShareHistoryEntry) error {
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -261,7 +280,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("Dropbox: 上传文件路径为空")
 	}
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return err
 	}

@@ -22,11 +22,12 @@ import (
 )
 
 const (
-	accountHost = "https://account.guangyapan.com"
-	apiHost     = "https://api.guangyapan.com"
-	clientID    = "aMe-8VSlkrbQXpUR"
-	RootID      = "guangya_root"
-	ua          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	accountHost  = "https://account.guangyapan.com"
+	apiHost      = "https://api.guangyapan.com"
+	clientID     = "aMe-8VSlkrbQXpUR"
+	RootID       = "guangya_root"
+	listPageSize = 50
+	ua           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 const providerID = model.ProviderGuangya
@@ -47,7 +48,8 @@ func init() {
 			"recycleBin":          false,
 			"permanentDelete":     true,
 		}, func(c *drive.Capabilities) {
-			c.SetHashes([]string{"md5"}, nil)
+			c.SetHashes([]string{"md5"}, []string{"md5"})
+			c.SetConflictPolicies("rename")
 			c.SetShareExpirationOptions(0, 1, 7, 30)
 		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
@@ -221,7 +223,7 @@ func (c *client) List(ctx context.Context, parentID string) ([]File, error) {
 			} `json:"data"`
 		}
 		err := c.post(ctx, "/userres/v1/file/get_file_list", map[string]any{
-			"parentId": parentID, "page": page, "pageSize": 100,
+			"parentId": parentID, "page": page, "pageSize": listPageSize,
 			"orderBy": 3, "sortType": 1, "fileTypes": []any{},
 		}, &resp)
 		if err != nil {
@@ -242,7 +244,7 @@ func (c *client) List(ctx context.Context, parentID string) ([]File, error) {
 				ParentID: parentID,
 			})
 		}
-		if len(list) < 100 {
+		if len(list) < listPageSize {
 			break
 		}
 		if resp.Data.Total > 0 && len(out) >= resp.Data.Total {

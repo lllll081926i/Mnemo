@@ -32,10 +32,11 @@ import (
 const providerID = model.ProviderS3
 
 const (
-	s3MultipartThreshold = 64 * 1024 * 1024
-	s3MultipartPartSize  = 16 * 1024 * 1024
-	s3CopyCutoff         = 5*1024*1024*1024 - 64*1024*1024
-	s3CopyPartSize       = 64 * 1024 * 1024
+	s3MultipartThreshold       = 64 * 1024 * 1024
+	s3MultipartPartSize        = 16 * 1024 * 1024
+	s3CopyCutoff               = 5*1024*1024*1024 - 64*1024*1024
+	s3CopyPartSize             = 64 * 1024 * 1024
+	listPageSize         int32 = 200
 )
 
 func init() {
@@ -335,6 +336,7 @@ func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *dri
 			Prefix:            aws.String(prefix),
 			Delimiter:         aws.String("/"),
 			ContinuationToken: token,
+			MaxKeys:           aws.Int32(listPageSize),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("s3: list: %w", err)

@@ -123,7 +123,7 @@ func TestDriverImplementsInterface(t *testing.T) {
 
 func TestGetInfoPseudoEntries(t *testing.T) {
 	d := &Driver{}
-	c := drive.Context{DriveID: "pan189:u"}
+	c := drive.Context{UserID: "pan189:u", DriveID: "pan189:u"}
 	for _, root := range []string{PAN189Root, "-11", "root", "/"} {
 		info, err := d.GetInfo(t.Context(), c, root)
 		if err != nil {
@@ -134,13 +134,88 @@ func TestGetInfoPseudoEntries(t *testing.T) {
 			t.Fatalf("GetInfo(%q) = %+v", root, info)
 		}
 	}
-	info, err := d.GetInfo(t.Context(), c, "file-1")
+	if _, err := d.GetInfo(t.Context(), c, "file-1"); err == nil {
+		t.Fatal("uncached file metadata must not be fabricated")
+	}
+}
+
+func TestGetFileAndResolveTransferHashUseCachedMetadata(t *testing.T) {
+	drive.ClearFileMetaCache()
+	t.Cleanup(drive.ClearFileMetaCache)
+	c := drive.Context{UserID: "pan189:cached", DriveID: "pan189:cached"}
+	drive.RememberFile(c.UserID, c.DriveID, model.File{
+		DriveID: c.DriveID, FileID: "file-1", ParentFileID: PAN189Root,
+		Name: "movie.mp4", Size: 4096,
+		ContentHashName: "md5", ContentHash: "D41D8CD98F00B204E9800998ECF8427E",
+	})
+
+	f, err := (&Driver{}).GetFile(t.Context(), c, "file-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := info.(model.File)
-	if f.IsDir || f.FileID != "file-1" {
-		t.Fatalf("GetInfo(file-1) = %+v", info)
+	if f.Name != "movie.mp4" || f.Size != 4096 || f.ContentHash == "" {
+		t.Fatalf("GetFile() = %+v", f)
+	}
+	hash, err := (&Driver{}).ResolveTransferHash(t.Context(), c, "file-1", "md5", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash != "d41d8cd98f00b204e9800998ecf8427e" {
+		t.Fatalf("ResolveTransferHash() = %q", hash)
+	}
+}
+
+func TestRapidUploadByHashHitMissInvalidAndMalformedResponses(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	sess := &Session{SessionKey: "session-key", SessionSecret: "session-secret", CloudType: CloudPersonal}
+	c := drive.Context{UserID: "pan189:user", DriveID: "pan189:user", Token: &model.TokenInfo{AccessToken: sess.SessionKey, RefreshToken: mustJSON(sess)}}
+	d := &Driver{}
+	valid := drive.RapidUploadRequest{ParentID: PAN189Root, FileName: "movie.mp4", Method: "md5", Hash: "d41d8cd98f00b204e9800998ecf8427e", Size: 4096}
+
+	for _, tc := range []struct {
+		name       string
+		createBody string
+		wantReuse  bool
+		wantErr    bool
+	}{
+		{name: "hit", createBody: `{"data":{"uploadFileId":"upload-1","fileCommitUrl":"https://api.cloud.189.cn/commit.action","fileDataExists":1}}`, wantReuse: true},
+		{name: "miss", createBody: `{"data":{"uploadFileId":"upload-2","fileDataExists":0}}`},
+		{name: "malformed", createBody: `{"data":"invalid"}`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			netx.TestTransportHook = pan189AuthRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Path {
+				case "/createUploadFile.action":
+					return pan189AuthResponse(req, http.StatusOK, nil, tc.createBody), nil
+				case "/commit.action":
+					return pan189AuthResponse(req, http.StatusOK, nil, `<response><id>file-9</id></response>`), nil
+				default:
+					return nil, fmt.Errorf("unexpected request %s", req.URL.String())
+				}
+			})
+			result, err := d.RapidUploadByHash(t.Context(), c, valid)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("RapidUploadByHash() error = %v", err)
+			}
+			if err == nil && (result == nil || result.Reuse != tc.wantReuse) {
+				t.Fatalf("RapidUploadByHash() = %+v", result)
+			}
+		})
+	}
+
+	for _, req := range []drive.RapidUploadRequest{
+		{Method: "sha1", Hash: valid.Hash, Size: 1},
+		{Method: "md5", Hash: "invalid", Size: 1},
+		{Method: "md5", Hash: valid.Hash, Size: -1},
+	} {
+		result, err := d.RapidUploadByHash(t.Context(), c, req)
+		if err != nil {
+			t.Fatalf("invalid request returned error: %v", err)
+		}
+		if result == nil || result.Reuse {
+			t.Fatalf("invalid request result = %+v", result)
+		}
 	}
 }
 

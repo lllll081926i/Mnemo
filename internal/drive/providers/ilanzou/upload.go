@@ -12,8 +12,10 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -21,6 +23,28 @@ import (
 )
 
 const uploadPartSize = 8 * 1024 * 1024 // 单片 8MB
+
+const (
+	qiniuDefaultUploadHost = "https://upload.qiniup.com"
+	// The region query is the same official fallback used by Qiniu SDKs. It
+	// is intentionally consulted only after an init request explicitly says
+	// that the selected upload region is wrong, never on the normal path.
+	qiniuRegionQueryPrimary  = "https://uc.qbox.me/v4/query"
+	qiniuRegionQueryFallback = "https://api.qiniu.com/v4/query"
+	qiniuRegionCacheTTL      = 30 * time.Minute
+)
+
+var qiniuRegionQueryEndpoints = []string{qiniuRegionQueryPrimary, qiniuRegionQueryFallback}
+
+type qiniuUploadHostCacheEntry struct {
+	host      string
+	expiresAt time.Time
+}
+
+var qiniuUploadHostCache = struct {
+	sync.Mutex
+	entries map[string]qiniuUploadHostCacheEntry
+}{entries: make(map[string]qiniuUploadHostCacheEntry)}
 
 // fileMD5 computes the lowercase hex MD5 of the whole local file while
 // reporting progress via ui.Upload.
@@ -153,6 +177,253 @@ type qiniuPart struct {
 	Etag       string `json:"etag"`
 }
 
+// qiniuHTTPError keeps the Qiniu request id and a short server explanation.
+// The old flow threw the response body away, leaving the user with a bare
+// "初始化分片上传失败 HTTP 400" even when Qiniu had already told us whether
+// the token, bucket, object key, or region was wrong.
+type qiniuHTTPError struct {
+	StatusCode int
+	Detail     string
+	RequestID  string
+}
+
+func (e *qiniuHTTPError) Error() string {
+	if e == nil {
+		return "qiniu: request failed"
+	}
+	message := fmt.Sprintf("qiniu: http %d", e.StatusCode)
+	if e.Detail != "" {
+		message += ": " + e.Detail
+	}
+	if e.RequestID != "" {
+		message += " (request_id=" + e.RequestID + ")"
+	}
+	return message
+}
+
+func newQiniuHTTPError(resp *http.Response, body []byte) error {
+	detail := strings.Join(strings.Fields(string(body)), " ")
+	return &qiniuHTTPError{
+		StatusCode: resp.StatusCode,
+		Detail:     truncate(detail, 240),
+		RequestID:  truncate(strings.TrimSpace(resp.Header.Get("X-Reqid")), 120),
+	}
+}
+
+// qiniuUploadHost honors a regional upload endpoint when ilanzou returns one
+// together with the temporary upload token. The previous hard-coded host only
+// works for buckets in its default region and can produce an opaque 400 after
+// the upstream bucket is migrated.
+func qiniuUploadHost(up map[string]any) string {
+	if up == nil {
+		return qiniuDefaultUploadHost
+	}
+	for _, source := range []map[string]any{up, mapVal(up, "data")} {
+		for _, key := range []string{"uploadHost", "upHost", "uploadUrl", "uploadURL", "host"} {
+			if host := normalizeQiniuUploadHost(strOf(source[key])); host != "" {
+				return host
+			}
+		}
+	}
+	return qiniuDefaultUploadHost
+}
+
+func normalizeQiniuUploadHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil || !isQiniuUploadHostname(u.Hostname()) {
+		return ""
+	}
+	// UpHost is an origin. Discard a path/query supplied by an upstream API so
+	// a temporary bearer token cannot be redirected to an unexpected endpoint.
+	u.Path, u.RawPath, u.RawQuery, u.Fragment = "", "", "", ""
+	return strings.TrimRight(u.String(), "/")
+}
+
+func isQiniuUploadHostname(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	return host == "qiniup.com" || host == "qbox.me" ||
+		strings.HasSuffix(host, ".qiniup.com") || strings.HasSuffix(host, ".qbox.me")
+}
+
+func qiniuIncorrectRegion(err error) bool {
+	var httpErr *qiniuHTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	detail := strings.ToLower(httpErr.Detail)
+	return strings.Contains(detail, "region") || strings.Contains(detail, "区域")
+}
+
+// qiniuSuggestedUploadHost extracts a Qiniu host from an "incorrect region"
+// response such as "Please use up-z2.qiniup.com". It never treats arbitrary
+// text as a host; normalizeQiniuUploadHost restricts the result to Qiniu's
+// HTTPS upload domains.
+func qiniuSuggestedUploadHost(err error) string {
+	var httpErr *qiniuHTTPError
+	if !errors.As(err, &httpErr) {
+		return ""
+	}
+	for _, candidate := range strings.Fields(httpErr.Detail) {
+		candidate = strings.Trim(candidate, " \t\r\n\\\"'`()[]{}<>,;")
+		candidate = strings.TrimRight(candidate, ".")
+		if host := normalizeQiniuUploadHost(candidate); host != "" {
+			return host
+		}
+	}
+	return ""
+}
+
+func qiniuRegionCacheKey(uploadToken, bucket string) string {
+	return qiniuAccessKey(uploadToken) + "\x00" + strings.TrimSpace(bucket)
+}
+
+func qiniuAccessKey(uploadToken string) string {
+	uploadToken = strings.TrimSpace(strings.TrimPrefix(uploadToken, "UpToken "))
+	index := strings.IndexByte(uploadToken, ':')
+	if index <= 0 {
+		return ""
+	}
+	key := uploadToken[:index]
+	for _, r := range key {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return ""
+		}
+	}
+	return key
+}
+
+// qiniuDiscoverUploadHost asks Qiniu's official region service for the
+// temporary token's bucket. It is a failure-only fallback and caches the
+// successful answer, so a transient wrong-region response costs at most one
+// additional lookup per account/bucket window instead of one per upload.
+func qiniuDiscoverUploadHost(ctx context.Context, uploadToken, bucket string) string {
+	cacheKey := qiniuRegionCacheKey(uploadToken, bucket)
+	if cacheKey == "\x00" {
+		return ""
+	}
+	now := time.Now()
+	qiniuUploadHostCache.Lock()
+	if entry, ok := qiniuUploadHostCache.entries[cacheKey]; ok && entry.expiresAt.After(now) {
+		qiniuUploadHostCache.Unlock()
+		return entry.host
+	}
+	qiniuUploadHostCache.Unlock()
+
+	for _, endpoint := range qiniuRegionQueryEndpoints {
+		queryURL, err := url.Parse(endpoint)
+		if err != nil || queryURL == nil {
+			continue
+		}
+		query := queryURL.Query()
+		query.Set("ak", qiniuAccessKey(uploadToken))
+		query.Set("bucket", strings.TrimSpace(bucket))
+		queryURL.RawQuery = query.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, queryURL.String(), nil)
+		if err != nil {
+			continue
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		if readErr != nil || resp.StatusCode >= http.StatusBadRequest {
+			continue
+		}
+		host, ttl := qiniuRegionHostFromResponse(body)
+		if host == "" {
+			continue
+		}
+		if ttl <= 0 {
+			ttl = qiniuRegionCacheTTL
+		}
+		if ttl > 24*time.Hour {
+			ttl = 24 * time.Hour
+		}
+		qiniuUploadHostCache.Lock()
+		qiniuUploadHostCache.entries[cacheKey] = qiniuUploadHostCacheEntry{host: host, expiresAt: now.Add(ttl)}
+		qiniuUploadHostCache.Unlock()
+		return host
+	}
+	return ""
+}
+
+// qiniuRegionHostFromResponse supports both the current v4 response
+// (hosts[].up.domains) and the v2 SDK response (data.up.acc.main).
+func qiniuRegionHostFromResponse(body []byte) (string, time.Duration) {
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return "", 0
+	}
+	ttl := time.Duration(numOf(payload["ttl"])) * time.Second
+	data := mapVal(payload, "data")
+	if up := mapVal(data, "up"); up != nil {
+		if acc := mapVal(up, "acc"); acc != nil {
+			if host := firstQiniuUploadHost(acc["main"]); host != "" {
+				return host, ttl
+			}
+		}
+		if host := firstQiniuUploadHost(up["domains"]); host != "" {
+			return host, ttl
+		}
+	}
+	if hosts, ok := payload["hosts"].([]any); ok {
+		for _, rawHost := range hosts {
+			hostInfo, ok := rawHost.(map[string]any)
+			if !ok {
+				continue
+			}
+			if candidateTTL := time.Duration(numOf(hostInfo["ttl"])) * time.Second; candidateTTL > 0 {
+				ttl = candidateTTL
+			}
+			if up := mapVal(hostInfo, "up"); up != nil {
+				if host := firstQiniuUploadHost(up["domains"]); host != "" {
+					return host, ttl
+				}
+			}
+		}
+	}
+	return "", 0
+}
+
+func firstQiniuUploadHost(value any) string {
+	for _, raw := range qiniuStringSlice(value) {
+		if host := normalizeQiniuUploadHost(raw); host != "" {
+			return host
+		}
+	}
+	return ""
+}
+
+func qiniuStringSlice(value any) []string {
+	switch entries := value.(type) {
+	case []string:
+		return entries
+	case []any:
+		out := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if value := strings.TrimSpace(strOf(entry)); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func qiniuObjectUploadURL(host, bucket, encodedKey string) string {
+	return strings.TrimRight(host, "/") + "/buckets/" + url.PathEscape(bucket) + "/objects/" + url.PathEscape(encodedKey) + "/uploads"
+}
+
 // qiniuJSON issues a JSON body request to upload.qiniup.com with the UpToken.
 func qiniuJSON(ctx context.Context, method, rawURL, upToken string, body any) (map[string]any, int, error) {
 	var reader io.Reader
@@ -181,7 +452,7 @@ func qiniuJSON(ctx context.Context, method, rawURL, upToken string, body any) (m
 		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, nil
+		return nil, resp.StatusCode, newQiniuHTTPError(resp, text)
 	}
 	var j map[string]any
 	if err := json.Unmarshal(text, &j); err != nil {
@@ -208,7 +479,7 @@ func qiniuPut(ctx context.Context, rawURL, upToken string, data []byte) (map[str
 		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, nil
+		return nil, resp.StatusCode, newQiniuHTTPError(resp, text)
 	}
 	var j map[string]any
 	if err := json.Unmarshal(text, &j); err != nil {
@@ -261,10 +532,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return err
 	}
-	upToken := strOf(up["upToken"])
+	upToken := strings.TrimSpace(strOf(up["upToken"]))
 	rapidFileID := strOf(firstOf(up, "fileId", "id"))
 	if data := mapVal(up, "data"); data != nil {
-		upToken = firstNonEmpty(upToken, strOf(data["upToken"]))
+		upToken = firstNonEmpty(upToken, strings.TrimSpace(strOf(data["upToken"])))
 		rapidFileID = firstNonEmpty(rapidFileID, strOf(firstOf(data, "fileId", "id")))
 	}
 	if upToken == "" && rapidFileID != "" {
@@ -287,6 +558,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	key := fmt.Sprintf("disk/%d/%d/%d/%s/%016d", now.Year(), int(now.Month()), now.Day(), account, now.UnixMilli())
 	keyB64 := base64.RawURLEncoding.EncodeToString([]byte(key))
 
+	uploadHost := qiniuUploadHost(up)
 	var commitToken string
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
@@ -314,7 +586,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if err := mw.Close(); err != nil {
 			return err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://upload.qiniup.com/", &body)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadHost+"/", &body)
 		if err != nil {
 			return err
 		}
@@ -325,7 +597,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			return fmt.Errorf("上传失败 HTTP %d", resp.StatusCode)
+			text, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+			return fmt.Errorf("上传失败: %w", newQiniuHTTPError(resp, text))
 		}
 		var j map[string]any
 		if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
@@ -334,13 +607,25 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		commitToken = responseString(j, "token")
 		ui.ReportUploadProgress(size, size)
 	} else {
-		initURL := fmt.Sprintf("https://upload.qiniup.com/buckets/%s/objects/%s/uploads", ILANZOU_CONF.Bucket, keyB64)
-		j, status, err := qiniuJSON(ctx, http.MethodPost, initURL, upToken, nil)
-		if err != nil {
-			return err
+		initURL := qiniuObjectUploadURL(uploadHost, ILANZOU_CONF.Bucket, keyB64)
+		j, _, err := qiniuJSON(ctx, http.MethodPost, initURL, upToken, nil)
+		// A bucket can move regions after the app receives its temporary token.
+		// Retry only the initialization once and only after Qiniu explicitly
+		// identifies a region mismatch. This avoids turning normal 400s into
+		// background traffic or repeatedly replaying a multipart operation.
+		if err != nil && qiniuIncorrectRegion(err) {
+			retryHost := qiniuSuggestedUploadHost(err)
+			if retryHost == "" {
+				retryHost = qiniuDiscoverUploadHost(ctx, upToken, ILANZOU_CONF.Bucket)
+			}
+			if retryHost != "" && retryHost != uploadHost {
+				uploadHost = retryHost
+				initURL = qiniuObjectUploadURL(uploadHost, ILANZOU_CONF.Bucket, keyB64)
+				j, _, err = qiniuJSON(ctx, http.MethodPost, initURL, upToken, nil)
+			}
 		}
-		if status >= 400 {
-			return fmt.Errorf("初始化分片上传失败 HTTP %d", status)
+		if err != nil {
+			return fmt.Errorf("初始化分片上传失败: %w", err)
 		}
 		uploadID := responseString(j, "uploadId")
 		if uploadID == "" {
@@ -359,12 +644,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return err
 			}
 			partURL := fmt.Sprintf("%s/%s/%d", initURL, uploadID, i)
-			pj, status, err := qiniuPut(ctx, partURL, upToken, buff)
+			pj, _, err := qiniuPut(ctx, partURL, upToken, buff)
 			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return fmt.Errorf("分片上传失败 %d", status)
+				return fmt.Errorf("分片 %d 上传失败: %w", i, err)
 			}
 			etag := responseString(pj, "etag")
 			if etag == "" {
@@ -374,15 +656,12 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			ui.ReportUploadProgress(start+cur, size)
 		}
 		finURL := fmt.Sprintf("%s/%s", initURL, uploadID)
-		fj, status, err := qiniuJSON(ctx, http.MethodPost, finURL, upToken, map[string]any{
+		fj, _, err := qiniuJSON(ctx, http.MethodPost, finURL, upToken, map[string]any{
 			"fnmae": ui.Info.Name, // 服务端字段拼写即 fnmae（历史沿用）
 			"parts": parts,
 		})
 		if err != nil {
-			return err
-		}
-		if status >= 400 {
-			return fmt.Errorf("完成分片上传失败 HTTP %d", status)
+			return fmt.Errorf("完成分片上传失败: %w", err)
 		}
 		commitToken = responseString(fj, "token")
 	}

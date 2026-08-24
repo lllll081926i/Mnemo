@@ -1,7 +1,7 @@
 # PikPak 网盘功能详情
 
 > 调研范围：`internal/drive/providers/pikpak/`（auth.go, client.go, pikpak.go, gcid.go, oss.go）
-> 当前证据：本仓库 `internal/drive/providers/pikpak`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 当前证据：本仓库 `internal/drive/providers/pikpak`、统一能力注册表、本地自动化测试，以及 `D:/Code/Mnemo/Example/alist/drivers/pikpak` 的原版实现。
 > 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
@@ -18,6 +18,7 @@
 | trashView / trashRestore / trashPurge / trashClear | true / true / — / — | ✅ / ✅ / 声明已移除 / 声明已移除 |
 | playbackHistory | 未声明 | 声明已移除 |
 | recycleBin / permanentDelete | true | ✅ / ✅ |
+| ProvideHashes / RapidUploadHashes | gcid / gcid | ✅ 原生 GCID 元数据与服务端创建文件秒传 |
 
 ---
 
@@ -78,10 +79,12 @@
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| GCID 计算 | ✅ | `gcid.go:23-55` 分块 SHA1 → 拼接 → SHA1 → 大写 hex | 无 |
+| GCID 计算 | ✅ | `gcid.go` 分块 SHA1 → 拼接 → SHA1 → 40 位大写 hex | 已修复将 hex 字符串再次 `%x` 编码成 80 位的错误 |
 | 分片大小策略 | ✅ | `gcid.go:10-20` 4 档 | 无 |
 | 创建上传任务 | ✅ | `pikpak.go:295-322` POST `/drive/v1/files` RESUMABLE + PROVIDER_ALIYUN | 无 |
-| 秒传 | ✅ | `pikpak.go:325-327` res.Resumable==nil 时完成 | 无 |
+| 普通上传内置秒传 | ✅ | 创建文件时提交 GCID；仅 `file.phase=PHASE_TYPE_COMPLETE` 判定服务端命中 | 模糊响应会清理预创建对象并报错，不误报完成 |
+| 跨盘 GCID 秒传 | ✅ | `upload.go:RapidUploadByHash` 使用 `/drive/v1/files` 原生 GCID 创建协议 | 仅 `file.phase=PHASE_TYPE_COMPLETE` 判定命中；明确未命中时清理预创建文件再回退 |
+| 迁移源 GCID | ✅ | 列表/详情的 `file.hash` 映射为 `ContentHashName=gcid`；`ResolveTransferHash` 可从详情补取 | 不为缺失 GCID 的文件额外下载全文件，避免一次迁移重复下载 |
 | OSS PUT | ✅ | `oss.go:18-89` HMAC-SHA1 签名流式 PUT | 无 |
 | **同名冲突处理** | ✅ | `pikpak.go:prepareUploadTarget` 分页查找，支持 refuse/skip/rename/overwrite | overwrite 移入回收站后再上传 |
 | **上传失败清理** | ✅ | `pikpak.go:cleanupPikPakUpload` OSS 失败后永久删除已创建文件 | 清理失败会附加错误返回 |
@@ -153,8 +156,11 @@
 
 ## 12. ProvideHashes / RapidUploadHashes
 
-❌ 能力声明未调用 SetHashes，ProvideHashes/RapidUploadHashes 为空。
-> 注：PikPak 实际通过 UploadOneFile 中 GCID 匹配实现秒传（`pikpak.go:325-327`），但未暴露为独立 RapidUploadByHash 接口，也未声明 hash 类型。
+✅ 声明 `SetHashes(["gcid"], ["gcid"])`。PikPak 可作为 GCID 迁移源和目标；只有源文件元数据能提供有效 40 位 GCID 时才尝试秒传。
+
+`RapidUploadByHash` 与原版普通上传共用 `/drive/v1/files` 原生协议。若服务端返回 `resumable`，表示未命中；实现会先删除该预创建对象，再进入流式或落盘上传回退，避免遗留半成品和同名冲突。
+
+不支持把 MD5/SHA1 猜测为 GCID，也不会为了生成 GCID 先下载一次、随后回退上传再下载一次。
 
 ---
 

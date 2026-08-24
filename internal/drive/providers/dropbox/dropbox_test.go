@@ -46,6 +46,50 @@ func dropboxAPIPath(r *http.Request) string {
 	return strings.TrimPrefix(r.URL.Path, "/2")
 }
 
+func assertDropboxPathRoot(t *testing.T, r *http.Request, wantRoot string) {
+	t.Helper()
+	raw := r.Header.Get("Dropbox-API-Path-Root")
+	if raw == "" {
+		t.Fatal("Dropbox-API-Path-Root header is missing")
+	}
+	var value struct {
+		Tag  string `json:".tag"`
+		Root string `json:"root"`
+	}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		t.Fatalf("Dropbox-API-Path-Root = %q: %v", raw, err)
+	}
+	if value.Tag != "root" || value.Root != wantRoot {
+		t.Fatalf("Dropbox-API-Path-Root = %+v, want root %q", value, wantRoot)
+	}
+}
+
+func TestDropboxTransferHashCapabilitiesAndResolver(t *testing.T) {
+	caps := (&Driver{}).Capabilities()
+	if strings.Join(caps.ProvideHashes, ",") != "dropbox" {
+		t.Fatalf("ProvideHashes = %v, want [dropbox]", caps.ProvideHashes)
+	}
+	if len(caps.RapidUploadHashes) != 0 {
+		t.Fatalf("RapidUploadHashes = %v, want none", caps.RapidUploadHashes)
+	}
+
+	withDropboxTransport(t, dropboxRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Host != "api.dropboxapi.com" || dropboxAPIPath(req) != "/files/get_metadata" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
+		}
+		return dropboxResponse(req, http.StatusOK, `{ ".tag":"file", "id":"id:file-hash", "name":"payload.bin", "content_hash":"dropbox-content-hash" }`), nil
+	}))
+
+	c := drive.Context{Token: &model.TokenInfo{AccessToken: "access-token"}}
+	hash, err := (&Driver{}).ResolveTransferHash(context.Background(), c, "id:file-hash", "dropbox", false)
+	if err != nil || hash != "dropbox-content-hash" {
+		t.Fatalf("ResolveTransferHash(dropbox) = %q, %v", hash, err)
+	}
+	if hash, err := (&Driver{}).ResolveTransferHash(context.Background(), c, "id:file-hash", "md5", false); err != nil || hash != "" {
+		t.Fatalf("ResolveTransferHash(md5) = %q, %v, want unsupported empty hash", hash, err)
+	}
+}
+
 func TestCreateShareUsesDropboxSharingAPI(t *testing.T) {
 	withDropboxTransport(t, dropboxRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost || req.URL.Host != "api.dropboxapi.com" || dropboxAPIPath(req) != "/sharing/create_shared_link_with_settings" {
@@ -72,7 +116,7 @@ func TestCreateShareUsesDropboxSharingAPI(t *testing.T) {
 	}))
 
 	item, err := (&Driver{}).CreateShare(context.Background(), drive.Context{
-		UserID: "dropbox:user", DriveID: "dropbox:user", Token: &model.TokenInfo{AccessToken: "access-token"},
+		UserID: "dropbox:user", DriveID: "dropbox:user", Token: &model.TokenInfo{AccessToken: "access-token", ProviderRootID: "root-ns"},
 	}, drive.ShareParams{FileIDs: []string{"/movie.mkv"}, Expiration: "2030-01-01T00:00:00Z", Password: "p4ss"})
 	if err != nil {
 		t.Fatalf("CreateShare() error = %v", err)
@@ -100,7 +144,7 @@ func TestDropboxCancelShareRevokesRemoteLink(t *testing.T) {
 		return dropboxResponse(req, http.StatusOK, ``), nil
 	}))
 
-	err := (&Driver{}).CancelShare(context.Background(), drive.Context{Token: &model.TokenInfo{AccessToken: "access-token"}}, model.ShareHistoryEntry{ShareURL: "https://www.dropbox.com/s/share-1"})
+	err := (&Driver{}).CancelShare(context.Background(), drive.Context{Token: &model.TokenInfo{AccessToken: "access-token", ProviderRootID: "root-ns"}}, model.ShareHistoryEntry{ShareURL: "https://www.dropbox.com/s/share-1"})
 	if err != nil {
 		t.Fatalf("CancelShare() error = %v", err)
 	}
@@ -178,7 +222,7 @@ func TestDropboxRefreshAccountUpdatesExpiryAndRetainsRotatingFields(t *testing.T
 			}
 			return dropboxResponse(r, http.StatusOK, `{"access_token":"access-new-2","token_type":"Bearer"}`), nil
 		case "/users/get_current_account":
-			return dropboxResponse(r, http.StatusOK, `{"account_id":"db-acct","email":"user@example.com","name":{"display_name":"Dropbox User"}}`), nil
+			return dropboxResponse(r, http.StatusOK, `{"account_id":"db-acct","email":"user@example.com","name":{"display_name":"Dropbox User"},"root_info":{".tag":"team","root_namespace_id":"root-ns"}}`), nil
 		case "/users/get_space_usage":
 			return dropboxResponse(r, http.StatusOK, `{"used":10,"allocation":{"allocated":100}}`), nil
 		default:
@@ -204,6 +248,9 @@ func TestDropboxRefreshAccountUpdatesExpiryAndRetainsRotatingFields(t *testing.T
 	}
 	if tok.UserID != model.BuildUserID(providerID, "db-acct") || tok.DefaultDriveID != model.BuildDriveID(providerID, "db-acct") {
 		t.Fatalf("account identity = %q/%q", tok.UserID, tok.DefaultDriveID)
+	}
+	if tok.ProviderRootID != "root-ns" {
+		t.Fatalf("ProviderRootID = %q", tok.ProviderRootID)
 	}
 	expiry, err := time.Parse(time.RFC3339, tok.ExpireTime)
 	if err != nil {
@@ -290,7 +337,7 @@ func TestDropboxListUsesConservativeFolderPayload(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			return nil, err
 		}
-		if body["path"] != "" || body["include_mounted_folders"] != false || body["include_non_downloadable_files"] != false || body["limit"] != float64(2000) {
+		if body["path"] != "" || body["include_mounted_folders"] != false || body["include_non_downloadable_files"] != false || body["limit"] != float64(listPageLimit) {
 			return nil, fmt.Errorf("list payload = %#v", body)
 		}
 		return dropboxResponse(r, http.StatusOK, `{"entries":[],"has_more":false}`), nil
@@ -298,6 +345,288 @@ func TestDropboxListUsesConservativeFolderPayload(t *testing.T) {
 
 	if _, err := newClient("access").List(context.Background(), RootID); err != nil {
 		t.Fatalf("List returned error: %v", err)
+	}
+}
+
+func TestDropboxCurrentAccountPersistsRootNamespace(t *testing.T) {
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if dropboxAPIPath(r) != "/users/get_current_account" {
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+		if got := r.Header.Get("Dropbox-API-Path-Root"); got != "" {
+			return nil, fmt.Errorf("profile request unexpectedly has path root %q", got)
+		}
+		return dropboxResponse(r, http.StatusOK, `{"account_id":"db-acct","email":"user@example.com","root_info":{".tag":"team","root_namespace_id":"root-ns","home_namespace_id":"home-ns"}}`), nil
+	}))
+
+	tok := &model.TokenInfo{AccessToken: "profile-access"}
+	if err := fetchDropboxCurrentAccount(context.Background(), tok.AccessToken, tok); err != nil {
+		t.Fatalf("fetchDropboxCurrentAccount() error = %v", err)
+	}
+	if tok.ProviderAccountID != "db-acct" || tok.ProviderRootID != "root-ns" {
+		t.Fatalf("token = %+v", tok)
+	}
+}
+
+func TestDropboxListUsesRootNamespaceHeader(t *testing.T) {
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if dropboxAPIPath(r) != "/files/list_folder" {
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+		assertDropboxPathRoot(t, r, "root-ns")
+		return dropboxResponse(r, http.StatusOK, `{"entries":[],"has_more":false}`), nil
+	}))
+
+	if _, err := newClientWithRoot("access", "root-ns").List(context.Background(), RootID); err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+}
+
+func TestDropboxLegacyAccountHydratesRootBeforeFirstList(t *testing.T) {
+	profileCalls := 0
+	listCalls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		switch dropboxAPIPath(r) {
+		case "/users/get_current_account":
+			profileCalls++
+			if got := r.Header.Get("Dropbox-API-Path-Root"); got != "" {
+				return nil, fmt.Errorf("profile request unexpectedly has path root %q", got)
+			}
+			return dropboxResponse(r, http.StatusOK, `{"account_id":"legacy-account","root_info":{".tag":"team","root_namespace_id":"legacy-root"}}`), nil
+		case "/files/list_folder":
+			listCalls++
+			assertDropboxPathRoot(t, r, "legacy-root")
+			return dropboxResponse(r, http.StatusOK, `{"entries":[],"has_more":false}`), nil
+		default:
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+	}))
+
+	tok := &model.TokenInfo{AccessToken: "legacy-access"}
+	if _, err := (&Driver{}).ListPaged(context.Background(), drive.Context{Token: tok}, RootID, "", nil); err != nil {
+		t.Fatalf("ListPaged returned error: %v", err)
+	}
+	if profileCalls != 1 || listCalls != 1 || tok.ProviderRootID != "legacy-root" {
+		t.Fatalf("calls/profile root = %d/%d/%q", profileCalls, listCalls, tok.ProviderRootID)
+	}
+}
+
+func TestDropboxInvalidRootUpdatesHeaderAndPersistedToken(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if dropboxAPIPath(r) != "/files/list_folder" {
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+		calls++
+		if calls == 1 {
+			assertDropboxPathRoot(t, r, "old-root")
+			return dropboxResponse(r, http.StatusUnprocessableEntity, `{"error_summary":"invalid_root/..","error":{".tag":"invalid_root","invalid_root":{".tag":"user","root_namespace_id":"new-root"}}}`), nil
+		}
+		assertDropboxPathRoot(t, r, "new-root")
+		return dropboxResponse(r, http.StatusOK, `{"entries":[],"has_more":false}`), nil
+	}))
+
+	tok := &model.TokenInfo{AccessToken: "stale-root-access", ProviderRootID: "old-root"}
+	if _, err := (&Driver{}).ListPaged(context.Background(), drive.Context{Token: tok}, RootID, "", nil); err != nil {
+		t.Fatalf("ListPaged returned error: %v", err)
+	}
+	if calls != 2 || tok.ProviderRootID != "new-root" {
+		t.Fatalf("calls/root = %d/%q", calls, tok.ProviderRootID)
+	}
+}
+
+func TestDropboxContentRequestUsesRootNamespaceHeader(t *testing.T) {
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "content.dropboxapi.com" || dropboxAPIPath(r) != "/files/upload" {
+			return nil, fmt.Errorf("unexpected request %s", r.URL)
+		}
+		assertDropboxPathRoot(t, r, "content-root")
+		return dropboxResponse(r, http.StatusOK, `{".tag":"file","id":"id:file","name":"file.txt"}`), nil
+	}))
+
+	got, err := newClientWithRoot("access", "content-root").UploadSmall(context.Background(), "/file.txt", strings.NewReader("data"), 4, uploadPolicy{mode: "overwrite"})
+	if err != nil || got != "id:file" {
+		t.Fatalf("UploadSmall() = %q, %v", got, err)
+	}
+}
+
+func TestDropboxSmallUploadUsesKnownLengthForSpoolFile(t *testing.T) {
+	path := t.TempDir() + "/payload.txt"
+	if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "content.dropboxapi.com" || dropboxAPIPath(r) != "/files/upload" {
+			return nil, fmt.Errorf("unexpected request %s", r.URL)
+		}
+		if r.ContentLength != 4 {
+			return nil, fmt.Errorf("content length = %d, want 4", r.ContentLength)
+		}
+		for _, encoding := range r.TransferEncoding {
+			if strings.EqualFold(encoding, "chunked") {
+				return nil, errors.New("upload used chunked transfer encoding")
+			}
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != "data" {
+			return nil, fmt.Errorf("upload body = %q, %v", body, err)
+		}
+		return dropboxResponse(r, http.StatusOK, `{ ".tag":"file","id":"id:file","name":"file.txt" }`), nil
+	}))
+
+	got, err := newClient("access").UploadSmall(context.Background(), "/file.txt", f, 4, uploadPolicy{mode: "overwrite"})
+	if err != nil || got != "id:file" {
+		t.Fatalf("UploadSmall() = %q, %v", got, err)
+	}
+}
+
+func TestDropboxMkdirResolvesFolderIDToPath(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		calls++
+		assertDropboxPathRoot(t, r, "root-ns")
+
+		var request struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			return nil, err
+		}
+
+		switch dropboxAPIPath(r) {
+		case "/files/get_metadata":
+			if request.Path != "id:parent" {
+				return nil, fmt.Errorf("metadata path = %q, want id:parent", request.Path)
+			}
+			return dropboxResponse(r, http.StatusOK, `{ ".tag":"folder", "id":"id:parent", "path_display":"/Destination" }`), nil
+		case "/files/create_folder_v2":
+			if request.Path != "/Destination/Child" {
+				return nil, fmt.Errorf("create path = %q, want /Destination/Child", request.Path)
+			}
+			return dropboxResponse(r, http.StatusOK, `{ "metadata": { ".tag":"folder", "id":"id:child", "path_display":"/Destination/Child" } }`), nil
+		default:
+			return nil, fmt.Errorf("unexpected endpoint %s", dropboxAPIPath(r))
+		}
+	}))
+
+	result, err := newClientWithRoot("access", "root-ns").Mkdir(context.Background(), "id:parent", "Child")
+	if err != nil || result.Error != "" || result.FileID != "id:child" {
+		t.Fatalf("Mkdir() = %+v, %v", result, err)
+	}
+	if calls != 2 {
+		t.Fatalf("Mkdir calls = %d, want 2", calls)
+	}
+}
+
+func TestDropboxUploadUsesFolderIDRelativePath(t *testing.T) {
+	path := t.TempDir() + "/payload.txt"
+	if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "content.dropboxapi.com" || dropboxAPIPath(r) != "/files/upload" {
+			return nil, fmt.Errorf("unexpected request %s", r.URL)
+		}
+		assertDropboxPathRoot(t, r, "root-ns")
+		var arg struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg); err != nil {
+			return nil, fmt.Errorf("decode upload argument: %w", err)
+		}
+		if arg.Path != "id:parent/payload.txt" {
+			return nil, fmt.Errorf("upload path = %q, want id:parent/payload.txt", arg.Path)
+		}
+		if r.ContentLength != 4 {
+			return nil, fmt.Errorf("content length = %d, want 4", r.ContentLength)
+		}
+		return dropboxResponse(r, http.StatusOK, `{ ".tag":"file", "id":"id:file", "name":"payload.txt" }`), nil
+	}))
+
+	ui := &model.UploadingUI{Info: model.UploadInfo{
+		LocalFilePath: path, ParentFileID: "id:parent", Name: "payload.txt",
+	}}
+	err := (&Driver{}).UploadOneFile(context.Background(), drive.Context{
+		Token: &model.TokenInfo{AccessToken: "access", ProviderRootID: "root-ns"},
+	}, ui)
+	if err != nil {
+		t.Fatalf("UploadOneFile() error = %v", err)
+	}
+	if ui.Upload.FileID != "id:file" {
+		t.Fatalf("uploaded file id = %q, want id:file", ui.Upload.FileID)
+	}
+}
+
+func TestDropboxErrorKeepsCompactBodyWhenErrorSummaryIsMissing(t *testing.T) {
+	err := newDropboxRPCError("/files/upload", http.StatusBadRequest, "dropbox-request-42", []byte(`{"error":"malformed upload path"}`))
+	message := err.Error()
+	if !strings.Contains(message, "malformed upload path") || !strings.Contains(message, "dropbox-request-42") {
+		t.Fatalf("Dropbox error lost diagnostics: %q", message)
+	}
+}
+
+func TestDropboxSmallUploadInvalidRootRewindsAndRetriesWithNewHeader(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "content.dropboxapi.com" || dropboxAPIPath(r) != "/files/upload" {
+			return nil, fmt.Errorf("unexpected request %s", r.URL)
+		}
+		calls++
+		if calls == 1 {
+			assertDropboxPathRoot(t, r, "old-root")
+			return dropboxResponse(r, http.StatusUnprocessableEntity, `{"error_summary":"invalid_root/..","error":{".tag":"invalid_root","invalid_root":{".tag":"team","root_namespace_id":"new-root"}}}`), nil
+		}
+		assertDropboxPathRoot(t, r, "new-root")
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != "data" {
+			return nil, fmt.Errorf("retried upload body = %q, %v", body, err)
+		}
+		return dropboxResponse(r, http.StatusOK, `{".tag":"file","id":"id:file","name":"file.txt"}`), nil
+	}))
+
+	updatedRoot := ""
+	cl := newClientWithRoot("access", "old-root")
+	cl.onRootNamespaceChange = func(root string) { updatedRoot = root }
+	got, err := cl.UploadSmall(context.Background(), "/file.txt", strings.NewReader("data"), 4, uploadPolicy{mode: "overwrite"})
+	if err != nil || got != "id:file" || calls != 2 || updatedRoot != "new-root" {
+		t.Fatalf("UploadSmall() = %q, %v; calls/root = %d/%q", got, err, calls, updatedRoot)
+	}
+}
+
+func TestDropboxListFallsBackToMinimalPayloadOnServerError(t *testing.T) {
+	calls := 0
+	withDropboxTransport(t, dropboxRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if dropboxAPIPath(r) != "/files/list_folder" {
+			return dropboxResponse(r, http.StatusNotFound, `{}`), nil
+		}
+		calls++
+		if calls <= rpcRetryAttempts {
+			resp := dropboxResponse(r, http.StatusInternalServerError, `{"error_summary":"internal_error/"}`)
+			resp.Header.Set("Retry-After", "0")
+			return resp, nil
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if len(body) != 2 || body["path"] != "" || body["recursive"] != false {
+			return nil, fmt.Errorf("fallback payload = %#v", body)
+		}
+		return dropboxResponse(r, http.StatusOK, `{"entries":[],"has_more":false}`), nil
+	}))
+
+	if _, err := newClient("access").List(context.Background(), RootID); err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if calls != rpcRetryAttempts+1 {
+		t.Fatalf("list calls = %d, want %d", calls, rpcRetryAttempts+1)
 	}
 }
 
@@ -315,8 +644,8 @@ func TestDropboxListServerErrorPreservesEndpointAndRequestID(t *testing.T) {
 	if err == nil {
 		t.Fatal("List unexpectedly succeeded")
 	}
-	if calls != rpcRetryAttempts {
-		t.Fatalf("server error calls = %d, want %d", calls, rpcRetryAttempts)
+	if calls != rpcRetryAttempts+1 {
+		t.Fatalf("server error calls = %d, want %d", calls, rpcRetryAttempts+1)
 	}
 	for _, want := range []string{"/files/list_folder", "http 500", "request_id=dbx-request-123"} {
 		if !strings.Contains(err.Error(), want) {
@@ -358,7 +687,7 @@ func TestDropboxUploadRequiresRemoteFileID(t *testing.T) {
 		t.Fatal(err)
 	}
 	ui := &model.UploadingUI{Info: model.UploadInfo{LocalFilePath: path, Name: "x.txt"}}
-	if err := (&Driver{}).UploadOneFile(context.Background(), drive.Context{Token: &model.TokenInfo{AccessToken: "access"}}, ui); err != nil {
+	if err := (&Driver{}).UploadOneFile(context.Background(), drive.Context{Token: &model.TokenInfo{AccessToken: "access", ProviderRootID: "root-ns"}}, ui); err != nil {
 		t.Fatalf("UploadOneFile returned error: %v", err)
 	}
 	if ui.Upload.FileID != "id:x" {
@@ -399,7 +728,7 @@ func TestDropboxTemporaryLinkDoesNotCarryBearerToken(t *testing.T) {
 		return dropboxResponse(r, http.StatusOK, `{"link":"https://dl.dropboxusercontent.com/signed","metadata":{".tag":"file","size":4}}`), nil
 	}))
 
-	c := drive.Context{DriveID: "dropbox-drive", Token: &model.TokenInfo{AccessToken: "secret"}}
+	c := drive.Context{DriveID: "dropbox-drive", Token: &model.TokenInfo{AccessToken: "secret", ProviderRootID: "root-ns"}}
 	dl, err := (&Driver{}).GetDownloadURL(context.Background(), c, "/x.txt", 0)
 	if err != nil {
 		t.Fatalf("GetDownloadURL returned error: %v", err)

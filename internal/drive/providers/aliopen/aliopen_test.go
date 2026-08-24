@@ -306,3 +306,72 @@ func TestAliOpenNotFoundRequiresStructuredStatus(t *testing.T) {
 		t.Fatal("provider error code without HTTP 404 must not enable an endpoint fallback")
 	}
 }
+
+func TestRapidUploadByHashValidatesAndCleansPendingMiss(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	var paths []string
+	netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		body := `{}`
+		switch req.URL.Path {
+		case "/adrive/v1.0/openFile/create":
+			body = `{"file_id":"pending-1","upload_id":"upload-1","rapid_upload":false}`
+		case "/adrive/v1.0/openFile/delete":
+		default:
+			return nil, errors.New("unexpected aliopen request: " + req.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	})
+	sess := &Session{AccessToken: "access-token", DriveID: "drive-1"}
+	c := drive.Context{UserID: "aliopen:user", DriveID: "aliopen:user", Token: &model.TokenInfo{AccessToken: sess.AccessToken, RefreshToken: mustJSON(sess)}}
+	req := drive.RapidUploadRequest{ParentID: "b:root", FileName: "movie.mp4", Method: "sha1", Hash: strings.Repeat("a", 40), Size: 4096}
+	result, err := (&Driver{}).RapidUploadByHash(t.Context(), c, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.Reuse || strings.Join(paths, ",") != "/adrive/v1.0/openFile/create,/adrive/v1.0/openFile/delete" {
+		t.Fatalf("result/paths = %+v / %v", result, paths)
+	}
+
+	for _, invalid := range []drive.RapidUploadRequest{
+		{Method: "md5", Hash: strings.Repeat("a", 40), Size: 1},
+		{Method: "sha1", Hash: "invalid", Size: 1},
+		{Method: "sha1", Hash: strings.Repeat("a", 40), Size: -1},
+	} {
+		paths = nil
+		got, err := (&Driver{}).RapidUploadByHash(t.Context(), c, invalid)
+		if err != nil || got == nil || got.Reuse || len(paths) != 0 {
+			t.Fatalf("invalid request = %+v, result=%+v err=%v paths=%v", invalid, got, err, paths)
+		}
+	}
+}
+
+func TestResolveTransferHashValidatesSHA1AndPreservesDetailError(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	sess := &Session{AccessToken: "access-token", DriveID: "drive-1"}
+	c := drive.Context{UserID: "aliopen:user", DriveID: "aliopen:user", Token: &model.TokenInfo{AccessToken: sess.AccessToken, RefreshToken: mustJSON(sess)}}
+
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		wantHash string
+		wantErr  bool
+	}{
+		{name: "valid", status: http.StatusOK, body: `{"content_hash_name":"sha1","content_hash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`, wantHash: strings.Repeat("a", 40)},
+		{name: "invalid hash", status: http.StatusOK, body: `{"content_hash_name":"sha1","content_hash":"not-sha1"}`},
+		{name: "detail error", status: http.StatusInternalServerError, body: `{"code":"ServerError","message":"detail failed"}`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body)), Request: req}, nil
+			})
+			hash, err := (&Driver{}).ResolveTransferHash(t.Context(), c, "b:file-1", "sha1", false)
+			if hash != tc.wantHash || (err != nil) != tc.wantErr {
+				t.Fatalf("ResolveTransferHash() = %q, %v", hash, err)
+			}
+		})
+	}
+}

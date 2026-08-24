@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -27,6 +29,38 @@ func onedriveResponse(req *http.Request, status int, body string) *http.Response
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
+	}
+}
+
+func TestOneDriveTransferHashCapabilitiesAndResolver(t *testing.T) {
+	caps := (&Driver{}).Capabilities()
+	if strings.Join(caps.ProvideHashes, ",") != "sha1,quickxorhash" {
+		t.Fatalf("ProvideHashes = %v, want [sha1 quickxorhash]", caps.ProvideHashes)
+	}
+	if len(caps.RapidUploadHashes) != 0 {
+		t.Fatalf("RapidUploadHashes = %v, want none", caps.RapidUploadHashes)
+	}
+
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	netx.TestTransportHook = onedriveRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.Host != "graph.microsoft.com" || req.URL.Path != "/v1.0/me/drive/items/file-hash" {
+			return nil, fmt.Errorf("unexpected request %s %s", req.Method, req.URL)
+		}
+		return onedriveResponse(req, http.StatusOK, `{"id":"file-hash","file":{"hashes":{"sha1Hash":"ABCDEF0123456789","quickXorHash":"quick-xor"}}}`), nil
+	})
+
+	c := drive.Context{Token: &model.TokenInfo{AccessToken: "access-token"}}
+	sha1, err := (&Driver{}).ResolveTransferHash(context.Background(), c, "file-hash", "sha1", false)
+	if err != nil || sha1 != "ABCDEF0123456789" {
+		t.Fatalf("ResolveTransferHash(sha1) = %q, %v", sha1, err)
+	}
+	quickXor, err := (&Driver{}).ResolveTransferHash(context.Background(), c, "file-hash", "quickxorhash", false)
+	if err != nil || quickXor != "quick-xor" {
+		t.Fatalf("ResolveTransferHash(quickxorhash) = %q, %v", quickXor, err)
+	}
+	if hash, err := (&Driver{}).ResolveTransferHash(context.Background(), c, "file-hash", "md5", false); err != nil || hash != "" {
+		t.Fatalf("ResolveTransferHash(md5) = %q, %v, want unsupported empty hash", hash, err)
 	}
 }
 
@@ -92,6 +126,9 @@ func TestOneDrivePresignedDownloadURLDoesNotCarryBearerToken(t *testing.T) {
 		if r.URL.Path != "/v1.0/me/drive/items/file-1" {
 			return onedriveResponse(r, http.StatusNotFound, `{}`), nil
 		}
+		if !strings.Contains(r.URL.RawQuery, "@microsoft.graph.downloadUrl") || !strings.Contains(r.URL.RawQuery, "@content.downloadUrl") {
+			return nil, fmt.Errorf("detail request missed signed download URL fields: %q", r.URL.RawQuery)
+		}
 		return onedriveResponse(r, http.StatusOK, `{"id":"file-1","name":"movie.mp4","size":4,"@microsoft.graph.downloadUrl":"https://download.example/movie"}`), nil
 	})
 	t.Cleanup(func() { netx.TestTransportHook = old })
@@ -105,6 +142,87 @@ func TestOneDrivePresignedDownloadURLDoesNotCarryBearerToken(t *testing.T) {
 	}
 	if dl.URL != "https://download.example/movie" || len(dl.Headers) != 0 {
 		t.Fatalf("presigned download = %+v", dl)
+	}
+}
+
+func TestOneDriveGetDownloadURLRefreshesMalformedAccessToken(t *testing.T) {
+	old := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = old })
+	graphCalls, refreshCalls := 0, 0
+	netx.TestTransportHook = onedriveRoundTripper(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Host {
+		case "graph.microsoft.com":
+			graphCalls++
+			if r.Header.Get("Authorization") == "Bearer malformed" {
+				return onedriveResponse(r, http.StatusUnauthorized, `{"error":{"code":"InvalidAuthenticationToken","message":"JWT is not well formed"}}`), nil
+			}
+			if r.Header.Get("Authorization") != "Bearer refreshed-token" {
+				return nil, fmt.Errorf("unexpected Graph authorization %q", r.Header.Get("Authorization"))
+			}
+			return onedriveResponse(r, http.StatusOK, `{"id":"file-1","name":"movie.mp4","size":4,"@microsoft.graph.downloadUrl":"https://download.example/movie"}`), nil
+		case "login.microsoftonline.com":
+			refreshCalls++
+			return onedriveResponse(r, http.StatusOK, `{"access_token":"refreshed-token","refresh_token":"refresh-new","expires_in":3600,"token_type":"Bearer"}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s", r.URL)
+		}
+	})
+
+	token := &model.TokenInfo{AccessToken: "malformed", RefreshToken: "refresh-old", DeviceID: "client-id"}
+	dl, err := (&Driver{}).GetDownloadURL(context.Background(), drive.Context{DriveID: "onedrive-drive", Token: token}, "file-1", 0)
+	if err != nil {
+		t.Fatalf("GetDownloadURL() error = %v", err)
+	}
+	if graphCalls != 2 || refreshCalls != 1 || dl.URL != "https://download.example/movie" || len(dl.Headers) != 0 {
+		t.Fatalf("calls/download = graph:%d refresh:%d download:%+v", graphCalls, refreshCalls, dl)
+	}
+	if token.AccessToken != "refreshed-token" || token.RefreshToken != "refresh-new" {
+		t.Fatalf("refreshed token = %+v", token)
+	}
+}
+
+func TestOneDriveSmallUploadRefreshesTokenAndUsesKnownLength(t *testing.T) {
+	path := t.TempDir() + "/payload.txt"
+	if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = old })
+	graphCalls, refreshCalls := 0, 0
+	netx.TestTransportHook = onedriveRoundTripper(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Host {
+		case "graph.microsoft.com":
+			graphCalls++
+			if r.Method != http.MethodPut || r.ContentLength != 4 {
+				return nil, fmt.Errorf("unexpected upload request %s length=%d", r.Method, r.ContentLength)
+			}
+			for _, encoding := range r.TransferEncoding {
+				if strings.EqualFold(encoding, "chunked") {
+					return nil, fmt.Errorf("small upload unexpectedly used chunked encoding")
+				}
+			}
+			if r.Header.Get("Authorization") == "Bearer malformed" {
+				return onedriveResponse(r, http.StatusUnauthorized, `{"error":{"code":"InvalidAuthenticationToken","message":"JWT is not well formed"}}`), nil
+			}
+			if r.Header.Get("Authorization") != "Bearer refreshed-token" {
+				return nil, fmt.Errorf("unexpected upload authorization %q", r.Header.Get("Authorization"))
+			}
+			return onedriveResponse(r, http.StatusCreated, `{"id":"uploaded-file"}`), nil
+		case "login.microsoftonline.com":
+			refreshCalls++
+			return onedriveResponse(r, http.StatusOK, `{"access_token":"refreshed-token","refresh_token":"refresh-new","expires_in":3600,"token_type":"Bearer"}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s", r.URL)
+		}
+	})
+
+	token := &model.TokenInfo{AccessToken: "malformed", RefreshToken: "refresh-old", DeviceID: "client-id"}
+	ui := &model.UploadingUI{Info: model.UploadInfo{LocalFilePath: path, Name: "payload.txt"}}
+	if err := (&Driver{}).UploadOneFile(context.Background(), drive.Context{DriveID: "onedrive-drive", Token: token}, ui); err != nil {
+		t.Fatalf("UploadOneFile() error = %v", err)
+	}
+	if graphCalls != 2 || refreshCalls != 1 || ui.Upload.FileID != "uploaded-file" || token.AccessToken != "refreshed-token" {
+		t.Fatalf("calls/upload/token = graph:%d refresh:%d upload:%+v token:%+v", graphCalls, refreshCalls, ui.Upload, token)
 	}
 }
 
@@ -183,5 +301,52 @@ func TestGraphAuthenticationFailureUsesStructuredError(t *testing.T) {
 	}
 	if isGraphAuthenticationFailure(fmt.Errorf("onedrive: http 401: InvalidAuthenticationToken")) {
 		t.Fatal("formatted error text alone must not trigger a refresh retry")
+	}
+}
+
+func TestRefreshOneDriveUsesConfiguredMatchingClientSecret(t *testing.T) {
+	oldTransport := netx.TestTransportHook
+	netx.TestTransportHook = onedriveRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "login.microsoftonline.com" || r.Method != http.MethodPost {
+			return nil, fmt.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		if form.Get("client_id") != "configured-client" || form.Get("client_secret") != "configured-secret" {
+			return nil, fmt.Errorf("refresh credentials = client_id:%q client_secret:%q", form.Get("client_id"), form.Get("client_secret"))
+		}
+		return onedriveResponse(r, http.StatusOK, `{"access_token":"fresh","expires_in":3600,"token_type":"Bearer"}`), nil
+	})
+	drive.SetSecretResolver(func(key string) string {
+		switch key {
+		case "onedrive_client_id":
+			return "configured-client"
+		case "onedrive_client_secret":
+			return "configured-secret"
+		default:
+			return ""
+		}
+	})
+	t.Cleanup(func() {
+		netx.TestTransportHook = oldTransport
+		drive.SetSecretResolver(nil)
+	})
+
+	token := &model.TokenInfo{AccessToken: "malformed", RefreshToken: "refresh", DeviceID: "configured-client"}
+	if err := refreshOneDriveAccessToken(context.Background(), token); err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken != "fresh" || token.DeviceID != "configured-client" {
+		t.Fatalf("refreshed token = %+v", token)
+	}
+
+	if _, secret := resolveCredentials("different-client", "", "configured-client", "configured-secret"); secret != "" {
+		t.Fatalf("unrelated client must not receive configured secret: %q", secret)
 	}
 }

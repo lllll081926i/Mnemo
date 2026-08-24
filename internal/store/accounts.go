@@ -236,6 +236,13 @@ func (s *Store) UpdateAccountCustomMeta(userID, customName, customIcon string) (
 	if userID == "" {
 		return nil, fmt.Errorf("user ID is empty")
 	}
+	customName = strings.TrimSpace(customName)
+	if len([]rune(customName)) > 40 {
+		return nil, fmt.Errorf("custom name exceeds 40 characters")
+	}
+	if strings.ContainsAny(customName, "\r\n\t") {
+		return nil, fmt.Errorf("custom name contains control characters")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	list, err := s.readAccountsUnlocked()
@@ -246,7 +253,7 @@ func (s *Store) UpdateAccountCustomMeta(userID, customName, customIcon string) (
 		if account == nil || account.UserID != userID {
 			continue
 		}
-		account.CustomName = strings.TrimSpace(customName)
+		account.CustomName = customName
 		account.CustomIcon = strings.TrimSpace(customIcon)
 		if err := s.writeAccountsUnlocked(list); err != nil {
 			return nil, err

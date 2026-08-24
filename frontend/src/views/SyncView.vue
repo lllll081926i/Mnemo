@@ -1,7 +1,8 @@
 <script setup>
 // 文件夹同步页：本地文件夹与网盘目录的双向/单向同步任务管理。
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, RunSync, CancelSync, ListRunningSyncIDs, onEvent, accountName, PickDirectory } from '../api'
+import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, RunSync, CancelSync, ListRunningSyncIDs, onEvent, accountName, providerIconUrl, providerMetaOf, PickDirectory } from '../api'
+import { orderAccounts } from '../appearance'
 import Modal from '../components/Modal.vue'
 import SegTabs from '../components/SegTabs.vue'
 import SelectDirModal from '../components/SelectDirModal.vue'
@@ -45,11 +46,24 @@ function refresh() {
   ListSyncConfigs().then((j) => { jobs.value = j || [] }).catch((e) => emit('toast', String(e), 'error'))
 }
 
+const accounts = computed(() => orderAccounts(props.accounts))
+
 function accountOf(job) {
-  return props.accounts.find((a) => a.user_id === job.user_id) || null
+  return accounts.value.find((a) => a.user_id === job.user_id) || null
 }
 
-const formAccount = computed(() => props.accounts.find((a) => a.user_id === form.value.user_id) || null)
+const formAccount = computed(() => accounts.value.find((a) => a.user_id === form.value.user_id) || null)
+function accountIcon(account) {
+  return providerIconUrl(providerMetaOf(account, props.providers))
+}
+const accountOptions = computed(() => accounts.value.map((account) => {
+  const meta = providerMetaOf(account, props.providers)
+  return {
+    value: account.user_id,
+    label: `${meta.label || '网盘'} · ${accountName(account) || account.user_id}`,
+    img: providerIconUrl(meta),
+  }
+}))
 
 function openCreate() {
   editingId.value = ''
@@ -57,9 +71,9 @@ function openCreate() {
   if (props.account) {
     form.value.user_id = props.account.user_id
     form.value.drive_id = props.account.drive_id
-  } else if (props.accounts.length) {
-    form.value.user_id = props.accounts[0].user_id
-    form.value.drive_id = props.accounts[0].drive_id
+  } else if (accounts.value.length) {
+    form.value.user_id = accounts.value[0].user_id
+    form.value.drive_id = accounts.value[0].drive_id
   }
   showEdit.value = true
 }
@@ -248,7 +262,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <div class="sync-task-paths">
             <span class="sync-path" :title="job.local_dir">本地：{{ job.local_dir }}</span>
             <span style="color:var(--text-tertiary);flex-shrink:0">{{ dirArrow[job.direction] || '⇄' }}</span>
-            <span class="sync-path" :title="job.remote_name || job.remote_dir">网盘：{{ accountOf(job) ? accountName(accountOf(job)) + ' / ' : '' }}{{ job.remote_name || (job.remote_dir === 'root' ? '根目录' : job.remote_dir) }}</span>
+            <span class="sync-path" :title="job.remote_name || job.remote_dir"><img v-if="accountIcon(accountOf(job))" :src="accountIcon(accountOf(job))" alt="" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px;margin-right:4px" />网盘：{{ accountOf(job) ? accountName(accountOf(job)) + ' / ' : '' }}{{ job.remote_name || (job.remote_dir === 'root' ? '根目录' : job.remote_dir) }}</span>
           </div>
           <div v-if="running.has(job.id) && progress[job.id]" class="sync-task-progress">
             <div class="progress-total">
@@ -288,7 +302,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           v-model="form.user_id"
           block
           placeholder="请选择账号"
-          :options="accounts.map((a) => ({ value: a.user_id, label: accountName(a) }))"
+          :options="accountOptions"
           @change="onFormAccount"
         />
       </div>

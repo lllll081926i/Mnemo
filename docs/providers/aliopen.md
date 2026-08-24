@@ -80,8 +80,8 @@ SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 
 | 子功能 | 状态 | Go 证据 | 差距 |
 |--------|:----:|---------|------|
-| RapidUploadByHash | ✅ | 校验 sha1；`RapidUpload` 严格检查 `rapid_upload`/`exist` | 未命中时继续普通分片上传 |
-| ResolveTransferHash | ✅ | `Detail` 读取 `content_hash` | 🟡 无 SHA1 格式校验 |
+| RapidUploadByHash | ✅ | 严格校验 40 位 SHA1 与非负大小；仅 `rapid_upload`/`exist` 视为命中 | 未命中若返回 pending `file_id`，先永久删除再回退普通上传；清理失败则停止回退 |
+| ResolveTransferHash | ✅ | `Detail` 读取并规范化 40 位 SHA1，详情请求错误向上返回 | 元数据没有合法 SHA1 时回退普通传输，不下载补算 |
 
 ---
 

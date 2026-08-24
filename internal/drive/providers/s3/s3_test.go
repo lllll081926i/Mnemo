@@ -136,3 +136,10 @@ func TestTemporaryS3ShareDoesNotAdvertiseHistory(t *testing.T) {
 		t.Fatal("temporary presigned URLs must not be advertised as persistent share history")
 	}
 }
+
+func TestS3DoesNotAdvertiseETagAsContentHash(t *testing.T) {
+	caps := (&Driver{}).Capabilities()
+	if len(caps.ProvideHashes) != 0 || len(caps.RapidUploadHashes) != 0 {
+		t.Fatalf("generic S3 must not advertise ETag as MD5 or hash rapid upload: %+v", caps)
+	}
+}

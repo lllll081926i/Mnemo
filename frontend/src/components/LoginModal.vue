@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, validateMountedWrite, SendGuangyaSms, SendPan139SMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha } from '../api'
+import { login, saveMounted, validateMountedWrite, providerIconUrl, OpenBrowser } from '../api'
 import UiIcon from './UiIcon.vue'
 import UiSelect from './UiSelect.vue'
 import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
+import { useCarrierLogin } from '../composables/useCarrierLogin'
+import { usePikPakLogin } from '../composables/usePikPakLogin'
 
 const props = defineProps({ providers: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'toast'])
@@ -11,7 +13,7 @@ const emit = defineEmits(['close', 'toast'])
 const providerId = ref(localStorage.getItem('login_provider') || 'pikpak')
 function defaultLoginForm(id) {
   if (id === 'lanzou') return { upload_tier: 'v0' }
-  if (id === 'pan189') return { cloud_type: 'personal' }
+  if (id === 'pan189') return { cloud_type: 'personal', login_mode: 'password' }
   if (id === 'pan139') return { login_mode: 'password' }
   return {}
 }
@@ -35,55 +37,56 @@ const webdavPresets = [
   { id: 'pcloud-us', name: 'pCloud（US）', label: 'pCloud（US 数据区）', endpoint: 'https://webdav.pcloud.com/', rootPath: '/', icon: new URL('../assets/drive-icons/pcloud-us.svg', import.meta.url).href },
 ]
 const busy = ref(false)
-const smsBusy = ref(false)
-const smsCountdown = ref(0)
-let smsTimer = null
-const pikpakCooldownSeconds = ref(0)
-let pikpakCooldownTimer = null
-function startSmsCountdown() {
-  smsCountdown.value = 60
-  if (smsTimer) clearInterval(smsTimer)
-  smsTimer = setInterval(() => {
-    smsCountdown.value--
-    if (smsCountdown.value <= 0) {
-      clearInterval(smsTimer)
-      smsTimer = null
-    }
-  }, 1000)
-}
-function clearPikPakCooldown() {
-  if (pikpakCooldownTimer) clearInterval(pikpakCooldownTimer)
-  pikpakCooldownTimer = null
-  pikpakCooldownSeconds.value = 0
-}
-function startPikPakCooldown(seconds) {
-  clearPikPakCooldown()
-  pikpakCooldownSeconds.value = Math.max(30, Math.ceil(Number(seconds) || 0))
-  pikpakCooldownTimer = setInterval(() => {
-    pikpakCooldownSeconds.value--
-    if (pikpakCooldownSeconds.value <= 0) clearPikPakCooldown()
-  }, 1000)
-}
-function handlePikPakRateLimit(error) {
-  const text = String(error || '')
-  if (!/(?:频繁|too[ _-]*(?:many|frequent)|rate[ _-]*limit|request[ _-]*frequency|access[ _-]*prohibited|risk[ _-]*control|429)/i.test(text)) return false
-	const match = text.match(/(?:等待|wait(?:ing)?(?:\s+for)?|retry\s+after)\s*(\d+)\s*(?:秒|second)?/i)
-  const riskBlocked = /access[ _-]*prohibited|risk[ _-]*control/i.test(text)
-  startPikPakCooldown(match ? Number(match[1]) : (riskBlocked ? 60 : 30))
-  errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
-  return true
-}
 const errorText = ref('')
-const pan139SMSRequired = ref(false)
+let loginModalDisposed = false
 const passwordVisibility = ref({})
 function passwordVisible(key) { return !!passwordVisibility.value[key] }
 function togglePassword(key) {
   passwordVisibility.value = { ...passwordVisibility.value, [key]: !passwordVisible(key) }
 }
 
+const {
+  fieldVisible: isLoginFieldVisible,
+  handleError: handleCarrierLoginError,
+  isPan139DirectLogin,
+  pan189Captcha,
+  reset: resetCarrierLogin,
+  sendGuangyaSms: sendSms,
+  sendPan139Sms,
+  sendPan189Sms,
+  smsBusy,
+  smsCountdown,
+  subtitle: carrierLoginSubtitle,
+  validate: validateCarrierLogin,
+} = useCarrierLogin({ providerId, form, errorText, emit })
+
+const {
+  captchaUrl,
+  captchaFrameReady,
+  captchaSubmitting,
+  cooldownSeconds: pikpakCooldownSeconds,
+  clearCooldown: clearPikPakCooldown,
+  finishSubmit: finishPikPakSubmit,
+  handleError: handlePikPakLoginError,
+  prepareSubmit: preparePikPakSubmit,
+  reloadCaptcha,
+  reset: resetPikPakLogin,
+} = usePikPakLogin({
+  providerId,
+  form,
+  errorText,
+  busy,
+  resumeLogin: () => submit(),
+})
+
 // 一刻相册（yike）登录入口暂时隐藏（待平台重新开发完成），后端注册保留
 const availableProviders = computed(() => props.providers.filter((p) => p.ID !== 'yike'))
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
+function loginProviderLabel(item) {
+  if (item?.ID === 'pan139') return '移动云盘'
+  if (item?.ID === 'pan189') return '天翼云盘'
+  return item?.Meta?.label || item?.ID || ''
+}
 const webdavPresetOptions = computed(() => webdavPresets.map((item) => ({ value: item.id, label: item.label, img: item.icon })))
 const webdavAuthOptions = [
   { value: 'auto', label: '自动（推荐）' },
@@ -118,11 +121,12 @@ const isTokenField = (field) => /token|authorization|secret/i.test(`${field.key}
 const hasCookieLogin = computed(() => !hasAccountLogin.value && visibleFields.value.some(isCookieField))
 const hasTokenLogin = computed(() => !hasAccountLogin.value && visibleFields.value.some(isTokenField))
 const isLongText = (key) => /cookie|token|bduss|secret|authorization/i.test(key)
-const isPan139DirectLogin = computed(() => providerId.value === 'pan139' && String(form.value.authorization || '').trim() !== '')
 const hasRefreshToken = computed(() => String(form.value.refresh_token || '').trim() !== '')
 const loginSubtitle = computed(() => {
   if (isMounted.value) return '连接设置'
   if (isOAuth.value) return '浏览器授权'
+  const carrierSubtitle = carrierLoginSubtitle()
+  if (carrierSubtitle) return carrierSubtitle
   if (hasPhoneLogin.value && hasEmailLogin.value) return '手机号/邮箱登录'
   if (hasPhoneLogin.value) return '手机号登录'
   if (hasEmailLogin.value) return '邮箱登录'
@@ -134,12 +138,6 @@ const loginSubtitle = computed(() => {
 function isFieldRequired(field) {
   if (isPan139DirectLogin.value && (field.key === 'username' || field.key === 'password')) return false
   return field.required
-}
-function isPan139FieldVisible(field) {
-  if (providerId.value !== 'pan139') return true
-  if (field.key === 'password') return !pan139SMSRequired.value
-  if (field.key === 'sms_code') return pan139SMSRequired.value
-  return true
 }
 function fieldInputType(field) {
   return field.type === 'password' ? 'password' : 'text'
@@ -159,27 +157,6 @@ function applyWebDAVPreset(id) {
   mountedForm.value.rootPath = preset.rootPath
 }
 
-// Captcha state is initialized before the provider watcher. A stale saved
-// provider can be corrected synchronously as soon as the provider list arrives.
-const captchaUrl = ref('')
-const captchaSessionId = ref('')
-const captchaFrameReady = ref(false)
-const captchaSubmitting = ref(false)
-const pan189Captcha = ref('')
-let offPikPakCaptchaCompleted = null
-let loginModalDisposed = false
-let captchaCompletionBusy = false
-let captchaClosePromise = Promise.resolve()
-
-function closePikPakCaptchaSession() {
-  const close = captchaClosePromise
-    .catch(() => {})
-    .then(() => ClosePikPakCaptcha())
-    .catch(() => {})
-  captchaClosePromise = close
-  return close
-}
-
 watch(providerId, (v, previous) => {
   info('login', 'login provider selected', { provider: v, previous_provider: previous || '' })
   localStorage.setItem('login_provider', v)
@@ -188,7 +165,8 @@ watch(providerId, (v, previous) => {
   webdavPreset.value = 'custom'
   mountedForm.value = { name: v === 'webdav' ? 'WebDAV' : (v === 's3' ? 'S3' : ''), endpoint: '', username: '', password: '', authType: 'auto', bucket: '', region: '', rootPath: '', basePath: '', sessionToken: '', forcePathStyle: true, verifyWrite: false, allowPrivateNetwork: false }
   errorText.value = ''
-  resetCaptcha(previous === 'pikpak')
+  resetCarrierLogin()
+  resetPikPakLogin(previous === 'pikpak')
   if (v !== 'pikpak') clearPikPakCooldown()
 })
 
@@ -204,20 +182,11 @@ onMounted(() => {
 	debug('login', 'login modal mounted', { provider: providerId.value })
   loginModalDisposed = false
   window.addEventListener('keydown', onKey)
-  offPikPakCaptchaCompleted = onEvent('pikpak:captcha:completed', (payload) => {
-	info('captcha', 'PikPak captcha completion event received', { session_id: String(payload?.session_id || ''), has_token: !!String(payload?.captcha_token || '').trim() })
-    void completePikPakCaptcha(payload)
-  })
 })
 onBeforeUnmount(() => {
 	debug('login', 'login modal unmounted')
   loginModalDisposed = true
   window.removeEventListener('keydown', onKey)
-  if (offPikPakCaptchaCompleted) offPikPakCaptchaCompleted()
-  offPikPakCaptchaCompleted = null
-  void closePikPakCaptchaSession()
-  if (smsTimer) clearInterval(smsTimer)
-  clearPikPakCooldown()
 })
 
 // 逐网盘附加帮助（后端 Login.fields 之外的引导）
@@ -226,159 +195,6 @@ const PROVIDER_HELP = {
 }
 const providerHelp = computed(() => PROVIDER_HELP[providerId.value] || null)
 function openHelp() { if (providerHelp.value) OpenBrowser(providerHelp.value.url).catch(() => {}) }
-
-// PikPak 的验证页会回调应用创建的一次性 localhost 地址。不要依赖 iframe
-// postMessage：挑战页并不保证会把最终 token 发给嵌入方。
-async function completePikPakCaptcha(payload) {
-  const sessionID = String(payload?.session_id || '').trim()
-  if (
-    captchaCompletionBusy ||
-    providerId.value !== 'pikpak' ||
-    !captchaUrl.value ||
-    !captchaSessionId.value ||
-    sessionID !== captchaSessionId.value
-  ) return
-	info('captcha', 'PikPak captcha completion accepted', { session_id: sessionID, has_token: !!String(payload?.captcha_token || '').trim() })
-
-  captchaCompletionBusy = true
-  const token = String(payload?.captcha_token || '').trim()
-  captchaSessionId.value = ''
-  captchaFrameReady.value = false
-  captchaUrl.value = ''
-  if (token) {
-    form.value.captcha_token = token
-    form.value.captcha_verified = 'true'
-    delete form.value.captcha_requires_confirmation
-  } else {
-    // 部分回调不会携带最终 token；后端会用初始 token 做一次受限确认。
-    form.value.captcha_verified = 'true'
-    form.value.captcha_requires_confirmation = 'true'
-  }
-  errorText.value = ''
-
-  try {
-    try {
-      await closePikPakCaptchaSession()
-    } catch {
-      // 回调服务会自行关闭；关闭失败不应阻断已经完成的登录续办。
-    }
-    if (!loginModalDisposed && providerId.value === 'pikpak') await submit()
-  } finally {
-    captchaCompletionBusy = false
-  }
-}
-
-function parseCaptcha(err) {
-  const text = String(err)
-  const m = text.match(/captcha_required\r?\nurl=(\S+)\r?\ntoken=(\S*)/)
-  if (!m) return false
-  const session = text.match(/(?:^|\r?\n)session=([A-Za-z0-9_-]+)/)
-  captchaUrl.value = m[1]
-  captchaSessionId.value = session ? session[1] : ''
-  form.value.captcha_token = m[2]
-  delete form.value.captcha_verified
-  delete form.value.captcha_requires_confirmation
-  captchaFrameReady.value = false
-  return true
-}
-async function reloadCaptcha() {
-  if (!captchaUrl.value || busy.value) return
-  captchaSessionId.value = ''
-  captchaFrameReady.value = false
-  captchaUrl.value = ''
-  delete form.value.captcha_token
-  delete form.value.captcha_verified
-  delete form.value.captcha_requires_confirmation
-  try {
-	info('captcha', 'PikPak captcha reload requested')
-    await closePikPakCaptchaSession()
-  } catch {
-    // A stale callback must not prevent a deliberate retry.
-  }
-  await submit()
-}
-
-// 天翼云 189 图形验证码
-function parse189Captcha(err) {
-  const m = String(err).match(/captcha_required_189\nimage=(\S+)/)
-  if (!m) return false
-  pan189Captcha.value = m[1]
-  form.value.validate_code = ''
-  return true
-}
-function parse189CaptchaExpired(err) {
-  if (!/captcha_expired_189/i.test(String(err))) return false
-  pan189Captcha.value = ''
-  form.value.validate_code = ''
-  errorText.value = '验证码已过期，请重新登录'
-  return true
-}
-function parse189CaptchaRetry(err) {
-  if (!/captcha_retry_189/i.test(String(err))) return false
-  pan189Captcha.value = ''
-  form.value.validate_code = ''
-  errorText.value = '验证码不正确，请重新登录'
-  return true
-}
-
-function resetCaptcha(closeSession = false) {
-  captchaSessionId.value = ''
-  captchaUrl.value = ''
-  captchaFrameReady.value = false
-  captchaSubmitting.value = false
-  pan189Captcha.value = ''
-  pan139SMSRequired.value = false
-  delete form.value.captcha_token
-  delete form.value.captcha_verified
-  delete form.value.validate_code
-  delete form.value.sms_code
-  if (closeSession) void closePikPakCaptchaSession()
-}
-
-async function sendSms() {
-  if (!String(form.value.phone || '').trim()) { errorText.value = '请先填写手机号'; return }
-  smsBusy.value = true
-	info('login', 'SMS verification request started', { provider: providerId.value })
-  errorText.value = ''
-  try {
-    const r = await SendGuangyaSms(form.value.phone)
-    form.value.verification_id = r.verification_id
-    form.value.device_id = r.device_id
-    form.value.captcha_token = r.captcha_token || ''
-    emit('toast', '验证码已发送', 'success')
-    startSmsCountdown()
-  } catch (e) {
-		warn('login', 'SMS verification request failed', { error: formatErrorText(e) })
-    errorText.value = String(e)
-  } finally {
-    smsBusy.value = false
-  }
-}
-
-async function sendPan139Sms() {
-  if (!String(form.value.username || '').trim()) { errorText.value = '请先填写账号'; return }
-  smsBusy.value = true
-  errorText.value = ''
-  try {
-    await SendPan139SMS(String(form.value.username).trim())
-    emit('toast', '验证码已发送', 'success')
-    startSmsCountdown()
-  } catch (e) {
-    warn('login', '139 SMS verification request failed', { error: formatErrorText(e) })
-    errorText.value = String(e)
-  } finally {
-    smsBusy.value = false
-  }
-}
-
-function parsePan139SMSRequired(err) {
-  if (!/pan139_sms_required/i.test(String(err))) return false
-  pan139SMSRequired.value = true
-  form.value.login_mode = 'sms'
-  form.value.sms_code = ''
-  errorText.value = '请获取并填写短信验证码'
-  return true
-}
 
 function validate() {
   if (isMounted.value) {
@@ -403,18 +219,8 @@ function validate() {
     if (!value('verification_id')) return '请先获取短信验证码'
     return ''
   }
-  if (providerId.value === 'pan189' && pan189Captcha.value && !value('validate_code')) {
-    return '请填写图形验证码'
-  }
-  if (providerId.value === 'pan139') {
-    if (!value('username')) return '请填写手机号/账号'
-    if (pan139SMSRequired.value) {
-      if (!value('sms_code')) return '请填写短信验证码'
-    } else if (!value('password')) {
-      return '请填写密码'
-    }
-    return ''
-  }
+  const carrierError = validateCarrierLogin(value)
+  if (carrierError !== null) return carrierError
   for (const f of visibleFields.value) {
     if (isFieldRequired(f) && !value(f.key)) return `请填写${f.label}`
   }
@@ -431,29 +237,10 @@ async function submit() {
   const attemptMounted = isMounted.value
   const attemptOAuth = isOAuth.value
   busy.value = true
-  captchaSubmitting.value = true
   errorText.value = ''
   try {
 	  debug('login', 'login form submit started', { provider: attemptProvider, config_keys: configKeys(attemptMounted ? mountedForm.value : form.value), has_captcha: !!captchaUrl.value })
-  // The callback normally resumes login automatically. Keep a manual
-  // fallback for dev WebView/browser environments where the event bridge can
-  // be delayed or unavailable after the challenge redirects.
-    if (attemptProvider === 'pikpak' && captchaUrl.value) {
-    captchaSessionId.value = ''
-    captchaFrameReady.value = false
-    captchaUrl.value = ''
-    delete form.value.captcha_verified
-    delete form.value.captcha_requires_confirmation
-    await closePikPakCaptchaSession()
-  }
-    if (attemptProvider === 'pikpak') {
-    await captchaClosePromise
-      if (loginModalDisposed || providerId.value !== attemptProvider || captchaUrl.value) return
-  }
-    if (attemptProvider === 'pikpak' && pikpakCooldownSeconds.value > 0) {
-    errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
-    return
-  }
+    if (attemptProvider === 'pikpak' && !await preparePikPakSubmit(attemptProvider)) return
   const err = validate()
   if (err) {
 		warn('login', 'login form validation failed', { provider: attemptProvider, reason: err })
@@ -481,22 +268,13 @@ async function submit() {
     emit('close')
   } catch (e) {
     try {
-      if (attemptProvider === 'pikpak' && handlePikPakRateLimit(e)) {
-        // Keep the challenge state intact while the provider cooldown runs.
-      } else if (attemptProvider === 'pikpak' && parseCaptcha(e)) {
-        errorText.value = '请在登录窗口内完成安全验证'
-      } else if (attemptProvider === 'pan189' && parse189Captcha(e)) {
-        errorText.value = '请输入图片中的验证码'
-      } else if (attemptProvider === 'pan189' && parse189CaptchaRetry(e)) {
-        // 清掉旧验证码，下一次提交会重新获取登录参数和图片。
-      } else if (attemptProvider === 'pan189' && parse189CaptchaExpired(e)) {
-        // 清掉失效图片，下一次提交会重新获取登录参数和验证码。
-      } else if (attemptProvider === 'pan139' && parsePan139SMSRequired(e)) {
-        // 账密登录已建立临时会话，切换到短信二次验证，不重复提交密码。
+      if (attemptProvider === 'pikpak' && handlePikPakLoginError(e)) {
+        // PikPak composable 保留 challenge 或风控倒计时状态。
+      } else if (handleCarrierLoginError(attemptProvider, e)) {
+        // 运营商 composable 负责切换短信验证或刷新图形验证码状态。
       } else {
         errorText.value = String(e)
       }
-		warn('login', 'login form submit failed', { provider: attemptProvider, error: formatErrorText(e) })
     } catch (handlerError) {
       // Error rendering must never leave the submit button stuck in busy state.
 			errorText.value = String(handlerError)
@@ -504,7 +282,7 @@ async function submit() {
     }
   } finally {
     busy.value = false
-    captchaSubmitting.value = false
+    finishPikPakSubmit()
   }
 }
 </script>
@@ -528,12 +306,12 @@ async function submit() {
                 class="lp-item"
                 :class="{ active: p.ID === providerId }"
                 :aria-selected="p.ID === providerId"
-                :title="p.Meta.label"
+                :title="loginProviderLabel(p)"
 				:disabled="busy"
                 @click="providerId = p.ID"
               >
                 <img :src="providerIconUrl(p.Meta)" alt="" />
-                <span>{{ p.Meta.label }}</span>
+                <span>{{ loginProviderLabel(p) }}</span>
               </button>
             </div>
 
@@ -541,7 +319,7 @@ async function submit() {
               <div class="lf-head">
                 <img :src="providerIconUrl(provider.Meta)" alt="" />
                 <div>
-                  <div class="lf-title">{{ provider.Meta.label }}</div>
+                  <div class="lf-title">{{ loginProviderLabel(provider) }}</div>
                   <div class="lf-sub">{{ loginSubtitle }}</div>
                 </div>
               </div>
@@ -600,7 +378,7 @@ async function submit() {
                 <!-- 常规表单 -->
                 <template v-else>
                   <div v-if="visibleFields.length" class="login-section">
-                    <div v-for="f in visibleFields" v-show="isPan139FieldVisible(f)" :key="f.key" class="field login-field">
+                    <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field">
                       <label>{{ f.label }}</label>
                       <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
@@ -615,6 +393,9 @@ async function submit() {
                       </div>
                       <div v-if="providerId === 'pan139' && f.key === 'sms_code'" class="field-action-row">
                         <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendPan139Sms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
+                      </div>
+                      <div v-if="providerId === 'pan189' && f.key === 'sms_code'" class="field-action-row">
+                        <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendPan189Sms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
                       </div>
                     </div>
                   </div>
@@ -631,7 +412,7 @@ async function submit() {
                   <div class="captcha-head">
                     <div>
                       <strong>请在下方完成安全验证</strong>
-                      <p>{{ captchaFrameReady ? '验证完成后将自动继续登录。' : '正在加载验证页面…' }}</p>
+                      <p>{{ captchaFrameReady ? '验证完成后将自动继续登录；若未自动继续，请点击下方“继续登录”。' : '正在加载验证页面…' }}</p>
                     </div>
                     <button class="btn sm" type="button" :disabled="captchaSubmitting || pikpakCooldownSeconds > 0" @click="reloadCaptcha">重新加载</button>
                   </div>

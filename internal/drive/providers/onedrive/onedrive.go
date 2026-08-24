@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -56,7 +57,7 @@ func (d *Driver) Capabilities() drive.Capabilities { return drive.RegistryCaps(p
 func (d *Driver) RootID() string                   { return RootID }
 
 func clientOf(c drive.Context) (*client, error) {
-	if c.Token == nil || c.Token.AccessToken == "" {
+	if c.Token == nil || strings.TrimSpace(c.Token.AccessToken) == "" {
 		return nil, drive.ErrUnauthorized
 	}
 	return newClient(c.Token.AccessToken), nil
@@ -81,9 +82,33 @@ func refreshedClientAfterGraphAuthFailure(ctx context.Context, c drive.Context, 
 		return nil, requestErr
 	}
 	if err := refreshOneDriveAccessToken(ctx, c.Token); err != nil {
-		return nil, fmt.Errorf("onedrive: 目录请求鉴权失败（%v），刷新访问令牌失败: %w", requestErr, err)
+		return nil, fmt.Errorf("onedrive: Graph 请求鉴权失败（%v），刷新访问令牌失败: %w", requestErr, err)
 	}
 	return newClient(c.Token.AccessToken), nil
+}
+
+// detailWithOneDriveAuthRetry refreshes an expired OAuth access token once for
+// any file-metadata path. Migration relies on Detail to obtain a signed direct
+// download URL, so leaving this retry only on directory listing made an
+// otherwise healthy account fail with InvalidAuthenticationToken mid-transfer.
+func detailWithOneDriveAuthRetry(ctx context.Context, c drive.Context, fileID string) (*Item, error) {
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	item, err := cl.Detail(ctx, fileID)
+	if err == nil {
+		return item, nil
+	}
+	cl, retryErr := refreshedClientAfterGraphAuthFailure(ctx, c, err)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	item, err = cl.Detail(ctx, fileID)
+	if err != nil {
+		return nil, fmt.Errorf("onedrive: 刷新令牌后文件请求仍失败: %w", err)
+	}
+	return item, nil
 }
 
 func (d *Driver) List(ctx context.Context, c drive.Context, dirID string, _ *drive.ListOptions) ([]model.File, error) {
@@ -141,11 +166,7 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 		f := driveutil_file(c.DriveID, RootID, "")
 		return f, nil
 	}
-	cl, err := clientOf(c)
-	if err != nil {
-		return nil, err
-	}
-	item, err := cl.Detail(ctx, fileID)
+	item, err := detailWithOneDriveAuthRetry(ctx, c, fileID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,11 +190,7 @@ func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*
 }
 
 func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID string, _ int) (*model.DownloadURL, error) {
-	cl, err := clientOf(c)
-	if err != nil {
-		return nil, err
-	}
-	item, err := cl.Detail(ctx, fileID)
+	item, err := detailWithOneDriveAuthRetry(ctx, c, fileID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +205,7 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	if item.DownloadURL == "" && item.ContentDownloadURL == "" {
 		headers = map[string]string{"Authorization": "Bearer " + c.Token.AccessToken}
 	}
+	cl := newClient(c.Token.AccessToken)
 	return &model.DownloadURL{
 		DriveID:      c.DriveID,
 		FileID:       fileID,
@@ -375,7 +393,20 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	behavior := oneDriveConflictBehavior(ui.Info.ConflictPolicy)
 	if info.Size() <= smallUploadLimit {
 		target := graphUploadTarget(graphHost+smallUploadPath(parentID, name), behavior)
-		fileID, putErr := cl.rawPut(ctx, target, f)
+		fileID, putErr := cl.rawPut(ctx, target, f, info.Size())
+		if isGraphAuthenticationFailure(putErr) {
+			cl, retryErr := refreshedClientAfterGraphAuthFailure(ctx, c, putErr)
+			if retryErr != nil {
+				return retryErr
+			}
+			if _, err := f.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("onedrive: 刷新令牌后无法重置上传文件: %w", err)
+			}
+			fileID, putErr = cl.rawPut(ctx, target, f, info.Size())
+			if putErr != nil {
+				putErr = fmt.Errorf("onedrive: 刷新令牌后上传仍失败: %w", putErr)
+			}
+		}
 		if putErr != nil {
 			if driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) == driveutil.ConflictSkip && isGraphConflict(putErr) {
 				return nil
@@ -386,6 +417,16 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return nil
 	}
 	sessionErr := cl.sessionUpload(ctx, c, f, parentID, name, ui, behavior)
+	if isGraphAuthenticationFailure(sessionErr) {
+		cl, retryErr := refreshedClientAfterGraphAuthFailure(ctx, c, sessionErr)
+		if retryErr != nil {
+			return retryErr
+		}
+		sessionErr = cl.sessionUpload(ctx, c, f, parentID, name, ui, behavior)
+		if sessionErr != nil {
+			sessionErr = fmt.Errorf("onedrive: 刷新令牌后分片上传仍失败: %w", sessionErr)
+		}
+	}
 	if sessionErr != nil && driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) == driveutil.ConflictSkip && isGraphConflict(sessionErr) {
 		return nil
 	}
@@ -476,6 +517,7 @@ func refreshOneDriveAccessToken(ctx context.Context, token *model.TokenInfo) err
 		return errors.New("onedrive: missing refresh_token")
 	}
 	configuredID := strings.TrimSpace(drive.Secret("onedrive_client_id"))
+	configuredSecret := strings.TrimSpace(drive.Secret("onedrive_client_secret"))
 	clientID := strings.TrimSpace(token.DeviceID)
 	// Older builds stored the literal "mnemo" instead of the client id.
 	// Treat it as unset so existing accounts fall back to the configured or
@@ -483,7 +525,7 @@ func refreshOneDriveAccessToken(ctx context.Context, token *model.TokenInfo) err
 	if clientID == "" || clientID == "mnemo" {
 		clientID = configuredID
 	}
-	clientID, clientSecret := resolveCredentials(clientID, "", configuredID, "")
+	clientID, clientSecret := resolveCredentials(clientID, "", configuredID, configuredSecret)
 
 	fresh, err := refreshOneDriveToken(ctx, clientID, clientSecret, refreshToken)
 	if err != nil {
@@ -580,11 +622,7 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 	if method != "sha1" && method != "quickxorhash" {
 		return "", nil
 	}
-	cl, err := clientOf(c)
-	if err != nil {
-		return "", err
-	}
-	item, err := cl.Detail(ctx, fileID)
+	item, err := detailWithOneDriveAuthRetry(ctx, c, fileID)
 	if err != nil || item.File == nil || item.File.Hashes == nil {
 		return "", err
 	}

@@ -3,6 +3,7 @@
 // 支持模块跳转、网盘账号快切、快捷命令（刷新/上传/新建文件夹/明暗切换）
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { accountName, providerIconUrl, providerMetaOf, providerOf } from '../api'
+import { orderAccounts } from '../appearance'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -35,7 +36,7 @@ const baseItems = computed(() => {
   ]
 
   // 网盘账号
-  for (const acc of props.accounts) {
+  for (const acc of orderAccounts(props.accounts)) {
     const meta = providerMetaOf(acc, props.providers)
     const label = (meta && meta.label) || providerOf(acc.user_id) || '网盘'
     items.push({

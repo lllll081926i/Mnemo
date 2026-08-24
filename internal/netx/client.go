@@ -38,6 +38,11 @@ var TestTransportHook http.RoundTripper
 // NewClient call picks it up so providers don't each need proxy plumbing.
 var globalProxy atomic.Value // stores string
 
+// proxyTransports keeps one connection pool per proxy endpoint. http.Transport
+// is safe for concurrent use and should be reused; cloning it for every
+// provider client prevents keep-alive connections from being shared.
+var proxyTransports sync.Map // map[string]*http.Transport
+
 // SetGlobalProxy configures the proxy used by all subsequently created netx
 // clients (and the download engine). An empty string disables proxying.
 func SetGlobalProxy(proxyURL string) { globalProxy.Store(proxyURL) }
@@ -228,13 +233,27 @@ func normalizeProxyEndpoint(raw, defaultScheme string) string {
 // WithProxy returns a client that routes traffic through proxyURL.
 func (c *Client) WithProxy(proxyURL string) *Client {
 	clone := *c
+	transport := proxyTransportFor(proxyURL)
+	clone.HTTP = &http.Client{Transport: transport, Timeout: c.HTTP.Timeout}
+	clone.Proxy = proxyURL
+	return &clone
+}
+
+func proxyTransportFor(proxyURL string) *http.Transport {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if cached, ok := proxyTransports.Load(proxyURL); ok {
+		return cached.(*http.Transport)
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if u, err := url.Parse(proxyURL); err == nil && u.Scheme != "" {
 		transport.Proxy = http.ProxyURL(u)
 	}
-	clone.HTTP = &http.Client{Transport: transport, Timeout: c.HTTP.Timeout}
-	clone.Proxy = proxyURL
-	return &clone
+	actual, loaded := proxyTransports.LoadOrStore(proxyURL, transport)
+	if loaded {
+		transport.CloseIdleConnections()
+		return actual.(*http.Transport)
+	}
+	return transport
 }
 
 // Req builds an http.Request with the client's UA.
@@ -249,6 +268,24 @@ func (c *Client) Req(ctx context.Context, method, rawURL string, body io.Reader)
 
 // Do executes a request with the client UA preset.
 func (c *Client) Do(ctx context.Context, method, rawURL string, headers map[string]string, body io.Reader) (*http.Response, error) {
+	return c.do(ctx, method, rawURL, headers, body, -1)
+}
+
+// DoWithContentLength executes a request with a known body length.  Go cannot
+// infer the length of an *os.File (or a generic io.Reader), so callers that
+// already know their upload size must use this method to avoid silently
+// switching a content-upload API to Transfer-Encoding: chunked.
+//
+// A negative value means unknown and is intentionally rejected here: callers
+// should use Do in that case, rather than accidentally claiming a length.
+func (c *Client) DoWithContentLength(ctx context.Context, method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (*http.Response, error) {
+	if contentLength < 0 {
+		return nil, fmt.Errorf("netx: negative content length: %d", contentLength)
+	}
+	return c.do(ctx, method, rawURL, headers, body, contentLength)
+}
+
+func (c *Client) do(ctx context.Context, method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (*http.Response, error) {
 	started := time.Now()
 	target := requestTarget(rawURL)
 	logging.Debug("HTTP request started", "method", method, "target", target)
@@ -256,6 +293,15 @@ func (c *Client) Do(ctx context.Context, method, rawURL string, headers map[stri
 	if err != nil {
 		logging.Warn("HTTP request construction failed", "method", method, "target", target, "error", err)
 		return nil, err
+	}
+	if contentLength >= 0 {
+		req.ContentLength = contentLength
+		// http.NewRequest gives a generic empty reader a non-nil Body with a
+		// zero/unknown length. Declare the empty-body case explicitly so the
+		// transport emits Content-Length: 0 instead of chunked framing.
+		if contentLength == 0 {
+			req.Body = http.NoBody
+		}
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)

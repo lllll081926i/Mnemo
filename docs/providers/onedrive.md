@@ -12,7 +12,7 @@
 search, createShare, shareExpiration, sharePassword, shareHistory: true
 SetHashes(["sha1", "quickxorhash"], nil)
 ```
-> trashView 未设；ProvideHashes 已声明
+> `ProvideHashes` 已声明；`RapidUploadHashes` 为空，OneDrive 不能作为跨盘秒传目标。
 
 ---
 
@@ -124,9 +124,11 @@ SetHashes(["sha1", "quickxorhash"], nil)
 
 ---
 
-## 11. ProvideHashes
+## 11. 跨盘秒传
 
-✅ `onedrive.go:30` SetHashes(["sha1", "quickxorhash"], nil)。`graph.go:460-472` mapItem 提取 sha1Hash/quickXorHash → ContentHash。
+- **源端：支持。** `onedrive.go` 声明 `ProvideHashes=["sha1", "quickxorhash"]`；`ResolveTransferHash` 直接读取 Microsoft Graph 文件元数据中的 `sha1Hash` 或 `quickXorHash`，不需要下载文件计算。
+- **目标端：不支持。** `RapidUploadHashes` 为空，provider 没有实现按 SHA1 或 QuickXorHash 创建目标文件的 `RapidUploadByHash`；普通上传始终使用小文件 `/content` PUT 或大文件 upload session。
+- **实际可用范围：** 只有目标 provider 声明相同哈希算法时才会进入跨盘秒传。例如 OneDrive 的 SHA1 可以供支持 SHA1 目标秒传的 provider 使用；QuickXorHash 当前没有匹配的目标端实现。
 
 ---
 
@@ -141,7 +143,7 @@ SetHashes(["sha1", "quickxorhash"], nil)
 1. ✅ **Token 刷新已实现**（`onedrive.go` 的 `RefreshAccount`），登录与刷新都会写入新的绝对 `expire_time`
 2. ✅ **账号信息/配额已实现**（`onedrive.go:386-414`）
 3. ✅ **上传断点续传已实现**（`upload.go:65-128` UploadSession + querySessionPosition + ClearUploadSession）
-4. ✅ **ProvideHashes 已声明**（`onedrive.go:30` SetHashes）
+4. ✅ **跨盘秒传源已声明**（SHA1/QuickXorHash）；目标端按哈希秒传不支持
 5. ✅ **搜索分页已实现**（`graph.go:238-261` 跟随 nextLink）
 6. ✅ 上传冲突策略已覆盖 overwrite/refuse/rename/skip，并校验上传响应的文件 ID
 7. 🟡 搜索无缩略图；关键词的 OData 单引号和 URL 路径转义已修复

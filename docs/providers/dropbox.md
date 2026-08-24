@@ -12,7 +12,7 @@
 search, createShare, shareExpiration, sharePassword, shareHistory: true
 SetHashes(["dropbox"], nil)
 ```
-> ProvideHashes 已声明
+> `ProvideHashes` 已声明；`RapidUploadHashes` 为空，Dropbox 不能作为跨盘秒传目标。
 
 ---
 
@@ -127,9 +127,12 @@ SetHashes(["dropbox"], nil)
 
 ---
 
-## 11. ProvideHashes
+## 11. 跨盘秒传
 
-✅ `dropbox.go:43` SetHashes(["dropbox"], nil)。`dropbox.go:489-491` mapItem 提取 content_hash → ContentHash。
+- **源端：仅提供 Dropbox 专用指纹。** `dropbox.go` 声明 `ProvideHashes=["dropbox"]`；`ResolveTransferHash` 从 `/files/get_metadata` 的 `content_hash` 读取指纹，不下载文件。
+- **算法不等价于 MD5/SHA1。** Dropbox content hash 是 provider 专用的分块摘要语义，不能把它标记成 MD5、SHA1 或直接交给这些算法的目标端。
+- **目标端：不支持。** `RapidUploadHashes` 为空，provider 没有按 content hash 创建文件的目标端 API；普通上传仍走 `/files/upload` 或 upload session。
+- **当前迁移效果：** 由于仓库内没有 provider 声明 `RapidUploadHashes=["dropbox"]`，Dropbox 指纹当前不会形成跨盘秒传匹配，只作为准确的源文件内容标识保留。
 
 ---
 
@@ -147,7 +150,7 @@ SetHashes(["dropbox"], nil)
 1. ✅ **Token 刷新已实现**（`dropbox.go:637-670` RefreshAccount）
 2. ✅ **账号信息/配额已实现**（`dropbox.go:650-670`）
 3. ✅ **分享 visibility 逻辑已修复**（`dropbox.go:306-312` 有密码时为 password）
-4. ✅ **ProvideHashes 已声明**（`dropbox.go:43` SetHashes）
+4. ✅ **Dropbox 专用源指纹已声明**；无匹配目标端，不支持目标秒传
 5. ✅ **搜索分页已实现**（`dropbox.go:162-194` 跟随 cursor）
 6. ✅ 上传具备 429 重试、Retry-After 和大文件暂停
 7. ✅ 上传冲突策略已按统一 ConflictPolicy 处理

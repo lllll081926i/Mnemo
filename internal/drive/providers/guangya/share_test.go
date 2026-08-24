@@ -30,6 +30,133 @@ func guangyaResponse(req *http.Request, status int, body string) *http.Response 
 	}
 }
 
+type guangyaMemoryUploadStore struct {
+	sessionID string
+	parts     []int
+	cleared   bool
+}
+
+func (s *guangyaMemoryUploadStore) SaveUploadSession(_ string, parts []int) error {
+	return s.SaveUploadSessionState("", "", parts)
+}
+
+func (s *guangyaMemoryUploadStore) LoadUploadSession(string) []int {
+	_, parts := s.LoadUploadSessionState("")
+	return parts
+}
+
+func (s *guangyaMemoryUploadStore) ClearUploadSession(string) {
+	s.sessionID = ""
+	s.parts = nil
+	s.cleared = true
+}
+
+func (s *guangyaMemoryUploadStore) SaveUploadSessionState(_ string, sessionID string, parts []int) error {
+	s.sessionID = sessionID
+	s.parts = append([]int(nil), parts...)
+	return nil
+}
+
+func (s *guangyaMemoryUploadStore) LoadUploadSessionState(string) (string, []int) {
+	return s.sessionID, append([]int(nil), s.parts...)
+}
+
+func TestGuangyaDeclaresMD5RapidUpload(t *testing.T) {
+	caps := drive.RegistryCaps(providerID)
+	if strings.Join(caps.ProvideHashes, ",") != "md5" || strings.Join(caps.RapidUploadHashes, ",") != "md5" {
+		t.Fatalf("Guangya hashes = provide:%v rapid:%v", caps.ProvideHashes, caps.RapidUploadHashes)
+	}
+	if strings.Join(caps.UploadConflictPolicies, ",") != "rename" {
+		t.Fatalf("Guangya conflict policies = %v", caps.UploadConflictPolicies)
+	}
+	if _, ok := normalizeGuangyaMD5("ABC"); ok {
+		t.Fatal("short MD5 must be rejected")
+	}
+}
+
+func TestGuangyaRapidUploadMissPersistsCreatedTask(t *testing.T) {
+	store := &guangyaMemoryUploadStore{}
+	drive.SetUploadSessionStore(store)
+	t.Cleanup(func() { drive.SetUploadSessionStore(nil) })
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+
+	var paths []string
+	netx.TestTransportHook = guangyaRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		switch req.URL.Path {
+		case "/nd.bizuserres.s/v1/get_res_center_token":
+			return guangyaResponse(req, http.StatusOK, `{"code":0,"data":{"taskId":"task-miss","uploadUrl":"https://upload.example/object"}}`), nil
+		case "/userres/v1/check_can_flash_upload":
+			var body map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				return nil, err
+			}
+			if body["taskId"] != "task-miss" || body["md5"] != strings.Repeat("a", 32) {
+				return nil, fmt.Errorf("unexpected flash body: %#v", body)
+			}
+			return guangyaResponse(req, http.StatusOK, `{"code":0,"data":{"canFlashUpload":false}}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s", req.URL)
+		}
+	})
+
+	result, err := (&Driver{}).RapidUploadByHash(context.Background(), drive.Context{
+		UserID: "guangya:user", DriveID: "guangya:user",
+		Token: &model.TokenInfo{AccessToken: "access-token"},
+	}, drive.RapidUploadRequest{
+		ParentID: RootID, FileName: "movie.mkv", Size: 123, Method: "MD5", Hash: strings.Repeat("A", 32),
+	})
+	if err != nil {
+		t.Fatalf("RapidUploadByHash() error = %v", err)
+	}
+	if result == nil || result.Reuse {
+		t.Fatalf("rapid result = %+v, want explicit miss", result)
+	}
+	if strings.Join(paths, ",") != "/nd.bizuserres.s/v1/get_res_center_token,/userres/v1/check_can_flash_upload" {
+		t.Fatalf("request paths = %v", paths)
+	}
+	saved, ok := decodeGuangyaUploadSession(store.sessionID)
+	if !ok || saved.Data.TaskID != "task-miss" || saved.Data.UploadURL != "https://upload.example/object" {
+		t.Fatalf("saved upload session = %#v", saved)
+	}
+}
+
+func TestGuangyaRapidUploadHitWaitsForFile(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	var paths []string
+	netx.TestTransportHook = guangyaRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		switch req.URL.Path {
+		case "/nd.bizuserres.s/v1/get_res_center_token":
+			return guangyaResponse(req, http.StatusOK, `{"code":0,"data":{"taskId":"task-hit"}}`), nil
+		case "/userres/v1/check_can_flash_upload":
+			return guangyaResponse(req, http.StatusOK, `{"code":0,"data":{"canFlashUpload":true}}`), nil
+		case "/nd.bizuserres.s/v1/file/get_info_by_task_id":
+			return guangyaResponse(req, http.StatusOK, `{"code":0,"data":{"fileId":"file-hit","status":0}}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s", req.URL)
+		}
+	})
+
+	result, err := (&Driver{}).RapidUploadByHash(context.Background(), drive.Context{
+		UserID: "guangya:user", DriveID: "guangya:user",
+		Token: &model.TokenInfo{AccessToken: "access-token"},
+	}, drive.RapidUploadRequest{
+		ParentID: "folder-1", FileName: "movie.mkv", Size: 123, Method: "md5", Hash: strings.Repeat("a", 32),
+	})
+	if err != nil {
+		t.Fatalf("RapidUploadByHash() error = %v", err)
+	}
+	if result == nil || !result.Reuse || result.FileID != "file-hit" {
+		t.Fatalf("rapid result = %+v", result)
+	}
+	if len(paths) != 3 {
+		t.Fatalf("request paths = %v", paths)
+	}
+}
+
 func TestCreateShareUsesGuangyaShareAPI(t *testing.T) {
 	previous := netx.TestTransportHook
 	t.Cleanup(func() { netx.TestTransportHook = previous })

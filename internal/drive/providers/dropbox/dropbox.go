@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -30,8 +32,13 @@ const (
 	uploadSingleLimit = 150 * 1024 * 1024 // Dropbox single upload cap
 	sessionChunkSize  = 8 * 1024 * 1024
 	rpcRetryAttempts  = 3
+	listPageLimit     = 100
 	maxErrorBodyBytes = 8 * 1024
 	maxErrorDetailLen = 200
+	// An old local account may predate ProviderRootID persistence. Avoid
+	// repeatedly probing /users/get_current_account if that one recovery call
+	// is temporarily unavailable.
+	rootNamespaceProbeCooldown = 5 * time.Minute
 )
 
 const providerID = model.ProviderDropbox
@@ -75,28 +82,110 @@ type Metadata struct {
 
 // client is an authenticated Dropbox session.
 type client struct {
-	http  *netx.Client
-	token string
+	http                  *netx.Client
+	token                 string
+	rootNamespaceID       string
+	onRootNamespaceChange func(string)
 }
 
 func newClient(token string) *client {
 	return &client{http: netx.NewClientWithSystemProxy(90 * time.Second), token: token}
 }
 
+func newClientWithRoot(token, rootNamespaceID string) *client {
+	cl := newClient(token)
+	cl.rootNamespaceID = strings.TrimSpace(rootNamespaceID)
+	return cl
+}
+
 func clientOf(c drive.Context) (*client, error) {
 	if c.Token == nil || c.Token.AccessToken == "" {
 		return nil, drive.ErrUnauthorized
 	}
-	return newClient(c.Token.AccessToken), nil
+	return newClientWithRoot(c.Token.AccessToken, c.Token.ProviderRootID), nil
 }
 
-// rpc posts a JSON body to an RPC endpoint and decodes the JSON response.
-func (c *client) rpc(ctx context.Context, endpoint string, body any, out any) error {
+func (c *client) rpcHeaders() map[string]string {
 	headers := map[string]string{
 		"Authorization": "Bearer " + c.token,
 		"Content-Type":  "application/json",
 	}
-	for attempt := 0; attempt < rpcRetryAttempts; attempt++ {
+	c.applyPathRootHeader(headers)
+	return headers
+}
+
+func (c *client) contentHeaders(apiArg []byte) map[string]string {
+	headers := map[string]string{
+		"Authorization": "Bearer " + c.token,
+		"Content-Type":  "application/octet-stream",
+	}
+	if apiArg != nil {
+		headers["Dropbox-API-Arg"] = string(apiArg)
+	}
+	c.applyPathRootHeader(headers)
+	return headers
+}
+
+// applyPathRootHeader makes paths resolve from the current Dropbox root
+// namespace. It is required for Team Space accounts and harmless for regular
+// personal accounts. Marshal the header value instead of hand-building JSON so
+// a namespace identifier can never produce malformed header syntax.
+func (c *client) applyPathRootHeader(headers map[string]string) {
+	root := strings.TrimSpace(c.rootNamespaceID)
+	if root == "" {
+		return
+	}
+	payload, err := json.Marshal(struct {
+		Tag  string `json:".tag"`
+		Root string `json:"root"`
+	}{Tag: "root", Root: root})
+	if err == nil {
+		headers["Dropbox-API-Path-Root"] = string(payload)
+	}
+}
+
+func (c *client) setRootNamespaceID(root string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" || root == c.rootNamespaceID {
+		return false
+	}
+	c.rootNamespaceID = root
+	if c.onRootNamespaceChange != nil {
+		c.onRootNamespaceChange(root)
+	}
+	return true
+}
+
+// invalidDropboxRootNamespace extracts the replacement root returned by the
+// documented invalid_root response. Dropbox sends this after an account joins
+// or leaves a team, so retrying the same stale root cannot recover by itself.
+func invalidDropboxRootNamespace(body []byte) string {
+	var payload struct {
+		Error *struct {
+			Tag         string `json:".tag"`
+			InvalidRoot *struct {
+				RootNamespaceID string `json:"root_namespace_id"`
+			} `json:"invalid_root"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Error == nil || payload.Error.Tag != "invalid_root" || payload.Error.InvalidRoot == nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Error.InvalidRoot.RootNamespaceID)
+}
+
+// rpc posts a JSON body to an RPC endpoint and decodes the JSON response.
+func (c *client) rpc(ctx context.Context, endpoint string, body any, out any) error {
+	return c.rpcAttempts(ctx, endpoint, body, out, rpcRetryAttempts)
+}
+
+func (c *client) rpcAttempts(ctx context.Context, endpoint string, body any, out any, attempts int) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	rootCorrected := false
+	for attempt := 0; attempt < attempts; {
+		headers := c.rpcHeaders()
 		resp, err := c.http.Do(ctx, http.MethodPost, apiHost+endpoint, headers, netx.JSONBody(body))
 		if err != nil {
 			return fmt.Errorf("dropbox: %s request failed: %w", endpoint, err)
@@ -121,13 +210,19 @@ func (c *client) rpc(ctx context.Context, endpoint string, body any, out any) er
 			return json.Unmarshal(data, out)
 		}
 
+		if status == http.StatusUnprocessableEntity && !rootCorrected && c.setRootNamespaceID(invalidDropboxRootNamespace(data)) {
+			rootCorrected = true
+			continue
+		}
+
 		apiErr := newDropboxRPCError(endpoint, status, requestID, data)
-		if !retryableDropboxStatus(status) || attempt == rpcRetryAttempts-1 {
+		if !retryableDropboxStatus(status) || attempt+1 >= attempts {
 			return apiErr
 		}
 		if err := waitRetry(ctx, delay); err != nil {
 			return err
 		}
+		attempt++
 	}
 	return errors.New("dropbox: RPC request failed")
 }
@@ -137,10 +232,19 @@ func newDropboxRPCError(endpoint string, status int, requestID string, body []by
 	var errBody struct {
 		ErrorSummary string `json:"error_summary"`
 	}
+	detail := ""
 	if json.Unmarshal(body, &errBody) == nil {
-		if summary := compactDropboxDetail(strings.TrimPrefix(errBody.ErrorSummary, "path/")); summary != "" {
-			message += ": " + summary
-		}
+		detail = compactDropboxDetail(strings.TrimPrefix(errBody.ErrorSummary, "path/"))
+	}
+	// Some edge/CDN responses have no Dropbox error_summary at all. Preserve a
+	// short compact body so an HTTP 400 can still distinguish malformed paths,
+	// expired credentials, and an upstream proxy error without dumping a full
+	// response into the task log.
+	if detail == "" {
+		detail = compactDropboxDetail(string(body))
+	}
+	if detail != "" {
+		message += ": " + detail
 	}
 	if requestID != "" {
 		message += " (request_id=" + requestID + ")"
@@ -176,7 +280,7 @@ func (c *client) ListPage(ctx context.Context, parentID, cursor string) ([]Metad
 		path = parentID
 	}
 	var resp listFolderResp
-	err := c.rpc(ctx, "/files/list_folder", map[string]any{
+	body := map[string]any{
 		// Keep the initial listing payload to the stable fields accepted by both
 		// personal and team accounts. Some Dropbox accounts return a server-side
 		// 500 for include_mounted_folders=true even though a normal root listing
@@ -184,8 +288,19 @@ func (c *client) ListPage(ctx context.Context, parentID, cursor string) ([]Metad
 		"path": path, "recursive": false, "include_media_info": false,
 		"include_deleted": false, "include_has_explicit_shared_members": false,
 		"include_mounted_folders": false, "include_non_downloadable_files": false,
-		"limit": 2000,
-	}, &resp)
+		"limit": listPageLimit,
+	}
+	err := c.rpc(ctx, "/files/list_folder", body, &resp)
+	// A subset of Dropbox accounts intermittently returns HTTP 500 for the
+	// extended list_folder payload. Retry once with the minimal documented
+	// payload so the first navigation can still succeed without increasing the
+	// request count for healthy accounts.
+	if err != nil && strings.Contains(err.Error(), "/files/list_folder http 500") {
+		resp = listFolderResp{}
+		err = c.rpcAttempts(ctx, "/files/list_folder", map[string]any{
+			"path": path, "recursive": false,
+		}, &resp, 1)
+	}
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -297,7 +412,10 @@ func (c *client) Mkdir(ctx context.Context, parent, name string) (*drive.MkdirRe
 	var resp struct {
 		Metadata Metadata `json:"metadata"`
 	}
-	path := resolveCommandPath(parent, "", "")
+	path, err := c.mkdirParentPath(ctx, parent)
+	if err != nil {
+		return &drive.MkdirResult{Error: err.Error()}, nil
+	}
 	if path == "" {
 		path = "/" + name
 	} else {
@@ -311,6 +429,29 @@ func (c *client) Mkdir(ctx context.Context, parent, name string) (*drive.MkdirRe
 		id = resp.Metadata.PathDisplay
 	}
 	return &drive.MkdirResult{FileID: id}, nil
+}
+
+// mkdirParentPath converts a Dropbox folder id to its display path before
+// calling create_folder_v2. Dropbox accepts id:path syntax for file uploads,
+// but create_folder_v2 requires a normal path (or the root path).
+func (c *client) mkdirParentPath(ctx context.Context, parent string) (string, error) {
+	path := resolveCommandPath(parent, "", "")
+	if !strings.HasPrefix(path, "id:") {
+		return path, nil
+	}
+
+	metadata, err := c.Detail(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("dropbox: resolve mkdir parent %q: %w", parent, err)
+	}
+	path = metadata.PathDisplay
+	if path == "" {
+		path = metadata.PathLower
+	}
+	if path == "" {
+		return "", fmt.Errorf("dropbox: resolve mkdir parent %q: folder has no path", parent)
+	}
+	return path, nil
 }
 
 // Rename moves path to new name in place (autorename).
@@ -471,31 +612,45 @@ func mapSharedLink(l sharedLinkMetadata, path, pwd string) *model.ShareItem {
 
 // UploadSmall PUTs a file ≤150MB.
 func (c *client) UploadSmall(ctx context.Context, path string, r io.Reader, size int64, policy uploadPolicy) (string, error) {
+	if size < 0 {
+		return "", fmt.Errorf("dropbox: invalid upload size: %d", size)
+	}
 	arg, _ := json.Marshal(map[string]any{
 		"path": path, "mode": policy.mode, "autorename": policy.autorename, "mute": false,
 		"strict_conflict": policy.strictConflict,
 	})
-	headers := map[string]string{
-		"Authorization":   "Bearer " + c.token,
-		"Content-Type":    "application/octet-stream",
-		"Dropbox-API-Arg": string(arg),
-	}
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			if seeker, ok := r.(io.Seeker); ok {
-				if _, err := seeker.Seek(0, io.SeekStart); err != nil {
-					return "", err
-				}
+	rootCorrected := false
+	needsRewind := false
+	for attempt := 0; attempt < 3; {
+		if needsRewind {
+			seeker, ok := r.(io.Seeker)
+			if !ok {
+				return "", errors.New("dropbox: upload retry requires a seekable source")
+			}
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return "", err
 			}
 		}
-		resp, err := c.http.Do(ctx, http.MethodPost, contentHost+"/files/upload", headers, r)
+		headers := c.contentHeaders(arg)
+		// Migration spools the source into an *os.File. http.NewRequest cannot
+		// infer its size and silently falls back to chunked transfer encoding;
+		// Dropbox's content endpoint expects the concrete file length instead.
+		resp, err := c.http.DoWithContentLength(ctx, http.MethodPost, contentHost+"/files/upload", headers, r, size)
 		if err != nil {
 			return "", err
 		}
-		data, _ := io.ReadAll(resp.Body)
+		reader := io.Reader(resp.Body)
+		if resp.StatusCode >= http.StatusBadRequest {
+			reader = io.LimitReader(resp.Body, maxErrorBodyBytes)
+		}
+		data, readErr := io.ReadAll(reader)
 		status := resp.StatusCode
+		requestID := compactDropboxDetail(resp.Header.Get("X-Dropbox-Request-Id"))
 		delay := retryAfter(resp, attempt)
 		resp.Body.Close()
+		if readErr != nil {
+			return "", fmt.Errorf("dropbox: upload response read failed: %w", readErr)
+		}
 		if status < 400 {
 			var item Metadata
 			if err := json.Unmarshal(data, &item); err != nil {
@@ -506,12 +661,19 @@ func (c *client) UploadSmall(ctx context.Context, path string, r io.Reader, size
 			}
 			return item.ID, nil
 		}
-		if !retryableDropboxStatus(status) || attempt == 2 {
-			return "", fmt.Errorf("dropbox: upload http %d: %s", status, strings.TrimSpace(string(data)))
+		if status == http.StatusUnprocessableEntity && !rootCorrected && c.setRootNamespaceID(invalidDropboxRootNamespace(data)) {
+			rootCorrected = true
+			needsRewind = true
+			continue
+		}
+		if !retryableDropboxStatus(status) || attempt+1 >= 3 {
+			return "", newDropboxRPCError("/files/upload", status, requestID, data)
 		}
 		if err := waitRetry(ctx, delay); err != nil {
 			return "", err
 		}
+		attempt++
+		needsRewind = true
 	}
 	return "", errors.New("dropbox: upload failed")
 }
@@ -677,36 +839,44 @@ func (c *client) sessionFinish(ctx context.Context, sessID string, offset int64,
 }
 
 func (c *client) contentJSON(ctx context.Context, endpoint string, apiArg []byte, chunk []byte, out any) error {
-	headers := map[string]string{
-		"Authorization": "Bearer " + c.token,
-		"Content-Type":  "application/octet-stream",
-	}
-	if apiArg != nil {
-		headers["Dropbox-API-Arg"] = string(apiArg)
-	}
-	for attempt := 0; attempt < 3; attempt++ {
+	rootCorrected := false
+	for attempt := 0; attempt < 3; {
+		headers := c.contentHeaders(apiArg)
 		resp, err := c.http.Do(ctx, http.MethodPost, contentHost+endpoint, headers, bytesReader(chunk))
 		if err != nil {
 			return err
 		}
-		data, _ := io.ReadAll(resp.Body)
+		reader := io.Reader(resp.Body)
+		if resp.StatusCode >= http.StatusBadRequest {
+			reader = io.LimitReader(resp.Body, maxErrorBodyBytes)
+		}
+		data, readErr := io.ReadAll(reader)
 		status := resp.StatusCode
+		requestID := compactDropboxDetail(resp.Header.Get("X-Dropbox-Request-Id"))
 		delay := retryAfter(resp, attempt)
 		resp.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("dropbox: %s response read failed: %w", endpoint, readErr)
+		}
 		if status < 400 {
 			if out != nil {
 				return json.Unmarshal(data, out)
 			}
 			return nil
 		}
-		if !retryableDropboxStatus(status) || attempt == 2 {
-			return fmt.Errorf("dropbox: %s http %d: %s", endpoint, status, strings.TrimSpace(string(data)))
+		if status == http.StatusUnprocessableEntity && !rootCorrected && c.setRootNamespaceID(invalidDropboxRootNamespace(data)) {
+			rootCorrected = true
+			continue
+		}
+		if !retryableDropboxStatus(status) || attempt+1 >= 3 {
+			return newDropboxRPCError(endpoint, status, requestID, data)
 		}
 		if err := waitRetry(ctx, delay); err != nil {
 			return err
 		}
+		attempt++
 	}
-	return nil
+	return errors.New("dropbox: content request failed")
 }
 
 type uploadPolicy struct {
@@ -720,12 +890,18 @@ func retryableDropboxStatus(status int) bool {
 }
 
 func retryAfter(resp *http.Response, attempt int) time.Duration {
+	// Exponential backoff is the floor even when Dropbox sends Retry-After=0.
+	// A small random jitter prevents concurrent clients from retrying in lockstep.
+	delay := time.Duration(1<<attempt) * 500 * time.Millisecond
 	if raw := strings.TrimSpace(resp.Header.Get("Retry-After")); raw != "" {
 		if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
-			return time.Duration(seconds) * time.Second
+			serverDelay := time.Duration(seconds) * time.Second
+			if serverDelay > delay {
+				delay = serverDelay
+			}
 		}
 	}
-	return time.Duration(1<<attempt) * 500 * time.Millisecond
+	return delay + time.Duration(100+rand.Intn(901))*time.Millisecond
 }
 
 func waitRetry(ctx context.Context, delay time.Duration) error {
@@ -880,12 +1056,15 @@ func dropboxExpireTime(expiresIn int64) string {
 	return time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
 }
 
-// fetchDropboxProfile queries users/get_current_account and
-// users/get_space_usage to populate the token's UserName, avatar, and quota.
-func fetchDropboxProfile(ctx context.Context, accessToken string, tok *model.TokenInfo) {
+// fetchDropboxCurrentAccount loads the identity and root namespace without a
+// storage-quota request. Legacy accounts use it once, lazily, before their
+// first file operation so their first list request has the same context as a
+// newly authorized account.
+func fetchDropboxCurrentAccount(ctx context.Context, accessToken string, tok *model.TokenInfo) error {
+	if tok == nil {
+		return errors.New("dropbox: token is nil")
+	}
 	cl := newClient(accessToken)
-
-	// account info
 	var acct struct {
 		AccountID       string `json:"account_id"`
 		Email           string `json:"email"`
@@ -893,21 +1072,87 @@ func fetchDropboxProfile(ctx context.Context, accessToken string, tok *model.Tok
 		Name            *struct {
 			DisplayName string `json:"display_name"`
 		} `json:"name"`
+		RootInfo *struct {
+			RootNamespaceID string `json:"root_namespace_id"`
+		} `json:"root_info"`
 	}
-	if err := cl.rpc(ctx, "/users/get_current_account", nil, &acct); err == nil {
-		if acct.Name != nil && acct.Name.DisplayName != "" {
-			tok.UserName = acct.Name.DisplayName
-			tok.NickName = acct.Name.DisplayName
-		} else if acct.Email != "" {
-			tok.UserName = acct.Email
-		}
-		if acct.ProfilePhotoURL != "" {
-			tok.Avatar = acct.ProfilePhotoURL
-		}
-		if acct.AccountID != "" {
-			tok.ProviderAccountID = acct.AccountID
+	if err := cl.rpc(ctx, "/users/get_current_account", nil, &acct); err != nil {
+		return err
+	}
+	if acct.Name != nil && acct.Name.DisplayName != "" {
+		tok.UserName = acct.Name.DisplayName
+		tok.NickName = acct.Name.DisplayName
+	} else if acct.Email != "" {
+		tok.UserName = acct.Email
+	}
+	if acct.ProfilePhotoURL != "" {
+		tok.Avatar = acct.ProfilePhotoURL
+	}
+	if acct.AccountID != "" {
+		tok.ProviderAccountID = acct.AccountID
+	}
+	if acct.RootInfo != nil {
+		if root := strings.TrimSpace(acct.RootInfo.RootNamespaceID); root != "" {
+			tok.ProviderRootID = root
 		}
 	}
+	return nil
+}
+
+var dropboxRootNamespaceProbeState = struct {
+	sync.Mutex
+	next map[string]time.Time
+}{next: make(map[string]time.Time)}
+
+func rootNamespaceProbeKey(accessToken string) string {
+	sum := sha256.Sum256([]byte(accessToken))
+	return hex.EncodeToString(sum[:])
+}
+
+func claimDropboxRootNamespaceProbe(accessToken string) bool {
+	key := rootNamespaceProbeKey(accessToken)
+	now := time.Now()
+	dropboxRootNamespaceProbeState.Lock()
+	defer dropboxRootNamespaceProbeState.Unlock()
+	for staleKey, until := range dropboxRootNamespaceProbeState.next {
+		if !until.After(now) {
+			delete(dropboxRootNamespaceProbeState.next, staleKey)
+		}
+	}
+	if until, ok := dropboxRootNamespaceProbeState.next[key]; ok && until.After(now) {
+		return false
+	}
+	dropboxRootNamespaceProbeState.next[key] = now.Add(rootNamespaceProbeCooldown)
+	return true
+}
+
+func clearDropboxRootNamespaceProbe(accessToken string) {
+	dropboxRootNamespaceProbeState.Lock()
+	delete(dropboxRootNamespaceProbeState.next, rootNamespaceProbeKey(accessToken))
+	dropboxRootNamespaceProbeState.Unlock()
+}
+
+func ensureDropboxRootNamespace(ctx context.Context, tok *model.TokenInfo) {
+	if tok == nil || strings.TrimSpace(tok.AccessToken) == "" || strings.TrimSpace(tok.ProviderRootID) != "" {
+		return
+	}
+	if !claimDropboxRootNamespaceProbe(tok.AccessToken) {
+		return
+	}
+	if fetchDropboxCurrentAccount(ctx, tok.AccessToken, tok) == nil && strings.TrimSpace(tok.ProviderRootID) != "" {
+		clearDropboxRootNamespaceProbe(tok.AccessToken)
+	}
+}
+
+// fetchDropboxProfile queries users/get_current_account and
+// users/get_space_usage to populate the token's UserName, avatar, quota, and
+// root namespace.
+func fetchDropboxProfile(ctx context.Context, accessToken string, tok *model.TokenInfo) {
+	if tok == nil {
+		return
+	}
+	_ = fetchDropboxCurrentAccount(ctx, accessToken, tok)
+	cl := newClient(accessToken)
 
 	// space usage
 	var space struct {
@@ -984,7 +1229,7 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileI
 	if method != "dropbox" {
 		return "", nil
 	}
-	cl, err := clientOf(c)
+	cl, err := d.client(ctx, c)
 	if err != nil {
 		return "", err
 	}

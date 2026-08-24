@@ -42,6 +42,7 @@ const PREFS_DEFAULTS = {
   sideWidth: 220,         // 网盘侧边栏宽度（px）
   accountAliases: {},     // 账号本地自定义昵称 { [userId]: alias }
   accountIcons: {},       // 账号本地自定义图标 { [userId]: iconFileName }
+  accountOrder: [],       // 全局账号显示顺序（侧边栏拖拽后同步到所有入口）
 }
 
 export function getPrefs() {
@@ -59,6 +60,35 @@ export function setPref(key, value) {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('mnemo:prefs-changed', { detail: { key, value } }))
   }
+}
+
+// 账号顺序由侧边栏维护，但不能只作用在侧边栏。所有账号选择器、迁移目标、
+// 同步和分享入口都应复用这里的稳定排序，避免相同账号在不同页面出现顺序不一致。
+// 新格式以 user_id + drive_id 区分多挂载盘；同时兼容早期仅保存 user_id 的偏好。
+export function accountOrderKey(account) {
+  const userId = String(account?.user_id || '').trim()
+  const driveId = String(account?.drive_id || '').trim()
+  return driveId ? `${userId}\u0000${driveId}` : userId
+}
+
+export function orderAccounts(accounts, order = getPrefs().accountOrder) {
+  const source = Array.isArray(accounts) ? accounts.filter(Boolean) : []
+  const saved = Array.isArray(order) ? order.map((item) => String(item || '').trim()).filter(Boolean) : []
+  if (!source.length || !saved.length) return [...source]
+
+  const rank = new Map()
+  saved.forEach((key, index) => {
+    if (!rank.has(key)) rank.set(key, index)
+  })
+  return source
+    .map((account, index) => {
+      const key = accountOrderKey(account)
+      const legacyKey = String(account?.user_id || '').trim()
+      const position = rank.has(key) ? rank.get(key) : rank.get(legacyKey)
+      return { account, index, position: Number.isInteger(position) ? position : Number.MAX_SAFE_INTEGER }
+    })
+    .sort((a, b) => a.position - b.position || a.index - b.index)
+    .map(({ account }) => account)
 }
 
 // ---------- 账号本地自定义昵称与图标（仅在本机显示，不影响远端） ----------

@@ -10,13 +10,50 @@ const api = vi.hoisted(() => ({
   validateMountedWrite: vi.fn(),
   SendGuangyaSms: vi.fn(),
   SendPan139SMS: vi.fn(),
+  SendPan189SMS: vi.fn(),
   providerIconUrl: vi.fn(() => ''),
   OpenBrowser: vi.fn(),
   onEvent: vi.fn(() => () => {}),
   ClosePikPakCaptcha: vi.fn(),
   refreshAccount: vi.fn(),
   refreshAccountNow: vi.fn(),
+  listDir: vi.fn(),
+  listTrash: vi.fn(),
+  search: vi.fn(),
+  mkdir: vi.fn(),
+  rename: vi.fn(),
+  trash: vi.fn(),
+  remove: vi.fn(),
+  restore: vi.fn(),
+  move: vi.fn(),
+  copy: vi.fn(),
+  favorite: vi.fn(),
+  createShare: vi.fn(),
+  uploadFiles: vi.fn(),
+  validateUploadFiles: vi.fn(),
+  migrateFiles: vi.fn(),
+  download: vi.fn(),
+  AddFavorite: vi.fn(),
+  RemoveFavorite: vi.fn(),
+  ListFavorites: vi.fn(),
+  OfflineDownload: vi.fn(),
+  PickDirectory: vi.fn(),
+  PickFiles: vi.fn(),
+  formatTime: vi.fn(() => ''),
+  formatTimeParts: vi.fn(() => ({ date: '', clock: '' })),
+  iconOf: vi.fn(() => ''),
+  extOf: vi.fn(() => ''),
+  openKindOf: vi.fn(() => ''),
+  copyText: vi.fn(),
+  capsOf: vi.fn(() => ({})),
+  GetDirectoryCache: vi.fn(),
+  SaveDirectoryCache: vi.fn(),
+  DeleteDirectoryCache: vi.fn(),
+  ListDirPage: vi.fn(),
+  onFileChange: vi.fn(() => () => {}),
+  notifyFileChange: vi.fn(),
   accountName: vi.fn((account) => account?.user_id || ''),
+  providerOf: vi.fn((userId) => String(userId || '').split(/[_:]/, 1)[0]),
   providerMetaOf: vi.fn(() => ({ key: 'webdav', label: 'WebDAV' })),
   formatBytes: vi.fn((value) => `${value} B`),
 }))
@@ -30,9 +67,18 @@ vi.mock('../logger', () => ({
   errorText: vi.fn((value) => String(value)),
   configKeys: vi.fn(() => []),
 }))
+vi.mock('../appearance', () => ({
+  getPrefs: vi.fn(() => ({ accountOrder: [] })),
+  setPref: vi.fn(),
+  accountOrderKey: vi.fn((account) => account?.user_id || ''),
+  orderAccounts: vi.fn((accounts) => [...(accounts || [])]),
+}))
 
 import LoginModal from './LoginModal.vue'
 import AccountAvatar from './AccountAvatar.vue'
+import AccountRail from './AccountRail.vue'
+import PanView from '../views/PanView.vue'
+import { warn as logWarn } from '../logger'
 
 const storage = new Map()
 Object.defineProperty(globalThis, 'localStorage', {
@@ -69,6 +115,52 @@ afterEach(async () => {
 })
 
 describe('关键交互组件', () => {
+  it('账号列右键“自定义”会把对应账号传给父组件', async () => {
+    const account = { user_id: 'dropbox_account-1', drive_id: 'root', token: { user_name: 'Dropbox' } }
+    const wrapper = mountAttached(AccountRail, {
+      props: {
+        accounts: [account],
+        providers: [{ ID: 'dropbox', Meta: { label: 'Dropbox', icon: 'drive-icons/dropbox.svg' } }],
+        current: account,
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+
+    await wrapper.get('.rail-item').trigger('contextmenu', { clientX: 80, clientY: 96 })
+    await nextTick()
+
+    const entries = [...document.body.querySelectorAll('.ctx-item')]
+    expect(entries.map((entry) => entry.textContent.trim())).toEqual(['账号信息', '自定义', '移除账号'])
+    await entries[1].click()
+    await nextTick()
+
+    expect(wrapper.emitted('rename')).toEqual([[account]])
+  })
+
+  it('侧栏切换账号后文件页自动加载新账号目录，无需手动刷新', async () => {
+    const first = { user_id: 'pikpak_first', drive_id: 'pikpak:first', token: { user_name: 'first' } }
+    const second = { user_id: 'dropbox_second', drive_id: 'dropbox:second', token: { user_name: 'second' } }
+    api.GetDirectoryCache.mockResolvedValue(null)
+    api.ListFavorites.mockResolvedValue([])
+    api.ListDirPage.mockImplementation(async (userId, driveId, dirId) => ({
+      items: [{ file_id: `${userId}-${dirId}`, drive_id: driveId, name: `文件-${userId}`, isDir: false, size: 1 }],
+      nextMarker: '',
+    }))
+
+    const wrapper = mountAttached(PanView, {
+      props: { account: first, accounts: [first, second], providers: [] },
+      shallow: true,
+    })
+    await vi.waitFor(() => {
+      expect(api.ListDirPage).toHaveBeenCalledWith(first.user_id, first.drive_id, 'root', '')
+    })
+
+    await wrapper.setProps({ account: second, accounts: [first, second] })
+    await vi.waitFor(() => {
+      expect(api.ListDirPage).toHaveBeenCalledWith(second.user_id, second.drive_id, 'root', '')
+    })
+  })
+
   it('弹窗声明对话框语义，并由 Escape 请求关闭和恢复焦点', async () => {
     const opener = document.createElement('button')
     document.body.appendChild(opener)
@@ -227,6 +319,7 @@ describe('关键交互组件', () => {
     })
     await nextTick()
 
+    expect(document.body.querySelector('.lf-title')?.textContent).toBe('移动云盘')
     const inputForLabel = (label) => [...document.body.querySelectorAll('.login-field')]
       .find((field) => field.querySelector('label')?.textContent === label)
       ?.querySelector('input')
@@ -256,6 +349,68 @@ describe('关键交互组件', () => {
     expect(api.login).toHaveBeenCalledTimes(2)
     expect(api.login.mock.calls[1][0]).toBe('pan139')
     expect(api.login.mock.calls[1][1]).toMatchObject({ login_mode: 'sms', username: '13800138000', sms_code: '123456' })
+  })
+
+  it('天翼云盘短信失败只在表单展示，重试后可用验证码登录', async () => {
+    localStorage.setItem('login_provider', 'pan189')
+    api.SendPan189SMS
+      .mockRejectedValueOnce(new Error('短信发送失败'))
+      .mockResolvedValueOnce(undefined)
+    api.login.mockResolvedValue(undefined)
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [{
+          ID: 'pan189', Meta: { label: '189 云盘' }, Login: { fields: [
+            { key: 'login_mode', type: 'select', label: '登录方式', required: true, options: [
+              { value: 'password', label: '账号密码' },
+              { value: 'sms', label: '短信验证码' },
+            ] },
+            { key: 'username', type: 'text', label: '手机号/邮箱', required: true },
+            { key: 'password', type: 'password', label: '密码', required: false },
+            { key: 'sms_code', type: 'text', label: '短信验证码', required: false },
+            { key: 'cloud_type', type: 'select', label: '云空间', required: false, options: [] },
+            { key: 'validate_code', type: 'text', label: '图形验证码', required: false },
+          ] },
+        }],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+
+    expect(document.body.querySelector('.lf-title')?.textContent).toBe('天翼云盘')
+    const loginMode = wrapper.findAllComponents(UiSelect)
+      .find((select) => select.props('options')?.some((option) => option.value === 'sms'))
+    loginMode.vm.$emit('update:modelValue', 'sms')
+    await nextTick()
+    expect(document.body.querySelector('.lf-sub')?.textContent).toBe('短信验证码登录')
+
+    const fieldForLabel = (label) => [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent === label)
+    const inputForLabel = (label) => fieldForLabel(label)?.querySelector('input')
+    expect(fieldForLabel('密码').style.display).toBe('none')
+    expect(fieldForLabel('短信验证码').style.display).not.toBe('none')
+
+    await setDomInput(inputForLabel('手机号/邮箱'), '18900000000')
+    const sendButton = [...fieldForLabel('短信验证码').querySelectorAll('button')]
+      .find((button) => button.textContent.includes('获取验证码'))
+    await sendButton.click()
+    await Promise.resolve()
+    await nextTick()
+    expect(document.body.querySelector('.form-error')?.textContent).toContain('短信发送失败')
+    expect(logWarn).not.toHaveBeenCalled()
+
+    await sendButton.click()
+    await Promise.resolve()
+    expect(api.SendPan189SMS).toHaveBeenCalledTimes(2)
+    expect(api.SendPan189SMS).toHaveBeenLastCalledWith('18900000000')
+
+    await setDomInput(inputForLabel('短信验证码'), '654321')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await Promise.resolve()
+    await nextTick()
+    expect(api.login).toHaveBeenCalledWith('pan189', expect.objectContaining({
+      login_mode: 'sms', username: '18900000000', sms_code: '654321', cloud_type: 'personal',
+    }))
   })
 
   it('S3 默认不做写入验证和内网预览授权，保存时只提交一次连接配置', async () => {
@@ -326,20 +481,170 @@ describe('关键交互组件', () => {
     await nextTick()
   })
 
+  it('登录失败由后端操作边界统一记录，表单只展示错误而不重复告警', async () => {
+    localStorage.setItem('login_provider', 'pikpak')
+    api.login.mockRejectedValueOnce(new Error('PikPak risk control'))
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [{
+          ID: 'pikpak',
+          Meta: { label: 'PikPak' },
+          Login: { fields: [
+            { key: 'username', type: 'text', label: '账号', required: true },
+            { key: 'password', type: 'password', label: '密码', required: true },
+          ] },
+        }],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+
+    const fieldInput = (label) => [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent.startsWith(label))
+      ?.querySelector('input')
+    await setDomInput(fieldInput('账号'), 'first@example.com')
+    await setDomInput(fieldInput('密码'), 'secret')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain('PikPak 暂时限制了登录请求'))
+    expect(logWarn).not.toHaveBeenCalled()
+    expect(wrapper.exists()).toBe(true)
+  })
+
+  it('PikPak 验证内嵌在登录页，并把最终 token 原样续接登录', async () => {
+    localStorage.setItem('login_provider', 'pikpak')
+    let onCaptchaCompleted
+    api.onEvent.mockImplementation((event, listener) => {
+      if (event === 'pikpak:captcha:completed') onCaptchaCompleted = listener
+      return () => {}
+    })
+    api.ClosePikPakCaptcha.mockResolvedValue(undefined)
+    api.login
+      .mockRejectedValueOnce(new Error('pikpak: captcha_required\nurl=https://captcha.example/challenge\ntoken=initial-token\nsession=session-1\ncallback=http://127.0.0.1:4567/callback/session-1'))
+      .mockResolvedValueOnce(undefined)
+
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [{
+          ID: 'pikpak',
+          Meta: { label: 'PikPak' },
+          Login: { fields: [
+            { key: 'username', type: 'text', label: '账号', required: true },
+            { key: 'password', type: 'password', label: '密码', required: true },
+          ] },
+        }],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+
+    const fieldInput = (label) => [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent.startsWith(label))
+      ?.querySelector('input')
+    await setDomInput(fieldInput('账号'), 'first@example.com')
+    await setDomInput(fieldInput('密码'), 'secret')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      expect(api.login).toHaveBeenCalledTimes(1)
+      const frame = document.querySelector('iframe.captcha-frame')
+      expect(frame).not.toBeNull()
+      expect(frame.getAttribute('src')).toContain('https://captcha.example/challenge')
+      expect(frame.getAttribute('src')).toContain('redirect_uri=')
+      expect(document.body.textContent).toContain('请在下方完成安全验证')
+    })
+    expect(onCaptchaCompleted).toEqual(expect.any(Function))
+
+    onCaptchaCompleted({ session_id: 'session-1', captcha_token: 'verified-token' })
+    await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(2))
+    expect(api.login.mock.calls[1][0]).toBe('pikpak')
+    expect(api.login.mock.calls[1][1]).toMatchObject({
+      username: 'first@example.com',
+      password: 'secret',
+      captcha_token: 'verified-token',
+      captcha_verified: 'true',
+    })
+    expect(api.login.mock.calls[1][1]).not.toHaveProperty('captcha_requires_confirmation')
+    await vi.waitFor(() => expect(wrapper.emitted('close')).toHaveLength(1))
+  })
+
+  it('PikPak 登录仅短暂禁用按钮，超过一小时的重试提示不在本地锁定', async () => {
+    localStorage.setItem('login_provider', 'pikpak')
+    api.login.mockRejectedValueOnce(new Error('PikPak login requests are rate limited; retry after 8 seconds'))
+    const wrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [{
+          ID: 'pikpak',
+          Meta: { label: 'PikPak' },
+          Login: { fields: [
+            { key: 'username', type: 'text', label: '账号', required: true },
+            { key: 'password', type: 'password', label: '密码', required: true },
+          ] },
+        }],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+    const fieldInput = (label) => [...document.body.querySelectorAll('.login-field')]
+      .find((field) => field.querySelector('label')?.textContent.startsWith(label))
+      ?.querySelector('input')
+    await setDomInput(fieldInput('账号'), 'first@example.com')
+    await setDomInput(fieldInput('密码'), 'secret')
+    const form = document.body.querySelector('form')
+    const loginButton = () => document.body.querySelector('.login-actions .primary')
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      expect(loginButton().disabled).toBe(true)
+      expect(document.body.textContent).toContain('等待 8 秒后再试')
+    })
+
+    // 关闭第一轮弹窗会清理短计时器；下一轮用长 Retry-After 验证不会
+    // 把按钮变为不可用，避免让真实计时器拖慢测试。
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    await nextTick()
+
+    api.login.mockRejectedValueOnce(new Error('PikPak login requests are rate limited; retry after 3600 seconds'))
+    const longWaitWrapper = mountAttached(LoginModal, {
+      props: {
+        providers: [{
+          ID: 'pikpak',
+          Meta: { label: 'PikPak' },
+          Login: { fields: [
+            { key: 'username', type: 'text', label: '账号', required: true },
+            { key: 'password', type: 'password', label: '密码', required: true },
+          ] },
+        }],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+    await setDomInput(fieldInput('账号'), 'first@example.com')
+    await setDomInput(fieldInput('密码'), 'secret')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      expect(document.body.querySelector('.login-actions .primary').disabled).toBe(false)
+      expect(document.body.textContent).toContain('请稍后重试')
+    })
+    expect(longWaitWrapper.exists()).toBe(true)
+  })
+
   it('账号容量在启动同步，并支持右上角手动同步', async () => {
     vi.useFakeTimers()
+    api.refreshAccount.mockResolvedValue({ user_id: 'quota-dedupe', token: {}, usage: { size: 100, used: 20 } })
     api.refreshAccountNow.mockResolvedValue({ user_id: 'quota-dedupe', token: {}, usage: { size: 100, used: 20 } })
     const account = { user_id: 'quota-dedupe', token: {}, usage: null }
     const wrapper = mountAttached(AccountAvatar, { props: { account, providers: [] }, global: { stubs: { UiIcon: true } } })
 
     await vi.runAllTicks()
-    expect(api.refreshAccountNow).toHaveBeenCalledTimes(1)
+    expect(api.refreshAccount).toHaveBeenCalledTimes(1)
+    expect(api.refreshAccountNow).not.toHaveBeenCalled()
     await wrapper.get('.acc-ava').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(120)
     const refreshButton = document.querySelector('.ap-refresh')
     expect(refreshButton).not.toBeNull()
     refreshButton.click()
     await vi.runAllTicks()
-    expect(api.refreshAccountNow).toHaveBeenCalledTimes(2)
+    expect(api.refreshAccountNow).toHaveBeenCalledTimes(1)
   })
 })

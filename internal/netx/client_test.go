@@ -3,10 +3,25 @@ package netx
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestProxyTransportIsReused(t *testing.T) {
+	const proxyURL = "http://127.0.0.1:7890"
+	first := NewClient(time.Second).WithProxy(proxyURL)
+	second := NewClient(2 * time.Second).WithProxy(proxyURL)
+	if first.HTTP.Transport != second.HTTP.Transport {
+		t.Fatal("clients using the same proxy did not share a connection pool")
+	}
+	if first.HTTP.Timeout == second.HTTP.Timeout {
+		t.Fatal("shared transport unexpectedly replaced per-client timeout")
+	}
+}
 
 func TestClientDoCancelsBlockedTransport(t *testing.T) {
 	started := make(chan struct{}, 1)
@@ -39,6 +54,45 @@ func TestClientDoCancelsBlockedTransport(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Do did not return after cancellation")
+	}
+}
+
+func TestClientDoWithContentLengthKeepsFileUploadOutOfChunkedMode(t *testing.T) {
+	path := t.TempDir() + "/payload.bin"
+	if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	previous := TestTransportHook
+	TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.ContentLength != 4 {
+			return nil, errors.New("content length was not propagated")
+		}
+		for _, encoding := range req.TransferEncoding {
+			if strings.EqualFold(encoding, "chunked") {
+				return nil, errors.New("known-length file upload unexpectedly used chunked encoding")
+			}
+		}
+		body, readErr := io.ReadAll(req.Body)
+		if readErr != nil || string(body) != "data" {
+			return nil, errors.New("request body changed")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}")), Request: req}, nil
+	})
+	t.Cleanup(func() { TestTransportHook = previous })
+
+	resp, err := NewClient(time.Minute).DoWithContentLength(context.Background(), http.MethodPost, "https://upload.example/content", nil, f, 4)
+	if err != nil {
+		t.Fatalf("DoWithContentLength() error = %v", err)
+	}
+	resp.Body.Close()
+	if _, err := NewClient(time.Minute).DoWithContentLength(context.Background(), http.MethodPost, "https://upload.example/content", nil, strings.NewReader("x"), -1); err == nil {
+		t.Fatal("negative content length unexpectedly succeeded")
 	}
 }
 

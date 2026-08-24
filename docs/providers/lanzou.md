@@ -97,7 +97,9 @@ search, copy, recycleBin, trashView: false
 
 ## 9. 搜索 / ProvideHashes
 
-❌ 均无（设计）。`lanzou.go:12-21` NewCapabilities 第三参数 nil。
+❌ 均无（设计）。`lanzou.go` 未声明 `ProvideHashes` 或 `RapidUploadHashes`，也未实现 `ResolveTransferHash` / `RapidUploadByHash`。
+
+普通蓝奏上传会把完整文件组装为 multipart 请求并提交 `html5up.php`，上游接口没有可供统一迁移引擎使用的哈希预检或按指纹创建文件流程。因此 Lanzou 既不能作为跨盘秒传源，也不能作为跨盘秒传目标；迁移会使用常规下载和上传回退。
 
 ---
 

@@ -1,7 +1,8 @@
 <script setup>
 // 分享记录页：聚合全部账号的分享历史，按网盘 + 账号分组展示。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare, cancelShare } from '../api'
+import { ListShareHistory, OpenBrowser, onEvent, notifyFileChange, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare, cancelShare } from '../api'
+import { orderAccounts } from '../appearance'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import Modal from '../components/Modal.vue'
@@ -40,7 +41,8 @@ const importSelected = ref([])
 const importDirPick = ref(false)
 const importDir = ref({ id: 'root', name: '根目录' })
 
-const importAccounts = computed(() => (props.accounts || []).filter((account) => capsOf(account, props.providers).importShare))
+const orderedAccounts = computed(() => orderAccounts(props.accounts))
+const importAccounts = computed(() => orderedAccounts.value.filter((account) => capsOf(account, props.providers).importShare))
 const importTarget = computed(() => importAccounts.value.find((account) => account.user_id === importTargetId.value) || null)
 const importDirRoot = computed(() => {
   const meta = providerMetaOf(importTarget.value, props.providers)
@@ -49,6 +51,7 @@ const importDirRoot = computed(() => {
 const importAccountOptions = computed(() => importAccounts.value.map((account) => ({
   value: account.user_id,
   label: `${providerMetaOf(account, props.providers).label || providerOf(account.user_id)} · ${accountName(account)}`,
+  img: providerIconUrl(providerMetaOf(account, props.providers)),
 })))
 
 function formatSize(size) {
@@ -139,6 +142,13 @@ async function saveImport() {
       importDir.value.id,
     )
     const count = Array.isArray(saved) ? saved.length : importSelected.value.length
+    notifyFileChange({
+      userId: importTarget.value.user_id,
+      driveId: importTarget.value.drive_id,
+      directories: [importDir.value.id],
+      refreshSearch: true,
+      delay: 600,
+    })
     emit('toast', `已导入 ${count} 个项目`, 'success')
     importOpen.value = false
     importDirPick.value = false
@@ -188,28 +198,54 @@ function labelOf(pid) {
 }
 
 function accountOf(userId) {
-  return props.accounts.find((a) => a.user_id === userId) || null
+  return orderedAccounts.value.find((a) => a.user_id === userId) || null
 }
 
-// 从记录中聚合出现过的 provider 列表
+// 从记录中聚合出现过的 provider，并以账号侧边栏的全局顺序排列。
 const providerOptions = computed(() => {
   const seen = new Set()
+  const result = []
+  for (const account of orderedAccounts.value) {
+    const pid = providerOf(account.user_id)
+    if (pid && history.value.some((h) => (h.provider || providerOf(h.account_id)) === pid) && !seen.has(pid)) {
+      seen.add(pid)
+      result.push(pid)
+    }
+  }
   for (const h of history.value) {
     const pid = h.provider || providerOf(h.account_id)
-    if (pid) seen.add(pid)
+    if (pid && !seen.has(pid)) {
+      seen.add(pid)
+      result.push(pid)
+    }
   }
-  return [...seen]
+  return result
 })
 
 // 账号筛选只列出有分享记录的账号
 const accountOptions = computed(() => {
-  const seen = new Map()
-  for (const h of history.value) {
-    if (!h.account_id || seen.has(h.account_id)) continue
-    const acc = accountOf(h.account_id)
-    seen.set(h.account_id, acc ? accountName(acc) : h.account_id)
+  const seen = new Set(history.value.map((historyItem) => historyItem.account_id).filter(Boolean))
+  const result = []
+  for (const account of orderedAccounts.value) {
+    if (!seen.has(account.user_id)) continue
+    seen.delete(account.user_id)
+    result.push({
+      id: account.user_id,
+      name: accountName(account),
+      img: providerIconUrl(providerMetaOf(account, props.providers)),
+    })
   }
-  return [...seen.entries()].map(([id, name]) => ({ id, name }))
+  for (const h of history.value) {
+    if (!h.account_id || !seen.has(h.account_id)) continue
+    const acc = accountOf(h.account_id)
+    seen.delete(h.account_id)
+    result.push({
+      id: h.account_id,
+      name: acc ? accountName(acc) : h.account_id,
+      img: acc ? providerIconUrl(providerMetaOf(acc, props.providers)) : providerIconUrl(metaOf(h.provider || providerOf(h.account_id))),
+    })
+  }
+  return result
 })
 
 const filtered = computed(() => {
@@ -237,6 +273,7 @@ const groups = computed(() => {
       const acc = accountOf(h.account_id)
       map.set(key, {
         key,
+        accountID: h.account_id,
         pid,
         icon: providerIconUrl(metaOf(pid)),
         label: labelOf(pid),
@@ -246,7 +283,8 @@ const groups = computed(() => {
     }
     map.get(key).items.push(h)
   }
-  return [...map.values()]
+  const ranks = new Map(orderedAccounts.value.map((account, index) => [account.user_id, index]))
+  return [...map.values()].sort((a, b) => (ranks.get(a.accountID) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(b.accountID) ?? Number.MAX_SAFE_INTEGER))
 })
 
 function openLink(h) {
@@ -347,12 +385,12 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <UiSelect
             v-model="filterProvider"
             class="share-filter"
-            :options="[{ value: '', label: '全部网盘' }, ...providerOptions.map((pid) => ({ value: pid, label: labelOf(pid) }))]"
+            :options="[{ value: '', label: '全部网盘' }, ...providerOptions.map((pid) => ({ value: pid, label: labelOf(pid), img: providerIconUrl(metaOf(pid)) }))]"
           />
           <UiSelect
             v-model="filterAccount"
             class="share-filter"
-            :options="[{ value: '', label: '全部账号' }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]"
+            :options="[{ value: '', label: '全部账号' }, ...accountOptions.map((a) => ({ value: a.id, label: a.name, img: a.img }))]"
           />
         </div>
         <div class="share-toolbar-actions">

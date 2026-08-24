@@ -79,9 +79,11 @@ type FileRef struct {
 
 // RapidUploadRequest is the fingerprint-based秒传 request on the target drive.
 type RapidUploadRequest struct {
-	ParentID  string `json:"parentId"`
-	FileName  string `json:"fileName"`
-	Method    string `json:"method"` // md5 | sha1
+	ParentID string `json:"parentId"`
+	FileName string `json:"fileName"`
+	// Method is the canonical lowercase fingerprint name. Built-in providers
+	// currently use md5, sha1, sha256, quickxorhash, dropbox, or gcid.
+	Method    string `json:"method"`
 	Hash      string `json:"hash"`
 	Size      int64  `json:"size"`
 	Duplicate int    `json:"duplicate,omitempty"` // 1 skip / 2 overwrite / 0 rename

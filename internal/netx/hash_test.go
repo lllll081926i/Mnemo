@@ -14,6 +14,9 @@ func TestNewHash(t *testing.T) {
 	if _, err := NewHash(HashSHA1); err != nil {
 		t.Fatalf("sha1: %v", err)
 	}
+	if _, err := NewHash(HashSHA256); err != nil {
+		t.Fatalf("sha256: %v", err)
+	}
 	if _, err := NewHash("crc32"); err == nil {
 		t.Fatal("unknown kind must error")
 	}

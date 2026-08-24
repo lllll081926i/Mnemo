@@ -14,6 +14,8 @@ import (
 	"mnemo-go/internal/model"
 )
 
+const listPageLimit = "30"
+
 // fileList paginates /record/file/list (offset pages of 60) until totalPage is
 // reached or a page comes back empty.
 func (d *Driver) fileList(ctx context.Context, c drive.Context, folderID string) ([]listItem, error) {
@@ -25,7 +27,7 @@ func (d *Driver) fileList(ctx context.Context, c drive.Context, folderID string)
 			method: http.MethodGet,
 			query: map[string]string{
 				"offset":   strconv.Itoa(offset),
-				"limit":    "60",
+				"limit":    listPageLimit,
 				"folderId": fid,
 				"type":     "0",
 			},

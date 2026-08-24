@@ -3,6 +3,7 @@ package netx
 import (
 	"crypto/md5"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"hash"
@@ -16,8 +17,9 @@ import (
 type HashKind string
 
 const (
-	HashMD5  HashKind = "md5"
-	HashSHA1 HashKind = "sha1"
+	HashMD5    HashKind = "md5"
+	HashSHA1   HashKind = "sha1"
+	HashSHA256 HashKind = "sha256"
 )
 
 // NewHash returns the hasher for a kind.
@@ -27,6 +29,8 @@ func NewHash(kind HashKind) (hash.Hash, error) {
 		return md5.New(), nil
 	case HashSHA1:
 		return sha1.New(), nil
+	case HashSHA256:
+		return sha256.New(), nil
 	default:
 		return nil, fmt.Errorf("netx: unsupported hash kind %q", kind)
 	}

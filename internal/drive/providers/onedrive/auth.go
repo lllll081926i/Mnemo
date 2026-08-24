@@ -240,16 +240,21 @@ func firstNonEmpty(values ...string) string {
 func resolveCredentials(clientID, clientSecret, configuredID, configuredSecret string) (string, string) {
 	id := strings.TrimSpace(clientID)
 	secret := strings.TrimSpace(clientSecret)
+	configuredID = strings.TrimSpace(configuredID)
+	configuredSecret = strings.TrimSpace(configuredSecret)
 	if id == "" {
-		id = strings.TrimSpace(configuredID)
+		id = configuredID
 	}
 	if id == "" {
 		id = builtinClientID
 	}
-	if secret == "" {
-		secret = strings.TrimSpace(configuredSecret)
+	// A configured secret belongs only to its configured client id. Passing it
+	// to a different per-account/custom id makes refresh fail as
+	// invalid_client, which then leaves a stale Graph access token in place.
+	if secret == "" && configuredSecret != "" && id == configuredID {
+		secret = configuredSecret
 	}
-	if secret == "" && id == builtinClientID && strings.TrimSpace(configuredID) == "" {
+	if secret == "" && id == builtinClientID && configuredID == "" {
 		secret = builtinClientSecret
 	}
 	return id, secret

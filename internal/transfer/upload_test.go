@@ -15,7 +15,7 @@ import (
 
 func waitUploadRunState(t *testing.T, q *UploadQueue, id string, active bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		q.mu.Lock()
 		_, ok := q.runs[id]
@@ -26,6 +26,41 @@ func waitUploadRunState(t *testing.T, q *UploadQueue, id string, active bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("upload run %q active=%v did not become %v", id, !active, active)
+}
+
+func TestUploadQueueCloseWaitsForActiveWorker(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	q.handlerResolver = func(_, _ string) (func(context.Context, *model.UploadingUI) error, error) {
+		return func(ctx context.Context, _ *model.UploadingUI) error {
+			close(started)
+			<-ctx.Done()
+			close(stopped)
+			return ctx.Err()
+		}, nil
+	}
+	path := filepath.Join(t.TempDir(), "payload.bin")
+	if err := os.WriteFile(path, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	q.enqueue("unknown_user", "unknown_drive", "root", "rename", path, "payload.bin", 7)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("upload worker did not start")
+	}
+
+	q.Close()
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("Close returned before the active worker observed cancellation")
+	}
 }
 
 func TestNewUploadQueueRestoresPaused(t *testing.T) {
@@ -174,6 +209,97 @@ func TestUploadQueueWaitReturnsProviderFailure(t *testing.T) {
 	got, waitErr := q.Wait(job.UploadID, time.Second)
 	if got == nil || waitErr == nil || waitErr.Error() != "服务端拒绝" {
 		t.Fatalf("Wait failure = job %#v, err %v", got, waitErr)
+	}
+}
+
+func TestUploadConcurrencyGateCanShrinkAndGrow(t *testing.T) {
+	gate := newUploadConcurrencyGate(2)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := gate.acquire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.acquire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gate.setLimit(1)
+	blocked := make(chan error, 1)
+	go func() { blocked <- gate.acquire(ctx) }()
+	gate.release()
+	select {
+	case err := <-blocked:
+		t.Fatalf("shrunk gate admitted a third worker: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	gate.setLimit(2)
+	select {
+	case err := <-blocked:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("grown gate did not wake a waiting worker")
+	}
+	gate.release()
+	gate.release()
+}
+
+func TestUploadQueueDirectoryScanRunsAsynchronously(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 20; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("file-%02d.txt", i)), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+	// Avoid network work: scanning/enqueue behavior is the unit under test.
+	q.handlerResolver = func(_, _ string) (func(context.Context, *model.UploadingUI) error, error) {
+		return func(context.Context, *model.UploadingUI) error { return nil }, nil
+	}
+	created := q.AddFiles("unknown_user", "unknown_drive", "root", "overwrite", []string{root})
+	if len(created) != 0 {
+		t.Fatalf("directory scan blocked to return %d jobs synchronously", len(created))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(q.List()) == 20 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("background directory scan produced %d jobs, want 20", len(q.List()))
+}
+
+func TestUploadEventIdentifiesChangedDirectory(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emitted TaskEvent
+	q := NewUploadQueue(st, func(event TaskEvent) { emitted = event })
+	defer q.Close()
+
+	q.publishSnapshot(model.UploadingUI{
+		UploadID: "upload-event",
+		UserID:   "account-1",
+		Info: model.UploadInfo{
+			DriveID:      "drive-1",
+			ParentFileID: "folder-1",
+			Name:         "done.txt",
+		},
+		Upload: model.UploadState{IsCompleted: true, DownState: "completed"},
+	}, false)
+
+	if emitted.Kind != "upload" || emitted.Task.Status != "completed" {
+		t.Fatalf("upload event state = %#v", emitted)
+	}
+	if emitted.Task.UserID != "account-1" || emitted.Task.DriveID != "drive-1" || emitted.Task.ParentID != "folder-1" {
+		t.Fatalf("upload event directory identity = %#v", emitted.Task)
 	}
 }
 

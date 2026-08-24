@@ -657,6 +657,7 @@ export namespace model {
 	    id: string;
 	    user_id: string;
 	    drive_id: string;
+	    parent_id?: string;
 	    provider: string;
 	    file_id: string;
 	    name: string;
@@ -682,6 +683,7 @@ export namespace model {
 	        this.id = source["id"];
 	        this.user_id = source["user_id"];
 	        this.drive_id = source["drive_id"];
+	        this.parent_id = source["parent_id"];
 	        this.provider = source["provider"];
 	        this.file_id = source["file_id"];
 	        this.name = source["name"];
@@ -1021,6 +1023,8 @@ export namespace model {
 	    isDir: boolean;
 	    isMiaoChuan: boolean;
 	    sha1: string;
+	    contentHash?: string;
+	    contentHashAlgorithm?: string;
 	    crc64: string;
 	    conflictPolicy?: string;
 	    cleanupLocalFile?: boolean;
@@ -1042,6 +1046,8 @@ export namespace model {
 	        this.isDir = source["isDir"];
 	        this.isMiaoChuan = source["isMiaoChuan"];
 	        this.sha1 = source["sha1"];
+	        this.contentHash = source["contentHash"];
+	        this.contentHashAlgorithm = source["contentHashAlgorithm"];
 	        this.crc64 = source["crc64"];
 	        this.conflictPolicy = source["conflictPolicy"];
 	        this.cleanupLocalFile = source["cleanupLocalFile"];
@@ -1272,6 +1278,7 @@ export namespace store {
 	    proxy?: string;
 	    downloadDir?: string;
 	    maxConcurrentDownloads: number;
+	    maxConcurrentUploads: number;
 	    maxDownloadSpeed: number;
 	    maxUploadSpeed: number;
 	    autoUpdate: boolean;
@@ -1292,6 +1299,7 @@ export namespace store {
 	        this.proxy = source["proxy"];
 	        this.downloadDir = source["downloadDir"];
 	        this.maxConcurrentDownloads = source["maxConcurrentDownloads"];
+	        this.maxConcurrentUploads = source["maxConcurrentUploads"];
 	        this.maxDownloadSpeed = source["maxDownloadSpeed"];
 	        this.maxUploadSpeed = source["maxUploadSpeed"];
 	        this.autoUpdate = source["autoUpdate"];

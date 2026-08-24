@@ -11,7 +11,7 @@
 ```
 createFolder, photoAlbum, permanentDelete: true
 createDateFolder: false
-不声明 ProvideHashes/RapidUploadHashes  // 按需求不参与跨盘秒传
+不声明 ProvideHashes/RapidUploadHashes  // 跨盘秒传能力已封存，不作为哈希源或目标
 ```
 
 ---
@@ -49,7 +49,7 @@ createDateFolder: false
 |--------|:----:|---------|------|
 | UploadOneFile | ✅ | `upload.go:42-258` precreate → superfile2 分片 → create → addToAlbum | 无 |
 | 分片 4MB | ✅ | `upload.go:23` | 无 |
-| content-md5 + slice-md5 + block_list | ✅ | 秒传支持 | 无 |
+| content-md5 + slice-md5 + block_list | ✅ | provider 自有预创建协议；本地普通上传可能命中服务端已有内容 | 不等价于仅凭通用 MD5 即可调用的目标端秒传 |
 
 ---
 
@@ -84,7 +84,14 @@ createDateFolder: false
 
 ## 9. ProvideHashes
 
-✅ `mapFile` 仍会通过 `decryptYikeMd5` 解析文件 MD5 并填入 `ContentHash`；能力位按需求不声明，因此不参与跨盘秒传路由。
+`mapFile` 仍会通过 `decryptYikeMd5` 解析列表中的 MD5 并填入 `ContentHash`，供文件元数据显示等 provider 内部场景使用。
+
+跨盘迁移能力明确封存：
+
+- 不声明 `ProvideHashes`，不作为跨盘秒传源。
+- 不声明 `RapidUploadHashes`，不作为跨盘秒传目标。
+- 普通本地上传仍可能通过 provider 自有的 `content-md5 + slice-md5 + block_list` 预创建协议命中已有内容；该协议需要多组文件指纹，不等价于统一迁移接口中“仅提交 MD5”的通用目标端秒传。
+- 迁移任务不应根据 `ContentHashName=md5` 推断 Yike 可参与跨盘秒传。
 
 ---
 
@@ -94,3 +101,4 @@ createDateFolder: false
 2. ✅ 容量固定展示为无限空间，不额外请求配额接口
 3. albumDirId 改为 album: 前缀方案（功能等价，实现不同）
 4. Move/Copy 不支持——与旧版设计一致，非差距
+5. 跨盘秒传能力已按需求封存：`ProvideHashes`、`RapidUploadHashes` 均不声明；普通上传的 provider 私有预创建能力保持不变

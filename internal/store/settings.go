@@ -15,6 +15,7 @@ type Settings struct {
 	DownloadDir string `json:"downloadDir,omitempty"`
 
 	MaxConcurrentDownloads int   `json:"maxConcurrentDownloads"`
+	MaxConcurrentUploads   int   `json:"maxConcurrentUploads"`
 	MaxDownloadSpeed       int64 `json:"maxDownloadSpeed"` // bytes/s, 0 = unlimited
 	MaxUploadSpeed         int64 `json:"maxUploadSpeed"`
 
@@ -36,6 +37,7 @@ func DefaultSettings() Settings {
 		Theme:                  "dark",
 		DefaultTab:             "pan",
 		MaxConcurrentDownloads: 3,
+		MaxConcurrentUploads:   2,
 		MaxDownloadSpeed:       0,
 		MaxUploadSpeed:         0,
 		AutoUpdate:             true,

@@ -21,6 +21,30 @@ func withNoThrottle(t *testing.T) {
 	t.Cleanup(func() { fetchMinInterval = old })
 }
 
+func TestILanzouTransferHashCapabilitiesAndCachedResolver(t *testing.T) {
+	caps := (&Driver{}).Capabilities()
+	if strings.Join(caps.ProvideHashes, ",") != "md5" || strings.Join(caps.RapidUploadHashes, ",") != "md5" {
+		t.Fatalf("transfer hashes = provide:%v rapid:%v, want md5/md5", caps.ProvideHashes, caps.RapidUploadHashes)
+	}
+
+	const userID = "ilanzou_hash-source-test"
+	const driveID = "ilanzou:hash-source-test"
+	const fileID = "cached-md5-file"
+	drive.RememberFile(userID, driveID, model.File{
+		DriveID: driveID, FileID: fileID,
+		ContentHashName: "MD5", ContentHash: "D41D8CD98F00B204E9800998ECF8427E",
+	})
+	hash, err := (&Driver{}).ResolveTransferHash(context.Background(), drive.Context{
+		UserID: userID, DriveID: driveID,
+	}, fileID, "md5", false)
+	if err != nil || hash != "d41d8cd98f00b204e9800998ecf8427e" {
+		t.Fatalf("ResolveTransferHash(cached md5) = %q, %v", hash, err)
+	}
+	if hash, err := (&Driver{}).ResolveTransferHash(context.Background(), drive.Context{}, "cache-miss", "md5", false); err != nil || hash != "" {
+		t.Fatalf("ResolveTransferHash(cache miss without streaming) = %q, %v, want empty hash", hash, err)
+	}
+}
+
 // TestFileListPagination drives /record/file/list against a fake API and
 // verifies the offset paging loop stops at totalPage.
 func TestFileListPagination(t *testing.T) {
@@ -322,7 +346,7 @@ func (t uploadRewriteTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	if req.URL.Host != "upload.qiniup.com" {
+	if !isQiniuUploadHostname(req.URL.Hostname()) {
 		return base.RoundTrip(req)
 	}
 	clone := req.Clone(req.Context())
@@ -381,6 +405,126 @@ func TestUploadOneFileUsesActualSizeAndCompletes(t *testing.T) {
 	}
 	if qiniuCalls != 1 {
 		t.Fatalf("qiniu calls = %d, want 1", qiniuCalls)
+	}
+}
+
+func TestQiniuMultipartInitErrorPreservesReasonAndRequestID(t *testing.T) {
+	oldClient := httpClient
+	t.Cleanup(func() { httpClient = oldClient })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "UpToken temporary-upload-token" {
+			http.Error(w, "missing upload token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("X-Reqid", "qiniu-request-42")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"incorrect region"}`))
+	}))
+	defer srv.Close()
+	httpClient = srv.Client()
+
+	_, status, err := qiniuJSON(context.Background(), http.MethodPost, srv.URL+"/buckets/demo/objects/key/uploads", "temporary-upload-token", nil)
+	if status != http.StatusBadRequest || err == nil {
+		t.Fatalf("qiniuJSON() = status:%d err:%v", status, err)
+	}
+	message := err.Error()
+	if !strings.Contains(message, "incorrect region") || !strings.Contains(message, "qiniu-request-42") {
+		t.Fatalf("Qiniu error lost server diagnostics: %q", message)
+	}
+	if strings.Contains(message, "temporary-upload-token") {
+		t.Fatalf("Qiniu error leaked upload token: %q", message)
+	}
+}
+
+func TestQiniuUploadHostPrefersServerRegionalEndpoint(t *testing.T) {
+	if got := qiniuUploadHost(map[string]any{"data": map[string]any{"upHost": "up-z2.qiniup.com"}}); got != "https://up-z2.qiniup.com" {
+		t.Fatalf("qiniuUploadHost() = %q", got)
+	}
+	if got := qiniuUploadHost(map[string]any{"uploadHost": "http://untrusted.example"}); got != qiniuDefaultUploadHost {
+		t.Fatalf("insecure host should fall back, got %q", got)
+	}
+	if got := qiniuObjectUploadURL("https://up-z2.qiniup.com/", "wpanstore-lanzou", "YQ-b_c"); got != "https://up-z2.qiniup.com/buckets/wpanstore-lanzou/objects/YQ-b_c/uploads" {
+		t.Fatalf("qiniuObjectUploadURL() = %q", got)
+	}
+}
+
+func TestQiniuMultipartInitRetriesSuggestedRegionalHost(t *testing.T) {
+	withNoThrottle(t)
+	oldBase, oldClient := ILANZOU_CONF.Base, httpClient
+	t.Cleanup(func() {
+		ILANZOU_CONF.Base = oldBase
+		httpClient = oldClient
+	})
+
+	var defaultInitCalls, regionalInitCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/7n/getUpToken"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "upToken": "demoAK:signature:policy"})
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/buckets/") && strings.HasSuffix(r.URL.Path, "/uploads"):
+			if r.Host == "upload.qiniup.com" {
+				defaultInitCalls++
+				w.Header().Set("X-Reqid", "wrong-region-request")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"incorrect region, please use up-z2.qiniup.com"}`))
+				return
+			}
+			if r.Host == "up-z2.qiniup.com" {
+				regionalInitCalls++
+				_ = json.NewEncoder(w).Encode(map[string]any{"uploadId": "upload-1"})
+				return
+			}
+			http.Error(w, "unexpected qiniu host "+r.Host, http.StatusBadRequest)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/uploads/upload-1/"):
+			if r.Host != "up-z2.qiniup.com" {
+				http.Error(w, "part used wrong host", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"etag": "etag-1"})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/uploads/upload-1"):
+			if r.Host != "up-z2.qiniup.com" {
+				http.Error(w, "finish used wrong host", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "commit-token"})
+		case strings.HasSuffix(r.URL.Path, "/7n/results"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "list": []any{map[string]any{"status": 1, "fileId": "uploaded-1"}}})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	ILANZOU_CONF.Base = srv.URL
+	httpClient = &http.Client{Transport: uploadRewriteTransport{host: strings.TrimPrefix(srv.URL, "http://")}}
+
+	path := t.TempDir() + "/large.bin"
+	if err := os.WriteFile(path, make([]byte, uploadPartSize+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ui := &model.UploadingUI{Info: model.UploadInfo{LocalFilePath: path, ParentFileID: "0", Name: "large.bin"}}
+	c := drive.Context{UserID: "ilanzou_42", DriveID: "ilanzou:42", Token: &model.TokenInfo{AccessToken: "api-token", DeviceID: "uuid-42"}}
+	if err := (&Driver{}).UploadOneFile(context.Background(), c, ui); err != nil {
+		t.Fatal(err)
+	}
+	if defaultInitCalls != 1 || regionalInitCalls != 1 || ui.Upload.FileID != "uploaded-1" || !ui.Upload.IsCompleted {
+		t.Fatalf("init calls default/regional=%d/%d upload=%+v", defaultInitCalls, regionalInitCalls, ui.Upload)
+	}
+}
+
+func TestQiniuRegionHostFromResponseSupportsSDKShapes(t *testing.T) {
+	for _, body := range [][]byte{
+		[]byte(`{"data":{"up":{"acc":{"main":["up-z1.qiniup.com"]}}},"ttl":90}`),
+		[]byte(`{"hosts":[{"ttl":120,"up":{"domains":["upload-z2.qiniup.com"]}}]}`),
+	} {
+		host, ttl := qiniuRegionHostFromResponse(body)
+		if host == "" || ttl <= 0 {
+			t.Fatalf("qiniuRegionHostFromResponse(%s) = %q, %s", body, host, ttl)
+		}
+	}
+
+	err := &qiniuHTTPError{StatusCode: http.StatusBadRequest, Detail: "incorrect region; use up-z2.qiniup.com", RequestID: "req-42"}
+	if got := qiniuSuggestedUploadHost(err); got != "https://up-z2.qiniup.com" {
+		t.Fatalf("qiniuSuggestedUploadHost() = %q", got)
 	}
 }
 

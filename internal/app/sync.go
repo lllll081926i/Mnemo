@@ -19,6 +19,18 @@ type activeSyncRun struct {
 	source    string
 }
 
+// syncRunMeta is emitted with lifecycle events so the file view can invalidate
+// only the directory affected by a completed remote-writing sync.
+// Keep the generic beginSyncRun helper below for callers/tests that do not
+// have a persisted Config at hand.
+type syncRunMeta struct {
+	userID            string
+	driveID           string
+	remoteDir         string
+	direction         string
+	deletePropagation bool
+}
+
 func (a *App) isSyncRunning(id string) bool {
 	a.syncRunMu.Lock()
 	defer a.syncRunMu.Unlock()
@@ -27,6 +39,10 @@ func (a *App) isSyncRunning(id string) bool {
 }
 
 func (a *App) beginSyncRun(parent context.Context, jobID, source string) (context.Context, func(error), error) {
+	return a.beginSyncRunWithMeta(parent, jobID, source, syncRunMeta{})
+}
+
+func (a *App) beginSyncRunWithMeta(parent context.Context, jobID, source string, meta syncRunMeta) (context.Context, func(error), error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return nil, nil, errors.New("同步任务 ID 为空")
@@ -48,7 +64,15 @@ func (a *App) beginSyncRun(parent context.Context, jobID, source string) (contex
 	}
 	a.syncRuns[jobID] = run
 	a.syncRunMu.Unlock()
-	a.emit("sync:state", map[string]any{"id": jobID, "running": true, "source": source, "startedAt": run.startedAt})
+	state := map[string]any{"id": jobID, "running": true, "source": source, "startedAt": run.startedAt}
+	if meta.userID != "" {
+		state["user_id"] = meta.userID
+		state["drive_id"] = meta.driveID
+		state["remote_dir"] = meta.remoteDir
+		state["direction"] = meta.direction
+		state["delete_propagation"] = meta.deletePropagation
+	}
+	a.emit("sync:state", state)
 
 	finish := func(runErr error) {
 		cancel()
@@ -63,13 +87,27 @@ func (a *App) beginSyncRun(parent context.Context, jobID, source string) (contex
 		} else if runErr != nil {
 			status = "failed"
 		}
-		a.emit("sync:state", map[string]any{"id": jobID, "running": false, "status": status})
+		state := map[string]any{"id": jobID, "running": false, "status": status, "startedAt": run.startedAt}
+		if meta.userID != "" {
+			state["user_id"] = meta.userID
+			state["drive_id"] = meta.driveID
+			state["remote_dir"] = meta.remoteDir
+			state["direction"] = meta.direction
+			state["delete_propagation"] = meta.deletePropagation
+		}
+		a.emit("sync:state", state)
 	}
 	return ctx, finish, nil
 }
 
 func (a *App) executeSync(parent context.Context, cfg sync.Config, engine *sync.Engine, source string) (runErr error) {
-	ctx, finish, err := a.beginSyncRun(parent, cfg.ID, source)
+	ctx, finish, err := a.beginSyncRunWithMeta(parent, cfg.ID, source, syncRunMeta{
+		userID:            cfg.UserID,
+		driveID:           cfg.DriveID,
+		remoteDir:         cfg.RemoteDir,
+		direction:         cfg.Direction,
+		deletePropagation: cfg.DeletePropagation,
+	})
 	if err != nil {
 		return err
 	}
@@ -108,14 +146,16 @@ func (a *App) ListRunningSyncIDs() []string {
 // CancelSync cancels an active manual or scheduled sync job. The registry is
 // cleared only after the worker exits, preventing an immediate overlapping run.
 func (a *App) CancelSync(id string) bool {
+	started := logActionStarted("取消同步", "sync", "", "", "job_id", redactID(id))
 	a.syncRunMu.Lock()
 	run := a.syncRuns[id]
 	a.syncRunMu.Unlock()
 	if run == nil {
+		logActionFinished("取消同步", "sync", "", "", started, errors.New("同步任务未运行"), "job_id", redactID(id))
 		return false
 	}
-	logging.Info("sync cancellation requested", "job_id", id, "source", run.source)
 	run.cancel()
+	logActionFinished("取消同步", "sync", "", "", started, nil, "job_id", redactID(id), "source", run.source)
 	return true
 }
 
@@ -147,52 +187,62 @@ func (a *App) ListSyncConfigs() []sync.Config {
 }
 
 // SaveSyncConfig persists a sync job.
-func (a *App) SaveSyncConfig(cfg sync.Config) error {
+func (a *App) SaveSyncConfig(cfg sync.Config) (retErr error) {
+	started := logActionStarted("保存同步任务", "sync", cfg.UserID, cfg.DriveID,
+		"job_id", redactID(cfg.ID), "direction", cfg.Direction, "enabled", cfg.Enabled)
+	defer func() {
+		logActionFinished("保存同步任务", "sync", cfg.UserID, cfg.DriveID, started, retErr,
+			"job_id", redactID(cfg.ID), "direction", cfg.Direction, "enabled", cfg.Enabled)
+	}()
 	if a.isSyncRunning(cfg.ID) {
 		return fmt.Errorf("同步任务正在运行，请先停止: %s", cfg.ID)
 	}
-	st, err := a.storeOrError()
-	if err != nil {
-		return err
+	st, retErr := a.storeOrError()
+	if retErr != nil {
+		return retErr
 	}
-	if err := st.SaveSyncConfig(cfg); err != nil {
-		logging.Error("sync configuration save failed", "job_id", cfg.ID, "error", err)
-		return err
+	if retErr = st.SaveSyncConfig(cfg); retErr != nil {
+		return retErr
 	}
-	logging.Info("sync configuration saved", "job_id", cfg.ID, "direction", cfg.Direction, "enabled", cfg.Enabled)
 	return nil
 }
 
 // DeleteSyncConfig removes a sync job.
-func (a *App) DeleteSyncConfig(id string) error {
+func (a *App) DeleteSyncConfig(id string) (retErr error) {
+	started := logActionStarted("删除同步任务", "sync", "", "", "job_id", redactID(id))
+	defer func() {
+		logActionFinished("删除同步任务", "sync", "", "", started, retErr, "job_id", redactID(id))
+	}()
 	if a.isSyncRunning(id) {
 		return fmt.Errorf("同步任务正在运行，请先停止: %s", id)
 	}
-	st, err := a.storeOrError()
-	if err != nil {
-		return err
+	st, retErr := a.storeOrError()
+	if retErr != nil {
+		return retErr
 	}
-	if err := st.DeleteSyncConfig(id); err != nil {
-		logging.Error("sync configuration removal failed", "job_id", id, "error", err)
-		return err
+	if retErr = st.DeleteSyncConfig(id); retErr != nil {
+		return retErr
 	}
-	logging.Info("sync configuration removed", "job_id", id)
 	return nil
 }
 
 // RunSync executes a sync job synchronously.
-func (a *App) RunSync(id string) error {
-	st, err := a.storeOrError()
-	if err != nil {
-		return err
+func (a *App) RunSync(id string) (retErr error) {
+	started := logActionStarted("启动同步", "sync", "", "", "job_id", redactID(id))
+	defer func() {
+		logActionFinished("启动同步", "sync", "", "", started, retErr, "job_id", redactID(id))
+	}()
+	st, retErr := a.storeOrError()
+	if retErr != nil {
+		return retErr
 	}
-	cfg, err := st.GetSyncConfig(id)
-	if err != nil {
-		logging.Warn("sync run rejected", "job_id", id, "error", err)
-		return err
+	cfg, retErr := st.GetSyncConfig(id)
+	if retErr != nil {
+		return retErr
 	}
 	eng := a.newSyncEngine(st, true)
-	return a.executeSync(a.appContext(), cfg, eng, "manual")
+	retErr = a.executeSync(a.appContext(), cfg, eng, "manual")
+	return retErr
 }
 
 // StartSyncScheduler launches the background scheduler for all enabled,
@@ -223,7 +273,7 @@ func (a *App) StartSyncScheduler() string {
 
 func (a *App) handleSyncLog(jobID, event, detail string) {
 	a.emit("sync:log", map[string]any{"id": jobID, "event": event, "detail": detail})
-	args := []any{"job_id", jobID, "event", event}
+	args := []any{"page", "sync", "job_id", redactID(jobID), "event", event}
 	if detail != "" {
 		args = append(args, "detail", detail)
 	}

@@ -376,6 +376,57 @@ func TestDuplicateFromRequest(t *testing.T) {
 	}
 }
 
+func TestRapidUploadByHashValidatesParentSizeAndCleansMiss(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	var paths []string
+	netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/file/upload_request"):
+			return pan123JSONResponse(`{"code":0,"data":{"FileId":"77","Key":"object","UploadId":"upload-1"}}`, req), nil
+		case strings.HasSuffix(req.URL.Path, "/file/delete"):
+			return pan123JSONResponse(`{"code":0}`, req), nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s", req.URL.String())
+		}
+	})
+	c := drive.Context{UserID: "pan123:rapid", DriveID: "pan123:rapid", Token: &model.TokenInfo{AccessToken: "access-token"}}
+	valid := drive.RapidUploadRequest{ParentID: RootID, FileName: "movie.mp4", Method: "md5", Hash: "d41d8cd98f00b204e9800998ecf8427e", Size: 4096}
+	result, err := (&Driver{}).RapidUploadByHash(t.Context(), c, valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.Reuse || len(paths) != 2 || !strings.HasSuffix(paths[1], "/file/delete") {
+		t.Fatalf("result/paths = %+v / %v", result, paths)
+	}
+
+	for _, invalid := range []drive.RapidUploadRequest{
+		{ParentID: RootID, Method: "sha1", Hash: valid.Hash, Size: 1},
+		{ParentID: RootID, Method: "md5", Hash: "invalid", Size: 1},
+		{ParentID: RootID, Method: "md5", Hash: valid.Hash, Size: -1},
+		{ParentID: "not-a-number", Method: "md5", Hash: valid.Hash, Size: 1},
+	} {
+		paths = nil
+		got, err := (&Driver{}).RapidUploadByHash(t.Context(), c, invalid)
+		if err != nil || got == nil || got.Reuse || len(paths) != 0 {
+			t.Fatalf("invalid request = %+v, result=%+v err=%v paths=%v", invalid, got, err, paths)
+		}
+	}
+}
+
+func TestResolveTransferHashPreservesDetailError(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return pan123JSONResponse(`{"code":500,"message":"detail failed"}`, req), nil
+	})
+	c := drive.Context{UserID: "pan123:resolve-error", DriveID: "pan123:resolve-error", Token: &model.TokenInfo{AccessToken: "access-token"}}
+	if hash, err := (&Driver{}).ResolveTransferHash(t.Context(), c, "987654321", "md5", false); err == nil || hash != "" {
+		t.Fatalf("ResolveTransferHash() = %q, %v", hash, err)
+	}
+}
+
 func TestDuplicateFromPolicy(t *testing.T) {
 	cases := map[string]int{
 		"":          2,

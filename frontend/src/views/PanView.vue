@@ -1,12 +1,14 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick } from 'vue'
 import {
   listDir, listTrash, search, mkdir, rename, trash, remove, restore,
   move, copy, favorite, createShare, uploadFiles, validateUploadFiles, migrateFiles, download,
   AddFavorite, RemoveFavorite, ListFavorites, OfflineDownload, PickDirectory, PickFiles,
   formatBytes, formatTime, formatTimeParts, iconOf, extOf, openKindOf, copyText,
-  capsOf, providerMetaOf, providerOf, GetDirectoryCache, SaveDirectoryCache, DeleteDirectoryCache,
+  capsOf, providerMetaOf, providerIconUrl, providerOf, accountName, GetDirectoryCache,
+  onEvent, onFileChange, notifyFileChange,
 } from '../api'
+import { debug, info, warn, error as logError, errorText } from '../logger'
 import ContextMenu from '../components/ContextMenu.vue'
 import DropdownBtn from '../components/DropdownBtn.vue'
 import Modal from '../components/Modal.vue'
@@ -19,22 +21,23 @@ import UiSelect from '../components/UiSelect.vue'
 import PlayerPanel from '../components/PlayerPanel.vue'
 import TreeNode from '../components/TreeNode.vue'
 import DragDropZone from '../components/DragDropZone.vue'
-import { getPrefs, setPref } from '../appearance'
+import { getPrefs, setPref, orderAccounts } from '../appearance'
+import { useDirectoryCache } from '../composables/useDirectoryCache'
+import { useFileSelection } from '../composables/useFileSelection'
+import { useVirtualFileList } from '../composables/useVirtualFileList'
 
 const props = defineProps({
   account: Object,
   accounts: { type: Array, default: () => [] },
   providers: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['toast', 'go'])
+const emit = defineEmits(['toast', 'go', 'ready'])
 
 // ---------- 状态 ----------
 const mode = ref('list') // list | trash | search | favorite
 const dirId = ref('root')
 const pathStack = ref([]) // [{id,name}]
 const files = ref([])
-const selected = ref([]) // file 对象数组
-const focusId = ref('')  // 键盘焦点行
 const loading = ref(false)
 const error = ref('')
 const favoriteError = ref('')
@@ -66,9 +69,6 @@ function onSortPick(action) {
   else if (kind === 'dir') sortAsc.value = v === 'asc'
 }
 
-// 区间选择模式：开启后点两个行选定区间
-const rangIsSelecting = ref(false)
-const rangAnchor = ref('')
 const viewMode = ref(initialPrefs.viewMode || 'list')  // list | grid
 const sideWidth = ref(initialPrefs.sideWidth || 220) // 侧边栏宽度
 const isSideResizing = ref(false)
@@ -153,128 +153,68 @@ function canReceiveMigration(account) {
   const targetCaps = capsOf(account, props.providers)
   return !!(targetCaps.upload || (Array.isArray(targetCaps.rapidUploadHashes) && targetCaps.rapidUploadHashes.length))
 }
-const migrateAccounts = computed(() => props.accounts.filter((a) => a.user_id !== uid.value && canReceiveMigration(a)))
+const migrateAccounts = computed(() => orderAccounts(props.accounts).filter((a) => a.user_id !== uid.value && canReceiveMigration(a)))
+const migrateAccountOptions = computed(() => migrateAccounts.value.map((account) => {
+  const accountMeta = providerMetaOf(account, props.providers)
+  const providerLabel = accountMeta.label || providerOf(account.user_id) || '网盘'
+  return {
+    value: account.user_id,
+    label: `${providerLabel} · ${accountName(account) || account.user_id}`,
+    img: providerIconUrl(accountMeta),
+  }
+}))
 const canMigrate = computed(() => !!caps.value.download && migrateAccounts.value.length > 0)
 
 const rootKey = computed(() => meta.value.rootKey || 'root')
 const rootTitle = computed(() => meta.value.rootTitle || '全部文件')
 
 // ---------- 数据加载 ----------
-// 目录缓存：按 provider、账号、存储、模式、目录和关键词隔离。
-const dirCache = new Map() // key -> { files: File[], at: number }
-const DIR_CACHE_MAX = 200
-const DIR_CACHE_TTL_MS = 10 * 60 * 1000
-const cacheWrites = new Map()
-function cacheKeyPart(value) { return encodeURIComponent(String(value ?? '')) }
-function dirCacheKey(uidV, didV, modeV, idV, kwV) {
-  return [providerOf(uidV), uidV, didV, modeV, idV || '', kwV || ''].map(cacheKeyPart).join('|')
-}
-function cacheDir(key, list) {
-  dirCache.set(key, { files: list || [], at: Date.now() })
-  if (dirCache.size > DIR_CACHE_MAX) { const first = dirCache.keys().next().value; dirCache.delete(first) }
-}
-function getCachedDir(key) {
-  const cached = dirCache.get(key)
-  if (!cached) return null
-  if (Date.now() - cached.at > DIR_CACHE_TTL_MS) {
-    dirCache.delete(key)
-    return null
-  }
-  return cached
-}
-function queueCacheWrite(key, action) {
-  const previous = cacheWrites.get(key) || Promise.resolve()
-  const next = previous.catch(() => {}).then(action)
-  cacheWrites.set(key, next)
-  next.finally(() => {
-    if (cacheWrites.get(key) === next) cacheWrites.delete(key)
-  }).catch(() => {})
-  return next
-}
-function persistDir(key, list, epoch = cacheEpoch) {
-  return queueCacheWrite(key, () => {
-    if (epoch !== cacheEpoch) return
-    return SaveDirectoryCache(key, list || [])
-  })
-}
-function isPersistableMode(modeV) { return modeV === 'list' }
-function invalidateDirCache(uidV, didV, modeV, idV) {
-  // 变更后清掉该目录缓存，避免后台刷新前闪现旧数据
-  const prefix = dirCacheKey(uidV, didV, modeV, idV, '')
-  for (const k of dirCache.keys()) if (k.startsWith(prefix)) dirCache.delete(k)
-  const key = dirCacheKey(uidV, didV, modeV, idV, '')
-  queueCacheWrite(key, () => DeleteDirectoryCache(key)).catch(() => {})
-}
+// 短时间重复打开同一目录直接命中内存；超过该窗口后仍先展示缓存，
+// 再在后台按页校验，避免缓存永久遮蔽远端变化。
+const DIR_CACHE_REVALIDATE_AFTER_MS = 20 * 1000
+const {
+  clear: clearDirectoryCache,
+  currentEpoch: cacheEpochOf,
+  directoryKey: dirCacheKey,
+  get: getCachedDir,
+  invalidateDirectory: invalidateDirCache,
+  invalidateMode: invalidateModeCache,
+  isCurrent: cacheIsCurrent,
+  isDirty: isDirectoryCacheDirty,
+  isPersistableMode,
+  listProgressively: listDirectoryProgressively,
+  modeKey: cacheModeKey,
+  modeVersionOf: modeCacheVersionOf,
+  persist: persistDir,
+  put: cacheDir,
+  versionOf: cacheVersionOf,
+} = useDirectoryCache()
 let loadSeq = 0
-let cacheEpoch = 0
 
-// ---------- 滚动位置记忆 ----------
-// 每个视图（模式+目录+关键词）记住自己的 scrollTop；返回时恢复，进入新目录归零。
-const listEl = ref(null)
-const scrollMemory = new Map()
-let scrollSaveFrame = 0
-let pendingScrollSeq = 0
-const VIRTUAL_THRESHOLD = 200
-const LIST_ROW_PITCH = 48
-const VIRTUAL_OVERSCAN = 10
-const virtualScrollTop = ref(0)
-const virtualViewportHeight = ref(0)
-const gridColumnCount = ref(1)
-const gridRowPitch = ref(166)
-let listResizeObserver = null
+// 滚动位置也必须按账号隔离。多个网盘通常都以 root 作为目录 ID；若只用
+// 目录和模式作 key，切换账号后会沿用上一个网盘的滚动位置，页面可能直接
+// 停在空白区域，造成“没有切换”的错觉。
+function currentViewKey() { return [uid.value, did.value, mode.value, dirId.value, keyword.value].join('|') }
 
-function currentViewKey() { return [mode.value, dirId.value, keyword.value].join('|') }
-
-function updateVirtualMetrics(el = listEl.value) {
-  if (!el) return
-  virtualViewportHeight.value = el.clientHeight || 0
-  if (!el.classList.contains('gridlist')) return
-  const template = getComputedStyle(el).gridTemplateColumns || ''
-  const tracks = template.match(/(?:^|\s)[\d.]+px(?=\s|$)/g)
-  gridColumnCount.value = Math.max(1, tracks?.length || Math.floor(Math.max(0, el.clientWidth - 24) / 140) || 1)
-  const card = el.querySelector('.griditem')
-  if (card) {
-    const gap = Number.parseFloat(getComputedStyle(el).rowGap || '8') || 8
-    gridRowPitch.value = Math.max(1, card.getBoundingClientRect().height + gap)
-  }
-}
-
-function onListScroll(e) {
-  const el = e?.currentTarget || listEl.value
-  if (el) virtualScrollTop.value = el.scrollTop
-  if (scrollSaveFrame) return
-  scrollSaveFrame = requestAnimationFrame(() => {
-    scrollSaveFrame = 0
-    if (listEl.value) scrollMemory.set(currentViewKey(), listEl.value.scrollTop)
-  })
-}
-
-watch([loading, files], () => {
-  if (loading.value || !pendingScrollSeq) return
-  const seq = pendingScrollSeq
-  nextTick(() => {
-    if (seq !== loadSeq) return // 期间又跳转了，丢弃
-    pendingScrollSeq = 0
-    if (listEl.value) {
-      const scrollTop = scrollMemory.get(currentViewKey()) || 0
-      listEl.value.scrollTop = scrollTop
-      virtualScrollTop.value = scrollTop
-      updateVirtualMetrics()
-    }
-  })
-})
-
-async function load(id) {
+async function load(id, options = {}) {
   if (!props.account) return
   const seq = ++loadSeq
-  pendingScrollSeq = seq
-  const epoch = cacheEpoch
+  markVirtualLoad(seq)
+  const epoch = cacheEpochOf()
   const snapUid = uid.value, snapDid = did.value, snapMode = mode.value, snapKw = keyword.value
   const ckey = dirCacheKey(snapUid, snapDid, snapMode, id, snapKw)
+  const version = cacheVersionOf(ckey)
+  const modeKey = cacheModeKey(snapUid, snapDid, snapMode)
+  const modeVersion = modeCacheVersionOf(modeKey)
+  // 目录页进入 KeepAlive 后不可见时不继续追加分页请求；已有的单次
+  // RPC 无法取消，但返回后不会再拉下一页或覆盖当前缓存。
+  const isCurrent = () => panViewActive && seq === loadSeq && cacheIsCurrent(ckey, epoch, version, modeKey, modeVersion)
   // 快路径：有缓存先立即展示，后台静默刷新
   const cached = getCachedDir(ckey)
+  const cacheStillFresh = cached && Date.now() - cached.at < DIR_CACHE_REVALIDATE_AFTER_MS
   let displayedCache = Boolean(cached)
   let networkDone = false
+  let freshDataArrived = false
   if (cached) {
     files.value = cached.files
     loading.value = false
@@ -282,12 +222,14 @@ async function load(id) {
   }
   else loading.value = true
   error.value = ''
-  if (!cached && isPersistableMode(snapMode)) {
+  // 缓存刚写入时不重复请求；超过短校验窗口后保持内容可见并后台渐进刷新。
+  if (cached && !options.force && cacheStillFresh) return
+  if (!cached && !isDirectoryCacheDirty(ckey) && isPersistableMode(snapMode)) {
     // Persistent cache is a second fast path for a newly mounted page. It is
     // intentionally account/provider keyed and is ignored once fresh data
     // has arrived from the provider.
     GetDirectoryCache(ckey).then((list) => {
-      if (seq !== loadSeq || epoch !== cacheEpoch || networkDone || !Array.isArray(list)) return
+      if (!isCurrent() || networkDone || freshDataArrived || !Array.isArray(list)) return
       displayedCache = true
       files.value = list
       cacheDir(ckey, list)
@@ -296,13 +238,23 @@ async function load(id) {
     }).catch(() => {})
   }
   try {
+    debug('pan', '加载目录', { mode: snapMode, dir: id || 'root', cached: !!cached, force: !!options.force })
     let list
     if (snapMode === 'trash') list = (await listTrash(snapUid, snapDid)) || []
     else if (snapMode === 'search') list = snapKw ? (await search(snapUid, snapDid, snapKw.trim())) || [] : []
-    else list = (await listDir(snapUid, snapDid, id)) || []
+    else list = await listDirectoryProgressively(snapUid, snapDid, id, isCurrent, (partial) => {
+      if (!isCurrent()) return
+      freshDataArrived = true
+      displayedCache = true
+      const snapshot = [...partial]
+      files.value = snapshot
+      loading.value = false
+      cacheDir(ckey, snapshot)
+      updateTreeSnapshot(id, snapshot, snapUid, snapDid)
+    })
     networkDone = true
     // 时序保护：过期响应（账号/目录已切换或有更新请求）直接丢弃
-    if (seq !== loadSeq || epoch !== cacheEpoch) return
+    if (!isCurrent()) return
     files.value = list
     // 清理当前目录已不存在的缩略图错误标记，避免瞬时失败被永久记住
     const validIds = new Set(list.map((f) => f.file_id))
@@ -310,17 +262,18 @@ async function load(id) {
     for (const k in thumbErrors.value) if (validIds.has(k)) nextErr[k] = thumbErrors.value[k]
     thumbErrors.value = nextErr
     cacheDir(ckey, list)
-    if (epoch === cacheEpoch && isPersistableMode(snapMode)) persistDir(ckey, list, epoch)
+    if (isPersistableMode(snapMode)) persistDir(ckey, list, epoch, version)
     if (snapMode === 'list') updateTreeSnapshot(id, list, snapUid, snapDid)
   } catch (e) {
     networkDone = true
-    if (seq !== loadSeq) return
+    if (!isCurrent()) return
     if (!displayedCache) {
       error.value = String(e)
       files.value = []
     }
+    warn('pan', '加载目录失败', { mode: snapMode, dir: id || 'root', error: errorText(e) })
   }
-  if (seq === loadSeq) loading.value = false
+  if (isCurrent()) loading.value = false
 }
 
 function updateTreeSnapshot(id, list, snapUid = uid.value, snapDid = did.value) {
@@ -334,21 +287,24 @@ function updateTreeSnapshot(id, list, snapUid = uid.value, snapDid = did.value) 
 
 async function listDirectorySnapshot(id) {
   const snapUid = uid.value, snapDid = did.value
-  const epoch = cacheEpoch
+  const epoch = cacheEpochOf()
   const key = dirCacheKey(snapUid, snapDid, 'list', id, '')
+  const version = cacheVersionOf(key)
+  const modeKey = cacheModeKey(snapUid, snapDid, 'list')
+  const modeVersion = modeCacheVersionOf(modeKey)
   const inMemory = getCachedDir(key)
   if (inMemory) return inMemory.files
-  const persisted = await GetDirectoryCache(key).catch(() => null)
-  if (epoch !== cacheEpoch || snapUid !== uid.value || snapDid !== did.value) return []
+  const persisted = isDirectoryCacheDirty(key) ? null : await GetDirectoryCache(key).catch(() => null)
+  if (!cacheIsCurrent(key, epoch, version, modeKey, modeVersion) || snapUid !== uid.value || snapDid !== did.value) return []
   if (Array.isArray(persisted)) {
     cacheDir(key, persisted)
     updateTreeSnapshot(id, persisted, snapUid, snapDid)
     return persisted
   }
   const list = (await listDir(snapUid, snapDid, id)) || []
-  if (epoch !== cacheEpoch || snapUid !== uid.value || snapDid !== did.value) return []
+  if (!cacheIsCurrent(key, epoch, version, modeKey, modeVersion) || snapUid !== uid.value || snapDid !== did.value) return []
   cacheDir(key, list)
-  if (epoch === cacheEpoch) persistDir(key, list, epoch)
+  persistDir(key, list, epoch, version)
   updateTreeSnapshot(id, list, snapUid, snapDid)
   return list
 }
@@ -386,6 +342,33 @@ const displayFiles = computed(() => {
   return arr
 })
 
+const favoriteFiles = computed(() =>
+  favorites.value.map((file) => ({
+    file_id: file.file_id,
+    name: file.name,
+    isDir: file.isDir,
+    size: 0,
+    time: file.added,
+    category: '',
+    starred: false,
+  }))
+)
+const listShown = computed(() => (mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value))
+
+const {
+  allSelected,
+  focusId,
+  invert: invertSel,
+  isSelected: isSel,
+  rangeAnchor: rangAnchor,
+  rangeSelecting: rangIsSelecting,
+  selectAll,
+  selected,
+  toggle: toggleSel,
+  toggleRangeSelecting: toggleRangSelect,
+  toggleSelectAll,
+} = useFileSelection(listShown)
+
 // 名称高亮：搜索/筛选关键词命中部分拆段（模板用 <mark> 渲染，无关键词时零开销）
 const hlKeyword = computed(() => (mode.value === 'search' ? keyword.value.trim() : filter.value.trim()))
 const thumbErrors = ref({})
@@ -417,6 +400,31 @@ const rowsShown = computed(() => {
     timeParts: formatTimeParts(f.time),
     thumb: f.thumbnail && !errs[f.file_id] ? f.thumbnail : '',
   }))
+})
+
+const {
+  cancelPendingRestore: cancelVirtualRestore,
+  gridRenderRows,
+  gridVirtualBottom,
+  gridVirtualTop,
+  gridVirtualized,
+  listEl,
+  listRenderRows,
+  listVirtualBottom,
+  listVirtualTop,
+  listVirtualized,
+  markLoad: markVirtualLoad,
+  onScroll: onListScroll,
+  resetScroll: resetVirtualScroll,
+  reveal: revealRow,
+} = useVirtualFileList({
+  files,
+  getLoadSequence: () => loadSeq,
+  loading,
+  rowsShown,
+  viewKey: currentViewKey,
+  viewMode,
+  visibleFiles: listShown,
 })
 
 const crumbs = computed(() => [{ id: rootKey.value, name: rootTitle.value }, ...pathStack.value])
@@ -467,9 +475,170 @@ function goHome() {
 }
 
 function refresh() {
-  if (mode.value === 'list') load(dirId.value)
+  if (mode.value === 'list') load(dirId.value, { force: true })
   else if (mode.value === 'favorite') loadFavorites()
-  else load(null)
+  else load(null, { force: true })
+}
+
+let refreshTimer = 0
+const lastAutoRefreshAt = new Map()
+const pendingMigrationSources = new Map()
+let panViewActive = false
+let panViewWasInactive = false
+let pendingVisibleRefresh = null
+let accountFavoritesTimer = 0
+let pendingAccountFavoritesLoad = false
+const ACCOUNT_FAVORITES_LOAD_DELAY_MS = 220
+
+// 收藏树不影响目录首屏。账号切换时把它放到首个目录请求之后，既避免
+// 同一网盘同时起两条初始化请求，也让用户更快看到文件列表。
+function scheduleAccountFavoritesLoad(delay = ACCOUNT_FAVORITES_LOAD_DELAY_MS) {
+  if (accountFavoritesTimer) clearTimeout(accountFavoritesTimer)
+  const expectedAccountKey = accountViewKey()
+  accountFavoritesTimer = setTimeout(() => {
+    accountFavoritesTimer = 0
+    if (accountViewKey() !== expectedAccountKey) return
+    if (!panViewActive) {
+      pendingAccountFavoritesLoad = true
+      return
+    }
+    pendingAccountFavoritesLoad = false
+    loadFavorites()
+  }, Math.max(0, delay))
+}
+
+function deferVisibleRefresh(delay = 250, minimumInterval = 0) {
+  if (!pendingVisibleRefresh) {
+    pendingVisibleRefresh = { delay, minimumInterval }
+    return
+  }
+  // 多个后台动作合并成用户回到页面后的一次刷新；保留最短等待时间即可。
+  pendingVisibleRefresh.delay = Math.min(pendingVisibleRefresh.delay, delay)
+  pendingVisibleRefresh.minimumInterval = Math.max(pendingVisibleRefresh.minimumInterval, minimumInterval)
+}
+
+function flushDeferredVisibleRefresh() {
+  if (!panViewActive || !pendingVisibleRefresh) return
+  const pending = pendingVisibleRefresh
+  pendingVisibleRefresh = null
+  scheduleCurrentViewRefresh(pending.delay, pending.minimumInterval)
+}
+
+function currentRefreshSnapshot() {
+  return {
+    userId: uid.value,
+    driveId: did.value,
+    mode: mode.value,
+    dirId: dirId.value,
+    keyword: keyword.value,
+  }
+}
+
+function refreshSnapshotKey(snapshot) {
+  return [snapshot.userId, snapshot.driveId, snapshot.mode, snapshot.dirId, snapshot.keyword].join('|')
+}
+
+function isCurrentRefreshSnapshot(snapshot) {
+  return snapshot.userId === uid.value && snapshot.driveId === did.value &&
+    snapshot.mode === mode.value && snapshot.dirId === dirId.value && snapshot.keyword === keyword.value
+}
+
+function currentViewNeedsRevalidation() {
+  if (!props.account || mode.value === 'favorite') return false
+  const id = mode.value === 'list' ? dirId.value : null
+  const key = dirCacheKey(uid.value, did.value, mode.value, id, keyword.value)
+  const cached = getCachedDir(key)
+  return !cached || Date.now() - cached.at >= DIR_CACHE_REVALIDATE_AFTER_MS
+}
+
+function scheduleCurrentViewRefresh(delay = 250, minimumInterval = 0) {
+  if (!panViewActive) {
+    deferVisibleRefresh(delay, minimumInterval)
+    return
+  }
+  clearTimeout(refreshTimer)
+  const snapshot = currentRefreshSnapshot()
+  const viewKey = refreshSnapshotKey(snapshot)
+  const lastAt = lastAutoRefreshAt.get(viewKey) || 0
+  const wait = Math.max(delay, minimumInterval - (Date.now() - lastAt))
+  refreshTimer = setTimeout(() => {
+    refreshTimer = 0
+    if (!panViewActive || !isCurrentRefreshSnapshot(snapshot)) return
+    // 目录/搜索词组合的刷新节流记录只保留有限数量，避免长期使用后无界增长。
+    lastAutoRefreshAt.delete(viewKey)
+    lastAutoRefreshAt.set(viewKey, Date.now())
+    if (lastAutoRefreshAt.size > 200) {
+      lastAutoRefreshAt.delete(lastAutoRefreshAt.keys().next().value)
+    }
+    if (snapshot.mode === 'list') load(snapshot.dirId, { force: true })
+    else if (snapshot.mode === 'favorite') loadFavorites()
+    else load(null, { force: true })
+  }, Math.max(0, wait))
+}
+
+function invalidateListDirectories(userID, driveID, ids) {
+  for (const id of new Set((ids || []).filter(Boolean))) {
+    invalidateDirCache(userID, driveID, 'list', id)
+    if (userID === uid.value && driveID === did.value && tree.value[id]) {
+      // 左侧树下次展开时会按新数据加载，避免一个隐藏节点持续保留旧快照。
+      delete tree.value[id]
+    }
+  }
+}
+
+function fileParentDirectories(list, includeCurrentListDirectory = true) {
+  const directories = (list || [])
+    .map((file) => String(file?.parent_file_id || '').trim())
+    .filter(Boolean)
+  if (includeCurrentListDirectory && mode.value === 'list' && dirId.value) directories.push(dirId.value)
+  return [...new Set(directories)]
+}
+
+function notifyCurrentFileChange(options = {}) {
+  const sourceFiles = options.files || selected.value
+  const directories = [
+    ...fileParentDirectories(sourceFiles, options.includeCurrentListDirectory !== false),
+    ...(options.directories || []),
+    ...(options.invalidateDirectories || []),
+  ]
+  const refreshView = Boolean(options.refreshView)
+  notifyFileChange({
+    userId: uid.value,
+    driveId: did.value,
+    directories,
+    refreshTrash: Boolean(options.refreshTrash || (refreshView && mode.value === 'trash')),
+    refreshFavorites: Boolean(options.refreshFavorites || (refreshView && mode.value === 'favorite')),
+    refreshSearch: Boolean(options.refreshSearch || (refreshView && mode.value === 'search')),
+    delay: options.delay,
+    minimumInterval: options.minimumInterval,
+  })
+}
+
+function onFileMutation(change) {
+  if (!change?.userId || !change?.driveId) return
+  invalidateListDirectories(change.userId, change.driveId, change.directories)
+  if (change.refreshTrash) invalidateModeCache(change.userId, change.driveId, 'trash')
+  if (change.refreshSearch) invalidateModeCache(change.userId, change.driveId, 'search')
+  if (change.userId !== uid.value || change.driveId !== did.value) return
+
+  // 网盘页面隐藏在 KeepAlive 中时，仅记录受影响范围；不要在后台请求或重绘。
+  if (change.refreshFavorites && mode.value !== 'favorite' && panViewActive) loadFavorites()
+  const refreshCurrent =
+    (mode.value === 'list' && change.directories.includes(dirId.value)) ||
+    (mode.value === 'trash' && change.refreshTrash) ||
+    (mode.value === 'favorite' && change.refreshFavorites) ||
+    (mode.value === 'search' && change.refreshSearch)
+  if (refreshCurrent) scheduleCurrentViewRefresh(change.delay ?? 250, change.minimumInterval ?? 0)
+}
+
+function onMigrateEvent(job) {
+  const id = String(job?.id || '')
+  const status = String(job.status || '')
+  if (id && ['completed', 'partial'].includes(status) && job.move) {
+    const source = pendingMigrationSources.get(id)
+    pendingMigrationSources.delete(id)
+    if (source) notifyFileChange({ ...source, refreshSearch: true, delay: 400 })
+  }
 }
 
 function showTrash() {
@@ -485,12 +654,6 @@ function showFavorites() {
   treeSelected.value = 'favorite'
   loadFavorites()
 }
-
-const favoriteFiles = computed(() =>
-  favorites.value.map((f) => ({
-    file_id: f.file_id, name: f.name, isDir: f.isDir, size: 0, time: f.added, category: '', starred: false,
-  }))
-)
 
 // 搜索：Enter/按钮触发；Esc 清空并返回目录
 function enterSearch() {
@@ -601,109 +764,6 @@ function selectTreeNode(idOrNode, name) {
   if (!expanded.value[id]) toggleTree(id, name)
 }
 
-// ---------- 选中 ----------
-const selSet = computed(() => new Set(selected.value.map((s) => s.file_id)))
-function isSel(f) { return selSet.value.has(f.file_id) }
-
-// 在 listShown 中选中 [fromId, toId] 区间（含端点）
-function selectRange(fromId, toId) {
-  const list = listShown.value
-  const a = list.findIndex((x) => x.file_id === fromId)
-  const b = list.findIndex((x) => x.file_id === toId)
-  if (a < 0 || b < 0) return
-  const [lo, hi] = a < b ? [a, b] : [b, a]
-  selected.value = list.slice(lo, hi + 1)
-}
-
-function toggleSel(f, e) {
-  // 区间选择模式：第一次点定起点，第二次点选中区间并退出
-  if (rangIsSelecting.value) {
-    if (!rangAnchor.value) { rangAnchor.value = f.file_id; focusId.value = f.file_id; return }
-    selectRange(rangAnchor.value, f.file_id)
-    rangIsSelecting.value = false
-    rangAnchor.value = ''
-    focusId.value = f.file_id
-    return
-  }
-  // Shift+点击：以上次焦点为锚点选区间（标准桌面行为）
-  if (e && e.shiftKey && focusId.value && focusId.value !== f.file_id) {
-    selectRange(focusId.value, f.file_id)
-    focusId.value = f.file_id
-    return
-  }
-  focusId.value = f.file_id
-  if (e && (e.ctrlKey || e.metaKey)) {
-    const i = selected.value.findIndex((s) => s.file_id === f.file_id)
-    if (i >= 0) selected.value.splice(i, 1)
-    else selected.value.push(f)
-  } else {
-    selected.value = isSel(f) && selected.value.length === 1 ? [] : [f]
-  }
-}
-
-function toggleRangSelect() {
-  rangIsSelecting.value = !rangIsSelecting.value
-  rangAnchor.value = ''
-}
-
-const listShown = computed(() => (mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value))
-watch(listShown, (list) => {
-  const visible = new Set(list.map((f) => f.file_id))
-  const next = selected.value.filter((f) => visible.has(f.file_id))
-  if (next.length !== selected.value.length) selected.value = next
-})
-
-// 大目录只保留视口附近的行/卡片，数据排序、选择和事件仍使用完整 listShown。
-// 仅改变渲染数量，不改变现有项目的 CSS 或尺寸。
-const listVirtualized = computed(() => viewMode.value === 'list' && listShown.value.length > VIRTUAL_THRESHOLD)
-const gridVirtualized = computed(() => viewMode.value === 'grid' && listShown.value.length > VIRTUAL_THRESHOLD)
-function virtualRange(total, pitch) {
-  if (!total) return { start: 0, end: 0 }
-  const viewport = Math.max(virtualViewportHeight.value, pitch * 8)
-  const start = Math.max(0, Math.floor(Math.max(0, virtualScrollTop.value) / pitch) - VIRTUAL_OVERSCAN)
-  const end = Math.min(total, Math.max(start + 1, Math.ceil((virtualScrollTop.value + viewport) / pitch) + VIRTUAL_OVERSCAN))
-  return { start, end }
-}
-const listWindow = computed(() => listVirtualized.value ? virtualRange(listShown.value.length, LIST_ROW_PITCH) : { start: 0, end: listShown.value.length })
-const gridWindow = computed(() => {
-  const total = listShown.value.length
-  const cols = Math.max(1, gridColumnCount.value)
-  if (!gridVirtualized.value) return { start: 0, end: total }
-  const rows = virtualRange(Math.ceil(total / cols), gridRowPitch.value)
-  return { start: rows.start * cols, end: Math.min(total, rows.end * cols) }
-})
-const listRenderRows = computed(() => rowsShown.value.slice(listWindow.value.start, listWindow.value.end))
-const gridRenderRows = computed(() => rowsShown.value.slice(gridWindow.value.start, gridWindow.value.end))
-const listVirtualTop = computed(() => listWindow.value.start * LIST_ROW_PITCH)
-const listVirtualBottom = computed(() => Math.max(0, (listShown.value.length - listWindow.value.end) * LIST_ROW_PITCH))
-const gridVirtualTop = computed(() => Math.floor(gridWindow.value.start / Math.max(1, gridColumnCount.value)) * gridRowPitch.value)
-const gridVirtualBottom = computed(() => {
-  const cols = Math.max(1, gridColumnCount.value)
-  const totalRows = Math.ceil(listShown.value.length / cols)
-  const renderedRows = Math.ceil((gridWindow.value.end - gridWindow.value.start) / cols)
-  return Math.max(0, (totalRows - Math.floor(gridWindow.value.start / cols) - renderedRows) * gridRowPitch.value)
-})
-function revealRow(index) {
-  const el = listEl.value
-  if (!el || index < 0) return
-  const isGrid = viewMode.value === 'grid'
-  const virtualized = isGrid ? gridVirtualized.value : listVirtualized.value
-  if (virtualized) {
-    const row = isGrid ? Math.floor(index / Math.max(1, gridColumnCount.value)) : index
-    const top = row * (isGrid ? gridRowPitch.value : LIST_ROW_PITCH)
-    const height = isGrid ? gridRowPitch.value : LIST_ROW_PITCH
-    if (top < el.scrollTop) el.scrollTop = top
-    else if (top + height > el.scrollTop + el.clientHeight) el.scrollTop = Math.max(0, top + height - el.clientHeight)
-    virtualScrollTop.value = el.scrollTop
-  }
-  nextTick(() => el.querySelector('.fileitem.focus, .griditem.focus')?.scrollIntoView({ block: 'nearest' }))
-}
-const allSelected = computed(() => listShown.value.length > 0 && selected.value.length === listShown.value.length)
-
-function selectAll() { selected.value = [...listShown.value] }
-function toggleSelectAll() { allSelected.value ? (selected.value = []) : selectAll() }
-function invertSel() { selected.value = listShown.value.filter((f) => !isSel(f)) }
-
 // ---------- 打开 ----------
 async function openFile(file) {
   if (file.isDir) { openDir(file); return }
@@ -726,18 +786,31 @@ async function openFile(file) {
 function selIds() { return selected.value.map((f) => f.file_id) }
 
 let running = false
-async function run(fn, okMsg) {
+async function run(fn, okMsg, options = {}) {
   if (running) return false
   running = true
+  const action = okMsg || '执行操作'
+  // 实际文件动作由后端统一记录开始/完成；界面这里只保留 debug 轨迹，
+  // 避免同一操作同时出现两套 info 日志。
+  debug('pan', '文件操作已提交', { action })
   try {
     await fn()
     if (okMsg) emit('toast', okMsg, 'success')
-    invalidateDirCache(uid.value, did.value, mode.value, dirId.value)
-    refresh()
-    loadFavorites()
+    // 仅把当前操作影响到的目录/视图标记为失效。订阅者会在可见目录
+    // 上合并成一次后台刷新，其他目录保持本机缓存，直到用户真正进入。
+    if (options.refreshView || options.invalidateDirectories?.length || options.refreshTrash || options.refreshFavorites || options.refreshSearch) {
+      notifyCurrentFileChange({
+        ...options,
+        refreshTrash: options.refreshTrash || (options.refreshView && mode.value === 'trash'),
+        refreshFavorites: options.refreshFavorites || (options.refreshView && mode.value === 'favorite'),
+        refreshSearch: options.refreshSearch || (options.refreshView && mode.value === 'search'),
+      })
+    }
+    debug('pan', '文件操作界面已更新', { action })
     return true
   } catch (e) {
     emit('toast', String(e), 'error')
+    logError('pan', `${action}失败`, { error: errorText(e) })
     return false
   } finally {
     running = false
@@ -750,11 +823,16 @@ async function doDownload(list) {
   if (!targets.length) { emit('toast', '请选择要下载的文件', 'error'); return }
   if (running) return
   running = true
+  const started = performance.now()
+  const fields = { provider: providerOf(uid.value), count: targets.length }
+  info('pan', '加入下载队列开始', fields)
   try {
     for (const f of targets) await download(uid.value, did.value, f)
     emit('toast', `已加入下载队列（${targets.length} 项）`, 'success')
+    info('pan', '加入下载队列完成', { ...fields, duration_ms: Math.round(performance.now() - started) })
   } catch (e) {
     emit('toast', String(e), 'error')
+    logError('pan', '加入下载队列失败', { ...fields, error: errorText(e), duration_ms: Math.round(performance.now() - started) })
   } finally {
     running = false
   }
@@ -778,7 +856,7 @@ async function toggleFav(file) {
       for (const f of list) await AddFavorite(uid.value, did.value, { file_id: f.file_id, name: f.name, isDir: f.isDir, user_id: uid.value, drive_id: did.value, added: Math.floor(Date.now() / 1000) })
       if (caps.value.favorite) { try { await favorite(uid.value, did.value, true, list.map((f) => f.file_id)) } catch { /* 同上 */ } }
     }
-  }, removing ? '已移出收藏' : '已加入收藏')
+  }, removing ? '已移出收藏' : '已加入收藏', { refreshFavorites: true })
 }
 
 // ---------- 右键菜单 ----------
@@ -806,7 +884,7 @@ function onCtx(e, file) {
     { sep: true },
     caps.value.move && { icon: 'move', label: '移动到…', action: 'move' },
     caps.value.copy && { icon: 'copy', label: '复制到…', action: 'copy' },
-    canMigrate.value && { icon: 'migrate', label: '迁移到其他网盘…', action: 'migrate' },
+    canMigrate.value && { icon: 'migrate', label: '迁移到其他账号或网盘…', action: 'migrate' },
     caps.value.rename && { icon: 'pencil', label: '重命名', action: 'rename' },
     caps.value.rename && selected.value.length > 1 && { icon: 'pencil', label: `批量重命名 (${selected.value.length})`, action: 'renamemulti' },
     { sep: true },
@@ -851,11 +929,17 @@ function onMenuSelect(action) {
     case 'migrate':
       if (!canMigrate.value) { emit('toast', '没有支持接收迁移文件的目标账号', 'error'); return }
       modalFile.value = list; migrateTarget.value = ''; migrateDir.value = 'root'; migrateDirName.value = '根目录'; migrateDirPick.value = false; modal.value = 'migrate'; break
-    case 'trash': run(() => trash(uid.value, did.value, ids), '已移入回收站'); break
+    case 'trash': run(() => trash(uid.value, did.value, ids), '已移入回收站', {
+      refreshView: true, refreshFavorites: true, refreshTrash: true, refreshSearch: true, files: list,
+    }); break
     case 'delete':
-      askConfirm(`彻底删除 ${list.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
+      askConfirm(`彻底删除 ${list.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, ids), '已彻底删除', {
+        refreshView: true, refreshFavorites: true, refreshTrash: true, refreshSearch: true, files: list,
+      }), { danger: true, title: '彻底删除' })
       break
-    case 'restore': run(() => restore(uid.value, did.value, ids), '已还原'); break
+    case 'restore': run(() => restore(uid.value, did.value, ids), '已还原', {
+      refreshView: true, refreshTrash: true, refreshSearch: true, files: list,
+    }); break
     case 'copyname': copyText(file.name).then(() => emit('toast', '已复制文件名', 'success')); break
     case 'detail': modalFile.value = file; modal.value = 'detail'; break
   }
@@ -870,7 +954,7 @@ async function doMkdir() {
     if (await run(async () => {
       const r = await mkdir(uid.value, did.value, dirId.value, name)
       if (r && r.error) throw new Error(r.error)
-    }, '文件夹已创建')) {
+    }, '文件夹已创建', { refreshView: true, refreshSearch: true, directories: [dirId.value] })) {
       modal.value = null
       inputText.value = ''
     }
@@ -883,7 +967,9 @@ async function doRename() {
   const file = modalFile.value
   modalBusy.value = true
   try {
-    if (await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名')) {
+    if (await run(() => rename(uid.value, did.value, file.file_id, name), '已重命名', {
+      refreshView: true, refreshSearch: true, files: [file],
+    })) {
       modal.value = null
       inputText.value = ''
     }
@@ -933,11 +1019,7 @@ const conflictModal = ref(null) // { names, onPolicy }
 
 async function checkUploadConflict(paths) {
   const existing = new Set()
-  try {
-    const res = await listDir(uid.value, did.value, dirId.value)
-    const remoteFiles = Array.isArray(res) ? res : (Array.isArray(res?.files) ? res.files : [])
-    for (const f of remoteFiles) existing.add(f.name)
-  } catch { /* 忽略 */ }
+  for (const f of files.value) existing.add(f.name)
   const clashes = []
   for (const p of paths) {
     const name = p.split(/[/\\]/).pop()
@@ -985,8 +1067,22 @@ async function doOffline() {
   const url = inputText.value.trim()
   if (!url || modalBusy.value) return
   modalBusy.value = true
+  const started = performance.now()
+  const fields = { provider: providerOf(uid.value), count: 1 }
+  info('pan', '创建云离线任务开始', fields)
   try {
     if (await run(() => OfflineDownload(uid.value, did.value, url, ''), '已提交云离线任务')) {
+      // PikPak 未指定目录时会落到下载根目录；先让该目录在短延迟后校验，
+      // 既能尽早显示新建任务文件，也不在当前子目录做无意义刷新。
+      notifyFileChange({
+        userId: uid.value,
+        driveId: did.value,
+        directories: [rootKey.value],
+        refreshSearch: true,
+        delay: 1500,
+        minimumInterval: 5000,
+      })
+      info('pan', '创建云离线任务完成', { ...fields, duration_ms: Math.round(performance.now() - started) })
       modal.value = null
       inputText.value = ''
     }
@@ -999,27 +1095,58 @@ async function onDirPicked(target) {
   modal.value = null
   if (!list) return
   const ids = list.map((f) => f.file_id)
-  if (which === 'movedir') await run(() => move(uid.value, did.value, ids, target.id), '已移动')
-  else if (which === 'copydir') await run(() => copy(uid.value, did.value, ids, target.id), '已复制')
+  if (which === 'movedir') await run(() => move(uid.value, did.value, ids, target.id), '已移动', {
+    refreshView: true, invalidateDirectories: [target.id], refreshSearch: true, files: list,
+  })
+  else if (which === 'copydir') await run(() => copy(uid.value, did.value, ids, target.id), '已复制', {
+    refreshView: mode.value === 'list' && target.id === dirId.value,
+    invalidateDirectories: [target.id], refreshSearch: true, files: list,
+  })
 }
 
-const migrateTargetAcc = computed(() => props.accounts.find((a) => a.user_id === migrateTarget.value) || null)
+// 迁移目标必须从同一份已排序、已过滤的列表里解析，避免账号列表更新后
+// 下拉显示的顺序和实际执行目标不一致。
+const migrateTargetAcc = computed(() => migrateAccounts.value.find((a) => a.user_id === migrateTarget.value) || null)
+const migrateTargetRoot = computed(() => providerMetaOf(migrateTargetAcc.value, props.providers).rootKey || 'root')
+
+watch(migrateTarget, () => {
+  const targetMeta = providerMetaOf(migrateTargetAcc.value, props.providers)
+  migrateDir.value = targetMeta.rootKey || 'root'
+  migrateDirName.value = targetMeta.rootTitle || '根目录'
+})
 
 async function doMigrate() {
-  const targetAcc = props.accounts.find((a) => a.user_id === migrateTarget.value)
+  const targetAcc = migrateTargetAcc.value
   if (!targetAcc) { emit('toast', '请选择目标账号', 'error'); return }
   if (!canReceiveMigration(targetAcc)) { emit('toast', '目标账号不支持上传，无法迁移', 'error'); return }
   const list = modalFile.value
   if (!list || modalBusy.value) return
   modalBusy.value = true
   try {
+    let createdJob = null
     if (await run(
-      () => migrateFiles(uid.value, did.value, targetAcc.user_id, targetAcc.drive_id, migrateDir.value || 'root', list.map((f) => f.file_id), false),
+      async () => { createdJob = await migrateFiles(uid.value, did.value, targetAcc.user_id, targetAcc.drive_id, migrateDir.value || migrateTargetRoot.value, list.map((f) => f.file_id), false) },
       '迁移任务已创建'
     )) {
+      if (createdJob?.id && createdJob.move) {
+        pendingMigrationSources.set(createdJob.id, {
+          userId: uid.value,
+          driveId: did.value,
+          directories: fileParentDirectories(list),
+        })
+      }
       modal.value = null
     }
   } finally { modalBusy.value = false }
+}
+
+function onPreviewSaved() {
+  notifyCurrentFileChange({ files: modalFile.value ? [modalFile.value] : [], refreshView: true, refreshSearch: true })
+}
+
+function onRenameMultiDone() {
+  const renamed = Array.isArray(modalFile.value) ? modalFile.value : selected.value
+  notifyCurrentFileChange({ files: renamed, refreshView: true, refreshSearch: true })
 }
 
 // ---------- 工具条分享 ----------
@@ -1037,7 +1164,9 @@ function openShareModal() { openShareDialog(selected.value) }
 
 function confirmDeleteSelected() {
   if (!selected.value.length) return
-  askConfirm(`彻底删除 ${selected.value.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, selIds()), '已彻底删除'), { danger: true, title: '彻底删除' })
+  askConfirm(`彻底删除 ${selected.value.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, selIds()), '已彻底删除', {
+    refreshView: true, refreshFavorites: true, refreshTrash: true, refreshSearch: true, files: selected.value,
+  }), { danger: true, title: '彻底删除' })
 }
 
 // ---------- 收藏打开 ----------
@@ -1103,7 +1232,7 @@ function onTreeEnter(e, node) {
     const y = Math.min(rect.top, window.innerHeight - 320)
     hoverPreview.value = { id, name: node.name, x, y, items: [], loading: true }
     try {
-      const list = await listDir(uid.value, did.value, id)
+      const list = await listDirectorySnapshot(id)
       if (hoverPreview.value && hoverPreview.value.id === id) {
         hoverPreview.value.items = (list || []).slice(0, 8)
         hoverPreview.value.loading = false
@@ -1144,7 +1273,9 @@ function onKey(e) {
     modalFile.value = selected.value[0]; inputText.value = selected.value[0].name; modal.value = 'rename'; e.preventDefault()
   }
   else if (e.code === 'Delete' && selected.value.length && caps.value.recycleBin && mode.value !== 'trash') {
-    run(() => trash(uid.value, did.value, selIds()), '已移入回收站'); e.preventDefault()
+    run(() => trash(uid.value, did.value, selIds()), '已移入回收站', {
+      refreshView: true, refreshFavorites: true, refreshTrash: true, refreshSearch: true, files: selected.value,
+    }); e.preventDefault()
   }
   else if (e.ctrlKey && e.shiftKey && e.code === 'KeyS' && selected.value.length && caps.value.createShare) { openShareModal(); e.preventDefault() }
   else if (e.code === 'Enter') {
@@ -1173,16 +1304,65 @@ function onKey(e) {
   }
 }
 
-watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKey.value], ([nextUid, nextDid]) => {
+function accountViewKey(account = props.account) {
+  return [account?.user_id || '', account?.drive_id || '', rootKey.value].join('\u0000')
+}
+
+let appliedAccountViewKey = ''
+let pendingAccountViewSync = false
+
+// 账号变更需要同时失效旧请求、清空旧账号的瞬时 UI 状态，并以新账号的
+// 缓存为首屏。这一方法既由 prop watcher 调用，也暴露给父页面作为切换
+// 兜底，避免 KeepAlive/过渡期间漏掉一次 prop watcher 后必须手动刷新。
+function syncAccountView({ force = false } = {}) {
   const a = props.account
-  if (!a) { files.value = []; return }
+  const nextKey = accountViewKey(a)
+  if (accountFavoritesTimer) clearTimeout(accountFavoritesTimer)
+  accountFavoritesTimer = 0
+  if (!a) {
+    appliedAccountViewKey = ''
+    pendingAccountViewSync = false
+    pendingAccountFavoritesLoad = false
+    loadSeq++
+    cancelVirtualRestore()
+    files.value = []
+    favorites.value = []
+    selected.value = []
+    focusId.value = ''
+    loading.value = false
+    error.value = ''
+    return false
+  }
+  if (!force && nextKey === appliedAccountViewKey) return false
+
+  appliedAccountViewKey = nextKey
+  // 让上一账号仍在进行中的分页/缓存读结果立即失效。
+  loadSeq++
+  cancelVirtualRestore()
   tree.value = {}
   expanded.value = {}
   treeParents.value = {}
   treeNames.value = {}
   thumbErrors.value = {}
+  files.value = []
   favorites.value = []
   favoriteError.value = ''
+  selected.value = []
+  focusId.value = ''
+  filterRaw.value = ''
+  filter.value = ''
+  resetVirtualScroll()
+  error.value = ''
+
+  // 页面在 KeepAlive 后台时只记录待同步状态；回到可见页面再读取缓存或
+  // 远端，避免账号列表更新在后台额外制造网络请求。
+  if (!panViewActive) {
+    pendingAccountViewSync = true
+    pendingAccountFavoritesLoad = true
+    return true
+  }
+  pendingAccountViewSync = false
+
   // 恢复该账号上次浏览位置；没有记录时回根目录
   const saved = (getPrefs().panLocations || {})[a.user_id]
   if (saved && saved.dirId && saved.dirId !== rootKey.value) {
@@ -1202,8 +1382,11 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
     goHome()
     expanded.value[rootKey.value] = true
   }
-  loadFavorites()
-})
+  scheduleAccountFavoritesLoad()
+  return true
+}
+
+watch(() => accountViewKey(), () => { syncAccountView() })
 
 async function onDropUpload(paths) {
   if (!props.account || mode.value !== 'list' || !caps.value.upload) return
@@ -1224,12 +1407,12 @@ function openUploadModal() {
 
 defineExpose({
   refresh,
+  syncAccountView,
   openMkdirModal,
   openUploadModal,
   clearCache: () => {
-    cacheEpoch++
     loadSeq++
-    dirCache.clear()
+    clearDirectoryCache()
     tree.value = {}
     expanded.value = {}
     treeParents.value = {}
@@ -1237,38 +1420,61 @@ defineExpose({
   },
 })
 
-watch(listEl, (el) => {
-  listResizeObserver?.disconnect()
-  listResizeObserver = null
-  if (!el) return
-  nextTick(() => {
-    if (listEl.value !== el) return
-    updateVirtualMetrics(el)
-    if (typeof ResizeObserver === 'undefined') return
-    listResizeObserver = new ResizeObserver(() => updateVirtualMetrics(el))
-    listResizeObserver.observe(el)
-  })
-}, { flush: 'post' })
-watch([listShown, viewMode], () => nextTick(() => updateVirtualMetrics()), { flush: 'post' })
-
+let offMigrateEvent = null
+let offFileMutation = null
 onMounted(() => {
+  panViewActive = true
   window.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', sideMove)
   window.addEventListener('mouseup', sideUp)
-  if (props.account) {
-    expanded.value[rootKey.value] = true
-    load(rootKey.value)
-    loadFavorites()
+  offMigrateEvent = onEvent('migrate:progress', onMigrateEvent)
+  offFileMutation = onFileChange(onFileMutation)
+  syncAccountView({ force: true })
+  emit('ready')
+})
+onActivated(() => {
+  panViewActive = true
+  const returningFromBackground = panViewWasInactive
+  panViewWasInactive = false
+  const accountWasSynced = pendingAccountViewSync
+    ? syncAccountView({ force: true })
+    : syncAccountView()
+  if (accountWasSynced) {
+    // 新账号已由 syncAccountView 按缓存策略加载，不再叠加一次自动校验。
+  } else {
+    if (pendingAccountFavoritesLoad) scheduleAccountFavoritesLoad(0)
+    if (pendingVisibleRefresh) flushDeferredVisibleRefresh()
+    // 回到文件页时，短时间内继续复用本机缓存；超过校验窗口才后台拉取
+    // 当前这一页，避免离开页面一段时间后仍停留在过期快照。
+    else if (returningFromBackground && currentViewNeedsRevalidation()) scheduleCurrentViewRefresh(120)
+  }
+  emit('ready')
+})
+onDeactivated(() => {
+  panViewActive = false
+  panViewWasInactive = true
+  if (accountFavoritesTimer) {
+    clearTimeout(accountFavoritesTimer)
+    accountFavoritesTimer = 0
+    pendingAccountFavoritesLoad = true
+  }
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = 0
+    deferVisibleRefresh(120)
   }
 })
 onBeforeUnmount(() => {
+  panViewActive = false
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('mousemove', sideMove)
   window.removeEventListener('mouseup', sideUp)
   clearTimeout(filterTimer)
   clearTimeout(hoverTimer)
-  listResizeObserver?.disconnect()
-  if (scrollSaveFrame) cancelAnimationFrame(scrollSaveFrame)
+  clearTimeout(refreshTimer)
+  clearTimeout(accountFavoritesTimer)
+  offMigrateEvent?.()
+  offFileMutation?.()
 })
 </script>
 
@@ -1390,10 +1596,10 @@ onBeforeUnmount(() => {
               <button class="tbtn" @click="toggleFav(selected[0])"><UiIcon name="star" :size="15" />{{ isFav(selected[0]) && selected.length === 1 ? '移出收藏' : '收藏' }}</button>
               <button v-if="caps.move" class="tbtn" @click="modalFile = [...selected]; modal = 'movedir'"><UiIcon name="move" :size="15" />移动</button>
               <button v-if="caps.copy" class="tbtn" @click="modalFile = [...selected]; modal = 'copydir'"><UiIcon name="copy" :size="15" />复制</button>
-              <button v-if="caps.recycleBin && mode !== 'trash'" class="tbtn danger" title="删除 (Delete)" @click="run(() => trash(uid, did, selIds()), '已移入回收站')"><UiIcon name="trash" :size="15" />删除</button>
+              <button v-if="caps.recycleBin && mode !== 'trash'" class="tbtn danger" title="删除 (Delete)" @click="run(() => trash(uid, did, selIds()), '已移入回收站', { refreshView: true, refreshFavorites: true, refreshTrash: true, refreshSearch: true, files: selected })"><UiIcon name="trash" :size="15" />删除</button>
             </div>
             <div class="toppanbtn" v-if="mode === 'trash' && selected.length">
-              <button v-if="caps.trashRestore" class="tbtn" @click="run(() => restore(uid, did, selIds()), '已还原')"><UiIcon name="restore" :size="15" />还原</button>
+              <button v-if="caps.trashRestore" class="tbtn" @click="run(() => restore(uid, did, selIds()), '已还原', { refreshView: true, refreshTrash: true, refreshSearch: true, files: selected })"><UiIcon name="restore" :size="15" />还原</button>
               <button v-if="caps.permanentDelete" class="tbtn danger" @click="confirmDeleteSelected"><UiIcon name="x-circle" :size="15" />彻底删除</button>
             </div>
             <div class="toolbar-spacer"></div>
@@ -1641,8 +1847,8 @@ onBeforeUnmount(() => {
       </template>
     </Modal>
 
-    <!-- 跨盘迁移 -->
-    <Modal v-if="modal === 'migrate'" title="迁移到其他网盘" @close="modal = null">
+    <!-- 跨账号/跨盘迁移 -->
+    <Modal v-if="modal === 'migrate'" title="迁移到其他账号或网盘" @close="modal = null">
       <div class="field">
         <label>目标账号</label>
         <UiSelect
@@ -1650,9 +1856,10 @@ onBeforeUnmount(() => {
           block
           :disabled="modalBusy"
           placeholder="选择目标账号"
-          :options="migrateAccounts.map((a) => ({ value: a.user_id, label: (a.token && (a.token.nick_name || a.token.user_name)) || a.user_id }))"
+          :options="migrateAccountOptions"
         />
         <div class="hint" v-if="!migrateAccounts.length">没有其他可用账号，请先在左侧添加网盘账号</div>
+        <div class="hint" v-else>可选择同一网盘的其他账号；源、目标支持相同指纹时会优先秒传，目标支持常规上传时未命中会自动继续迁移。</div>
       </div>
       <div class="field" v-if="migrateTarget">
         <label>目标目录</label>
@@ -1700,7 +1907,7 @@ onBeforeUnmount(() => {
       :file-list="listShown"
       @close="modal = null"
       @toast="(m, t) => emit('toast', m, t)"
-      @saved="refresh"
+      @saved="onPreviewSaved"
     />
     <PlayerPanel
       v-if="modal === 'player'"
@@ -1718,7 +1925,7 @@ onBeforeUnmount(() => {
       :account="account"
       :files="modalFile"
       @close="modal = null"
-      @done="refresh"
+      @done="onRenameMultiDone"
       @toast="(m, t) => emit('toast', m, t)"
     />
 

@@ -2,7 +2,8 @@
 // 账号快切栏（复刻旧版 AccountRail）：默认 60px 窄图标栏，悬停展开为 220px 显示名称与用量。
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { providerOf, accountName, providerIconUrl, providerMetaOf } from '../api'
-import { getPrefs, setPref } from '../appearance'
+import { accountOrderKey, orderAccounts, setPref } from '../appearance'
+import { debug } from '../logger'
 import ContextMenu from './ContextMenu.vue'
 import UiIcon from './UiIcon.vue'
 
@@ -22,18 +23,12 @@ onBeforeUnmount(() => { clearTimeout(enterTimer); clearTimeout(leaveTimer) })
 // ---------- 手动拖拽排序（顺序存 localStorage prefs.accountOrder） ----------
 const dragIdx = ref(-1)
 const liveList = ref(null) // 拖拽中的实时顺序
-const bumpMap = ref({})    // 被挤动项的碰撞果冻：user_id -> { dir, delay }
+const bumpMap = ref({})    // 被挤动项的碰撞果冻：accountOrderKey -> { dir, delay }
 let suppressClick = false
 
 const orderedAccounts = computed(() => {
   if (liveList.value) return liveList.value
-  const order = Array.isArray(getPrefs().accountOrder) ? getPrefs().accountOrder : []
-  if (!order.length) return props.accounts
-  const known = order
-    .map((id) => props.accounts.find((a) => a.user_id === id))
-    .filter(Boolean)
-  const unknown = props.accounts.filter((a) => !order.includes(a.user_id))
-  return [...known, ...unknown]
+  return orderAccounts(props.accounts)
 })
 
 function onItemPointerDown(e, acc) {
@@ -45,7 +40,7 @@ function onItemPointerDown(e, acc) {
   let dragging = false
   let ghost = null
   let rafId = 0
-  let heights = null   // Map<user_id, height>，拖动起点捕获的各项静止高度
+  let heights = null   // Map<accountOrderKey, height>，拖动起点捕获的各项静止高度
   let gapPx = 0
   let top0 = 0         // 首项静止 top
   let bottomLimit = 0  // 末项静止 bottom（拖动垂直范围上限）
@@ -68,7 +63,7 @@ function onItemPointerDown(e, acc) {
       const cur = dragIdx.value
       if (target !== cur && cur >= 0) {
         const before = liveList.value
-        const beforeIdx = new Map(before.map((a, i) => [a.user_id, i]))
+        const beforeIdx = new Map(before.map((a, i) => [accountOrderKey(a), i]))
         const list = [...before]
         const [moved] = list.splice(cur, 1)
         list.splice(target, 0, moved)
@@ -78,10 +73,11 @@ function onItemPointerDown(e, acc) {
         // 延迟与 FLIP 波纹一致；清空再赋值以保证同向连续挤动时动画能重新播放
         const bumps = {}
         list.forEach((a, ni) => {
-          if (a.user_id === moved.user_id) return
-          const oi = beforeIdx.get(a.user_id)
+          const key = accountOrderKey(a)
+          if (key === accountOrderKey(moved)) return
+          const oi = beforeIdx.get(key)
           if (oi !== ni) {
-            bumps[a.user_id] = { dir: ni > oi ? 'down' : 'up', delay: Math.min(Math.abs(ni - target) * 35, 140) }
+            bumps[key] = { dir: ni > oi ? 'down' : 'up', delay: Math.min(Math.abs(ni - target) * 35, 140) }
           }
         })
         bumpMap.value = {}
@@ -98,7 +94,7 @@ function onItemPointerDown(e, acc) {
     const list = liveList.value
     let top = top0
     for (let i = 0; i < list.length; i++) {
-      const h = heights.get(list[i].user_id) || 0
+      const h = heights.get(accountOrderKey(list[i])) || 0
       if (y < top + h + gapPx) return i
       top += h + gapPx
     }
@@ -111,7 +107,7 @@ function onItemPointerDown(e, acc) {
     const items = [...listEl.querySelectorAll('.rail-item')]
     if (!items.length) return
     heights = new Map()
-    items.forEach((el, i) => heights.set(liveList.value[i].user_id, el.getBoundingClientRect().height))
+    items.forEach((el, i) => heights.set(accountOrderKey(liveList.value[i]), el.getBoundingClientRect().height))
     gapPx = parseFloat(getComputedStyle(listEl).rowGap) || 0
     top0 = items[0].getBoundingClientRect().top
     bottomLimit = items[items.length - 1].getBoundingClientRect().bottom
@@ -135,7 +131,7 @@ function onItemPointerDown(e, acc) {
     let targetTop = top0
     const list = liveList.value || []
     for (let i = 0; i < dragIdx.value && i < list.length; i++) {
-      targetTop += (heights?.get(list[i].user_id) || 0) + gapPx
+      targetTop += (heights?.get(accountOrderKey(list[i])) || 0) + gapPx
     }
     ghost.classList.add('dropping')
     ghost.style.transform = `translate3d(0, ${targetTop - ghostTop0}px, 0) scale(1)`
@@ -159,7 +155,7 @@ function onItemPointerDown(e, acc) {
       clearTimeout(enterTimer)
       clearTimeout(leaveTimer)
       liveList.value = [...orderedAccounts.value]
-      dragIdx.value = liveList.value.findIndex((a) => a.user_id === acc.user_id)
+      dragIdx.value = liveList.value.findIndex((a) => accountOrderKey(a) === accountOrderKey(acc))
       // 冻结栏宽/项高过渡（进行中的展开动画立即到位），下一帧捕获静止几何
       listEl.closest('.account-rail').classList.add('rail-frozen')
       document.body.classList.add('rail-drag-active')
@@ -172,7 +168,7 @@ function onItemPointerDown(e, acc) {
     window.removeEventListener('pointercancel', onUp)
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
     if (dragging && liveList.value) {
-      setPref('accountOrder', liveList.value.map((a) => a.user_id))
+      setPref('accountOrder', liveList.value.map(accountOrderKey))
       // click 紧跟 pointerup 触发，延后一帧清除以吞掉这次拖拽点击
       setTimeout(() => { suppressClick = false }, 0)
     }
@@ -214,7 +210,7 @@ function onRailLeave() {
 
 const groups = computed(() => {
   const map = new Map()
-  for (const acc of props.accounts) {
+  for (const acc of orderedAccounts.value) {
     const pid = providerOf(acc.user_id)
     if (!map.has(pid)) map.set(pid, [])
     map.get(pid).push(acc)
@@ -250,7 +246,10 @@ function labelOfAcc(acc) {
 }
 
 function onCtx(e, acc) {
+  e.preventDefault()
+  e.stopPropagation()
   menu.value = { x: e.clientX, y: e.clientY, acc }
+  debug('account', '打开账号菜单', { provider: providerOf(acc.user_id) })
 }
 
 const menuItems = computed(() => {
@@ -258,15 +257,17 @@ const menuItems = computed(() => {
   if (!acc) return []
   return [
     { icon: 'info', label: '账号信息', action: 'info' },
-    { icon: 'camera', label: '自定义截图', action: 'rename' },
+    { icon: 'edit', label: '自定义', action: 'rename' },
     { icon: 'trash', label: '移除账号', danger: true, action: 'remove' },
   ]
 })
 
 function onMenu(action) {
-  if (action === 'remove') emit('remove', menu.value.acc)
-  else if (action === 'info') emit('info', menu.value.acc)
-  else if (action === 'rename') emit('rename', menu.value.acc)
+  const acc = menu.value?.acc
+  if (!acc) return
+  if (action === 'remove') emit('remove', acc)
+  else if (action === 'info') emit('info', acc)
+  else if (action === 'rename') emit('rename', acc)
 }
 </script>
 
@@ -280,17 +281,17 @@ function onMenu(action) {
     <TransitionGroup name="rail" tag="div" class="rail-list" :class="{ reordering: dragIdx >= 0 }">
       <button
         v-for="(acc, i) in orderedAccounts"
-        :key="acc.user_id"
+        :key="accountOrderKey(acc)"
         type="button"
         class="rail-item"
-        :class="{ active: current && current.user_id === acc.user_id, dragging: dragIdx === i, ['bump-' + (bumpMap[acc.user_id] || {}).dir]: bumpMap[acc.user_id] }"
+        :class="{ active: current && current.user_id === acc.user_id && current.drive_id === acc.drive_id, dragging: dragIdx === i, ['bump-' + (bumpMap[accountOrderKey(acc)] || {}).dir]: bumpMap[accountOrderKey(acc)] }"
         :style="dragIdx >= 0 && dragIdx !== i ? { transitionDelay: Math.min(Math.abs(i - dragIdx) * 35, 140) + 'ms' } : null"
         :title="`${labelOfAcc(acc)} · ${accountName(acc)}`"
         @pointerdown="onItemPointerDown($event, acc)"
         @click="onItemClick(acc)"
         @contextmenu.prevent="onCtx($event, acc)"
       >
-        <span class="rail-inner" :style="bumpMap[acc.user_id] ? { animationDelay: bumpMap[acc.user_id].delay + 'ms' } : null">
+        <span class="rail-inner" :style="bumpMap[accountOrderKey(acc)] ? { animationDelay: bumpMap[accountOrderKey(acc)].delay + 'ms' } : null">
           <span class="rail-icon">
             <img v-if="iconOfAcc(acc)" :src="iconOfAcc(acc)" alt="" />
             <span v-else class="rail-fallback">{{ (accountName(acc) || '?')[0].toUpperCase() }}</span>

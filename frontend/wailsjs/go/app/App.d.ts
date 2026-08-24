@@ -126,8 +126,6 @@ export function OpenBrowser(arg1:string):Promise<void>;
 
 export function OpenFile(arg1:string):Promise<void>;
 
-export function OpenPikPakCaptcha(arg1:string):Promise<void>;
-
 export function PauseDownload(arg1:string):Promise<void>;
 
 export function PickDirectory(arg1:string,arg2:string):Promise<string>;
@@ -197,6 +195,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:string):Promise<Array<m
 export function SendGuangyaSms(arg1:string):Promise<Record<string, string>>;
 
 export function SendPan139SMS(arg1:string):Promise<void>;
+
+export function SendPan189SMS(arg1:string):Promise<void>;
 
 export function SetAccountCustomMeta(arg1:string,arg2:string,arg3:string):Promise<model.Account>;
 

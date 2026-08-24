@@ -32,6 +32,17 @@ func testCtx(driveID, baseURL, cookie string) drive.Context {
 	}
 }
 
+func TestLanzouDoesNotAdvertiseTransferHashes(t *testing.T) {
+	driver := &Driver{}
+	caps := driver.Capabilities()
+	if len(caps.ProvideHashes) != 0 || len(caps.RapidUploadHashes) != 0 {
+		t.Fatalf("transfer hashes = provide:%v rapid:%v, want none", caps.ProvideHashes, caps.RapidUploadHashes)
+	}
+	if hash, err := driver.ResolveTransferHash(context.Background(), drive.Context{}, "file-1", "md5", false); err == nil || hash != "" {
+		t.Fatalf("ResolveTransferHash(md5) = %q, %v, want not supported", hash, err)
+	}
+}
+
 // TestFileListPagination exercises the task-47 / task-5 paging loop and the
 // folder+file mapping.
 func TestFileListPagination(t *testing.T) {

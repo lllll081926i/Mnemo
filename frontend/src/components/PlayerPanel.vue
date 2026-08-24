@@ -2,9 +2,13 @@
 // 网页播放器只保留浏览器/WebView 可解码路径：原生 MP4/WebM/Ogg，按需加载
 // HLS.js 和 dash.js 的 MSE 流。所有远程请求都经 Go 侧本地会话代理。
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings, previewUrl, download } from '../api'
+import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, getSettings, previewUrl, download } from '../api'
 import { getPrefs } from '../appearance'
-import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
+import { srtToVtt } from '../player/subtitles'
+import { error as logError, errorText, info } from '../logger'
+import { extensionOf, usePlaybackEngine } from '../composables/usePlaybackEngine'
+import { usePlaybackCursor } from '../composables/usePlaybackCursor'
+import { useSubtitleRenderers } from '../composables/useSubtitleRenderers'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 
@@ -31,8 +35,6 @@ const speed = ref(getPrefs().defaultSpeed || 1)
 const seekStep = getPrefs().seekStep || 10
 const qualities = ref([])
 const currentQuality = ref('')
-const src = ref('')
-const streamType = ref('')
 const looping = ref(false)
 const isFullscreen = ref(false)
 // 窗口控制（右上角）：全屏时隐藏
@@ -65,10 +67,6 @@ const osdPct = ref(0)
 const supCanvasEl = ref(null)
 const localSubInput = ref(null)
 const extraTextSubs = ref([]) // 网盘同名字幕 + 本地文本字幕（srt/vtt）
-const supTracks = ref([])     // SUP 图形字幕：{ label, url }
-const supActive = ref(false)
-const assTracks = ref([])     // ASS/SSA 特效字幕：{ label, url | content }
-const assActive = ref(false)
 const fsAnim = ref('') // 'in' | 'out'：全屏切换过渡动画
 const isBuffering = ref(false) // 播放过程中卡顿缓冲状态
 const loadingSpeed = ref('') // 实时缓冲网速
@@ -77,32 +75,68 @@ let lastSpeedCalcTime = Date.now()
 
 let unmounted = false
 let playbackSeq = 0
-let sourceSeq = 0
 let controlsTimer = null
-let saveTimer = null
-let pendingResume = 0
-let pendingAutoplay = true
-let suppressVideoErrors = false
-let hlsPlayer = null
-let dashPlayer = null
-let hlsRecoveryAttempts = 0
-let dashRecoveryAttempts = 0
-let activeSourceURL = ''
-let playbackEnded = false
 let centerTimer = null
 let osdTimer = null
 let audioCtx = null
 let gainNode = null
-let supRenderer = null
 let fsAnimTimer = null
-let assRenderer = null
-let subtitleFetchController = null
 let localSubtitleReader = null
 const subtitleObjectURLs = new Set()
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const speedOptions = SPEEDS.map((s) => ({ value: s, label: s + 'x' }))
-const UNSUPPORTED_WEB_CONTAINERS = new Set(['avi', 'flv', 'm2ts', 'mkv', 'mpg', 'mpeg', 'mts', 'rm', 'rmvb', 'ts', 'wmv'])
+const {
+  assActive,
+  assTracks,
+  destroyAss,
+  onResize: onWindowResize,
+  renderSupFrame,
+  reset: resetSubtitleRenderers,
+  selectAss,
+  selectSup,
+  stopSup,
+  supActive,
+  supTracks,
+} = useSubtitleRenderers({ currentSubtitle, emit, selectTextSubtitle: selectSubtitle, supCanvasEl, videoEl })
+const {
+  clear: clearPlayCursor,
+  hasEnded: hasPlaybackEnded,
+  markActive: markPlaybackActive,
+  markEnded: markPlaybackEnded,
+  save: saveCursor,
+  start: startCursorTimer,
+  stop: stopCursorTimer,
+} = usePlaybackCursor({
+  account: () => props.account,
+  currentFileId: () => props.file?.file_id,
+  videoEl,
+})
+const {
+  consumeLoadIntent,
+  handleVideoError,
+  loadSource: loadEngineSource,
+  reset: resetPlaybackEngine,
+  src,
+  streamType,
+} = usePlaybackEngine({
+  currentFileName: () => props.file?.name,
+  error,
+  extraTextSubtitles: extraTextSubs,
+  onBeforeSourceLoad: () => {
+    stopSup()
+    destroyAss()
+  },
+  playing,
+  readableError: readablePlaybackError,
+  resetTextSubtitles: (cloudTracks, localTracks) => {
+    subtitleSources.value = [...cloudTracks, ...localTracks]
+    subtitleTracks.value = []
+    subtitleEnabled.value = false
+    currentSubtitle.value = ''
+  },
+  videoEl,
+})
 const episodeFiles = computed(() => (props.files || []).filter((candidate) => !candidate?.isDir && isVideoFile(candidate)))
 const thumbnailUrl = computed(() => String(props.file?.thumbnail || props.file?.thumbnail_url || props.file?.thumb_url || '').trim())
 const episodeIndex = computed(() => episodeFiles.value.findIndex((candidate) => candidate.file_id === props.file?.file_id))
@@ -119,29 +153,19 @@ onMounted(() => {
 watch(() => props.file?.file_id, (nextId, previousId) => {
   if (!nextId || nextId === previousId || unmounted) return
   saveCursor(previousId)
-  if (saveTimer) {
-    clearInterval(saveTimer)
-    saveTimer = null
-  }
+  stopCursorTimer()
   startPlayback()
 })
 onBeforeUnmount(() => {
   unmounted = true
   playbackSeq++
-  sourceSeq++
-  saveCursor()
-  cancelSubtitleFetch()
   cancelLocalSubtitleReader()
   revokeSubtitleObjectURLs()
-  destroyAdaptivePlayers()
-  if (saveTimer) clearInterval(saveTimer)
   if (controlsTimer) clearTimeout(controlsTimer)
   if (centerTimer) clearTimeout(centerTimer)
   if (osdTimer) clearTimeout(osdTimer)
   if (audioCtx) { try { audioCtx.close() } catch {}; audioCtx = null; gainNode = null }
   if (fsAnimTimer) clearTimeout(fsAnimTimer)
-  stopSup()
-  destroyAss()
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
@@ -167,34 +191,21 @@ function isVideoFile(file) {
 
 async function startPlayback() {
   const seq = ++playbackSeq
-  sourceSeq++
-  if (saveTimer) {
-    clearInterval(saveTimer)
-    saveTimer = null
-  }
-  cancelSubtitleFetch()
+  stopCursorTimer()
   cancelLocalSubtitleReader()
   revokeSubtitleObjectURLs()
-  destroyAdaptivePlayers()
+  resetPlaybackEngine()
+  resetSubtitleRenderers()
   loading.value = true
   error.value = ''
   playing.value = false
   position.value = 0
   buffered.value = 0
   duration.value = 0
-  src.value = ''
-  activeSourceURL = ''
-  playbackEnded = false
-  streamType.value = ''
+  markPlaybackActive()
   subtitleSources.value = []
   subtitleTracks.value = []
   extraTextSubs.value = []
-  supTracks.value = []
-  assTracks.value = []
-  stopSup()
-  destroyAss()
-  pendingResume = 0
-  clearVideoSource()
   try {
     await pinFileSnapshot(props.account.user_id, props.account.drive_id, props.file)
     if (unmounted || seq !== playbackSeq) return
@@ -221,203 +232,8 @@ async function startPlayback() {
   }
 }
 
-async function loadPlaybackSource(preview, resumeAt, autoplay, parentSeq) {
-  const url = String(preview && preview.url || '').trim()
-  if (!url) throw new Error('未获取到可播放的视频地址')
-  const v = videoEl.value
-  if (!v) throw new Error('播放器尚未初始化')
-  const loadSeq = ++sourceSeq
-  destroyAdaptivePlayers()
-  clearVideoSource()
-  src.value = ''
-  activeSourceURL = url
-  playbackEnded = false
-  pendingResume = Math.max(0, Number(resumeAt) || 0)
-  pendingAutoplay = Boolean(autoplay)
-  streamType.value = normalizeStreamType(preview)
-  subtitleSources.value = [...normalizeSubtitles(preview && preview.subtitles), ...extraTextSubs.value]
-  subtitleTracks.value = []
-  subtitleEnabled.value = false
-  currentSubtitle.value = ''
-  stopSup()
-  destroyAss()
-  await nextTick()
-  if (unmounted || parentSeq !== playbackSeq || loadSeq !== sourceSeq) return
-
-  if (streamType.value === 'hls') {
-    await loadHLS(v, url, loadSeq)
-    return
-  }
-  if (streamType.value === 'dash') {
-    await loadDASH(v, url, loadSeq)
-    return
-  }
-  if (UNSUPPORTED_WEB_CONTAINERS.has(streamType.value)) {
-    throw new Error(`网页播放器不支持 ${streamType.value.toUpperCase()} 容器，请下载后使用本地播放器打开`)
-  }
-  await loadNativeSource(v, url, loadSeq)
-}
-
-async function loadNativeSource(v, url, loadSeq) {
-  src.value = url
-  await nextTick()
-  if (unmounted || loadSeq !== sourceSeq || videoEl.value !== v) return
-  suppressVideoErrors = false
-  v.load()
-}
-
-async function loadHLS(v, url, loadSeq) {
-  if (canPlayNativeHLS(v)) {
-    await loadNativeSource(v, url, loadSeq)
-    return
-  }
-  const Hls = await getHlsConstructor()
-  if (unmounted || loadSeq !== sourceSeq) return
-  if (!Hls || !Hls.isSupported()) throw new Error('当前系统 WebView 不支持 HLS 播放')
-  const player = new Hls({
-    enableWorker: true,
-    lowLatencyMode: false,
-    capLevelToPlayerSize: true,
-    maxBufferLength: 30,
-    maxMaxBufferLength: 60,
-    backBufferLength: 30,
-  })
-  hlsPlayer = player
-  hlsRecoveryAttempts = 0
-  suppressVideoErrors = false
-  player.on(Hls.Events.MEDIA_ATTACHED, () => {
-    if (!unmounted && player === hlsPlayer && loadSeq === sourceSeq) player.loadSource(url)
-  })
-  player.on(Hls.Events.ERROR, (_, data) => handleHLSError(Hls, player, data, loadSeq))
-  player.attachMedia(v)
-}
-
-async function loadDASH(v, url, loadSeq, retrying = false) {
-  if (!window.MediaSource) throw new Error('当前系统 WebView 不支持 DASH 播放')
-  const dashjs = await getDashConstructor()
-  if (unmounted || loadSeq !== sourceSeq) return
-  const player = dashjs.MediaPlayer().create()
-  dashPlayer = player
-  if (!retrying) dashRecoveryAttempts = 0
-  suppressVideoErrors = false
-  player.updateSettings({
-    streaming: {
-      buffer: {
-        bufferTimeAtTopQuality: 20,
-        bufferTimeAtTopQualityLongForm: 30,
-        stableBufferTime: 12,
-      },
-      fastSwitchEnabled: false,
-    },
-  })
-  player.on(dashjs.MediaPlayer.events.ERROR, (event) => handleDASHError(player, event, loadSeq))
-  player.initialize(v, url, false)
-}
-
-function handleHLSError(Hls, player, data, loadSeq) {
-  if (!data || !data.fatal || player !== hlsPlayer || loadSeq !== sourceSeq) return
-  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsRecoveryAttempts < 1) {
-    hlsRecoveryAttempts++
-    player.startLoad()
-    return
-  }
-  if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsRecoveryAttempts < 1) {
-    hlsRecoveryAttempts++
-    player.recoverMediaError()
-    return
-  }
-  failPlayback('HLS 流加载失败，请检查网络或重新获取播放地址')
-}
-
-function handleDASHError(player, event, loadSeq) {
-  if (player !== dashPlayer || loadSeq !== sourceSeq) return
-  const retryURL = activeSourceURL
-  if (dashRecoveryAttempts < 1 && retryURL && videoEl.value) {
-    dashRecoveryAttempts++
-    try {
-      dashPlayer = null
-      player.reset()
-      void loadDASH(videoEl.value, retryURL, loadSeq, true).catch((e) => failPlayback(readablePlaybackError(e)))
-      return
-    } catch {}
-  }
-  const detail = event && event.error && event.error.message ? `：${event.error.message}` : ''
-  failPlayback('DASH 流加载失败' + detail)
-}
-
-function failPlayback(message) {
-  destroyAdaptivePlayers()
-  playing.value = false
-  error.value = message
-}
-
-function destroyAdaptivePlayers() {
-  const hls = hlsPlayer
-  hlsPlayer = null
-  if (hls) {
-    try { hls.destroy() } catch {}
-  }
-  const dash = dashPlayer
-  dashPlayer = null
-  if (dash) {
-    try { dash.reset() } catch {}
-  }
-}
-
-function clearVideoSource() {
-  const v = videoEl.value
-  if (!v) return
-  suppressVideoErrors = true
-  try {
-    v.pause()
-    v.removeAttribute('src')
-    v.load()
-  } catch {}
-}
-
-let hlsConstructorPromise = null
-async function getHlsConstructor() {
-  if (!hlsConstructorPromise) hlsConstructorPromise = import('hls.js').then((mod) => mod.default)
-  return hlsConstructorPromise
-}
-
-let dashConstructorPromise = null
-async function getDashConstructor() {
-  if (!dashConstructorPromise) dashConstructorPromise = import('dashjs').then((mod) => mod.default || mod)
-  return dashConstructorPromise
-}
-
-function normalizeStreamType(preview) {
-  const declared = String(preview && preview.stream_type || '').trim().toLowerCase()
-  if (declared === 'm3u8') return 'hls'
-  if (declared === 'mpd') return 'dash'
-  if (declared) return declared
-  const ext = extensionOf(props.file.name)
-  if (ext === 'm3u8') return 'hls'
-  if (ext === 'mpd') return 'dash'
-  if (['m4v', 'mov', '3gp'].includes(ext)) return 'mp4'
-  return ext
-}
-
-function canPlayNativeHLS(v) {
-  return Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'))
-}
-
-function extensionOf(name) {
-  const value = String(name || '')
-  const index = value.lastIndexOf('.')
-  return index > 0 ? value.slice(index + 1).toLowerCase() : ''
-}
-
-function normalizeSubtitles(value) {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((track, index) => ({
-      url: String(track && track.url || '').trim(),
-      language: String(track && track.language || 'und').trim() || 'und',
-      label: String(track && track.language || `字幕 ${index + 1}`).trim() || `字幕 ${index + 1}`,
-    }))
-    .filter((track) => track.url)
+function loadPlaybackSource(preview, resumeAt, autoplay, parentSeq) {
+  return loadEngineSource(preview, resumeAt, autoplay, () => !unmounted && parentSeq === playbackSeq)
 }
 
 function setQualityOptions(preview) {
@@ -431,17 +247,14 @@ function setQualityOptions(preview) {
 function onLoaded() {
   const v = videoEl.value
   if (!v) return
-  playbackEnded = false
+  markPlaybackActive()
   updateDuration(v)
   applyVolume()
   v.playbackRate = speed.value
-  if (pendingResume > 0 && (!Number.isFinite(v.duration) || pendingResume < v.duration)) v.currentTime = pendingResume
-  pendingResume = 0
-  const autoplay = pendingAutoplay
-  pendingAutoplay = false
+  const { resumeAt, autoplay } = consumeLoadIntent()
+  if (resumeAt > 0 && (!Number.isFinite(v.duration) || resumeAt < v.duration)) v.currentTime = resumeAt
   if (autoplay) v.play().catch(() => {})
-  if (saveTimer) clearInterval(saveTimer)
-  saveTimer = setInterval(saveCursor, 5000)
+  startCursorTimer()
   onTracksChange()
 }
 
@@ -461,7 +274,7 @@ function onLoadedData() {
 function onTimeUpdate() {
   const v = videoEl.value
   if (!v) return
-  if (playbackEnded && (!Number.isFinite(v.duration) || v.currentTime < v.duration)) playbackEnded = false
+  if (hasPlaybackEnded() && (!Number.isFinite(v.duration) || v.currentTime < v.duration)) markPlaybackActive()
   position.value = v.currentTime
   updateBuffered(v)
   if (supActive.value) renderSupFrame()
@@ -499,7 +312,7 @@ function updateBuffered(v) {
   } catch {}
 }
 
-function onPlay() { playbackEnded = false; playing.value = true; isBuffering.value = false; scheduleHideControls() }
+function onPlay() { markPlaybackActive(); playing.value = true; isBuffering.value = false; scheduleHideControls() }
 function onPause() { playing.value = false; isBuffering.value = false; showControls.value = true }
 function onWaiting() { isBuffering.value = true }
 function onPlaying() { isBuffering.value = false }
@@ -508,15 +321,13 @@ function onCanPlayThrough() { isBuffering.value = false }
 function onEnded() {
   playing.value = false
   if (!looping.value) {
-    playbackEnded = true
+    markPlaybackEnded()
     clearPlayCursor()
     showControls.value = getPrefs().autoCloseOnEnd ? false : true
   }
 }
 function onError() {
-  if (loading.value || suppressVideoErrors || hlsPlayer || dashPlayer) return
-  const code = videoEl.value && videoEl.value.error && videoEl.value.error.code
-  error.value = code === 4 ? '当前网页播放器不支持此视频的容器或编解码' : '视频加载失败，请检查网络或重新获取播放地址'
+  handleVideoError(loading.value)
 }
 function onVolumeChange() {
   const v = videoEl.value
@@ -543,7 +354,7 @@ function togglePlay() {
 function seek(delta) {
   const v = videoEl.value
   if (!v || !Number.isFinite(v.duration)) return
-  playbackEnded = false
+  markPlaybackActive()
   v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + delta))
 }
 
@@ -552,7 +363,7 @@ function onSeekInput(e) {
   if (!v) return
   const target = Number(e.target.value)
   if (!Number.isFinite(target)) return
-  playbackEnded = false
+  markPlaybackActive()
   v.currentTime = target
   position.value = target
 }
@@ -795,140 +606,12 @@ function revokeSubtitleObjectURLs() {
   subtitleObjectURLs.clear()
 }
 
-function cancelSubtitleFetch() {
-  const controller = subtitleFetchController
-  subtitleFetchController = null
-  if (controller) {
-    try { controller.abort() } catch {}
-  }
-}
-
 function cancelLocalSubtitleReader() {
   const reader = localSubtitleReader
   localSubtitleReader = null
   if (reader && reader.readyState === 1) {
     try { reader.abort() } catch {}
   }
-}
-
-async function selectSup(index) {
-  const track = supTracks.value[index]
-  if (!track) return
-  cancelSubtitleFetch()
-  const controller = new AbortController()
-  subtitleFetchController = controller
-  selectSubtitle(-1)
-  destroyAss()
-  try {
-    const response = await fetch(track.url, { signal: controller.signal })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const buffer = await response.arrayBuffer()
-    if (unmounted || controller.signal.aborted) return
-    const sets = parseSup(buffer)
-    if (!sets.length) throw new Error('no display sets')
-    if (!supRenderer) supRenderer = new SupRenderer(supCanvasEl.value)
-    supRenderer.load(sets)
-    supActive.value = true
-    currentSubtitle.value = 'sup:' + index
-    renderSupFrame()
-  } catch (error) {
-    if (unmounted || error?.name === 'AbortError') return
-    emit('toast', 'SUP 字幕解析失败', 'error')
-  } finally {
-    if (subtitleFetchController === controller) subtitleFetchController = null
-  }
-}
-
-function stopSup() {
-  supActive.value = false
-  if (supRenderer) supRenderer.stop()
-}
-
-// ---- ASS/SSA 特效字幕（libass WASM 渲染，保留定位/颜色/卡拉 OK 等全部特效） ----
-let jassubPromise = null
-async function getJassub() {
-  if (!jassubPromise) {
-    jassubPromise = Promise.all([
-      import('jassub'),
-      import('jassub/dist/wasm/jassub-worker.js?url'),
-      import('jassub/dist/wasm/jassub-worker.wasm?url'),
-      import('jassub/dist/default.woff2?url'),
-    ]).then(([mod, worker, wasm, font]) => ({
-      JASSUB: mod.default,
-      workerUrl: worker.default,
-      wasmUrl: wasm.default,
-      fontUrl: font.default,
-    }))
-  }
-  return jassubPromise
-}
-
-async function selectAss(index) {
-  const track = assTracks.value[index]
-  if (!track) return
-  cancelSubtitleFetch()
-  const controller = new AbortController()
-  subtitleFetchController = controller
-  selectSubtitle(-1)
-  stopSup()
-  try {
-    let content = track.content
-    if (!content) {
-      const response = await fetch(track.url, { signal: controller.signal })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      content = await response.text()
-    }
-    if (unmounted || controller.signal.aborted) return
-    const { JASSUB, workerUrl, wasmUrl, fontUrl } = await getJassub()
-    if (unmounted || controller.signal.aborted) return
-    destroyAss()
-    assRenderer = new JASSUB({ video: videoEl.value, subContent: content, workerUrl, wasmUrl, fonts: [fontUrl] })
-    assActive.value = true
-    currentSubtitle.value = 'ass:' + index
-  } catch (error) {
-    if (unmounted || error?.name === 'AbortError') return
-    emit('toast', 'ASS 字幕加载失败', 'error')
-  } finally {
-    if (subtitleFetchController === controller) subtitleFetchController = null
-  }
-}
-
-function destroyAss() {
-  assActive.value = false
-  if (assRenderer) {
-    try { assRenderer.destroy() } catch {}
-    assRenderer = null
-  }
-}
-
-function onWindowResize() {
-  if (supActive.value) renderSupFrame()
-}
-
-function renderSupFrame() {
-  const v = videoEl.value
-  const canvas = supCanvasEl.value
-  if (!v || !canvas || !supRenderer) return
-  supRenderer.renderAt(v.currentTime, computeSubtitleBox(v, canvas))
-}
-
-// SUP 按 16:9 规格制作：渲染框锁定为视频内容矩形内的最大 16:9 区域，其余保持透明
-function computeSubtitleBox(v, canvas) {
-  const cw = Math.round(v.clientWidth)
-  const ch = Math.round(v.clientHeight)
-  if (!cw || !ch) return null
-  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch }
-  const vw = v.videoWidth || 16
-  const vh = v.videoHeight || 9
-  const scale = Math.min(cw / vw, ch / vh)
-  const dw = vw * scale
-  const dh = vh * scale
-  const dx = (cw - dw) / 2
-  const dy = (ch - dh) / 2
-  let bw = dw
-  let bh = dw * 9 / 16
-  if (bh > dh) { bh = dh; bw = dh * 16 / 9 }
-  return { x: dx + (dw - bw) / 2, y: dy + (dh - bh) / 2, w: bw, h: bh }
 }
 
 function onLocalSubtitlePicked(event) {
@@ -1016,11 +699,15 @@ function switchEpisode(step) {
 
 // 播放失败时的下载兜底（不支持容器 / 资源失效均可直接取回）
 async function downloadCurrent() {
+  const started = performance.now()
+  info('player', '加入下载队列开始', { count: 1 })
   try {
     await download(props.account.user_id, props.account.drive_id, props.file)
     emit('toast', '已加入下载队列', 'success')
+    info('player', '加入下载队列完成', { count: 1, duration_ms: Math.round(performance.now() - started) })
   } catch (e) {
     emit('toast', String(e), 'error')
+    logError('player', '加入下载队列失败', { count: 1, error: errorText(e), duration_ms: Math.round(performance.now() - started) })
   }
 }
 
@@ -1032,23 +719,6 @@ function toggleMenu(name) {
 
 function closeMenu() {
   activeMenu.value = ''
-}
-
-// ---- save cursor ----
-function saveCursor(fileId = props.file?.file_id) {
-  if (playbackEnded) {
-    clearPlayCursor(fileId)
-    return
-  }
-  const v = videoEl.value
-  if (!v || !v.currentTime || v.currentTime < 1) return
-  if (!fileId) return
-  savePlayCursor(props.account.user_id, props.account.drive_id, fileId, v.currentTime).catch(() => {})
-}
-
-function clearPlayCursor(fileId = props.file?.file_id) {
-  if (!fileId) return
-  savePlayCursor(props.account.user_id, props.account.drive_id, fileId, 0).catch(() => {})
 }
 
 async function switchQuality(quality) {

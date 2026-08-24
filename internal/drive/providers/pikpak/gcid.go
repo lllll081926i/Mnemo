@@ -3,9 +3,9 @@ package pikpak
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"mnemo-go/internal/model"
 )
@@ -61,7 +61,7 @@ func computeGCID(path string, ui *model.UploadingUI) (string, error) {
 	finalSum := sha1.Sum(chunkHashes)
 	gcid := hex.EncodeToString(finalSum[:])
 	// PikPak expects uppercase
-	return fmt.Sprintf("%x", gcid), nil
+	return strings.ToUpper(gcid), nil
 }
 
 // gcidFromBytes computes GCID from a byte slice (for testing).

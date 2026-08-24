@@ -2,18 +2,20 @@ package model
 
 // UploadInfo describes the local file being uploaded.
 type UploadInfo struct {
-	LocalFilePath string `json:"localFilePath"`
-	ParentFileID  string `json:"parent_file_id"`
-	DriveID       string `json:"drive_id"`
-	Path          string `json:"path"`
-	Name          string `json:"name"`
-	Size          int64  `json:"size"`
-	SizeStr       string `json:"sizeStr"`
-	Icon          string `json:"icon"`
-	IsDir         bool   `json:"isDir"`
-	IsMiaoChuan   bool   `json:"isMiaoChuan"` // fingerprint秒传 flag
-	SHA1          string `json:"sha1"`
-	CRC64         string `json:"crc64"`
+	LocalFilePath        string `json:"localFilePath"`
+	ParentFileID         string `json:"parent_file_id"`
+	DriveID              string `json:"drive_id"`
+	Path                 string `json:"path"`
+	Name                 string `json:"name"`
+	Size                 int64  `json:"size"`
+	SizeStr              string `json:"sizeStr"`
+	Icon                 string `json:"icon"`
+	IsDir                bool   `json:"isDir"`
+	IsMiaoChuan          bool   `json:"isMiaoChuan"` // fingerprint秒传 flag
+	SHA1                 string `json:"sha1"`
+	ContentHash          string `json:"contentHash,omitempty"`
+	ContentHashAlgorithm string `json:"contentHashAlgorithm,omitempty"`
+	CRC64                string `json:"crc64"`
 
 	// ConflictPolicy controls behavior when the target path already exists.
 	// Supported: "" | "overwrite" (default, legacy) | "refuse" | "rename" | "skip".
@@ -113,6 +115,7 @@ type DownloadTask struct {
 	ID          string            `json:"id"`
 	UserID      string            `json:"user_id"`
 	DriveID     string            `json:"drive_id"`
+	ParentID    string            `json:"parent_id,omitempty"`
 	Provider    string            `json:"provider"`
 	FileID      string            `json:"file_id"`
 	Name        string            `json:"name"`

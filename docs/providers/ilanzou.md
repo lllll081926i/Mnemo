@@ -11,6 +11,7 @@
 ```
 permanentDelete: true
 search, createShare, copy, recycleBin, trashView: false
+SetHashes(["md5"], ["md5"])
 ```
 
 ---
@@ -98,13 +99,19 @@ search, createShare, copy, recycleBin, trashView: false
 
 `ilanzou.go:26` SetHashes(["md5"], ["md5"]) — ProvideHashes 和 RapidUploadHashes 均已声明。
 
-`upload.go` 的 `UploadOneFile` 与 `RapidUploadByHash` 都通过 `/7n/getUpToken` 判定 MD5 秒传；`ResolveTransferHash` 在没有服务端指纹时按迁移请求流式读取下载源计算 MD5，与 caps 声明一致。
+`upload.go` 的 `UploadOneFile` 与 `RapidUploadByHash` 都通过 `/7n/getUpToken` 判定 MD5 秒传；目标端命中时可直接创建远端文件，未命中则安全回退到常规迁移上传。
+
+源端 `ResolveTransferHash` 优先读取统一文件缓存/列表映射中的合法 MD5。该方法仍保留 `allowStream=true` 时完整读取下载源计算 MD5 的能力，供明确接受额外读取成本的调用方使用；跨盘迁移引擎不会启用这一模式，只使用已有元数据/缓存指纹：
+
+- 缓存中已有合法 MD5 时，迁移先尝试目标端秒传，不额外下载源文件。
+- 缓存缺失、哈希无效或为空时，迁移跳过秒传探测，直接进入后续流式上传或临时文件 spool 回退，避免“先完整下载算 MD5、未命中后再次下载”的双次读取。
+- 目标端拒绝已有 MD5 或秒传未命中时，迁移不会把任务误判为成功，而是安全回退到常规传输路径。
 
 ---
 
 ## 差距清单
 
-1. ✅ **跨盘秒传已闭环**：`RapidUploadByHash` 命中 `/7n/getUpToken`，源端 `ResolveTransferHash` 可从缓存或下载流提供 MD5。
+1. ✅ **跨盘秒传已闭环**：`RapidUploadByHash` 命中 `/7n/getUpToken`；迁移源端只使用缓存/元数据中的 MD5，缓存缺失时直接进入常规传输，避免为秒传探测产生额外完整下载。`ResolveTransferHash` 的流式算 MD5 能力仍保留，但迁移引擎不启用。
 2. ✅ **请求级重登会持久化新 session**：普通列表/文件操作遇到过期 token 时，重登后的 `appToken/uuid` 不再只在局部返回值中丢失。
 3. ✅ **下载/预览会话续期**：下载重定向遇到 401/403 会按当前账号账密重登并重试，视频质量固定为原画代理源。
 4. 其余功能与旧版对齐，无重大缺失

@@ -1,7 +1,7 @@
 // api.js — thin wrapper over the generated Wails bindings + runtime events.
 import * as App from '../wailsjs/go/app/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { debug, info, warn, error, errorText, configKeys } from './logger'
+import { debug, error, errorText, configKeys } from './logger'
 import { getAccountAlias, getAccountCustomIcon } from './appearance'
 
 // re-export the raw binding surface (used by views directly)
@@ -9,6 +9,71 @@ export * from '../wailsjs/go/app/App'
 
 export function onEvent(name, cb) {
   try { return EventsOn(name, cb) } catch { return () => {} } // 浏览器预览无 Wails bridge
+}
+
+// ---------- 文件变更通知 ----------
+// 文件页、分享导入和传输中心都可能改变网盘内容。这里使用进程内通知，
+// 只携带账号、存储和受影响目录，让文件页能精确失效对应缓存；它不发起
+// 网络请求，真正的重新加载仍由可见的文件页按节流策略决定。
+const fileChangeListeners = new Set()
+const pendingFileChanges = new Map()
+
+function normalizeFileChange(change = {}) {
+  const userId = String(change.userId || change.user_id || '').trim()
+  const driveId = String(change.driveId || change.drive_id || '').trim()
+  const rawDirectories = Array.isArray(change.directories)
+    ? change.directories
+    : [change.directory]
+  const directories = [...new Set(rawDirectories
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))]
+  const normalized = {
+    userId,
+    driveId,
+    directories,
+    refreshTrash: Boolean(change.refreshTrash),
+    refreshFavorites: Boolean(change.refreshFavorites),
+    refreshSearch: Boolean(change.refreshSearch),
+  }
+  if (Number.isFinite(change.delay)) normalized.delay = Math.max(0, Number(change.delay))
+  if (Number.isFinite(change.minimumInterval)) normalized.minimumInterval = Math.max(0, Number(change.minimumInterval))
+  return normalized
+}
+
+export function notifyFileChange(change) {
+  const normalized = normalizeFileChange(change)
+  if (!normalized.userId || !normalized.driveId) return normalized
+  if (!fileChangeListeners.size) {
+    const key = `${normalized.userId}\u0000${normalized.driveId}`
+    const previous = pendingFileChanges.get(key)
+    pendingFileChanges.set(key, previous ? {
+      ...normalized,
+      directories: [...new Set([...previous.directories, ...normalized.directories])],
+      refreshTrash: previous.refreshTrash || normalized.refreshTrash,
+      refreshFavorites: previous.refreshFavorites || normalized.refreshFavorites,
+      refreshSearch: previous.refreshSearch || normalized.refreshSearch,
+      delay: Math.max(previous.delay || 0, normalized.delay || 0) || undefined,
+      minimumInterval: Math.max(previous.minimumInterval || 0, normalized.minimumInterval || 0) || undefined,
+    } : normalized)
+    return normalized
+  }
+  // 复制一份监听器，允许回调在执行中取消自身而不影响本轮其余订阅。
+  for (const listener of [...fileChangeListeners]) {
+    try { listener(normalized) } catch { /* 单个页面异常不能阻断其余页面的缓存失效 */ }
+  }
+  return normalized
+}
+
+export function onFileChange(listener) {
+  if (typeof listener !== 'function') return () => {}
+  fileChangeListeners.add(listener)
+  // 文件页延迟挂载时，补发期间发生的变更；处理后即消费，避免每次切页
+  // 都重复刷新同一目录。
+  for (const change of pendingFileChanges.values()) {
+    try { listener(change) } catch { /* 同上 */ }
+  }
+  pendingFileChanges.clear()
+  return () => fileChangeListeners.delete(listener)
 }
 
 export function onFileDrop(cb) {
@@ -26,7 +91,7 @@ export function listProviders() {
   const started = performance.now()
   debug('rpc', 'ListProviders started')
   return App.ListProviders().then((result) => {
-    info('rpc', 'ListProviders completed', { count: (result || []).length, duration_ms: Math.round(performance.now() - started) })
+    debug('rpc', 'ListProviders completed', { count: (result || []).length, duration_ms: Math.round(performance.now() - started) })
     return result
   }).catch((err) => {
     error('rpc', 'ListProviders failed', { error: errorText(err), duration_ms: Math.round(performance.now() - started) })
@@ -37,7 +102,7 @@ export function listAccounts() {
   const started = performance.now()
   debug('rpc', 'ListAccounts started')
   return App.ListAccounts().then((result) => {
-    info('rpc', 'ListAccounts completed', { count: (result || []).length, duration_ms: Math.round(performance.now() - started) })
+    debug('rpc', 'ListAccounts completed', { count: (result || []).length, duration_ms: Math.round(performance.now() - started) })
     return result
   }).catch((err) => {
     error('rpc', 'ListAccounts failed', { error: errorText(err), duration_ms: Math.round(performance.now() - started) })
@@ -46,18 +111,20 @@ export function listAccounts() {
 }
 export function login(provider, config) {
   const started = performance.now()
-  info('login', 'provider login RPC started', { provider, config_keys: configKeys(config), has_captcha_token: !!String(config?.captcha_token || '').trim() })
+  debug('login', 'provider login RPC started', { provider, config_keys: configKeys(config), has_captcha_token: !!String(config?.captcha_token || '').trim() })
   return App.ProviderLogin(provider, config).then((result) => {
-    info('login', 'provider login RPC completed', { provider, duration_ms: Math.round(performance.now() - started) })
+    debug('login', 'provider login RPC completed', { provider, duration_ms: Math.round(performance.now() - started) })
     return result
-  }).catch((err) => {
-    warn('login', 'provider login RPC failed', { provider, error: errorText(err), duration_ms: Math.round(performance.now() - started) })
-    throw err
   })
 }
 export function SendPan139SMS(username) {
   const fn = App.SendPan139SMS || (typeof window !== 'undefined' && window.go?.app?.App?.SendPan139SMS)
   if (typeof fn !== 'function') return Promise.reject(new Error('139 短信验证暂不可用'))
+  return fn(username)
+}
+export function SendPan189SMS(username) {
+  const fn = App.SendPan189SMS || (typeof window !== 'undefined' && window.go?.app?.App?.SendPan189SMS)
+  if (typeof fn !== 'function') return Promise.reject(new Error('天翼云盘短信登录暂不可用'))
   return fn(username)
 }
 export function saveMounted(provider, conn) { return App.SaveMountedAccount(provider, conn) }
@@ -458,5 +525,4 @@ export async function copyText(text) {
 
 // 打开外部浏览器（后端包装，避免直接依赖 runtime）
 export function OpenBrowser(url) { return App.OpenBrowser(url) }
-export function OpenPikPakCaptcha(url) { return App.OpenPikPakCaptcha(url) }
 export function ClosePikPakCaptcha() { return App.ClosePikPakCaptcha() }

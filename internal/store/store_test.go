@@ -27,6 +27,9 @@ func TestOpenAndSettings(t *testing.T) {
 	if s.MaxConcurrentDownloads <= 0 {
 		t.Error("default MaxConcurrentDownloads should be positive")
 	}
+	if s.MaxConcurrentUploads <= 0 {
+		t.Error("default MaxConcurrentUploads should be positive")
+	}
 	// update settings
 	s.Proxy = "http://127.0.0.1:7890"
 	s.MaxDownloadSpeed = 1024000
@@ -118,6 +121,64 @@ func TestAccountSaveLoad(t *testing.T) {
 		t.Errorf("UserName mismatch: %s", got.Token.UserName)
 	}
 	_ = filepath.Join(dir, "unused")
+}
+
+func TestUpdateAccountCustomMetaPersistsForAllProviders(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerIDs := []string{
+		"pikpak", "onedrive", "dropbox", "pan123", "lanzou", "ilanzou", "pan139",
+		"pan189", "yike", "aliopen", "guangya", "webdav", "s3",
+	}
+	accounts := make([]*model.Account, 0, len(providerIDs))
+	for i, provider := range providerIDs {
+		userID := fmt.Sprintf("%s_user-%d", provider, i)
+		driveID := "root"
+		if provider == "webdav" || provider == "s3" {
+			userID = fmt.Sprintf("%s:mount-%d", provider, i)
+			driveID = userID
+		}
+		accounts = append(accounts, &model.Account{
+			UserID:  userID,
+			DriveID: driveID,
+			Token:   &model.TokenInfo{UserName: provider},
+		})
+	}
+	for _, account := range accounts {
+		if err := st.SaveAccount(account); err != nil {
+			t.Fatalf("SaveAccount(%s): %v", account.UserID, err)
+		}
+		updated, err := st.UpdateAccountCustomMeta(account.UserID, "本地昵称", "dropbox.svg")
+		if err != nil {
+			t.Fatalf("UpdateAccountCustomMeta(%s): %v", account.UserID, err)
+		}
+		if updated.CustomName != "本地昵称" || updated.CustomIcon != "dropbox.svg" {
+			t.Fatalf("custom metadata not applied for %s: %#v", account.UserID, updated)
+		}
+	}
+
+	// Reopen the store to prove the nickname is machine-local persisted state,
+	// not merely an in-memory presentation preference.
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range accounts {
+		got, err := reopened.GetAccount(account.UserID)
+		if err != nil {
+			t.Fatalf("GetAccount(%s): %v", account.UserID, err)
+		}
+		if got.CustomName != "本地昵称" || got.CustomIcon != "dropbox.svg" {
+			t.Fatalf("custom metadata not persisted for %s: %#v", account.UserID, got)
+		}
+	}
+
+	if _, err := st.UpdateAccountCustomMeta(accounts[0].UserID, strings.Repeat("a", 41), ""); err == nil {
+		t.Fatal("custom name longer than 40 characters must be rejected")
+	}
 }
 
 func TestRenameMountedAccountKeepsIdentityAndCredentials(t *testing.T) {
@@ -236,6 +297,35 @@ func TestDirectoryCacheIsolationAndClear(t *testing.T) {
 	}
 	if _, err := st.GetSettings(); err != nil {
 		t.Fatalf("ClearCache removed settings: %v", err)
+	}
+}
+
+func TestDirectoryCacheDoesNotWaitForCollectionLock(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "provider|account-a|drive-a|list|root|"
+	if err := st.SaveDirectoryCache(key, []model.File{{FileID: "file-1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟账号/任务集合正在进行一次较慢的原子写入。文件页读取目录缓存
+	// 不应再被这把无关锁阻塞，否则账号切换的首屏会随机变慢。
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	done := make(chan error, 1)
+	go func() {
+		_, loadErr := st.LoadDirectoryCache(key)
+		done <- loadErr
+	}()
+	select {
+	case loadErr := <-done:
+		if loadErr != nil {
+			t.Fatalf("LoadDirectoryCache: %v", loadErr)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("directory cache was blocked by the unrelated collection lock")
 	}
 }
 

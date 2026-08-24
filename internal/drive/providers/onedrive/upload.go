@@ -36,9 +36,11 @@ func smallUploadPath(parentID, fileName string) string {
 	return "/me/drive/items/" + url.PathEscape(parentID) + ":/" + name + ":/content"
 }
 
-// rawPut performs a PUT with an auth header.
-func (c *client) rawPut(ctx context.Context, target string, body io.Reader) (string, error) {
-	resp, err := c.http.Do(ctx, http.MethodPut, target, c.headers(map[string]string{"Content-Type": "application/octet-stream"}), body)
+// rawPut performs a PUT with an auth header and an explicit content length.
+// Graph's simple upload endpoint receives migration spool files as *os.File;
+// net/http cannot infer their length and would otherwise use chunked framing.
+func (c *client) rawPut(ctx context.Context, target string, body io.Reader, size int64) (string, error) {
+	resp, err := c.http.DoWithContentLength(ctx, http.MethodPut, target, c.headers(map[string]string{"Content-Type": "application/octet-stream"}), body, size)
 	if err != nil {
 		return "", err
 	}

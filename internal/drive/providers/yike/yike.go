@@ -22,13 +22,15 @@ import (
 )
 
 const (
-	apiBase  = "https://photo.baidu.com/youai"
-	userAPI  = apiBase + "/user/v1"
-	albumAPI = apiBase + "/album/v1"
-	fileV1   = apiBase + "/file/v1"
-	fileV2   = apiBase + "/file/v2"
-	ua       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	RootID   = "yike_root"
+	apiBase            = "https://photo.baidu.com/youai"
+	userAPI            = apiBase + "/user/v1"
+	albumAPI           = apiBase + "/album/v1"
+	fileV1             = apiBase + "/file/v1"
+	fileV2             = apiBase + "/file/v2"
+	ua                 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	RootID             = "yike_root"
+	rootListPageLimit  = "50"
+	albumListPageLimit = "200"
 )
 
 const providerID = model.ProviderYike
@@ -234,7 +236,7 @@ func (c *client) listRoot(ctx context.Context) ([]File, error) {
 	for {
 		q := url.Values{}
 		q.Set("need_amount", "1")
-		q.Set("limit", "100")
+		q.Set("limit", rootListPageLimit)
 		if cursor != "" {
 			q.Set("cursor", cursor)
 		}
@@ -299,7 +301,7 @@ func (c *client) listAlbum(ctx context.Context, albumID string) ([]File, error) 
 		q := url.Values{}
 		q.Set("album_id", albumID)
 		q.Set("need_amount", "1")
-		q.Set("limit", "1000")
+		q.Set("limit", albumListPageLimit)
 		q.Set("passwd", "")
 		if cursor != "" {
 			q.Set("cursor", cursor)

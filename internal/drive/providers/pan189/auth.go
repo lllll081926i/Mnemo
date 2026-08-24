@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,9 +67,18 @@ type pan189LoginState struct {
 	User          string
 	PasswordProof string
 	CaptchaToken  string
+	AppID         string
+	AccountType   string
+	ReturnURL     string
+	MailSuffix    string
+	ClientType    string
+	IsOAuth2      bool
 	LT            string
 	ParamID       string
 	ReqID         string
+	Referer       string
+	RSAPublicKey  string
+	RSAPrefix     string
 	RsaUsername   string
 	RsaPassword   string
 	Client        *netx.Client
@@ -164,42 +174,36 @@ func doLogin(ctx context.Context, user, pass, validateCode string) (*Session, er
 		}
 	}
 
-	// needcaptcha: anything other than "0" requires a graphical captcha.
-	if validateCode == "" {
-		need, err := needCaptcha(ctx, state)
-		if err != nil {
-			return nil, err
-		}
-		if need {
-			image, err := fetchCaptchaImage(ctx, state)
-			if err != nil {
-				return nil, err
+	toURL, err := loginSubmit(ctx, state, validateCode, false)
+	if err != nil {
+		var captchaRequired *pan189CaptchaRequiredError
+		if errors.As(err, &captchaRequired) {
+			if validateCode != "" {
+				return nil, errors.New("captcha_retry_189\n189 图形验证码不正确，请重新登录")
+			}
+			image, imageErr := fetchCaptchaImage(ctx, state)
+			if imageErr != nil {
+				return nil, imageErr
 			}
 			savePan189PendingLogin(state, image)
 			return nil, &CaptchaError{CaptchaImage: image}
 		}
-	}
-
-	toURL, err := loginSubmit(ctx, state, validateCode)
-	if err != nil {
 		return nil, err
 	}
 	deletePan189PendingLogin(user)
 	return getSessionForPC(ctx, state, toURL, user)
 }
 
-// prepareLoginParam fetches the init params (captchaToken/lt/paramId/reqId)
-// and the RSA public key, then encrypts the credentials (AList initLoginParam).
+// prepareLoginParam mirrors AList's current 189 login bootstrap: follow
+// loginUrl.action, read the dynamic OAuth identifiers from its final URL, then
+// obtain appConf and encryptConf before encrypting the credentials.
 func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginState, error) {
 	hc, err := newPan189LoginClient()
 	if err != nil {
 		return nil, err
 	}
-	// 1) unifyLoginForPC
-	ts := timestamp()
-	unifyURL := fmt.Sprintf("%s/api/portal/unifyLoginForPC.action?appId=%s&clientType=%s&returnURL=%s&timeStamp=%d",
-		webURL, appID, clientType, url.QueryEscape(returnURL), ts)
-	resp, err := hc.Do(ctx, http.MethodGet, unifyURL, map[string]string{
+	loginURL := webURL + "/api/portal/loginUrl.action?redirectURL=" + url.QueryEscape(webURL+"/main.action")
+	resp, err := hc.Do(ctx, http.MethodGet, loginURL, map[string]string{
 		"User-Agent": ua189,
 		"Accept":     "text/html,application/xhtml+xml",
 	}, nil)
@@ -210,28 +214,68 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 		resp.Body.Close()
 		return nil, fmt.Errorf("初始化 189 登录参数失败：HTTP %d", resp.StatusCode)
 	}
-	html, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 512*1024))
 	resp.Body.Close()
-	page := string(html)
-	captchaToken := pickMatch(page, `'captchaToken'\s*value='(.+?)'`)
-	if captchaToken == "" {
-		captchaToken = pickMatch(page, `captchaToken["']\s*value=["'](.+?)["']`)
+	redirectURL := resp.Request.URL
+	if redirectURL == nil {
+		return nil, errors.New("初始化 189 登录参数失败：未返回登录地址")
 	}
-	lt := pickMatch(page, `\blt\s*=\s*"([0-9A-Fa-f]{16,})"`)
-	paramID := pickMatch(page, `\bparamId\s*=\s*"([0-9A-Fa-f]{16,})"`)
-	reqID := pickMatch(page, `reqId\s*=\s*"(.+?)"`)
-	if lt == "" || paramID == "" || reqID == "" {
+	query := redirectURL.Query()
+	lt := query.Get("lt")
+	reqID := query.Get("reqId")
+	dynamicAppID := query.Get("appId")
+	captchaToken := query.Get("captchaToken")
+	if lt == "" || reqID == "" || dynamicAppID == "" {
 		return nil, errors.New("初始化 189 登录参数失败，请稍后重试")
 	}
+	headers := map[string]string{
+		"lt":         lt,
+		"reqid":      reqID,
+		"Referer":    redirectURL.String(),
+		"Origin":     authURL,
+		"User-Agent": ua189,
+		"Accept":     "application/json",
+	}
 
-	// 2) encryptConf → RSA public key + prefix
+	appForm := url.Values{}
+	appForm.Set("version", "2.0")
+	appForm.Set("appKey", dynamicAppID)
+	appResp, err := hc.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/appConf.do", withPan189FormHeader(headers), strings.NewReader(appForm.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	if appResp.StatusCode < http.StatusOK || appResp.StatusCode >= http.StatusMultipleChoices {
+		appResp.Body.Close()
+		return nil, fmt.Errorf("获取 189 应用登录配置失败：HTTP %d", appResp.StatusCode)
+	}
+	var appConf struct {
+		Result json.RawMessage `json:"result"`
+		Msg    string          `json:"msg"`
+		Data   struct {
+			AccountType string `json:"accountType"`
+			ClientType  int    `json:"clientType"`
+			IsOAuth2    bool   `json:"isOauth2"`
+			MailSuffix  string `json:"mailSuffix"`
+			ParamID     string `json:"paramId"`
+			ReqID       string `json:"reqId"`
+			ReturnURL   string `json:"returnUrl"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(appResp.Body).Decode(&appConf); err != nil {
+		appResp.Body.Close()
+		return nil, fmt.Errorf("解析 189 应用登录配置失败：%w", err)
+	}
+	appResp.Body.Close()
+	result := strings.Trim(strings.TrimSpace(string(appConf.Result)), `"`)
+	if result != "0" {
+		return nil, errors.New(firstNonEmpty(appConf.Msg, "获取 189 应用登录配置失败"))
+	}
+	if appConf.Data.AccountType == "" || appConf.Data.ClientType == 0 || appConf.Data.ParamID == "" || appConf.Data.ReturnURL == "" {
+		return nil, errors.New("获取 189 应用登录配置失败：响应字段不完整")
+	}
 	form := url.Values{}
-	form.Set("appId", appID)
-	cresp, err := hc.Do(ctx, http.MethodPost, authURL+"/api/logbox/config/encryptConf.do", map[string]string{
-		"Content-Type": "application/x-www-form-urlencoded",
-		"User-Agent":   ua189,
-		"Accept":       "application/json",
-	}, strings.NewReader(form.Encode()))
+	form.Set("appId", dynamicAppID)
+	cresp, err := hc.Do(ctx, http.MethodPost, authURL+"/api/logbox/config/encryptConf.do", withPan189FormHeader(headers), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +284,8 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 		return nil, fmt.Errorf("获取 189 RSA 公钥失败：HTTP %d", cresp.StatusCode)
 	}
 	var conf struct {
-		Data struct {
+		Result int `json:"result"`
+		Data   struct {
 			PubKey string `json:"pubKey"`
 			Pre    string `json:"pre"`
 		} `json:"data"`
@@ -250,6 +295,9 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 		return nil, err
 	}
 	cresp.Body.Close()
+	if conf.Result != 0 {
+		return nil, errors.New("获取 189 RSA 公钥失败：服务端拒绝请求")
+	}
 	if conf.Data.PubKey == "" {
 		return nil, errors.New("获取 189 RSA 公钥失败")
 	}
@@ -263,35 +311,23 @@ func prepareLoginParam(ctx context.Context, user, pass string) (*pan189LoginStat
 	}
 	return &pan189LoginState{
 		User: user, PasswordProof: pan189PasswordProof(pass), Client: hc, CreatedAt: time.Now(),
-		CaptchaToken: captchaToken, LT: lt, ParamID: paramID, ReqID: reqID,
-		RsaUsername: conf.Data.Pre + rsaUser,
-		RsaPassword: conf.Data.Pre + rsaPass,
+		CaptchaToken: captchaToken, AppID: dynamicAppID, AccountType: appConf.Data.AccountType,
+		ReturnURL: appConf.Data.ReturnURL, MailSuffix: appConf.Data.MailSuffix,
+		ClientType: strconv.Itoa(appConf.Data.ClientType), IsOAuth2: appConf.Data.IsOAuth2,
+		LT: lt, ParamID: appConf.Data.ParamID, ReqID: reqID, Referer: redirectURL.String(),
+		RSAPublicKey: conf.Data.PubKey, RSAPrefix: conf.Data.Pre,
+		RsaUsername: conf.Data.Pre + strings.ToLower(rsaUser),
+		RsaPassword: conf.Data.Pre + strings.ToLower(rsaPass),
 	}, nil
 }
 
-// needCaptcha reports whether the account requires a graphical captcha.
-func needCaptcha(ctx context.Context, st *pan189LoginState) (bool, error) {
-	if st == nil || st.Client == nil {
-		return false, errors.New("189 登录会话已失效，请重新登录")
+func withPan189FormHeader(headers map[string]string) map[string]string {
+	result := make(map[string]string, len(headers)+1)
+	for key, value := range headers {
+		result[key] = value
 	}
-	form := url.Values{}
-	form.Set("appKey", appID)
-	form.Set("accountType", accountType)
-	form.Set("userName", st.RsaUsername)
-	resp, err := st.Client.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/needcaptcha.do", map[string]string{
-		"Content-Type": "application/x-www-form-urlencoded",
-		"REQID":        st.ReqID,
-		"User-Agent":   ua189,
-	}, strings.NewReader(form.Encode()))
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return false, fmt.Errorf("检查 189 图形验证码失败：HTTP %d", resp.StatusCode)
-	}
-	return strings.TrimSpace(string(body)) != "0", nil
+	result["Content-Type"] = "application/x-www-form-urlencoded"
+	return result
 }
 
 // fetchCaptchaImage returns the captcha image as a base64 data URL.
@@ -320,22 +356,31 @@ func fetchCaptchaImage(ctx context.Context, st *pan189LoginState) (string, error
 }
 
 // loginSubmit sends the RSA-encrypted credentials and returns the redirect URL.
-func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string) (string, error) {
+func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string, sms bool) (string, error) {
 	if st == nil || st.Client == nil {
 		return "", errors.New("189 登录会话已失效，请重新登录")
 	}
 	form := url.Values{}
-	form.Set("appKey", appID)
-	form.Set("accountType", accountType)
+	form.Set("version", "v2.0")
+	form.Set("apToken", "")
+	form.Set("appKey", st.AppID)
+	form.Set("accountType", st.AccountType)
 	form.Set("userName", st.RsaUsername)
-	form.Set("password", st.RsaPassword)
+	form.Set("epd", st.RsaPassword)
+	form.Set("captchaType", "")
 	form.Set("validateCode", validateCode)
+	form.Set("smsValidateCode", "")
 	form.Set("captchaToken", st.CaptchaToken)
-	form.Set("returnUrl", returnURL)
-	form.Set("dynamicCheck", "FALSE")
-	form.Set("clientType", clientType)
-	form.Set("cb_SaveName", "1")
-	form.Set("isOauth2", "false")
+	form.Set("returnUrl", st.ReturnURL)
+	form.Set("mailSuffix", st.MailSuffix)
+	if sms {
+		form.Set("dynamicCheck", "TRUE")
+	} else {
+		form.Set("dynamicCheck", "FALSE")
+	}
+	form.Set("clientType", st.ClientType)
+	form.Set("cb_SaveName", "3")
+	form.Set("isOauth2", strconv.FormatBool(st.IsOAuth2))
 	form.Set("state", "")
 	form.Set("paramId", st.ParamID)
 
@@ -343,6 +388,8 @@ func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string)
 		"Content-Type": "application/x-www-form-urlencoded",
 		"REQID":        st.ReqID,
 		"lt":           st.LT,
+		"Referer":      st.Referer,
+		"Origin":       authURL,
 		"User-Agent":   ua189,
 		"Accept":       "application/json;charset=UTF-8",
 	}, strings.NewReader(form.Encode()))
@@ -361,12 +408,157 @@ func loginSubmit(ctx context.Context, st *pan189LoginState, validateCode string)
 	if toURL == "" {
 		msg := firstNonEmpty(strVal(j, "msg"), strVal(j, "message"), strVal(j, "errorMsg"), strVal(j, "desc"), "189 登录失败（未返回 toUrl）")
 		if isPan189CaptchaFailure(msg) {
-			return "", errors.New("captcha_retry_189\n189 图形验证码不正确，请重新登录")
+			if token := strVal(j, "captchaToken"); token != "" {
+				st.CaptchaToken = token
+			}
+			return "", &pan189CaptchaRequiredError{message: msg}
 		}
 		return "", errors.New(msg)
 	}
 	return toURL, nil
 }
+
+// RequestPan189SMS starts the SMS-login flow used by the current official
+// Tianyi account page. The provider requires a dynamic login bootstrap and may
+// require its own slider before it will send a code. We only continue when
+// smsNeedcaptcha.do explicitly returns 1; a 0 is surfaced to the UI instead of
+// attempting to bypass the provider challenge.
+func RequestPan189SMS(ctx context.Context, username string) error {
+	user := strings.TrimSpace(username)
+	if !regexp.MustCompile(`^1\d{10}$`).MatchString(user) {
+		return errors.New("请输入有效的 11 位手机号")
+	}
+	deletePan189PendingLogin(user)
+	state, err := prepareLoginParam(ctx, user, "")
+	if err != nil {
+		return err
+	}
+	// The code submission must reuse the exact cookies, lt/reqId and RSA key
+	// created here. Persist before sendSmsCode so a fast UI submit cannot race
+	// with state creation; failed sends remove the unusable state below.
+	savePan189PendingLogin(state, "")
+	if err := sendPan189SMS(ctx, state); err != nil {
+		deletePan189PendingLogin(user)
+		return err
+	}
+	return nil
+}
+
+func sendPan189SMS(ctx context.Context, state *pan189LoginState) error {
+	if state == nil || state.Client == nil {
+		return errors.New("天翼云盘短信登录会话已失效，请重新获取验证码")
+	}
+	needForm := url.Values{}
+	needForm.Set("mobile", state.RsaUsername)
+	needForm.Set("appKey", state.AppID)
+	resp, err := state.Client.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/smsNeedcaptcha.do", pan189LoginHeaders(state), strings.NewReader(needForm.Encode()))
+	if err != nil {
+		return fmt.Errorf("检查天翼云盘短信安全验证失败: %w", err)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("检查天翼云盘短信安全验证失败：HTTP %d", resp.StatusCode)
+	}
+	switch strings.TrimSpace(string(body)) {
+	case "1":
+		// The official page sends the SMS directly only for this response.
+	case "0":
+		return errors.New("该手机号发送短信前需要完成天翼账号安全验证，请先在官方登录页完成滑块验证后重试")
+	default:
+		return errors.New("检查天翼云盘短信安全验证失败：服务器响应异常")
+	}
+
+	sendForm := url.Values{}
+	sendForm.Set("version", "v2.0")
+	sendForm.Set("mobile", state.RsaUsername)
+	sendForm.Set("appKey", state.AppID)
+	resp, err = state.Client.Do(ctx, http.MethodPost, authURL+"/api/logbox/oauth2/web/sendSmsCode.do", pan189LoginHeaders(state), strings.NewReader(sendForm.Encode()))
+	if err != nil {
+		return fmt.Errorf("获取天翼云盘短信验证码失败: %w", err)
+	}
+	body, _ = io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("获取天翼云盘短信验证码失败：HTTP %d", resp.StatusCode)
+	}
+	var result struct {
+		Result json.RawMessage `json:"result"`
+		Msg    string          `json:"msg"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return errors.New("获取天翼云盘短信验证码失败：服务器响应异常")
+	}
+	code, ok := pan189JSONInt(result.Result)
+	if !ok {
+		return errors.New("获取天翼云盘短信验证码失败：服务器响应异常")
+	}
+	if code == 0 {
+		return nil
+	}
+	switch code {
+	case 20104, 51129:
+		return errors.New("短信验证码发送次数过多，请稍后重试")
+	case 20107:
+		return errors.New("您输入了无效的手机号码，请重新输入")
+	case -10320:
+		return errors.New("该手机号暂不支持短信验证，请使用账号密码登录")
+	default:
+		return errors.New(firstNonEmpty(result.Msg, "获取天翼云盘短信验证码失败"))
+	}
+}
+
+func pan189LoginHeaders(state *pan189LoginState) map[string]string {
+	return map[string]string{
+		"Content-Type": "application/x-www-form-urlencoded",
+		"lt":           state.LT,
+		"REQID":        state.ReqID,
+		"Referer":      state.Referer,
+		"Origin":       authURL,
+		"User-Agent":   ua189,
+		"Accept":       "application/json;charset=UTF-8",
+	}
+}
+
+func pan189JSONInt(raw json.RawMessage) (int, bool) {
+	text := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if text == "" {
+		return 0, false
+	}
+	value, err := strconv.Atoi(text)
+	return value, err == nil
+}
+
+func loginWithSMS(ctx context.Context, username, smsCode string) (*Session, error) {
+	user := strings.TrimSpace(username)
+	code := strings.TrimSpace(smsCode)
+	if !regexp.MustCompile(`^1\d{10}$`).MatchString(user) || code == "" {
+		return nil, errors.New("请输入手机号和短信验证码")
+	}
+	state, ok := takePan189PendingLogin(user, "")
+	if !ok || state.RSAPublicKey == "" {
+		return nil, errors.New("天翼云盘短信登录会话已过期，请重新获取验证码")
+	}
+	encrypted, err := rsaEncrypt(state.RSAPublicKey, code)
+	if err != nil {
+		return nil, err
+	}
+	state.RsaPassword = state.RSAPrefix + strings.ToLower(encrypted)
+	toURL, err := loginSubmit(ctx, state, "", true)
+	if err != nil {
+		return nil, err
+	}
+	session, err := getSessionForPC(ctx, state, toURL, user)
+	if err != nil {
+		return nil, err
+	}
+	deletePan189PendingLogin(user)
+	return attachLoginCredentials(session, user, ""), nil
+}
+
+type pan189CaptchaRequiredError struct{ message string }
+
+func (e *pan189CaptchaRequiredError) Error() string { return e.message }
 
 func isPan189CaptchaFailure(message string) bool {
 	message = strings.ToLower(message)
@@ -439,13 +631,20 @@ func pickMatch(text, pattern string) string {
 func login189(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, error) {
 	username := strings.TrimSpace(req.Config["username"])
 	password := req.Config["password"]
+	loginMode := strings.ToLower(strings.TrimSpace(req.Config["login_mode"]))
 	cloudType := strings.ToLower(strings.TrimSpace(req.Config["cloud_type"]))
 	if cloudType != CloudFamily {
 		cloudType = CloudPersonal
 	}
 	validateCode := req.Config["validate_code"]
 
-	session, err := loginWithCreds(ctx, username, password, validateCode)
+	var session *Session
+	var err error
+	if loginMode == "sms" {
+		session, err = loginWithSMS(ctx, username, req.Config["sms_code"])
+	} else {
+		session, err = loginWithCreds(ctx, username, password, validateCode)
+	}
 	if err != nil {
 		return nil, err
 	}

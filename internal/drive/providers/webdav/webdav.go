@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -333,35 +335,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return err
 	}
-	target := driveutil.JoinPath(pathOf(ui.Info.ParentFileID), ui.Info.Name)
-
-	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
-	case driveutil.ConflictRefuse:
-		_, e := client.Stat(ctx, target)
-		if e == nil {
-			return errors.New("webdav: 目标文件已存在")
-		}
-		if !isNotFound(e) {
-			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
-		}
-	case driveutil.ConflictRename:
-		_, e := client.Stat(ctx, target)
-		if e == nil {
-			newName := driveutil.GenerateConflictName(ui.Info.Name)
-			ui.Info.Name = newName
-			target = driveutil.JoinPath(pathOf(ui.Info.ParentFileID), newName)
-		} else if !isNotFound(e) {
-			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
-		}
-	case driveutil.ConflictSkip:
-		_, e := client.Stat(ctx, target)
-		if e == nil {
-			return nil
-		}
-		if !isNotFound(e) {
-			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
-		}
+	target, finalName, skip, err := resolveUploadTarget(ctx, client, ui.Info.ParentFileID, ui.Info.Name, driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy))
+	if err != nil {
+		return err
 	}
+	if skip {
+		return nil
+	}
+	ui.Info.Name = finalName
 
 	f, err := os.Open(ui.Info.LocalFilePath)
 	if err != nil {
@@ -379,6 +360,87 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		ui.ReportUploadProgress(read, size)
 	})
 	return client.Put(ctx, target, pr, size)
+}
+
+// UploadStream accepts a migration body without a local temporary file.
+// Migration uses rename-on-conflict, matching RapidUploadRequest.Duplicate=0
+// and the spool fallback's ConflictPolicyRename.
+func (d *Driver) UploadStream(ctx context.Context, c drive.Context, parentID, name string, size int64, reader io.Reader) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	if reader == nil {
+		return errors.New("webdav: 上传流为空")
+	}
+	if size < -1 {
+		return errors.New("webdav: 上传流长度无效")
+	}
+	client, err := clientOf(c)
+	if err != nil {
+		return err
+	}
+	target, _, _, err := resolveUploadTarget(ctx, client, parentID, name, driveutil.ConflictRename)
+	if err != nil {
+		return err
+	}
+	counted := &streamCountingReader{reader: reader}
+	if err := client.Put(ctx, target, counted, size); err != nil {
+		return err
+	}
+	if size >= 0 && counted.read != size {
+		return fmt.Errorf("webdav: 上传流长度不匹配：期望 %d 字节，实际读取 %d 字节", size, counted.read)
+	}
+	return nil
+}
+
+type streamCountingReader struct {
+	reader io.Reader
+	read   int64
+}
+
+func (r *streamCountingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.read += int64(n)
+	return n, err
+}
+
+func resolveUploadTarget(ctx context.Context, client *wc.Client, parentID, name string, policy int) (target, finalName string, skip bool, err error) {
+	parentID = pathOf(parentID)
+	target = driveutil.JoinPath(parentID, name)
+	finalName = name
+	_, statErr := client.Stat(ctx, target)
+	if statErr != nil && !isNotFound(statErr) {
+		return "", "", false, fmt.Errorf("webdav: 检查目标文件失败: %w", statErr)
+	}
+	if isNotFound(statErr) {
+		return target, finalName, false, nil
+	}
+	switch policy {
+	case driveutil.ConflictRefuse:
+		return "", "", false, errors.New("webdav: 目标文件已存在")
+	case driveutil.ConflictSkip:
+		return target, finalName, true, nil
+	case driveutil.ConflictRename:
+		for index := 1; index <= 9999; index++ {
+			candidateName := webDAVConflictName(name, index)
+			candidate := driveutil.JoinPath(parentID, candidateName)
+			_, candidateErr := client.Stat(ctx, candidate)
+			if isNotFound(candidateErr) {
+				return candidate, candidateName, false, nil
+			}
+			if candidateErr != nil {
+				return "", "", false, fmt.Errorf("webdav: 检查重命名目标失败: %w", candidateErr)
+			}
+		}
+		return "", "", false, errors.New("webdav: 无法生成不重复的文件名")
+	default:
+		return target, finalName, false, nil
+	}
+}
+
+func webDAVConflictName(name string, index int) string {
+	ext := path.Ext(name)
+	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), index, ext)
 }
 
 func idsToRefs(ids []string) []drive.FileRef {

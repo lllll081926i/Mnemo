@@ -18,7 +18,14 @@ import (
 	"mnemo-go/internal/netx"
 )
 
-const graphHost = "https://graph.microsoft.com/v1.0"
+const (
+	graphHost         = "https://graph.microsoft.com/v1.0"
+	graphListPageSize = "100"
+	// Request the signed content URLs whenever a driveItem is read.  List
+	// requests already did this, but Detail used by migration did not, which
+	// unnecessarily forced the authenticated /content fallback.
+	driveItemSelectFields = "$select=id,name,size,file,folder,parentReference,createdDateTime,lastModifiedDateTime,fileSystemInfo,image,video,@microsoft.graph.downloadUrl,@content.downloadUrl"
+)
 
 // RootID is the sentinel root folder id.
 const RootID = "onedrive_root"
@@ -203,11 +210,10 @@ func graphError(body []byte, status int) error {
 
 // listPath builds the children endpoint with $select/$expand.
 func listPath(parentID string) string {
-	const selectFields = "$select=id,name,size,file,folder,parentReference,createdDateTime,lastModifiedDateTime,fileSystemInfo,image,video,@microsoft.graph.downloadUrl,@content.downloadUrl"
 	if parentID == "" || parentID == RootID {
-		return "/me/drive/root/children?" + selectFields + "&$expand=thumbnails"
+		return "/me/drive/root/children?" + driveItemSelectFields + "&$expand=thumbnails&$top=" + graphListPageSize
 	}
-	return "/me/drive/items/" + url.PathEscape(parentID) + "/children?" + selectFields + "&$expand=thumbnails"
+	return "/me/drive/items/" + url.PathEscape(parentID) + "/children?" + driveItemSelectFields + "&$expand=thumbnails&$top=" + graphListPageSize
 }
 
 // ListPage returns one page of a directory listing.
@@ -251,9 +257,9 @@ func (c *client) List(ctx context.Context, parentID string) ([]Item, error) {
 
 // Detail returns one item (or nil).
 func (c *client) Detail(ctx context.Context, fileID string) (*Item, error) {
-	path := "/me/drive/root?$expand=thumbnails"
+	path := "/me/drive/root?" + driveItemSelectFields + "&$expand=thumbnails"
 	if fileID != "" && fileID != RootID {
-		path = "/me/drive/items/" + url.PathEscape(fileID) + "?$expand=thumbnails"
+		path = "/me/drive/items/" + url.PathEscape(fileID) + "?" + driveItemSelectFields + "&$expand=thumbnails"
 	}
 	var item Item
 	if err := c.getJSON(ctx, path, &item); err != nil {

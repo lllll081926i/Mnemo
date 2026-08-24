@@ -252,7 +252,7 @@ func TestSyncRunRegistryRejectsOverlapAndCancels(t *testing.T) {
 	}
 }
 
-func TestCollectUploadValidationItemsIncludesNestedFiles(t *testing.T) {
+func TestCollectUploadValidationItemsDefersDirectoryWalk(t *testing.T) {
 	root := t.TempDir()
 	plain := filepath.Join(root, "plain.txt")
 	nestedDir := filepath.Join(root, "nested")
@@ -275,7 +275,7 @@ func TestCollectUploadValidationItemsIncludesNestedFiles(t *testing.T) {
 	for _, item := range items {
 		got[item.Name] = item.Size
 	}
-	if len(got) != 2 || got["plain.txt"] != 3 || got["archive.zip"] != 5 {
+	if len(got) != 1 || got["plain.txt"] != 3 {
 		t.Fatalf("validation items = %#v", items)
 	}
 	if _, err := collectUploadValidationItems(nil); err == nil {

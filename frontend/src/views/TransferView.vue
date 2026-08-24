@@ -1,22 +1,31 @@
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
   ListDownloads, ListUploads,
   PauseDownload, ResumeDownload, CancelDownload, ClearDownloads,
   RemoveDownload, PrioritizeDownload, OpenFile,
   CancelUpload, ClearUploads, DownloadURL, ResumeUpload,
-  ListOfflineTasks, OfflineDownload, DeleteOfflineTask,
+  ListOfflineTasks, refreshOfflineTasks, OfflineDownload, DeleteOfflineTask, notifyFileChange,
   ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs,
-  EventsOn, RevealInFolder,
+  RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
 } from '../api'
-import { getPrefs } from '../appearance'
+import { getPrefs, orderAccounts } from '../appearance'
+import { error as logError, errorText, info, warn as logWarn } from '../logger'
 import Modal from '../components/Modal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
+import {
+  downStatusText, downStatusBadge, statusText,
+  upStatus, upStatusBadge, upName, upSize, upSpeed, upErr,
+  offProgress, migBadge, migStatusText, migCompletedTopLevel,
+  migRemaining, migProgress, migProgressText,
+} from '../composables/transferTaskUtils'
+import { useTransferTaskModel } from '../composables/useTransferTaskModel'
+import { useTransferPolling } from '../composables/useTransferPolling'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -27,10 +36,11 @@ const emit = defineEmits(['toast'])
 // ---------- 菜单 / 账号筛选 ----------
 const menu = ref('downloading')
 const filterUser = ref('')
+const accounts = computed(() => orderAccounts(props.accounts))
 
 // 支持云离线的账号
 const hasOffline = computed(() => offlineAccounts.value.length > 0)
-const offlineAccounts = computed(() => props.accounts.filter((a) => capsOf(a, props.providers).offlineDownload))
+const offlineAccounts = computed(() => accounts.value.filter((a) => capsOf(a, props.providers).offlineDownload))
 
 const menus = computed(() => {
   const list = [
@@ -49,7 +59,10 @@ watch(menu, () => { selectedIds.value = new Set(); ctx.value.show = false })
 watch(filterUser, () => { selectedIds.value = new Set() })
 
 function accIcon(acc) { return providerIconUrl(providerMetaOf(acc, props.providers)) }
-function accLabel(acc) { return accountName(acc) }
+function accLabel(acc) {
+  const meta = providerMetaOf(acc, props.providers)
+  return `${meta.label || '网盘'} · ${accountName(acc) || acc?.user_id || ''}`
+}
 
 // ---------- 下载 / 上传数据 ----------
 const downloads = ref([])
@@ -168,65 +181,21 @@ function scheduleRefresh(delay = 400) {
   }, delay)
 }
 
-// 快速筛选（任务名/链接，120ms 防抖）
-const taskFilterRaw = ref('')
-const taskFilter = ref('')
-let taskFilterTimer = null
-watch(taskFilterRaw, (v) => {
-  clearTimeout(taskFilterTimer)
-  taskFilterTimer = setTimeout(() => { taskFilter.value = v }, 120)
-})
-const byKw = (list, nameFn) => {
-  const kw = taskFilter.value.trim().toLowerCase()
-  if (!kw) return list
-  return list.filter((t) => (nameFn(t) || '').toLowerCase().includes(kw) || String(t.url || '').toLowerCase().includes(kw))
-}
-const byAccount = (list) => filterUser.value ? list.filter((t) => t.user_id === filterUser.value) : list
-const byUploadAccount = (list) => filterUser.value ? list.filter((t) => t.UserID === filterUser.value || (t.Info && t.Info.user_id === filterUser.value)) : list
-const activeDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
-const doneDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
-const activeUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted)), upName))
-const doneUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted)), upName))
+const {
+  taskFilterRaw,
+  activeDownloads,
+  doneDownloads,
+  activeUploads,
+  doneUploads,
+  selectedIds,
+  selectedTasks,
+  allActiveSelected,
+  toggleSelectAllActive,
+  toggleSelect,
+  onItemClick,
+  disposeTaskModel,
+} = useTransferTaskModel({ downloads, uploads, filterUser })
 
-// 全选（正在下载列表）
-const allActiveSelected = computed(() => activeDownloads.value.length > 0 && activeDownloads.value.every((t) => selectedIds.value.has(t.id)))
-function toggleSelectAllActive() {
-  selectedIds.value = allActiveSelected.value ? new Set() : new Set(activeDownloads.value.map((t) => t.id))
-}
-
-const downStatusText = (s) => ({ queued: '排队中', downloading: '下载中', paused: '已暂停', completed: '已完成', failed: '失败', canceled: '已取消' }[s] || s)
-const downStatusBadge = (s) => ({ downloading: 'primary', queued: 'primary', completed: 'success', failed: 'error', canceled: 'warn', paused: 'warn' }[s] || '')
-
-function upStatus(t) {
-  const u = t.Upload || {}
-  if (u.IsCompleted) return '已完成'
-  if (u.IsFailed) return '失败'
-  if (u.IsStop) return '已停止'
-  if (u.IsDowning) return '上传中'
-  return '排队中'
-}
-const upStatusBadge = (t) => ({ 已完成: 'success', 失败: 'error', 已停止: 'warn' }[upStatus(t)] || 'primary')
-const upName = (t) => (t.Info && t.Info.name) || ((t.Info && t.Info.localFilePath) || '').split(/[\\/]/).pop() || t.UploadID
-const upSize = (t) => (t.Info && (t.Info.sizeStr || formatBytes(t.Info.size))) || ''
-const upSpeed = (t) => (t.Upload && (t.Upload.DownSpeedStr || formatSpeed(t.Upload.DownSpeed || 0))) || ''
-const upErr = (t) => (t.Upload && t.Upload.failedMessage) || ''
-
-// ---------- 选择 / 批量 ----------
-const selectedIds = ref(new Set())
-function toggleSelect(id) {
-  const s = new Set(selectedIds.value)
-  s.has(id) ? s.delete(id) : s.add(id)
-  selectedIds.value = s
-}
-function onItemClick(e, id) {
-  if (e.ctrlKey || e.metaKey) toggleSelect(id)
-  else selectedIds.value = new Set([id])
-}
-const selectedTasks = computed(() => activeDownloads.value.filter((t) => selectedIds.value.has(t.id)))
-
-// ---------- 核心操作（全部配备即时乐观响应与回滚） ----------
-
-// 暂停
 async function pauseTask(t) {
   const orig = t.status
   t.status = 'paused'
@@ -518,7 +487,6 @@ const ctxItems = computed(() => {
 
 // ---------- 任务详情 ----------
 const detailTask = ref(null)
-const statusText = (s) => ({ queued: '排队中', downloading: '下载中', paused: '已暂停', completed: '已完成', failed: '失败', canceled: '已取消', uploading: '上传中' }[s] || s)
 
 function onCtxSelect(action) {
   const t = ctx.value.task
@@ -555,11 +523,31 @@ async function submitDownload() {
   if (dlHeaders.value.ua.trim()) headers['User-Agent'] = dlHeaders.value.ua.trim()
   if (dlHeaders.value.referer.trim()) headers['Referer'] = dlHeaders.value.referer.trim()
   if (dlHeaders.value.cookie.trim()) headers['Cookie'] = dlHeaders.value.cookie.trim()
+  const started = performance.now()
+  const fields = { count: urls.length, has_headers: Object.keys(headers).length > 0 }
+  info('transfer', '创建链接下载开始', fields)
+  let accepted = 0
+  let failed = 0
+  let lastError = ''
   for (const url of urls) {
     const name = urls.length === 1 ? dlName.value.trim() : ''
-    try { await DownloadURL(name, url, headers) } catch (e) { emit('toast', String(e && e.message ? e.message : e), 'error') }
+    try {
+      await DownloadURL(name, url, headers)
+      accepted++
+    } catch (e) {
+      failed++
+      lastError = errorText(e)
+    }
   }
-  emit('toast', `已添加 ${urls.length} 个下载任务`, 'success')
+  const result = { ...fields, accepted, failed, duration_ms: Math.round(performance.now() - started) }
+  if (accepted) {
+    info('transfer', '创建链接下载完成', result)
+    emit('toast', failed ? `已添加 ${accepted} 个下载任务，${failed} 个失败` : `已添加 ${accepted} 个下载任务`, failed ? 'warn' : 'success')
+  } else {
+    logError('transfer', '创建链接下载失败', { ...result, error: lastError })
+    emit('toast', lastError || '创建下载任务失败', 'error')
+  }
+  if (accepted && failed) logWarn('transfer', '创建链接下载部分失败', { ...result, error: lastError })
   refresh()
 }
 
@@ -571,7 +559,6 @@ const offlineError = ref('')
 let offlineRefreshSeq = 0
 const offModal = ref(false)
 const offLinks = ref('')
-let offlineTimer = null
 
 watch(offlineAccounts, (list) => {
   if (!offlineUser.value && list.length) offlineUser.value = list[0].user_id
@@ -587,40 +574,98 @@ const offlineDriveId = computed(() => {
   return acc ? acc.drive_id : ''
 })
 
-async function refreshOffline() {
+function isOfflineCompleted(task) {
+  const status = String(task?.status || '').toLowerCase()
+  return status.includes('complete') || status.includes('finished') || task?.progress >= 100
+}
+
+function isOfflineTerminal(task) {
+  const status = String(task?.status || '').toLowerCase()
+  return isOfflineCompleted(task) || status.includes('fail') || status.includes('error') ||
+    status.includes('cancel') || status.includes('delete')
+}
+
+const hasPendingOffline = computed(() => offlineTasks.value.some((task) => !isOfflineTerminal(task)))
+
+function offlineRootDirectory() {
+  const account = offlineAccounts.value.find((item) => item.user_id === offlineUser.value)
+  return providerMetaOf(account, props.providers)?.rootKey || 'root'
+}
+
+async function refreshOffline({ remote = menu.value === 'offline' } = {}) {
   const seq = ++offlineRefreshSeq
   const userID = offlineUser.value
   if (!userID) { offlineTasks.value = []; offlineError.value = ''; return }
   offlineLoading.value = true
   try {
-    const list = (await ListOfflineTasks(userID)) || []
+    const driveID = offlineDriveId.value
+    const previous = new Map(offlineTasks.value.map((task) => [task.id || task.task_id, task]))
+    const list = (remote
+      ? await refreshOfflineTasks(userID, driveID)
+      : await ListOfflineTasks(userID)) || []
     if (seq !== offlineRefreshSeq || userID !== offlineUser.value) return
     offlineTasks.value = list
     offlineError.value = ''
+    // 云离线完成后仅让对应账号根目录进入待校验状态。文件页可见时才会
+    // 合并为一次刷新；不可见时保持缓存，用户进入再拉取。
+    if (remote && list.some((task) => {
+      const previousTask = previous.get(task.id || task.task_id)
+      return isOfflineCompleted(task) && !isOfflineCompleted(previousTask)
+    })) {
+      notifyFileChange({
+        userId: userID,
+        driveId: driveID,
+        directories: [offlineRootDirectory()],
+        refreshSearch: true,
+        delay: 1200,
+        minimumInterval: 5000,
+      })
+    }
   } catch (e) {
     if (seq === offlineRefreshSeq && userID === offlineUser.value) offlineError.value = String(e && e.message ? e.message : e)
   } finally {
     if (seq === offlineRefreshSeq) offlineLoading.value = false
   }
 }
-watch(offlineUser, refreshOffline)
-watch(menu, (m) => { if (m === 'offline') refreshOffline() })
+watch(offlineUser, () => {
+  refreshOffline({ remote: menu.value === 'offline' })
+  if (isViewActive() && menu.value === 'offline') startPolling()
+})
+watch(menu, (m) => {
+  if (m !== 'offline') return
+  refreshOffline()
+  if (isViewActive()) startPolling()
+})
 
 const offUrlList = computed(() => offLinks.value.split('\n').map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s) || /^magnet:/i.test(s) || /^ed2k:/i.test(s)))
 async function submitOffline() {
   const urls = offUrlList.value
   if (!urls.length) { emit('toast', '请输入有效的链接', 'error'); return }
   offModal.value = false
+  const started = performance.now()
+  const fields = { count: urls.length }
+  info('transfer', '创建云离线任务开始', fields)
   let ok = 0
+  let failed = 0
+  let lastError = ''
   for (const url of urls) {
     try { await OfflineDownload(offlineUser.value, offlineDriveId.value, url, ''); ok++ }
-    catch (e) { emit('toast', String(e && e.message ? e.message : e), 'error') }
+    catch (e) { failed++; lastError = errorText(e) }
   }
-  if (ok) emit('toast', `已提交 ${ok} 个离线任务`, 'success')
+  const result = { ...fields, accepted: ok, failed, duration_ms: Math.round(performance.now() - started) }
+  if (ok) {
+    info('transfer', '创建云离线任务完成', result)
+    emit('toast', failed ? `已提交 ${ok} 个离线任务，${failed} 个失败` : `已提交 ${ok} 个离线任务`, failed ? 'warn' : 'success')
+  } else {
+    logError('transfer', '创建云离线任务失败', { ...result, error: lastError })
+    emit('toast', lastError || '创建云离线任务失败', 'error')
+  }
+  if (ok && failed) logWarn('transfer', '创建云离线任务部分失败', { ...result, error: lastError })
   offLinks.value = ''
-  refreshOffline()
+  // 创建接口已经将任务写入本地记录，先读取本地快照；后续仅在有进行中任务时再向云端校验。
+  refreshOffline({ remote: false })
+  if (isViewActive() && menu.value === 'offline') startPolling()
 }
-const offProgress = (t) => Math.max(0, Math.min(100, Math.round(t.progress || 0)))
 
 async function delOfflineTask(t) {
   askConfirm(`删除离线任务「${t.file_name || t.url || t.task_id}」？`, async () => {
@@ -628,9 +673,9 @@ async function delOfflineTask(t) {
     offlineTasks.value = offlineTasks.value.filter((x) => x.task_id !== t.task_id && x.id !== t.id)
     try {
       await DeleteOfflineTask(offlineUser.value, offlineDriveId.value, t.task_id || t.id, true)
-      await refreshOffline()
+      await refreshOffline({ remote: false })
       emit('toast', '已删除', 'success')
-    } catch (e) { await refreshOffline(); emit('toast', String(e), 'error') }
+    } catch (e) { await refreshOffline({ remote: true }); emit('toast', String(e), 'error') }
   }, { danger: true, title: '删除离线任务' })
 }
 
@@ -707,91 +752,35 @@ async function clearMigrateHistory() {
   }
 }
 const migName = (uid) => {
-  const acc = props.accounts.find((a) => a.user_id === uid)
+  const acc = accounts.value.find((a) => a.user_id === uid)
   return acc ? accountName(acc) : uid
 }
-const migBadge = (s) => ({ completed: 'success', failed: 'error', running: 'primary' }[s] || 'warn')
-const migStatusText = (s) => ({ pending: '等待中', running: '迁移中', completed: '已完成', partial: '部分完成', failed: '失败', canceled: '已取消' }[s] || s)
-const migCompletedTopLevel = (j) => (j.fileIDs || []).filter((id) => (j.completedFileIDs || []).includes(id)).length
-const migRemaining = (j) => Math.max(0, (j.fileIDs || []).length - migCompletedTopLevel(j))
-const migProgress = (j) => j.totalBytes > 0
-  ? Math.min(100, Math.round(((j.processedBytes || 0) / j.totalBytes) * 100))
-  : (j.total ? Math.min(100, Math.round(((j.processed || 0) / j.total) * 100)) : 0)
-const migProgressText = (j) => j.totalBytes > 0
-  ? `${formatBytes(j.processedBytes || 0)} / ${formatBytes(j.totalBytes || 0)}`
-  : `${j.processed || 0} / ${j.total || 0} 个文件`
+const migAccount = (uid) => accounts.value.find((a) => a.user_id === uid) || null
+const migIcon = (uid) => accIcon(migAccount(uid))
 
 // ---------- 生命周期 ----------
-let pollTimer = null
-let offFns = []
-let viewActive = false
-
-function bindEvents() {
-  if (offFns.length) return
-  const off1 = EventsOn('transfer:event', onTransferEvent)
-  const off2 = EventsOn('migrate:progress', onMigrate)
-  if (typeof off1 === 'function') offFns.push(off1)
-  if (typeof off2 === 'function') offFns.push(off2)
-}
-
-function unbindEvents() {
-  offFns.forEach((fn) => { try { fn() } catch { /* 忽略 */ } })
-  offFns = []
-}
-
-function stopPolling() {
-  clearTimeout(pollTimer)
-  clearTimeout(offlineTimer)
-  pollTimer = null
-  offlineTimer = null
-}
-
-function startPolling() {
-  stopPolling()
-  const pollTransfers = async () => {
-    if (!viewActive) return
-    if (!document.hidden && (activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate')) {
-      await refresh()
-      if (menu.value === 'migrate') await refreshMigrateJobs()
-    }
-    pollTimer = setTimeout(pollTransfers, activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate' ? 5000 : 15000)
-  }
-  const pollOffline = async () => {
-    if (!viewActive) return
-    if (!document.hidden && menu.value === 'offline') await refreshOffline()
-    offlineTimer = setTimeout(pollOffline, menu.value === 'offline' ? 8000 : 20000)
-  }
-  pollTimer = setTimeout(pollTransfers, 5000)
-  offlineTimer = setTimeout(pollOffline, 8000)
-}
-
-function activateView() {
-  if (viewActive) return
-  viewActive = true
-  bindEvents()
-  refresh()
-  refreshMigrateJobs()
-  startPolling()
-}
-
-function deactivateView() {
-  if (!viewActive) return
-  viewActive = false
-  stopPolling()
-  clearTimeout(refreshTimer)
-  refreshTimer = null
-  refreshQueued = false
-  refreshSeq++
-  unbindEvents()
-}
-
-onMounted(activateView)
-onActivated(activateView)
-onDeactivated(deactivateView)
-onBeforeUnmount(() => {
-  deactivateView()
-  clearTimeout(taskFilterTimer)
+const {
+  startPolling,
+  isViewActive,
+} = useTransferPolling({
+  menu,
+  activeDownloads,
+  activeUploads,
+  hasPendingOffline,
+  onTransferEvent,
+  onMigrate,
+  refresh,
+  refreshMigrateJobs,
+  refreshOffline,
+  onDeactivate: () => {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+    refreshQueued = false
+    refreshSeq++
+  },
+  onDispose: disposeTaskModel,
 })
+
 </script>
 
 <template>
@@ -1075,7 +1064,7 @@ onBeforeUnmount(() => {
               <UiSelect
                 v-model="offlineUser"
                 style="width:200px"
-                :options="offlineAccounts.map((acc) => ({ value: acc.user_id, label: accLabel(acc) }))"
+                :options="offlineAccounts.map((acc) => ({ value: acc.user_id, label: accLabel(acc), img: accIcon(acc) }))"
               />
               <button class="tbtn primary" :disabled="!offlineUser" @click="offLinks = ''; offModal = true"><UiIcon name="plus" :size="14" />新建离线任务</button>
             </div>
@@ -1138,7 +1127,7 @@ onBeforeUnmount(() => {
                 <div class="rangselect"></div>
                 <div class="fileicon"><UiIcon name="migrate" :size="20" style="color:var(--color-primary)" /></div>
                 <div class="filename">
-                  <div>{{ migName(j.srcUser) }} → {{ migName(j.dstUser) }}</div>
+                  <div><img v-if="migIcon(j.srcUser)" :src="migIcon(j.srcUser)" alt="" style="width:15px;height:15px;object-fit:contain;vertical-align:-3px;margin-right:4px" />{{ migName(j.srcUser) }} <span style="color:var(--text-tertiary);margin:0 4px">→</span><img v-if="migIcon(j.dstUser)" :src="migIcon(j.dstUser)" alt="" style="width:15px;height:15px;object-fit:contain;vertical-align:-3px;margin-right:4px" />{{ migName(j.dstUser) }}</div>
                   <div class="fsub">{{ (j.fileIDs || []).length }} 个文件<template v-if="j.failed"> · 失败 {{ j.failed }}</template><template v-if="['partial', 'failed', 'canceled'].includes(j.status) && migRemaining(j)"> · 可恢复 {{ migRemaining(j) }} 个</template></div>
                 </div>
                 <div class="filesize"></div>
@@ -1164,7 +1153,7 @@ onBeforeUnmount(() => {
             <div v-if="!migrateJobs.length" class="workspace-empty-state">
               <UiIcon name="migrate" :size="36" style="opacity:.4" />
               <span class="wes-title">暂无迁移任务</span>
-              <span class="wes-desc">在网盘页选中文件后，右键选择「迁移到其他网盘」</span>
+              <span class="wes-desc">在网盘页选中文件后，右键选择「迁移到其他账号或网盘」</span>
             </div>
           </div>
         </template>

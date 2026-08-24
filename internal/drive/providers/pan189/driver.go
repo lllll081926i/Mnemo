@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,6 +18,8 @@ import (
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
+
+const listPageSize = "50"
 
 const providerID = model.ProviderPan189
 
@@ -38,8 +41,13 @@ func init() {
 		}),
 		Auth: login189,
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
+			{Key: "login_mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{
+				{Value: "password", Label: "账号密码"},
+				{Value: "sms", Label: "短信验证码"},
+			}},
 			{Key: "username", Type: "text", Label: "手机号/邮箱", Required: true},
-			{Key: "password", Type: "password", Label: "密码", Required: true},
+			{Key: "password", Type: "password", Label: "密码", Required: false},
+			{Key: "sms_code", Type: "text", Label: "短信验证码", Required: false, Hint: "选择短信登录后，先获取验证码"},
 			{Key: "cloud_type", Type: "select", Label: "云空间", Required: false, Options: []drive.LoginOption{
 				{Value: CloudPersonal, Label: "个人云"},
 				{Value: CloudFamily, Label: "家庭云"},
@@ -79,14 +87,14 @@ func (d *Driver) listPage(ctx context.Context, c drive.Context, dirID string, pa
 		rawURL = apiURL + "/family/file/listFiles.action"
 		query = map[string]string{
 			"folderId": parent, "fileType": "0", "mediaAttr": "0", "iconOption": "5",
-			"pageNum": strconv.Itoa(pageNum), "pageSize": "100", "familyId": familyID,
+			"pageNum": strconv.Itoa(pageNum), "pageSize": listPageSize, "familyId": familyID,
 			"orderBy": "1", "descending": "false",
 		}
 	} else {
 		rawURL = apiURL + "/listFiles.action"
 		query = map[string]string{
 			"folderId": parent, "fileType": "0", "mediaAttr": "0", "iconOption": "5",
-			"pageNum": strconv.Itoa(pageNum), "pageSize": "100", "recursive": "0",
+			"pageNum": strconv.Itoa(pageNum), "pageSize": listPageSize, "recursive": "0",
 			"orderBy": "filename", "descending": "false",
 		}
 	}
@@ -196,19 +204,23 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 		f.Icon = "iconfile-folder"
 		return f, nil
 	}
-	f := driveutil.NewFile(c.DriveID, fileID, "", fileID, false, 0, 0)
-	return f, nil
+	return d.GetFile(ctx, c, fileID)
 }
 
 func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*model.File, error) {
-	info, err := d.GetInfo(ctx, c, fileID)
-	if err != nil {
-		return nil, err
-	}
-	if f, ok := info.(model.File); ok {
+	if fileID == PAN189Root || fileID == "-11" || fileID == "root" || fileID == "/" {
+		f := driveutil.NewFile(c.DriveID, PAN189Root, "", "天翼云盘", true, 0, 0)
+		f.Icon = "iconfile-folder"
 		return &f, nil
 	}
-	return nil, errors.New("pan189: 无法解析文件信息")
+	if f, ok := drive.CachedFile(c.UserID, c.DriveID, fileID); ok {
+		return &f, nil
+	}
+	// The 189 API used by this provider has no reliable file-detail endpoint
+	// carrying name, size and MD5. Returning a fabricated stub here makes a
+	// migration use the file ID as its name and size zero. Require a real list
+	// snapshot instead; drive.GetFileContext populates this cache while listing.
+	return nil, fmt.Errorf("pan189: 文件元数据未缓存: %w", drive.ErrNotFound)
 }
 
 // ---- download / preview ----

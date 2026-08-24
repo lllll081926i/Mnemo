@@ -41,7 +41,9 @@ func init() {
 			"recycleBin":          true,
 			"favorite":            true,
 			"permanentDelete":     true,
-		}, nil),
+		}, func(c *drive.Capabilities) {
+			c.SetHashes([]string{"gcid"}, []string{"gcid"})
+		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "username", Type: "text", Label: "账号（手机/邮箱）", Required: true},
 			{Key: "password", Type: "password", Label: "密码", Required: true},
@@ -64,11 +66,15 @@ var apiCaptchaCache = struct {
 	items map[string]apiCaptchaCacheEntry
 }{items: make(map[string]apiCaptchaCacheEntry)}
 
-// pikpakVerifiedCaptchaWait gives the provider a brief window to persist the
-// completed challenge before the single bounded confirmation request.
-var pikpakVerifiedCaptchaWait = 1500 * time.Millisecond
+const (
+	// 本地门禁只用于吸收用户的连续点击，绝不能把服务端给出的长等待时间
+	// 变成应用内的“永久灰色按钮”。超过一小时的提示只展示给用户，不在
+	// 本进程继续拦截；其余等待最多保留 30 秒。
+	pikpakLoginCooldownCapSeconds      = 30
+	pikpakLoginCooldownIgnoreAtSeconds = 60 * 60
+)
 
-// PikPak risk cooldowns are scoped to the normalized login identifier.  A
+// PikPak risk cooldowns are scoped to the normalized login identifier. A
 // blocked PikPak account must not disable another PikPak account, and this
 // provider-local state must never gate logins for other providers.
 var pikpakLoginCooldown struct {
@@ -88,9 +94,6 @@ func pikpakLoginCooldownError(username string) error {
 	if remaining%time.Second != 0 {
 		seconds++
 	}
-	if seconds < pikpakMinRateLimitSeconds {
-		seconds = pikpakMinRateLimitSeconds
-	}
 	return &PikPakRateLimitError{RetryAfterSeconds: seconds}
 }
 
@@ -105,11 +108,11 @@ func rememberPikPakLoginCooldown(username string, err error) {
 			seconds = prohibited.retryAfterSeconds()
 		}
 	}
-	if seconds <= 0 {
+	if seconds <= 0 || seconds >= pikpakLoginCooldownIgnoreAtSeconds {
 		return
 	}
-	if seconds < pikpakMinRateLimitSeconds {
-		seconds = pikpakMinRateLimitSeconds
+	if seconds > pikpakLoginCooldownCapSeconds {
+		seconds = pikpakLoginCooldownCapSeconds
 	}
 	pikpakLoginCooldown.Lock()
 	until := time.Now().Add(time.Duration(seconds) * time.Second)
@@ -195,31 +198,25 @@ func isHex(s string) bool {
 	return true
 }
 
-// initCaptcha requests a captcha token (challenge url may be returned).
-func initCaptcha(ctx context.Context, hc *netx.Client, deviceID, username string, action, callbackURI string) (string, string, error) {
-	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, "", callbackURI)
+// initCaptcha requests the login captcha token using the same payload as
+// rclone's backend/pikpak newCaptchaTokenRequest. In particular, login always
+// identifies the account through meta.username and does not send redirect_uri.
+func initCaptcha(ctx context.Context, hc *netx.Client, deviceID, username string, action string) (string, string, error) {
+	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, "")
 }
 
-// initCaptchaWithPrev requests a captcha token; previousToken chains a verified
-// slider token so the server registers the result (legacy previousToken retry).
-// signin 动作的 meta 只含 email/phone_number/username 单字段（对齐旧版）。
-func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken, callbackURI string) (string, string, error) {
-	u := strings.TrimSpace(username)
-	meta := map[string]string{}
-	if strings.Contains(u, "@") && strings.Contains(u, ".") {
-		meta["email"] = u
-	} else if isPhone(u) {
-		meta["phone_number"] = strings.ReplaceAll(strings.ReplaceAll(u, " ", ""), "-", "")
-	} else {
-		meta["username"] = u
-	}
+// initCaptchaWithPrev is retained for API parity with rclone's token source.
+// Login invalidation passes an empty previous token, which is omitted from the
+// JSON body by construction; normal login never performs a token-exchange loop.
+func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken string) (string, string, error) {
+	meta := map[string]string{"username": strings.TrimSpace(username)}
 	body := map[string]any{
-		"client_id":    clientID,
-		"action":       action,
-		"device_id":    deviceID,
-		"meta":         meta,
-		"redirect_uri": loginCaptchaRedirectURI(callbackURI),
+		"client_id": clientID,
+		"action":    action,
+		"device_id": deviceID,
+		"meta":      meta,
 	}
+	// rclone's CaptchaTokenRequest uses omitempty for this field.
 	if previousToken != "" {
 		body["captcha_token"] = previousToken
 	}
@@ -243,13 +240,6 @@ func initCaptchaWithPrev(ctx context.Context, hc *netx.Client, deviceID, usernam
 		return "", "", errors.New("pikpak: 验证接口未返回 captcha token")
 	}
 	return res.CaptchaToken, res.URL, nil
-}
-
-func loginCaptchaRedirectURI(callbackURI string) string {
-	if value := strings.TrimSpace(callbackURI); value != "" {
-		return value
-	}
-	return redirectURI
 }
 
 // initAPICaptcha follows the drive API captcha protocol. Its meta payload is
@@ -379,9 +369,10 @@ type AuthResp struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-// signIn logs in with username+password (+captcha).
-// 字段与旧版 signInPikPak 一致：body 只有 client_id/username/password，
-// captcha_token 走 X-Captcha-Token 头（放 body 会被服务端忽略 → 报 "add captcha"）。
+// signIn logs in with username+password (+captcha). PikPak expects the captcha
+// value exclusively in X-Captcha-Token; putting it in the JSON body changes the
+// request shape used by the reference client and can make an otherwise valid
+// verified token fail server-side validation.
 func signIn(ctx context.Context, hc *netx.Client, deviceID, username, password, captchaToken string) (*AuthResp, error) {
 	body := map[string]any{
 		"client_id": clientID,
@@ -441,13 +432,6 @@ func refreshToken(ctx context.Context, hc *netx.Client, deviceID, refresh string
 	return &res, nil
 }
 
-// retryLoginCaptcha mirrors the legacy login flow after signin reports a
-// captcha error. A required captcha reuses the token that was submitted;
-// an invalid captcha starts a fresh chain without reusing that token.
-func retryLoginCaptcha(ctx context.Context, hc *netx.Client, deviceID, username, action, previousToken, callbackURI string) (string, string, error) {
-	return initCaptchaWithPrev(ctx, hc, deviceID, username, action, previousToken, callbackURI)
-}
-
 // CaptchaRequiredError carries the visual challenge values while preserving the
 // text protocol consumed by the Wails login page.
 type CaptchaRequiredError struct {
@@ -466,27 +450,21 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	password := req.Config["password"]
 	logging.Info("PikPak sign-in started", "identifier_type", pikpakIdentifierType(username), "has_captcha_token", strings.TrimSpace(req.Config["captcha_token"]) != "")
 	if username == "" || password == "" {
-		logging.Warn("PikPak sign-in rejected", "reason", "missing credentials")
 		return nil, errors.New("pikpak: 请输入账号和密码")
 	}
 	if err := pikpakLoginCooldownError(username); err != nil {
-		logging.Warn("PikPak sign-in blocked by cooldown")
 		return nil, err
 	}
 	deviceID := getOrCreateDeviceID(username)
 	hc := netx.NewClient(60 * time.Second)
-	callbackURI := strings.TrimSpace(req.Config["captcha_redirect_uri"])
 
 	captchaToken := strings.TrimSpace(req.Config["captcha_token"])
-	captchaVerified := strings.EqualFold(strings.TrimSpace(req.Config["captcha_verified"]), "true")
-	captchaNeedsConfirmation := captchaVerified && strings.EqualFold(strings.TrimSpace(req.Config["captcha_requires_confirmation"]), "true")
 	if captchaToken == "" {
 		// A failed captcha init must stop here. Continuing with an empty token
 		// turns a transport/rate-limit failure into a misleading login error.
-		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", callbackURI)
+		tok, urlValue, err := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin")
 		if err != nil {
 			rememberPikPakLoginCooldown(username, err)
-			logging.Warn("PikPak captcha initialization failed", "error", err)
 			return nil, err
 		}
 		captchaToken = tok
@@ -496,51 +474,19 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
 		}
 	}
-	if captchaNeedsConfirmation {
-		// The callback can arrive before the provider has registered the slider
-		// result. Confirm the prior token exactly once, never in an automatic
-		// retry loop, then submit the login request.
-		timer := time.NewTimer(pikpakVerifiedCaptchaWait)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
-		tok, urlValue, confirmErr := initCaptchaWithPrev(ctx, hc, deviceID, username, "POST:/v1/auth/signin", captchaToken, callbackURI)
-		if confirmErr != nil {
-			rememberPikPakLoginCooldown(username, confirmErr)
-			logging.Warn("PikPak captcha completion confirmation failed", "error", confirmErr)
-			return nil, confirmErr
-		}
-		if urlValue != "" {
-			logging.Info("PikPak captcha completion requires another visual challenge")
-			return nil, &CaptchaRequiredError{URL: urlValue, Token: tok}
-		}
-		captchaToken = tok
-	}
 
 	auth, err := signIn(ctx, hc, deviceID, username, password, captchaToken)
 	if err != nil {
 		rememberPikPakLoginCooldown(username, err)
-		logging.Warn("PikPak sign-in request failed", "error", err)
-		if captchaVerified {
+		// rclone retries exactly once only for captcha_invalid (4002): it
+		// invalidates the old captcha token, obtains a fresh token, then repeats
+		// signin. captcha_required and all other failures are returned unchanged.
+		if !isLoginCaptchaInvalidError(err) {
 			return nil, err
 		}
-		if !isCaptchaError(err) {
-			return nil, err
-		}
-		previousToken := ""
-		if isCaptchaRequiredError(err) {
-			previousToken = captchaToken
-		}
-		// The first failed signin follows the legacy client's single retry.
-		// Do not run the post-slider chain here: the user has not completed a
-		// new challenge yet.
-		tok, urlValue, retryErr := retryLoginCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin", previousToken, callbackURI)
+		tok, urlValue, retryErr := initCaptcha(ctx, hc, deviceID, username, "POST:/v1/auth/signin")
 		if retryErr != nil {
 			rememberPikPakLoginCooldown(username, retryErr)
-			logging.Warn("PikPak captcha retry initialization failed", "error", retryErr)
 			return nil, retryErr
 		}
 		if urlValue != "" {
@@ -552,7 +498,6 @@ func authSignIn(ctx context.Context, req drive.AuthRequest) (*model.TokenInfo, e
 	}
 	if err != nil {
 		rememberPikPakLoginCooldown(username, err)
-		logging.Warn("PikPak sign-in retry failed", "error", err)
 		return nil, err
 	}
 

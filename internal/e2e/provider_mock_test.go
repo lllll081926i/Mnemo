@@ -227,7 +227,7 @@ func TestPikPakCaptchaDelayedCloseKeepsNewSessionAlive(t *testing.T) {
 	}
 }
 
-func TestPikPakLoginUsesConfiguredCaptchaRedirectURI(t *testing.T) {
+func TestPikPakLoginOmitsConfiguredCaptchaRedirectURILikeRclone(t *testing.T) {
 	const callbackURI = "http://127.0.0.1:45678/callback/test-session"
 	var gotRedirectURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -264,8 +264,8 @@ func TestPikPakLoginUsesConfiguredCaptchaRedirectURI(t *testing.T) {
 	if !errors.As(err, &challenge) {
 		t.Fatalf("login error = %v, want captcha challenge", err)
 	}
-	if gotRedirectURI != callbackURI {
-		t.Fatalf("captcha redirect_uri = %q, want %q", gotRedirectURI, callbackURI)
+	if gotRedirectURI != "" {
+		t.Fatalf("captcha redirect_uri = %q, want omitted", gotRedirectURI)
 	}
 }
 
@@ -390,7 +390,7 @@ func TestPikPakLoginUsesVerifiedCaptchaTokenDirectly(t *testing.T) {
 	}
 }
 
-func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
+func TestPikPakLoginDoesNotRetryCaptchaRequired(t *testing.T) {
 	var initCalls, signinCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Referer"); got != "https://mypikpak.com/" {
@@ -408,10 +408,7 @@ func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
 			if initCalls == 1 && body.CaptchaToken != "" {
 				t.Errorf("initial captcha previous token = %q", body.CaptchaToken)
 			}
-			if initCalls == 2 && body.CaptchaToken != "initial-token" {
-				t.Errorf("retry captcha previous token = %q", body.CaptchaToken)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"captcha_token": map[int]string{1: "initial-token", 2: "final-token"}[initCalls]})
+			_ = json.NewEncoder(w).Encode(map[string]any{"captcha_token": "initial-token"})
 		case "/v1/auth/signin":
 			signinCalls++
 			if signinCalls == 1 {
@@ -419,13 +416,6 @@ func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": "captcha_required"})
 				return
 			}
-			if got := r.Header.Get("X-Captcha-Token"); got != "final-token" {
-				t.Errorf("retry X-Captcha-Token = %q", got)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"access_token": "initial-retry-access", "refresh_token": "initial-retry-refresh",
-				"expires_in": 3600, "token_type": "Bearer", "sub": "initial-retry-account",
-			})
 		case "/drive/v1/about":
 			_ = json.NewEncoder(w).Encode(map[string]any{"quota": map[string]any{"used": 0, "limit": 1}})
 		default:
@@ -440,14 +430,14 @@ func TestPikPakLoginRefreshesRejectedInitialCaptcha(t *testing.T) {
 	if !ok || reg.Auth == nil {
 		t.Fatal("pikpak login registration missing")
 	}
-	tok, err := reg.Auth(context.Background(), drive.AuthRequest{Config: map[string]string{
+	_, err := reg.Auth(context.Background(), drive.AuthRequest{Config: map[string]string{
 		"username": "initial@example.com", "password": "password",
 	}})
-	if err != nil || tok == nil || tok.AccessToken != "initial-retry-access" {
-		t.Fatalf("login token/error = %#v/%v", tok, err)
+	if err == nil || !strings.Contains(err.Error(), "captcha") {
+		t.Fatalf("login error = %v, want captcha_required without retry", err)
 	}
-	if initCalls != 2 || signinCalls != 2 {
-		t.Fatalf("captcha/signin calls = %d/%d", initCalls, signinCalls)
+	if initCalls != 1 || signinCalls != 1 {
+		t.Fatalf("captcha/signin calls = %d/%d, want 1/1", initCalls, signinCalls)
 	}
 }
 
@@ -474,7 +464,7 @@ func TestPikPakLoginRefreshesInvalidCaptchaWithoutPreviousToken(t *testing.T) {
 			signinCalls++
 			if signinCalls == 1 {
 				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": "captcha_invalid"})
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "captcha_invalid", "error_code": 4002})
 				return
 			}
 			if got := r.Header.Get("X-Captcha-Token"); got != "final-token" {
@@ -557,7 +547,7 @@ func TestPikPakListUsesCompleteAndTrashFilters(t *testing.T) {
 		t.Fatalf("normal filters = %s", normalFilters[0])
 	}
 	for i := range normalFilters {
-		if normalLimits[i] != "100" || normalPageSizes[i] != "" {
+		if normalLimits[i] != "50" || normalPageSizes[i] != "" {
 			t.Fatalf("normal pagination query %d: limit=%q page_size=%q", i, normalLimits[i], normalPageSizes[i])
 		}
 		if normalParents[i] != "" {
@@ -570,7 +560,7 @@ func TestPikPakListUsesCompleteAndTrashFilters(t *testing.T) {
 	if !strings.Contains(trashQuery, `"trashed":{"eq":true}`) || !strings.Contains(trashQuery, "parent=*") {
 		t.Fatalf("trash query = %s", trashQuery)
 	}
-	if trashLimit != "100" || trashPageSize != "" {
+	if trashLimit != "50" || trashPageSize != "" {
 		t.Fatalf("trash pagination query: limit=%q page_size=%q", trashLimit, trashPageSize)
 	}
 }
@@ -590,7 +580,7 @@ func TestPikPakOfflineUsesLegacyPayloadAndPagination(t *testing.T) {
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v1/tasks":
 			listCalls++
-			if r.URL.Query().Get("type") != "offline" || r.URL.Query().Get("limit") != "10000" ||
+			if r.URL.Query().Get("type") != "offline" || r.URL.Query().Get("limit") != "100" ||
 				r.URL.Query().Get("thumbnail_size") != "SIZE_SMALL" || r.URL.Query().Get("with") != "reference_resource" ||
 				!strings.Contains(r.URL.Query().Get("filters"), `"phase":{"in":`) {
 				t.Errorf("offline list query = %s", r.URL.RawQuery)
@@ -906,7 +896,9 @@ func TestPikPakUploadHonorsConflictPolicy(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{})
 		case r.Method == http.MethodPost && r.URL.Path == "/drive/v1/files":
 			createCalls++
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "new-file"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"file": map[string]any{
+				"id": "new-file", "phase": "PHASE_TYPE_COMPLETE",
+			}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

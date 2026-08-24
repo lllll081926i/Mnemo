@@ -53,22 +53,25 @@ func (a *App) RevealInFolder(path string) {
 	if path == "" {
 		return
 	}
+	started := logActionStarted("在文件夹中显示", "transfer", "", "")
+	var err error
 	switch gruntime.GOOS {
 	case "windows":
-		if st, err := os.Stat(path); err == nil && st.IsDir() {
-			_ = exec.Command("explorer.exe", path).Start()
+		if st, statErr := os.Stat(path); statErr == nil && st.IsDir() {
+			err = exec.Command("explorer.exe", path).Start()
 		} else {
-			_ = exec.Command("explorer.exe", "/select,", path).Start()
+			err = exec.Command("explorer.exe", "/select,", path).Start()
 		}
 	case "darwin":
-		_ = exec.Command("open", "-R", path).Start()
+		err = exec.Command("open", "-R", path).Start()
 	default: // linux 无标准“选中文件”，打开所在目录
 		dir := path
-		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+		if st, statErr := os.Stat(path); statErr == nil && !st.IsDir() {
 			dir = filepath.Dir(path)
 		}
-		_ = exec.Command("xdg-open", dir).Start()
+		err = exec.Command("xdg-open", dir).Start()
 	}
+	logActionFinished("在文件夹中显示", "transfer", "", "", started, err)
 }
 
 // OpenFile opens a file with the OS default application.
@@ -76,12 +79,15 @@ func (a *App) OpenFile(path string) {
 	if path == "" {
 		return
 	}
+	started := logActionStarted("打开本地文件", "transfer", "", "")
+	var err error
 	switch gruntime.GOOS {
 	case "windows":
-		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", path).Start()
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", path).Start()
 	case "darwin":
-		_ = exec.Command("open", path).Start()
+		err = exec.Command("open", path).Start()
 	default:
-		_ = exec.Command("xdg-open", path).Start()
+		err = exec.Command("xdg-open", path).Start()
 	}
+	logActionFinished("打开本地文件", "transfer", "", "", started, err)
 }

@@ -4,6 +4,9 @@ package guangya
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -97,6 +100,34 @@ type resCenterToken struct {
 	} `json:"data"`
 }
 
+func guangyaUploadSessionKey(c drive.Context, parentID, name string, size int64) string {
+	return drive.UploadSessionKey(c.UserID, c.DriveID, parentID, name, size)
+}
+
+func encodeGuangyaUploadSession(token resCenterToken) string {
+	data, _ := json.Marshal(token)
+	return string(data)
+}
+
+func decodeGuangyaUploadSession(raw string) (resCenterToken, bool) {
+	var token resCenterToken
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &token) != nil || strings.TrimSpace(token.Data.TaskID) == "" {
+		return resCenterToken{}, false
+	}
+	return token, true
+}
+
+func normalizeGuangyaMD5(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) != md5.Size*2 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(value); err != nil {
+		return "", false
+	}
+	return value, true
+}
+
 // waitUploadTask polls get_info_by_task_id until fileId appears (300×1s cap).
 func waitUploadTask(ctx context.Context, c *client, taskID string) (string, error) {
 	for i := 0; i < 300; i++ {
@@ -147,15 +178,24 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	ui.Info.Size = info.Size()
+	sessionKey := guangyaUploadSessionKey(c, parentID, ui.Info.Name, ui.Info.Size)
 
 	var tokenRes resCenterToken
-	if err := cl.post(ctx, "/nd.bizuserres.s/v1/get_res_center_token", map[string]any{
-		"capacity": 2,
-		"name":     ui.Info.Name,
-		"parentId": parentID,
-		"res":      map[string]any{"fileSize": ui.Info.Size},
-	}, &tokenRes); err != nil {
-		return err
+	if saved, _ := drive.LoadUploadSessionState(sessionKey); saved != "" {
+		tokenRes, _ = decodeGuangyaUploadSession(saved)
+	}
+	if strings.TrimSpace(tokenRes.Data.TaskID) == "" {
+		if err := cl.post(ctx, "/nd.bizuserres.s/v1/get_res_center_token", map[string]any{
+			"capacity": 2,
+			"name":     ui.Info.Name,
+			"parentId": parentID,
+			"res":      map[string]any{"fileSize": ui.Info.Size},
+		}, &tokenRes); err != nil {
+			return err
+		}
+		if tokenRes.Data.TaskID != "" && tokenRes.Code != 156 {
+			_ = drive.SaveUploadSessionState(sessionKey, encodeGuangyaUploadSession(tokenRes), nil)
+		}
 	}
 
 	taskID := tokenRes.Data.TaskID
@@ -167,6 +207,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
 			return err
 		}
+		drive.ClearUploadSession(sessionKey)
 		ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
 		return nil
 	}
@@ -180,7 +221,11 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 
 	// 兼容旧直传 URL
 	if (accessKey == "" || bucket == "" || objectPath == "") && tokenRes.Data.UploadURL != "" {
-		return directPut(ctx, ui, f, tokenRes.Data.UploadURL, cl, taskID)
+		err := directPut(ctx, ui, f, tokenRes.Data.UploadURL, cl, taskID)
+		if err == nil {
+			drive.ClearUploadSession(sessionKey)
+		}
+		return err
 	}
 	if accessKey == "" || secretKey == "" || bucket == "" || objectPath == "" || endpoint == "" {
 		if tokenRes.Msg != "" {
@@ -188,7 +233,80 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		return errors.New("上传凭证不完整")
 	}
-	return ossMultipart(ctx, ui, f, endpoint, bucket, objectPath, accessKey, secretKey, sessionToken, cl, taskID)
+	err = ossMultipart(ctx, ui, f, endpoint, bucket, objectPath, accessKey, secretKey, sessionToken, cl, taskID)
+	if err == nil {
+		drive.ClearUploadSession(sessionKey)
+	}
+	return err
+}
+
+// RapidUploadByHash performs Guangya's explicit MD5 flash-upload check. A
+// miss persists the already-created upload task so the normal fallback can
+// reuse it instead of creating a second remote task.
+func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req drive.RapidUploadRequest) (*drive.RapidUploadResult, error) {
+	if !strings.EqualFold(strings.TrimSpace(req.Method), "md5") {
+		return &drive.RapidUploadResult{Reuse: false, Message: "光鸭云盘仅支持 MD5 秒传"}, nil
+	}
+	hash, ok := normalizeGuangyaMD5(req.Hash)
+	if !ok {
+		return &drive.RapidUploadResult{Reuse: false, Message: "无效的 MD5 指纹"}, nil
+	}
+	name := strings.TrimSpace(req.FileName)
+	if name == "" || req.Size < 0 {
+		return nil, errors.New("光鸭云盘秒传参数无效")
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	parentID := toID(req.ParentID)
+	var tokenRes resCenterToken
+	if err := cl.post(ctx, "/nd.bizuserres.s/v1/get_res_center_token", map[string]any{
+		"capacity": 2,
+		"name":     name,
+		"parentId": parentID,
+		"res":      map[string]any{"fileSize": req.Size},
+	}, &tokenRes); err != nil {
+		return nil, err
+	}
+	taskID := strings.TrimSpace(tokenRes.Data.TaskID)
+	if taskID == "" {
+		return nil, errors.New("光鸭云盘秒传响应缺少 taskId")
+	}
+	sessionKey := guangyaUploadSessionKey(c, parentID, name, req.Size)
+	if tokenRes.Code == 156 {
+		fileID, err := waitUploadTask(ctx, cl, taskID)
+		if err != nil {
+			return nil, err
+		}
+		drive.ClearUploadSession(sessionKey)
+		return &drive.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: req.ParentID, Message: "秒传命中"}, nil
+	}
+	var flash struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			CanFlashUpload bool `json:"canFlashUpload"`
+		} `json:"data"`
+	}
+	if err := cl.post(ctx, "/userres/v1/check_can_flash_upload", map[string]any{"taskId": taskID, "md5": hash}, &flash); err != nil {
+		return nil, err
+	}
+	if flash.Code != 0 {
+		return nil, fmt.Errorf("光鸭云盘秒传检查失败: %s", firstNonEmptyStr(flash.Msg, fmt.Sprintf("code %d", flash.Code)))
+	}
+	if !flash.Data.CanFlashUpload {
+		if err := drive.SaveUploadSessionState(sessionKey, encodeGuangyaUploadSession(tokenRes), nil); err != nil {
+			return nil, fmt.Errorf("保存光鸭上传会话失败: %w", err)
+		}
+		return &drive.RapidUploadResult{Reuse: false, ParentID: req.ParentID, Message: "未命中秒传"}, nil
+	}
+	fileID, err := waitUploadTask(ctx, cl, taskID)
+	if err != nil {
+		return nil, err
+	}
+	drive.ClearUploadSession(sessionKey)
+	return &drive.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: req.ParentID, Message: "秒传命中"}, nil
 }
 
 func credVal(c *struct {
