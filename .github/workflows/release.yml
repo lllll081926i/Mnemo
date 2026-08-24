@@ -270,7 +270,7 @@ jobs:
           set -euo pipefail
           test -d build/bin/Mnemo.app
           dmg_path="${{ matrix.artifact }}.dmg"
-          temp_dmg="${dmg_path}.partial"
+          temp_dmg="${dmg_path%.dmg}.partial.dmg"
           rm -f "$dmg_path" "$temp_dmg"
           for attempt in 1 2 3 4 5; do
             if hdiutil create -volname Mnemo -srcfolder build/bin/Mnemo.app -ov -format UDZO "$temp_dmg"; then
@@ -290,7 +290,9 @@ jobs:
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}-${{ github.ref_name }}
+          # github.ref_name may contain '/' for a manually dispatched branch;
+          # use the numeric run id so artifact names are valid on every host.
+          name: ${{ matrix.artifact }}-${{ github.run_id }}
           path: |
             ${{ matrix.artifact }}.deb
             ${{ matrix.artifact }}.rpm
@@ -314,7 +316,7 @@ jobs:
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: Mnemo-*-${{ github.ref_name }}
+          pattern: Mnemo-*-${{ github.run_id }}
           path: release-assets
           merge-multiple: true
 
