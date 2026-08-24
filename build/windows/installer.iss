@@ -8,13 +8,17 @@
 
 #define MyAppName "Mnemo"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.2"
+  #define MyAppVersion "0.2.3"
 #endif
 #define MyAppExeName "Mnemo.exe"
 
 [Setup]
 AppId={{8F4E3D2A-1B5C-4E7F-9A2D-6C8B1F3E5D7A}
 AppName={#MyAppName}
+; AppVerName defaults to "AppName AppVersion", which would expose the
+; version in Windows Installed apps and in setup window titles. Keep the
+; user-facing application name stable while retaining AppVersion metadata.
+AppVerName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppName}
 DefaultDirName={autopf}\{#MyAppName}
@@ -28,6 +32,7 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayName={#MyAppName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
