@@ -162,8 +162,12 @@ jobs:
           set -euo pipefail
           choco install innosetup -y --no-progress
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          installer_version="$(node -p "require('./wails.json').version")"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            installer_version="${GITHUB_REF_NAME#v}"
+          fi
           # MSYS_NO_PATHCONV=1 防止 Git Bash 把 /D 参数误转为 Windows 路径
-          MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" "/DMyAppVersion=${GITHUB_REF_NAME#v}" build/windows/installer.iss
+          MSYS_NO_PATHCONV=1 "$ISCC" "/DMyArchSuffix=${{ matrix.artifact }}" "/DMyAppVersion=$installer_version" build/windows/installer.iss
           test -f "build/installer/${{ matrix.artifact }}-Setup.exe"
           # 拷到根目录再上传，保证 artifact 解包后文件位于顶层（publish 按 maxdepth 1 收集）
           cp "build/installer/${{ matrix.artifact }}-Setup.exe" "${{ matrix.artifact }}-Setup.exe"
@@ -175,6 +179,10 @@ jobs:
           set -euo pipefail
           binary="build/bin/Mnemo"
           test -x "$binary"
+          package_version="$(node -p "require('./wails.json').version")"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            package_version="${GITHUB_REF_NAME#v}"
+          fi
           package_stage="$(mktemp -d)"
           archive_stage="$(mktemp -d)"
           appdir="$(mktemp -d)"
@@ -207,7 +215,7 @@ jobs:
           test "$(grep -E '^Name=Mnemo$' "$package_stage/mnemo.desktop")" = 'Name=Mnemo'
 
           export NFPM_ARCH="$package_arch"
-          export NFPM_VERSION="${GITHUB_REF_NAME#v}"
+          export NFPM_VERSION="$package_version"
           export NFPM_BINARY_PATH="$package_stage/Mnemo"
           export NFPM_DATA_DIR="$package_stage/data"
           export NFPM_DESKTOP_PATH="$package_stage/mnemo.desktop"
@@ -261,7 +269,22 @@ jobs:
         run: |
           set -euo pipefail
           test -d build/bin/Mnemo.app
-          hdiutil create -volname Mnemo -srcfolder build/bin/Mnemo.app -ov -format UDZO "${{ matrix.artifact }}.dmg"
+          dmg_path="${{ matrix.artifact }}.dmg"
+          temp_dmg="${dmg_path}.partial"
+          rm -f "$dmg_path" "$temp_dmg"
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname Mnemo -srcfolder build/bin/Mnemo.app -ov -format UDZO "$temp_dmg"; then
+              mv "$temp_dmg" "$dmg_path"
+              break
+            fi
+            rm -f "$temp_dmg"
+            if [[ "$attempt" == 5 ]]; then
+              echo "hdiutil failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep "$attempt"
+          done
+          test -s "$dmg_path"
           tar -czf "${{ matrix.artifact }}.tar.gz" -C build/bin Mnemo.app
 
       - name: Upload packaged artifacts
