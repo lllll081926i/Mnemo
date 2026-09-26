@@ -402,12 +402,12 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       </header>
 
       <section class="share-content">
-        <div v-if="loadError" role="alert" class="share-empty">
-          <span class="wes-title">{{ loadError }}</span>
+        <div v-if="loadError" role="alert" class="share-refresh-error">
+          <span>{{ loadError }}{{ history.length ? '，已保留上次加载的记录。' : '' }}</span>
           <button class="btn" :disabled="loading" @click="refresh">重新加载</button>
         </div>
         <!-- 骨架屏加载状态 -->
-        <div v-else-if="loading && !history.length" class="skeleton-list share-skeleton">
+        <div v-if="loading && !history.length" class="skeleton-list share-skeleton">
           <div v-for="i in 4" :key="i" class="skeleton-row share-skeleton-row">
             <div class="skeleton skeleton-icon share-skeleton-icon"></div>
             <div class="share-skeleton-copy">
@@ -417,7 +417,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
             <div class="skeleton share-skeleton-action"></div>
           </div>
         </div>
-        <div v-else-if="!groups.length" class="share-empty">
+        <div v-else-if="!groups.length && (!loadError || history.length)" class="share-empty">
           <div class="share-empty-icon"><UiIcon name="link" :size="28" /></div>
           <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有分享记录' }}</span>
           <template v-if="!history.length">
@@ -558,6 +558,8 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
 </template>
 
 <style scoped>
+.share-refresh-error { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 12px; margin-bottom:12px; border:1px solid var(--border-light); border-radius:var(--radius-md); background:var(--bg-subtle); color:var(--text-secondary); font-size:12.5px; }
+.share-refresh-error .btn { flex-shrink:0; }
 .import-summary { display:flex; flex-direction:column; gap:4px; padding:9px 10px; margin-bottom:10px; border:1px solid var(--border-lighter); border-radius:var(--radius-md); color:var(--text-secondary); font-size:12px; }
 .import-summary strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); font-weight:600; }
 .import-file-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:6px; }

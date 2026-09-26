@@ -30,6 +30,21 @@ afterEach(() => {
 })
 
 describe('分享页面交互', () => {
+  it('刷新分享历史失败时保留旧记录并允许重试', async () => {
+    api.ListShareHistory.mockResolvedValueOnce([{ account_id: 'pikpak:test', provider: 'pikpak', share_id: 'one', share_name: '已有分享', share_url: 'https://example.test/share' }])
+      .mockRejectedValueOnce(new Error('网络异常')).mockResolvedValueOnce([])
+    wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    await wrapper.vm.refresh()
+    await flushPromises()
+
+    expect(wrapper.get('.share-record-name').text()).toBe('已有分享')
+    expect(wrapper.get('[role="alert"]').text()).toContain('已保留上次加载的记录')
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
   it('微调同一分享文案时保留手动填写的提取码，换链接时清除', async () => {
     wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
     await flushPromises()
