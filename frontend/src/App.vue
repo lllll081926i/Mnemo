@@ -78,8 +78,15 @@ const accounts = ref([])
 const orderedAccounts = useOrderedAccounts(() => accounts.value)
 const providers = ref([])
 const current = ref(null)
+let prewarmTargetsKey = ''
 watch([accounts, providers], ([nextAccounts, nextProviders]) => {
   if (!nextAccounts.length || !nextProviders.length) return
+  const targetsKey = JSON.stringify(nextAccounts
+    .filter(account => account?.user_id && !account.disabled)
+    .map(account => JSON.stringify([account.user_id, account.drive_id || '', providerMetaOf(account, nextProviders).rootKey || 'root']))
+    .sort())
+  if (targetsKey === prewarmTargetsKey) return
+  prewarmTargetsKey = targetsKey
   void prewarmRootDirectories(nextAccounts, nextProviders)
 }, { flush: 'post' })
 const showLogin = ref(false)
