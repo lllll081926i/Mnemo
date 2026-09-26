@@ -7,7 +7,7 @@ import { CheckUpdate, GetUpdateStatus, DownloadUpdate, CancelUpdate, ApplyUpdate
 
 const props = defineProps({ initialInfo: { type: Object, default: null } })
 const emit = defineEmits(['close'])
-const state = ref('checking')
+const state = ref(props.initialInfo?.available ? 'available' : 'checking')
 const info = ref(props.initialInfo ? { ...props.initialInfo } : null)
 const progress = ref({ downloaded: 0, total: 0 })
 const updatePath = ref('')
@@ -95,6 +95,7 @@ async function applyUpdate() {
   }
 }
 async function openFolder() {
+  if (!updatePath.value) return
   try { await RevealInFolder(updatePath.value) }
   catch (e) { errorMsg.value = String(e) }
 }
@@ -149,7 +150,8 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
           <div v-else-if="state === 'done'" class="upd-state">
             <UiIcon name="check" :size="30" /><p class="upd-title">下载完成，校验通过</p>
             <p class="upd-meta">{{ fmtBytes(progress.downloaded) }}</p>
-            <div class="upd-actions"><button v-if="canInstall" class="btn primary" @click="install">安装并重启</button><button class="btn" @click="openFolder">打开目录</button></div>
+            <div class="upd-actions"><button v-if="canInstall" class="btn primary" :disabled="!updatePath" @click="install">安装并重启</button><button class="btn" :disabled="!updatePath" @click="openFolder">打开目录</button><button v-if="!updatePath" class="btn" @click="info?.available ? startDownload() : check()">{{ info?.available ? '重新下载' : '重新检查' }}</button></div>
+            <p v-if="!updatePath" class="upd-meta">安装包路径不可用，请重新下载或检查更新。</p>
             <p v-if="!canInstall" class="upd-meta">退出当前应用后，使用下载的更新包手动安装。</p>
           </div>
           <div v-else-if="state === 'applying'" class="upd-state" role="status"><span class="spin"></span><span>正在启动安装程序，请完成系统授权…</span></div>
