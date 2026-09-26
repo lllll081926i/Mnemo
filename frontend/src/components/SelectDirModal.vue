@@ -1,6 +1,6 @@
 <script setup>
 // 选择网盘目录：在指定账号内浏览文件夹树并选中目标目录。
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { listDir, providerMetaOf, providerIconUrl, accountName, mkdir } from '../api'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
@@ -9,14 +9,14 @@ const newFolderName = ref('')
 const creatingFolder = ref(false)
 async function createFolder() {
   const name = newFolderName.value.trim()
-  if (!name) return
+  if (!name || creatingFolder.value) return
   creatingFolder.value = true
   try {
     const parentId = crumbs.value[crumbs.value.length - 1].id
     const result = await mkdir(props.account.user_id, props.account.drive_id, parentId, name)
     if (result?.error) throw new Error(result.error)
     newFolderName.value = ''
-    await load(parentId)
+    if (crumbs.value[crumbs.value.length - 1].id === parentId) await load(parentId)
     emit('toast', '文件夹已创建', 'success')
   } catch (e) { emit('toast', String(e), 'error') }
   creatingFolder.value = false
@@ -40,6 +40,7 @@ async function load(id) {
   const seq = ++loadSeq
   loading.value = true
   error.value = ''
+  dirs.value = []
   try {
     const list = await listDir(props.account.user_id, props.account.drive_id, id)
     if (seq !== loadSeq) return // 过期响应丢弃
@@ -53,6 +54,7 @@ async function load(id) {
 }
 
 function enter(d) {
+  if (loading.value) return
   crumbs.value.push({ id: d.file_id, name: d.name })
   load(d.file_id)
 }
@@ -70,6 +72,7 @@ function jump(i) {
 }
 
 onMounted(() => load(rootKey))
+onBeforeUnmount(() => { ++loadSeq })
 </script>
 
 <template>
@@ -105,7 +108,7 @@ onMounted(() => load(rootKey))
       </div>
       <span style="flex:1"></span>
       <button class="btn" @click="emit('close')">取消</button>
-      <button class="btn primary" @click="emit('select', { id: crumbs[crumbs.length - 1].id, name: crumbs[crumbs.length - 1].name })">选择当前目录</button>
+      <button class="btn primary" :disabled="loading || !!error" @click="emit('select', { id: crumbs[crumbs.length - 1].id, name: crumbs[crumbs.length - 1].name })">选择当前目录</button>
     </template>
   </Modal>
 </template>

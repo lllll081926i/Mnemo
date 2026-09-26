@@ -80,6 +80,7 @@ const formAccount = computed(() => props.accounts.find((a) => a.user_id === form
 
 function openCreate() {
   ++editVersion
+  showDirPick.value = false
   editingId.value = ''
   form.value = emptyForm()
   if (props.account) {
@@ -94,6 +95,7 @@ function openCreate() {
 
 function openEdit(job) {
   ++editVersion
+  showDirPick.value = false
   editingId.value = job.id
   form.value = {
     name: job.name || '',
@@ -111,6 +113,7 @@ function openEdit(job) {
 }
 
 function onFormAccount() {
+  showDirPick.value = false
   const acc = formAccount.value
   if (acc) {
     form.value.drive_id = acc.drive_id
@@ -121,9 +124,17 @@ function onFormAccount() {
 
 // 选择本地同步文件夹（原生目录选择对话框）
 async function pickLocalDir() {
+  const version = editVersion
+  const currentForm = form.value
   let dir
-  try { dir = await PickDirectory('选择本地文件夹', form.value.local_dir || '') } catch { return }
-  if (dir) form.value.local_dir = dir
+  try { dir = await PickDirectory('选择本地文件夹', currentForm.local_dir || '') } catch { return }
+  if (dir && showEdit.value && version === editVersion && form.value === currentForm) currentForm.local_dir = dir
+}
+
+function closeEdit() {
+  ++editVersion
+  showEdit.value = false
+  showDirPick.value = false
 }
 
 const savingEdit = ref(false)
@@ -150,7 +161,7 @@ async function save() {
        deletePropagation: !!form.value.deletePropagation,
        conflictPolicy: form.value.conflictPolicy,
     })
-    if (version === editVersion) showEdit.value = false
+    if (version === editVersion) closeEdit()
     refresh()
     emit('toast', '已保存同步任务', 'success')
   } catch (e) { emit('toast', String(e), 'error') }
@@ -317,7 +328,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Modal v-if="showEdit" :title="editingId ? '编辑同步任务' : '新建同步任务'" width="480px" @close="showEdit = false">
+    <Modal v-if="showEdit" :title="editingId ? '编辑同步任务' : '新建同步任务'" width="480px" @close="closeEdit">
       <div class="field">
         <label>任务名称</label>
         <input class="input" style="width:100%" v-model="form.name" placeholder="如：工作文档同步" />
@@ -361,7 +372,7 @@ onBeforeUnmount(() => {
         <span class="hint">启用后会同步删除两端缺失的文件</span>
       </div>
       <template #actions>
-        <button class="btn" :disabled="savingEdit" @click="showEdit = false">取消</button>
+        <button class="btn" :disabled="savingEdit" @click="closeEdit">取消</button>
         <button class="btn primary" :disabled="savingEdit" @click="save">
           <span v-if="savingEdit" class="spin spin-on-primary"></span>
           <span>{{ savingEdit ? '保存中…' : '保存' }}</span>
@@ -375,7 +386,7 @@ onBeforeUnmount(() => {
       :account="formAccount"
       :providers="providers"
       @close="showDirPick = false"
-      @select="(d) => { form.remote_dir = d.id; form.remote_name = d.name; showDirPick = false }"
+      @select="(d) => { if (showEdit && showDirPick) { form.remote_dir = d.id; form.remote_name = d.name; showDirPick = false } }"
       @toast="(msg, type) => emit('toast', msg, type)"
     />
 
