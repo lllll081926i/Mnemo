@@ -45,7 +45,7 @@ const importDir = ref({ id: 'root', name: '根目录' })
 
 const detectedShare = computed(() => parseShareText(importForm.value.url))
 const importAccounts = computed(() => (props.accounts || []).filter((account) => capsOf(account, props.providers).importShare && (!detectedShare.value.provider || providerOf(account.user_id) === detectedShare.value.provider)))
-watch(() => detectedShare.value.password, password => { if (password) importForm.value.password = password })
+watch(() => [detectedShare.value.url, detectedShare.value.password], ([, password]) => { importForm.value.password = password })
 const importTarget = computed(() => importAccounts.value.find((account) => account.user_id === importTargetId.value) || null)
 let importSeq = 0
 watch(() => [importTarget.value?.user_id, importTarget.value?.drive_id], ([user, drive], [oldUser, oldDrive]) => {
