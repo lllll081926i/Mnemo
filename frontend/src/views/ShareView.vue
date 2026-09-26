@@ -45,7 +45,10 @@ const importDir = ref({ id: 'root', name: '根目录' })
 
 const detectedShare = computed(() => parseShareText(importForm.value.url))
 const importAccounts = computed(() => (props.accounts || []).filter((account) => capsOf(account, props.providers).importShare && (!detectedShare.value.provider || providerOf(account.user_id) === detectedShare.value.provider)))
-watch(() => [detectedShare.value.url, detectedShare.value.password], ([, password]) => { importForm.value.password = password })
+watch(() => [detectedShare.value.url, detectedShare.value.password], ([url, password], [oldUrl, oldPassword]) => {
+  if (url !== oldUrl || password) importForm.value.password = password
+  else if (oldPassword && importForm.value.password === oldPassword) importForm.value.password = ''
+})
 const importTarget = computed(() => importAccounts.value.find((account) => account.user_id === importTargetId.value) || null)
 let importSeq = 0
 watch(() => [importTarget.value?.user_id, importTarget.value?.drive_id], ([user, drive], [oldUser, oldDrive]) => {
@@ -199,7 +202,7 @@ watch(() => props.accounts, (list) => {
 }, { deep: true })
 
 function itemKey(h, idx) {
-  return h.share_id || h.share_url || `${h.account_id || ''}_${idx}`
+  return `${h.account_id || ''}|${h.share_id || h.share_url || idx}`
 }
 
 function metaOf(pid) {
