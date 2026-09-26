@@ -1,7 +1,7 @@
 <script setup>
 // 全局快捷命令面板 (Ctrl+P / Command+P)：
 // 支持模块跳转、网盘账号快切、快捷命令（刷新/上传/新建文件夹/明暗切换）
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { motion, MotionConfig } from 'motion-v'
 import { accountName, providerIconUrl, providerMetaOf, providerOf } from '../api'
 import UiIcon from './UiIcon.vue'
@@ -19,6 +19,7 @@ const keyword = ref('')
 const activeIndex = ref(0)
 const inputEl = ref(null)
 const listEl = ref(null)
+const shortcutLabel = document.documentElement.dataset.platform === 'darwin' ? '⌘P' : 'Ctrl+P'
 
 const baseItems = computed(() => {
   const items = [
@@ -152,7 +153,7 @@ function scrollActiveIntoView() {
               spellcheck="false"
               @keydown="onKeyDown"
             />
-            <span class="qo-badge">Ctrl+P</span>
+            <span class="qo-badge">{{ shortcutLabel }}</span>
           </div>
 
           <div ref="listEl" class="qo-list" role="listbox" aria-label="快捷命令">
