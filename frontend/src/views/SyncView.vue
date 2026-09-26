@@ -40,6 +40,7 @@ async function executePreview() {
 const jobs = ref([])
 const progress = ref({}) // id -> { done, total }
 const running = ref(new Set())
+const toggling = ref(new Set())
 let syncStateVersion = 0
 
 const showEdit = ref(false)
@@ -169,17 +170,15 @@ async function save() {
 }
 
 async function toggle(job) {
-  if (running.value.has(job.id)) return
-  syncStateVersion++
-  running.value = new Set([...running.value, job.id])
+  if (running.value.has(job.id) || toggling.value.has(job.id)) return
+  toggling.value = new Set([...toggling.value, job.id])
   const next = { ...job, enabled: !job.enabled }
   try {
     await SaveSyncConfig(next)
     job.enabled = next.enabled
   } catch (e) { emit('toast', String(e), 'error') }
   finally {
-    syncStateVersion++
-    const s = new Set(running.value); s.delete(job.id); running.value = s
+    const pending = new Set(toggling.value); pending.delete(job.id); toggling.value = pending
   }
 }
 
@@ -216,12 +215,16 @@ async function cancel(job) {
 }
 
 function remove(job) {
-  if (running.value.has(job.id)) {
-    emit('toast', '任务正在同步中，请先等待完成或停止', 'warn')
+  if (running.value.has(job.id) || toggling.value.has(job.id)) {
+    emit('toast', '任务正在同步或更新中，请稍后再删除', 'warn')
     return
   }
   confirmDialog.value = { message: `删除同步任务「${job.name}」？本地与网盘文件不受影响。`, onOk: async () => {
     confirmDialog.value = null
+    if (running.value.has(job.id) || toggling.value.has(job.id)) {
+      emit('toast', '任务正在同步或更新中，请稍后再删除', 'warn')
+      return
+    }
     try {
       await DeleteSyncConfig(job.id)
       refresh()
@@ -318,12 +321,12 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="sync-task-actions">
-          <div class="switch" :class="{ on: job.enabled }" :title="job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></div>
-          <button class="btn-circle" :disabled="!running.has(job.id) && !accountOf(job)" :title="running.has(job.id) ? '停止同步' : '预览同步'" @click="running.has(job.id) ? cancel(job) : showPreview(job)">
+          <button class="switch" role="switch" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在更新任务' : job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></button>
+          <button class="btn-circle" :disabled="toggling.has(job.id) || (!running.has(job.id) && !accountOf(job))" :title="running.has(job.id) ? '停止同步' : '预览同步'" @click="running.has(job.id) ? cancel(job) : showPreview(job)">
             <UiIcon :name="running.has(job.id) ? 'close' : 'play'" :size="14" />
           </button>
-          <button class="btn-circle" title="编辑" @click="openEdit(job)"><UiIcon name="pencil" :size="14" /></button>
-          <button class="btn-circle" title="删除" style="color:var(--color-error)" @click="remove(job)"><UiIcon name="trash" :size="14" /></button>
+          <button class="btn-circle" title="编辑" :disabled="toggling.has(job.id)" @click="openEdit(job)"><UiIcon name="pencil" :size="14" /></button>
+          <button class="btn-circle" title="删除" :disabled="toggling.has(job.id)" style="color:var(--color-error)" @click="remove(job)"><UiIcon name="trash" :size="14" /></button>
         </div>
       </div>
     </div>
@@ -400,3 +403,7 @@ onBeforeUnmount(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.sync-task-actions .switch:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+</style>
