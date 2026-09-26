@@ -582,3 +582,15 @@ func mapItem(item *Item, driveID, parentID string) model.File {
 	f.Description = strings.Join(parts, ";")
 	return f
 }
+
+func mapSearchItems(items []Item, driveID string) []model.File {
+	out := make([]model.File, 0, len(items))
+	for i := range items {
+		parentID := RootID
+		if ref := items[i].ParentReference; ref != nil && ref.ID != "" {
+			parentID = ref.ID
+		}
+		out = append(out, mapItem(&items[i], driveID, parentID))
+	}
+	return out
+}

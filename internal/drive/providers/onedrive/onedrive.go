@@ -275,7 +275,7 @@ func (d *Driver) Search(ctx context.Context, c drive.Context, keyword string) ([
 	if err != nil {
 		return nil, err
 	}
-	return mapItems(items, c.DriveID, RootID), nil
+	return mapSearchItems(items, c.DriveID), nil
 }
 
 func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (any, error) {
