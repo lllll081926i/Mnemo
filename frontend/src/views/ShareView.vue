@@ -276,24 +276,29 @@ const groups = computed(() => {
   return [...map.values()].sort((a, b) => (ranks.get(a.accountId) ?? Infinity) - (ranks.get(b.accountId) ?? Infinity))
 })
 
-function openLink(h) {
+async function openLink(h) {
   if (!h.share_url) return
-  OpenBrowser(h.share_url)
+  try { await OpenBrowser(h.share_url) }
+  catch (error) { emit('toast', '打开分享链接失败：' + String(error?.message || error), 'error') }
 }
 
 const copiedMap = ref({})
 
 async function copy(text, tip, key) {
-  const ok = await copyText(text)
-  if (ok && key) {
-    copiedMap.value[key] = true
-    setTimeout(() => {
-      const m = { ...copiedMap.value }
-      delete m[key]
-      copiedMap.value = m
-    }, 1600)
+  try {
+    const ok = await copyText(text)
+    if (ok && key) {
+      copiedMap.value[key] = true
+      setTimeout(() => {
+        const m = { ...copiedMap.value }
+        delete m[key]
+        copiedMap.value = m
+      }, 1600)
+    }
+    emit('toast', ok ? tip : '复制失败', ok ? 'success' : 'error')
+  } catch (error) {
+    emit('toast', '复制失败：' + String(error?.message || error), 'error')
   }
-  emit('toast', ok ? tip : '复制失败', ok ? 'success' : 'error')
 }
 
 function copyAll(h, key) {
