@@ -38,6 +38,8 @@ async function executePreview() {
 }
 
 const jobs = ref([])
+const loadingJobs = ref(false)
+const jobsError = ref('')
 const progress = ref({}) // id -> { done, total }
 const running = ref(new Set())
 const toggling = ref(new Set())
@@ -65,11 +67,18 @@ function emptyForm() {
 let refreshSeq = 0
 async function refresh() {
   const seq = ++refreshSeq
+  loadingJobs.value = true
+  jobsError.value = ''
   try {
     const list = await ListSyncConfigs()
     if (seq === refreshSeq) jobs.value = list || []
   } catch (e) {
-    if (seq === refreshSeq) emit('toast', String(e), 'error')
+    if (seq === refreshSeq) {
+      jobsError.value = String(e)
+      emit('toast', String(e), 'error')
+    }
+  } finally {
+    if (seq === refreshSeq) loadingJobs.value = false
   }
 }
 
@@ -292,7 +301,15 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
-    <div v-if="!jobs.length" class="workspace-empty-state" style="flex:1">
+    <div v-if="loadingJobs && !jobs.length" class="workspace-empty-state" style="flex:1" role="status">
+      <span class="wes-title">正在加载同步任务…</span>
+    </div>
+    <div v-else-if="jobsError && !jobs.length" class="workspace-empty-state" style="flex:1" role="alert">
+      <span class="wes-title">同步任务加载失败</span>
+      <span class="wes-desc">{{ jobsError }}</span>
+      <button class="btn" @click="refresh">重试</button>
+    </div>
+    <div v-else-if="!jobs.length" class="workspace-empty-state" style="flex:1">
       <UiIcon name="refresh" :size="40" style="opacity:.4" />
       <span class="wes-title">还没有同步任务</span>
       <span class="wes-desc">新建一个任务，把本地文件夹和网盘文件夹关联起来</span>

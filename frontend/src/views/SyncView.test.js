@@ -29,6 +29,19 @@ afterEach(() => {
 })
 
 describe('同步任务操作状态', () => {
+  it('首次加载失败时显示重试而非空任务提示', async () => {
+    api.ListSyncConfigs.mockRejectedValueOnce(new Error('网络异常')).mockResolvedValue([])
+    api.ListRunningSyncIDs.mockResolvedValue([])
+    wrapper = mount(SyncView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('同步任务加载失败')
+    expect(wrapper.text()).not.toContain('还没有同步任务')
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('还没有同步任务')
+  })
+
   it('启停设置保存期间不伪装为正在同步', async () => {
     const job = { id: 'job', name: '任务', user_id: 'user', drive_id: 'drive', enabled: true, local_dir: 'D:/data', remote_dir: 'root' }
     api.ListSyncConfigs.mockResolvedValue([job])

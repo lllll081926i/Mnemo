@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
@@ -36,6 +36,19 @@ afterEach(() => {
 })
 
 describe('选择目录弹窗', () => {
+  it('根目录加载失败后可直接重试', async () => {
+    api.providerMetaOf.mockReturnValue({ rootKey: 'root', rootTitle: '根目录' })
+    api.listDir.mockRejectedValueOnce(new Error('网络暂不可用')).mockResolvedValue([{ file_id: 'child', name: '子目录', isDir: true }])
+    wrapper = mount(SelectDirModal, wrapperOptions)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('网络暂不可用')
+    await wrapper.get('button.btn.sm').trigger('click')
+    await flushPromises()
+    expect(api.listDir).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('子目录')
+  })
+
   it('新建目录返回业务错误时保留输入并展示失败，不伪报成功', async () => {
     api.providerMetaOf.mockReturnValue({ rootKey: 'root', rootTitle: '根目录' })
     api.listDir.mockResolvedValue([])
