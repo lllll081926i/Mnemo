@@ -93,6 +93,7 @@ const exportingLogs = ref(false)
 const logPath = ref('')
 const effectiveDownloadDir = ref(''), downloadDirError = ref('')
 let directoryReadSeq = 0
+let directoryPickSeq = 0
 async function refreshDownloadDirectory() {
   const seq = ++directoryReadSeq
   try {
@@ -197,6 +198,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  ++directoryPickSeq
   bodyEl.value?.removeEventListener('scroll', onScroll)
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
 })
@@ -267,9 +269,11 @@ function onInputCommit() {
 }
 
 async function pickDownloadDir() {
+  const seq = ++directoryPickSeq
+  const previous = settings.value.downloadDir
   let dir
   try { dir = await PickDirectory('选择下载文件夹', effectiveDownloadDir.value || '') } catch { return }
-  if (!dir) return
+  if (!dir || seq !== directoryPickSeq || settings.value.downloadDir !== previous) return
   settings.value.downloadDir = dir
   save(true)
 }
@@ -282,7 +286,7 @@ async function openDownloadDir() {
 async function resetDownloadDir() {
   const previous = settings.value.downloadDir
   settings.value.downloadDir = ''
-  if (!(await save(true))) settings.value.downloadDir = previous
+  if (!(await save(true)) && !settings.value.downloadDir) settings.value.downloadDir = previous
 }
 
 function setDownloadLimitPreset(kb) {
