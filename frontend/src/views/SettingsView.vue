@@ -48,7 +48,7 @@ async function readBackup() {
 async function restorePrefs() {
   const data = pendingBackup.value
   if (!data || backupBusy.value) return
-  pendingBackup.value = null; backupBusy.value = true
+  backupBusy.value = true
   try {
     const accounts = await listAccounts()
     for (const acc of accounts) {
@@ -60,6 +60,7 @@ async function restorePrefs() {
     const current = await GetSettings()
     await SaveSettings({ ...current, theme: data.theme })
     prefs.value = getPrefs(); settings.value.theme = data.theme; emit('theme', data.theme)
+    pendingBackup.value = null
     emit('toast', '偏好已恢复，账号凭据不受影响', 'success')
   } catch(e) { emit('toast', '恢复未完成，已恢复的项目会保留，可重试：' + String(e), 'error') }
   finally { backupBusy.value = false }
