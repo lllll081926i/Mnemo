@@ -76,10 +76,18 @@ func (s *Store) ClearDownloadTasks() error {
 		return err
 	}
 	out := list[:0]
+	activeGroups := map[string]bool{}
+	for _, task := range list {
+		if task.IsDir && task.Status != "completed" && task.Status != "canceled" {
+			activeGroups[task.ID] = true
+		}
+	}
 	for i := range list {
 		switch list[i].Status {
 		case "completed", "canceled", "failed":
-			continue
+			if !activeGroups[list[i].ID] && !activeGroups[list[i].GroupID] {
+				continue
+			}
 		}
 		out = append(out, list[i])
 	}

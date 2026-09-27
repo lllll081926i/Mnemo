@@ -106,6 +106,10 @@ export function DownloadFile(arg1, arg2, arg3) {
   return window['go']['app']['App']['DownloadFile'](arg1, arg2, arg3);
 }
 
+export function DownloadFolder(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DownloadFolder'](arg1, arg2, arg3, arg4);
+}
+
 export function DownloadURL(arg1, arg2, arg3) {
   return window['go']['app']['App']['DownloadURL'](arg1, arg2, arg3);
 }

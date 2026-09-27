@@ -205,6 +205,7 @@ func (m *Manager) loadPersisted() {
 	for i := range list {
 		t := list[i]
 		safeTask := safeDownloadTask(t)
+		safeTask.FolderEntries = t.FolderEntries
 		dirty := t.URL != "" || len(t.Headers) > 0 || t.Error != safeTask.Error
 		t = safeTask
 		if t.Status == "downloading" || t.Status == "queued" {
@@ -247,24 +248,52 @@ func (m *Manager) update(t *model.DownloadTask) {
 	if t == nil {
 		return
 	}
+	if t.IsDir {
+		m.persistMu.Lock()
+	}
 	m.mu.Lock()
 	if m.removed[t.ID] {
 		m.mu.Unlock()
+		if t.IsDir {
+			m.persistMu.Unlock()
+		}
 		return
 	}
 	m.tasks[t.ID] = t
 	snapshot := *t
 	shouldPersist := m.shouldPersistLocked(snapshot)
+	if shouldPersist && t.IsDir {
+		snapshot.FolderEntries = append([]model.DownloadEntry(nil), t.FolderEntries...)
+	}
 	event := m.onEvent
 	m.mu.Unlock()
 	if shouldPersist {
 		// Store methods read-modify-write one JSON file. Serialize the whole
 		// operation so concurrent task progress cannot lose another task's update.
-		m.persistMu.Lock()
-		persisted := safeDownloadTask(snapshot)
-		if err := m.store.SaveDownloadTask(&persisted); err != nil {
-			logging.Warn("download task persistence failed", "task_id", snapshot.ID, "status", snapshot.Status, "error", err)
+		if !t.IsDir {
+			m.persistMu.Lock()
 		}
+		m.mu.Lock()
+		current := !m.removed[t.ID] && m.tasks[t.ID] == t
+		m.mu.Unlock()
+		if current {
+			persisted := safeDownloadTask(snapshot)
+			persisted.FolderEntries = snapshot.FolderEntries
+			if err := m.store.SaveDownloadTask(&persisted); err != nil {
+				logging.Warn("download task persistence failed", "task_id", snapshot.ID, "status", snapshot.Status, "error", err)
+			}
+		}
+		if !t.IsDir {
+			m.persistMu.Unlock()
+		}
+		if !current {
+			if t.IsDir {
+				m.persistMu.Unlock()
+			}
+			return
+		}
+	}
+	if t.IsDir {
 		m.persistMu.Unlock()
 	}
 	if event != nil {
@@ -273,6 +302,7 @@ func (m *Manager) update(t *model.DownloadTask) {
 }
 
 func safeDownloadTask(task model.DownloadTask) model.DownloadTask {
+	task.FolderEntries = nil
 	task.URL = ""
 	task.Headers = nil
 	task.Error = logging.RedactText(task.Error)
@@ -363,6 +393,10 @@ func (m *Manager) shouldPersistLocked(task model.DownloadTask) bool {
 
 // AddDownload enqueues a download from a drive file.
 func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.DownloadTask, error) {
+	if f.IsDir {
+		task, _, err := m.AddDownloadFolder(userID, driveID, f, false)
+		return task, err
+	}
 	provider := drive.ProviderOf(userID, driveID, "")
 	// Keep the exact list-row snapshot available until the provider resolves
 	// its authenticated URL. Some providers need metadata that is not present
@@ -415,6 +449,10 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 }
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
+	if t.IsDir {
+		m.runFolderDownload(t)
+		return
+	}
 	started := time.Now()
 	logging.Info("download worker started", "task_id", t.ID, "name", t.Name)
 	// wait for a concurrency slot before doing any work
@@ -440,6 +478,14 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		m.mu.Unlock()
 		logging.Debug("download worker skipped", "task_id", t.ID, "reason", "task no longer queued")
 		return
+	}
+	if t.GroupID != "" {
+		if err := validateFolderChild(t, m.tasks[t.GroupID]); err != nil {
+			t.Status, t.Error = "failed", err.Error()
+			m.mu.Unlock()
+			m.update(t)
+			return
+		}
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	defer cancel()
@@ -652,6 +698,7 @@ func isExpiredDownloadError(err error) bool {
 
 // Pause marks a task paused and cancels active download immediately.
 func (m *Manager) Pause(id string) {
+	defer m.controlFolderChildren(id, "pause")
 	m.mu.Lock()
 	if cancel, ok := m.cancels[id]; ok {
 		cancel()
@@ -686,6 +733,7 @@ func (m *Manager) Resume(id string) {
 
 // Cancel stops and removes a task.
 func (m *Manager) Cancel(id string) {
+	defer m.controlFolderChildren(id, "cancel")
 	m.mu.Lock()
 	_, active := m.cancels[id]
 	if cancel, ok := m.cancels[id]; ok {
@@ -707,6 +755,8 @@ func (m *Manager) Cancel(id string) {
 
 // Remove hard-deletes a task record (from memory and the store) immediately.
 func (m *Manager) Remove(id string) {
+	m.controlFolderChildren(id, "remove")
+	m.persistMu.Lock()
 	m.mu.Lock()
 	m.removed[id] = true
 	delete(m.lastPersist, id)
@@ -726,6 +776,7 @@ func (m *Manager) Remove(id string) {
 	if err := m.store.DeleteDownloadTask(id); err != nil {
 		logging.Warn("download task removal persistence failed", "task_id", id, "error", err)
 	}
+	m.persistMu.Unlock()
 	if ok && !active {
 		removeDownloadTemp(t)
 	}
@@ -737,9 +788,16 @@ func (m *Manager) Remove(id string) {
 // Prioritize boosts one task: pause every other active (downloading/queued)
 // task and (re)start this one so it gets the full bandwidth.
 func (m *Manager) Prioritize(id string) {
+	if task, ok := m.get(id); ok && (task.IsDir || task.GroupID != "") {
+		m.Resume(id)
+		return
+	}
 	m.mu.Lock()
 	var paused []*model.DownloadTask
 	for oid, o := range m.tasks {
+		if o.IsDir || o.GroupID != "" {
+			continue
+		}
 		if oid != id && (o.Status == "downloading" || o.Status == "queued") {
 			if cancel, ok := m.cancels[oid]; ok {
 				cancel()
@@ -773,16 +831,10 @@ func (m *Manager) Prioritize(id string) {
 
 // ClearCompleted removes completed/canceled tasks.
 func (m *Manager) ClearCompleted() {
-	m.mu.Lock()
-	for id, t := range m.tasks {
-		if t.Status == "completed" || t.Status == "canceled" || t.Status == "failed" {
-			delete(m.tasks, id)
-			delete(m.lastPersist, id)
+	for _, task := range m.List() {
+		if task.GroupID == "" && (task.Status == "completed" || task.Status == "canceled" || task.Status == "failed") {
+			m.Remove(task.ID)
 		}
-	}
-	m.mu.Unlock()
-	if err := m.store.ClearDownloadTasks(); err != nil {
-		logging.Warn("completed download task cleanup failed", "error", err)
 	}
 }
 
@@ -804,7 +856,7 @@ func (m *Manager) Shutdown() {
 }
 
 func removeDownloadTemp(t *model.DownloadTask) {
-	if t == nil {
+	if t == nil || t.IsDir {
 		return
 	}
 	_ = os.Remove(t.LocalPath + ".part")

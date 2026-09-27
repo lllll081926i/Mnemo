@@ -1,7 +1,10 @@
 package transfer
 
 import (
+	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +19,16 @@ import (
 
 type blockingURLDriver struct {
 	drive.Driver
-	entered chan context.Context
-	release chan struct{}
+	entered     chan context.Context
+	release     chan struct{}
+	files       map[string][]model.File
+	listCalls   int
+	downloadURL string
+}
+
+func (d *blockingURLDriver) ListPaged(ctx context.Context, c drive.Context, dirID, marker string, opts *drive.ListOptions) (*drive.DirPage, error) {
+	d.listCalls++
+	return &drive.DirPage{Items: d.files[dirID]}, nil
 }
 
 var downloadTestDriver *blockingURLDriver
@@ -25,7 +36,162 @@ var downloadTestDriver *blockingURLDriver
 func init() {
 	drive.Register(drive.Registration{ID: "webdav", Factory: func() drive.Driver { return downloadTestDriver }})
 }
+
+func TestFolderScanKeepsEmptyDirectoriesAndRestoresCheckpoint(t *testing.T) {
+	driver := &blockingURLDriver{files: map[string][]model.File{
+		"cloud-folder": {
+			{FileID: "empty", Name: "空目录", IsDir: true},
+			{FileID: "nested", Name: "内容", IsDir: true},
+			{FileID: "first", Name: "README.txt", Size: 4},
+			{FileID: "second", Name: "readme.txt", Size: 6},
+		},
+		"nested": {{FileID: "traversal", Name: "../outside", Size: 1}},
+	}}
+	downloadTestDriver = driver
+	root := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(st, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "folder")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.DownloadTask{ID: "folder-checkpoint", UserID: "webdav:test", DriveID: "webdav:test", FileID: "cloud-folder", Name: "folder", LocalPath: target, IsDir: true, Status: "paused", FolderEntries: []model.DownloadEntry{{FileID: "cloud-folder", Name: "folder", RelativePath: ".", IsDir: true}}}
+	manager.mu.Lock()
+	manager.tasks[task.ID] = task
+	manager.mu.Unlock()
+	if err := manager.scanDownloadFolder(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if task.TotalFiles != 3 {
+		t.Fatalf("scanned %d files, want 3", task.TotalFiles)
+	}
+	if _, err := os.Stat(filepath.Join(target, "空目录")); err != nil {
+		t.Fatal(err)
+	}
+	if driver.listCalls != 3 {
+		t.Fatalf("listed %d directories, want 3", driver.listCalls)
+	}
+	manager.Shutdown()
+	restored, err := NewManager(st, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Shutdown()
+	reloaded, ok := restored.get(task.ID)
+	if !ok {
+		t.Fatal("folder checkpoint was not restored")
+	}
+	if err := restored.scanDownloadFolder(context.Background(), reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if driver.listCalls != 3 || reloaded.TotalFiles != 3 {
+		t.Fatal("resume listed or queued the same directory twice")
+	}
+	paths := map[string]bool{}
+	for _, entry := range reloaded.FolderEntries {
+		if entry.IsDir {
+			continue
+		}
+		path, err := folderPath(target, entry.RelativePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if paths[strings.ToLower(path)] {
+			t.Fatalf("duplicate local path: %s", path)
+		}
+		paths[strings.ToLower(path)] = true
+		if !strings.HasPrefix(path, target+string(filepath.Separator)) {
+			t.Fatalf("escaped download root: %s", path)
+		}
+	}
+	if _, err := folderPath(target, filepath.Join("..", "outside")); err == nil {
+		t.Fatal("relative traversal was accepted")
+	}
+}
+
+func TestFolderSkipExistingDoesNotEnqueue(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "folder"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(st, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	task, skipped, err := manager.AddDownloadFolder("webdav:test", "webdav:test", model.File{FileID: "folder-id", Name: "folder", IsDir: true}, true)
+	if err != nil || !skipped || task != nil || len(manager.List()) != 0 {
+		t.Fatalf("task=%v skipped=%v err=%v", task, skipped, err)
+	}
+}
+
+func TestFolderDownloadCompletesWithEmptyDirectory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.ServeContent(writer, request, "file", time.Time{}, bytes.NewReader([]byte("hello")))
+	}))
+	defer server.Close()
+	downloadTestDriver = &blockingURLDriver{downloadURL: server.URL, files: map[string][]model.File{
+		"source": {{FileID: "empty", Name: "空目录", IsDir: true}, {FileID: "first", Name: "first.txt", Size: 5}, {FileID: "second", Name: "second.txt", Size: 5}},
+	}}
+	root := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(st, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	task, skipped, err := manager.AddDownloadFolder("webdav:test", "webdav:test", model.File{FileID: "source", Name: "下载目录", IsDir: true}, false)
+	if err != nil || skipped {
+		t.Fatalf("task=%v skipped=%v err=%v", task, skipped, err)
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		current, ok := manager.get(task.ID)
+		if !ok {
+			t.Fatal("folder task disappeared")
+		}
+		manager.mu.Lock()
+		status, reason, completed := current.Status, current.Error, current.CompletedFiles
+		manager.mu.Unlock()
+		if status == "failed" {
+			t.Fatal(reason)
+		}
+		if status == "completed" {
+			if completed != 2 {
+				t.Fatalf("completed %d files, want 2", completed)
+			}
+			for _, name := range []string{"first.txt", "second.txt"} {
+				content, readErr := os.ReadFile(filepath.Join(task.LocalPath, name))
+				if readErr != nil || string(content) != "hello" {
+					t.Fatalf("%s: content=%q err=%v", name, content, readErr)
+				}
+			}
+			if _, statErr := os.Stat(filepath.Join(task.LocalPath, "空目录")); statErr != nil {
+				t.Fatal(statErr)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("folder download did not complete")
+}
 func (d *blockingURLDriver) GetDownloadURL(ctx context.Context, c drive.Context, id string, expires int) (*model.DownloadURL, error) {
+	if d.downloadURL != "" {
+		return &model.DownloadURL{URL: d.downloadURL + "/" + id, Size: 5}, nil
+	}
 	d.entered <- ctx
 	select {
 	case <-ctx.Done():

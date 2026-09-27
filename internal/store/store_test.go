@@ -429,6 +429,32 @@ func TestTaskSavesKeepConcurrentRecords(t *testing.T) {
 	}
 }
 
+func TestClearDownloadTasksKeepsRecoverableFolder(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []model.DownloadTask{
+		{ID: "folder", IsDir: true, Status: "failed"},
+		{ID: "child", GroupID: "folder", Status: "completed"},
+		{ID: "single", Status: "completed"},
+	} {
+		if err := store.SaveDownloadTask(&task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.ClearDownloadTasks(); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := store.ListDownloadTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("got %d tasks, want recoverable folder and child", len(remaining))
+	}
+}
+
 func TestDownloadTaskPersistenceOmitsSecrets(t *testing.T) {
 	dir := t.TempDir()
 	st, err := Open(dir)

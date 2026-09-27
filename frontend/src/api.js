@@ -131,6 +131,7 @@ export function ListFavorites(userId, driveId) { return driveCall('加载收藏'
 export function AddFavorite(userId, driveId, favoriteItem) { return driveCall('添加收藏', App.AddFavorite(userId, driveId, favoriteItem)) }
 export function RemoveFavorite(userId, driveId, fileId) { return driveCall('取消收藏', App.RemoveFavorite(userId, driveId, fileId)) }
 export function download(userId, driveId, file) { return driveCall('添加下载任务', App.DownloadFile(userId, driveId, file)) }
+export function downloadFolder(userId, driveId, file, skipExisting = false) { return driveCall('添加文件夹下载任务', App.DownloadFolder(userId, driveId, file, skipExisting)) }
 export function pinFileSnapshot(userId, driveId, file) { return driveCall('读取文件信息', App.PinFileSnapshot(userId, driveId, file)) }
 export function PinFileSnapshot(userId, driveId, file) { return pinFileSnapshot(userId, driveId, file) }
 export function downloadUrl(name, url, headers) { return App.DownloadURL(name, url, headers) }

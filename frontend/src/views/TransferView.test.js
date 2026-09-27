@@ -43,4 +43,16 @@ describe('传输页刷新调度', () => {
 
     expect(api.ListDownloads).toHaveBeenCalledOnce()
   })
+
+  it('文件夹只占用一条下载行，子任务在行内展开', async () => {
+    api.ListDownloads.mockResolvedValueOnce([
+      { id: 'folder', isDir: true, name: '文件夹', status: 'downloading', stage: 'scanning', totalFiles: 1, completedFiles: 0, localPath: 'folder' },
+      { id: 'file', groupId: 'folder', name: 'file.txt', status: 'queued', localPath: 'folder/file.txt' },
+    ])
+    wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    expect(wrapper.findAll('.taskrow')).toHaveLength(1)
+    expect(wrapper.text()).toContain('扫描目录')
+    expect(wrapper.text()).toContain('查看文件（1/1）')
+  })
 })

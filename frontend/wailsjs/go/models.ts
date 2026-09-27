@@ -805,7 +805,39 @@ export namespace model {
 		}
 	}
 	
+	export class DownloadEntry {
+	    fileId: string;
+	    parentFileId?: string;
+	    sourcePath?: string;
+	    name: string;
+	    relativePath: string;
+	    size: number;
+	    isDir: boolean;
+	    scanned?: boolean;
+
+	    static createFrom(source: any = {}) { return new DownloadEntry(source); }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fileId = source["fileId"];
+	        this.parentFileId = source["parentFileId"];
+	        this.sourcePath = source["sourcePath"];
+	        this.name = source["name"];
+	        this.relativePath = source["relativePath"];
+	        this.size = source["size"];
+	        this.isDir = source["isDir"];
+	        this.scanned = source["scanned"];
+	    }
+	}
+
 	export class DownloadTask {
+	    isDir?: boolean;
+	    groupId?: string;
+	    totalFiles?: number;
+	    completedFiles?: number;
+	    failedFiles?: number;
+	    scanDone?: boolean;
+	    folderEntries?: DownloadEntry[];
 	    stage?: string;
 	    stageProgress?: number;
 	    id: string;
@@ -834,6 +866,13 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.isDir = source["isDir"];
+	        this.groupId = source["groupId"];
+	        this.totalFiles = source["totalFiles"];
+	        this.completedFiles = source["completedFiles"];
+	        this.failedFiles = source["failedFiles"];
+	        this.scanDone = source["scanDone"];
+	        this.folderEntries = this.convertValues(source["folderEntries"], DownloadEntry);
 	        this.stage = source["stage"];
 	        this.stageProgress = source["stageProgress"];
 	        this.id = source["id"];
@@ -855,7 +894,21 @@ export namespace model {
 	        this.created = source["created"];
 	        this.updated = source["updated"];
 	        this.concurrency = source["concurrency"];
-	    }
+	}
+
+	    convertValues(a: any, classs: any, asMap: boolean = false): any {
+        if (!a) return a;
+        if (a === null) return null;
+        if (Array.isArray(a)) return a.map(e => this.convertValues(e, classs));
+        if (typeof a === 'object') {
+            if (asMap) {
+                for (const key of Object.keys(a)) a[key] = new classs(a[key]);
+                return a;
+            }
+            return new classs(a);
+        }
+        return a;
+    }
 	}
 	export class DownloadURL {
 	    drive_id: string;
@@ -1738,4 +1791,3 @@ export namespace sync {
 	}
 
 }
-

@@ -2,8 +2,8 @@
 import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from 'vue'
 import {
   listDir, listDirSilently, listTrash, search, mkdir, rename, trash, remove, restore,
-  move, copy, createShare, uploadFiles, validateUploadFiles, migrateFiles, PreviewMigration, download,
-  AddFavorite, RemoveFavorite, ListFavorites, OfflineDownload, PickDirectory, PickFiles,
+  move, copy, createShare, uploadFiles, validateUploadFiles, migrateFiles, PreviewMigration, download, downloadFolder,
+  AddFavorite, RemoveFavorite, ListFavorites, ListMigrateJobs, OfflineDownload, PickDirectory, PickFiles,
   formatBytes, formatTime, formatTimeParts, iconOf, extOf, openKindOf, copyText,
   capsOf, providerMetaOf, providerOf, accountName, providerIconUrl, GetDirectoryCache, SaveDirectoryCache, DeleteDirectoryCache, OpenBrowser, onEvent,
 } from '../api'
@@ -20,6 +20,8 @@ import DragDropZone from '../components/DragDropZone.vue'
 import { getPrefs, setPref } from '../appearance'
 import { createNavigationHistory } from '../navigation'
 import { directoryCacheKey, recordAccountHealth } from '../workspace'
+import { uniqueFileSelection, transferFiles, transferProblem, sameSpace } from '../file-transfer'
+import { fileClipboard, clipboardBusy, setFileClipboard, clearFileClipboard, retainClipboardFiles, clipboardMigrationEvent } from '../file-clipboard'
 
 const props = defineProps({
   account: Object,
@@ -141,6 +143,15 @@ watch([migrateTarget, migrateDir, modalFile], () => { migrationPreview.value = n
 
 const uid = computed(() => (props.account ? props.account.user_id : ''))
 const did = computed(() => (props.account ? props.account.drive_id : ''))
+const cutClipboardIDs = computed(() => {
+  const source = fileClipboard.value
+  if (!source?.moving || source.account.user_id !== uid.value || source.account.drive_id !== did.value) return new Set()
+  return new Set(source.files.map(file => file.file_id))
+})
+watch(() => props.accounts.map(account => account.user_id + '\0' + account.drive_id), accounts => {
+  const source = fileClipboard.value?.account
+  if (source && !accounts.includes(source.user_id + '\0' + source.drive_id)) fileClipboard.value = null
+})
 const caps = computed(() => capsOf(props.account, props.providers))
 const meta = computed(() => providerMetaOf(props.account, props.providers))
 const defaultShareExpirationOptions = [
@@ -903,12 +914,22 @@ function onSelectionPick(action) {
 }
 
 const selectedMoreItems = computed(() => [
+  caps.value.download && selected.value.some(file => file.isDir) && { icon: 'download', label: '下载（跳过本地同名文件夹）', action: 'download-skip' },
   { icon: 'star', label: selected.value.every(isFav) ? '移出收藏' : '加入收藏', action: 'favorite' },
+  mode.value === 'list' && { icon: 'copy', label: '复制到剪贴板', action: 'clipboard-copy' },
+  mode.value === 'list' && { icon: 'move', label: '剪切到剪贴板', action: 'clipboard-cut' },
+  mode.value === 'list' && fileClipboard.value && { icon: 'copy', label: '粘贴到当前目录', action: 'clipboard-paste' },
+  mode.value === 'list' && fileClipboard.value && { icon: 'close', label: '清空文件剪贴板', action: 'clipboard-clear' },
   caps.value.move && { icon: 'move', label: '移动', action: 'move' },
   caps.value.copy && { icon: 'copy', label: '复制', action: 'copy' },
 ].filter(Boolean))
 function onSelectedMorePick(action) {
   if (action === 'favorite') toggleFav(selected.value[0])
+  else if (action === 'download-skip') doDownload(null, true)
+  else if (action === 'clipboard-copy') copyToFileClipboard(false)
+  else if (action === 'clipboard-cut') copyToFileClipboard(true)
+  else if (action === 'clipboard-paste') pasteFiles()
+  else if (action === 'clipboard-clear') clearFileClipboard()
   else if (action === 'move') { modalFile.value = [...selected.value]; modal.value = 'movedir' }
   else if (action === 'copy') { modalFile.value = [...selected.value]; modal.value = 'copydir' }
 }
@@ -959,23 +980,29 @@ async function run(fn, okMsg) {
 }
 
 // 下载：直接入队，停留当前页 + toast，不弹确认框、不跳转传输页
-async function doDownload(list) {
-  const targets = (list || selected.value).filter((file) => !file.isDir)
-  if (!targets.length) { emit('toast', '请选择要下载的文件', 'error'); return }
+async function doDownload(list, skipExisting = false) {
+  const targets = uniqueFileSelection(list || selected.value)
+  if (!targets.length) { emit('toast', '请选择要下载的文件或文件夹', 'error'); return }
   if (running) return
   running = true
   const snapUid = uid.value, snapDid = did.value
   let completed = 0
+  let skipped = 0
   let firstError = null
   try {
     for (const file of targets) {
       try {
-        await download(snapUid, snapDid, file)
-        completed++
+        if (file.isDir && skipExisting) {
+          if (await downloadFolder(snapUid, snapDid, file, true)) skipped++
+          else completed++
+        } else {
+          await download(snapUid, snapDid, file)
+          completed++
+        }
       } catch (error) { firstError ||= error }
     }
-    if (firstError) emit('toast', `已加入下载队列 ${completed}/${targets.length} 项；失败：${String(firstError)}`, 'error')
-    else emit('toast', `已加入下载队列（${completed} 项）`, 'success')
+    if (firstError) emit('toast', `已加入下载队列 ${completed}/${targets.length} 项${skipped ? `，跳过 ${skipped} 项` : ''}；失败：${String(firstError)}`, 'error')
+    else emit('toast', `已加入下载队列 ${completed} 项${skipped ? `，跳过同名文件夹 ${skipped} 项` : ''}`, 'success')
   } finally {
     running = false
   }
@@ -1032,10 +1059,14 @@ function onCtx(e, file) {
     return
   }
   const list = [
-    caps.value.download && targets(file).some((item) => !item.isDir) && { icon: 'download', label: '下载', action: 'download' },
+    caps.value.download && { icon: 'download', label: '下载', action: 'download' },
+    caps.value.download && targets(file).some(item => item.isDir) && { icon: 'download', label: '下载（跳过本地同名文件夹）', action: 'download-skip' },
     caps.value.createShare && { icon: 'share', label: '分享', action: 'share' },
     { icon: 'star', label: removingFavorites(file) ? '移出收藏' : '加入收藏', action: 'fav' },
     { sep: true },
+    mode.value === 'list' && { icon: 'copy', label: '复制到剪贴板', action: 'clipboard-copy' },
+    mode.value === 'list' && { icon: 'move', label: '剪切到剪贴板', action: 'clipboard-cut' },
+    mode.value === 'list' && fileClipboard.value && { icon: 'copy', label: '粘贴到当前目录', action: 'clipboard-paste' },
     caps.value.move && { icon: 'move', label: '移动到…', action: 'move' },
     caps.value.copy && { icon: 'copy', label: '复制到…', action: 'copy' },
     canMigrate.value && { icon: 'migrate', label: '迁移到其他网盘…', action: 'migrate' },
@@ -1065,6 +1096,10 @@ function onMenuSelect(action) {
       break
     }
     case 'download': doDownload(list); break
+    case 'download-skip': doDownload(list, true); break
+    case 'clipboard-copy': copyToFileClipboard(false, list); break
+    case 'clipboard-cut': copyToFileClipboard(true, list); break
+    case 'clipboard-paste': pasteFiles(); break
     case 'open': openFile(file); break
     case 'share': openShareDialog(list); break
     case 'fav': toggleFav(file); break
@@ -1165,6 +1200,51 @@ const conflictModal = ref(null) // { names, onPolicy }
 function uploadDestination() { return { user: uid.value, drive: did.value, dir: dirId.value } }
 function uploadDestinationMatches(destination) {
   return props.account && mode.value === 'list' && destination.user === uid.value && destination.drive === did.value && destination.dir === dirId.value
+}
+
+function copyToFileClipboard(moving, list = selected.value) {
+  if (mode.value !== 'list' || !setFileClipboard({ ...snapshot(), label: accountName(props.account), files: list }, moving)) {
+    emit('toast', '请先选择文件；进行中的迁移剪贴板不可覆盖', 'warn')
+    return
+  }
+  emit('toast', `已${moving ? '剪切' : '复制'} ${fileClipboard.value.files.length} 项，可切换目录或账号后粘贴`, 'success')
+}
+
+function pasteFiles(moveOverride = false) {
+  const source = fileClipboard.value
+  if (!source || clipboardBusy.value) return
+  if (source.jobId) { emit('toast', '跨盘迁移已提交，请在传输页查看或继续任务', 'warn'); return }
+  const moving = source.moving || moveOverride
+  const target = snapshot()
+  const problem = transferProblem(source, target, props.providers, moving)
+  if (problem) { emit('toast', problem, 'warn'); return }
+  const label = `${source.label || source.account.user_id} / ${source.files.length} 项`
+  const destination = `${accountName(props.account)} / ${crumbs.value.map(part => part.name).join(' / ')}`
+  const conflict = sameSpace(source, target) ? '盘内同名项由网盘处理，部分网盘可能覆盖目标文件。' : '跨盘同名文件将重命名保留。'
+  askConfirm(`${moving ? '移动' : '复制'} ${label} 到 ${destination}？${conflict}`, async () => {
+    if (clipboardBusy.value || fileClipboard.value !== source) return
+    clipboardBusy.value = true
+    try {
+      const result = await transferFiles(source, target, props.providers, moving)
+      if (result.queued) {
+        fileClipboard.value = { ...source, moving, jobId: result.job?.id, jobStatus: 'running' }
+        try {
+          const jobs = await ListMigrateJobs()
+          clipboardMigrationEvent(jobs?.find(job => job.id === result.job?.id))
+        } catch { }
+        emit('toast', '已提交跨盘迁移，可在传输页查看进度', 'success')
+      } else {
+        if (moving) retainClipboardFiles(source, result.completed)
+        emit('toast', `已${moving ? '移动' : '复制'}到目标目录`, 'success')
+      }
+      invalidateDirCache(source.account.user_id, source.account.drive_id, 'list', source.dirId)
+      invalidateDirCache(target.account.user_id, target.account.drive_id, 'list', target.dirId)
+      if (target.account.user_id === uid.value && target.dirId === dirId.value) refresh()
+    } catch (error) {
+      if (moving && error.completedIDs?.length) retainClipboardFiles(source, error.completedIDs)
+      emit('toast', String(error), 'error')
+    } finally { clipboardBusy.value = false }
+  }, { title: '粘贴文件', okText: moving ? '移动' : '复制' })
 }
 function ensureUploadDestination(destination) {
   if (uploadDestinationMatches(destination)) return true
@@ -1396,6 +1476,9 @@ function onKey(e) {
   if (!props.account || modal.value) return
   if (e.code === 'Escape' && (selected.value.length || rangIsSelecting.value)) { clearSelection(); e.preventDefault() }
   else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') { selectAll(); e.preventDefault() }
+  else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && mode.value === 'list' && selected.value.length) { copyToFileClipboard(false); e.preventDefault() }
+  else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyX' && mode.value === 'list' && selected.value.length) { copyToFileClipboard(true); e.preventDefault() }
+  else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && mode.value === 'list' && fileClipboard.value) { pasteFiles(e.metaKey && e.altKey); e.preventDefault() }
   else if (e.code === 'F5') { refresh(); e.preventDefault() }
   else if (e.code === 'Backspace' && mode.value === 'list' && pathStack.value.length) { goUp(); e.preventDefault() }
   else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF' && caps.value.search) { enterSearch(); e.preventDefault() }
@@ -1574,6 +1657,7 @@ let pageActive = false
 let pageWasDeactivated = false
 let stopPreviewSaved
 let stopFavoritesChanged
+let stopClipboardMigration
 function activatePage() {
   if (pageActive) return
   pageActive = true
@@ -1601,6 +1685,7 @@ function deactivatePage() {
 onActivated(activatePage)
 onDeactivated(deactivatePage)
 onMounted(() => {
+  stopClipboardMigration = onEvent('migrate:progress', clipboardMigrationEvent)
   stopFavoritesChanged = onEvent('favorites:changed', (event) => {
     if (!running && event?.user_id === uid.value && event?.drive_id === did.value) loadFavorites()
   })
@@ -1616,6 +1701,7 @@ onBeforeUnmount(() => {
   clearTimeout(locSaveTimer)
   stopPreviewSaved?.()
   stopFavoritesChanged?.()
+  stopClipboardMigration?.()
   deactivatePage()
   clearTimeout(hoverTimer)
   listResizeObserver?.disconnect()
@@ -1736,12 +1822,14 @@ onBeforeUnmount(() => {
             <div class="toppanbtn" v-if="!selected.length && mode === 'list'">
               <button v-if="caps.createFolder" class="tbtn sm" title="新建文件夹 (Ctrl+Shift+N)" @click="inputText = ''; modal = 'mkdir'"><UiIcon name="plus" :size="14" />新建</button>
               <button v-if="caps.upload" class="tbtn sm" title="上传 (Ctrl+U)" @click="uploadPickModal = true"><UiIcon name="upload" :size="14" />上传</button>
+              <button v-if="fileClipboard" class="tbtn sm" :disabled="clipboardBusy || !!fileClipboard.jobId" title="粘贴到当前目录 (Ctrl/⌘+V)" @click="pasteFiles"><UiIcon name="copy" :size="14" />粘贴 {{ fileClipboard.files.length }}</button>
+              <button v-if="fileClipboard" class="tbtn icon" :disabled="clipboardBusy" title="清空应用内文件剪贴板" @click="clearFileClipboard"><UiIcon name="close" :size="14" /></button>
             </div>
             <div v-if="selected.length || listShown.length" class="toppanbtn sel-mgmt">
               <DropdownBtn :label="selected.length ? `已选 ${selected.length} 项` : rangIsSelecting ? '区间选择中' : '选择'" icon="check" :items="selectionMenuItems" :class="{ 'selection-active': selected.length || rangIsSelecting }" title="管理文件选择" @select="onSelectionPick" />
             </div>
             <div class="toppanbtn" v-if="selected.length && mode !== 'trash'">
-              <button v-if="caps.download && selected.some(file => !file.isDir)" class="tbtn" @click="doDownload()"><UiIcon name="download" :size="15" />下载</button>
+              <button v-if="caps.download" class="tbtn" @click="doDownload()"><UiIcon name="download" :size="15" />下载</button>
               <button v-if="caps.createShare" class="tbtn" title="分享 (Ctrl+Shift+S)" @click="openShareModal"><UiIcon name="share" :size="15" />分享</button>
               <button v-if="caps.recycleBin" class="tbtn danger" title="删除 (Delete)" @click="run(() => trash(uid, did, selIds()), '已移入回收站')"><UiIcon name="trash" :size="15" />删除</button>
               <DropdownBtn label="更多" icon="more-horizontal" :items="selectedMoreItems" title="更多文件操作" @select="onSelectedMorePick" />
@@ -1798,7 +1886,7 @@ onBeforeUnmount(() => {
               @dragstart="startCloudDrag($event, r.f)"
               @dragend="emit('cloud-drag-end')"
               @drop="dropCloudFiles($event, r.f)"
-              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id }"
+              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id, 'clipboard-cut': cutClipboardIDs.has(r.f.file_id) }"
               @click="toggleSel(r.f, $event)"
               @dblclick="onRowOpen(r.f)"
               @contextmenu.prevent="onCtx($event, r.f)"
@@ -1845,7 +1933,7 @@ onBeforeUnmount(() => {
               @dragstart="startCloudDrag($event, r.f)"
               @dragend="emit('cloud-drag-end')"
               @drop="dropCloudFiles($event, r.f)"
-              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id }"
+              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id, 'clipboard-cut': cutClipboardIDs.has(r.f.file_id) }"
               @click="toggleSel(r.f, $event)"
               @dblclick="onRowOpen(r.f)"
               @contextmenu.prevent="onCtx($event, r.f)"
@@ -2125,4 +2213,5 @@ mark.hl {
 .conflict-more { font-size: var(--fs-aux); color: var(--text-tertiary); align-self: center; }
 .conflict-q { color: var(--text-primary); margin-bottom: 12px; }
 .conflict-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.fileitem.clipboard-cut, .griditem.clipboard-cut { opacity: .72; transition: opacity var(--motion-fast) var(--motion-ease); }
 </style>

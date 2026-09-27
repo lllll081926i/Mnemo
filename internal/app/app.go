@@ -1430,6 +1430,15 @@ func (a *App) DownloadFile(userID, driveID string, f model.File) (*model.Downloa
 	return task, err
 }
 
+func (a *App) DownloadFolder(userID, driveID string, f model.File, skipExisting bool) (bool, error) {
+	dl := a.downloadManager()
+	if dl == nil {
+		return false, errors.New("下载服务未启动")
+	}
+	_, skipped, err := dl.AddDownloadFolder(userID, driveID, f, skipExisting)
+	return skipped, err
+}
+
 // PinFileSnapshot keeps the exact list-row metadata available for a provider
 // before preview/player code resolves an authenticated URL by file ID.
 func (a *App) PinFileSnapshot(userID string, driveID string, f model.File) {

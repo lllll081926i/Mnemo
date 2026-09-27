@@ -3,7 +3,8 @@ import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import PanView from './PanView.vue'
 import UiSelect from '../components/UiSelect.vue'
 import UiIcon from '../components/UiIcon.vue'
-import { accountName, providerMetaOf, providerIconUrl, migrateFiles, move, copy, capsOf, onEvent, pinFileSnapshot } from '../api'
+import { accountName, providerMetaOf, providerIconUrl, onEvent } from '../api'
+import { transferFiles } from '../file-transfer'
 const props = defineProps({ account: Object, accounts: Array, providers: Array, dual: Boolean })
 const emit = defineEmits(['toast', 'go'])
 const dual = computed(() => props.dual)
@@ -54,30 +55,16 @@ async function transfer(direction, dragged = null, folder = null, moving = false
   if (!src?.account || !dst?.account || !src.files.length || dst.mode !== 'list') { emit('toast', '请选择文件，并在另一栏打开目标目录', 'warn'); return }
   busy.value = true
   try {
-    if (src.account.user_id === dst.account.user_id && src.account.drive_id === dst.account.drive_id) {
-      if (src.dirId === dst.dirId) throw new Error('来源与目标目录相同')
-      if (src.files.some(f => f.isDir && (f.file_id === dst.dirId || dst.path.some(p => f.file_id === p.id)))) throw new Error('不能移动或复制到自身及其子目录')
-      if (!capsOf(src.account, props.providers)[moving ? 'move' : 'copy']) throw new Error(moving ? '该网盘不支持盘内移动' : '该网盘不支持盘内复制')
-      await pinSelection(src)
-      const result = await (moving ? move : copy)(src.account.user_id, src.account.drive_id, src.files.map(f => f.file_id), dst.dirId)
+    const result = await transferFiles(src, dst, props.providers, moving)
+    if (!result.queued) {
       await refreshAccounts(src, dst)
-      if (!Array.isArray(result) || result.length !== src.files.length) throw new Error('部分项目未完成，请检查目录后重试')
+      if (result.completed.length !== src.files.length) throw new Error('部分项目未完成，请检查目录后重试')
       emit('toast', moving ? '已移动到目标目录' : '已复制到目标目录', 'success')
     } else {
-      if (!capsOf(src.account, props.providers).download) throw new Error('源网盘不支持下载，无法迁移')
-      const targetCaps = capsOf(dst.account, props.providers)
-      if (!targetCaps.upload && !targetCaps.rapidUploadHashes?.length) throw new Error('目标网盘不支持上传，无法迁移')
-      await pinSelection(src)
-      await migrateFiles(src.account.user_id, src.account.drive_id, dst.account.user_id, dst.account.drive_id, dst.dirId, src.files.map(f => f.file_id), moving)
       emit('toast', moving ? '已提交移动迁移，成功传输后移除源项目；可在传输页查看进度' : '已提交复制迁移，可在传输页查看进度', 'success')
     }
   } catch(e) { emit('toast', String(e), 'error') }
   finally { busy.value = false }
-}
-function pinSelection(source) {
-  return Promise.all(source.files.map(file => pinFileSnapshot(source.account.user_id, source.account.drive_id, {
-    ...file, parent_file_id: file.parent_file_id || source.dirId,
-  })))
 }
 let stopMigration
 onMounted(() => {

@@ -58,6 +58,8 @@ export function DeleteSyncConfig(arg1:string):Promise<void>;
 
 export function DownloadFile(arg1:string,arg2:string,arg3:model.File):Promise<model.DownloadTask>;
 
+export function DownloadFolder(arg1:string,arg2:string,arg3:model.File,arg4:boolean):Promise<boolean>;
+
 export function DownloadURL(arg1:string,arg2:string,arg3:Record<string, string>):Promise<model.DownloadTask>;
 
 export function DownloadUpdate(arg1:string):Promise<string>;

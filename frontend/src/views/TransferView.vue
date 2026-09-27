@@ -146,7 +146,7 @@ function onTransferEvent(ev) {
   const t = ev.task
   if (ev.kind === 'download') {
     const failureKey = `download:${t.id}`
-    if (t.status === 'failed') notifyTaskFailure(failureKey, t.error, '下载文件')
+    if (t.status === 'failed' && !t.groupId) notifyTaskFailure(failureKey, t.error, '下载文件')
     else clearTaskFailure(failureKey)
     const list = downloads.value
     const idx = list.findIndex((x) => x.id === t.id)
@@ -163,7 +163,7 @@ function onTransferEvent(ev) {
     if (idx >= 0) {
       const prev = list[idx]
       if (prev.status !== 'completed' && t.status === 'completed') {
-        playFinishSound()
+        if (!t.groupId) playFinishSound()
         // 完成后清理该项已选状态
         if (selectedIds.value.has(t.id)) {
           const s = new Set(selectedIds.value)
@@ -242,8 +242,16 @@ const byKw = (list, nameFn) => {
 }
 const byAccount = (list) => filterUser.value ? list.filter((t) => t.user_id === filterUser.value) : list
 const byUploadAccount = (list) => filterUser.value ? list.filter((t) => t.UserID === filterUser.value || (t.Info && t.Info.user_id === filterUser.value)) : list
-const activeDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
-const doneDownloads = computed(() => byKw(byAccount(downloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
+const visibleDownloads = computed(() => {
+  const groups = new Set(downloads.value.filter(task => task.isDir).map(task => task.id))
+  return downloads.value.filter(task => !task.groupId || !groups.has(task.groupId))
+})
+const activeDownloads = computed(() => byKw(byAccount(visibleDownloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
+const doneDownloads = computed(() => byKw(byAccount(visibleDownloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
+const groupChildren = id => downloads.value.filter(task => task.groupId === id)
+const groupChildLimits = ref({})
+const shownGroupChildren = id => groupChildren(id).slice(0, groupChildLimits.value[id] || 100)
+function showMoreGroupChildren(id) { groupChildLimits.value = { ...groupChildLimits.value, [id]: (groupChildLimits.value[id] || 100) + 100 } }
 const activeUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted)), upName))
 const doneUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted)), upName))
 
@@ -254,7 +262,7 @@ function toggleSelectAllActive() {
 }
 
 const downStatusText = (s) => ({ queued: '排队中', downloading: '下载中', paused: '已暂停', completed: '已完成', failed: '失败', canceled: '已取消' }[s] || s)
-const downTaskStatus = (t) => t.status === 'downloading' ? ({ resolving: '获取下载链接', connecting: '建立连接' }[t.stage] || downStatusText(t.status)) : downStatusText(t.status)
+const downTaskStatus = (t) => t.status === 'downloading' ? ({ resolving: '获取下载链接', connecting: '建立连接', scanning: '扫描目录' }[t.stage] || downStatusText(t.status)) : downStatusText(t.status)
 const downStatusBadge = (s) => ({ downloading: 'primary', queued: 'primary', completed: 'success', failed: 'error', canceled: 'warn', paused: 'warn' }[s] || '')
 
 function upStatus(t) {
@@ -1030,12 +1038,17 @@ onBeforeUnmount(() => {
                   <div class="fileicon" :class="'ft-' + iconOf({ name: t.name })"><UiIcon :name="iconOf({ name: t.name })" :size="20" /></div>
                   <div class="filename">
                     <div :title="t.localPath || t.url || ''">{{ t.name || t.url || t.id }}</div>
-                    <div class="fsub">{{ t.localPath || t.url || '' }}</div>
+                    <div class="fsub">{{ t.isDir ? `${t.scanDone ? '' : '正在扫描 · '}${t.completedFiles || 0}/${t.totalFiles || 0} 个文件${t.failedFiles ? ` · 失败 ${t.failedFiles}` : ''}` : t.localPath || t.url || '' }}</div>
+                    <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details" @click.stop>
+                      <summary>查看文件（{{ Math.min(groupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ groupChildren(t.id).length }}）</summary>
+                      <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath">{{ child.name }} · {{ downTaskStatus(child) }} <template v-if="child.status === 'downloading'">{{ child.progress || 0 }}%</template></div>
+                      <button v-if="groupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
+                    </details>
                   </div>
-                  <div class="filesize">{{ formatBytes(t.size) }}</div>
+                    <div class="filesize">{{ t.isDir && !t.scanDone ? '扫描中' : formatBytes(t.size) }}</div>
                   <div class="downprogress">
                     <div class="transfering-state">
-                      <p class="text-state"><span class="badge" :class="downStatusBadge(t.status)">{{ downTaskStatus(t) }}</span><span>{{ t.stage && t.status === 'downloading' ? '…' : `${t.progress || 0}%` }}</span></p>
+                      <p class="text-state"><span class="badge" :class="downStatusBadge(t.status)">{{ downTaskStatus(t) }}</span><span>{{ t.isDir && !t.scanDone ? '…' : t.stage && t.status === 'downloading' ? '…' : `${t.progress || 0}%` }}</span></p>
                       <div class="progress-total">
                         <div :class="t.status === 'downloading' || t.status === 'queued' ? 'progress-current active' : t.status === 'completed' ? 'progress-current succeed' : t.status === 'failed' ? 'progress-current error' : 'progress-current'" :style="{ width: (t.progress || 0) + '%' }"></div>
                       </div>
@@ -1044,7 +1057,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="downspeed">{{ t.status === 'downloading' ? formatSpeed(t.speed || 0) : '' }}</div>
                   <div class="tactions" @click.stop>
-                    <button v-if="t.status !== 'completed'" class="btn-circle" title="优先下载（暂停其他任务）" @click="prioritizeTask(t)"><UiIcon name="priority" :size="14" /></button>
+                    <button v-if="t.status !== 'completed' && !t.isDir" class="btn-circle" title="优先下载（暂停其他任务）" @click="prioritizeTask(t)"><UiIcon name="priority" :size="14" /></button>
                     <button v-if="t.status === 'downloading' || t.status === 'queued'" class="btn-circle" title="暂停" @click="pauseTask(t)"><UiIcon name="pause" :size="14" /></button>
                     <button v-else-if="t.status === 'paused' || t.status === 'failed'" class="btn-circle" :title="t.status === 'failed' ? '重试' : '继续'" @click="resumeTask(t)"><UiIcon name="play" :size="14" /></button>
                     <button v-if="t.localPath" class="btn-circle" title="打开所在目录" @click="reveal(t)"><UiIcon name="folder" :size="14" /></button>
@@ -1083,7 +1096,12 @@ onBeforeUnmount(() => {
                 <div class="fileicon" :class="'ft-' + iconOf({ name: t.name })"><UiIcon :name="iconOf({ name: t.name })" :size="20" /></div>
                 <div class="filename">
                   <div :title="t.localPath || ''">{{ t.name || t.url || t.id }}</div>
-                  <div class="fsub">{{ t.localPath || '' }}<template v-if="t.updated"> · {{ formatTime(t.updated) }}</template></div>
+                  <div class="fsub">{{ t.isDir ? `${t.completedFiles || 0} 个文件 · ${t.localPath || ''}` : t.localPath || '' }}<template v-if="t.updated"> · {{ formatTime(t.updated) }}</template></div>
+                  <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details">
+                    <summary>查看文件（{{ Math.min(groupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ groupChildren(t.id).length }}）</summary>
+                    <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child">{{ child.name }} · {{ downTaskStatus(child) }}</div>
+                    <button v-if="groupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
+                  </details>
                 </div>
                 <div class="filesize">{{ formatBytes(t.size) }}</div>
                 <div class="downprogress">
@@ -1094,7 +1112,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="downspeed"></div>
                 <div class="tactions">
-                  <button v-if="t.localPath" class="btn-circle" title="打开文件" @click="openFile(t)"><UiIcon name="play" :size="14" /></button>
+                  <button v-if="t.localPath && !t.isDir" class="btn-circle" title="打开文件" @click="openFile(t)"><UiIcon name="play" :size="14" /></button>
                   <button v-if="t.localPath" class="btn-circle" title="打开所在目录" @click="reveal(t)"><UiIcon name="folder" :size="14" /></button>
                   <button v-if="t.url" class="btn-circle" title="复制链接" @click="copyLink(t)">
                     <UiIcon v-if="copiedLinkMap[t.id]" name="check" :size="14" class="icon-check-pop" />
@@ -1402,4 +1420,7 @@ onBeforeUnmount(() => {
 .td-label { width: 72px; flex-shrink: 0; color: var(--text-tertiary); font-size: 12.5px; font-weight: 600; }
 .td-val { flex: 1; min-width: 0; color: var(--text-primary); word-break: break-all; user-select: text; }
 .td-url { font-size: 12px; color: var(--text-link); }
+.folder-task-details { color: var(--text-secondary); font-size: 12px; max-height: 110px; overflow: auto; }
+.folder-task-details summary { cursor: pointer; width: fit-content; color: var(--color-primary); }
+.folder-task-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 0 2px 12px; }
 </style>
