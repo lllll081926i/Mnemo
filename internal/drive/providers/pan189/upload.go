@@ -247,7 +247,7 @@ func fileMD5Of(r io.ReaderAt, size, slice int64, count int, ui *model.UploadingU
 		partInfos = append(partInfos, itoa(int64(i))+"-"+base64StdEncode(sliceSum))
 		hashed += cur
 		if ui != nil {
-			ui.ReportUploadProgress(hashed, size)
+			ui.ReportHashProgress(hashed, size)
 		}
 	}
 	return strings.ToUpper(hexEncode(fileSum.Sum(nil))), sliceHexs, partInfos, nil
@@ -325,6 +325,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if fileMD5Hex == "" {
 		return errors.New("计算 MD5 失败")
 	}
+	ui.ReportUploadStage("checking")
 	// 多分片：sliceMd5 = MD5(各分片 hex 列表 join '\n')。
 	sliceMD5Hex := fileMD5Hex
 	if count > 1 {

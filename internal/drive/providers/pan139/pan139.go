@@ -1601,7 +1601,7 @@ func hashPan139File(ctx context.Context, f *os.File, ui *model.UploadingUI) (str
 			}
 			hashed += int64(n)
 			if ui != nil {
-				ui.ReportUploadProgress(hashed, size)
+				ui.ReportHashProgress(hashed, size)
 			}
 		}
 		if err == io.EOF {
@@ -1721,6 +1721,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return err
 	}
+	ui.ReportUploadStage("checking")
 	parts := pan139UploadParts(size)
 	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, ui.Info.ParentFileID, ui.Info.Name, size)
 	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)

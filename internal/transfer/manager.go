@@ -445,6 +445,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	defer cancel()
 	m.cancels[t.ID] = cancel
 	t.Status = "downloading"
+	t.Stage = ""
 	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
 	defer func() {
@@ -490,6 +491,10 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	}
 	opts.Limiter = m.speedLimiter
 	if url == "" && t.UserID != "" {
+		m.mu.Lock()
+		t.Stage = "resolving"
+		m.mu.Unlock()
+		m.update(t)
 		rememberDownloadSource(t)
 		u, err := drive.GetDownloadURLContext(ctx, t.UserID, t.DriveID, t.FileID, 14400)
 		if err != nil {
@@ -550,6 +555,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		return
 	}
 	t.URL = url
+	t.Stage = "connecting"
 	t.Updated = time.Now().Unix()
 	opts.ExpectedSize = t.Size
 	m.mu.Unlock()
@@ -560,6 +566,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 
 	progress := func(p dlengine.Progress) {
 		m.mu.Lock()
+		t.Stage = ""
 		t.Downloaded = p.Downloaded
 		if p.Total > 0 {
 			t.Size = p.Total
@@ -575,6 +582,10 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	// running. Re-resolve once for account-backed tasks and reuse the .part
 	// file; direct URL tasks have no provider context and remain unchanged.
 	if err != nil && t.UserID != "" && isExpiredDownloadError(err) && ctx.Err() == nil {
+		m.mu.Lock()
+		t.Stage = "resolving"
+		m.mu.Unlock()
+		m.update(t)
 		rememberDownloadSource(t)
 		if fresh, refreshErr := drive.GetDownloadURLContext(ctx, t.UserID, t.DriveID, t.FileID, 14400); refreshErr == nil && fresh != nil && fresh.URL != "" {
 			url = fresh.URL
@@ -582,6 +593,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			opts.RequestAuth = fresh.RequestAuth
 			m.mu.Lock()
 			t.URL = url
+			t.Stage = "connecting"
 			if fresh.Size > 0 {
 				t.Size = fresh.Size
 			}
@@ -623,6 +635,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		}
 	}
 	t.Updated = time.Now().Unix()
+	t.Stage = ""
 	m.mu.Unlock()
 	m.update(t)
 	logging.Info("download worker finished", "task_id", t.ID, "status", t.Status, "error_present", t.Error != "", "duration", logging.Duration(started))

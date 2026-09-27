@@ -35,8 +35,10 @@ func init() {
 			// not expose a permanent-delete endpoint through the current API.
 			"recycleBin":      true,
 			"permanentDelete": false,
+			"webEdit":         true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"sha1", "quickxorhash"}, nil)
+			c.TrashWebURL = "https://www.office.com/launch/onedrive"
 		}),
 		Factory: func() drive.Driver { return &Driver{} },
 		Auth:    authPKCE,
@@ -407,7 +409,78 @@ func (d *Driver) Delete(ctx context.Context, c drive.Context, refs []drive.FileR
 }
 
 func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string) ([]string, error) {
-	return nil, drive.NotSupported("restore")
+	if c.Token == nil || c.Token.ProviderDriveType != "personal" {
+		return nil, drive.NotSupported("OneDrive 工作或学校账号回收站恢复")
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return nil, err
+	}
+	var restored []string
+	var failed []error
+	for _, fileID := range fileIDs {
+		if strings.TrimSpace(fileID) == "" {
+			failed = append(failed, errors.New("恢复文件 ID 不能为空"))
+			continue
+		}
+		path := "/me/drive/items/" + url.PathEscape(fileID) + "/restore"
+		var item struct {
+			ID string `json:"id"`
+		}
+		requestErr := cl.jsonDo(ctx, http.MethodPost, path, map[string]any{}, &item)
+		if isGraphAuthenticationFailure(requestErr) {
+			cl, requestErr = refreshedClientAfterGraphAuthFailure(ctx, c, requestErr)
+			if requestErr == nil {
+				requestErr = cl.jsonDo(ctx, http.MethodPost, path, map[string]any{}, &item)
+			}
+		}
+		if requestErr != nil || item.ID == "" {
+			if requestErr == nil {
+				requestErr = errors.New("恢复接口未返回文件 ID")
+			}
+			failed = append(failed, fmt.Errorf("%s: %w", fileID, requestErr))
+			continue
+		}
+		restored = append(restored, fileID)
+	}
+	return restored, errors.Join(failed...)
+}
+
+func (d *Driver) WebEditURL(ctx context.Context, c drive.Context, fileID string) (string, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return "", errors.New("文件 ID 不能为空")
+	}
+	cl, err := clientOf(c)
+	if err != nil {
+		return "", err
+	}
+	path := "/me/drive/items/" + url.PathEscape(fileID) + "?$select=webUrl"
+	var item struct {
+		WebURL string `json:"webUrl"`
+	}
+	err = cl.getJSON(ctx, path, &item)
+	if isGraphAuthenticationFailure(err) {
+		cl, err = refreshedClientAfterGraphAuthFailure(ctx, c, err)
+		if err == nil {
+			err = cl.getJSON(ctx, path, &item)
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	if !trustedOneDriveEditorURL(item.WebURL) {
+		return "", errors.New("OneDrive 未返回可信的文档网页地址")
+	}
+	return item.WebURL, nil
+}
+
+func trustedOneDriveEditorURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "onedrive.live.com" || host == "1drv.ms" || strings.HasSuffix(host, ".sharepoint.com")
 }
 
 func (d *Driver) Move(ctx context.Context, c drive.Context, refs []drive.FileRef, toParentID, _ string) ([]string, error) {

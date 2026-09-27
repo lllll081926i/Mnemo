@@ -110,6 +110,38 @@ func TestLiveFamilySessionResponseReadOnly(t *testing.T) {
 	t.Skip("未找到可用的天翼云盘账号")
 }
 
+func TestLiveRecycleListReadOnly(t *testing.T) {
+	if os.Getenv("MNEMO_LIVE_FAMILY_READONLY") != "1" {
+		t.Skip("仅在明确启用只读诊断时运行")
+	}
+	configDir, err := config.UserConfigDir("Mnemo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountStore, err := store.Open(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := accountStore.ListAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range accounts {
+		if account.Provider() != model.ProviderPan189 || account.Token == nil || account.Disabled {
+			continue
+		}
+		token := *account.Token
+		cloud := drive.Context{UserID: account.UserID, DriveID: account.DriveID, Token: &token}
+		files, listErr := (&Driver{}).ListTrash(t.Context(), cloud, nil)
+		if listErr != nil {
+			t.Fatalf("统一回收站列表失败，类型=%T", listErr)
+		}
+		t.Logf("统一回收站列表数量=%d", len(files))
+		return
+	}
+	t.Skip("未找到可用的天翼云盘账号")
+}
+
 func TestLiveFamilyDownloadReadOnly(t *testing.T) {
 	if os.Getenv("MNEMO_LIVE_FAMILY_READONLY") != "1" {
 		t.Skip("仅在明确启用只读家庭云诊断时运行")

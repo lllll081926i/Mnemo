@@ -25,6 +25,8 @@ type UploadInfo struct {
 
 // UploadState is the mutable progress/status of an upload job.
 type UploadState struct {
+	Stage         string `json:"stage,omitempty"` // hashing | checking | uploading
+	StageProgress int    `json:"stageProgress,omitempty"`
 	DownState     string `json:"DownState"` // queued | uploading | completed | failed | stopped
 	DownTime      int64  `json:"DownTime"`
 	DownSize      int64  `json:"DownSize"`
@@ -50,8 +52,9 @@ type UploadingUI struct {
 	Info     UploadInfo  `json:"Info"`
 	Upload   UploadState `json:"Upload"`
 
-	progressReporter func(done int64, percent int) `json:"-"`
-	stopRequested    func() bool                   `json:"-"`
+	progressReporter func(done int64, percent int)   `json:"-"`
+	stageReporter    func(stage string, percent int) `json:"-"`
+	stopRequested    func() bool                     `json:"-"`
 }
 
 // ConfigureUploadRuntime installs queue-owned callbacks on a worker-local
@@ -63,6 +66,41 @@ func (u *UploadingUI) ConfigureUploadRuntime(progress func(done int64, percent i
 	}
 	u.progressReporter = progress
 	u.stopRequested = stopped
+}
+
+func (u *UploadingUI) ConfigureUploadStage(reporter func(stage string, percent int)) {
+	if u != nil {
+		u.stageReporter = reporter
+	}
+}
+
+func (u *UploadingUI) ReportHashProgress(done, total int64) {
+	if u == nil {
+		return
+	}
+	percent := 0
+	if total > 0 {
+		if done < 0 {
+			done = 0
+		}
+		percent = int(min(done, total) * 100 / total)
+	}
+	changed := u.Upload.Stage != "hashing" || u.Upload.StageProgress != percent
+	u.Upload.Stage = "hashing"
+	u.Upload.StageProgress = percent
+	if changed && u.stageReporter != nil {
+		u.stageReporter("hashing", percent)
+	}
+}
+
+func (u *UploadingUI) ReportUploadStage(stage string) {
+	if u != nil {
+		u.Upload.Stage = stage
+		u.Upload.StageProgress = 0
+		if u.stageReporter != nil {
+			u.stageReporter(stage, 0)
+		}
+	}
 }
 
 // ReportUploadProgress updates the provider-local view and forwards an
@@ -89,8 +127,14 @@ func (u *UploadingUI) ReportUploadProgress(done, total int64) {
 		// only progress sample.
 		percent = 100
 	}
+	wasUploading := u.Upload.Stage == "uploading"
 	u.Upload.DownSize = done
 	u.Upload.DownProcess = percent
+	u.Upload.Stage = "uploading"
+	u.Upload.StageProgress = percent
+	if u.stageReporter != nil && !wasUploading {
+		u.stageReporter("uploading", percent)
+	}
 	if u.progressReporter != nil {
 		u.progressReporter(done, percent)
 	}
@@ -110,25 +154,27 @@ func (u *UploadingUI) IsUploadStopRequested() bool {
 
 // DownloadTask is a transfer-center download task.
 type DownloadTask struct {
-	ID          string            `json:"id"`
-	UserID      string            `json:"user_id"`
-	DriveID     string            `json:"drive_id"`
-	Provider    string            `json:"provider"`
-	FileID      string            `json:"file_id"`
-	SourcePath  string            `json:"source_path,omitempty"`
-	Name        string            `json:"name"`
-	Size        int64             `json:"size"`
-	Downloaded  int64             `json:"downloaded"`
-	Speed       int64             `json:"speed"`
-	Progress    int               `json:"progress"`
-	Status      string            `json:"status"` // queued|downloading|paused|completed|failed|canceled
-	LocalPath   string            `json:"localPath"`
-	URL         string            `json:"url,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Created     int64             `json:"created"`
-	Updated     int64             `json:"updated"`
-	Concurrency int               `json:"concurrency,omitempty"`
+	Stage         string            `json:"stage,omitempty"`
+	StageProgress int               `json:"stageProgress,omitempty"`
+	ID            string            `json:"id"`
+	UserID        string            `json:"user_id"`
+	DriveID       string            `json:"drive_id"`
+	Provider      string            `json:"provider"`
+	FileID        string            `json:"file_id"`
+	SourcePath    string            `json:"source_path,omitempty"`
+	Name          string            `json:"name"`
+	Size          int64             `json:"size"`
+	Downloaded    int64             `json:"downloaded"`
+	Speed         int64             `json:"speed"`
+	Progress      int               `json:"progress"`
+	Status        string            `json:"status"` // queued|downloading|paused|completed|failed|canceled
+	LocalPath     string            `json:"localPath"`
+	URL           string            `json:"url,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Created       int64             `json:"created"`
+	Updated       int64             `json:"updated"`
+	Concurrency   int               `json:"concurrency,omitempty"`
 }
 
 // OfflineTask is a provider-side (cloud) offline download task (PikPak).
@@ -151,15 +197,18 @@ type OfflineTask struct {
 
 // MigrateJob is one cross-drive migration request.
 type MigrateJob struct {
-	Items     map[string]MigrateItem `json:"items,omitempty"`
-	ID        string                 `json:"id"`
-	SrcUser   string                 `json:"srcUser"`
-	SrcDrive  string                 `json:"srcDrive"`
-	FileIDs   []string               `json:"fileIDs"`
-	DstUser   string                 `json:"dstUser"`
-	DstDrive  string                 `json:"dstDrive"`
-	DstParent string                 `json:"dstParent"`
-	Move      bool                   `json:"move"`
+	Stage         string                 `json:"stage,omitempty"`
+	StageName     string                 `json:"stageName,omitempty"`
+	StageProgress int                    `json:"stageProgress,omitempty"`
+	Items         map[string]MigrateItem `json:"items,omitempty"`
+	ID            string                 `json:"id"`
+	SrcUser       string                 `json:"srcUser"`
+	SrcDrive      string                 `json:"srcDrive"`
+	FileIDs       []string               `json:"fileIDs"`
+	DstUser       string                 `json:"dstUser"`
+	DstDrive      string                 `json:"dstDrive"`
+	DstParent     string                 `json:"dstParent"`
+	Move          bool                   `json:"move"`
 	// Live progress
 	Total     int64 `json:"total"`
 	Processed int64 `json:"processed"`

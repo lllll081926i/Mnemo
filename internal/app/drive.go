@@ -18,6 +18,14 @@ import (
 
 // ---- drive file operations (thin pass-through to the drive facade) ----
 
+func (a *App) OpenCloudEditor(userID, driveID, fileID string) error {
+	link, err := drive.WebEditURL(userID, driveID, fileID)
+	if err != nil {
+		return err
+	}
+	return a.OpenBrowser(link)
+}
+
 // SaveCloudTextFile writes text content to an isolated temporary file and
 // waits until the corresponding remote upload reaches a terminal state. The
 // ordinary upload queue remains asynchronous; only this user-facing save flow

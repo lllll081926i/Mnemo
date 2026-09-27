@@ -382,6 +382,20 @@ func SearchDir(userID, driveID, keyword string) (files []model.File, err error) 
 	return d.Search(context.Background(), c, keyword)
 }
 
+// WebEditURL 返回网盘提供的浏览器文档地址。
+func WebEditURL(userID, driveID, fileID string) (link string, err error) {
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { err = withTokenPersist(err, c) }()
+	editor, ok := d.(WebEditor)
+	if !ok {
+		return "", NotSupported("在线编辑")
+	}
+	return editor.WebEditURL(context.Background(), c, fileID)
+}
+
 // ListTrash lists the recycle bin.
 func ListTrash(userID, driveID string, opts *ListOptions) (files []model.File, err error) {
 	d, c, err := driverAndCtx(userID, driveID)

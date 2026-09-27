@@ -14,7 +14,6 @@ import (
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
-	"mnemo-go/internal/netx"
 	"mnemo-go/internal/store"
 )
 
@@ -151,6 +150,7 @@ func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist 
 	}
 	if q.onEvent != nil {
 		t := model.DownloadTask{
+			Stage: snapshot.Upload.Stage, StageProgress: snapshot.Upload.StageProgress,
 			ID: snapshot.UploadID, Name: snapshot.Info.Name, Size: snapshot.Info.Size,
 			Downloaded: snapshot.Upload.DownSize, Speed: snapshot.Upload.DownSpeed,
 			Progress: snapshot.Upload.DownProcess, Status: uploadStatus(snapshot.Upload),
@@ -187,6 +187,8 @@ func (q *UploadQueue) reportRunProgress(id string, generation uint64, done int64
 	}
 	j.Upload.DownSize = done
 	j.Upload.DownProcess = percent
+	j.Upload.Stage = "uploading"
+	j.Upload.StageProgress = percent
 	last := q.lastProgress[id]
 	publish := last.IsZero() || now.Sub(last) >= 500*time.Millisecond || percent >= 100
 	if publish {
@@ -198,6 +200,13 @@ func (q *UploadQueue) reportRunProgress(id string, generation uint64, done int64
 		return
 	}
 	q.mu.Unlock()
+}
+
+func (q *UploadQueue) reportRunStage(id string, generation uint64, stage string, percent int) {
+	q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
+		j.Upload.Stage = stage
+		j.Upload.StageProgress = percent
+	})
 }
 
 func (q *UploadQueue) shouldPersistLocked(job model.UploadingUI) bool {
@@ -547,6 +556,8 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		}
 		j.Upload.IsDowning = true
 		j.Upload.DownState = "uploading"
+		j.Upload.Stage = "uploading"
+		j.Upload.StageProgress = 0
 		worker = *j
 		canStart = true
 	}) || !canStart {
@@ -575,6 +586,9 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 	worker.Info.Path = relative
 	worker.Info.Name = uploadLeaf(relative)
 	parentID := strings.TrimSpace(worker.Info.ParentFileID)
+	if strings.Contains(relative, "/") {
+		q.reportRunStage(id, generation, "preparing", 0)
+	}
 	provider := drive.ProviderOf(userID, driveID, "")
 	if parentID == "" || drive.IsRootID(provider, parentID) {
 		if root, rootErr := drive.RootID(userID, driveID); rootErr == nil && root != "" {
@@ -602,14 +616,9 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		j.Info.Path = worker.Info.Path
 		j.Info.Name = worker.Info.Name
 		j.Info.ParentFileID = worker.Info.ParentFileID
+		j.Upload.Stage = "uploading"
+		j.Upload.StageProgress = 0
 	})
-
-	// compute hash for providers that support 秒传 (optional, best-effort)
-	if method := rapidMethod2(drive.ProviderOf(userID, driveID, "")); method != "" {
-		if h, err := netx.HashFile(worker.Info.LocalFilePath, netx.HashKind(method)); err == nil {
-			worker.Info.SHA1 = h
-		}
-	}
 
 	handler, err := q.handlerResolver(userID, driveID)
 	if err != nil {
@@ -627,6 +636,7 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		func(done int64, percent int) { q.reportRunProgress(id, generation, done, percent) },
 		func() bool { return ctx.Err() != nil },
 	)
+	worker.ConfigureUploadStage(func(stage string, percent int) { q.reportRunStage(id, generation, stage, percent) })
 	handlerErr := handler(ctx, &worker)
 	q.mu.Lock()
 	current := q.jobs[id]
@@ -680,6 +690,8 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		j.Upload.DownProcess = 100
 		j.Upload.DownSize = j.Info.Size
 		j.Upload.DownState = "completed"
+		j.Upload.Stage = ""
+		j.Upload.StageProgress = 0
 		j.Upload.FailedCode = 0
 		j.Upload.FailedMessage = ""
 	}) {
@@ -694,17 +706,6 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		q.cleanupTemporarySource(snapshot)
 	}
 	logging.Info("upload worker finished", "job_id", id, "status", "completed", "duration", logging.Duration(started))
-}
-
-// rapidMethod returns the fingerprint kind a provider supports for upload.
-func rapidMethod2(provider string) string {
-	caps := drive.RegistryCaps(provider)
-	for _, m := range caps.RapidUploadHashes {
-		if m == "sha1" || m == "md5" {
-			return m
-		}
-	}
-	return ""
 }
 
 // Cancel stops a job by canceling its provider request and marking it stopped.

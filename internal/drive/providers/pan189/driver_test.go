@@ -184,8 +184,8 @@ func TestCapabilities(t *testing.T) {
 	if got := caps.ShareExpirationOptions; len(got) != 3 || got[0] != 0 || got[1] != 1 || got[2] != 7 {
 		t.Errorf("shareExpirationOptions = %v, want [0 1 7]", got)
 	}
-	if caps.TrashView {
-		t.Error("trashView must stay disabled")
+	if !caps.TrashView || !caps.TrashRestore {
+		t.Error("天翼回收站列表与恢复应启用")
 	}
 	// md5 hashes both directions
 	if len(caps.ProvideHashes) != 1 || caps.ProvideHashes[0] != "md5" {

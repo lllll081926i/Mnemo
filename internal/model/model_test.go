@@ -33,6 +33,23 @@ func TestUploadingUIRuntimeProgressZeroByte(t *testing.T) {
 	}
 }
 
+func TestUploadingUIHashStageDoesNotCountUploadedBytes(t *testing.T) {
+	ui := &UploadingUI{Info: UploadInfo{Size: 100}}
+	var stages []string
+	ui.ConfigureUploadStage(func(stage string, percent int) {
+		stages = append(stages, stage)
+	})
+	ui.ReportHashProgress(50, 100)
+	ui.ReportHashProgress(50, 100)
+	if ui.Upload.Stage != "hashing" || ui.Upload.StageProgress != 50 || ui.Upload.DownSize != 0 || ui.Upload.DownProcess != 0 || len(stages) != 1 {
+		t.Fatalf("hash progress = %+v; stages = %v", ui.Upload, stages)
+	}
+	ui.ReportUploadProgress(10, 100)
+	if ui.Upload.Stage != "uploading" || ui.Upload.DownProcess != 10 || len(stages) != 2 || stages[1] != "uploading" {
+		t.Fatalf("upload progress = %+v; stages = %v", ui.Upload, stages)
+	}
+}
+
 func TestFormatBytes(t *testing.T) {
 	if FormatBytes(0) != "0 B" {
 		t.Fatal("0")

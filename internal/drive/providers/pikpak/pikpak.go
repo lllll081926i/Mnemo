@@ -429,6 +429,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		markPikPakUploadFailed(ui, err)
 		return err
 	}
+	ui.ReportUploadStage("checking")
 	info, err := os.Stat(ui.Info.LocalFilePath)
 	if err != nil {
 		markPikPakUploadFailed(ui, err)

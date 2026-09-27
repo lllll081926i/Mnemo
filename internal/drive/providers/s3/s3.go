@@ -1012,9 +1012,12 @@ func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key s
 		return err
 	}
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
+	if _, err := io.Copy(hasher, driveutil.NewProgressOnlyReader(f, ui.Info.Size, func(read int64) {
+		ui.ReportHashProgress(read, ui.Info.Size)
+	})); err != nil {
 		return err
 	}
+	ui.ReportUploadStage("resuming")
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}

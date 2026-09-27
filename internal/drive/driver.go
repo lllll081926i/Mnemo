@@ -191,6 +191,10 @@ type RemoteFavorites interface {
 	ListFavorites(ctx context.Context, c Context) ([]model.File, error)
 }
 
+type WebEditor interface {
+	WebEditURL(ctx context.Context, c Context, fileID string) (string, error)
+}
+
 // Driver is the plugin contract every provider implements.
 // Only List is required; everything else is capability-gated and optional.
 type Driver interface {

@@ -161,6 +161,34 @@ func TestUploadQueueWaitReturnsTerminalResult(t *testing.T) {
 	}
 }
 
+func TestUploadQueueWithoutHashStartsUploadingDirectly(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewUploadQueue(st, nil)
+	defer q.Close()
+	started := make(chan string, 1)
+	q.handlerResolver = func(_, _ string) (func(context.Context, *model.UploadingUI) error, error) {
+		return func(ctx context.Context, ui *model.UploadingUI) error {
+			started <- ui.Upload.Stage
+			<-ctx.Done()
+			return ctx.Err()
+		}, nil
+	}
+	job := q.enqueue("user", "test-drive", "parent", "rename", "payload.bin", "payload.bin", 64)
+	select {
+	case stage := <-started:
+		if stage != "uploading" {
+			t.Fatalf("stage = %q, want uploading", stage)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upload worker did not start")
+	}
+	q.Cancel(job.UploadID)
+	waitUploadRunState(t, q, job.UploadID, false)
+}
+
 func TestUploadQueueWaitReturnsProviderFailure(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(dir)

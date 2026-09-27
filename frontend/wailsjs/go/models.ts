@@ -218,6 +218,8 @@ export namespace drive {
 	    trashRestore: boolean;
 	    trashPurge: boolean;
 	    trashClear: boolean;
+	    webEdit: boolean;
+	    trashWebUrl?: string;
 	    createShare: boolean;
 	    shareExpiration: boolean;
 	    shareExpirationOptions?: number[];
@@ -265,6 +267,8 @@ export namespace drive {
 	        this.trashRestore = source["trashRestore"];
 	        this.trashPurge = source["trashPurge"];
 	        this.trashClear = source["trashClear"];
+	        this.webEdit = source["webEdit"];
+	        this.trashWebUrl = source["trashWebUrl"];
 	        this.createShare = source["createShare"];
 	        this.shareExpiration = source["shareExpiration"];
 	        this.shareExpirationOptions = source["shareExpirationOptions"];
@@ -802,6 +806,8 @@ export namespace model {
 	}
 	
 	export class DownloadTask {
+	    stage?: string;
+	    stageProgress?: number;
 	    id: string;
 	    user_id: string;
 	    drive_id: string;
@@ -828,6 +834,8 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stage = source["stage"];
+	        this.stageProgress = source["stageProgress"];
 	        this.id = source["id"];
 	        this.user_id = source["user_id"];
 	        this.drive_id = source["drive_id"];
@@ -994,6 +1002,9 @@ export namespace model {
 	    }
 	}
 	export class MigrateJob {
+	    stage?: string;
+	    stageName?: string;
+	    stageProgress?: number;
 	    items?: Record<string, MigrateItem>;
 	    id: string;
 	    srcUser: string;
@@ -1022,6 +1033,9 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stage = source["stage"];
+	        this.stageName = source["stageName"];
+	        this.stageProgress = source["stageProgress"];
 	        this.items = this.convertValues(source["items"], MigrateItem, true);
 	        this.id = source["id"];
 	        this.srcUser = source["srcUser"];
@@ -1252,6 +1266,8 @@ export namespace model {
 	    }
 	}
 	export class UploadState {
+	    stage?: string;
+	    stageProgress?: number;
 	    DownState: string;
 	    DownTime: number;
 	    DownSize: number;
@@ -1275,6 +1291,8 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stage = source["stage"];
+	        this.stageProgress = source["stageProgress"];
 	        this.DownState = source["DownState"];
 	        this.DownTime = source["DownTime"];
 	        this.DownSize = source["DownSize"];

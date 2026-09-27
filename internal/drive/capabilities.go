@@ -19,15 +19,17 @@ type Capabilities struct {
 	CreateDateFolder bool `json:"createDateFolder"`
 	CreateTextFile   bool `json:"createTextFile"`
 
-	Rename          bool `json:"rename"`
-	Move            bool `json:"move"`
-	Copy            bool `json:"copy"`
-	RecycleBin      bool `json:"recycleBin"`
-	PermanentDelete bool `json:"permanentDelete"`
-	TrashView       bool `json:"trashView"`
-	TrashRestore    bool `json:"trashRestore"`
-	TrashPurge      bool `json:"trashPurge"`
-	TrashClear      bool `json:"trashClear"`
+	Rename          bool   `json:"rename"`
+	Move            bool   `json:"move"`
+	Copy            bool   `json:"copy"`
+	RecycleBin      bool   `json:"recycleBin"`
+	PermanentDelete bool   `json:"permanentDelete"`
+	TrashView       bool   `json:"trashView"`
+	TrashRestore    bool   `json:"trashRestore"`
+	TrashPurge      bool   `json:"trashPurge"`
+	TrashClear      bool   `json:"trashClear"`
+	WebEdit         bool   `json:"webEdit"`
+	TrashWebURL     string `json:"trashWebUrl,omitempty"`
 
 	CreateShare     bool `json:"createShare"`
 	ShareExpiration bool `json:"shareExpiration"`
@@ -161,6 +163,8 @@ func NewCapabilities(provider string, overrides map[string]bool, extra func(*Cap
 			caps.PermanentDelete = v
 		case "trashView":
 			caps.TrashView = v
+		case "webEdit":
+			caps.WebEdit = v
 		case "trashRestore":
 			caps.TrashRestore = v
 		case "trashPurge":

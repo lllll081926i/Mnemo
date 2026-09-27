@@ -10,6 +10,10 @@ export function ApplyUpdate(arg1) {
   return window['go']['app']['App']['ApplyUpdate'](arg1);
 }
 
+export function CachedPreviewDocumentURL(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CachedPreviewDocumentURL'](arg1, arg2, arg3);
+}
+
 export function CachedPreviewImageURL(arg1, arg2, arg3) {
   return window['go']['app']['App']['CachedPreviewImageURL'](arg1, arg2, arg3);
 }
@@ -260,6 +264,10 @@ export function OfflineDownload(arg1, arg2, arg3, arg4) {
 
 export function OpenBrowser(arg1) {
   return window['go']['app']['App']['OpenBrowser'](arg1);
+}
+
+export function OpenCloudEditor(arg1, arg2, arg3) {
+  return window['go']['app']['App']['OpenCloudEditor'](arg1, arg2, arg3);
 }
 
 export function OpenDownloadDirectory() {

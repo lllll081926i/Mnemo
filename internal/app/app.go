@@ -1635,16 +1635,31 @@ func (a *App) PreviewURL(userID, driveID, fileID string) (string, error) {
 }
 
 func (a *App) CachedPreviewImageURL(userID, driveID string, file model.File) (string, error) {
+	return a.cachedPreviewFileURL(userID, driveID, file, "image")
+}
+
+func (a *App) CachedPreviewDocumentURL(userID, driveID string, file model.File) (string, error) {
+	if file.Size > 64*1024*1024 {
+		return "", fmt.Errorf("文档超过缓存大小上限")
+	}
+	return a.cachedPreviewFileURL(userID, driveID, file, "document")
+}
+
+func (a *App) cachedPreviewFileURL(userID, driveID string, file model.File, kind string) (string, error) {
+	label := "图片"
+	if kind == "document" {
+		label = "文档"
+	}
 	if strings.TrimSpace(file.FileID) == "" || file.IsDir {
-		return "", fmt.Errorf("无效的图片文件")
+		return "", fmt.Errorf("无效的%s文件", label)
 	}
 	a.stateMu.RLock()
 	cache, mediaProxy := a.imageCache, a.preview
 	a.stateMu.RUnlock()
 	if cache == nil || mediaProxy == nil {
-		return "", fmt.Errorf("图片缓存不可用")
+		return "", fmt.Errorf("%s缓存不可用", label)
 	}
-	key := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%s", userID, driveID, file.FileID, file.Size, file.Time, file.ContentHash)
+	key := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s", kind, userID, driveID, file.FileID, file.Size, file.Time, file.ContentHash)
 	if path, ok := cache.Get(key); ok {
 		if local := mediaProxy.LocalURL(path); local != "" {
 			return local, nil
@@ -1660,7 +1675,7 @@ func (a *App) CachedPreviewImageURL(userID, driveID string, file model.File) (st
 	}
 	local := mediaProxy.LocalURL(path)
 	if local == "" {
-		return "", fmt.Errorf("无法读取图片缓存")
+		return "", fmt.Errorf("无法读取%s缓存", label)
 	}
 	return local, nil
 }

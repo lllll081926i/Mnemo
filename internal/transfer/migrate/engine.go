@@ -167,6 +167,9 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	job.ProcessedBytes = 0
 	job.Status = "running"
 	job.Message = ""
+	job.Stage = ""
+	job.StageName = ""
+	job.StageProgress = 0
 	if job.CreatedAt == 0 {
 		job.CreatedAt = time.Now().Unix()
 	}
@@ -201,6 +204,9 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 		e.emit(job)
 	}
 	job.Status = migrationResultStatus(job.Failed, succeeded, partial)
+	job.Stage = ""
+	job.StageName = ""
+	job.StageProgress = 0
 	job.UpdatedAt = time.Now().Unix()
 	e.saveJob(job)
 	e.emit(job)
@@ -235,6 +241,9 @@ func (e *Engine) finishCanceled(job *Job, cause error) error {
 		cause = context.Canceled
 	}
 	job.Status = "canceled"
+	job.Stage = ""
+	job.StageName = ""
+	job.StageProgress = 0
 	job.Message = cause.Error()
 	job.UpdatedAt = time.Now().Unix()
 	e.saveJob(job)
@@ -265,6 +274,9 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 	}
 	job.Items[fileID] = item
 	defer func() {
+		job.Stage = ""
+		job.StageName = ""
+		job.StageProgress = 0
 		item.TargetID = job.Items[fileID].TargetID
 		if resultErr != nil {
 			item.Status = "failed"
@@ -291,6 +303,10 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		if !srcFile.IsDir && (!item.SourceRecorded || item.Size != srcFile.Size || item.SourceTime != srcFile.Time || item.SourceHash != sourceHash(srcFile)) {
 			return newPartialMigrationError(errors.New("来源文件已变化或缺少原始记录，已保留来源，请核对后重新迁移"), 1)
 		}
+		job.Stage = "cleaning"
+		job.StageName = srcFile.Name
+		job.StageProgress = 0
+		e.emit(job)
 		if err := e.finalizeMove(ctx, job, srcFile); err != nil {
 			return err
 		}
@@ -304,6 +320,10 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 	job.Items[fileID] = item
 	e.emit(job)
 	if srcFile.IsDir {
+		job.Stage = "scanning"
+		job.StageName = srcFile.Name
+		job.StageProgress = 0
+		e.emit(job)
 		if err := e.migrateDir(ctx, job, srcFile, targetParent); err != nil {
 			return err
 		}
@@ -325,6 +345,10 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		// rapid upload failed — fall through to stream/spool.
 		job.ProcessedBytes = progressStart
 	}
+	job.Stage = "uploading"
+	job.StageName = srcFile.Name
+	job.StageProgress = 0
+	e.emit(job)
 
 	// 2) Attempt streaming migration; fall back to spool on failure.
 	if migrated, err := e.tryStreamMigrate(ctx, job, srcFile, targetParent); migrated {
@@ -361,6 +385,10 @@ func (e *Engine) completeResource(ctx context.Context, job *Job, srcFile *model.
 		if err := e.markCopied(job, srcFile.FileID); err != nil {
 			return newPartialMigrationError(fmt.Errorf("目标已复制，但恢复记录保存失败，已保留来源: %w", err), 1)
 		}
+		job.Stage = "cleaning"
+		job.StageName = srcFile.Name
+		job.StageProgress = 0
+		e.emit(job)
 		if err := e.finalizeMove(ctx, job, srcFile); err != nil {
 			return err
 		}
@@ -394,6 +422,10 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 	if method == "" {
 		return false, nil
 	}
+	job.Stage = "hashing"
+	job.StageName = srcFile.Name
+	job.StageProgress = 0
+	e.emit(job)
 
 	// resolve the source file's hash (allowStream=true lets the provider
 	// download+hash when no precomputed fingerprint exists).
@@ -404,6 +436,9 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 	if strings.TrimSpace(hash) == "" {
 		return true, fmt.Errorf("rapid: resolve hash %s returned empty hash", method)
 	}
+	job.Stage = "checking"
+	job.StageProgress = 0
+	e.emit(job)
 
 	// attempt秒传 on the target.
 	result, err := drive.RapidUploadByHashContext(ctx, job.DstUser, job.DstDrive, drive.RapidUploadRequest{
@@ -532,6 +567,9 @@ func streamMigration(ctx context.Context, dl *model.DownloadURL, job *Job, uploa
 // spoolMigrate downloads the source to a temp file then uploads it to the
 // target. This is the legacy/fallback path.
 func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File, targetParent string) error {
+	job.Stage = "downloading"
+	job.StageProgress = 0
+	e.emit(job)
 	// resolve download url
 	dl, err := drive.GetDownloadURLContext(ctx, job.SrcUser, job.SrcDrive, srcFile.FileID, 3600)
 	if err != nil {
@@ -565,6 +603,23 @@ func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File
 			ConflictPolicy: driveutil.ConflictPolicyRename,
 		},
 	}
+	job.Stage = "local-upload"
+	job.StageProgress = 0
+	e.emit(job)
+	ui.ConfigureUploadStage(func(stage string, percent int) {
+		if job.Stage != stage || job.StageProgress != percent {
+			job.Stage = stage
+			job.StageProgress = percent
+			e.emit(job)
+		}
+	})
+	ui.ConfigureUploadRuntime(func(_ int64, percent int) {
+		if job.Stage != "local-upload" || job.StageProgress != percent {
+			job.Stage = "local-upload"
+			job.StageProgress = percent
+			e.emit(job)
+		}
+	}, func() bool { return ctx.Err() != nil })
 	handler, err := drive.QueueUploadHandlerContext(ctx, job.DstUser, job.DstDrive)
 	if err != nil {
 		return err

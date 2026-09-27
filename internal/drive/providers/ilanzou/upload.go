@@ -40,7 +40,7 @@ func fileMD5(path string, ui *model.UploadingUI) (string, error) {
 			h.Write(buf[:n])
 			read += int64(n)
 			if ui != nil {
-				ui.ReportUploadProgress(read, ui.Info.Size)
+				ui.ReportHashProgress(read, ui.Info.Size)
 			}
 		}
 		if err == io.EOF {
@@ -254,6 +254,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if md5hex == "" {
 		return errors.New("计算 MD5 失败")
 	}
+	ui.ReportUploadStage("checking")
 	stat, err := os.Stat(ui.Info.LocalFilePath)
 	if err != nil {
 		return err

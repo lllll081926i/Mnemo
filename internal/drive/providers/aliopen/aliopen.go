@@ -2009,7 +2009,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if contentHash == "" {
 		contentHash, err = netx.HashFileWithProgress(ui.Info.LocalFilePath, netx.HashSHA1, func(read int64) {
 			if ui != nil {
-				ui.ReportUploadProgress(read, ui.Info.Size)
+				ui.ReportHashProgress(read, ui.Info.Size)
 			}
 		}, 0)
 		if err != nil {
@@ -2018,6 +2018,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		contentHash = strings.ToUpper(contentHash)
 		ui.Info.SHA1 = contentHash
 	}
+	ui.ReportUploadStage("checking")
 	partSize := aliOpenPartSize(size)
 	partCount := aliOpenPartCount(size, partSize)
 	// Legacy name/size-only sessions cannot prove that their parts belong to

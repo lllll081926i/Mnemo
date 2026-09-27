@@ -31,10 +31,12 @@ func init() {
 			"shareHistory":    true,
 			"recycleBin":      true,
 			"permanentDelete": true,
-			"trashRestore":    false,
+			"trashView":       true,
+			"trashRestore":    true,
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"md5"}, []string{"md5"})
 			c.SetShareExpirationOptions(0, 1, 7)
+			c.TrashWebURL = "https://cloud.189.cn/web/main/file"
 		}),
 		Auth: login189,
 		Login: drive.LoginConfig{Fields: []drive.LoginField{

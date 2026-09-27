@@ -96,6 +96,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return errors.New("读取上传文件失败: " + err.Error())
 		}
 		contentH.Write(buf)
+		ui.ReportHashProgress(start+cur, size)
 		blockList = append(blockList, md5Hex(buf))
 		if sliceLeft > 0 {
 			take := sliceLeft
@@ -107,6 +108,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 	}
 	contentMD5 := hex.EncodeToString(contentH.Sum(nil))
+	ui.ReportUploadStage("checking")
 	sliceMD5 := hex.EncodeToString(sliceH.Sum(nil))
 	blockListJSON, _ := json.Marshal(blockList)
 	pathName := "/" + ui.Info.Name

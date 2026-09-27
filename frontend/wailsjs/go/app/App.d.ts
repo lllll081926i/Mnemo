@@ -10,6 +10,8 @@ export function AddFavorite(arg1:string,arg2:string,arg3:store.Favorite):Promise
 
 export function ApplyUpdate(arg1:string):Promise<void>;
 
+export function CachedPreviewDocumentURL(arg1:string,arg2:string,arg3:model.File):Promise<string>;
+
 export function CachedPreviewImageURL(arg1:string,arg2:string,arg3:model.File):Promise<string>;
 
 export function CancelDownload(arg1:string):Promise<void>;
@@ -135,6 +137,8 @@ export function MoveFiles(arg1:string,arg2:string,arg3:Array<string>,arg4:string
 export function OfflineDownload(arg1:string,arg2:string,arg3:string,arg4:string):Promise<model.OfflineTask>;
 
 export function OpenBrowser(arg1:string):Promise<void>;
+
+export function OpenCloudEditor(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function OpenDownloadDirectory():Promise<void>;
 

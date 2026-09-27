@@ -146,7 +146,7 @@ func fileMD5(path string, ui *model.UploadingUI) (string, error) {
 			h.Write(buf[:n])
 			read += int64(n)
 			if ui != nil {
-				ui.ReportUploadProgress(read, ui.Info.Size)
+				ui.ReportHashProgress(read, ui.Info.Size)
 			}
 		}
 		if err == io.EOF {
@@ -336,6 +336,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		mark(false, true, "计算 MD5 失败")
 		return errors.New("计算 MD5 失败")
 	}
+	ui.ReportUploadStage("checking")
 	if stopped(ctx, ui) {
 		markStopped(ui)
 		return ctx.Err()

@@ -56,6 +56,12 @@ func TestPauseCancelsDownloadURLResolution(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("resolver not entered")
 	}
+	m.mu.Lock()
+	stage := task.Stage
+	m.mu.Unlock()
+	if stage != "resolving" {
+		t.Fatalf("download stage = %q, want resolving", stage)
+	}
 	m.Pause(task.ID)
 	select {
 	case <-done:

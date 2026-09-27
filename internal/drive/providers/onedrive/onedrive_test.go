@@ -30,6 +30,45 @@ func onedriveResponse(req *http.Request, status int, body string) *http.Response
 	}
 }
 
+func TestPersonalRestoreUsesGraphAndBusinessRemainsUnsupported(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	netx.TestTransportHook = onedriveRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Path != "/v1.0/me/drive/items/deleted-1/restore" {
+			t.Fatalf("unexpected restore request: %s %s", req.Method, req.URL)
+		}
+		return onedriveResponse(req, http.StatusOK, `{"id":"deleted-1"}`), nil
+	})
+	driver := &Driver{}
+	account := drive.Context{Token: &model.TokenInfo{AccessToken: "token", ProviderDriveType: "personal"}}
+	restored, err := driver.Restore(t.Context(), account, []string{"deleted-1"})
+	if err != nil || len(restored) != 1 || restored[0] != "deleted-1" {
+		t.Fatalf("restore = %v, %v", restored, err)
+	}
+	account.Token.ProviderDriveType = "business"
+	if _, err := driver.Restore(t.Context(), account, []string{"deleted-1"}); err == nil {
+		t.Fatal("business restore must not use the personal-only Graph API")
+	}
+}
+
+func TestWebEditorRejectsForeignURL(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	netx.TestTransportHook = onedriveRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1.0/me/drive/items/file-1" {
+			t.Fatalf("unexpected editor request: %s", req.URL)
+		}
+		return onedriveResponse(req, http.StatusOK, `{"webUrl":"https://evil.example/file"}`), nil
+	})
+	account := drive.Context{Token: &model.TokenInfo{AccessToken: "token"}}
+	if _, err := (&Driver{}).WebEditURL(t.Context(), account, "file-1"); err == nil {
+		t.Fatal("foreign editor URL accepted")
+	}
+	if !trustedOneDriveEditorURL("https://onedrive.live.com/?id=file") || !trustedOneDriveEditorURL("https://tenant-my.sharepoint.com/personal/file") {
+		t.Fatal("trusted OneDrive editor URLs rejected")
+	}
+}
+
 func TestFavoritesRejectUnknownAccountTypeAndMalformedList(t *testing.T) {
 	d := &Driver{}
 	ctx := drive.Context{DriveID: "local", Token: &model.TokenInfo{AccessToken: "token", ProviderDriveType: "unexpected"}}
