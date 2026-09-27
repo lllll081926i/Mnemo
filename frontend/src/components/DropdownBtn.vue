@@ -5,6 +5,8 @@ import { ref } from 'vue'
 import ContextMenu from './ContextMenu.vue'
 import UiIcon from './UiIcon.vue'
 
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps({
   label: { type: String, required: true },
   icon: { type: String, default: '' },
@@ -35,11 +37,14 @@ function onSelect(action) {
 <template>
   <button
     ref="btnEl"
+    v-bind="$attrs"
     type="button"
     class="tbtn dropbtn"
     :class="{ open }"
     :disabled="disabled"
     :title="title || label"
+    aria-haspopup="menu"
+    :aria-expanded="open"
     @click="toggle"
   >
     <UiIcon v-if="icon" :name="icon" :size="15" />
