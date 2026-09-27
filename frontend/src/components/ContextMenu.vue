@@ -7,6 +7,7 @@ const props = defineProps({
   x: { type: Number, required: true },
   y: { type: Number, required: true },
   items: { type: Array, required: true },
+  trigger: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'select'])
 const menuEl = ref(null)
@@ -55,7 +56,7 @@ function focusActive() {
 }
 
 function onPointerDown(e) {
-  if (!menuEl.value?.contains(e.target)) emit('close')
+  if (!menuEl.value?.contains(e.target) && !props.trigger?.contains(e.target)) emit('close')
 }
 function activate(sourceIndex) {
   const index = actionableItems.value.findIndex(entry => entry.sourceIndex === sourceIndex)
@@ -106,7 +107,7 @@ function onResize() {
   measure()
 }
 function onFocusIn(e) {
-  if (!menuEl.value?.contains(e.target)) emit('close')
+  if (!menuEl.value?.contains(e.target) && !props.trigger?.contains(e.target)) emit('close')
 }
 
 watch(() => [props.x, props.y, props.items], () => {

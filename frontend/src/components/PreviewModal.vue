@@ -2,10 +2,11 @@
 // 高级预览弹窗：
 // 1. 图片画廊（缩放/拖拽平移/90度旋转/翻页/胶卷条）
 // 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
-// 3. 音频播放；PDF 与新版 Office 文档只读预览
+// 3. 音频播放；PDF 与新版 Office 文档站内只读预览，支持时跳转官网编辑
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
-import { PreviewURL, cachedPreviewImageURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, copyText, iconOf, getPlayCursor, savePlayCursor, onEvent } from '../api'
+import { PreviewURL, cachedPreviewImageURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, openCloudEditor, copyText, iconOf, getPlayCursor, savePlayCursor, onEvent } from '../api'
 import { getPrefs } from '../appearance'
+import { useSeekDisplay } from '../player/seek-display'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
@@ -17,6 +18,7 @@ const props = defineProps({
   account: { type: Object, required: true },
   file: { type: Object, required: true },
   fileList: { type: Array, default: () => [] },
+  capabilities: { type: Object, default: () => ({}) },
   backgroundAudio: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'toast', 'saved', 'background-audio', 'stop-close'])
@@ -24,6 +26,11 @@ const emit = defineEmits(['close', 'toast', 'saved', 'background-audio', 'stop-c
 const activeFile = ref(props.file)
 const kind = computed(() => openKindOf(activeFile.value))
 const isImmersive = computed(() => kind.value === 'image' || kind.value === 'audio')
+const canWebEdit = computed(() => props.capabilities.webEdit && documentKinds.has(kind.value))
+async function editInBrowser() {
+  try { await openCloudEditor(props.account.user_id, props.account.drive_id, activeFile.value.file_id) }
+  catch (cause) { emit('toast', `无法打开网页编辑器：${String(cause?.message || cause)}`) }
+}
 
 const url = ref('')
 const text = ref('')
@@ -207,26 +214,27 @@ function cachedImage(key) {
 }
 
 async function prepareImage(file) {
+  const userID = props.account.user_id, driveID = props.account.drive_id
   const key = imageCacheKey(file)
   const cached = cachedImage(key)
   if (cached) return cached
   if (imageLoads.has(key)) return imageLoads.get(key)
   const generation = cacheGeneration
   const task = (async () => {
-    await PinFileSnapshot(props.account.user_id, props.account.drive_id, file)
+    await PinFileSnapshot(userID, driveID, file)
     let previewUrl
     try {
       if (file.size > IMAGE_DISK_MAX_FILE_BYTES) throw new Error('图片超过单文件缓存上限')
-      previewUrl = await cachedPreviewImageURL(props.account.user_id, props.account.drive_id, file)
+      previewUrl = await cachedPreviewImageURL(userID, driveID, file)
     } catch {
-      previewUrl = await PreviewURL(props.account.user_id, props.account.drive_id, file.file_id)
+      previewUrl = await PreviewURL(userID, driveID, file.file_id)
     }
     let bitmap
     try {
       bitmap = await loadImageBitmap(previewUrl)
     } catch (cause) {
       if (!previewUrl.includes('/local/')) throw cause
-      previewUrl = await PreviewURL(props.account.user_id, props.account.drive_id, file.file_id)
+      previewUrl = await PreviewURL(userID, driveID, file.file_id)
       bitmap = await loadImageBitmap(previewUrl)
     }
     const entry = { url: previewUrl, bitmap, w: bitmap.naturalWidth, h: bitmap.naturalHeight }
@@ -291,6 +299,9 @@ const audioIdx = computed(() => audioList.value.findIndex((f) => f.file_id === a
 const audioEl = ref(null)
 const audioPlaying = ref(false)
 const audioPos = ref(0)
+const audioSeekDisplay = useSeekDisplay(audioPos)
+const audioDisplayPos = audioSeekDisplay.display
+let audioSeekDragging = false
 const audioDur = ref(0)
 const audioBuffered = ref(0)
 const audioVolume = ref(Math.min(200, Math.max(0, getPrefs().defaultVolume ?? 100)))
@@ -311,7 +322,7 @@ const audioExt = computed(() => {
   const i = n.lastIndexOf('.')
   return i > 0 ? n.slice(i + 1).toUpperCase() : 'AUDIO'
 })
-const audioPct = computed(() => (audioDur.value ? (audioPos.value / audioDur.value) * 100 : 0))
+const audioPct = computed(() => (audioDur.value ? (audioDisplayPos.value / audioDur.value) * 100 : 0))
 const audioBufPct = computed(() => (audioDur.value ? Math.min(100, (audioBuffered.value / audioDur.value) * 100) : 0))
 
 function fmtClock(seconds) {
@@ -392,21 +403,35 @@ function toggleAudioPlay() {
 function audioSeekBy(delta) {
   const el = audioEl.value
   if (!el || !audioDur.value) return
-  el.currentTime = Math.min(Math.max(0, audioDur.value - 0.2), Math.max(0, el.currentTime + delta))
-  audioPos.value = el.currentTime
+  const target = Math.min(Math.max(0, audioDur.value - 0.2), Math.max(0, audioDisplayPos.value + delta))
+  audioSeekDisplay.commit(target)
+  el.currentTime = target
 }
 
 function onAudioSeekInput(e) {
   const el = audioEl.value
   if (!el) return
-  el.currentTime = Number(e.target.value)
-  audioPos.value = el.currentTime
+  const target = Number(e.target.value)
+  if (audioSeekDragging) {
+    audioSeekDisplay.showPreview(target)
+  } else {
+    audioSeekDisplay.commit(target)
+    el.currentTime = target
+  }
+}
+
+function onAudioSeekCommit(e) {
+  if (!audioSeekDragging) return
+  audioSeekDragging = false
+  const target = Number(e.target.value)
+  audioSeekDisplay.commit(target)
+  if (audioEl.value) audioEl.value.currentTime = target
 }
 
 function onAudioTime() {
   const el = audioEl.value
   if (!el) return
-  audioPos.value = el.currentTime
+  audioSeekDisplay.sync(el.currentTime)
   try {
     if (el.buffered.length) audioBuffered.value = el.buffered.end(el.buffered.length - 1)
   } catch { /* ignore */ }
@@ -834,6 +859,8 @@ async function loadPreview() {
       const resume = await getPlayCursor(userID, driveID, file.file_id).catch(() => 0)
       if (seq !== loadSeq) return
       pendingAudioResume = resume
+      audioSeekDisplay.reset()
+      audioSeekDragging = false
       audioPos.value = 0
       audioDur.value = 0
       audioBuffered.value = 0
@@ -909,8 +936,12 @@ watch(stageEl, (el) => {
 onBeforeUnmount(() => {
   ++loadSeq
   ++imgSeq
-  stopCacheCleared?.()
+  cacheGeneration++
+  imageLoads.clear()
   imageCache.clear()
+  cachedPixels = 0
+  audioSeekDisplay.reset()
+  stopCacheCleared?.()
   textController?.abort()
   window.removeEventListener('keydown', onKey)
   clearTimeout(idleTimer)
@@ -996,8 +1027,6 @@ function decodeText(buf) {
           </div>
           <div class="pv-head-sub">
             <span>{{ formatBytes(activeFile.size) }}</span>
-            <span class="pv-head-sep">·</span>
-            <span>修改时间: {{ formatTime(activeFile.time) }}</span>
             <template v-if="kind === 'text'">
               <span class="pv-head-sep">·</span>
               <span class="pv-head-pill">{{ langMeta }}</span>
@@ -1005,6 +1034,7 @@ function decodeText(buf) {
             </template>
           </div>
         </div>
+        <button v-if="canWebEdit" type="button" class="btn sm pv-web-edit" title="在网盘官网打开，需在浏览器中登录同一账号；编辑能力由官网决定" @click="editInBrowser">{{ kind === 'pdf' ? '官网打开' : '官网编辑' }}</button>
       </div>
     </template>
 
@@ -1225,10 +1255,10 @@ function decodeText(buf) {
               <div class="pv-audio-buffer" :style="{ width: audioBufPct + '%' }"></div>
               <div class="pv-audio-fill" :style="{ width: audioPct + '%' }"><span class="pv-audio-thumb"></span></div>
             </div>
-            <input type="range" min="0" :max="audioDur || 0" step="0.1" :value="audioPos" aria-label="播放进度" @input="onAudioSeekInput" />
+            <input type="range" min="0" :max="audioDur || 0" step="0.1" :value="audioDisplayPos" aria-label="播放进度" @pointerdown="audioSeekDragging = true" @pointerup="onAudioSeekCommit" @pointercancel="onAudioSeekCommit" @change="onAudioSeekCommit" @blur="onAudioSeekCommit" @input="onAudioSeekInput" />
           </div>
           <div class="pv-audio-times">
-            <span>{{ fmtClock(audioPos) }}</span>
+            <span>{{ fmtClock(audioDisplayPos) }}</span>
             <span>{{ fmtClock(audioDur) }}</span>
           </div>
           <div class="pv-audio-controls">
@@ -1410,7 +1440,7 @@ function decodeText(buf) {
 .pv-head-custom {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
@@ -1418,21 +1448,22 @@ function decodeText(buf) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   flex-shrink: 0;
 }
 .pv-head-meta {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
   flex: 1;
 }
+.pv-web-edit { flex: none; margin-right: 8px; --wails-draggable: no-drag; }
 .pv-head-title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
@@ -1451,9 +1482,10 @@ function decodeText(buf) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-tertiary);
   white-space: nowrap;
+  flex: none;
 }
 .pv-head-sep { opacity: 0.6; }
 .pv-head-pill {
@@ -2061,7 +2093,7 @@ function decodeText(buf) {
 }
 
 /* 图片与音频共用48px标题栏，右上角窗口按钮无外侧留白。 */
-.pv-topbar { position: relative; flex: 0 0 48px; align-items: center; gap: 12px; padding: 0 0 0 18px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); }
+.pv-topbar { position: relative; flex: 0 0 32px; align-items: center; gap: 8px; padding: 0 0 0 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); }
 .pv-topbar-meta { flex: 1; min-width: 0; gap: 12px; padding: 0; color: var(--text-primary); }
 .pv-topbar-meta > :deep(svg) { color: var(--color-primary); }
 .pv-topbar-name { font-size: 13px; font-weight: 600; text-shadow: none; }

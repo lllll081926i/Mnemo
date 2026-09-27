@@ -96,6 +96,12 @@ function changeZoom(step) {
   void renderPage()
 }
 
+async function retryPDF() {
+  error.value = ''
+  if (document && pages.value) { await nextTick(); await renderPage() }
+  else await openPDF()
+}
+
 onMounted(() => {
   if (stage.value && typeof ResizeObserver !== 'undefined') {
     stageObserver = new ResizeObserver(fitOnResize)
@@ -132,7 +138,7 @@ onBeforeUnmount(() => {
       <span v-if="error">{{ error }}</span>
     </div>
     <div v-else-if="loading" class="document-state"><span class="spin"></span>正在解析 PDF…</div>
-    <div v-else-if="error" class="document-state" role="alert">{{ error }}</div>
+    <div v-else-if="error" class="document-state" role="alert"><span>{{ error }}</span><button class="btn sm" type="button" @click="retryPDF">重试</button></div>
     <div v-show="!loading && !error && !passwordRequired" ref="stage" class="pdf-stage"><canvas ref="canvas"></canvas></div>
   </div>
 </template>

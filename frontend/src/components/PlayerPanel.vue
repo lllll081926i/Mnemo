@@ -5,6 +5,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCursor, getSettings, previewUrl, download, openKindOf } from '../api'
 import { getPrefs } from '../appearance'
 import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
+import { useSeekDisplay } from '../player/seek-display'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 
@@ -23,6 +24,9 @@ const loading = ref(true)
 const error = ref('')
 const playing = ref(false)
 const position = ref(0)
+const seekDisplay = useSeekDisplay(position)
+const displayPosition = seekDisplay.display
+let seekDragging = false
 const duration = ref(0)
 const buffered = ref(0)
 const volume = ref(Math.min(200, Math.max(0, getPrefs().defaultVolume ?? 100)))
@@ -134,6 +138,7 @@ watch(() => [props.account.user_id, props.account.drive_id, props.file?.file_id]
 })
 onBeforeUnmount(() => {
   unmounted = true
+  seekDisplay.reset()
   playbackSeq++
   sourceSeq++
   saveCursor()
@@ -161,6 +166,8 @@ function isVideoFile(file) {
 
 async function startPlayback() {
   const seq = ++playbackSeq
+  seekDisplay.reset()
+  seekDragging = false
   const { user_id: userID, drive_id: driveID } = props.account
   const file = props.file
   sourceSeq++
@@ -502,7 +509,7 @@ function onTimeUpdate() {
   const v = videoEl.value
   if (!v) return
   if (playbackEnded && (!Number.isFinite(v.duration) || v.currentTime < v.duration)) playbackEnded = false
-  position.value = v.currentTime + tsTimeBase
+  seekDisplay.sync(v.currentTime + tsTimeBase)
   updateBuffered(v)
   if (supActive.value) renderSupFrame()
 }
@@ -583,7 +590,7 @@ function togglePlay() {
 function seek(delta) {
   const v = videoEl.value
   if (!v) return
-  seekTo(position.value + delta)
+  seekTo(displayPosition.value + delta)
 }
 
 function seekTo(requested) {
@@ -593,6 +600,7 @@ function seekTo(requested) {
   tsSeekController = null
   const total = Number.isFinite(v.duration) ? v.duration : duration.value
   const target = Math.max(0, total > 0 ? Math.min(total, requested) : requested)
+  seekDisplay.commit(target)
   if (tsPlayer && target > 0) {
     let bufferedTarget = false
     for (let i = 0; i < v.buffered.length; i++) {
@@ -639,6 +647,7 @@ async function seekTS(target, autoplay) {
   } catch (e) {
     if (unmounted || requestID !== tsSeekSequence || controller.signal.aborted) return
     isBuffering.value = false
+    seekDisplay.reset()
     position.value = (videoEl.value?.currentTime || 0) + tsTimeBase
     emit('toast', readablePlaybackError(e), 'error')
   } finally {
@@ -647,7 +656,18 @@ async function seekTS(target, autoplay) {
 }
 
 function onSeekInput(e) {
-  if (!seekTo(Number(e.target.value))) e.target.value = String(position.value)
+  const target = Number(e.target.value)
+  if (seekDragging) {
+    seekDisplay.showPreview(target)
+  } else if (!seekTo(target)) {
+    e.target.value = String(displayPosition.value)
+  }
+}
+
+function onSeekCommit(e) {
+  if (!seekDragging) return
+  seekDragging = false
+  if (!seekTo(Number(e.target.value))) seekDisplay.reset()
 }
 
 function onVolume(e) {
@@ -1280,7 +1300,7 @@ function fmtTime(seconds) {
   return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
 }
 
-const pct = computed(() => duration.value > 0 ? Math.min(100, (position.value / duration.value) * 100) : 0)
+const pct = computed(() => duration.value > 0 ? Math.min(100, (displayPosition.value / duration.value) * 100) : 0)
 const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value / duration.value) * 100) : 0)
 </script>
 
@@ -1381,7 +1401,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         <div class="pp-media-mark"><UiIcon name="video" :size="20" /></div>
         <div class="pp-file-meta pp-window-drag">
           <div class="pp-title" :title="file.name">{{ file.name }}</div>
-          <div class="pp-sub">{{ currentQualityLabel }}<span v-if="episodeFiles.length > 1"> · 第 {{ episodeIndex + 1 }} 集 / 共 {{ episodeFiles.length }} 集</span></div>
+          <div class="pp-sub">{{ currentQualityLabel }}<span v-if="episodeFiles.length > 1"> · {{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
         </div>
         <div class="pp-top-actions">
           <div v-if="!isFullscreen" class="pp-window-controls" aria-label="窗口控制">
@@ -1408,7 +1428,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
           <div v-if="scrubVisible" class="pp-scrub" :style="{ left: scrubX + '%' }">
             <span>{{ fmtTime(scrubTime) }}</span>
           </div>
-          <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="position" aria-label="播放进度" @input="onSeekInput" />
+          <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="displayPosition" aria-label="播放进度" @pointerdown="seekDragging = true" @pointerup="onSeekCommit" @pointercancel="onSeekCommit" @change="onSeekCommit" @blur="onSeekCommit" @input="onSeekInput" />
         </div>
 
         <div class="pp-controls">
@@ -1423,7 +1443,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
                 <span class="pp-vol-value">{{ muted ? 0 : volume }}%</span>
               </div>
             </div>
-            <span class="pp-time">{{ fmtTime(position) }}<i>/</i>{{ fmtTime(duration) }}</span>
+            <span class="pp-time">{{ fmtTime(displayPosition) }}<i>/</i>{{ fmtTime(duration) }}</span>
           </div>
 
           <div class="pp-group pp-right">
@@ -1535,9 +1555,9 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 .pp-sup-canvas { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .pp-hidden-input { display: none; }
 .player-panel.cursor-hidden .pp-stage { cursor: none; }
-.pp-topbar { position: absolute; z-index: 3; top: 0; left: 0; right: 0; height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 0 0 18px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); --wails-draggable: drag; }
+.pp-topbar { position: absolute; z-index: 3; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 0 0 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); --wails-draggable: drag; }
 .pp-media-mark { display: flex; align-items: center; color: var(--color-primary); }
-.pp-file-meta { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 16px; }
+.pp-file-meta { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .pp-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; line-height: 1.5; }
 .pp-sub { flex-shrink: 0; color: var(--pp-dim); font-size: 11px; }
 .pp-top-actions { display: flex; align-self: stretch; flex-shrink: 0; }

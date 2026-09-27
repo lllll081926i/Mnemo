@@ -1,6 +1,7 @@
 /* Mnemo-Go main styles — token-driven, polished. */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #app { height: 100%; }
+:root { --toolbar-control-height: 30px; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: var(--bg-base);
@@ -39,7 +40,7 @@ body {
 /* ============ 应用外壳 ============ */
 .app-shell { display: flex; flex-direction: column; height: 100%; }
 
-/* 48px 顶栏：品牌 + 主 tab + 弹性拖动区 + 设置 */
+/* 42px 顶栏：品牌 + 主 tab + 弹性拖动区 + 常用入口 */
 .topbar {
   height: 42px; flex-shrink: 0;
   display: flex; align-items: center; gap: 6px;
@@ -152,21 +153,18 @@ html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .pp-wi
 .page-host { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 .page-host > * { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .page-view { flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
-/* 页面切换：左右滑动，弹簧滑入 + 轻微缩放落位 */
+/* 页面切换不叠加半透明旧页，避免侧栏旁出现短暂的虚化残影。 */
 .page-slide-left-enter-active, .page-slide-right-enter-active {
-  transition: opacity 200ms var(--motion-ease), transform 300ms var(--motion-glide);
+  transition: transform 260ms var(--motion-ease);
 }
 .page-slide-left-leave-active, .page-slide-right-leave-active {
-  transition: opacity 150ms ease, transform 170ms ease;
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  pointer-events: none;
+  transition: none;
 }
-.page-slide-left-enter-from { opacity: 0; transform: translateX(14px); }
-.page-slide-left-leave-to { opacity: 0; transform: translateX(-7px); }
-.page-slide-right-enter-from { opacity: 0; transform: translateX(-14px); }
-.page-slide-right-leave-to { opacity: 0; transform: translateX(7px); }
+.page-slide-left-enter-from { transform: translateX(20px); }
+.page-slide-right-enter-from { transform: translateX(-20px); }
+@media (prefers-reduced-motion: reduce) {
+  .page-slide-left-enter-active, .page-slide-right-enter-active { transition: none; }
+}
 
 /* ============ 账号栏（60px 窄栏，悬停展开 220px，复刻旧版） ============ */
 .account-rail {
@@ -457,6 +455,10 @@ html.dark .account-rail .rail-active-indicator {
   box-shadow: 0 0 5px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 .pan-right { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.directory-stale { display: flex; align-items: center; gap: 8px; flex: none; min-height: 34px; padding: 5px 14px; border-bottom: 1px solid var(--border-light); background: var(--bg-subtle); color: var(--color-warning); font-size: 12px; }
+.directory-stale span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.directory-stale button { margin-left: auto; flex: none; border: 0; background: transparent; color: var(--color-primary); font: inherit; font-weight: 600; cursor: pointer; }
+.directory-stale button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 .tree-node {
   display: flex; align-items: center; gap: 7px;
@@ -466,6 +468,8 @@ html.dark .account-rail .rail-active-indicator {
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 .tree-node:hover { background: var(--bg-hover); }
+.tree-node[type="button"] { width: 100%; border: 0; background: transparent; text-align: left; font-family: inherit; }
+.tree-node[type="button"]:hover { background: var(--bg-hover); }
 .tree-node .tn-arrow { width: 14px; flex-shrink: 0; font-size: 11px; color: var(--text-tertiary); text-align: center; transition: transform .15s; }
 .tree-node .tn-arrow.open { transform: rotate(90deg); }
 .tree-node .tn-label { overflow: hidden; text-overflow: ellipsis; }
@@ -561,6 +565,8 @@ html.dark .account-rail .rail-active-indicator {
   height: min(760px, 82vh);
   max-height: 82vh;
 }
+.modal.preview-modal .modal-head { min-height: 32px; padding-left: 12px; }
+.modal.preview-modal .modal-window-btn { height: 32px; }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   min-height: 52px;
@@ -1075,6 +1081,8 @@ html.dark .account-rail .rail-active-indicator {
   overflow-x: auto; scrollbar-width: none;
 }
 .toppanbtns::-webkit-scrollbar { display: none; }
+.pan-file-toolbar { flex-wrap: wrap; overflow: visible; gap: 4px; }
+.pan-file-toolbar .toppanbtn { margin-right: 6px; }
 .toppanbtn { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 0 0 auto; margin-right: 12px; }
 .toppanbtn:last-child { margin-right: 0; }
 .toolbar-spacer { flex: 1 1 auto; }
@@ -1160,6 +1168,7 @@ html.dark .account-rail .rail-active-indicator {
 /* 选择管理组（全选框 + 已选中计数 + 区间/反向/取消） */
 .sel-mgmt { gap: 6px; }
 .sel-mgmt .selectInfo { font-size: 13px; white-space: nowrap; color: var(--text-secondary); }
+.pan-file-toolbar .selection-active { color: var(--color-primary); border-color: var(--color-primary); background: var(--bg-active); }
 
 /* 方形复选框（列表行/网格项/全选共用）：未选中=空方框，选中=主色填充+勾 */
 .rangselect { flex: 0 0 34px; width: 34px; display: flex; align-items: center; justify-content: center; }
@@ -1189,6 +1198,24 @@ html.dark .account-rail .rail-active-indicator {
 .view-switch .vs-btn + .vs-btn { border-left: 1px solid var(--border-lighter); }
 .view-switch .vs-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .view-switch .vs-btn.on { color: var(--color-primary); background: var(--bg-active); }
+
+:is(.toppanbtns, .share-toolbar, .syncpage-head, .workspace-controls, .import-file-toolbar, .document-toolbar, .spreadsheet-toolbar, .pptx-toolbar, .pv-toolbar) :is(.tbtn, .btn, .search-quick) {
+  height: var(--toolbar-control-height);
+  min-height: var(--toolbar-control-height);
+  font-size: 13.5px;
+  border-radius: var(--radius-md);
+}
+.toppanbtns .toppanbtn :is(.tbtn.sm, .tbtn.xs) {
+  height: var(--toolbar-control-height);
+  min-height: var(--toolbar-control-height);
+  font-size: 13.5px;
+}
+.toppanbtns .view-switch { height: var(--toolbar-control-height); }
+.toppanbtns .view-switch .vs-btn { height: calc(var(--toolbar-control-height) - 2px); }
+.toppanbtns .toppanbtn .tbtn.icon { width: var(--toolbar-control-height); }
+.pv-toolbar :is(.pv-mode-seg, .pv-font-size-group) { height: var(--toolbar-control-height); }
+.pv-toolbar .pv-mode-seg .pv-seg-btn { height: calc(var(--toolbar-control-height) - 5px); }
+.pv-toolbar .pv-font-size-group .tbtn { height: calc(var(--toolbar-control-height) - 2px); min-height: 0; }
 
 /* 圆形小图标钮（传输/播放/分享/同步等通用） */
 .btn-circle {

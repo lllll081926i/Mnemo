@@ -1,6 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { PinFileSnapshot, PreviewURL } from '../api'
+import { PinFileSnapshot, PreviewURL, cachedPreviewDocumentURL } from '../api'
 import { DOCUMENT_LIMITS, readDocumentBytes } from '../documentPreview'
 
 const props = defineProps({ account: Object, file: Object, kind: String })
@@ -27,7 +27,12 @@ async function load() {
     if (props.file.size > limit) throw new Error('文件超过在线预览大小上限，请下载后查看')
     await PinFileSnapshot(props.account.user_id, props.account.drive_id, props.file)
     if (disposed) return
-    const source = await PreviewURL(props.account.user_id, props.account.drive_id, props.file.file_id)
+    let source
+    if (props.kind !== 'pdf' && props.file.size <= 64 * 1024 * 1024) {
+      try { source = await cachedPreviewDocumentURL(props.account.user_id, props.account.drive_id, props.file) }
+      catch { /* 缓存不可用时仍可直接预览。 */ }
+    }
+    if (!source) source = await PreviewURL(props.account.user_id, props.account.drive_id, props.file.file_id)
     if (disposed) return
     if (props.kind === 'pdf') url.value = source
     else bytes.value = await readDocumentBytes(source, limit, controller.signal)

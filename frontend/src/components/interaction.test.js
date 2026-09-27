@@ -7,18 +7,23 @@ import ContextMenu from './ContextMenu.vue'
 import TreeNode from './TreeNode.vue'
 import AccountRail from './AccountRail.vue'
 import PreviewModal from './PreviewModal.vue'
+import QuickOpen from './QuickOpen.vue'
 import PlayerPanel from './PlayerPanel.vue'
 import ShareView from '../views/ShareView.vue'
 import SyncView from '../views/SyncView.vue'
+import SelectDirModal from './SelectDirModal.vue'
 import SettingsView from '../views/SettingsView.vue'
 import UpdateModal from './UpdateModal.vue'
 import * as appearance from '../appearance'
 import App from '../App.vue'
 import WorkspaceView from '../views/WorkspaceView.vue'
 import PanView from '../views/PanView.vue'
+import TransferView from '../views/TransferView.vue'
 
 const api = vi.hoisted(() => ({
   listDir: vi.fn().mockResolvedValue([]),
+  listTrash: vi.fn().mockResolvedValue([]),
+  search: vi.fn().mockResolvedValue([]),
   listDirSilently: vi.fn((...args) => api.listDir(...args)),
   GetDirectoryCache: vi.fn().mockResolvedValue(null),
   SaveDirectoryCache: vi.fn().mockResolvedValue(undefined),
@@ -67,6 +72,7 @@ const api = vi.hoisted(() => ({
   SendPan189SMS: vi.fn(),
   providerIconUrl: vi.fn(() => ''),
   OpenBrowser: vi.fn(),
+  OpenFile: vi.fn(),
   onEvent: vi.fn(() => () => {}),
   ClosePikPakCaptcha: vi.fn(),
   ShowPikPakCaptcha: vi.fn(),
@@ -76,6 +82,7 @@ const api = vi.hoisted(() => ({
   providerMetaOf: vi.fn(() => ({ key: 'webdav', label: 'WebDAV' })),
   providerOf: vi.fn((id) => String(id).split(':')[0]),
   formatBytes: vi.fn((value) => `${value} B`),
+  formatSpeed: vi.fn((value) => `${value} B/s`),
   PreviewURL: vi.fn(),
   cachedPreviewImageURL: vi.fn().mockRejectedValue(new Error('缓存不可用')),
   PinFileSnapshot: vi.fn().mockResolvedValue(undefined),
@@ -92,6 +99,24 @@ const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
   previewUrl: vi.fn(),
   download: vi.fn(),
+  PickFiles: vi.fn(),
+  validateUploadFiles: vi.fn(),
+  uploadFiles: vi.fn(),
+  ListDownloads: vi.fn().mockResolvedValue([]),
+  ListUploads: vi.fn().mockResolvedValue([]),
+  PauseDownload: vi.fn().mockResolvedValue(undefined),
+  ResumeDownload: vi.fn().mockResolvedValue(undefined),
+  CancelDownload: vi.fn().mockResolvedValue(undefined),
+  ListMigrateJobs: vi.fn().mockResolvedValue([]),
+  ListOfflineTasks: vi.fn().mockResolvedValue([]),
+  DownloadURL: vi.fn().mockResolvedValue(undefined),
+  OfflineDownload: vi.fn().mockResolvedValue(undefined),
+  DeleteOfflineTask: vi.fn().mockResolvedValue(undefined),
+  VerifyMigration: vi.fn().mockResolvedValue([]),
+  EventsOn: vi.fn(() => () => {}),
+  trash: vi.fn(),
+  remove: vi.fn(),
+  restore: vi.fn(),
   migrateFiles: vi.fn().mockResolvedValue({ id: 'migration-test', status: 'pending' }),
   move: vi.fn().mockResolvedValue(['folder', 'file']),
   copy: vi.fn().mockResolvedValue(['folder', 'file']),
@@ -128,12 +153,478 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 const wrappers = []
 beforeEach(() => {
+  api.OpenBrowser.mockReset().mockResolvedValue(undefined)
+  api.OpenFile.mockReset().mockResolvedValue(undefined)
+  api.RevealInFolder.mockReset().mockResolvedValue(undefined)
+  api.copyText.mockReset().mockResolvedValue(true)
+  api.download.mockReset().mockResolvedValue(undefined)
+  api.PickFiles.mockReset().mockResolvedValue([])
+  api.validateUploadFiles.mockReset().mockResolvedValue(undefined)
+  api.uploadFiles.mockReset().mockResolvedValue(undefined)
+  api.ListDownloads.mockReset().mockResolvedValue([])
+  api.ListUploads.mockReset().mockResolvedValue([])
+  api.PauseDownload.mockReset().mockResolvedValue(undefined)
+  api.ResumeDownload.mockReset().mockResolvedValue(undefined)
+  api.CancelDownload.mockReset().mockResolvedValue(undefined)
+  api.ListMigrateJobs.mockReset().mockResolvedValue([])
+  api.ListOfflineTasks.mockReset().mockResolvedValue([])
+  api.DownloadURL.mockReset().mockResolvedValue(undefined)
+  api.OfflineDownload.mockReset().mockResolvedValue(undefined)
+  api.DeleteOfflineTask.mockReset().mockResolvedValue(undefined)
+  api.VerifyMigration.mockReset().mockResolvedValue([])
+  api.trash.mockReset().mockResolvedValue(undefined)
+  api.remove.mockReset().mockResolvedValue(undefined)
+  api.restore.mockReset().mockResolvedValue(undefined)
   api.ListFavorites.mockReset().mockResolvedValue([])
   api.AddFavorite.mockReset().mockResolvedValue(undefined)
   api.RemoveFavorite.mockReset().mockResolvedValue(undefined)
   api.openKindOf.mockImplementation(file => file.name.endsWith('.wav') ? 'audio' : 'image')
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
+})
+
+describe('网盘工具栏状态', () => {
+  const account = { user_id: 'pikpak_toolbar', drive_id: 'drive' }
+  const file = { file_id: 'file', name: 'photo.jpg', isDir: false, size: 42 }
+
+  it('未选中时仅显示目录操作，选中后切换为文件操作', async () => {
+    api.capsOf.mockReturnValue({ search: true, createFolder: true, upload: true, download: true, createShare: true, move: true, copy: true, recycleBin: true })
+    api.listDir.mockResolvedValue([file])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    const toolbar = wrapper.get('.pan-file-toolbar')
+    expect(toolbar.text()).toContain('新建')
+    expect(toolbar.text()).toContain('上传')
+    expect(toolbar.text()).not.toContain('快速筛选')
+    await wrapper.get('.fileitem').trigger('click')
+    expect(toolbar.text()).toContain('已选 1 项')
+    expect(toolbar.text()).toContain('下载')
+    expect(toolbar.text()).toContain('更多')
+    expect(toolbar.text()).not.toContain('新建')
+    expect(toolbar.text()).not.toContain('上传')
+    expect(toolbar.text()).not.toContain('名称')
+    await toolbar.find('.sel-mgmt .dropbtn').trigger('click')
+    expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(expect.arrayContaining(['全选', '反向选择', '取消选择']))
+    ;[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.includes('取消选择')).click()
+    await nextTick()
+    expect(toolbar.text()).toContain('新建')
+  })
+
+  it('回收站选中时不显示普通文件操作', async () => {
+    api.capsOf.mockReturnValue({ trashView: true, trashRestore: true, permanentDelete: true, download: true, createShare: true, recycleBin: true })
+    api.listDir.mockResolvedValue([])
+    api.listTrash.mockResolvedValue([file])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.findAll('.tree-node').find(node => node.text().includes('回收站')).trigger('click')
+    await flushPromises()
+    await wrapper.get('.fileitem').trigger('click')
+    const toolbar = wrapper.get('.pan-file-toolbar')
+    expect(toolbar.text()).toContain('还原')
+    expect(toolbar.text()).toContain('彻底删除')
+    expect(toolbar.text()).not.toContain('下载')
+    expect(toolbar.text()).not.toContain('分享')
+    expect(toolbar.text()).not.toContain('更多')
+  })
+
+  it('根目录不保留无效后退键，搜索页只保留一个搜索入口', async () => {
+    api.capsOf.mockReturnValue({ search: true })
+    api.listDir.mockResolvedValue([file])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    const toolbar = wrapper.get('.pan-file-toolbar')
+    expect(toolbar.find('[title="后退 (Backspace)"]').exists()).toBe(false)
+    await toolbar.get('[title="全盘搜索 (Ctrl/⌘+F)"]').trigger('click')
+    expect(toolbar.find('[title="全盘搜索 (Ctrl/⌘+F)"]').exists()).toBe(false)
+    expect(toolbar.findAll('.search-quick')).toHaveLength(1)
+    await toolbar.get('.search-quick').setValue('photo')
+    await toolbar.get('.search-quick').trigger('keydown.enter')
+    await flushPromises()
+    expect(api.search).toHaveBeenCalledWith(account.user_id, account.drive_id, 'photo')
+  })
+})
+
+describe('网盘文件选择与目录切换', () => {
+  const account = { user_id: 'webdav:selection', drive_id: 'selection' }
+  const files = [
+    { file_id: 'a', name: 'A.txt', isDir: false },
+    { file_id: 'b', name: 'B.txt', isDir: false },
+    { file_id: 'c', name: 'C.txt', isDir: false },
+  ]
+
+  it('新目录尚未返回时隐藏旧文件，保留加载占位', async () => {
+    let finishDirectory
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockImplementation((_user, _drive, dir) => dir === 'root'
+      ? Promise.resolve(files)
+      : new Promise(resolve => { finishDirectory = resolve }))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    expect(wrapper.findAll('.fileitem')).toHaveLength(3)
+    const navigation = wrapper.vm.navigate({ dirId: 'new-directory', name: '新目录' })
+    await nextTick()
+    expect(wrapper.findAll('.fileitem')).toHaveLength(0)
+    expect(wrapper.find('.skeleton-list').exists()).toBe(true)
+    finishDirectory([{ file_id: 'new-file', name: '新文件.txt', isDir: false }])
+    await navigation
+    await flushPromises()
+    expect(wrapper.text()).toContain('新文件.txt')
+    expect(wrapper.text()).not.toContain('A.txt')
+  })
+
+  it('单击保持选中，Shift 继续沿原锚点扩展，空白和 Escape 可取消', async () => {
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValue(files)
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    const rows = wrapper.findAll('.fileitem')
+    await rows[0].trigger('click')
+    await rows[0].trigger('click')
+    expect(wrapper.findAll('.fileitem.selected')).toHaveLength(1)
+    await rows[2].trigger('click', { shiftKey: true })
+    expect(wrapper.findAll('.fileitem.selected')).toHaveLength(3)
+    await rows[1].trigger('click', { shiftKey: true })
+    expect(wrapper.findAll('.fileitem.selected')).toHaveLength(2)
+    await wrapper.get('.file-list').trigger('click')
+    expect(wrapper.findAll('.fileitem.selected')).toHaveLength(0)
+    await rows[0].trigger('click')
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(wrapper.findAll('.fileitem.selected')).toHaveLength(0)
+  })
+
+  it('同目录刷新保留选中并更新文件资料，点击列表留白可清除选择', async () => {
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValue([files[0]])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.get('.fileitem').trigger('click')
+    api.listDir.mockResolvedValue([{ ...files[0], name: '更新后的文件.txt', size: 99 }])
+    await wrapper.vm.refresh()
+    await flushPromises()
+    expect(wrapper.vm.snapshot().files).toMatchObject([{ name: '更新后的文件.txt', size: 99 }])
+    expect(wrapper.findAll('.fileitem.selected')).toHaveLength(1)
+    await wrapper.get('.file-list').trigger('click')
+    expect(wrapper.vm.snapshot().files).toHaveLength(0)
+  })
+
+  it('右键已选中的多项文件时下载整个选择集，纯文件夹不提供下载', async () => {
+    api.capsOf.mockReturnValue({ download: true, rename: true })
+    api.listDir.mockResolvedValue(files)
+    api.download.mockResolvedValue(undefined)
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    const rows = wrapper.findAll('.fileitem')
+    await rows[0].trigger('click')
+    await rows[1].trigger('click', { ctrlKey: true })
+    await rows[0].trigger('contextmenu')
+    const menuItems = [...document.querySelectorAll('.ctx-menu [role="menuitem"]')]
+    expect(menuItems.some(item => item.textContent.trim() === '重命名')).toBe(false)
+    menuItems.find(item => item.textContent.includes('下载')).click()
+    await flushPromises()
+    expect(api.download).toHaveBeenCalledTimes(2)
+    expect(api.download.mock.calls.map(call => call[2].file_id)).toEqual(['a', 'b'])
+    api.listDir.mockResolvedValue([{ file_id: 'folder', name: '文件夹', isDir: true }])
+    await wrapper.vm.refresh()
+    await flushPromises()
+    expect(wrapper.find('.pan-file-toolbar').text()).not.toContain('下载')
+    await wrapper.get('.fileitem').trigger('contextmenu')
+    expect([...document.querySelectorAll('.ctx-menu [role="menuitem"]')].some(item => item.textContent.includes('下载'))).toBe(false)
+  })
+
+  it('批量下载单项失败后继续入队其余文件，并报告实际成功数', async () => {
+    api.capsOf.mockReturnValue({ download: true })
+    api.listDir.mockResolvedValue(files)
+    api.download.mockImplementation((_user, _drive, file) => file.file_id === 'a' ? Promise.reject(new Error('网络故障')) : Promise.resolve())
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.findAll('.fileitem')[0].trigger('click')
+    await wrapper.findAll('.fileitem')[1].trigger('click', { ctrlKey: true })
+    await wrapper.find('.pan-file-toolbar').findAll('button').find(button => button.text() === '下载').trigger('click')
+    await flushPromises()
+    expect(api.download).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('toast')).toContainEqual(['已加入下载队列 1/2 项；失败：Error: 网络故障', 'error'])
+  })
+
+  it('彻底删除确认保留原选择，切换账号时关闭待确认操作', async () => {
+    const other = { user_id: 'webdav:other-selection', drive_id: 'other-selection' }
+    api.capsOf.mockReturnValue({ trashView: true, permanentDelete: true })
+    api.listDir.mockImplementation(user => Promise.resolve(user === account.user_id ? files : []))
+    api.listTrash.mockResolvedValue(files)
+    api.remove.mockResolvedValue(undefined)
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.findAll('.tree-node').find(node => node.text().includes('回收站')).trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.fileitem')[0].trigger('click')
+    await wrapper.find('.pan-file-toolbar .danger').trigger('click')
+    expect(document.querySelector('.modal')).not.toBeNull()
+    await wrapper.findAll('.fileitem')[1].trigger('click')
+    expect(document.querySelector('.modal')).not.toBeNull()
+    document.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    expect(api.remove).toHaveBeenCalledWith(account.user_id, account.drive_id, ['a'])
+    await wrapper.findAll('.fileitem')[0].trigger('click')
+    await wrapper.find('.pan-file-toolbar .danger').trigger('click')
+    await wrapper.setProps({ account: other })
+    await flushPromises()
+    expect(document.querySelector('.modal')).toBeNull()
+  })
+
+  it('旧账号操作完成后不重新加载当前账号目录', async () => {
+    const other = { user_id: 'webdav:other-running', drive_id: 'other-running' }
+    let finishTrash
+    api.capsOf.mockReturnValue({ recycleBin: true })
+    api.listDir.mockImplementation(user => Promise.resolve(user === account.user_id ? files : []))
+    api.trash.mockImplementation(() => new Promise(resolve => { finishTrash = resolve }))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.get('.fileitem').trigger('click')
+    await wrapper.find('.pan-file-toolbar .danger').trigger('click')
+    await wrapper.setProps({ account: other })
+    await flushPromises()
+    const currentLoads = api.listDir.mock.calls.filter(call => call[0] === other.user_id).length
+    finishTrash()
+    await flushPromises()
+    expect(api.listDir.mock.calls.filter(call => call[0] === other.user_id)).toHaveLength(currentLoads)
+  })
+
+  it('目录读取未完成时切到收藏或搜索，不保留旧页的加载遮罩', async () => {
+    let finishDirectory
+    api.capsOf.mockReturnValue({ search: true })
+    api.listDir.mockImplementation(() => new Promise(resolve => { finishDirectory = resolve }))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    expect(wrapper.find('.skeleton-list').exists()).toBe(true)
+    await wrapper.findAll('.tree-node').find(node => node.text().includes('收藏')).trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.skeleton-list').exists()).toBe(false)
+    expect(wrapper.text()).toContain('暂无收藏')
+    await wrapper.get('[title="全盘搜索 (Ctrl/⌘+F)"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.skeleton-list').exists()).toBe(false)
+    finishDirectory(files)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('A.txt')
+  })
+
+  it('收藏读取失败时在内容区显示错误和重试，不误报为空', async () => {
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValue([])
+    api.ListFavorites.mockRejectedValueOnce(new Error('请求失败')).mockRejectedValueOnce(new Error('请求失败')).mockResolvedValue([])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.findAll('.tree-node').find(node => node.text().includes('收藏')).trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.pan-right .empty').text()).toContain('收藏加载失败')
+    expect(wrapper.get('.pan-right .empty').text()).not.toContain('暂无收藏')
+    await wrapper.get('.pan-right .empty button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.pan-right .empty').exists()).toBe(false)
+    expect(wrapper.text()).toContain('暂无收藏')
+  })
+
+  it('文件选择器返回前切换账号，不把文件上传到新账号', async () => {
+    const other = { user_id: 'webdav:upload-other', drive_id: 'upload-other' }
+    let finishPicker
+    api.capsOf.mockReturnValue({ upload: true })
+    api.listDir.mockResolvedValue([])
+    api.PickFiles.mockImplementation(() => new Promise(resolve => { finishPicker = resolve }))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.get('[title="上传 (Ctrl+U)"]').trigger('click')
+    document.querySelector('.uppick-card').click()
+    await wrapper.setProps({ account: other })
+    await flushPromises()
+    finishPicker(['D:/待上传.txt'])
+    await flushPromises()
+    expect(api.validateUploadFiles).not.toHaveBeenCalled()
+    expect(api.uploadFiles).not.toHaveBeenCalled()
+    expect(wrapper.emitted('toast')).toContainEqual(['上传目标已切换，请重新选择文件', 'warn'])
+  })
+
+  it('上传冲突检查未完成时切换目录，取消旧目录的上传', async () => {
+    let finishConflictCheck
+    api.capsOf.mockReturnValue({ upload: true })
+    api.listDir.mockResolvedValue([])
+    api.PickFiles.mockResolvedValue(['D:/待上传.txt'])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    api.listDir.mockImplementation((_user, _drive, dir) => dir === 'root'
+      ? new Promise(resolve => { finishConflictCheck = resolve })
+      : Promise.resolve([]))
+    await wrapper.get('[title="上传 (Ctrl+U)"]').trigger('click')
+    document.querySelector('.uppick-card').click()
+    await flushPromises()
+    expect(finishConflictCheck).toBeTypeOf('function')
+    await wrapper.vm.navigate({ dirId: 'another-directory', name: '其他目录' })
+    finishConflictCheck([])
+    await flushPromises()
+    expect(api.uploadFiles).not.toHaveBeenCalled()
+    expect(wrapper.emitted('toast')).toContainEqual(['上传目标已切换，请重新选择文件', 'warn'])
+  })
+
+  it('无法读取目标目录时取消上传，不默认覆盖同名文件', async () => {
+    api.capsOf.mockReturnValue({ upload: true })
+    api.listDir.mockResolvedValue([])
+    api.PickFiles.mockResolvedValue(['D:/重要文件.txt'])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    api.listDir.mockRejectedValue(new Error('目录不可用'))
+    await wrapper.get('[title="上传 (Ctrl+U)"]').trigger('click')
+    document.querySelector('.uppick-card').click()
+    await flushPromises()
+    expect(api.uploadFiles).not.toHaveBeenCalled()
+    expect(wrapper.emitted('toast')).toContainEqual(['无法检查同名文件，上传已取消：Error: 目录不可用', 'error'])
+  })
+})
+
+describe('传输页面任务提交', () => {
+  it('打开、定位或复制下载结果失败时提供明确反馈', async () => {
+    api.capsOf.mockReturnValue({})
+    api.OpenFile.mockRejectedValue(new Error('文件已移动'))
+    api.RevealInFolder.mockRejectedValue(new Error('目录不存在'))
+    api.copyText.mockRejectedValue(new Error('剪贴板不可用'))
+    const wrapper = mountAttached(TransferView)
+    await flushPromises()
+    await wrapper.vm.openFile({ localPath: 'D:/文件.txt' })
+    await wrapper.vm.reveal({ localPath: 'D:/文件.txt' })
+    await wrapper.vm.copyLink({ id: 'task', url: 'https://example.test/file' })
+    expect(wrapper.emitted('toast')).toContainEqual(['打开文件失败：文件已移动', 'error'])
+    expect(wrapper.emitted('toast')).toContainEqual(['定位文件失败：目录不存在', 'error'])
+    expect(wrapper.emitted('toast')).toContainEqual(['复制失败：剪贴板不可用', 'error'])
+  })
+
+  it('批量操作只处理可执行状态，按钮显示实际目标数量', async () => {
+    api.capsOf.mockReturnValue({})
+    api.ListDownloads.mockImplementation(async () => [
+      { id: 'paused', name: '暂停的文件', status: 'paused' },
+      { id: 'active', name: '进行中的文件', status: 'downloading' },
+      { id: 'canceled', name: '已取消的文件', status: 'canceled' },
+    ])
+    const wrapper = mountAttached(TransferView)
+    await flushPromises()
+    await wrapper.get('[title="全选"]').trigger('click')
+    const toolbar = wrapper.get('.toppanbtns')
+    expect(toolbar.text()).toContain('继续 (1)')
+    expect(toolbar.text()).toContain('暂停 (1)')
+    expect(toolbar.text()).toContain('取消 (2)')
+    await toolbar.findAll('button').find(button => button.text().includes('继续 (1)')).trigger('click')
+    await flushPromises()
+    expect(api.ResumeDownload).toHaveBeenCalledOnce()
+    expect(api.ResumeDownload).toHaveBeenCalledWith('paused')
+    await toolbar.findAll('button').find(button => button.text().includes('暂停 (1)')).trigger('click')
+    await flushPromises()
+    expect(api.PauseDownload).toHaveBeenCalledOnce()
+    expect(api.PauseDownload).toHaveBeenCalledWith('active')
+    api.ResumeDownload.mockClear()
+    await wrapper.findAll('.taskrow')[0].trigger('contextmenu')
+    const menuItems = [...document.querySelectorAll('.ctx-menu [role="menuitem"]')]
+    expect(menuItems.find(item => item.textContent.includes('继续')).textContent).not.toContain('(3)')
+    menuItems.find(item => item.textContent.includes('继续')).click()
+    await flushPromises()
+    expect(api.ResumeDownload.mock.calls.map(call => call[0])).toEqual(['paused'])
+  })
+
+  it('轮询发现任务已完成时清理旧选择，恢复普通工具栏', async () => {
+    api.capsOf.mockReturnValue({})
+    api.ListDownloads.mockResolvedValue([{ id: 'task', name: '文件', status: 'downloading' }])
+    const wrapper = mountAttached(TransferView)
+    await flushPromises()
+    await wrapper.get('[title="全选"]').trigger('click')
+    expect(wrapper.text()).toContain('已选 1 项')
+    api.ListDownloads.mockResolvedValue([{ id: 'task', name: '文件', status: 'completed' }])
+    await wrapper.vm.refresh()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('已选 1 项')
+    expect(wrapper.get('.toppanbtns').text()).toContain('开始全部')
+  })
+
+  it('下载链接含无效行时阻止提交，部分失败时只保留失败链接并报告真实数量', async () => {
+    api.capsOf.mockReturnValue({})
+    api.DownloadURL.mockImplementation((_name, url) => url.endsWith('/bad') ? Promise.reject(new Error('服务不可用')) : Promise.resolve())
+    const wrapper = mountAttached(TransferView)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('新建下载')).trigger('click')
+    const input = document.querySelector('.modal textarea')
+    input.value = 'https://example.com/good\nhttps://'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('.modal [role="alert"]').textContent).toContain('1 行')
+    expect(document.querySelector('.modal-actions .btn.primary').disabled).toBe(true)
+    input.value = 'https://example.com/good\nhttps://example.com/bad'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    document.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    expect(api.DownloadURL).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('toast')).toContainEqual(['已添加 1/2 个下载任务；失败：Error: 服务不可用', 'error'])
+    expect(document.querySelector('.modal textarea').value).toBe('https://example.com/bad')
+  })
+
+  it('离线任务提交期间切换账号，余下链接仍归属原账号', async () => {
+    const first = { user_id: 'pikpak:first-offline', drive_id: 'first-drive' }
+    const second = { user_id: 'pikpak:second-offline', drive_id: 'second-drive' }
+    let finishFirst
+    api.capsOf.mockReturnValue({ offlineDownload: true })
+    api.OfflineDownload.mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve }))
+    const wrapper = mountAttached(TransferView, { props: { accounts: [first, second] } })
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('云离线')).trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('新建离线任务')).trigger('click')
+    const input = document.querySelector('.modal textarea')
+    input.value = 'https://example.com/one\nhttps://example.com/two'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    document.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    await wrapper.setProps({ accounts: [second] })
+    await flushPromises()
+    finishFirst()
+    await flushPromises()
+    expect(api.OfflineDownload.mock.calls).toHaveLength(2)
+    expect(api.OfflineDownload.mock.calls.every(call => call[0] === first.user_id && call[1] === first.drive_id)).toBe(true)
+  })
+
+  it('离线任务确认删除前切换账号时不误删另一账号任务', async () => {
+    const first = { user_id: 'pikpak:delete-first', drive_id: 'first-drive' }
+    const second = { user_id: 'pikpak:delete-second', drive_id: 'second-drive' }
+    api.capsOf.mockReturnValue({ offlineDownload: true })
+    api.ListOfflineTasks.mockResolvedValue([{ task_id: 'task-1', file_name: '测试任务' }])
+    const wrapper = mountAttached(TransferView, { props: { accounts: [first, second] } })
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('云离线')).trigger('click')
+    await flushPromises()
+    await wrapper.get('[title="删除离线任务"]').trigger('click')
+    await wrapper.setProps({ accounts: [second] })
+    await flushPromises()
+    document.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    expect(api.DeleteOfflineTask).not.toHaveBeenCalled()
+    expect(wrapper.emitted('toast')).toContainEqual(['账号已切换，请重新选择任务', 'warn'])
+  })
+})
+
+describe('主窗口顶栏', () => {
+  it('移除重复入口但保留搜索、设置与快捷命令', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    api.listAccounts.mockResolvedValue([])
+    api.listProviders.mockResolvedValue([])
+    api.GetSettings.mockResolvedValue({ theme: 'light', autoUpdate: false })
+    try {
+      const wrapper = mountAttached(App, { global: { stubs: { PanView: true, AccountAvatar: true } } })
+      await flushPromises()
+      const topbar = wrapper.get('.topbar')
+      expect(topbar.find('[title="快捷命令面板 (Ctrl+P)"]').exists()).toBe(false)
+      expect(topbar.find('[title="切换到深色"]').exists()).toBe(false)
+      expect(topbar.find('[title="全盘搜索"]').exists()).toBe(true)
+      expect(topbar.find('[title="设置 (Alt+5)"]').exists()).toBe(true)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', ctrlKey: true, bubbles: true }))
+      await nextTick()
+      expect(wrapper.findComponent(QuickOpen).props('show')).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+  })
 })
 
 describe('网盘收藏', () => {
@@ -332,6 +823,35 @@ describe('关键交互组件', () => {
     expect(api.OpenDownloadDirectory).toHaveBeenCalledOnce()
     await wrapper.get('#sg-transfer').findAll('button').find(button => button.text() === '选择').trigger('click')
     expect(api.PickDirectory).toHaveBeenCalledWith('选择下载文件夹', 'D:/系统下载')
+  })
+  it('设置页目录选择器的旧结果不覆盖手动修改', async () => {
+    api.GetSettings.mockResolvedValue({ downloadDir: 'D:/原目录' })
+    api.GetLogPath.mockResolvedValue('')
+    api.GetDownloadDirectory.mockResolvedValue('D:/原目录')
+    let finishPick
+    api.PickDirectory.mockImplementation(() => new Promise(resolve => { finishPick = resolve }))
+    const wrapper = mountAttached(SettingsView)
+    await flushPromises()
+    const picking = wrapper.vm.pickDownloadDir()
+    wrapper.vm.settings.downloadDir = 'D:/新目录'
+    finishPick('D:/过期目录')
+    await picking
+    expect(wrapper.vm.settings.downloadDir).toBe('D:/新目录')
+    expect(api.SaveSettings).not.toHaveBeenCalled()
+  })
+  it('恢复默认目录失败不撤销等待期间的手动修改', async () => {
+    api.GetSettings.mockResolvedValue({ downloadDir: 'D:/原目录' })
+    api.GetLogPath.mockResolvedValue('')
+    api.GetDownloadDirectory.mockResolvedValue('D:/原目录')
+    let failSave
+    api.SaveSettings.mockImplementation(() => new Promise((_resolve, reject) => { failSave = reject }))
+    const wrapper = mountAttached(SettingsView)
+    await flushPromises()
+    const resetting = wrapper.vm.resetDownloadDir()
+    wrapper.vm.settings.downloadDir = 'D:/新目录'
+    failSave(new Error('保存失败'))
+    await resetting
+    expect(wrapper.vm.settings.downloadDir).toBe('D:/新目录')
   })
 
   it('设置页合并相关分类，并使用可访问的开关按钮', async () => {
@@ -587,17 +1107,17 @@ describe('关键交互组件', () => {
     await flushPromises()
     expect(wrapper.findAll('.fileitem')).toHaveLength(1)
     expect(wrapper.text()).toContain('webdav:one.txt')
-    await wrapper.get('.search-quick').setValue('不存在的文件')
-    await new Promise(resolve => setTimeout(resolve, 140))
-    expect(wrapper.findAll('.fileitem')).toHaveLength(0)
+    await wrapper.get('.fileitem').trigger('click')
+    expect(wrapper.get('.pan-file-toolbar').text()).toContain('已选 1 项')
     await wrapper.setProps({ dual: true })
     await flushPromises()
-    expect(wrapper.findAll('.fileitem')).toHaveLength(1) // 左栏筛选不影响右栏
+    expect(wrapper.findAll('.fileitem')).toHaveLength(2)
+    expect(wrapper.findAll('.pan-file-toolbar')[1].text()).not.toContain('已选 1 项')
     await wrapper.setProps({ dual: false, account: accounts[1] })
     await flushPromises()
     expect(wrapper.findAll('.fileitem')).toHaveLength(1)
     expect(wrapper.text()).toContain('webdav:two.txt')
-    expect(wrapper.get('.search-quick').element.value).toBe('')
+    expect(wrapper.get('.pan-file-toolbar').text()).not.toContain('已选 1 项')
   })
 
   it('重新点击当前账号会主动刷新左侧真实文件列表', async () => {
@@ -879,6 +1399,48 @@ describe('关键交互组件', () => {
     expect(wrapper.vm.showEdit).toBe(true)
     expect(wrapper.vm.form.name).toBe('新任务')
   })
+  it('本地目录选择结果不会写入重新打开的同步表单', async () => {
+    api.ListSyncConfigs.mockResolvedValue([])
+    api.ListRunningSyncIDs.mockResolvedValue([])
+    let finishPick
+    api.PickDirectory.mockImplementation(() => new Promise(resolve => { finishPick = resolve }))
+    const wrapper = mountAttached(SyncView, { props: { accounts: [{ user_id: 'user', drive_id: 'drive' }] } })
+    wrapper.vm.openCreate()
+    const picking = wrapper.vm.pickLocalDir()
+    wrapper.vm.closeEdit()
+    wrapper.vm.openCreate()
+    finishPick('D:/old-directory')
+    await picking
+    expect(wrapper.vm.form.local_dir).toBe('')
+    expect(wrapper.vm.showEdit).toBe(true)
+  })
+  it('切换同步账号或编辑任务时关闭旧网盘目录选择器', async () => {
+    api.ListSyncConfigs.mockResolvedValue([])
+    api.ListRunningSyncIDs.mockResolvedValue([])
+    const wrapper = mountAttached(SyncView, { props: { accounts: [{ user_id: 'user', drive_id: 'drive' }] } })
+    wrapper.vm.openCreate()
+    wrapper.vm.showDirPick = true
+    wrapper.vm.onFormAccount()
+    expect(wrapper.vm.showDirPick).toBe(false)
+    wrapper.vm.showDirPick = true
+    wrapper.vm.openEdit({ id: 'another', user_id: 'user', drive_id: 'drive' })
+    expect(wrapper.vm.showDirPick).toBe(false)
+  })
+  it('目录选择器切换目录时隐藏旧文件夹且等待新目录加载', async () => {
+    let finishChild
+    api.listDir.mockImplementation((_user, _drive, dir) => dir === 'root'
+      ? Promise.resolve([{ file_id: 'child', name: '旧目录', isDir: true }])
+      : new Promise(resolve => { finishChild = resolve }))
+    const wrapper = mountAttached(SelectDirModal, { props: { account: { user_id: 'user', drive_id: 'drive' } } })
+    await flushPromises()
+    wrapper.vm.enter({ file_id: 'child', name: '子目录' })
+    await nextTick()
+    expect(wrapper.vm.dirs).toEqual([])
+    expect(document.querySelector('.modal-mask .btn.primary')?.disabled).toBe(true)
+    finishChild([])
+    await flushPromises()
+    expect(wrapper.vm.loading).toBe(false)
+  })
   it('同步初始化的旧运行列表不能清除刚启动的任务', async () => {
     api.ListSyncConfigs.mockResolvedValue([])
     let resolveInitial, resolveRun
@@ -922,6 +1484,42 @@ describe('关键交互组件', () => {
     expect(wrapper.vm.importSession).toBeNull()
     expect(wrapper.vm.importStep).toBe('form')
     expect(wrapper.vm.importBusy).toBe(false)
+  })
+  it('粘贴新的分享链接时清除上一条链接的提取码', async () => {
+    api.ListShareHistory.mockResolvedValue([])
+    api.capsOf.mockReturnValue({ importShare: true })
+    const wrapper = mountAttached(ShareView, { props: { accounts: [{ user_id: 'pikpak:share', drive_id: 'drive' }] } })
+    wrapper.vm.importForm.url = 'https://mypikpak.com/s/first 提取码: abcd'
+    await nextTick()
+    expect(wrapper.vm.importForm.password).toBe('abcd')
+    wrapper.vm.importForm.url = 'https://mypikpak.com/s/second'
+    await nextTick()
+    expect(wrapper.vm.importForm.password).toBe('')
+  })
+  it('分享链接打开或复制失败时显示错误，不留下未处理异常', async () => {
+    api.ListShareHistory.mockResolvedValue([])
+    api.OpenBrowser.mockRejectedValue(new Error('浏览器不可用'))
+    api.copyText.mockRejectedValue(new Error('剪贴板不可用'))
+    const wrapper = mountAttached(ShareView)
+    await flushPromises()
+    await wrapper.vm.openLink({ share_url: 'https://example.test/share' })
+    await wrapper.vm.copy('链接', '已复制', 'link')
+    expect(wrapper.emitted('toast')).toContainEqual(['打开分享链接失败：浏览器不可用', 'error'])
+    expect(wrapper.emitted('toast')).toContainEqual(['复制失败：剪贴板不可用', 'error'])
+  })
+  it('偏好恢复中途失败后保留确认数据，允许原样重试', async () => {
+    api.GetSettings.mockResolvedValue({ theme: 'light' })
+    api.GetLogPath.mockResolvedValue('')
+    api.listAccounts.mockResolvedValue([])
+    api.SaveSettings.mockRejectedValueOnce(new Error('写入失败')).mockResolvedValue(undefined)
+    const wrapper = mountAttached(SettingsView)
+    await flushPromises()
+    wrapper.vm.pendingBackup = { preferences: { accountAliases: {}, accountIcons: {} }, favorites: [], theme: 'dark' }
+    await wrapper.vm.restorePrefs()
+    expect(wrapper.vm.pendingBackup).not.toBeNull()
+    await wrapper.vm.restorePrefs()
+    expect(wrapper.vm.pendingBackup).toBeNull()
+    expect(api.SaveSettings).toHaveBeenCalledTimes(2)
   })
   it('音频播放结束时清除旧的续播位置', async () => {
     api.PinFileSnapshot.mockResolvedValue(undefined)
@@ -1137,6 +1735,30 @@ describe('关键交互组件', () => {
       await flushPromises()
       expect(document.querySelector('.pv-img-layer img')?.getAttribute('src')).toBe('http://127.0.0.1/stream/original')
       expect(api.PreviewURL).toHaveBeenCalledOnce()
+    } finally {
+      vi.stubGlobal('Image', originalImage)
+    }
+  })
+
+  it('图片请求期间切换账号时，旧图片后续请求仍使用原账号', async () => {
+    const originalImage = globalThis.Image
+    vi.stubGlobal('Image', class {
+      naturalWidth = 640
+      naturalHeight = 480
+      set src(value) { queueMicrotask(() => this.onload?.()) }
+    })
+    let finishOldSnapshot
+    api.PinFileSnapshot.mockImplementationOnce(() => new Promise(resolve => { finishOldSnapshot = resolve })).mockResolvedValue(undefined)
+    api.cachedPreviewImageURL.mockImplementation(async (user) => `http://127.0.0.1/cache/${user}`)
+    try {
+      const file = { file_id: 'shared-id', name: 'photo.png', size: 100 }
+      const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'first', drive_id: 'first-drive' }, file } })
+      await flushPromises()
+      await wrapper.setProps({ account: { user_id: 'second', drive_id: 'second-drive' } })
+      await flushPromises()
+      finishOldSnapshot()
+      await flushPromises()
+      expect(api.cachedPreviewImageURL.mock.calls.map(call => [call[0], call[1]])).toEqual(expect.arrayContaining([['first', 'first-drive'], ['second', 'second-drive']]))
     } finally {
       vi.stubGlobal('Image', originalImage)
     }

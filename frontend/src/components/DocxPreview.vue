@@ -7,6 +7,7 @@ const stage = ref(null)
 const loading = ref(true)
 const error = ref('')
 const pages = ref(0)
+const compatibilityMode = ref(false)
 const zoom = ref(100)
 const fitToWidth = ref(true)
 let disposed = false
@@ -14,10 +15,15 @@ let stageObserver = null
 function fitOnResize() { if (fitToWidth.value && !loading.value) void fitWidth() }
 
 async function renderDocument() {
+  loading.value = true
+  error.value = ''
+  compatibilityMode.value = false
+  pages.value = 0
+  content.value?.replaceChildren()
   try {
-    const { renderAsync } = await import('docx-preview')
+    const { renderAsync, defaultOptions } = await import('docx-preview')
     if (disposed || !content.value) return
-    await renderAsync(props.bytes, content.value, content.value, {
+    const options = {
       className: 'docx',
       inWrapper: true,
       breakPages: true,
@@ -25,9 +31,25 @@ async function renderDocument() {
       renderFooters: true,
       renderFootnotes: true,
       renderEndnotes: true,
-      renderAltChunks: false,
-      useBase64URL: false,
-    })
+      renderAltChunks: true,
+      useBase64URL: true,
+      experimental: true,
+      h: element => {
+        const node = defaultOptions.h(element)
+        if (node instanceof HTMLIFrameElement) node.setAttribute('sandbox', '')
+        return node
+      },
+    }
+    try {
+      await renderAsync(props.bytes, content.value, content.value, options)
+      if (!content.value.querySelector('section.docx')) throw new Error('文档没有可显示的页面')
+    } catch {
+      if (disposed || !content.value) return
+      content.value.replaceChildren()
+      await renderAsync(props.bytes, content.value, content.value, { ...options, experimental: false, renderAltChunks: false })
+      if (!content.value.querySelector('section.docx')) throw new Error('文档没有可显示的页面')
+      compatibilityMode.value = true
+    }
     if (disposed) return
     pages.value = content.value.querySelectorAll('section.docx').length
     loading.value = false
@@ -59,11 +81,11 @@ onBeforeUnmount(() => { disposed = true; stageObserver?.disconnect(); window.rem
 
 <template>
   <div class="document-viewer">
-    <div class="document-toolbar"><strong>Word 预览 <span v-if="pages">· {{ pages }} 页</span></strong>
+    <div class="document-toolbar"><strong>Word 预览 <span v-if="pages">· {{ pages }} 页</span><span v-if="compatibilityMode"> · 兼容模式</span></strong>
       <div class="document-controls"><button class="btn sm" @click="changeZoom(-10)">−</button><span>{{ zoom }}%</span><button class="btn sm" @click="changeZoom(10)">＋</button><button class="btn sm" @click="fitWidth">适合宽度</button></div>
     </div>
     <div v-if="loading" class="document-state"><span class="spin"></span>正在排版文档…</div>
-    <div v-else-if="error" class="document-state" role="alert">{{ error }}</div>
+    <div v-else-if="error" class="document-state" role="alert"><span>{{ error }}</span><button class="btn sm" type="button" @click="renderDocument">重试</button></div>
     <div v-show="!error" ref="stage" class="docx-stage"><div ref="content" class="docx-content" :style="{ zoom: zoom / 100 }"></div></div>
   </div>
 </template>

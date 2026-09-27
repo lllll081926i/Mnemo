@@ -292,7 +292,9 @@ export function refreshAccountNow(userId) { return driveCall('检查账号', App
 // ---------- preview / player ----------
 export function previewUrl(userId, driveId, fileId) { return driveCall('打开预览', App.PreviewURL(userId, driveId, fileId)) }
 export function PreviewURL(userId, driveId, fileId) { return previewUrl(userId, driveId, fileId) }
+export function openCloudEditor(userId, driveId, fileId) { return App.OpenCloudEditor(userId, driveId, fileId) }
 export function cachedPreviewImageURL(userId, driveId, file) { return App.CachedPreviewImageURL(userId, driveId, file) }
+export function cachedPreviewDocumentURL(userId, driveId, file) { return App.CachedPreviewDocumentURL(userId, driveId, file) }
 export function localPreviewUrl(path) { return App.LocalPreviewURL(path) }
 export function mediaProxy() { return App.MediaProxy() }
 export function playVideo(userId, driveId, fileId) { return driveCall('播放视频', App.PlayVideo(userId, driveId, fileId)) }

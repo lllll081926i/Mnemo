@@ -506,10 +506,8 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         ><UiIcon :name="t.icon" :size="18" /></button>
       </div>
       <div class="spacer"></div>
-      <button class="icon-btn" title="快捷命令面板 (Ctrl+P)" @click="showQuickOpen = true"><UiIcon name="search" :size="16" /></button>
       <button class="icon-btn" title="全盘搜索" aria-label="全盘搜索" @click="showSearch = true"><UiIcon name="globe" :size="17" /></button>
       <button v-if="tab === 'pan'" class="icon-btn" :class="{ active: dualPane }" :title="dualPane ? '切换单栏' : '切换双栏'" :aria-label="dualPane ? '切换单栏' : '切换双栏'" :aria-pressed="dualPane" @click="dualPane = !dualPane"><UiIcon :name="dualPane ? 'columns' : 'single-pane'" :size="17" /></button>
-      <button class="icon-btn" :title="isDark ? '切换到浅色' : '切换到深色'" @click="quickToggleTheme"><UiIcon :name="isDark ? 'sun' : 'moon'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
       <div class="window-actions" aria-label="窗口控制">
@@ -532,7 +530,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
         @rename="openRename"
       />
       <main class="page-host">
-        <transition :name="pageTrans">
+        <transition :name="pageTrans" mode="out-in">
           <KeepAlive>
             <component
               :is="pageComponent"

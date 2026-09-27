@@ -51,7 +51,7 @@ function onSelect(action) {
     <span>{{ label }}</span>
     <UiIcon name="chevron-down" :size="11" class="dropbtn-caret" />
   </button>
-  <ContextMenu v-if="open" :x="pos.x" :y="pos.y" :items="items" @close="open = false" @select="onSelect" />
+  <ContextMenu v-if="open" :x="pos.x" :y="pos.y" :items="items" :trigger="btnEl" @close="open = false" @select="onSelect" />
 </template>
 
 <style scoped>

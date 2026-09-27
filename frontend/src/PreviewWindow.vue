@@ -44,7 +44,7 @@ async function close(force = false) {
 
 <template>
   <PlayerPanel v-if="opened && seed.kind === 'video'" :account="seed.account" :file="file" :files="seed.files" :capabilities="seed.capabilities" @select-file="file = $event" @close="close" @toast="notify" />
-  <PreviewModal v-else-if="opened" ref="preview" :account="seed.account" :file="file" :file-list="seed.files" :background-audio="backgroundAudio" @background-audio="backgroundAudio = $event" @stop-close="close(true)" @close="close()" @toast="notify" />
+  <PreviewModal v-else-if="opened" ref="preview" :account="seed.account" :file="file" :file-list="seed.files" :capabilities="seed.capabilities" :background-audio="backgroundAudio" @background-audio="backgroundAudio = $event" @stop-close="close(true)" @close="close()" @toast="notify" />
   <MotionConfig :reduced-motion="reducedMotion">
     <motion.div
       v-if="toast"
@@ -71,9 +71,9 @@ html.dark.preview-window {
 .preview-window .preview-modal .modal-head { padding-right: 0; padding-top: 0; }
 .preview-window .preview-modal svg { color: #fff !important; stroke: #fff; fill: none; stroke-width: 1.6; }
 .preview-window .preview-modal .pv-abtn-main { background: #ffffff16; }
-.preview-window .preview-modal .modal-head { height: 56px; min-height: 56px; padding: 0 0 0 16px; border-bottom: 1px solid #ffffff14; --wails-draggable: drag; }
-.preview-window .preview-modal .modal-window-controls { height: 56px; align-self: stretch; gap: 0; margin: 0; }
-.preview-window .preview-modal .modal-window-btn { height: 56px; border: 0; border-radius: 0; }
+.preview-window .preview-modal .modal-head { height: 32px; min-height: 32px; padding: 0 0 0 12px; border-bottom: 1px solid #ffffff14; --wails-draggable: drag; }
+.preview-window .preview-modal .modal-window-controls { height: 32px; align-self: stretch; gap: 0; margin: 0; }
+.preview-window .preview-modal .modal-window-btn { height: 32px; border: 0; border-radius: 0; }
 .preview-window .preview-modal .pv-head-icon { display: none; }
 .preview-window .preview-modal .pv-head-title { font-size: 13px; font-weight: 500; }
 .preview-window .preview-modal .pv-head-sub { font-size: 10px; }
