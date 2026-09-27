@@ -12,7 +12,9 @@
 favorite, search, createShare, shareExpiration, sharePassword, shareHistory: true
 SetHashes(["sha1", "quickxorhash"], nil)
 ```
-> trashView 未设；ProvideHashes 已声明
+> trashView 未设；ProvideHashes 已声明；webEdit 已设，官网回收站入口实际指向 OneDrive 主页。
+
+预览中的 DOCX/XLSX/PPTX 可从 Graph `webUrl` 在系统浏览器打开，由 OneDrive 官网提供编辑；PDF 仅可官网打开。浏览器需登录同一账号，应用不将修改后的二进制文档直接回传。Graph `/restore` 只对个人版已知文件 ID 可用；Graph 当前授权范围无法列出完整回收站，因此未在应用内显示虚假的可恢复列表。
 
 `favorite` 是按账号类型启用的原生能力：工作/学校空间使用 Graph `/me/drive/following`、`/items/{id}/follow`、`/items/{id}/unfollow`；个人账号回退本地收藏。通过 `driveType` 识别并缓存类型，不将未知类型或请求失败当作可用。列表只保留当前挂载空间条目，支持分页、token 失效重试；关注操作必须返回对应文件 ID。依据：[Graph 关注权限](https://learn.microsoft.com/en-us/graph/api/driveitem-follow?view=graph-rest-1.0)、[取消关注](https://learn.microsoft.com/en-us/graph/api/driveitem-unfollow?view=graph-rest-1.0)。已通过模拟 HTTP 回归，未进行真实租户写入验证。
 
@@ -92,9 +94,23 @@ SetHashes(["sha1", "quickxorhash"], nil)
 
 | 操作 | 状态 | 说明 |
 |------|:----:|------|
-| Trash | ✅ | `graph.go:275` DELETE（永久删除） |
-| Restore | ❌ | `onedrive.go:162-164` NotSupported |
-| TrashView | ❌ | 未设 |
+| Trash | ✅ | Graph DELETE（移入回收站） |
+| Restore | ⚠️ | Graph `/restore`，仅个人账号且需已知文件 ID |
+| TrashView | ❌ | 普通 OneDrive 无已核实的 Graph 列表接口；提供官网入口 |
+
+Graph 的 `fileStorageContainer` 回收站列表只面向 SharePoint Embedded，不能用普通 OneDrive 授权替代。工作/学校账号虽有 SharePoint REST 回收站接口，但现有 Graph 访问令牌的受众不是 SharePoint，不能直接复用；不在未增加独立授权的情况下静默调用。
+
+### 第三方实现复核（2026-09-24）
+
+- [SimpleList 的 `ListTrashAsync`](https://github.com/aiguoli/SimpleList/blob/main/SimpleList.Core/Services/OneDriveStorageProvider.cs#L213) 在 `/drives/{driveId}/root/children` 加 `includeDeletedItems=true`，再筛选 `deleted` 字段；其 `EmptyTrashAsync` 依赖这一列表。微软的 [Get driveItem 文档](https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0) 明确限定：该参数仅在**按 ID 获取 driveItem**时有效，其他目标会被忽略，且仅支持 OneDrive Personal。因此不能把该列表方案当作可靠的完整回收站接口，也不能照搬其清空逻辑。
+- SimpleList 的 `SupportsTrash=true` 是无条件声明，源码没有回收站列表失败时的其他枚举路径；`ListTrashAsync` 也没有在 `SimpleList.Tests` 中得到实际回收站列表测试覆盖。本机同账号非空回收站的只读探测返回 0 条，故当前项目不能照其能力声明开放“应用内完整回收站”。
+- 用户已在回收站添加文件后，本机唯一已登录的 OneDrive 个人账号只读探测仍返回“已删容量 0、普通根目录条目 5、`deleted` 条目 0”。用户提供的网页请求路径中的个人站点标识与本机账号标识后四位一致，排除了此前怀疑的账号不一致；Graph 的 `root/children` 路径确实未列出该账号已删项。不能仅凭 `quota.deleted=0` 断言官网回收站为空。诊断测试需显式设置 `MNEMO_LIVE_ONEDRIVE_READONLY=1` 才运行，不会删除或恢复文件。
+- 用户复制的网页请求是 `SP.Web.GetContextWebThemeData`，用于获取站点主题信息，不是回收站数据接口；请求携带登录 Cookie，不能放进源码、日志或诊断材料，也不能作为应用鉴权方案。
+- SimpleList 还实现了 `GET /items/{id}/content?format=pdf` 的 Office 文档转 PDF，以及独立的 `/items/{id}/thumbnails` 缩略图获取；前者可作为高保真文档预览的候选，但需考虑格式支持、响应重定向和缓存。其 `/items/{id}/permanentDelete` 是永久删除，不能因示例有此方法就自动提供回收站“清空”按钮。
+- [CuteOne](https://github.com/Hackxiaoya/CuteOne) 的 `app/admin/drive/logic.py` 实现了 Graph 文件列表、新建、重命名和删除，但未找到回收站列表或恢复协议，不能作为回收站实现依据。
+- [Graph beta 的 SharePoint 站点回收站列表](https://learn.microsoft.com/en-us/graph/api/recyclebin-list-items?view=graph-rest-beta) 提供 `GET /sites/{siteId}/recycleBin/items`，可作为工作/学校账号的**候选只读方案**；现有授权的 `Files.ReadWrite` 高于文档所列的 `Files.Read` 最低权限，但本机只有个人账号，尚未用企业租户验证 OneDrive 个人站点是否能列出。返回的 `recycleBinItem.id` 是删除事务 ID，不是可直接传给个人版 `/restore` 的 driveItem ID；Graph beta 的对应恢复文档只覆盖 SharePoint Embedded 容器，不能据此宣称普通 OneDrive 可站内恢复。
+- 本机个人站点标识可从 Graph 获取，但 `GET /beta/sites/{siteId}/recycleBin/items` 的只读实测返回 HTTP 400 `BadRequest`，因此不能把此方案当作个人版替代接口。SimpleList 的 `permanentDelete` 也不能直接借用到个人版：[rclone 的 OneDrive 文档](https://rclone.org/onedrive/) 明确指出该 Graph 方法仅适用于工作/学校版及 SharePoint 文档库。
+- 若未来要支持工作/学校账号的完整恢复，应单独获取面向 SharePoint 的访问令牌并验证 `/_api/web/recyclebin` 与恢复端点；不能把当前面向 Graph 的令牌发送给 SharePoint 域名。个人版可考虑仅维护“本应用删除记录”并凭已知 driveItem ID 查询和恢复，但必须明确标为不完整视图，不能伪装成官网全部回收站。
 
 ---
 

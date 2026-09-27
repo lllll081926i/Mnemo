@@ -150,11 +150,11 @@
 | pikpak | ✅ | ✅ | ✅ | ✅ | ❌(声明已移除) | ❌(声明已移除) |
 | aliopen | ✅ | ✅ | ✅ | ✅ | ➖ | ➖ |
 | pan123 | ✅ | ✅ | ✅ | ✅ | ❌(声明已移除) | ❌(声明已移除) |
-| pan189 | ✅ | ✅(清空回收站) | ❌**缺** | ❌(设计禁用) | ✅(Delete内联) | ✅(Delete内联) |
+| pan189 | ✅ | ✅(清空回收站) | ⚠️(模拟验证) | ✅(个人/家庭只读实测) | ✅(Delete内联) | ✅(Delete内联) |
 | pan139 | ✅ | ✅ | ✅(个人云) | ✅(个人云) | ➖ | ➖ |
 | lanzou | ✅ | ➖ | ✅ | ✅ | ➖ | ➖ |
 | ilanzou | ✅ | ✅ | ✅ | ✅ | ➖ | ➖ |
-| onedrive | ✅ | ➖(与 Trash 同一接口) | ➖ | ➖ | ➖ | ➖ |
+| onedrive | ✅ | ➖(与 Trash 同一接口) | ⚠️(仅个人版已知 ID) | ➖ | ➖ | ➖ |
 | dropbox | ✅ | ➖(与 Trash 同一接口) | ✅(仅文件) | ✅(仅文件) | ➖ | ➖ |
 | yike | ✅(照片) | ➖ | ✅(照片) | ✅(照片) | ➖ | ➖ |
 | guangya | ✅ | ➖ | ✅ | ✅ | ➖ | ➖ |
@@ -162,7 +162,8 @@
 | s3 | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
 
 > ✅ 能力声明已修正：pikpak/pan123 已将 trashPurge/trashClear 改为不声明。
-> ⚠️ pan189 的 `recycleBin:true` 但只支持删除到回收站 + 清空回收站，无法查看/恢复。
+> 天翼云盘已通过签名接口 `listRecycleBinFiles.action` 读取个人云与家庭云回收站；恢复使用 `RESTORE` 批量任务并通过模拟协议回归，尚未对真实文件执行恢复写入验收。
+> OneDrive 当前 Graph v1.0 授权无法可靠列出普通网盘回收站，侧栏保留官网入口。第三方 SimpleList 的 `root/children?includeDeletedItems=true` 方案超出微软文档承诺范围；Graph beta 的 SharePoint 站点回收站列表可供工作/学校账号后续验证，但本机无企业账号。Graph `/restore` 仅支持个人账号已知文件 ID，当前界面没有可选择的回收站条目。
 
 ---
 
