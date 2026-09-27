@@ -8,12 +8,25 @@ import UiIcon from './UiIcon.vue'
 
 const refreshInflight = new Map()
 
+function trackRefresh(userID, promise, force) {
+  const entry = { promise, force }
+  refreshInflight.set(userID, entry)
+  void promise.then(() => {
+    if (refreshInflight.get(userID) === entry) refreshInflight.delete(userID)
+  }, () => {
+    if (refreshInflight.get(userID) === entry) refreshInflight.delete(userID)
+  })
+  return promise
+}
+
 function refreshAccountOnce(userID, force = false) {
   if (!userID) return Promise.resolve(null)
-  if (refreshInflight.has(userID)) return refreshInflight.get(userID)
-  const promise = (force ? refreshAccountNow(userID) : refreshAccountSilently(userID)).finally(() => refreshInflight.delete(userID))
-  refreshInflight.set(userID, promise)
-  return promise
+  const current = refreshInflight.get(userID)
+  if (current) {
+    if (!force || current.force) return current.promise
+    return trackRefresh(userID, current.promise.catch(() => null).then(() => refreshAccountNow(userID)), true)
+  }
+  return trackRefresh(userID, force ? refreshAccountNow(userID) : refreshAccountSilently(userID), force)
 }
 
 const props = defineProps({
@@ -29,6 +42,7 @@ watch(() => props.account, (a) => {
   tok.value = a ? (a.token || {}) : {}
   quota.value = a ? (a.usage || null) : null
   familyQuota.value = a ? (a.family_usage || null) : null
+  refreshError.value = false
 })
 
 const avatar = computed(() => tok.value.avatar || '')
@@ -89,6 +103,7 @@ const rootRef = ref(null)
 const show = ref(false)
 const popStyle = ref({})
 const refreshing = ref(false)
+const refreshError = ref(false)
 let enterTimer = null, leaveTimer = null
 
 function updatePos() {
@@ -130,6 +145,7 @@ async function syncQuota(force = false) {
       if (acc.token) tok.value = acc.token
       quota.value = acc.usage || null
       familyQuota.value = acc.family_usage || null
+      recordAccountHealth(snapUid)
     }
     return acc
   } catch(error) {
@@ -140,8 +156,9 @@ async function syncQuota(force = false) {
 async function manualRefresh() {
   if (!props.account || refreshing.value) return
   refreshing.value = true
+  refreshError.value = false
   try {
-    await syncQuota(true)
+    if (!await syncQuota(true)) refreshError.value = true
   } finally {
     refreshing.value = false
   }
@@ -215,6 +232,7 @@ onMounted(() => {
               <UiIcon v-else name="refresh" :size="12" />
               {{ refreshing ? '刷新中…' : '刷新' }}
             </button>
+            <div v-if="refreshError" class="ap-qstatus" role="alert">刷新失败，请稍后重试</div>
           </div>
         </div>
       </transition>
