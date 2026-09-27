@@ -94,6 +94,7 @@ const logPath = ref('')
 const effectiveDownloadDir = ref(''), downloadDirError = ref('')
 let directoryReadSeq = 0
 let directoryPickSeq = 0
+let settingsLoadSeq = 0
 async function refreshDownloadDirectory() {
   const seq = ++directoryReadSeq
   try {
@@ -170,11 +171,13 @@ const sortKeyOptions = [
 
 async function loadSettings() {
   if (loadingSettings.value) return
+  const seq = ++settingsLoadSeq
   loadingSettings.value = true
   loaded.value = false
   loadError.value = ''
   try {
     const s = (await GetSettings()) || {}
+    if (seq !== settingsLoadSeq) return
     settings.value = {
       ...defaults,
       ...s,
@@ -183,13 +186,16 @@ async function loadSettings() {
       maxUploadSpeed: Math.round((Number(s.maxUploadSpeed) || 0) / 1024),
     }
 		settings.value.logLevel = settings.value.logLevel || 'info'
-		logPath.value = await GetLogPath().catch(() => '')
+    logPath.value = ''
     loaded.value = true
-    await refreshDownloadDirectory()
+    void Promise.resolve().then(() => GetLogPath()).then(path => {
+      if (seq === settingsLoadSeq) logPath.value = path || ''
+    }).catch(() => {})
+    void refreshDownloadDirectory()
   } catch (e) {
-    loadError.value = '设置加载失败：' + String(e?.message || e)
+    if (seq === settingsLoadSeq) loadError.value = '设置加载失败：' + String(e?.message || e)
   } finally {
-    loadingSettings.value = false
+    if (seq === settingsLoadSeq) loadingSettings.value = false
   }
 }
 onMounted(() => {
@@ -198,6 +204,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  ++settingsLoadSeq
+  ++directoryReadSeq
   ++directoryPickSeq
   bodyEl.value?.removeEventListener('scroll', onScroll)
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
