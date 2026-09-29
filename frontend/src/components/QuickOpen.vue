@@ -6,6 +6,7 @@ import { motion, MotionConfig } from 'motion-v'
 import { accountName, providerIconUrl, providerMetaOf, providerOf } from '../api'
 import UiIcon from './UiIcon.vue'
 import { panelReveal, reducedMotion } from '../motion/presets'
+import { recentItems, recentEnabled, clearRecentItems, setRecentEnabled } from '../recent-items'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -13,7 +14,7 @@ const props = defineProps({
   providers: { type: Array, default: () => [] },
   currentAccount: { type: Object, default: null },
 })
-const emit = defineEmits(['close', 'select-tab', 'select-account', 'action'])
+const emit = defineEmits(['close', 'select-tab', 'select-account', 'action', 'navigate'])
 
 const keyword = ref('')
 const activeIndex = ref(0)
@@ -36,6 +37,15 @@ const baseItems = computed(() => {
     { id: 'cmd-mkdir', group: '命令', title: '新建文件夹', sub: '在当前目录下创建 (Ctrl+Shift+N)', icon: 'plus', run: () => emit('action', 'mkdir') },
     { id: 'cmd-upload', group: '命令', title: '上传文件/文件夹', sub: '选择本地文件上传 (Ctrl+U)', icon: 'upload', run: () => emit('action', 'upload') },
   ]
+
+  if (recentEnabled.value) {
+    const accounts = new Set(props.accounts.map(account => JSON.stringify([account.user_id, account.drive_id])))
+    for (const entry of recentItems.value.filter(item => accounts.has(JSON.stringify([item.userId, item.driveId]))).slice(0, 20)) {
+      items.push({ id: `recent-${entry.userId}-${entry.driveId}-${entry.fileId}`, group: '最近使用', title: entry.name,
+        sub: `${entry.isDir ? '文件夹' : '文件'} · ${accountName(props.accounts.find(account => account.user_id === entry.userId)) || entry.userId}`,
+        icon: entry.isDir ? 'folder' : 'file', run: () => emit('navigate', entry) })
+    }
+  }
 
   // 网盘账号
   for (const acc of props.accounts) {
@@ -180,6 +190,10 @@ function scrollActiveIntoView() {
               <span class="qo-item-group">{{ item.group }}</span>
             </div>
           </div>
+          <div class="qo-recent-controls">
+            <button type="button" @click="setRecentEnabled(!recentEnabled)">{{ recentEnabled ? '暂停记录最近使用' : '开启记录最近使用' }}</button>
+            <button v-if="recentItems.length" type="button" @click="clearRecentItems">清空记录</button>
+          </div>
           </motion.div>
         </MotionConfig>
       </div>
@@ -239,6 +253,9 @@ function scrollActiveIntoView() {
   overflow-y: auto;
   padding: 8px;
 }
+.qo-recent-controls { display: flex; justify-content: flex-end; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--border-light); }
+.qo-recent-controls button { border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 11px; }
+.qo-recent-controls button:hover { color: var(--color-primary); }
 .qo-empty {
   display: grid;
   justify-items: center;

@@ -37,6 +37,35 @@ func init() {
 	drive.Register(drive.Registration{ID: "webdav", Factory: func() drive.Driver { return downloadTestDriver }})
 }
 
+func TestRetryChildUpdatesFailedFolderSummary(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(st, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	parent := &model.DownloadTask{ID: "folder-retry", IsDir: true, Status: "failed", TotalFiles: 2, FailedFiles: 1}
+	first := &model.DownloadTask{ID: "first", GroupID: parent.ID, Status: "completed", Downloaded: 10}
+	second := &model.DownloadTask{ID: "second", GroupID: parent.ID, Status: "failed", Downloaded: 5}
+	manager.mu.Lock()
+	manager.tasks[parent.ID], manager.tasks[first.ID], manager.tasks[second.ID] = parent, first, second
+	manager.mu.Unlock()
+	manager.refreshFolderSummary(parent.ID)
+	if parent.CompletedFiles != 1 || parent.FailedFiles != 1 || parent.Status != "failed" {
+		t.Fatalf("部分失败统计不正确: %+v", parent)
+	}
+	manager.mu.Lock()
+	second.Status, second.Downloaded = "completed", 10
+	manager.mu.Unlock()
+	manager.refreshFolderSummary(parent.ID)
+	if parent.Status != "completed" || parent.CompletedFiles != 2 || parent.FailedFiles != 0 || parent.Progress != 100 {
+		t.Fatalf("重试完成后文件夹状态不正确: %+v", parent)
+	}
+}
+
 func TestFolderScanKeepsEmptyDirectoriesAndRestoresCheckpoint(t *testing.T) {
 	driver := &blockingURLDriver{files: map[string][]model.File{
 		"cloud-folder": {

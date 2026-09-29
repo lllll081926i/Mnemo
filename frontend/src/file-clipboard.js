@@ -28,6 +28,23 @@ export function retainClipboardFiles(source, completed) {
   fileClipboard.value = remaining.length ? { ...source, files: remaining } : null
 }
 
+export function clipboardPasteSource(source, target) {
+  const key = JSON.stringify([target.account.user_id, target.account.drive_id, target.dirId])
+  const completed = source.completedByTarget?.[key] || []
+  return { ...source, files: source.files.filter(file => !completed.includes(file.file_id)) }
+}
+
+export function rememberClipboardCopy(source, target, completed, finished = false) {
+  if (fileClipboard.value !== source) return
+  const key = JSON.stringify([target.account.user_id, target.account.drive_id, target.dirId])
+  const previous = source.completedByTarget?.[key] || []
+  const confirmed = [...new Set([...previous, ...completed])]
+  const completedByTarget = { ...source.completedByTarget }
+  if (finished) delete completedByTarget[key]
+  else completedByTarget[key] = confirmed
+  fileClipboard.value = { ...source, completedByTarget }
+}
+
 export function clipboardMigrationEvent(job) {
   const source = fileClipboard.value
   if (!source?.jobId || source.jobId !== job?.id) return

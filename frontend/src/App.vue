@@ -105,11 +105,13 @@ async function checkAccount() {
 async function navigateTo(location) {
   const acc = accounts.value.find(a => a.user_id === location.userId)
   if (!acc) { toast('账号已移除，请重新添加', 'warn'); return }
-  select(acc); switchTab('pan')
+  if (location.driveId && acc.drive_id !== location.driveId) { toast('网盘空间已变更，无法打开原记录', 'warn'); return }
+  await select(acc); switchTab('pan')
   await nextTick()
   // The page transition can defer mounting until its previous page leaves.
   for (let attempt = 0; attempt < 20 && !panView.value; attempt++) await new Promise(resolve => setTimeout(resolve, 30))
-  await panView.value?.navigate(location)
+  try { await panView.value?.navigate(location) }
+  catch (error) { toast(String(error), 'warn') }
 }
 const showUpdate = ref(false)
 const pendingUpdateInfo = ref(null)
@@ -362,7 +364,7 @@ async function saveRename() {
   }
 }
 
-function toast(msg, type = '') {
+function toast(msg, type = '', action = null) {
   const message = String(msg ?? '')
   const id = Date.now() + Math.random()
   const normalizedType = ['success', 'error', 'warn', 'info'].includes(type) ? type : 'info'
@@ -371,15 +373,20 @@ function toast(msg, type = '') {
   ))
   if (duplicate) return duplicate.id
   const labels = { success: '已完成', error: '操作失败', warn: '需要注意', info: '提示' }
-  const item = { id, msg: message, type: normalizedType, label: labels[normalizedType], createdAt: Date.now() }
+  const item = { id, msg: message, type: normalizedType, label: labels[normalizedType], createdAt: Date.now(), action: action?.tab === 'transfer' ? { label: '查看任务', tab: 'transfer' } : null }
   toasts.value.push(item)
-  const lifetime = normalizedType === 'error' ? 6500 : 3600
+  const lifetime = item.action ? 6500 : normalizedType === 'error' ? 6500 : 3600
   setTimeout(() => dismissToast(id), lifetime)
   return id
 }
 
 function dismissToast(id) {
   toasts.value = toasts.value.filter((t) => t.id !== id)
+}
+
+function onToastAction(item) {
+  if (item.action?.tab === 'transfer') switchTab('transfer')
+  dismissToast(item.id)
 }
 
 function applyTheme(theme) {
@@ -417,6 +424,19 @@ function onQuickAction(action) {
   } else if (action === 'upload') {
     switchTab('pan')
     panView.value?.openUploadModal()
+  }
+}
+
+const notifiedTransfers = new Set()
+function onTransferNotice(event) {
+  const task = event?.task
+  if (!task?.id || task.status !== 'completed' || task.groupId || tab.value === 'transfer') return
+  const key = `${event.kind}:${task.id}`
+  if (notifiedTransfers.has(key)) return
+  notifiedTransfers.add(key)
+  if (notifiedTransfers.size > 200) notifiedTransfers.delete(notifiedTransfers.values().next().value)
+  if (event.kind === 'download' || event.kind === 'upload') {
+    toast(`${event.kind === 'download' ? '下载' : '上传'}完成：${task.name || '文件'}`, 'success', { tab: 'transfer' })
   }
 }
 
@@ -461,6 +481,7 @@ onMounted(async () => {
     onEvent('account:changed', refresh),
     onEvent('account:expired', handleAccountExpired),
     onEvent('app:ready', refresh),
+    onEvent('transfer:event', onTransferNotice),
     onEvent('share:history-error', (ev) => {
       error('share', 'share history persistence failed', { error: errorText(ev?.error) })
       toast('分享已创建，但本地历史记录保存失败，请稍后重试', 'warn')
@@ -557,6 +578,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
       @select-tab="switchTab"
       @select-account="select"
       @action="onQuickAction"
+      @navigate="navigateTo"
     />
 
     <Modal v-if="infoAcc" title="账号信息" width="420px" @close="infoAcc = null">
@@ -677,6 +699,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
           />
         </span>
         <span class="t-message">{{ t.msg }}</span>
+        <button v-if="t.action" class="toast-action" type="button" @click="onToastAction(t)">{{ t.action.label }}</button>
         <button class="toast-close" type="button" title="关闭通知" aria-label="关闭通知" @click="dismissToast(t.id)">
           <UiIcon name="close" :size="11" />
         </button>

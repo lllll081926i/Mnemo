@@ -379,6 +379,10 @@ func (m *Manager) runFolderDownload(task *model.DownloadTask) {
 				workErr = context.Canceled
 				return
 			}
+			if child != nil && (m.tasks[id] != child || (child.Status != "paused" && child.Status != "failed") || m.cancels[id] != nil) {
+				m.mu.Unlock()
+				continue
+			}
 			if child == nil {
 				child = &model.DownloadTask{ID: id, GroupID: task.ID, UserID: task.UserID, DriveID: task.DriveID, Provider: task.Provider, FileID: entry.FileID, SourcePath: entry.SourcePath, Name: entry.Name, LocalPath: target, Size: entry.Size, Created: time.Now().Unix()}
 				m.tasks[id] = child

@@ -21,7 +21,8 @@ import { getPrefs, setPref } from '../appearance'
 import { createNavigationHistory } from '../navigation'
 import { directoryCacheKey, recordAccountHealth } from '../workspace'
 import { uniqueFileSelection, transferFiles, transferProblem, sameSpace } from '../file-transfer'
-import { fileClipboard, clipboardBusy, setFileClipboard, clearFileClipboard, retainClipboardFiles, clipboardMigrationEvent } from '../file-clipboard'
+import { fileClipboard, clipboardBusy, setFileClipboard, clearFileClipboard, retainClipboardFiles, clipboardPasteSource, rememberClipboardCopy, clipboardMigrationEvent } from '../file-clipboard'
+import { recordRecentItem } from '../recent-items'
 
 const props = defineProps({
   account: Object,
@@ -565,7 +566,11 @@ function openDir(file) {
   treeSelected.value = file.file_id
   mode.value = 'list'
   selected.value = []
-  load(file.file_id)
+  load(file.file_id).then(() => {
+    if (!error.value && uid.value === props.account?.user_id && dirId.value === file.file_id) {
+      recordRecentItem({ userId: uid.value, driveId: did.value, fileId: file.file_id, dirId: file.file_id, name: file.name, isDir: true, path: pathStack.value })
+    }
+  })
 }
 
 function goCrumb(i) {
@@ -943,12 +948,16 @@ async function openFile(file) {
     askConfirm(`“${file.name}”不支持在线预览，是否下载到本地？`, () => doDownload([file]), { okText: '下载', title: '无法预览' })
   } else {
     try {
+      const accountId = uid.value, driveId = did.value, parentId = file.parent_file_id || dirId.value
+      const openedPath = mode.value === 'list' && parentId === dirId.value
+        ? pathStack.value.map(part => ({ ...part })) : [{ id: parentId, name: '所在目录' }]
       const prefs = getPrefs()
       await window.go.app.App.OpenPreviewWindow({
         account: { user_id: uid.value, drive_id: did.value },
         file, files: listShown.value, capabilities: caps.value, kind,
         preferences: Object.fromEntries(['defaultVolume', 'defaultSpeed', 'seekStep', 'autoCloseOnEnd', 'autoLoadSubtitles', 'oledBackground'].map(key => [key, prefs[key]])),
       })
+      recordRecentItem({ userId: accountId, driveId, fileId: file.file_id, dirId: parentId, name: file.name, isDir: false, path: openedPath })
     } catch (error) { emit('toast', `打开预览窗口失败：${String(error)}`, 'error') }
   }
 }
@@ -1216,33 +1225,44 @@ function pasteFiles(moveOverride = false) {
   if (source.jobId) { emit('toast', '跨盘迁移已提交，请在传输页查看或继续任务', 'warn'); return }
   const moving = source.moving || moveOverride
   const target = snapshot()
-  const problem = transferProblem(source, target, props.providers, moving)
+  const pending = moving ? source : clipboardPasteSource(source, target)
+  if (!pending.files.length) { emit('toast', '该目录中的项目已复制；重新复制可再次粘贴', 'info'); return }
+  const problem = transferProblem(pending, target, props.providers, moving)
   if (problem) { emit('toast', problem, 'warn'); return }
-  const label = `${source.label || source.account.user_id} / ${source.files.length} 项`
+  const label = `${source.label || source.account.user_id} / ${pending.files.length} 项`
   const destination = `${accountName(props.account)} / ${crumbs.value.map(part => part.name).join(' / ')}`
   const conflict = sameSpace(source, target) ? '盘内同名项由网盘处理，部分网盘可能覆盖目标文件。' : '跨盘同名文件将重命名保留。'
   askConfirm(`${moving ? '移动' : '复制'} ${label} 到 ${destination}？${conflict}`, async () => {
     if (clipboardBusy.value || fileClipboard.value !== source) return
     clipboardBusy.value = true
     try {
-      const result = await transferFiles(source, target, props.providers, moving)
+      const result = await transferFiles(pending, target, props.providers, moving)
       if (result.queued) {
         fileClipboard.value = { ...source, moving, jobId: result.job?.id, jobStatus: 'running' }
         try {
           const jobs = await ListMigrateJobs()
           clipboardMigrationEvent(jobs?.find(job => job.id === result.job?.id))
         } catch { }
-        emit('toast', '已提交跨盘迁移，可在传输页查看进度', 'success')
+        emit('toast', '已提交跨盘迁移，可在传输页查看进度', 'success', { tab: 'transfer' })
       } else {
         if (moving) retainClipboardFiles(source, result.completed)
+        else if (sameSpace(source, target)) rememberClipboardCopy(source, target, result.completed, true)
         emit('toast', `已${moving ? '移动' : '复制'}到目标目录`, 'success')
       }
       invalidateDirCache(source.account.user_id, source.account.drive_id, 'list', source.dirId)
       invalidateDirCache(target.account.user_id, target.account.drive_id, 'list', target.dirId)
       if (target.account.user_id === uid.value && target.dirId === dirId.value) refresh()
     } catch (error) {
-      if (moving && error.completedIDs?.length) retainClipboardFiles(source, error.completedIDs)
-      emit('toast', String(error), 'error')
+      if (error.completedIDs?.length) {
+        if (moving) retainClipboardFiles(source, error.completedIDs)
+        else if (sameSpace(source, target)) rememberClipboardCopy(source, target, error.completedIDs)
+      }
+      if (error.completedIDs?.length) {
+        invalidateDirCache(source.account.user_id, source.account.drive_id, 'list', source.dirId)
+        invalidateDirCache(target.account.user_id, target.account.drive_id, 'list', target.dirId)
+        if (target.account.user_id === uid.value && target.dirId === dirId.value) refresh()
+      }
+      emit('toast', error.completedIDs?.length ? `已完成 ${error.completedIDs.length} 项，剩余项目可在此目录重试：${String(error)}` : String(error), 'error')
     } finally { clipboardBusy.value = false }
   }, { title: '粘贴文件', okText: moving ? '移动' : '复制' })
 }
@@ -1390,7 +1410,9 @@ function openFav(f) {
     dirId.value = f.file_id
     treeSelected.value = f.file_id
     selected.value = []
-    load(f.file_id)
+    load(f.file_id).then(() => {
+      if (!error.value && dirId.value === f.file_id) recordRecentItem({ userId: uid.value, driveId: did.value, fileId: f.file_id, dirId: f.file_id, name: f.name, isDir: true, path: pathStack.value })
+    })
   } else {
     openFile(f)
   }
@@ -1619,9 +1641,14 @@ defineExpose({
   navigate: async location => {
     mode.value = 'list'; selected.value = []; keyword.value = ''
     dirId.value = location.dirId || rootKey.value
-    pathStack.value = dirId.value === rootKey.value ? [] : [{ id: dirId.value, name: location.name || '目录' }]
+    pathStack.value = Array.isArray(location.path) ? location.path.map(part => ({ id: part.id, name: part.name })) : dirId.value === rootKey.value ? [] : [{ id: dirId.value, name: location.name || '目录' }]
     await load(dirId.value)
-    if (location.file && !location.file.isDir) selected.value = files.value.filter(f => f.file_id === location.file.file_id)
+    if (error.value) throw new Error(error.value)
+    if (location.fileId && !location.isDir) {
+      const file = files.value.find(entry => entry.file_id === location.fileId)
+      if (!file) throw new Error('文件已移动或删除，无法打开')
+      await openFile(file)
+    } else if (location.file && !location.file.isDir) selected.value = files.value.filter(f => f.file_id === location.file.file_id)
   },
   navigateHistory,
   refresh,

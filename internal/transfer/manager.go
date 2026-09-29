@@ -453,6 +453,9 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		m.runFolderDownload(t)
 		return
 	}
+	if t.GroupID != "" {
+		defer m.refreshFolderSummary(t.GroupID)
+	}
 	started := time.Now()
 	logging.Info("download worker started", "task_id", t.ID, "name", t.Name)
 	// wait for a concurrency slot before doing any work
@@ -685,6 +688,37 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	m.mu.Unlock()
 	m.update(t)
 	logging.Info("download worker finished", "task_id", t.ID, "status", t.Status, "error_present", t.Error != "", "duration", logging.Duration(started))
+}
+
+func (m *Manager) refreshFolderSummary(groupID string) {
+	m.mu.Lock()
+	parent := m.tasks[groupID]
+	if parent == nil || parent.Status != "failed" {
+		m.mu.Unlock()
+		return
+	}
+	completed, failed := 0, 0
+	var downloaded int64
+	for _, child := range m.tasks {
+		if child.GroupID != groupID {
+			continue
+		}
+		downloaded += child.Downloaded
+		if child.Status == "completed" {
+			completed++
+		} else if child.Status == "failed" || child.Status == "canceled" {
+			failed++
+		}
+	}
+	parent.CompletedFiles, parent.FailedFiles, parent.Downloaded = completed, failed, downloaded
+	if completed == parent.TotalFiles {
+		parent.Status, parent.Progress, parent.Error = "completed", 100, ""
+	} else {
+		parent.Error = fmt.Sprintf("%d 个文件未完成，继续可重试", parent.TotalFiles-completed)
+	}
+	parent.Updated = time.Now().Unix()
+	m.mu.Unlock()
+	m.update(parent)
 }
 
 func isExpiredDownloadError(err error) bool {

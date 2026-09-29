@@ -1205,6 +1205,8 @@ html.dark .account-rail .rail-active-indicator {
   font-size: 13.5px;
   border-radius: var(--radius-md);
 }
+.toast-action { flex-shrink: 0; border: 0; border-radius: 999px; padding: 4px 8px; background: var(--bg-elevated); color: var(--color-primary); cursor: pointer; font: inherit; font-weight: 600; }
+.toast-action:hover { background: var(--bg-hover); }
 .toppanbtns .toppanbtn :is(.tbtn.sm, .tbtn.xs) {
   height: var(--toolbar-control-height);
   min-height: var(--toolbar-control-height);

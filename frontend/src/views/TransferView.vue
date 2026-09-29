@@ -248,9 +248,26 @@ const visibleDownloads = computed(() => {
 })
 const activeDownloads = computed(() => byKw(byAccount(visibleDownloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
 const doneDownloads = computed(() => byKw(byAccount(visibleDownloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
-const groupChildren = id => downloads.value.filter(task => task.groupId === id)
+const groupChildrenByID = computed(() => {
+  const groups = new Map()
+  for (const task of downloads.value) {
+    if (!task.groupId) continue
+    if (!groups.has(task.groupId)) groups.set(task.groupId, [])
+    groups.get(task.groupId).push(task)
+  }
+  return groups
+})
+const groupChildren = id => groupChildrenByID.value.get(id) || []
 const groupChildLimits = ref({})
-const shownGroupChildren = id => groupChildren(id).slice(0, groupChildLimits.value[id] || 100)
+const failedGroupOnly = ref({})
+const filteredGroupChildren = id => failedGroupOnly.value[id] ? groupChildren(id).filter(child => child.status === 'failed' || child.status === 'canceled') : groupChildren(id)
+const shownGroupChildren = id => filteredGroupChildren(id).slice(0, groupChildLimits.value[id] || 100)
+function toggleFailedGroup(id) { failedGroupOnly.value = { ...failedGroupOnly.value, [id]: !failedGroupOnly.value[id] }; groupChildLimits.value = { ...groupChildLimits.value, [id]: 100 } }
+async function retryGroupChild(parent, child) {
+  if (!['failed', 'paused'].includes(child.status)) return
+  if (['paused', 'canceled'].includes(parent.status)) { emit('toast', '请先恢复文件夹任务，再重试单个文件', 'warn'); return }
+  await resumeTask(child)
+}
 function showMoreGroupChildren(id) { groupChildLimits.value = { ...groupChildLimits.value, [id]: (groupChildLimits.value[id] || 100) + 100 } }
 const activeUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted)), upName))
 const doneUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted)), upName))
@@ -1040,9 +1057,10 @@ onBeforeUnmount(() => {
                     <div :title="t.localPath || t.url || ''">{{ t.name || t.url || t.id }}</div>
                     <div class="fsub">{{ t.isDir ? `${t.scanDone ? '' : '正在扫描 · '}${t.completedFiles || 0}/${t.totalFiles || 0} 个文件${t.failedFiles ? ` · 失败 ${t.failedFiles}` : ''}` : t.localPath || t.url || '' }}</div>
                     <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details" @click.stop>
-                      <summary>查看文件（{{ Math.min(groupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ groupChildren(t.id).length }}）</summary>
-                      <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath">{{ child.name }} · {{ downTaskStatus(child) }} <template v-if="child.status === 'downloading'">{{ child.progress || 0 }}%</template></div>
-                      <button v-if="groupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
+                      <summary>查看文件（{{ Math.min(filteredGroupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ filteredGroupChildren(t.id).length }}）</summary>
+                      <button class="btn sm" type="button" @click.stop="toggleFailedGroup(t.id)">{{ failedGroupOnly[t.id] ? '查看全部' : '只看失败项' }}</button>
+                      <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath"><span>{{ child.name }} · {{ downTaskStatus(child) }} <template v-if="child.status === 'downloading'">{{ child.progress || 0 }}%</template></span><button v-if="['failed', 'paused'].includes(child.status)" class="btn sm" type="button" @click.stop="retryGroupChild(t, child)">重试</button></div>
+                      <button v-if="filteredGroupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
                     </details>
                   </div>
                     <div class="filesize">{{ t.isDir && !t.scanDone ? '扫描中' : formatBytes(t.size) }}</div>
@@ -1098,9 +1116,10 @@ onBeforeUnmount(() => {
                   <div :title="t.localPath || ''">{{ t.name || t.url || t.id }}</div>
                   <div class="fsub">{{ t.isDir ? `${t.completedFiles || 0} 个文件 · ${t.localPath || ''}` : t.localPath || '' }}<template v-if="t.updated"> · {{ formatTime(t.updated) }}</template></div>
                   <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details">
-                    <summary>查看文件（{{ Math.min(groupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ groupChildren(t.id).length }}）</summary>
-                    <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child">{{ child.name }} · {{ downTaskStatus(child) }}</div>
-                    <button v-if="groupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
+                    <summary>查看文件（{{ Math.min(filteredGroupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ filteredGroupChildren(t.id).length }}）</summary>
+                    <button class="btn sm" type="button" @click.stop="toggleFailedGroup(t.id)">{{ failedGroupOnly[t.id] ? '查看全部' : '只看失败项' }}</button>
+                    <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath"><span>{{ child.name }} · {{ downTaskStatus(child) }}</span><button v-if="['failed', 'paused'].includes(child.status)" class="btn sm" type="button" @click.stop="retryGroupChild(t, child)">重试</button></div>
+                    <button v-if="filteredGroupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
                   </details>
                 </div>
                 <div class="filesize">{{ formatBytes(t.size) }}</div>
@@ -1420,7 +1439,8 @@ onBeforeUnmount(() => {
 .td-label { width: 72px; flex-shrink: 0; color: var(--text-tertiary); font-size: 12.5px; font-weight: 600; }
 .td-val { flex: 1; min-width: 0; color: var(--text-primary); word-break: break-all; user-select: text; }
 .td-url { font-size: 12px; color: var(--text-link); }
-.folder-task-details { color: var(--text-secondary); font-size: 12px; max-height: 110px; overflow: auto; }
+.folder-task-details { color: var(--text-secondary); font-size: 12px; max-height: 180px; overflow: auto; }
 .folder-task-details summary { cursor: pointer; width: fit-content; color: var(--color-primary); }
-.folder-task-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 0 2px 12px; }
+.folder-task-child { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 0 2px 12px; }
+.folder-task-child span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
