@@ -131,7 +131,7 @@ func parseUploadRequestData(raw map[string]any) UploadRequestData {
 
 // fileMD5 computes the lowercase hex MD5 of the whole local file.
 // fileMD5 computes the MD5 hash while reporting progress via ui.Upload.
-func fileMD5(path string, ui *model.UploadingUI) (string, error) {
+func fileMD5(ctx context.Context, path string, ui *model.UploadingUI) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -141,6 +141,9 @@ func fileMD5(path string, ui *model.UploadingUI) (string, error) {
 	buf := make([]byte, 256*1024)
 	var read int64
 	for {
+		if stopped(ctx, ui) {
+			return "", context.Canceled
+		}
 		n, err := f.Read(buf)
 		if n > 0 {
 			h.Write(buf[:n])
@@ -215,7 +218,7 @@ func readSlice(f *os.File, offset, n int64) ([]byte, error) {
 	}
 	buf := make([]byte, n)
 	m, err := io.ReadFull(io.NewSectionReader(f, offset, n), buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil {
 		return nil, err
 	}
 	return buf[:m], nil
@@ -327,7 +330,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 	}
 
-	etag, err := fileMD5(ui.Info.LocalFilePath, ui)
+	etag, err := fileMD5(ctx, ui.Info.LocalFilePath, ui)
 	if err != nil {
 		mark(false, true, "计算 MD5 失败: "+err.Error())
 		return err
@@ -386,7 +389,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				mark(false, true, err.Error())
 				return err
 			}
-			if data.Reuse || data.Key == "" {
+			if data.Reuse {
 				// 本地 MD5 命中秒传
 				ui.Upload.FileID = data.FileID
 				ui.ReportUploadProgress(size, size)

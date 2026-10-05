@@ -13,6 +13,47 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func TestNativeThunderPageInitialization(t *testing.T) {
+	var script string
+	view := nativeICoreWebView2{Vtbl: &nativeICoreWebView2Vtbl{}}
+	view.Vtbl.ExecuteScript = nativeComProc(windows.NewCallback(func(_ uintptr, source *uint16, _ uintptr) uintptr {
+		script = windows.UTF16PtrToString(source)
+		return 0
+	}))
+	window := captchaWindow{ctx: context.Background(), view: &view, session: Session{Provider: "thunder"}}
+	window.navigationCompleted(0, nil)
+	if !strings.Contains(script, "sdk.init(") || !strings.Contains(script, "xlaccsdk01://xunlei.com/callback?state=harbor") {
+		t.Fatal("官方页面加载后没有调用 SDK 并绑定迅雷回调")
+	}
+	script = ""
+	window.session.Provider = "pikpak"
+	window.navigationCompleted(0, nil)
+	if script != "" {
+		t.Fatal("迅雷初始化脚本影响了 PikPak")
+	}
+}
+
+func TestNativeThunderCreditKeyIntercept(t *testing.T) {
+	results := make(chan VerificationResult, 1)
+	session, err := StartForProviderWithResult("thunder", func(_ Session, result VerificationResult) { results <- result })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer Close()
+	window := captchaWindow{ctx: context.Background(), session: *session}
+	if !window.intercept("xlaccsdk01://xunlei.com/callback?state=harbor&creditkey=final-key") {
+		t.Fatal("未截获 SDK 验证结果")
+	}
+	select {
+	case result := <-results:
+		if result.CreditKey != "final-key" || result.CaptchaToken != "" {
+			t.Fatal("SDK 信任参数回传失败")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SDK 验证结果未送达")
+	}
+}
+
 func TestNativeReportResponseBody(t *testing.T) {
 	for _, status := range []int32{200, 401} {
 		t.Run(strconv.Itoa(int(status)), func(t *testing.T) {
@@ -74,40 +115,50 @@ func TestNativeWebViewCallback(t *testing.T) {
 	if os.Getenv("MNEMO_TEST_WEBVIEW2") != "1" {
 		t.Skip("set MNEMO_TEST_WEBVIEW2=1 to exercise the installed WebView2 Runtime")
 	}
-	results := make(chan string, 1)
-	s, err := Start(func(_ Session, token string) { results <- token })
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	token := strings.Repeat("native-token", 4)
-	profile, err := os.MkdirTemp("", "mnemo-captcha-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		cancel()
-		for i := 0; i < 50; i++ {
-			if os.RemoveAll(profile) == nil {
-				return
+	for _, provider := range []string{"pikpak", "thunder"} {
+		t.Run(provider, func(t *testing.T) {
+			results := make(chan VerificationResult, 1)
+			s, err := StartForProviderWithResult(provider, func(_ Session, result VerificationResult) { results <- result })
+			if err != nil {
+				t.Fatal(err)
 			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		t.Errorf("WebView2 profile still in use: %s", profile)
-	}()
-	// The hidden real WebView exercises COM setup, response-event registration,
-	// navigation interception and fragment delivery without an online account.
-	if err := startNativeWindow(ctx, *s, s.CallbackURL+"#captcha_token="+token, profile, false); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case got := <-results:
-		if got != token {
-			t.Fatalf("got %q, want final callback token", got)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("native callback did not arrive")
+			defer Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			token := strings.Repeat("native-token", 4)
+			callback := s.CallbackURL + "#captcha_token=" + token
+			expected := VerificationResult{CaptchaToken: token}
+			if provider == "thunder" {
+				callback = s.CallbackURL + "#creditkey=verified-credit-key"
+				expected = VerificationResult{CreditKey: "verified-credit-key"}
+			}
+			profile, err := os.MkdirTemp("", "mnemo-captcha-test-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				cancel()
+				for i := 0; i < 50; i++ {
+					if os.RemoveAll(profile) == nil {
+						return
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+				t.Errorf("WebView2 profile still in use: %s", profile)
+			}()
+			// The hidden real WebView exercises COM setup, response-event registration,
+			// navigation interception and fragment delivery without an online account.
+			if err := startNativeWindow(ctx, *s, callback, profile, false); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case got := <-results:
+				if got != expected {
+					t.Fatal("原生验证结果未正确回传")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("native callback did not arrive")
+			}
+		})
 	}
 }

@@ -1,9 +1,9 @@
 package pikpak
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 
@@ -26,7 +26,7 @@ func gcidChunkSize(fileSize int64) int64 {
 
 // computeGCID computes the PikPak GCID for a local file while reporting
 // progress via ui.Upload.
-func computeGCID(path string, ui *model.UploadingUI) (string, error) {
+func computeGCID(ctx context.Context, path string, ui *model.UploadingUI) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -43,12 +43,16 @@ func computeGCID(path string, ui *model.UploadingUI) (string, error) {
 	buf := make([]byte, chunkSize)
 	var hashed int64
 	for offset < size {
-		n, err := f.ReadAt(buf, offset)
-		if err != nil && err != io.EOF {
+		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if n == 0 {
-			break
+		if ui != nil && ui.IsUploadStopRequested() {
+			return "", context.Canceled
+		}
+		length := min(chunkSize, size-offset)
+		n, err := io.ReadFull(io.NewSectionReader(f, offset, length), buf[:length])
+		if err != nil {
+			return "", err
 		}
 		sum := sha1.Sum(buf[:n])
 		chunkHashes = append(chunkHashes, sum[:]...)
@@ -59,9 +63,7 @@ func computeGCID(path string, ui *model.UploadingUI) (string, error) {
 		}
 	}
 	finalSum := sha1.Sum(chunkHashes)
-	gcid := hex.EncodeToString(finalSum[:])
-	// PikPak expects uppercase
-	return fmt.Sprintf("%x", gcid), nil
+	return hex.EncodeToString(finalSum[:]), nil
 }
 
 // gcidFromBytes computes GCID from a byte slice (for testing).

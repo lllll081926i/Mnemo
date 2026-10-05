@@ -73,6 +73,8 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 	identity := strings.TrimSpace(ui.Info.SHA1)
 	if identity == "" {
 		identity = fmt.Sprintf("mtime:%d", info.ModTime().UnixNano())
+	} else {
+		identity += fmt.Sprintf("\x00mtime:%d", info.ModTime().UnixNano())
 	}
 	// Include content identity and conflict behavior so a same-size replacement
 	// or a changed policy cannot resume an unrelated Graph session.
@@ -105,6 +107,9 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 	if sess == nil || strings.TrimSpace(sess.UploadURL) == "" {
 		return errors.New("onedrive: upload session url missing")
 	}
+	if err := drive.SaveUploadSessionState(sessionKey, sess.UploadURL, []int{int(pos)}); err != nil {
+		return err
+	}
 
 	// Query a newly-created session too; this keeps the handling consistent
 	// when the provider returns an already-initialized session.
@@ -125,12 +130,13 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 
 	buf := make([]byte, sessionChunkSize)
 	for pos < size {
-		n, err := f.ReadAt(buf, pos)
-		if err != nil && err != io.EOF {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if n == 0 {
-			break
+		length := min(int64(len(buf)), size-pos)
+		n, err := io.ReadFull(io.NewSectionReader(f, pos, length), buf[:length])
+		if err != nil {
+			return err
 		}
 		chunk := buf[:n]
 		end := pos + int64(n) - 1
@@ -144,8 +150,11 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 		if err != nil {
 			return err
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
 		if resp.StatusCode >= 300 && resp.StatusCode != 201 && resp.StatusCode != 202 && resp.StatusCode != 200 {
 			// 416 → already uploaded; query position to advance
 			if resp.StatusCode == 416 {
@@ -167,9 +176,16 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 			var item struct {
 				ID string `json:"id"`
 			}
-			if json.Unmarshal(body, &item) == nil && item.ID != "" {
-				ui.Upload.FileID = item.ID
+			if json.Unmarshal(body, &item) != nil || strings.TrimSpace(item.ID) == "" {
+				return errors.New("onedrive: 上传提交未返回文件 ID")
 			}
+			if pos+int64(n) != size {
+				return errors.New("onedrive: 文件未传完但服务端返回已完成")
+			}
+			ui.Upload.FileID = item.ID
+			ui.ReportUploadProgress(size, size)
+			drive.ClearUploadSession(sessionKey)
+			return nil
 		}
 		pos += int64(n)
 		// Persist progress incrementally (byte offset as single-element part list)
@@ -178,8 +194,12 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 			ui.ReportUploadProgress(pos, size)
 		}
 	}
-	drive.ClearUploadSession(sessionKey)
-	return nil
+	if _, fileID, completed, usable := querySessionPosition(ctx, sess.UploadURL, c); usable && completed {
+		ui.Upload.FileID = fileID
+		drive.ClearUploadSession(sessionKey)
+		return nil
+	}
+	return errors.New("onedrive: 分片已发送，但服务端尚未确认上传完成")
 }
 
 // querySessionPosition queries the Graph upload session URL to discover the
@@ -212,21 +232,20 @@ func querySessionPosition(ctx context.Context, uploadURL string, c *client) (pos
 		NextExpectedRanges []string `json:"nextExpectedRanges"`
 	}
 	if json.Unmarshal(body, &data) != nil {
-		return 0, "", false, true
+		return 0, "", false, false
 	}
 	if len(data.NextExpectedRanges) == 0 {
-		return 0, "", false, true
+		return 0, "", false, false
 	}
 	first := data.NextExpectedRanges[0]
 	if idx := indexByte(first, '-'); idx > 0 {
 		first = first[:idx]
 	}
-	var p int64
-	fmt.Sscanf(first, "%d", &p)
-	if p > 0 {
-		return p, "", false, true
+	position, err := strconv.ParseInt(first, 10, 64)
+	if err != nil || position < 0 {
+		return 0, "", false, false
 	}
-	return 0, "", false, true
+	return position, "", false, true
 }
 
 func indexByte(s string, b byte) int {

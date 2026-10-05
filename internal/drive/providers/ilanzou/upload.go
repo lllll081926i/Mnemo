@@ -25,7 +25,7 @@ const uploadPartSize = 8 * 1024 * 1024 // 单片 8MB
 
 // fileMD5 computes the lowercase hex MD5 of the whole local file while
 // reporting progress via ui.Upload.
-func fileMD5(path string, ui *model.UploadingUI) (string, error) {
+func fileMD5(ctx context.Context, path string, ui *model.UploadingUI) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -35,6 +35,12 @@ func fileMD5(path string, ui *model.UploadingUI) (string, error) {
 	buf := make([]byte, 256*1024)
 	var read int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if ui != nil && ui.IsUploadStopRequested() {
+			return "", context.Canceled
+		}
 		n, err := f.Read(buf)
 		if n > 0 {
 			h.Write(buf[:n])
@@ -247,7 +253,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Upload.DownState = "uploading"
 	ui.Upload.IsDowning = true
 
-	md5hex, err := fileMD5(ui.Info.LocalFilePath, ui)
+	md5hex, err := fileMD5(ctx, ui.Info.LocalFilePath, ui)
 	if err != nil {
 		return err
 	}
@@ -323,7 +329,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 
 	if size <= uploadPartSize {
 		buff := make([]byte, size)
-		if _, err := io.ReadFull(f, buff); err != nil && err != io.EOF {
+		if _, err := io.ReadFull(f, buff); err != nil {
 			return err
 		}
 		var body bytes.Buffer
@@ -398,7 +404,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				continue
 			}
 			buff := make([]byte, cur)
-			if _, err := f.ReadAt(buff, start); err != nil && err != io.EOF {
+			if _, err := io.ReadFull(io.NewSectionReader(f, start, cur), buff); err != nil {
 				return err
 			}
 			partURL := fmt.Sprintf("%s/%s/%d", initURL, saved.UploadID, i)

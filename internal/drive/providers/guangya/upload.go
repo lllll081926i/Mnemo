@@ -165,9 +165,11 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if taskID == "" {
 			return errors.New("秒传未返回 taskId")
 		}
-		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
+		fileID, err := waitUploadTask(ctx, cl, taskID)
+		if err != nil {
 			return err
 		}
+		ui.Upload.FileID = fileID
 		ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
 		return nil
 	}
@@ -242,25 +244,34 @@ func directPut(ctx context.Context, ui *model.UploadingUI, f *os.File, uploadURL
 	}
 	ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
 	if taskID != "" {
-		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
+		fileID, err := waitUploadTask(ctx, cl, taskID)
+		if err != nil {
 			return err
 		}
+		ui.Upload.FileID = fileID
 	}
 	return nil
 }
 
 // ossMultipart uploads via S3 multipart (queueSize=2, partSize≥5MiB).
 func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoint, bucket, key, ak, sk, token string, cl *client, taskID string) error {
+	uploadHTTP := netx.NewClientWithSystemProxy(60 * time.Second).HTTP
+	uploadHTTP.Timeout = 0
 	cli := s3.New(s3.Options{
 		Region:       ossRegionFromEndpoint(endpoint),
 		BaseEndpoint: aws.String(endpoint),
 		Credentials:  credentials.NewStaticCredentialsProvider(ak, sk, token),
 		UsePathStyle: false,
+		HTTPClient:   uploadHTTP,
 	})
 	size := ui.Info.Size
 	partSize := calcPartSize(size)
 	if min := int64(5 * 1024 * 1024); partSize < min {
 		partSize = min
+	}
+	if minimum := (size + 9999) / 10000; partSize < minimum {
+		const unit = int64(5 * 1024 * 1024)
+		partSize = ((minimum + unit - 1) / unit) * unit
 	}
 
 	mu, err := cli.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
@@ -272,18 +283,31 @@ func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoi
 		return errors.New("OSS 分片上传失败: " + err.Error())
 	}
 	uploadID := mu.UploadId
+	if uploadID == nil || *uploadID == "" {
+		return errors.New("OSS 初始化未返回上传 ID")
+	}
 	abort := func() {
-		_, _ = cli.AbortMultipartUpload(context.Background(), &s3.AbortMultipartUploadInput{
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_, _ = cli.AbortMultipartUpload(cleanupCtx, &s3.AbortMultipartUploadInput{
 			Bucket: aws.String(bucket), Key: aws.String(key), UploadId: uploadID,
 		})
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			abort()
+		}
+	}()
+	uploadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	partCount := int((size + partSize - 1) / partSize)
 	if partCount < 1 {
 		partCount = 1
 	}
 	parts := make([]s3types.CompletedPart, partCount)
-	sem := make(chan struct{}, 2) // queueSize 2
+	pending := make(chan int)
 	var wg sync.WaitGroup
 	var firstErr error
 	var errMu sync.Mutex
@@ -293,58 +317,67 @@ func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoi
 		errMu.Lock()
 		if firstErr == nil {
 			firstErr = e
+			cancel()
 		}
 		errMu.Unlock()
 	}
 
-	for i := 0; i < partCount; i++ {
-		if ui.IsUploadStopRequested() {
-			abort()
-			return errors.New("已暂停")
-		}
-		idx := i
+	for workerIndex := 0; workerIndex < min(2, partCount); workerIndex++ {
 		wg.Add(1)
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
-			offset := int64(idx) * partSize
-			cur := partSize
-			if size-offset < cur {
-				cur = size - offset
+			for partIndex := range pending {
+				if uploadCtx.Err() != nil || ui.IsUploadStopRequested() {
+					fail(context.Canceled)
+					return
+				}
+				offset := int64(partIndex) * partSize
+				length := max(int64(0), min(partSize, size-offset))
+				body := io.NewSectionReader(f, offset, length)
+				out, err := cli.UploadPart(uploadCtx, &s3.UploadPartInput{
+					Bucket:     aws.String(bucket),
+					Key:        aws.String(key),
+					UploadId:   uploadID,
+					PartNumber: aws.Int32(int32(partIndex + 1)),
+					Body:       body,
+				}, func(o *s3.Options) { o.HTTPClient = netx.UploadHTTPClient{Client: o.HTTPClient} })
+				if err != nil {
+					fail(err)
+					return
+				}
+				if out.ETag == nil || *out.ETag == "" {
+					fail(errors.New("OSS 分片未返回 ETag"))
+					return
+				}
+				parts[partIndex] = s3types.CompletedPart{
+					ETag:       out.ETag,
+					PartNumber: aws.Int32(int32(partIndex + 1)),
+				}
+				progMu.Lock()
+				uploaded += length
+				ui.ReportUploadProgress(uploaded, size)
+				progMu.Unlock()
 			}
-			if cur <= 0 {
-				cur = 0
-			}
-			body := io.NewSectionReader(f, offset, cur)
-			out, err := cli.UploadPart(ctx, &s3.UploadPartInput{
-				Bucket:     aws.String(bucket),
-				Key:        aws.String(key),
-				UploadId:   uploadID,
-				PartNumber: aws.Int32(int32(idx + 1)),
-				Body:       body,
-			}, func(o *s3.Options) { o.HTTPClient = netx.UploadHTTPClient{Client: o.HTTPClient} })
-			if err != nil {
-				fail(err)
-				return
-			}
-			parts[idx] = s3types.CompletedPart{
-				ETag:       out.ETag,
-				PartNumber: aws.Int32(int32(idx + 1)),
-			}
-			progMu.Lock()
-			uploaded += cur
-			ui.ReportUploadProgress(uploaded, size)
-			progMu.Unlock()
 		}()
 	}
+schedule:
+	for partIndex := 0; partIndex < partCount; partIndex++ {
+		select {
+		case pending <- partIndex:
+		case <-uploadCtx.Done():
+			break schedule
+		}
+	}
+	close(pending)
 	wg.Wait()
 	if firstErr != nil {
-		abort()
 		if ui.IsUploadStopRequested() {
 			return errors.New("已暂停")
 		}
 		return errors.New("OSS 分片上传失败: " + firstErr.Error())
+	}
+	if err := uploadCtx.Err(); err != nil {
+		return err
 	}
 
 	if _, err := cli.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
@@ -357,11 +390,14 @@ func ossMultipart(ctx context.Context, ui *model.UploadingUI, f *os.File, endpoi
 	}); err != nil {
 		return errors.New("OSS 分片上传失败: " + err.Error())
 	}
+	committed = true
 	ui.ReportUploadProgress(size, size)
 	if taskID != "" {
-		if _, err := waitUploadTask(ctx, cl, taskID); err != nil {
+		fileID, err := waitUploadTask(ctx, cl, taskID)
+		if err != nil {
 			return err
 		}
+		ui.Upload.FileID = fileID
 	}
 	return nil
 }

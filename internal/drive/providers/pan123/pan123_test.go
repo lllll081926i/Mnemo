@@ -475,6 +475,12 @@ func TestPan123VideoPreviewUsesCachedDescription(t *testing.T) {
 		if strings.HasSuffix(req.URL.Path, "/file/download_info") {
 			return pan123JSONResponse(fmt.Sprintf(`{"code":0,"data":{"DownloadUrl":%q}}`, redirectServer.URL+"/redirect"), req), nil
 		}
+		if req.URL.Path == "/redirect" {
+			if req.Header.Get("User-Agent") != ua || req.Header.Get("Referer") != referer {
+				t.Error("下载入口缺少专用请求头")
+			}
+			return http.DefaultTransport.RoundTrip(req)
+		}
 		return pan123JSONResponse(`{"code":0}`, req), nil
 	})
 	t.Cleanup(func() { netx.TestTransportHook = previous })
@@ -485,6 +491,9 @@ func TestPan123VideoPreviewUsesCachedDescription(t *testing.T) {
 	}
 	if preview == nil || len(preview.Qualities) != 1 || preview.Qualities[0].URL != redirectServer.URL+"/cdn/movie.mp4" {
 		t.Fatalf("preview = %+v, want cached-file redirect", preview)
+	}
+	if preview.Headers["User-Agent"] != ua {
+		t.Fatal("直链未携带专用 UA")
 	}
 }
 
@@ -928,7 +937,7 @@ func TestPan123UploadResumesSavedSessionBeforeRequest(t *testing.T) {
 		DriveID: "pan123:user",
 		Token:   &model.TokenInfo{AccessToken: "access-token"},
 	}
-	etag, err := fileMD5(path, nil)
+	etag, err := fileMD5(t.Context(), path, nil)
 	if err != nil {
 		t.Fatalf("fileMD5: %v", err)
 	}
@@ -995,7 +1004,7 @@ func TestPan123UploadRecreatesStaleSavedSession(t *testing.T) {
 		DriveID: "pan123:user",
 		Token:   &model.TokenInfo{AccessToken: "access-token"},
 	}
-	etag, err := fileMD5(path, nil)
+	etag, err := fileMD5(t.Context(), path, nil)
 	if err != nil {
 		t.Fatalf("fileMD5: %v", err)
 	}
@@ -1165,7 +1174,7 @@ func TestPan123UploadRejectsMissingTargetFile(t *testing.T) {
 	}
 	previous := netx.TestTransportHook
 	t.Cleanup(func() { netx.TestTransportHook = previous })
-	for _, data := range []string{`{}`, `{"Reuse":true}`, `{"Reuse":true,"FileId":0}`, `{"Key":"object","UploadId":"upload-1"}`} {
+	for _, data := range []string{`{}`, `{"Reuse":true}`, `{"Reuse":true,"FileId":0}`, `{"Key":"object","UploadId":"upload-1"}`, `{"Reuse":false,"FileId":7}`} {
 		t.Run(data, func(t *testing.T) {
 			netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if !strings.HasSuffix(req.URL.Path, "/file/upload_request") {
@@ -1186,7 +1195,7 @@ func TestPan123UploadRejectsMissingTargetFile(t *testing.T) {
 func TestPan123RapidUploadRequiresTargetFileID(t *testing.T) {
 	previous := netx.TestTransportHook
 	t.Cleanup(func() { netx.TestTransportHook = previous })
-	for _, data := range []string{`{"Reuse":true}`, `{"Reuse":true,"FileId":0}`, `{"FileId":0}`} {
+	for _, data := range []string{`{"Reuse":true}`, `{"Reuse":true,"FileId":0}`, `{"FileId":0}`, `{"Reuse":false,"FileId":7}`, `{"FileId":7}`} {
 		t.Run(data, func(t *testing.T) {
 			netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				return pan123JSONResponse(`{"code":0,"data":`+data+`}`, req), nil

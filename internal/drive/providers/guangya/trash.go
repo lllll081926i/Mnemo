@@ -36,13 +36,13 @@ func (d *Driver) Restore(ctx context.Context, account drive.Context, fileIDs []s
 	if response.Code != 0 || response.Data == nil || response.Data.TaskID == "" {
 		return nil, fmt.Errorf("光鸭还原请求失败（code=%d）：%s", response.Code, response.Msg)
 	}
-	if err := cl.waitRecycleTask(ctx, response.Data.TaskID); err != nil {
+	if err := cl.waitFileTask(ctx, response.Data.TaskID, "还原"); err != nil {
 		return nil, err
 	}
 	return fileIDs, nil
 }
 
-func (c *client) waitRecycleTask(ctx context.Context, taskID string) error {
+func (c *client) waitFileTask(ctx context.Context, taskID, action string) error {
 	for attempt := 0; attempt < 120; attempt++ {
 		var response struct {
 			Code int    `json:"code"`
@@ -59,13 +59,13 @@ func (c *client) waitRecycleTask(ctx context.Context, taskID string) error {
 			return err
 		}
 		if response.Code != 0 {
-			return fmt.Errorf("光鸭查询还原任务失败（code=%d）：%s", response.Code, response.Msg)
+			return fmt.Errorf("光鸭查询%s任务失败（code=%d）：%s", action, response.Code, response.Msg)
 		}
 		if response.Data == nil {
-			return errors.New("光鸭还原任务响应缺少状态")
+			return fmt.Errorf("光鸭%s任务响应缺少状态", action)
 		}
 		if response.Data.Detail.Code != 0 || response.Data.Status == 3 {
-			return fmt.Errorf("光鸭还原任务失败（code=%d）：%s", response.Data.Detail.Code, response.Data.Detail.Msg)
+			return fmt.Errorf("光鸭%s任务失败（code=%d）：%s", action, response.Data.Detail.Code, response.Data.Detail.Msg)
 		}
 		if response.Data.Status == 2 {
 			return nil
@@ -78,5 +78,5 @@ func (c *client) waitRecycleTask(ctx context.Context, taskID string) error {
 		case <-timer.C:
 		}
 	}
-	return errors.New("光鸭还原任务超时，请到回收站确认结果")
+	return fmt.Errorf("光鸭%s任务超时，请到官网确认结果", action)
 }

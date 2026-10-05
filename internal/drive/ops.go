@@ -447,6 +447,16 @@ func RefreshAccount(userID, driveID string) (token *model.TokenInfo, err error) 
 // files are placed in the asynchronous queue. Providers without a policy are
 // intentionally a no-op.
 func ValidateUploadItems(userID, driveID string, items []UploadValidationItem) (err error) {
+	return ValidateUploadItemsContext(context.Background(), userID, driveID, items)
+}
+
+func ValidateUploadItemsContext(ctx context.Context, userID, driveID string, items []UploadValidationItem) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(items) == 0 {
 		return nil
 	}
@@ -467,7 +477,7 @@ func ValidateUploadItems(userID, driveID string, items []UploadValidationItem) (
 		if item.Size < 0 {
 			return fmt.Errorf("drive: 上传文件大小无效: %s", name)
 		}
-		if validationErr := validator.ValidateUpload(context.Background(), c, name, item.Size); validationErr != nil {
+		if validationErr := validator.ValidateUpload(ctx, c, name, item.Size); validationErr != nil {
 			return validationErr
 		}
 	}
@@ -549,7 +559,11 @@ func GetFileFreshContext(ctx context.Context, userID, driveID, fileID string) (f
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	file, err = d.GetFile(ctx, c, fileID)
+	if fresh, ok := d.(FreshFileDriver); ok {
+		file, err = fresh.GetFileFresh(ctx, c, fileID)
+	} else {
+		file, err = d.GetFile(ctx, c, fileID)
+	}
 	if err != nil {
 		return nil, err
 	}

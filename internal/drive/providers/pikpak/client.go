@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
@@ -1360,6 +1361,10 @@ func (r *ShareResult) UnmarshalJSON(data []byte) error {
 
 // CreateShare creates a share.
 func (c *client) CreateShare(ctx context.Context, fileIDs []string, _ string, passCode string, expiration string) (*ShareResult, error) {
+	expirationDays, err := pikpakExpirationDays(expiration)
+	if err != nil {
+		return nil, err
+	}
 	shareTo := "publiclink"
 	passCodeOption := "NOT_REQUIRED"
 	if strings.TrimSpace(passCode) != "" {
@@ -1369,7 +1374,7 @@ func (c *client) CreateShare(ctx context.Context, fileIDs []string, _ string, pa
 	body := map[string]any{
 		"file_ids":         fileIDs,
 		"share_to":         shareTo,
-		"expiration_days":  pikpakExpirationDays(expiration),
+		"expiration_days":  expirationDays,
 		"pass_code_option": passCodeOption,
 	}
 	var res ShareResult
@@ -1394,26 +1399,26 @@ func (c *client) DeleteShare(ctx context.Context, shareID string) error {
 	return c.jsonDo(ctx, http.MethodPost, "/drive/v1/share:batchDelete", map[string]any{"ids": []string{shareID}}, nil, nil)
 }
 
-func pikpakExpirationDays(expiration string) int {
+func pikpakExpirationDays(expiration string) (int, error) {
 	value := strings.TrimSpace(expiration)
-	if value == "" {
-		return -1
+	if value == "" || value == "0" || value == "-1" {
+		return -1, nil
 	}
 	if days, err := strconv.Atoi(value); err == nil && days > 0 {
-		return days
+		return days, nil
 	}
 	target, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		target, err = time.Parse("2006-01-02", value)
 	}
 	if err != nil {
-		return -1
+		return 0, errors.New("PikPak 分享有效期格式无效")
 	}
 	remaining := time.Until(target)
 	if remaining <= 0 {
-		return 1
+		return 0, errors.New("PikPak 分享有效期已过期")
 	}
-	return int((remaining + 24*time.Hour - 1) / (24 * time.Hour))
+	return int((remaining + 24*time.Hour - 1) / (24 * time.Hour)), nil
 }
 
 // OfflineCreate submits an offline download task (magnet/link). PikPak uses
@@ -1456,19 +1461,7 @@ func (c *client) OfflineCreate(ctx context.Context, urlValue, fileName, parentID
 }
 
 // OfflineTask is a raw offline task.
-type OfflineTask struct {
-	TaskID      string `json:"task_id"`
-	FileID      string `json:"file_id"`
-	Name        string `json:"name"`
-	Status      string `json:"status"`
-	Progress    int    `json:"progress"`
-	Phase       string `json:"phase"`
-	Message     string `json:"message"`
-	FileSize    int64  `json:"file_size,omitempty"`
-	CreatedTime string `json:"created_time,omitempty"`
-	UpdatedTime string `json:"updated_time,omitempty"`
-	URL         string `json:"url,omitempty"`
-}
+type OfflineTask drive.OfflineTask
 
 type offlineTaskWire struct {
 	ID                string                     `json:"id"`

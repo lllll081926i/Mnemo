@@ -1,0 +1,35 @@
+package thunder
+
+import (
+	"mnemo-go/internal/drive"
+	"mnemo-go/internal/model"
+)
+
+const RootID = "thunder_root"
+
+type Driver struct{ drive.BaseDriver }
+
+var _ drive.Driver = (*Driver)(nil)
+var _ drive.OfflineDriver = (*Driver)(nil)
+
+func init() {
+	drive.Register(drive.Registration{
+		ID: model.ProviderThunder, Meta: drive.GetMeta(model.ProviderThunder),
+		Caps: drive.NewCapabilities(model.ProviderThunder, map[string]bool{
+			"upload": false, "createTextFile": false, "offlineDownload": true,
+			"cloudVideoPreview": true, "recycleBin": true,
+		}, func(caps *drive.Capabilities) { caps.SetUploadMode(drive.UploadModeNone) }),
+		Login: drive.LoginConfig{Fields: []drive.LoginField{
+			{Key: "login_mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "密码登录"}, {Value: "sms", Label: "短信验证码登录"}}},
+			{Key: "username", Type: "text", Label: "手机号", Required: true, Placeholder: "请输入迅雷账号绑定的手机号"},
+			{Key: "password", Type: "password", Label: "密码", Required: true, Placeholder: "请输入迅雷账号密码", Hint: "密码仅用于本次登录，不保存在本机；需要安全验证时会打开官方验证页面"},
+			{Key: "sms_code", Type: "text", Label: "短信验证码", Required: false, Placeholder: "请输入 6 位短信验证码"},
+		}},
+		Auth: authLogin, Factory: func() drive.Driver { return &Driver{} },
+	})
+}
+
+func (*Driver) ID() string                       { return model.ProviderThunder }
+func (*Driver) Meta() drive.Meta                 { return drive.GetMeta(model.ProviderThunder) }
+func (*Driver) Capabilities() drive.Capabilities { return drive.Require(model.ProviderThunder).Caps }
+func (*Driver) RootID() string                   { return RootID }

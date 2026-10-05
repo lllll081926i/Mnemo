@@ -83,6 +83,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	sliceLeft := int64(yikeSlicePart)
 	blockList := make([]string, 0, count)
 	for i := int64(0); i < count; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if ui.IsUploadStopRequested() {
 			return errors.New("已暂停")
 		}
@@ -189,8 +192,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 
 	for _, partseq := range parts {
-		if partseq < 0 {
-			continue
+		if partseq < 0 || int64(partseq) >= count {
+			return errors.New("一刻相册返回了无效分片序号")
 		}
 		if ui.IsUploadStopRequested() {
 			return errors.New("已暂停")

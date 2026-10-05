@@ -1,6 +1,7 @@
 package netx
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
@@ -53,6 +54,10 @@ func HashFile(path string, kind HashKind) (string, error) {
 // optional progress callback. total, if non-zero, sets the denominator for
 // pct computation (usually the file size).
 func HashFileWithProgress(path string, kind HashKind, progress func(read int64), total int64) (string, error) {
+	return HashFileWithProgressContext(context.Background(), path, kind, progress, total)
+}
+
+func HashFileWithProgressContext(ctx context.Context, path string, kind HashKind, progress func(read int64), total int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -70,6 +75,9 @@ func HashFileWithProgress(path string, kind HashKind, progress func(read int64),
 	buf := make([]byte, 256*1024)
 	var read int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		n, err := f.Read(buf)
 		if n > 0 {
 			if _, werr := h.Write(buf[:n]); werr != nil {

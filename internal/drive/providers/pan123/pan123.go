@@ -1304,11 +1304,9 @@ func (d *Driver) alistLink(ctx context.Context, c drive.Context, f pan123File) (
 	}
 	linkURL := downloadURL
 	// NoRedirect GET with Referer.
-	hc := &http.Client{
-		Timeout: 60 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	hc := netx.NewClientWithSystemProxy(60 * time.Second).HTTP
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
@@ -1335,7 +1333,7 @@ func (d *Driver) alistLink(ctx context.Context, c drive.Context, f pan123File) (
 			linkURL = redirect
 		}
 	}
-	return linkURL, map[string]string{"Referer": referer}, nil
+	return linkURL, map[string]string{"Referer": referer, "User-Agent": ua}, nil
 }
 
 func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID string, _ int) (*model.DownloadURL, error) {
@@ -1657,8 +1655,7 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	data := parseMap(resp.Data)
 	reuse := asBool(pick(data, "Reuse", "reuse"))
 	fileID := firstString(data, "FileId", "fileId")
-	key := firstString(data, "Key", "key")
-	if strings.TrimSpace(fileID) != "" && fileID != "0" && (reuse || key == "") {
+	if strings.TrimSpace(fileID) != "" && fileID != "0" && reuse {
 		return &drive.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: req.ParentID, Message: "秒传命中"}, nil
 	}
 	return &drive.RapidUploadResult{Reuse: false, Message: "未命中秒传"}, nil
@@ -1727,28 +1724,36 @@ func pan123ShareList(ctx context.Context, d *Driver, c drive.Context, shareKey, 
 		"shareKey":       shareKey,
 		"SharePwd":       sharePwd,
 	}
-	resp, err := d.api(ctx, c, http.MethodGet, apiShareGet, nil, query)
-	if err != nil {
-		return nil, err
-	}
-	data := parseMap(resp.Data)
-	list := rawList(data)
 	var out []drive.ShareImportFile
-	for _, raw := range list {
-		if m, ok := raw.(map[string]any); ok {
-			f := normalizePan123File(m)
-			if f.FileID == "" {
-				continue
+	seen := make(map[string]bool)
+	for page := 1; page <= 200; page++ {
+		query["Page"] = strconv.Itoa(page)
+		resp, err := d.api(ctx, c, http.MethodGet, apiShareGet, nil, query)
+		if err != nil {
+			return nil, err
+		}
+		data := parseMap(resp.Data)
+		list := rawList(data)
+		for _, raw := range list {
+			if metadata, ok := raw.(map[string]any); ok {
+				file := normalizePan123File(metadata)
+				if file.FileID == "" || seen[file.FileID] {
+					return nil, errors.New("123: 分享分页返回空 ID 或重复文件")
+				}
+				seen[file.FileID] = true
+				out = append(out, drive.ShareImportFile{
+					FileID: file.FileID,
+					Name:   file.FileName,
+					Size:   file.Size,
+					IsDir:  file.Type == 1,
+				})
 			}
-			out = append(out, drive.ShareImportFile{
-				FileID: f.FileID,
-				Name:   f.FileName,
-				Size:   f.Size,
-				IsDir:  f.Type == 1,
-			})
+		}
+		if len(list) == 0 || asString(pick(data, "Next", "next")) == "-1" {
+			return out, nil
 		}
 	}
-	return out, nil
+	return nil, errors.New("123: 分享文件分页超过上限")
 }
 
 // SaveShare implements drive.ShareImportDriver.
@@ -1783,10 +1788,7 @@ func parsePan123ShareURL(raw string) (shareKey, sharePwd string) {
 	if raw == "" {
 		return "", ""
 	}
-	if !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "//") {
-		raw = "https://" + raw
-	}
-	u, err := url.Parse(raw)
+	u, err := driveutil.ParseShareURL(raw, "123pan.com", "123pan.cn", "123684.com", "123865.com", "123912.com")
 	if err != nil {
 		return "", ""
 	}

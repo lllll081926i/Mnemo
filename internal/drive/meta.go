@@ -15,7 +15,7 @@ type Meta struct {
 	RootTitle string `json:"rootTitle,omitempty"`
 }
 
-// builtinMetas lists the 13 in-scope providers. Each plugin registers its own
+// builtinMetas lists the in-scope providers. Each plugin registers its own
 // meta; the builtin table serves as the authoritative display registry used by
 // the UI (login list + account rails).
 var builtinMetas = map[string]Meta{
@@ -30,6 +30,7 @@ var builtinMetas = map[string]Meta{
 	model.ProviderYike:     {Key: "yike", Label: "一刻相册", Icon: "drive-icons/yike.svg"},
 	model.ProviderAliopen:  {Key: "aliopen", Label: "阿里云盘", Icon: "drive-icons/aliopen.svg"},
 	model.ProviderGuangya:  {Key: "guangya", Label: "光鸭云盘", Icon: "drive-icons/guangya.svg"},
+	model.ProviderThunder:  {Key: "thunder", Label: "迅雷网盘", Icon: "drive-icons/thunder.svg", RootKey: "thunder_root", RootTitle: "网盘文件"},
 	model.ProviderWebdav:   {Key: "webdav", Label: "WebDAV", Icon: "drive-icons/webdav.svg", RootKey: "/"},
 	model.ProviderS3:       {Key: "s3", Label: "S3", Icon: "drive-icons/s3.svg", RootKey: "/"},
 }
@@ -39,7 +40,7 @@ var userIDPrefixes = map[string]string{
 	"pikpak": "pikpak_", "onedrive": "onedrive_", "dropbox": "dropbox_",
 	"pan123": "pan123_", "lanzou": "lanzou_", "ilanzou": "ilanzou_",
 	"pan139": "pan139_", "pan189": "pan189_", "yike": "yike_",
-	"aliopen": "aliopen_", "guangya": "guangya_",
+	"aliopen": "aliopen_", "guangya": "guangya_", "thunder": "thunder_",
 	"webdav": "webdav:", "s3": "s3:",
 }
 

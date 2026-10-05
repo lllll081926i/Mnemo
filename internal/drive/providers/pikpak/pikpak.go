@@ -24,6 +24,8 @@ type Driver struct {
 	drive.BaseDriver
 }
 
+var _ drive.OfflineDriver = (*Driver)(nil)
+
 var pikpakRefreshLocks = struct {
 	sync.Mutex
 	accounts map[string]*sync.Mutex
@@ -165,7 +167,6 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID, URL: u, Size: size,
 		DownloadMode: "redirect",
-		Headers:      map[string]string{"Authorization": "Bearer " + c.Token.AccessToken},
 	}, nil
 }
 
@@ -424,7 +425,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Upload.IsDowning = true
 	ui.Upload.IsFailed = false
 	ui.Upload.IsCompleted = false
-	gcid, err := computeGCID(ui.Info.LocalFilePath, ui)
+	gcid, err := computeGCID(ctx, ui.Info.LocalFilePath, ui)
 	if err != nil {
 		markPikPakUploadFailed(ui, err)
 		return err
@@ -762,11 +763,7 @@ func parsePikPakShareURL(raw string) (shareID, passCode string) {
 	}
 	// url.Parse treats a link without a scheme as a path. Normalize it so
 	// `mypikpak.com/s/<id>` behaves the same as the copied HTTPS link.
-	normalized := raw
-	if !strings.Contains(normalized, "://") && !strings.HasPrefix(normalized, "//") {
-		normalized = "https://" + normalized
-	}
-	u, err := url.Parse(normalized)
+	u, err := driveutil.ParseShareURL(raw, "mypikpak.com", "pikpak.me")
 	if err != nil {
 		return "", ""
 	}
@@ -807,12 +804,20 @@ func (d *Driver) OfflineCreate(ctx context.Context, c drive.Context, url, fileNa
 }
 
 // OfflineList returns PikPak offline tasks.
-func (d *Driver) OfflineList(ctx context.Context, c drive.Context) ([]OfflineTask, error) {
+func (d *Driver) OfflineList(ctx context.Context, c drive.Context) ([]drive.OfflineTask, error) {
 	cl, err := clientOf(c)
 	if err != nil {
 		return nil, err
 	}
-	return cl.OfflineList(ctx)
+	tasks, err := cl.OfflineList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]drive.OfflineTask, 0, len(tasks))
+	for _, task := range tasks {
+		result = append(result, drive.OfflineTask(task))
+	}
+	return result, nil
 }
 
 // OfflineFind locates one task by task id or file id.

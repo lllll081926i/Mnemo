@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -2005,19 +2004,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 	}
 
-	contentHash := strings.ToUpper(strings.TrimSpace(ui.Info.SHA1))
-	if contentHash == "" {
-		contentHash, err = netx.HashFileWithProgress(ui.Info.LocalFilePath, netx.HashSHA1, func(read int64) {
-			if ui != nil {
-				ui.ReportHashProgress(read, ui.Info.Size)
-			}
-		}, 0)
-		if err != nil {
-			return fmt.Errorf("aliopen: 计算文件 SHA1 失败: %w", err)
-		}
-		contentHash = strings.ToUpper(contentHash)
-		ui.Info.SHA1 = contentHash
+	contentHash, err := netx.HashFileWithProgressContext(ctx, ui.Info.LocalFilePath, netx.HashSHA1, func(read int64) {
+		ui.ReportHashProgress(read, ui.Info.Size)
+	}, 0)
+	if err != nil {
+		return fmt.Errorf("aliopen: 计算文件 SHA1 失败: %w", err)
 	}
+	contentHash = strings.ToUpper(contentHash)
+	ui.Info.SHA1 = contentHash
 	ui.ReportUploadStage("checking")
 	partSize := aliOpenPartSize(size)
 	partCount := aliOpenPartCount(size, partSize)
@@ -2076,7 +2070,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			if strings.TrimSpace(created.FileID) == "" {
 				return errors.New("aliopen: 秒传响应缺少 file_id")
 			}
-			ui.Upload.FileID = created.FileID
+			ui.Upload.FileID = wrapRef(ref.Scope, created.FileID)
 			ui.ReportUploadProgress(size, size)
 			return nil
 		}
@@ -2108,7 +2102,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err := cl.fillUploadURLs(ctx, ref.Scope, fileID, uploadID, parts, uploadedSet); err != nil {
 		return err
 	}
-	ui.Upload.FileID = fileID
+	ui.Upload.FileID = wrapRef(ref.Scope, fileID)
 
 	var uploadedSize int64
 	for partNumber := range uploadedSet {
@@ -2127,6 +2121,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	lastURLRefresh := time.Now()
 	for i := range parts {
 		part := &parts[i]
+		if uploadedSet[part.PartNumber] {
+			continue
+		}
 		start := int64(part.PartNumber-1) * partSize
 		length := int64(0)
 		if start < size {
@@ -2234,7 +2231,11 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 			return &drive.RapidUploadResult{Reuse: true, Message: "目标文件已存在，已跳过"}, nil
 		}
 	}
-	return cl.rapidUploadWithMode(ctx, ref.Scope, ref.FID, req.FileName, req.Size, req.Hash, aliOpenCheckNameModeForDuplicate(req.Duplicate))
+	result, err := cl.rapidUploadWithMode(ctx, ref.Scope, ref.FID, req.FileName, req.Size, req.Hash, aliOpenCheckNameModeForDuplicate(req.Duplicate))
+	if result != nil && result.FileID != "" {
+		result.FileID = wrapRef(ref.Scope, result.FileID)
+	}
+	return result, err
 }
 
 func (d *Driver) ResolveTransferHash(ctx context.Context, c drive.Context, fileID, method string, _ bool) (string, error) {
@@ -2263,7 +2264,10 @@ func (d *Driver) ImportShareSession(ctx context.Context, c drive.Context, shareU
 	if err != nil {
 		return nil, err
 	}
-	shareID, _ := parseAliShareURL(shareURL)
+	shareID, linkPassword := parseAliShareURL(shareURL)
+	if password == "" {
+		password = linkPassword
+	}
 	if shareID == "" {
 		return nil, errors.New("aliopen: 无效的分享链接")
 	}
@@ -2348,25 +2352,18 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 		return nil, err
 	}
 	// Determine target drive + parent
-	targetDrive := cl.session.ResourceDriveID
-	if targetDrive == "" {
-		targetDrive = cl.session.DriveID
-	}
-	if targetDrive == "" {
-		return nil, errors.New("aliopen: 缺少目标 drive_id")
-	}
 	parent := toParentID
 	if parent == "" || parent == "root" || parent == "/" || parent == RootID {
 		parent = "root"
 	}
 	ref := parseRef(parent)
+	targetDrive := cl.scopedDriveID(ref.Scope)
+	if targetDrive == "" {
+		return nil, errors.New("aliopen: 缺少目标 drive_id")
+	}
 	parent = ref.FID
 	if parent == "" {
 		parent = "root"
-	}
-	// If the target scope's drive_id differs from targetDrive, use the target drive
-	if ref.Scope == ScopeResource && cl.session.ResourceDriveID != "" {
-		targetDrive = cl.session.ResourceDriveID
 	}
 	hdrs := map[string]string{"x-share-token": session.ShareToken}
 	var saved []string
@@ -2394,10 +2391,7 @@ func parseAliShareURL(raw string) (shareID string, pwd string) {
 	if raw == "" {
 		return "", ""
 	}
-	if !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "//") {
-		raw = "https://" + raw
-	}
-	u, err := url.Parse(raw)
+	u, err := driveutil.ParseShareURL(raw, "alipan.com", "aliyundrive.com")
 	if err != nil {
 		return "", ""
 	}

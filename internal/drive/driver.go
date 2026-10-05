@@ -133,6 +133,10 @@ type ShareImportDriver interface {
 	SaveShare(ctx context.Context, c Context, session *ShareImportSession, fileIDs []string, toParentID string) ([]string, error)
 }
 
+type FreshFileDriver interface {
+	GetFileFresh(ctx context.Context, c Context, fileID string) (*model.File, error)
+}
+
 // ShareCancellationDriver is the optional capability interface for revoking a
 // share that was created by this application. A provider must implement it
 // before advertising CancelCreatedShares; removing only the local history is

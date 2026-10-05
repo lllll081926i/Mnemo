@@ -118,6 +118,9 @@ func (d *Driver) commitMultiUploadFile(ctx context.Context, c drive.Context, bas
 	if res.Data.File.UserFileID != "" {
 		return res.Data.File.UserFileID, nil
 	}
+	if strings.TrimSpace(res.Data.FileID) == "" {
+		return "", errors.New("天翼云盘上传提交未返回文件 ID")
+	}
 	return res.Data.FileID, nil
 }
 
@@ -217,7 +220,7 @@ func putPart(ctx context.Context, rawURL string, headers map[string]string, chun
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return errors.New("分片上传失败 HTTP " + itoa(int64(resp.StatusCode)) + ": " + truncateStr(string(body), 200))
 	}
 	return nil
@@ -226,19 +229,25 @@ func putPart(ctx context.Context, rawURL string, headers map[string]string, chun
 // fileMD5Of computes the whole-file MD5 plus per-slice md5 hex + partInfo.
 // Returns uppercase whole-file md5, per-slice md5 hex list and partInfo list.
 // Progress is reported through the upload runtime callback during hashing.
-func fileMD5Of(r io.ReaderAt, size, slice int64, count int, ui *model.UploadingUI) (string, []string, []string, error) {
+func fileMD5Of(ctx context.Context, r io.ReaderAt, size, slice int64, count int, ui *model.UploadingUI) (string, []string, []string, error) {
 	var fileSum = md5.New()
 	sliceHexs := make([]string, 0, count)
 	partInfos := make([]string, 0, count)
 	var hashed int64
 	for i := 1; i <= count; i++ {
+		if err := ctx.Err(); err != nil {
+			return "", nil, nil, err
+		}
+		if ui != nil && ui.IsUploadStopRequested() {
+			return "", nil, nil, context.Canceled
+		}
 		start := (int64(i) - 1) * slice
 		cur := slice
 		if remain := size - start; remain < cur {
 			cur = remain
 		}
 		chunk := make([]byte, cur)
-		if _, err := r.ReadAt(chunk, start); err != nil && err != io.EOF {
+		if _, err := io.ReadFull(io.NewSectionReader(r, start, cur), chunk); err != nil {
 			return "", nil, nil, err
 		}
 		_, _ = fileSum.Write(chunk)
@@ -306,6 +315,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	size := info.Size()
+	ui.Info.Size = size
 	slice := partSize(size)
 	count := 1
 	if size > 0 {
@@ -318,7 +328,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	fileName := ui.Info.Name
 
 	// 单遍预计算 整文件MD5 + 各分片MD5 + partInfo（对齐 AList FastUpload）。
-	fileMD5Hex, sliceMD5Hexs, partInfos, err := fileMD5Of(f, size, slice, count, ui)
+	fileMD5Hex, sliceMD5Hexs, partInfos, err := fileMD5Of(ctx, f, size, slice, count, ui)
 	if err != nil {
 		return err
 	}
@@ -388,7 +398,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return err
 		}
 		chunk := make([]byte, cur)
-		if _, err := f.ReadAt(chunk, start); err != nil && err != io.EOF {
+		if _, err := io.ReadFull(io.NewSectionReader(f, start, cur), chunk); err != nil {
 			return err
 		}
 		if err := putPart(ctx, uploadURLStr, headers, chunk); err != nil {
@@ -412,7 +422,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 }
 
 func setUploadState(ui *model.UploadingUI, done, total int64) {
-	if ui == nil || total <= 0 {
+	if ui == nil {
 		return
 	}
 	ui.ReportUploadProgress(done, total)

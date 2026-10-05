@@ -19,6 +19,7 @@ const (
 	ProviderYike     = "yike"
 	ProviderAliopen  = "aliopen"
 	ProviderGuangya  = "guangya"
+	ProviderThunder  = "thunder"
 	ProviderWebdav   = "webdav"
 	ProviderS3       = "s3"
 	ProviderUnknown  = "unknown"
@@ -149,7 +150,7 @@ func ResolveProviderFromUserID(userID string) string {
 func AllProviders() []string {
 	v := []string{ProviderPikpak, ProviderOnedrive, ProviderDropbox, ProviderPan123,
 		ProviderLanzou, ProviderIlanzou, ProviderPan139, ProviderPan189, ProviderYike,
-		ProviderAliopen, ProviderGuangya, ProviderWebdav, ProviderS3}
+		ProviderAliopen, ProviderGuangya, ProviderThunder, ProviderWebdav, ProviderS3}
 	sort.Strings(v)
 	return v
 }

@@ -26,6 +26,7 @@ type nativeInvoke interface {
 }
 type controllerCallback interface{ nativeInvoke }
 type navigationCallback interface{ nativeInvoke }
+type navigationCompletedCallback interface{ nativeInvoke }
 type popupCallback interface{ nativeInvoke }
 type responseCallback interface{ nativeInvoke }
 type contentCallback interface{ nativeInvoke }
@@ -42,6 +43,7 @@ func registerNativeCallback[T nativeInvoke](iid string) {
 func init() {
 	registerNativeCallback[controllerCallback]("{6c4819f3-c9b7-4260-8127-c9f5bde7f68c}")
 	registerNativeCallback[navigationCallback]("{9adbe429-f36d-432b-9ddc-f8881fbd76e3}")
+	registerNativeCallback[navigationCompletedCallback]("{d33a35bf-1c49-4f98-93ab-006e0533fe1c}")
 	registerNativeCallback[popupCallback]("{d4c185fe-c81c-4989-97af-2d3fa7ab5651}")
 	registerNativeCallback[responseCallback]("{7de9898a-24f5-40c3-a2de-d4f458e69828}")
 	registerNativeCallback[contentCallback]("{875738e1-9fa2-40e3-8b74-2e8972dd6fe7}")
@@ -141,6 +143,9 @@ func (w *captchaWindow) run(profile string) {
 		return
 	}
 	title := windows.StringToUTF16Ptr("PikPak 安全验证")
+	if w.session.Provider == "thunder" {
+		title = windows.StringToUTF16Ptr("迅雷安全验证")
+	}
 	hwnd, _, err := captchaUser32.NewProc("CreateWindowExW").Call(0, uintptr(unsafe.Pointer(nativeClassName)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow|wsClipChildren, 0x80000000, 0x80000000, 520, 720, 0, 0, instance, 0)
 	if hwnd == 0 {
 		w.signal(err)
@@ -307,6 +312,14 @@ func (w *captchaWindow) configure() error {
 	if int32(hr) < 0 {
 		return syscall.Errno(hr)
 	}
+	if w.session.Provider == "thunder" {
+		loaded := combridge.New[navigationCompletedCallback](invokeFunc(w.navigationCompleted))
+		defer loaded.Close()
+		hr, _, _ = w.view.Vtbl.AddNavigationCompleted.Call(uintptr(unsafe.Pointer(w.view)), loaded.Ref(), uintptr(unsafe.Pointer(&eventToken)))
+		if int32(hr) < 0 {
+			return syscall.Errno(hr)
+		}
+	}
 	popup := combridge.New[popupCallback](invokeFunc(func(_ uintptr, ptr unsafe.Pointer) uintptr {
 		a := (*nativeICoreWebView2NewWindowRequestedEventArgs)(ptr)
 		a.Vtbl.PutHandled.Call(uintptr(ptr), 1)
@@ -337,12 +350,24 @@ func (w *captchaWindow) configure() error {
 }
 
 func (w *captchaWindow) intercept(raw string) bool {
-	if token, ok := callbackToken(w.session, raw); ok {
-		queueCallback(w.session.ID, token)
+	if result, ok := callbackResult(w.session, raw); ok {
+		queueCallbackResult(w.session.ID, result)
 		return true
 	}
 	u, err := url.Parse(raw)
 	return err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil
+}
+
+func (w *captchaWindow) navigationCompleted(_ uintptr, _ unsafe.Pointer) uintptr {
+	if w.closed || w.ctx.Err() != nil || w.view == nil || w.session.Provider != "thunder" {
+		return 0
+	}
+	script, err := windows.UTF16PtrFromString(thunderVerificationScript(w.session))
+	if err != nil {
+		return 0
+	}
+	w.view.Vtbl.ExecuteScript.Call(uintptr(unsafe.Pointer(w.view)), uintptr(unsafe.Pointer(script)), 0)
+	return 0
 }
 
 func (w *captchaWindow) responseReceived(_ uintptr, ptr unsafe.Pointer) uintptr {
@@ -356,7 +381,7 @@ func (w *captchaWindow) responseReceived(_ uintptr, ptr unsafe.Pointer) uintptr 
 	}
 	defer releaseNative(unsafe.Pointer(request))
 	raw, err := nativeString(unsafe.Pointer(request), request.Vtbl.GetUri)
-	if err != nil || !isReportURL(raw) {
+	if err != nil || !isSessionReportURL(w.session, raw) {
 		return 0
 	}
 	response, err := args.GetResponse()

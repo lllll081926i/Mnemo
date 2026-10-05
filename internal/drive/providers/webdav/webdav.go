@@ -386,7 +386,11 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	pr := driveutil.NewProgressOnlyReader(f, size, func(read int64) {
 		ui.ReportUploadProgress(read, size)
 	})
-	return client.Put(ctx, target, pr, size)
+	if err := client.Put(ctx, target, pr, size); err != nil {
+		return err
+	}
+	ui.Upload.FileID = target
+	return nil
 }
 
 func idsToRefs(ids []string) []drive.FileRef {

@@ -1,11 +1,27 @@
 package netx
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestHashFileWithProgressContextCancels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, make([]byte, 3*256*1024), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	samples := 0
+	_, err := HashFileWithProgressContext(ctx, path, HashSHA1, func(int64) { samples++; cancel() }, 0)
+	if !errors.Is(err, context.Canceled) || samples != 1 {
+		t.Fatalf("哈希取消未停止：%d, %v", samples, err)
+	}
+}
 
 func TestNewHash(t *testing.T) {
 	if _, err := NewHash(HashMD5); err != nil {

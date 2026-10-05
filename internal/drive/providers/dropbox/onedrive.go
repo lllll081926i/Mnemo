@@ -101,7 +101,7 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	}
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID,
-		ExpireTime:   timeNow().Add(4 * hour).Unix(),
+		ExpireTime:   timeNow().Add(4 * hour).UnixMilli(),
 		URL:          lnk,
 		Size:         size,
 		DownloadMode: "redirect",

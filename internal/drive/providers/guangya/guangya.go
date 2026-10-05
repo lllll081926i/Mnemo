@@ -36,6 +36,7 @@ func init() {
 		ID:   providerID,
 		Meta: drive.GetMeta(providerID),
 		Caps: drive.NewCapabilities(providerID, map[string]bool{
+			"offlineDownload":     true,
 			"copy":                true,
 			"createShare":         true,
 			"manageCreatedShares": true,
@@ -495,8 +496,8 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID, URL: u, DownloadMode: "proxy",
 		Headers: map[string]string{
-			"Referer":    "https://pan.quark.cn/",
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			"Referer":    "https://www.guangyapan.com/",
+			"User-Agent": ua,
 		},
 	}, nil
 }

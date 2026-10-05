@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
@@ -123,7 +124,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Upload.DownState = "uploading"
 	ui.Upload.IsDowning = true
 
-	body, contentType, contentLength, err := buildLanzouUploadBody(f, ui.Info.Name, folderID)
+	body, contentType, contentLength, err := buildLanzouUploadBody(ctx, f, ui.Info.Name, folderID)
 	if err != nil {
 		return err
 	}
@@ -166,7 +167,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	return nil
 }
 
-func buildLanzouUploadBody(source *os.File, name, folderID string) (*os.File, string, int64, error) {
+func buildLanzouUploadBody(ctx context.Context, source *os.File, name, folderID string) (*os.File, string, int64, error) {
 	body, err := os.CreateTemp("", "mnemo-lanzou-upload-*")
 	if err != nil {
 		return nil, "", 0, err
@@ -198,7 +199,7 @@ func buildLanzouUploadBody(source *os.File, name, folderID string) (*os.File, st
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
 		return cleanup(err)
 	}
-	if _, err := io.Copy(part, source); err != nil {
+	if _, err := io.Copy(part, driveutil.NewContextReader(ctx, source)); err != nil {
 		return cleanup(err)
 	}
 	if err := mw.Close(); err != nil {

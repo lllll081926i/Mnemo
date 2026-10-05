@@ -30,12 +30,20 @@ import (
 type Session struct {
 	ID          string
 	CallbackURL string
+	Provider    string
 }
 
 // CompletedFunc receives the token returned after a visual challenge.
 // A token can be empty when PikPak only signals completion through its redirect;
 // callers can then exchange the original challenge token with the API.
 type CompletedFunc func(session Session, token string)
+
+type VerificationResult struct {
+	CaptchaToken string
+	CreditKey    string
+}
+
+type ResultCompletedFunc func(Session, VerificationResult)
 
 const legacyCallbackURI = "xlaccsdk01://xbase.cloud/callback"
 
@@ -44,6 +52,9 @@ const legacyCallbackURI = "xlaccsdk01://xbase.cloud/callback"
 // needed. Browser/iframe platforms use their session's localhost endpoint.
 func RedirectURI(session Session) string {
 	if launchWindow != nil {
+		if session.Provider == "thunder" {
+			return "xlaccsdk01://xunlei.com/callback?state=harbor"
+		}
 		return legacyCallbackURI
 	}
 	return session.CallbackURL
@@ -53,7 +64,7 @@ var (
 	mu            sync.Mutex
 	server        *http.Server
 	listener      net.Listener
-	onDone        CompletedFunc
+	onDone        ResultCompletedFunc
 	activeSession Session
 	completed     bool
 	callbackTimer *time.Timer
@@ -92,26 +103,48 @@ func Show(sessionID, rawURL, profileDir string) (bool, error) {
 	return true, nil
 }
 
+func ShowForProvider(provider, sessionID, rawURL, profileDir string) (bool, error) {
+	mu.Lock()
+	valid := activeSession.ID == sessionID && activeSession.Provider == provider
+	mu.Unlock()
+	if !valid {
+		return false, fmt.Errorf("captcha: 验证会话与网盘不匹配")
+	}
+	return Show(sessionID, rawURL, profileDir)
+}
+
 func callbackToken(session Session, raw string) (string, bool) {
+	result, ok := callbackResult(session, raw)
+	return result.CaptchaToken, ok
+}
+
+func callbackResult(session Session, raw string) (VerificationResult, bool) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", false
+		return VerificationResult{}, false
 	}
 	local, _ := url.Parse(session.CallbackURL)
 	isLocal := local != nil && u.Scheme == local.Scheme && u.Host == local.Host && u.Path == local.Path
-	isLegacy := u.Scheme == "xlaccsdk01" && u.Host == "xbase.cloud" && u.Path == "/callback"
-	if !isLocal && !isLegacy {
-		return "", false
+	isLegacy := u.Scheme == "xlaccsdk01" && u.Host == "xbase.cloud" && u.Path == "/callback" && session.Provider != "thunder"
+	if session.Provider == "thunder" {
+		isLegacy = u.Scheme == "xlaccsdk01" && u.Host == "xunlei.com" && u.Path == "/callback" && u.Query().Get("state") == "harbor"
 	}
-	fragment, _ := url.ParseQuery(u.Fragment)
+	if !isLocal && !isLegacy {
+		return VerificationResult{}, false
+	}
+	result := VerificationResult{}
+	fragment, _ := url.ParseQuery(u.EscapedFragment())
 	for _, values := range []url.Values{u.Query(), fragment} {
 		for _, key := range []string{"captcha_token", "captchaToken", "token"} {
-			if token := normalizeToken(values.Get(key)); token != "" {
-				return token, true
+			if token := normalizeToken(values.Get(key)); token != "" && result.CaptchaToken == "" {
+				result.CaptchaToken = token
 			}
 		}
+		if session.Provider == "thunder" && result.CreditKey == "" {
+			result.CreditKey = strings.TrimSpace(values.Get("creditkey"))
+		}
 	}
-	return "", true
+	return result, true
 }
 
 func isReportURL(raw string) bool {
@@ -124,7 +157,10 @@ func isReportURL(raw string) bool {
 }
 
 func acceptReport(sessionID, rawURL string, body []byte) bool {
-	if !isReportURL(rawURL) || len(body) > 1<<20 {
+	mu.Lock()
+	session := activeSession
+	mu.Unlock()
+	if session.ID != sessionID || !isSessionReportURL(session, rawURL) || len(body) > 1<<20 {
 		return false
 	}
 	var payload any
@@ -137,6 +173,18 @@ func acceptReport(sessionID, rawURL string, body []byte) bool {
 	}
 	_, accepted := complete(sessionID, token)
 	return accepted
+}
+
+func isSessionReportURL(session Session, raw string) bool {
+	if session.Provider != "thunder" {
+		return isReportURL(raw)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Path != "/credit/v1/report" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "xunlei.com" || strings.HasSuffix(host, ".xunlei.com")
 }
 
 func findReportToken(value any, depth int) string {
@@ -167,21 +215,44 @@ func findReportToken(value any, depth int) string {
 
 // Like the legacy client, allow the report response to win the redirect race.
 func queueCallback(sessionID, token string) {
+	queueCallbackResult(sessionID, VerificationResult{CaptchaToken: token})
+}
+
+func queueCallbackResult(sessionID string, result VerificationResult) {
 	mu.Lock()
 	defer mu.Unlock()
 	if activeSession.ID != sessionID || completed || onDone == nil || callbackTimer != nil {
 		return
 	}
-	callbackTimer = time.AfterFunc(500*time.Millisecond, func() { complete(sessionID, token) })
+	callbackTimer = time.AfterFunc(500*time.Millisecond, func() { completeResult(sessionID, result) })
 }
 
 // Start creates a localhost callback endpoint without opening a browser. The
 // caller supplies Session.CallbackURL to PikPak while it initializes a visual
 // challenge, so the challenge itself redirects back to this application.
 func Start(onComplete CompletedFunc) (*Session, error) {
+	return StartForProvider("pikpak", onComplete)
+}
+
+func StartForProvider(provider string, onComplete CompletedFunc) (*Session, error) {
+	return StartForProviderWithResult(provider, func(session Session, result VerificationResult) {
+		if onComplete != nil {
+			onComplete(session, result.CaptchaToken)
+		}
+	})
+}
+
+func StartForProviderWithResult(provider string, onComplete ResultCompletedFunc) (*Session, error) {
+	if provider != "pikpak" && provider != "thunder" {
+		return nil, fmt.Errorf("captcha: 不支持的验证服务")
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	session, err := startLocked(onComplete)
+	session, err := startResultLocked(onComplete)
+	if session != nil {
+		session.Provider = provider
+		activeSession.Provider = provider
+	}
 	if err != nil {
 		logging.Warn("captcha callback server start failed", "error", err)
 	} else {
@@ -220,6 +291,14 @@ func Open(rawURL string, onComplete CompletedFunc) error {
 }
 
 func startLocked(onComplete CompletedFunc) (*Session, error) {
+	return startResultLocked(func(session Session, result VerificationResult) {
+		if onComplete != nil {
+			onComplete(session, result.CaptchaToken)
+		}
+	})
+}
+
+func startResultLocked(onComplete ResultCompletedFunc) (*Session, error) {
 	// Stop any previous session: only one login modal can be active at once.
 	stopLocked()
 
@@ -266,6 +345,14 @@ func Close() {
 	defer mu.Unlock()
 	stopLocked()
 	logging.Debug("captcha callback server stopped")
+}
+
+func CloseSession(sessionID string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if activeSession.ID == sessionID {
+		stopLocked()
+	}
 }
 
 func stopLocked() {
@@ -335,14 +422,21 @@ func handleCallback(w http.ResponseWriter, r *http.Request, sessionID string) {
 		}
 	}
 	token := extractToken(r)
-	if r.Method == http.MethodGet && token == "" {
+	mu.Lock()
+	provider := activeSession.Provider
+	mu.Unlock()
+	result := VerificationResult{CaptchaToken: token}
+	if provider == "thunder" {
+		result.CreditKey = strings.TrimSpace(r.FormValue("creditkey"))
+	}
+	if r.Method == http.MethodGet && token == "" && result.CreditKey == "" {
 		// Fragments never reach an HTTP server. Let the landing page forward
 		// the browser's fragment before emitting even a tokenless completion.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(callbackPage))
 		return
 	}
-	session, accepted := complete(sessionID, token)
+	session, accepted := completeResult(sessionID, result)
 	logging.Info("captcha callback received", "session_id", session.ID, "accepted", accepted, "has_token", token != "")
 	// Return a minimal HTML that auto-closes the tab.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -368,11 +462,12 @@ const callbackPage = `<!doctype html><meta charset="utf-8">
     if (value.length > 20) { token = value; break; }
   }
   const path = location.pathname;
+  const creditkey = fragment.get('creditkey') || '';
   history.replaceState(null, '', path);
   try {
     const response = await fetch(path, {
       method: 'POST',
-      body: new URLSearchParams({captcha_token: token})
+      body: new URLSearchParams({captcha_token: token, creditkey})
     });
     if (!response.ok) throw new Error('callback failed');
     document.getElementById('status').textContent = '验证完成，可关闭此页面';
@@ -383,6 +478,10 @@ const callbackPage = `<!doctype html><meta charset="utf-8">
 </script>`
 
 func complete(sessionID, token string) (Session, bool) {
+	return completeResult(sessionID, VerificationResult{CaptchaToken: token})
+}
+
+func completeResult(sessionID string, result VerificationResult) (Session, bool) {
 	mu.Lock()
 	if completed || onDone == nil || activeSession.ID != sessionID {
 		mu.Unlock()
@@ -401,7 +500,7 @@ func complete(sessionID, token string) (Session, bool) {
 	callback := onDone
 	session := activeSession
 	mu.Unlock()
-	go callback(session, token)
+	go callback(session, result)
 	return session, true
 }
 

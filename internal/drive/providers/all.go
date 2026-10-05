@@ -14,6 +14,7 @@ import (
 	_ "mnemo-go/internal/drive/providers/pan189"
 	_ "mnemo-go/internal/drive/providers/pikpak"
 	_ "mnemo-go/internal/drive/providers/s3"
+	_ "mnemo-go/internal/drive/providers/thunder"
 	_ "mnemo-go/internal/drive/providers/webdav"
 	_ "mnemo-go/internal/drive/providers/yike"
 )

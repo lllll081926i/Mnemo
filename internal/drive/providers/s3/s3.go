@@ -990,6 +990,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err != nil {
 		return fmt.Errorf("s3: upload: %w", err)
 	}
+	ui.Upload.FileID = cc.idOf(key)
 	return nil
 }
 
@@ -1012,9 +1013,9 @@ func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key s
 		return err
 	}
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, driveutil.NewProgressOnlyReader(f, ui.Info.Size, func(read int64) {
+	if _, err := io.Copy(hasher, driveutil.NewContextReader(ctx, driveutil.NewProgressOnlyReader(f, ui.Info.Size, func(read int64) {
 		ui.ReportHashProgress(read, ui.Info.Size)
-	})); err != nil {
+	}))); err != nil {
 		return err
 	}
 	ui.ReportUploadStage("resuming")
@@ -1095,6 +1096,9 @@ func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key s
 		if readErr == io.ErrUnexpectedEOF || readErr == io.EOF {
 			break
 		}
+	}
+	if total != ui.Info.Size {
+		return errors.New("multipart upload: 本地文件大小在上传期间变化，未提交远端文件")
 	}
 	_, err = cc.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
 		Bucket:          aws.String(cc.bucket),

@@ -1383,6 +1383,13 @@ func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*
 	return &f, nil
 }
 
+func (d *Driver) GetFileFresh(ctx context.Context, c drive.Context, fileID string) (*model.File, error) {
+	if space, _ := pan139SpaceID(fileID); space == pan139FamilySpace && fileID != Pan139FamilyRoot {
+		return nil, errors.New("移动云盘家庭云缺少文件所属目录，请刷新目录后重试")
+	}
+	return d.GetFile(ctx, c, fileID)
+}
+
 func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID string, _ int) (*model.DownloadURL, error) {
 	u, size, err := d.DownloadInfo(ctx, c, fileID)
 	if err != nil {
@@ -1760,6 +1767,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return fmt.Errorf("pan139: 上传初始化响应无效: %w", err)
 		}
 		if created.Exist || created.RapidUpload {
+			if created.FileID.String() == "" {
+				return errors.New("移动云盘秒传未返回目标文件 ID")
+			}
+			ui.Upload.FileID = pan139FileID(space, created.FileID.String())
 			ui.ReportUploadProgress(size, size)
 			drive.ClearUploadSession(sessionKey)
 			return nil
@@ -1847,6 +1858,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	drive.ClearUploadSession(sessionKey)
+	ui.Upload.FileID = pan139FileID(space, session.FileID)
 	ui.ReportUploadProgress(size, size)
 	return nil
 }
