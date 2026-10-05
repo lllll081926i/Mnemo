@@ -113,8 +113,8 @@ type nativeMonitorInfo struct {
 func fitCaptchaWindow(anchor, work nativeRECT) nativeRECT {
 	width := min(int32(520), work.Right-work.Left)
 	height := min(int32(720), work.Bottom-work.Top)
-	left := max(work.Left, min(anchor.Left, work.Right-width))
-	top := max(work.Top, min(anchor.Top, work.Bottom-height))
+	left := max(work.Left, min(anchor.Left+(anchor.Right-anchor.Left-width)/2, work.Right-width))
+	top := max(work.Top, min(anchor.Top+(anchor.Bottom-anchor.Top-height)/2, work.Bottom-height))
 	return nativeRECT{Left: left, Top: top, Right: left + width, Bottom: top + height}
 }
 

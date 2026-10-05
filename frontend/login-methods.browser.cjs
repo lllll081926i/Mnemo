@@ -108,7 +108,11 @@ async function main() {
       await page.evaluate(() => { window.__requireVerification = true })
       await page.getByRole('button', { name: '获取验证码', exact: true }).click()
       await page.locator('.login-verification').waitFor()
-      assert.equal(await page.locator('.login-verification').evaluate(element => element.getBoundingClientRect().left), 0, '安全验证弹窗没有贴靠页面左侧')
+      const verificationCenter = await page.locator('.login-verification').evaluate(element => {
+        const bounds = element.getBoundingClientRect()
+        return { x: (bounds.left + bounds.right - window.innerWidth) / 2, y: (bounds.top + bounds.bottom - window.innerHeight) / 2 }
+      })
+      assert(Math.abs(verificationCenter.x) < 1 && Math.abs(verificationCenter.y) < 1, '安全验证弹窗没有居中显示')
       await assertCloseAtCorner(page, '.login-verification')
       await page.screenshot({ path: path.join(output, `verification-${theme}.png`) })
       await page.keyboard.press('Escape')
@@ -121,7 +125,7 @@ async function main() {
       await assertCloseAtCorner(page, '.qo-panel')
       await page.getByRole('button', { name: '关闭快捷命令面板', exact: true }).click()
       assert.deepEqual(errors, [], '登录切换产生浏览器运行错误')
-      console.log(`${theme}：桌面和窄窗口的表单对齐、验证码按钮、隐藏滚动条及滚动、左侧安全验证、二级关闭按钮与 Esc 隔离通过；截图 ${output}`)
+      console.log(`${theme}：桌面和窄窗口的表单对齐、验证码按钮、隐藏滚动条及滚动、居中安全验证、二级关闭按钮与 Esc 隔离通过；截图 ${output}`)
       await page.close()
     }
   } finally {

@@ -774,7 +774,7 @@ html.dark .account-rail .rail-active-indicator {
 .modal.login-modal .modal-head { height: 40px; min-height: 40px; padding-left: 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); }
 .modal.login-modal .modal-head h3 { font-size: 14px; font-weight: 650; }
 .modal.login-modal .modal-window-btn { width: 48px; }
-.modal-mask.verification-mask { justify-content: flex-start; }
+.modal-mask.verification-mask { justify-content: center; }
 .modal.login-verification { max-height: 94vh; }
 
 @media (max-width: 640px) {

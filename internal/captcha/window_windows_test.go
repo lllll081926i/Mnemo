@@ -33,17 +33,19 @@ func TestNativeThunderPageInitialization(t *testing.T) {
 	}
 }
 
-func TestCaptchaWindowAlignsWithLeftEdgeAndStaysInWorkArea(t *testing.T) {
+func TestCaptchaWindowCentersAndStaysInWorkArea(t *testing.T) {
 	for _, sample := range []struct {
 		name   string
 		anchor nativeRECT
 		work   nativeRECT
 		want   nativeRECT
 	}{
-		{name: "主窗口左侧", anchor: nativeRECT{Left: 180, Top: 80}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Left: 180, Top: 80, Right: 700, Bottom: 800}},
-		{name: "负坐标副屏", anchor: nativeRECT{Left: -1800, Top: 70}, work: nativeRECT{Left: -1920, Right: 0, Bottom: 1040}, want: nativeRECT{Left: -1800, Top: 70, Right: -1280, Bottom: 790}},
-		{name: "小屏保留完整窗口", anchor: nativeRECT{Left: 900, Top: 900}, work: nativeRECT{Left: 20, Top: 30, Right: 420, Bottom: 630}, want: nativeRECT{Left: 20, Top: 30, Right: 420, Bottom: 630}},
-		{name: "最大化边框越界", anchor: nativeRECT{Left: -8, Top: -8}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Right: 520, Bottom: 720}},
+		{name: "主窗口居中", anchor: nativeRECT{Left: 180, Top: 80, Right: 1380, Bottom: 880}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Left: 520, Top: 120, Right: 1040, Bottom: 840}},
+		{name: "负坐标副屏", anchor: nativeRECT{Left: -1800, Top: 70, Right: -600, Bottom: 870}, work: nativeRECT{Left: -1920, Right: 0, Bottom: 1040}, want: nativeRECT{Left: -1460, Top: 110, Right: -940, Bottom: 830}},
+		{name: "小屏保留完整窗口", anchor: nativeRECT{Left: 900, Top: 900, Right: 1300, Bottom: 1500}, work: nativeRECT{Left: 20, Top: 30, Right: 420, Bottom: 630}, want: nativeRECT{Left: 20, Top: 30, Right: 420, Bottom: 630}},
+		{name: "最大化边框越界", anchor: nativeRECT{Left: -8, Top: -8, Right: 1928, Bottom: 1048}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Left: 700, Top: 160, Right: 1220, Bottom: 880}},
+		{name: "无主窗口时屏幕居中", anchor: nativeRECT{Right: 1920, Bottom: 1040}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Left: 700, Top: 160, Right: 1220, Bottom: 880}},
+		{name: "窗口靠右下时限制工作区", anchor: nativeRECT{Left: 1600, Top: 800, Right: 2000, Bottom: 1000}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Left: 1400, Top: 320, Right: 1920, Bottom: 1040}},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
 			if got := fitCaptchaWindow(sample.anchor, sample.work); got != sample.want {

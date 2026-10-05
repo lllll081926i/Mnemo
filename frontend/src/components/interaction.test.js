@@ -663,7 +663,7 @@ describe('迅雷登录安全验证', () => {
     expect(api.CancelThunderLogin).toHaveBeenCalledWith('', 'session-1')
   })
 
-  it('内嵌验证使用左侧二级弹窗，Esc 只关闭验证，不关闭登录页', async () => {
+  it('内嵌验证使用独立二级弹窗，Esc 只关闭验证，不关闭登录页', async () => {
     api.ShowThunderVerification.mockResolvedValue(false)
     const wrapper = await prepare()
     const verification = document.querySelector('.verification-mask .login-verification')
