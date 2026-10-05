@@ -108,14 +108,15 @@ type Progress struct {
 
 // state is the persisted resume state.
 type state struct {
-	URL          string `json:"url,omitempty"` // legacy read-only; never written
-	URLHash      string `json:"url_hash,omitempty"`
-	ResourceHash string `json:"resource_hash,omitempty"`
-	Total        int64  `json:"total"`
-	Chunk        int64  `json:"chunk"`
-	Done         []bool `json:"done"`
-	ETag         string `json:"etag,omitempty"`
-	LastModified string `json:"last_modified,omitempty"`
+	URL          string  `json:"url,omitempty"` // legacy read-only; never written
+	URLHash      string  `json:"url_hash,omitempty"`
+	ResourceHash string  `json:"resource_hash,omitempty"`
+	Total        int64   `json:"total"`
+	Chunk        int64   `json:"chunk"`
+	Done         []bool  `json:"done"`
+	PartialBytes []int64 `json:"partial_bytes,omitempty"`
+	ETag         string  `json:"etag,omitempty"`
+	LastModified string  `json:"last_modified,omitempty"`
 }
 
 type resourceValidator struct {
@@ -266,7 +267,7 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	// Resume from state only when both the remote identity and local data match.
 	if b, err := os.ReadFile(statePath); err == nil {
 		var prev state
-		if partIntact && json.Unmarshal(b, &prev) == nil && stateResourceMatches(prev, url, urlHash, resourceHash, validator) && prev.Total == total && prev.Chunk > 0 && (autoChunk || prev.Chunk == opts.ChunkSize) &&
+		if partIntact && json.Unmarshal(b, &prev) == nil && validResumeProgress(prev) && stateResourceMatches(prev, url, urlHash, resourceHash, validator) && prev.Total == total && prev.Chunk > 0 && (autoChunk || prev.Chunk == opts.ChunkSize) &&
 			resumeIdentityMatches(prev, validator) {
 			st = &prev
 			opts.ChunkSize = prev.Chunk
@@ -275,6 +276,9 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	numChunks := int((total-1)/opts.ChunkSize + 1)
 	if len(st.Done) != numChunks {
 		st.Done = make([]bool, numChunks)
+	}
+	if len(st.PartialBytes) != numChunks {
+		st.PartialBytes = make([]int64, numChunks)
 	}
 	st.ETag = validator.ETag
 	st.LastModified = validator.LastModified
@@ -301,7 +305,13 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	for i, done := range st.Done {
 		if done {
 			downloaded.Add(chunkLen(st, i))
+		} else {
+			downloaded.Add(st.PartialBytes[i])
 		}
+	}
+	if onProgress != nil {
+		current := downloaded.Load()
+		onProgress(Progress{Downloaded: current, Total: total, Percent: percent(current, total)})
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -311,17 +321,38 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	fetchChunk := func(chunkIdx int) error {
 		start := int64(chunkIdx) * opts.ChunkSize
 		length := chunkLen(st, chunkIdx)
-		remainingStart := start
-		remainingLength := length
+		remainingStart := start + st.PartialBytes[chunkIdx]
+		remainingLength := length - st.PartialBytes[chunkIdx]
+		defer func() {
+			mu.Lock()
+			if remainingLength == 0 {
+				st.Done[chunkIdx] = true
+				st.PartialBytes[chunkIdx] = 0
+			} else {
+				st.PartialBytes[chunkIdx] = remainingStart - start
+			}
+			mu.Unlock()
+		}()
 		var lastErr error
 		partialRequests := 0
 		for attempt := 0; attempt < MaxRetriesPerChunk; {
 			err := fetchRange(gctx, hc, opts, url, remainingStart, remainingLength, total, validator, f, limiter, func(n int64) {
 				downloaded.Add(n)
 			})
+			var partial *partialRangeReadError
+			continued := errors.As(err, &partial) && partial.written > 0 && partial.written <= remainingLength
+			if continued {
+				remainingStart += partial.written
+				remainingLength -= partial.written
+				if remainingLength == 0 && gctx.Err() == nil {
+					err = nil
+				}
+			}
 			if err == nil {
+				remainingStart, remainingLength = start+length, 0
 				mu.Lock()
 				st.Done[chunkIdx] = true
+				st.PartialBytes[chunkIdx] = 0
 				var checkpointErr error
 				if time.Since(lastCheckpoint) >= time.Second {
 					checkpointErr = f.Sync()
@@ -336,21 +367,12 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 			lastErr = err
 			var statusErr *httpStatusError
 			if errors.As(err, &statusErr) || errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) || errors.Is(err, errRangeIgnored) {
-				if resumed := remainingStart - start; resumed > 0 {
-					downloaded.Add(-resumed)
-				}
 				return fmt.Errorf("dlengine: chunk %d rejected: %w", chunkIdx, err)
 			}
 			if gctx.Err() != nil {
-				if resumed := remainingStart - start; resumed > 0 {
-					downloaded.Add(-resumed)
-				}
 				return gctx.Err()
 			}
-			var partial *partialRangeReadError
-			if errors.As(err, &partial) && partial.written > 0 && partial.written < remainingLength {
-				remainingStart += partial.written
-				remainingLength -= partial.written
+			if continued {
 				partialRequests++
 				if partialRequests <= MaxPartialRangeRequests {
 					// This is a continuation, not a blind retry: the next request
@@ -365,14 +387,8 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 			select {
 			case <-time.After(time.Duration(500*attempt) * time.Millisecond):
 			case <-gctx.Done():
-				if resumed := remainingStart - start; resumed > 0 {
-					downloaded.Add(-resumed)
-				}
 				return gctx.Err()
 			}
-		}
-		if resumed := remainingStart - start; resumed > 0 {
-			downloaded.Add(-resumed)
 		}
 		return fmt.Errorf("dlengine: chunk %d failed after %d attempts: %w", chunkIdx, MaxRetriesPerChunk, lastErr)
 	}
@@ -557,6 +573,22 @@ func resumeIdentityMatches(previous state, current resourceValidator) bool {
 	return true
 }
 
+func validResumeProgress(previous state) bool {
+	if previous.Total <= 0 || previous.Chunk <= 0 {
+		return false
+	}
+	count := int((previous.Total-1)/previous.Chunk + 1)
+	if len(previous.Done) != count || len(previous.PartialBytes) != 0 && len(previous.PartialBytes) != count {
+		return false
+	}
+	for chunk, partial := range previous.PartialBytes {
+		if partial < 0 || partial >= chunkLen(&previous, chunk) || previous.Done[chunk] && partial != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func strongETag(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) < 2 || strings.HasPrefix(strings.ToUpper(value), "W/") || value[0] != '"' || value[len(value)-1] != '"' {
@@ -664,9 +696,17 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 		n, err := body.Read(buf)
 		if n > 0 {
 			if err := limiter.Wait(ctx, int64(n)); err != nil {
+				if written > 0 {
+					preservePartial = true
+					return &partialRangeReadError{err: err, written: written}
+				}
 				return err
 			}
 			if _, werr := f.WriteAt(buf[:n], start+written); werr != nil {
+				if written > 0 {
+					preservePartial = true
+					return &partialRangeReadError{err: werr, written: written}
+				}
 				return werr
 			}
 			written += int64(n)
