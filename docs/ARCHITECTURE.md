@@ -10,7 +10,7 @@ internal/app      绑定层：账号/网盘/传输/播放/同步/设置
    ▼
 internal/drive    ops 门面（唯一业务入口，禁止中央 if provider）
    ├─ registry / capabilities / meta
-   └─ providers/  13 个插件包（pikpak/onedrive/.../webdav/s3）
+   └─ providers/  14 个插件包（pikpak/onedrive/.../thunder/webdav/s3）
 internal/transfer  原生 Go 分段下载器 · 上传队列 · 跨盘迁移
 internal/sync      双向同步
 internal/preview   本地 Range/播放会话代理（鉴权流、HLS/DASH 与字幕）
@@ -40,6 +40,10 @@ internal/netx      HTTP/上传/哈希/限速 工具
 | 播放 | app.PlayVideo → driver.GetVideoPreview → preview 播放会话代理 → HTML5 `<video>`；HLS/DASH 由按需加载的 HLS.js/dash.js 驱动 |
 | 迁移 | app.Migrate → transfer/migrate（server/stream/spool 策略） |
 
+下载设置区分任务并发（默认 3）与单文件请求并发（默认 8，1–16）；插件的显式 `Concurrency` 是上限，预览代理模式不决定本地下载并发。分片使用有限 worker 与自适应大小，已有合法断点保留原布局；先同步数据再持久化分片完成位图，暂停/失败保存检查点，退出等待下载 worker 收尾。
+
+普通下载、目录同步与跨盘迁移共用下载设置供应器和全局令牌桶。大文件 HTTP 无总时限，网络阻塞读取默认 60 秒空闲超时，不计限速或目标上传背压；临时 HTTP 状态有界重试并协调单下载内的 Retry-After。迁移的流式路径仍为顺序流。完整配置、性能证据和公网待测项见 [下载引擎审计](DOWNLOAD_ENGINE_AUDIT_2026-10-04.md)。
+
 ## 依赖方向
 
 `app → drive → netx/model/store`；`providers → drive/netx/model`；无反向依赖。
@@ -55,8 +59,20 @@ provider 之间互相独立，只能通过 `drive` 注册表暴露能力。
 - 迁移 `items` 保存每个资源的结果与错误；目标接口返回明确文件 ID 时可按需比较目标大小和共同哈希，接口不返回 ID 时明确标为未校验。流式传输检查字节数，失败回退临时文件；校验操作不修改迁移检查点。
 
 - 同步下载在替换前再次核对本地文件是否仍与计划一致，包括计划中不存在、下载期间新建的文件。远端哈希变化参与删除冲突判定；Windows 特殊路径及同步临时文件名不进入同步计划。
-- 移动式迁移清理来源前重新读取元数据，目录必须已经清空；复制期间新增或修改的内容保留在来源，任务报告部分完成。恢复记录无法落盘时不删除来源。各网盘的元数据精度和条件删除能力不同，这些检查不能替代服务端事务锁。
+- 移动式迁移清理来源前，先复查目标 ID 对应的资源、类型、大小及双方可比较的哈希，再重新读取来源元数据；来源目录必须已经清空。旧复制检查点恢复时也不能跳过目标检查。缺少目标 ID、查询失败或恢复记录无法落盘时保留来源，报告未完成；复制期间新增或修改的内容也保留。退出等待全部迁移收尾，进度与启动响应使用独立快照。各网盘的元数据精度和条件删除能力不同，这些检查不能替代服务端事务锁。
 
 ## 工作区验证
+
+### 下载完成提示音
+
+- 两段音效保存为 `frontend/src/assets/audio/download-complete-1.mp3`、`download-complete-2.mp3`；旧音效不再参与构建。
+- 设置提供“提示音 1 / 提示音 2”与试听，保留总开关。选择通过本地偏好 `downloadSoundType` 保存，并纳入偏好备份白名单；旧设置或无效值默认使用提示音 1。
+- 设置试听和下载完成共用音效配置；切换音效时停止旧音频，下次下载完成读取最新选择。保留单文件及文件夹整体完成通知规则，子下载任务不重复响铃。
+
+### 关闭与退出
+
+- 启用关闭到托盘时，关闭主窗口仅隐藏；托盘退出或禁用关闭到托盘时才真正退出。无托盘的平台直接进入退出流程。
+- 存在排队或下载中的任务时，后端阻止首次关闭并发送 `app:quit-confirm`（进行中的下载数量），前端使用应用内 `ConfirmModal`，默认保留继续下载的选择，不再使用原生消息框。
+- 前端调用 `RespondQuit(bool)`：取消清除退出标记；确认设置已确认状态后重新请求 Wails 退出，关闭钩子不再重复拦截。重复关闭或重复回复不会反复弹窗；最终仍由 `OnShutdown` 释放资源和保存任务。
 
 前端运行 `npm test`，后端运行 `go test ./...`。`frontend/workspace.browser.cjs` 用 Edge 无头浏览器和本地 mock 验证 20 账号、10000 文件、双栏焦点、分享、同步、搜索和备份。需要可用的 Playwright 模块；通过 `PLAYWRIGHT_MODULE` 指定安装位置，`QA_URL` 指定 Vite 地址，`QA_OUTPUT` 指定截图目录。脚本不连接真实网盘。

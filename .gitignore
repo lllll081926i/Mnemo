@@ -17,6 +17,7 @@ internal/engine/**/*.exe
 .tmp-go-cache/
 .gocache/
 .workflow/
+/.trash/
 mnemo-darwin-check
 mnemo-linux-check
 .mcp.json

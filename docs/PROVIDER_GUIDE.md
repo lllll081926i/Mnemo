@@ -1,7 +1,7 @@
 # 新增网盘插件指南（PROVIDER_GUIDE）
 
-Mnemo-Go 的网盘是插件：**新增一个盘 = 新增一个 Go 包 + 一行 blank import**，
-不需要改任何核心代码。本指南说明插件契约与移植流程。
+Mnemo-Go 的网盘是插件：新增一个 Go 包，并登记模型常量、账号前缀、显示元数据和 blank import。
+业务调用不增加中央 provider 判断。本指南说明插件契约与移植流程。
 
 ## 1. 契约（internal/drive）
 
@@ -14,19 +14,27 @@ type Driver interface {
     Capabilities() drive.Capabilities
     RootID() string
     List(ctx, c drive.Context, dirID string, opts *drive.ListOptions) ([]model.File, error)
-    // 其余为可选，BaseDriver 提供默认 ErrNotImplemented
+    // 其余方法以 driver.go 的实际契约为准
 }
 ```
 
-Provider 实现时**内嵌 `drive.BaseDriver`** 并覆盖支持的方法：
+Provider 实现时**内嵌 `drive.BaseDriver`** 并覆盖支持的方法。`BaseDriver` 未提供默认实现的方法（如 `Mkdir`、`Rename`、`Move`、`Copy`、`Delete`）仍须显式实现；不支持的操作返回 `drive.NotSupported`，并关闭对应能力。新增包应加接口编译断言，避免只参考示例而漏掉实际契约：
 
 ```go
 type Driver struct{ drive.BaseDriver }
+
+var _ drive.Driver = (*Driver)(nil)
 
 func (d *Driver) List(...) ([]model.File, error) { ... }   // 必实现
 func (d *Driver) Search(...) ...                          // 可选
 func (d *Driver) UploadOneFile(...) ...                   // 可选
 ```
+
+### 新鲜文件元数据
+
+需要绕过驱动内存池或 UI 占位详情时，实现 `drive.FreshFileDriver.GetFileFresh(ctx, c, fileID)`。`drive.GetFileFreshContext` 优先重新列出已知父目录；缺少父目录时使用驱动的新鲜详情接口。无法从远端确认文件的驱动必须返回错误，不能把占位名称、大小 0 或旧缓存当作可删除来源的依据。普通浏览仍可使用原有缓存。
+
+移动迁移必须重新列出目标所属目录并匹配目标 ID，再核对类型、大小及共同哈希。冷启动恢复缺少父目录时保留来源，提示刷新目录；不得用同名文件猜测目标。
 
 ### 注册（init()）
 
@@ -71,7 +79,19 @@ type RemoteFavorites interface {
 
 UI 使用 `App.AddFavorite` / `App.RemoveFavorite` / `App.ListFavorites`；本地回退、云端快照、备份与账号隔离由 app/store 层负责。不要在 UI 再调用一次 `FavoriteFiles`，也不要在中央代码按 provider 写分支。逐盘现状见 [收藏核查表](PROVIDER_STATUS.md#收藏逐盘核查2026-09-10)。
 
-### 装配
+### 下载源契约
+
+`GetDownloadURL` 返回下载源，而非中央按网盘分支执行下载。插件必须返回必要的 `Headers`（包括专用 UA）、大小和可用的过期时间；`ExpireTime` 使用 Unix 毫秒，未知可为 0。签名 CDN 链接不要附带不必要的账号 Bearer token。
+
+- `DownloadMode`、`ForceLocalProxy` 用于前端/播放策略，不隐含限制本地下载并发。
+- `Concurrency > 0` 表示插件允许的请求并发上限；最终值不超过用户单文件设置。0 表示使用用户设置，而不是单请求。
+- `ChunkSize > 0` 为显式分片大小；0 使用下载器自适应策略。没有真实协议/账号证据时，不擅自增减插件现有连接限制。
+- `RequestAuth` 为请求绑定鉴权器，必须可为每次请求重新签名。Digest 需要保序时应同时声明 `Concurrency: 1`。
+- 普通账号下载每次启动/恢复重新取得完整源；不能只缓存 URL 而丢弃头、鉴权器和策略。
+
+普通下载、目录同步使用同一分片下载器。跨盘迁移管道使用同一下载 HTTP 超时/重试策略，但仍是顺序流，应用装配让这些路径共享下载限速器。逐盘配置及未实测的限制见 [下载引擎审计](DOWNLOAD_ENGINE_AUDIT_2026-10-04.md)。
+
+### 装配方式
 `internal/drive/providers/all.go` 用 blank import 引入新包即完成注册：
 
 ```go
@@ -91,6 +111,10 @@ import (
 
 每次驱动调用都会拿到 `drive.Context`（含 userId/driveId/token）。
 从 `ctx.Token` 读取凭据；需要刷新时实现 `RefreshAccount`。
+
+云离线功能实现 `drive.OfflineDriver`，创建、查询、删除统一使用 `drive.Context` 和 `drive.OfflineTask`；不要让应用层依赖某个 provider 的私有返回类型。设备身份固定，轮换凭据在释放账号锁前通过 `drive.PersistToken` 保存。
+
+完整实现离线契约时必须开启 `offlineDownload`，并添加编译断言。`registrycheck` 会逐盘核对注册开关、驱动开关及统一门面是否与实现一致；应用层验证开关传递到前端，前端验证支持账号确实显示入口，防止出现“已实现但未开放”。没有实现的网盘不能仅打开开关。
 
 ## 4. 登录流（Auth）
 

@@ -1,7 +1,7 @@
 # 光鸭云盘（guangya）功能详情
 
 > 调研范围：`internal/drive/providers/guangya/`（guangya.go ~693 行 + upload.go ~312 行）
-> 当前证据：本仓库 `internal/drive/providers/guangya`、统一能力注册表和本地自动化测试；本次未读取父目录旧项目。
+> 当前证据：本仓库 `internal/drive/providers/guangya`、统一能力注册表、本地自动化测试与官网网页脚本；旧项目说明不作为现行接口依据。
 > 状态：✅ 统一驱动已注册；可靠性以自动验证范围和已知限制为准，见 [Provider 状态总表](../PROVIDER_STATUS.md)。
 
 ---
@@ -9,7 +9,8 @@
 ## 能力声明（guangya.go:36-43）
 
 ```
-copy, permanentDelete, createShare, shareExpiration, sharePassword, combinedShare, shareHistory: true
+copy, offlineDownload, recycleBin, trashView, trashRestore, createShare, shareExpiration, sharePassword, combinedShare, shareHistory: true
+permanentDelete: false
 SetHashes(["md5"], nil)
 ShareExpirationOptions: [0, 1, 7, 30]
 ```
@@ -34,6 +35,8 @@ ShareExpirationOptions: [0, 1, 7, 30]
 ---
 
 ## 3. 下载（guangya.go）
+
+下载器兼容 Range 探测返回 `200 + Content-Length: 1` 的响应：不把该 1 字节当作完整文件大小，有效 `Content-Range` 可用于取总大小，但只有 `206` 才启用分段。单流开始后以完整响应的 `Content-Length` 更新任务大小，缺少长度时回退已知文件大小或在完成后记录实际字节数。前后端百分比均限制在 0–100%，历史异常进度也不会撑破进度条。对应回归测试：`internal/e2e/dlengine_test.go`、`internal/transfer/dlengine/progress_test.go`、`frontend/src/views/TransferView.test.js`。
 
 ✅ `guangya.go:267-288` DownloadInfo → `:398-415` GetDownloadURL proxy；使用旧版稳定的 `/nd.bizuserres.s/v1/get_res_download_url`，优先解析 `data.signedURL`，兼容 `downloadUrl`。
 
@@ -95,4 +98,13 @@ ShareExpirationOptions: [0, 1, 7, 30]
 
 ## 差距清单
 
-无明显差距。登录、容量、请求级续期和上传链路均已接入。
+登录、容量、请求级续期和上传链路均已接入；云离线接口已接入并开启，真实账号仍待验收，不能把模拟测试视为线上成功。
+
+## 11. 云离线（offline.go）
+
+- 支持 HTTP/HTTPS、magnet、ed2k，通过统一“传输 → 云离线”入口提交，文件保存在网盘，不是本地下载。
+- 先调用 `/cloudcollection/v1/resolve_res`，含子文件的资源递归提取可添加索引，排除服务端 `excludeIndices`；再用 `/cloudcollection/v1/create_task` 提交。
+- `/cloudcollection/v1/list_task` 游标分页读取任务与进度；0 排队、1 进行中、2 完成、3 失败、4 取消、5 部分完成。部分完成不强制 100%，并保留服务端错误。
+- `/cloudcollection/v2/delete_task` 区分清除任务与同时删除网盘文件；有 `deleteFileTaskId` 时查询文件任务并等待成功。
+- 沿用现有光鸭账号鉴权，续期后的凭据保存到原账号。业务失败、缺失任务 ID、重复分页游标和 429 均不冒充成功。
+- 协议来源：2026-10-04 读取官网 `https://www.guangyapan.com/static/js/index.2795c2ad.js`。首版不提供种子上传、子文件勾选或任务重试界面，详见 `docs/specs/GUANGYA_OFFLINE.md`。

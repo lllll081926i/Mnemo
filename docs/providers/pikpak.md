@@ -21,6 +21,8 @@
 
 ---
 
+云离线提交入口 `internal/app/drive.go:offlineCreate` 使用统一的 `drive.OfflineDriver`，创建、查询、删除都传入当前账号上下文。此前遗漏 `drive.Context` 会在真正发送磁力请求前误报“当前网盘不支持云离线”，不是能力开关未启用。PikPak 保留原有任务 JSON 解码，在驱动出口转换为统一模型，不依赖其他网盘。`internal/app/drive_test.go:TestPikPakOfflineDownloadDispatchesAndPersists` 覆盖能力声明、应用入口、磁力请求参数及任务持久化（模拟 API，不代表真实账号验收）。
+
 ## 1. 登录（auth.go）
 
 | 子功能 | 状态 | Go 证据 | 差距 |
