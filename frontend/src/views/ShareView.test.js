@@ -30,6 +30,31 @@ afterEach(() => {
 })
 
 describe('分享页面交互', () => {
+  it('转存无回执时不误报全部成功，保留选择', async () => {
+    api.saveImportedShare.mockResolvedValueOnce([])
+    wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    wrapper.vm.openImport()
+    wrapper.vm.importSession = { provider: 'pikpak', files: [{ fileId: 'file' }] }
+    wrapper.vm.importSelected = ['file']
+    await wrapper.vm.saveImport()
+    expect(wrapper.emitted('toast').at(-1)).toEqual([expect.stringContaining('结果不完整'), 'error'])
+    expect(wrapper.vm.importOpen).toBe(true)
+    expect(wrapper.vm.importSelected).toEqual(['file'])
+  })
+
+  it('请求被接收只提示已提交，不承诺远端落盘完成', async () => {
+    api.saveImportedShare.mockResolvedValueOnce(['file'])
+    wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    wrapper.vm.openImport()
+    wrapper.vm.importSession = { provider: 'pikpak', files: [{ fileId: 'file' }] }
+    wrapper.vm.importSelected = ['file']
+    await wrapper.vm.saveImport()
+    expect(wrapper.emitted('toast').at(-1)).toEqual([expect.stringContaining('已提交转存'), 'success'])
+    expect(wrapper.vm.importOpen).toBe(false)
+  })
+
   it('刷新分享历史失败时保留旧记录并允许重试', async () => {
     api.ListShareHistory.mockResolvedValueOnce([{ account_id: 'pikpak:test', provider: 'pikpak', share_id: 'one', share_name: '已有分享', share_url: 'https://example.test/share' }])
       .mockRejectedValueOnce(new Error('网络异常')).mockResolvedValueOnce([])

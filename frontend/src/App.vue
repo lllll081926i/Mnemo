@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount, defineAsyncComponent } from 'vue'
-import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, providerOf, providerMetaOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
+import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, RespondQuit, providerOf, providerMetaOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta, useOrderedAccounts } from './appearance'
 import PanView from './views/PanView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
@@ -194,6 +194,21 @@ async function saveThemePref() {
 }
 const toasts = ref([])
 const confirmDialog = ref(null)
+const quitDialog = ref(null)
+const quitBusy = ref(false)
+let stopQuitConfirmation = null
+async function respondQuit(confirmed) {
+  if (quitBusy.value || quitDialog.value === null) return
+  quitBusy.value = true
+  try {
+    await RespondQuit(confirmed)
+    quitDialog.value = null
+  } catch (err) {
+    toast(`退出操作失败：${errorText(err)}`, 'error')
+  } finally {
+    quitBusy.value = false
+  }
+}
 function askConfirm(message, onOk, opts) {
   confirmDialog.value = { message, onOk, okText: opts?.okText || '确定', cancelText: opts?.cancelText || '取消', danger: opts?.danger || false, title: opts?.title || '确认操作' }
 }
@@ -441,6 +456,7 @@ function onTransferNotice(event) {
 }
 
 onMounted(async () => {
+	stopQuitConfirmation = onEvent('app:quit-confirm', (active) => { quitDialog.value = Number(active) || 0 })
 	const removeMouseNavigation = installMouseNavigation(window, navigateMouse, mouseNavigationBlocked)
 	info('app', 'frontend mounted')
 	window.addEventListener('contextmenu', preventNativeContextMenu, true)
@@ -504,7 +520,10 @@ onMounted(async () => {
 	debug('app', 'frontend initialization tasks scheduled')
 })
 let cleanupFns = null
-onBeforeUnmount(() => cleanupFns && cleanupFns())
+onBeforeUnmount(() => {
+  stopQuitConfirmation?.()
+  cleanupFns?.()
+})
 </script>
 
 <template>
@@ -707,6 +726,7 @@ onBeforeUnmount(() => cleanupFns && cleanupFns())
     </transition-group>
 
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :cancel-text="confirmDialog.cancelText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
+    <ConfirmModal v-if="quitDialog !== null" title="退出 Mnemo" :message="`还有 ${quitDialog} 个下载任务正在进行。退出后任务将暂停，下次启动可继续。确定要退出吗？`" ok-text="退出应用" cancel-text="继续下载" :busy="quitBusy" danger @ok="respondQuit(true)" @cancel="respondQuit(false)" />
     <UpdateModal v-if="showUpdate" :initial-info="pendingUpdateInfo" @close="closeUpdateModal" />
   </div>
 </template>

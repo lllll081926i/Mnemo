@@ -8,11 +8,12 @@ const props = defineProps({
   okText: { type: String, default: '确定' },
   cancelText: { type: String, default: '取消' },
   danger: { type: Boolean, default: false },
+  busy: { type: Boolean, default: false },
 })
 const emit = defineEmits(['ok', 'cancel'])
 
-const ok = () => emit('ok')
-const cancel = () => emit('cancel')
+const ok = () => { if (!props.busy) emit('ok') }
+const cancel = () => { if (!props.busy) emit('cancel') }
 </script>
 
 <template>
@@ -24,8 +25,8 @@ const cancel = () => emit('cancel')
       <div class="confirm-message">{{ message }}</div>
     </div>
     <template #actions>
-      <button class="btn" @click="cancel">{{ cancelText }}</button>
-      <button class="btn primary" :class="{ danger }" @click="ok">{{ okText }}</button>
+      <button class="btn" :disabled="busy" @click="cancel">{{ cancelText }}</button>
+      <button class="btn primary" :class="{ danger }" :disabled="busy" @click="ok">{{ okText }}</button>
     </template>
   </Modal>
 </template>

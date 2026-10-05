@@ -81,7 +81,7 @@ export function login(provider, config) {
     warn('login', 'provider login RPC failed', { provider, error: detail, duration_ms: Math.round(performance.now() - started) })
     // These markers are continuation states consumed by LoginModal, not
     // terminal failures. Keep them intact so captcha/SMS flows can proceed.
-    if (/captcha_required(?:\r?\n|_189)|pan139_sms_required/i.test(detail)) throw err
+    if (/captcha_required(?:\r?\n|_189)|pan139_sms_required|thunder_verification_required/i.test(detail)) throw err
     if (/captcha_(?:retry|expired)_189|429|too[ _-]*(?:many|frequent)|rate[ _-]*limit|risk[ _-]*control|access[ _-]*prohibited/i.test(detail)) {
       dispatchDriveNotice(driveErrorNotice(err, '登录网盘'))
       throw err
@@ -100,6 +100,15 @@ export function SendPan189SMS(username, validateCode = '') {
   return driveCall('发送短信验证码', fn(username, validateCode))
 }
 export function SendGuangyaSms(phone) { return driveCall('发送短信验证码', App.SendGuangyaSms(phone)) }
+export async function SendThunderSMS(config) {
+  try {
+    return await App.SendThunderSMS(config)
+  } catch (err) {
+    if (/thunder_verification_required/.test(String(err))) throw err
+    dispatchDriveNotice(driveErrorNotice(err, '发送短信验证码'))
+    throw err
+  }
+}
 export function saveMounted(provider, conn) { return driveCall('连接网盘', App.SaveMountedAccount(provider, conn)) }
 export function validateMountedWrite(provider, conn) { return driveCall('验证写入权限', App.ValidateMountedWrite(provider, conn)) }
 export function removeAccount(userId) { return App.RemoveAccount(userId) }
@@ -168,7 +177,7 @@ export function cancelUpload(id) { return App.CancelUpload(id) }
 export function resumeUpload(id) { return App.ResumeUpload(id) }
 export function clearUploads() { return App.ClearUploads() }
 
-// ---------- offline (PikPak cloud) ----------
+// ---------- 云离线 ----------
 export function offlineDownload(userId, driveId, url, fileName) { return driveCall('创建离线下载', App.OfflineDownload(userId, driveId, url, fileName)) }
 export function OfflineDownload(userId, driveId, url, fileName) { return offlineDownload(userId, driveId, url, fileName) }
 export function listOfflineTasks(userId) { return driveCall('加载离线任务', App.ListOfflineTasks(userId)) }

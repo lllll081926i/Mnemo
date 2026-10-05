@@ -1,10 +1,12 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   ListDownloads: vi.fn().mockResolvedValue([]),
   ListUploads: vi.fn().mockResolvedValue([]),
   ListMigrateJobs: vi.fn().mockResolvedValue([]),
+  ListOfflineTasks: vi.fn().mockResolvedValue([]),
+  refreshOfflineTasks: vi.fn().mockResolvedValue([]),
   EventsOn: vi.fn(() => () => {}),
   capsOf: vi.fn(() => ({})),
   accountName: vi.fn(() => ''),
@@ -19,16 +21,120 @@ const api = vi.hoisted(() => ({
 vi.mock('../api', () => api)
 
 import TransferView from './TransferView.vue'
+import { DOWNLOAD_SOUNDS } from '../download-sounds'
+import { setPref } from '../appearance'
 
 let wrapper
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
   vi.useRealTimers()
+  api.capsOf.mockReset().mockReturnValue({})
+  api.ListOfflineTasks.mockReset().mockResolvedValue([])
+  api.refreshOfflineTasks.mockReset().mockResolvedValue([])
   vi.clearAllMocks()
 })
 
 describe('传输页刷新调度', () => {
+  it('区分传输字节核对与远端目标校验', async () => {
+    wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    expect(wrapper.vm.verificationLabels['transferred-size']).toBe('传输大小已核对')
+    expect(wrapper.vm.verificationLabels['remote-size']).toBe('目标大小已核对')
+    expect(wrapper.vm.verificationLabels['remote-hash']).toBe('目标哈希已核对')
+  })
+
+  async function openGuangyaOffline() {
+    const account = { user_id: 'guangya_remote', drive_id: 'remote-drive' }
+    api.capsOf.mockReturnValue({ offlineDownload: true })
+    wrapper = mount(TransferView, { props: { accounts: [account], providers: [] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('云离线')).trigger('click')
+    await flushPromises()
+    return account
+  }
+
+  it('光鸭云离线刷新实际查询远端进度，部分完成不显示全部完成', async () => {
+    api.ListOfflineTasks.mockResolvedValue([{ task_id: 'task', drive_id: 'remote-drive', status: 'running', progress: 0 }])
+    api.refreshOfflineTasks.mockResolvedValue([{ task_id: 'task', file_name: '远端资源', status: 'partial', progress: 70, message: '部分文件未完成', file_size: 1024 }])
+    const account = await openGuangyaOffline()
+    expect(api.refreshOfflineTasks).toHaveBeenCalledWith(account.user_id, account.drive_id)
+    expect(wrapper.text()).toContain('远端资源')
+    expect(wrapper.text()).toContain('部分完成')
+    expect(wrapper.text()).toContain('70%')
+    expect(wrapper.text()).toContain('部分文件未完成')
+    expect(wrapper.find('.progress-current').element.style.width).toBe('70%')
+  })
+
+  it('远端查询失败保留同一网盘缓存并显示错误', async () => {
+    api.ListOfflineTasks.mockResolvedValue([
+      { task_id: 'cached', file_name: '缓存资源', drive_id: 'remote-drive', progress: 20 },
+      { task_id: 'other', file_name: '其他网盘资源', drive_id: 'other-drive' },
+    ])
+    api.refreshOfflineTasks.mockRejectedValue(new Error('查询限流'))
+    await openGuangyaOffline()
+    expect(wrapper.text()).toContain('缓存资源')
+    expect(wrapper.text()).not.toContain('其他网盘资源')
+    expect(wrapper.text()).toContain('查询限流')
+  })
+
+  it('部分完成即使上游进度为 100 也不能显示成功样式', async () => {
+    api.refreshOfflineTasks.mockResolvedValue([{ task_id: 'partial', file_name: '部分资源', status: 'partial', progress: 100 }])
+    await openGuangyaOffline()
+    expect(wrapper.text()).toContain('部分完成')
+    expect(wrapper.find('.progress-current').classes()).toContain('warning')
+    expect(wrapper.find('.progress-current').classes()).not.toContain('succeed')
+  })
+
+  it('切换账号后旧云离线响应不能覆盖新账号', async () => {
+    let finishOld
+    api.refreshOfflineTasks.mockImplementation(userID => userID === 'guangya_remote'
+      ? new Promise(resolve => { finishOld = resolve })
+      : Promise.resolve([{ task_id: 'new', file_name: '新账号资源', status: 'completed', progress: 100 }]))
+    await openGuangyaOffline()
+    await wrapper.setProps({ accounts: [{ user_id: 'guangya_new', drive_id: 'new-drive' }] })
+    await flushPromises()
+    finishOld([{ task_id: 'old', file_name: '旧账号资源', progress: 40 }])
+    await flushPromises()
+    expect(wrapper.text()).toContain('新账号资源')
+    expect(wrapper.text()).not.toContain('旧账号资源')
+  })
+
+  it.each(['pikpak', 'thunder', 'guangya'])('%s 已开启的云离线会显示入口并允许选择账号', async (provider) => {
+    const actualApi = await vi.importActual('../api')
+    api.capsOf.mockImplementation(actualApi.capsOf)
+    const supported = { user_id: `${provider}_enabled`, drive_id: 'enabled' }
+    const unsupported = { user_id: 'webdav_disabled', drive_id: 'disabled' }
+    wrapper = mount(TransferView, {
+      props: {
+        accounts: [supported, unsupported],
+        providers: [
+          { ID: provider, Capabilities: { offlineDownload: true } },
+          { ID: 'webdav', Capabilities: { offlineDownload: false } },
+        ],
+      },
+      global: { stubs: { UiIcon: true } },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('云离线')
+    expect(wrapper.vm.offlineAccounts.map(account => account.user_id)).toEqual([supported.user_id])
+  })
+
+  it.each([
+    [2971135900, '100%', '100%'],
+    [-5, '0%', '0%'],
+    [Number.NaN, '0%', '0%'],
+    [Number.POSITIVE_INFINITY, '0%', '0%'],
+  ])('下载记录百分比 %s 不会越界显示', async (progress, text, width) => {
+    api.ListDownloads.mockResolvedValueOnce([
+      { id: 'download', name: '测试文件.esd', status: 'paused', size: 1, progress },
+    ])
+    wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    expect(wrapper.find('.text-state').text()).toContain(text)
+    expect(wrapper.find('.progress-current').element.style.width).toBe(width)
+  })
+
   it('高频事件不会把已经安排的首次刷新不断往后推', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true } } })
@@ -54,5 +160,72 @@ describe('传输页刷新调度', () => {
     expect(wrapper.findAll('.taskrow')).toHaveLength(1)
     expect(wrapper.text()).toContain('扫描目录')
     expect(wrapper.text()).toContain('查看文件（1/1）')
+  })
+})
+
+describe('下载完成提示音选择', () => {
+  let rawPrefs
+  beforeEach(() => {
+    rawPrefs = '{}'
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => rawPrefs),
+      setItem: vi.fn((key, value) => { rawPrefs = value }),
+    })
+    vi.stubGlobal('Audio', vi.fn(function (url) {
+      this.src = url
+      this.currentTime = 0
+      this.play = vi.fn().mockResolvedValue(undefined)
+      this.pause = vi.fn()
+    }))
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function prepare(tasks) {
+    api.ListDownloads.mockResolvedValueOnce(tasks)
+    wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    return api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
+  }
+
+  it('完成时读取最新偏好，不需要重新打开传输页', async () => {
+    const notify = await prepare([
+      { id: 'first', name: 'first.txt', status: 'downloading' },
+      { id: 'second', name: 'second.txt', status: 'downloading' },
+    ])
+    notify({ kind: 'download', task: { id: 'first', status: 'completed' } })
+    await flushPromises()
+    expect(Audio).toHaveBeenLastCalledWith(DOWNLOAD_SOUNDS[0].url)
+    const first = Audio.mock.instances[0]
+    setPref('downloadSoundType', 'sound-2')
+    notify({ kind: 'download', task: { id: 'second', status: 'completed' } })
+    await flushPromises()
+    expect(Audio).toHaveBeenLastCalledWith(DOWNLOAD_SOUNDS[1].url)
+    expect(first.pause).toHaveBeenCalledOnce()
+    const second = Audio.mock.instances[1]
+    notify({ kind: 'download', task: { id: 'second', status: 'completed' } })
+    await flushPromises()
+    expect(second.play).toHaveBeenCalledOnce()
+  })
+
+  it('关闭总开关后下载完成不播放音效', async () => {
+    setPref('downloadSound', false)
+    const notify = await prepare([{ id: 'muted', name: 'muted.txt', status: 'downloading' }])
+    notify({ kind: 'download', task: { id: 'muted', status: 'completed' } })
+    await flushPromises()
+    expect(Audio).not.toHaveBeenCalled()
+  })
+
+  it('文件夹子任务不单独响铃，整体完成只响一次', async () => {
+    setPref('downloadSoundType', 'sound-2')
+    const notify = await prepare([
+      { id: 'folder', isDir: true, name: 'folder', status: 'downloading' },
+      { id: 'child', groupId: 'folder', name: 'child.txt', status: 'downloading' },
+    ])
+    notify({ kind: 'download', task: { id: 'child', groupId: 'folder', status: 'completed' } })
+    await flushPromises()
+    expect(Audio).not.toHaveBeenCalled()
+    notify({ kind: 'download', task: { id: 'folder', isDir: true, status: 'completed' } })
+    await flushPromises()
+    expect(Audio).toHaveBeenCalledExactlyOnceWith(DOWNLOAD_SOUNDS[1].url)
   })
 })

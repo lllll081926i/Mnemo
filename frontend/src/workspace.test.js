@@ -29,6 +29,14 @@ describe('工作区辅助逻辑', () => {
     expect(accountHealth.one).toMatchObject({ status: 'error', message: '账号检查暂时失败，请稍后重试' })
     recordAccountHealth('one'); expect(accountHealth.one.status).toBe('ok'); expect(accountHealth.one.message).toBe('')
   })
+  it('偏好备份保留两段下载音效选择，拒绝外部音频或无效值', () => {
+    for (const downloadSoundType of ['sound-1', 'sound-2']) {
+      expect(cleanBackupPrefs({ downloadSoundType }).downloadSoundType).toBe(downloadSoundType)
+    }
+    for (const downloadSoundType of ['sound-3', 'https://example.test/audio.mp3', '../audio.mp3']) {
+      expect(cleanBackupPrefs({ downloadSoundType }).downloadSoundType).toBeUndefined()
+    }
+  })
   it('把网盘原始错误转换为可操作的统一提示，不暴露服务端详情', () => {
     expect(driveErrorNotice(new Error('http 401: invalid_grant secret-token'), '刷新账号')).toMatchObject({ category: 'auth', message: '网盘登录已失效，请重新登录' })
     expect(driveErrorNotice(new Error('dial tcp: i/o timeout'), '加载目录')).toMatchObject({ category: 'network', message: '加载目录失败，请检查网络或代理设置后重试' })

@@ -159,8 +159,11 @@ async function saveImport() {
       importDir.value.id,
     )
     if (seq !== importSeq) return
-    const count = Array.isArray(saved) ? saved.length : importSelected.value.length
-    emit('toast', `已导入 ${count} 个项目`, 'success')
+    const count = Array.isArray(saved) ? saved.length : 0
+    if (count !== importSelected.value.length) {
+      throw new Error(`转存提交结果不完整（${count}/${importSelected.value.length}），请先检查目标目录，避免重复转存`)
+    }
+    emit('toast', `已提交转存 ${count} 个项目，请在目标目录确认结果`, 'success')
     importedLocation.value = { userId: importTarget.value.user_id, dirId: importDir.value.id, name: importDir.value.name }
     importOpen.value = false
     importDirPick.value = false

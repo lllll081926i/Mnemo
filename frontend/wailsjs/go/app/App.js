@@ -34,6 +34,10 @@ export function CancelSync(arg1) {
   return window['go']['app']['App']['CancelSync'](arg1);
 }
 
+export function CancelThunderLogin(arg1, arg2) {
+  return window['go']['app']['App']['CancelThunderLogin'](arg1, arg2);
+}
+
 export function CancelUpdate() {
   return window['go']['app']['App']['CancelUpdate']();
 }
@@ -370,6 +374,10 @@ export function RenameMountedAccount(arg1, arg2) {
   return window['go']['app']['App']['RenameMountedAccount'](arg1, arg2);
 }
 
+export function RespondQuit(arg1) {
+  return window['go']['app']['App']['RespondQuit'](arg1);
+}
+
 export function RestoreFavorite(arg1) {
   return window['go']['app']['App']['RestoreFavorite'](arg1);
 }
@@ -454,6 +462,10 @@ export function SendPan189SMS(arg1, arg2) {
   return window['go']['app']['App']['SendPan189SMS'](arg1, arg2);
 }
 
+export function SendThunderSMS(arg1) {
+  return window['go']['app']['App']['SendThunderSMS'](arg1);
+}
+
 export function SetAccountCustomMeta(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetAccountCustomMeta'](arg1, arg2, arg3);
 }
@@ -472,6 +484,10 @@ export function ShowPikPakCaptcha(arg1, arg2) {
 
 export function ShowPreviewWindows() {
   return window['go']['app']['App']['ShowPreviewWindows']();
+}
+
+export function ShowThunderVerification(arg1, arg2) {
+  return window['go']['app']['App']['ShowThunderVerification'](arg1, arg2);
 }
 
 export function StartSyncScheduler() {

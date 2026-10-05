@@ -814,9 +814,11 @@ export namespace model {
 	    size: number;
 	    isDir: boolean;
 	    scanned?: boolean;
-
-	    static createFrom(source: any = {}) { return new DownloadEntry(source); }
-
+	
+	    static createFrom(source: any = {}) {
+	        return new DownloadEntry(source);
+	    }
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.fileId = source["fileId"];
@@ -829,7 +831,6 @@ export namespace model {
 	        this.scanned = source["scanned"];
 	    }
 	}
-
 	export class DownloadTask {
 	    isDir?: boolean;
 	    groupId?: string;
@@ -894,21 +895,25 @@ export namespace model {
 	        this.created = source["created"];
 	        this.updated = source["updated"];
 	        this.concurrency = source["concurrency"];
-	}
-
-	    convertValues(a: any, classs: any, asMap: boolean = false): any {
-        if (!a) return a;
-        if (a === null) return null;
-        if (Array.isArray(a)) return a.map(e => this.convertValues(e, classs));
-        if (typeof a === 'object') {
-            if (asMap) {
-                for (const key of Object.keys(a)) a[key] = new classs(a[key]);
-                return a;
-            }
-            return new classs(a);
-        }
-        return a;
-    }
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class DownloadURL {
 	    drive_id: string;
@@ -1607,6 +1612,7 @@ export namespace store {
 	    proxy?: string;
 	    downloadDir?: string;
 	    maxConcurrentDownloads: number;
+	    maxDownloadConnections: number;
 	    maxDownloadSpeed: number;
 	    maxUploadSpeed: number;
 	    autoUpdate: boolean;
@@ -1627,6 +1633,7 @@ export namespace store {
 	        this.proxy = source["proxy"];
 	        this.downloadDir = source["downloadDir"];
 	        this.maxConcurrentDownloads = source["maxConcurrentDownloads"];
+	        this.maxDownloadConnections = source["maxDownloadConnections"];
 	        this.maxDownloadSpeed = source["maxDownloadSpeed"];
 	        this.maxUploadSpeed = source["maxUploadSpeed"];
 	        this.autoUpdate = source["autoUpdate"];
@@ -1791,3 +1798,4 @@ export namespace sync {
 	}
 
 }
+

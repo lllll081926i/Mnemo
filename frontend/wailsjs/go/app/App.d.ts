@@ -22,6 +22,8 @@ export function CancelShare(arg1:model.ShareHistoryEntry):Promise<void>;
 
 export function CancelSync(arg1:string):Promise<boolean>;
 
+export function CancelThunderLogin(arg1:string,arg2:string):Promise<void>;
+
 export function CancelUpdate():Promise<boolean>;
 
 export function CancelUpload(arg1:string):Promise<void>;
@@ -190,6 +192,8 @@ export function RenameFile(arg1:string,arg2:string,arg3:string,arg4:string):Prom
 
 export function RenameMountedAccount(arg1:string,arg2:string):Promise<model.Account>;
 
+export function RespondQuit(arg1:boolean):Promise<void>;
+
 export function RestoreFavorite(arg1:store.Favorite):Promise<void>;
 
 export function RestoreFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<Array<string>>;
@@ -232,6 +236,8 @@ export function SendPan139SMS(arg1:string):Promise<void>;
 
 export function SendPan189SMS(arg1:string,arg2:string):Promise<string>;
 
+export function SendThunderSMS(arg1:Record<string, string>):Promise<Record<string, string>>;
+
 export function SetAccountCustomMeta(arg1:string,arg2:string,arg3:string):Promise<model.Account>;
 
 export function SetupTray(arg1:Array<number>):Promise<void>;
@@ -241,6 +247,8 @@ export function ShowMainWindow():Promise<void>;
 export function ShowPikPakCaptcha(arg1:string,arg2:string):Promise<boolean>;
 
 export function ShowPreviewWindows():Promise<void>;
+
+export function ShowThunderVerification(arg1:string,arg2:string):Promise<boolean>;
 
 export function StartSyncScheduler():Promise<string>;
 

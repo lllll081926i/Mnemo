@@ -7,6 +7,7 @@ import { compactSpring, panelReveal } from '../motion/presets'
 import { GetSettings, SaveSettings, GetDownloadDirectory, OpenDownloadDirectory, ClearCache, PickDirectory, RevealInFolder, GetLogPath, ClearLogs, ExportLogs } from '../api'
 import { Environment } from '../../wailsjs/runtime/runtime'
 import { getPrefs, setPref } from '../appearance'
+import { DOWNLOAD_SOUNDS, createDownloadSoundPlayer } from '../download-sounds'
 import SegTabs from '../components/SegTabs.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
@@ -72,6 +73,7 @@ const defaults = {
   proxy: '',
   downloadDir: '',
   maxConcurrentDownloads: 3,
+  maxDownloadConnections: 8,
   maxDownloadSpeed: 0,
   maxUploadSpeed: 0,
   autoUpdate: true,
@@ -124,20 +126,15 @@ const activeNavIndex = computed(() => Math.max(0, groups.findIndex(group => grou
 
 // 纯前端偏好
 const prefs = ref(getPrefs())
+const testSoundPlayer = createDownloadSoundPlayer()
 function onPref(key, value) {
+  if (key === 'downloadSoundType' || (key === 'downloadSound' && !value)) testSoundPlayer.stop()
   prefs.value = { ...prefs.value, [key]: value }
   setPref(key, value)
 }
 
-let testAudio = null
-function playTestSound() {
-  try {
-    if (!testAudio) {
-      testAudio = new Audio(new URL('../assets/audio/download_finished.mp3', import.meta.url).href)
-    }
-    testAudio.currentTime = 0
-    testAudio.play().then(() => emit('toast', '正在试听提示音', 'success')).catch(() => {})
-  } catch { /* 忽略 */ }
+async function playTestSound() {
+  if (await testSoundPlayer.play(prefs.value.downloadSoundType)) emit('toast', '正在试听提示音', 'success')
 }
 
 const speedOptions = [
@@ -204,6 +201,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  testSoundPlayer.stop()
   ++settingsLoadSeq
   ++directoryReadSeq
   ++directoryPickSeq
@@ -243,6 +241,8 @@ async function save(silent) {
   try {
     const s = { ...settings.value }
     s.maxConcurrentDownloads = Math.min(8, Math.max(1, Number(s.maxConcurrentDownloads) || 1))
+    s.maxDownloadConnections = Math.min(16, Math.max(1, Math.trunc(Number(s.maxDownloadConnections) || 8)))
+    settings.value.maxDownloadConnections = s.maxDownloadConnections
     s.maxDownloadSpeed = Math.max(0, Number(s.maxDownloadSpeed) || 0) * 1024
     s.maxUploadSpeed = Math.max(0, Number(s.maxUploadSpeed) || 0) * 1024
     await SaveSettings(s)
@@ -446,6 +446,12 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">下载完成提示音</span></div>
               <div class="sg-control">
+                <UiSelect
+                  :model-value="prefs.downloadSoundType"
+                  :options="DOWNLOAD_SOUNDS"
+                  placeholder="选择下载完成提示音"
+                  @update:modelValue="(value) => onPref('downloadSoundType', value)"
+                />
                 <button v-if="prefs.downloadSound" class="tbtn xs" @click="playTestSound">
                   <UiIcon name="play" :size="12" />试听
                 </button>
@@ -519,7 +525,7 @@ async function exportLogs() {
             <div v-if="downloadDirError" class="sg-row" role="alert"><span class="sg-desc">{{ downloadDirError }}</span></div>
 
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">最大并发下载数</span></div>
+              <div class="sg-text"><span class="sg-label">最大并发下载数</span><span class="sg-desc">同时下载的文件数量，与单文件连接数独立</span></div>
               <div class="sg-control">
                 <input
                   class="input input-sm"
@@ -590,6 +596,24 @@ async function exportLogs() {
                   class="input"
                   v-model="settings.proxy"
                   placeholder="http://127.0.0.1:7890"
+                  @blur="onInputCommit"
+                  @keydown.enter="onInputCommit"
+                />
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">单文件下载连接数</span>
+                <span class="sg-desc">1–16，默认 8；网盘限制或不支持分段时自动减少，修改后对新启动和恢复的任务生效</span>
+              </div>
+              <div class="sg-control">
+                <input
+                  class="input input-sm"
+                  type="number"
+                  min="1"
+                  max="16"
+                  v-model.number="settings.maxDownloadConnections"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
                 />

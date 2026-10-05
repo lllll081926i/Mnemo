@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, validateMountedWrite, SendGuangyaSms, SendPan139SMS, SendPan189SMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha, ShowPikPakCaptcha } from '../api'
+import { login, saveMounted, validateMountedWrite, SendGuangyaSms, SendPan139SMS, SendPan189SMS, SendThunderSMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha, ShowPikPakCaptcha, ShowThunderVerification, CancelThunderLogin } from '../api'
 import UiIcon from './UiIcon.vue'
 import UiSelect from './UiSelect.vue'
 import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
@@ -14,6 +14,15 @@ const emit = defineEmits(['close', 'toast'])
 
 const providerId = ref(props.initialProvider || localStorage.getItem('login_provider') || 'pikpak')
 function defaultLoginForm(id) {
+  if (id === 'thunder') {
+    let deviceID = localStorage.getItem('mnemo.thunder.deviceId') || ''
+    if (!/^[a-f0-9]{32}$/.test(deviceID)) {
+      const bytes = window.crypto.getRandomValues(new Uint8Array(16))
+      deviceID = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('')
+      localStorage.setItem('mnemo.thunder.deviceId', deviceID)
+    }
+    return { device_id: deviceID, login_mode: 'password' }
+  }
   if (id === 'lanzou') return { upload_tier: 'v0' }
   if (id === 'pan189') return { login_mode: 'password' }
   if (id === 'pan139') return { login_mode: 'password' }
@@ -41,20 +50,34 @@ const webdavPresets = [
 const busy = ref(false)
 const smsBusy = ref(false)
 const smsCountdown = ref(0)
+let smsContextVersion = 0
+watch([providerId, () => form.value.username, () => form.value.phone, () => form.value.login_mode], () => { smsContextVersion++ }, { flush: 'sync' })
 let smsTimer = null
+const smsCooldowns = new Map()
 const pikpakCooldownSeconds = ref(0)
 let pikpakCooldownTimer = null
 function startSmsCountdown() {
-  smsCountdown.value = 60
+  const key = `${providerId.value}:${String(form.value.username || form.value.phone || '').trim()}`
+  smsCooldowns.set(key, Date.now() + 60000)
+  refreshSmsCountdown()
+}
+function refreshSmsCountdown() {
   if (smsTimer) clearInterval(smsTimer)
-  smsTimer = setInterval(() => {
-    smsCountdown.value--
+  smsTimer = null
+  const key = `${providerId.value}:${String(form.value.username || form.value.phone || '').trim()}`
+  const deadline = smsCooldowns.get(key) || 0
+  const update = () => {
+    smsCountdown.value = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
     if (smsCountdown.value <= 0) {
       clearInterval(smsTimer)
       smsTimer = null
+      smsCooldowns.delete(key)
     }
-  }, 1000)
+  }
+  update()
+  if (smsCountdown.value > 0) smsTimer = setInterval(update, 1000)
 }
+watch([providerId, () => form.value.username, () => form.value.phone], refreshSmsCountdown, { flush: 'sync' })
 function clearPikPakCooldown() {
   if (pikpakCooldownTimer) clearInterval(pikpakCooldownTimer)
   pikpakCooldownTimer = null
@@ -127,6 +150,15 @@ const webdavAuthOptions = [
   { value: 'bearer', label: 'Bearer Token' },
 ]
 const fields = computed(() => (provider.value && provider.value.Login && provider.value.Login.fields) || [])
+const loginModeField = computed(() => fields.value.find(field => field.key === 'login_mode'))
+const hasPasswordSmsSwitch = computed(() => {
+  const options = loginModeField.value?.options || []
+  return options.length === 2 && ['password', 'sms'].every(mode => options.some(option => option.value === mode))
+})
+const loginMethodOptions = [
+  { value: 'password', label: '密码登录' },
+  { value: 'sms', label: '短信验证码登录' },
+]
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuthField = (field) => field.type === 'oauth'
 const isCookieField = (field) => /cookie|cookies|bduss/i.test(`${field.key} ${field.label}`)
@@ -144,7 +176,7 @@ const HIDDEN_LOGIN_FIELDS = {
 
 const visibleFields = computed(() => {
   const hidden = HIDDEN_LOGIN_FIELDS[providerId.value] || []
-  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field) && !hidden.includes(field.key))
+  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field) && !hidden.includes(field.key) && !(hasPasswordSmsSwitch.value && field.key === 'login_mode'))
   // 有其它登录方式（账密/OAuth）时隐藏 Cookie 字段
   const hasAltLogin = hasAccountLogin.value || fields.value.some(isOAuthField)
   return hasAltLogin ? nonOAuthFields.filter((field) => !isCookieField(field)) : nonOAuthFields
@@ -156,15 +188,14 @@ const isLongText = (key) => /cookie|token|bduss|secret|authorization/i.test(key)
 const isPan139DirectLogin = computed(() => providerId.value === 'pan139' && String(form.value.authorization || '').trim() !== '')
 const hasRefreshToken = computed(() => String(form.value.refresh_token || '').trim() !== '')
 function isFieldRequired(field) {
-  if (['pan139', 'pan189'].includes(providerId.value) && form.value.login_mode === 'sms' && field.key === 'password') return false
+  if (loginModeField.value && ['password', 'sms_code'].includes(field.key)) return field.key === (form.value.login_mode === 'sms' ? 'sms_code' : 'password')
   if (isPan139DirectLogin.value && (field.key === 'username' || field.key === 'password')) return false
   return field.required
 }
-function isPan139FieldVisible(field) {
-  if (!['pan139', 'pan189'].includes(providerId.value)) return true
+function isLoginFieldVisible(field) {
   const sms = form.value.login_mode === 'sms'
-  if (field.key === 'password') return !sms
-  if (field.key === 'sms_code') return sms
+  if (loginModeField.value && field.key === 'password') return !sms
+  if (loginModeField.value && field.key === 'sms_code') return sms
   if (providerId.value === 'pan189' && field.key === 'validate_code') return !!pan189Captcha.value
   return true
 }
@@ -172,6 +203,7 @@ function fieldInputType(field) {
   return field.type === 'password' ? 'password' : 'text'
 }
 function fieldInputMode(field) {
+  if (providerId.value === 'thunder' && field.key === 'username') return 'numeric'
   if (/phone|sms_code/i.test(field.key)) return 'numeric'
   if (/email/i.test(field.key)) return 'email'
   return undefined
@@ -200,6 +232,79 @@ let loginModalDisposed = false
 let captchaCompletionBusy = false
 let pendingCaptchaCompletion = null
 let captchaClosePromise = Promise.resolve()
+const thunderVerification = ref(null)
+const thunderNativeWindow = ref(false)
+const thunderOpening = ref(false)
+let offThunderVerification = null
+let pendingThunderVerification = null
+
+function resetThunderVerification() {
+  const attemptID = form.value.login_attempt || ''
+  const sessionID = thunderVerification.value?.sessionID || ''
+  thunderVerification.value = null
+  pendingThunderVerification = null
+  delete form.value.login_attempt
+  delete form.value.captcha_verified
+  delete form.value.captcha_token
+  delete form.value.creditkey
+  if (attemptID || sessionID) void CancelThunderLogin(attemptID, sessionID).catch(() => {})
+}
+
+async function openThunderVerification() {
+  const verification = thunderVerification.value
+  if (!verification || thunderOpening.value) return
+  thunderOpening.value = true
+  try {
+    const opened = await ShowThunderVerification(verification.sessionID, verification.url)
+    if (thunderVerification.value === verification) thunderNativeWindow.value = opened
+  } catch (err) {
+    errorText.value = `无法打开迅雷验证窗口：${formatErrorText(err)}`
+  } finally {
+    thunderOpening.value = false
+  }
+}
+
+function parseThunderVerification(err, purpose = 'login') {
+  const text = String(err)
+  if (!text.includes('thunder_verification_required')) return false
+  const url = text.match(/\nurl=(\S+)/)?.[1]
+  const attemptID = text.match(/\nattempt=(\S+)/)?.[1]
+  const sessionID = text.match(/\nsession=(\S+)/)?.[1]
+  if (!url || !attemptID || !sessionID) return false
+  form.value.login_attempt = attemptID
+  delete form.value.captcha_verified
+  delete form.value.captcha_token
+  delete form.value.creditkey
+  thunderNativeWindow.value = false
+  thunderVerification.value = { url, sessionID, purpose }
+  return true
+}
+
+async function continueThunderVerification(token = '', creditKey = '') {
+  const verification = thunderVerification.value
+  if (busy.value || !verification || providerId.value !== 'thunder') return
+  busy.value = true
+  form.value.captcha_verified = 'true'
+  if (token) form.value.captcha_token = token
+  if (creditKey) form.value.creditkey = creditKey
+  thunderVerification.value = null
+  await CancelThunderLogin('', verification.sessionID).catch(() => {})
+  busy.value = false
+  if (!loginModalDisposed && providerId.value === 'thunder') {
+    if (verification.purpose === 'sms') await sendThunderSms()
+    else await submit()
+  }
+}
+
+async function completeThunderVerification(payload) {
+  if (loginModalDisposed || !thunderVerification.value || providerId.value !== 'thunder' || payload?.session_id !== thunderVerification.value.sessionID) return
+  if (busy.value || smsBusy.value) { pendingThunderVerification = payload; return }
+  await continueThunderVerification(String(payload.captcha_token || ''), String(payload.creditkey || ''))
+}
+
+watch([() => form.value.username, () => form.value.password], () => {
+  if (providerId.value === 'thunder' && form.value.login_attempt) resetThunderVerification()
+}, { flush: 'sync' })
 
 function closePikPakCaptchaSession() {
   const close = captchaClosePromise
@@ -211,6 +316,7 @@ function closePikPakCaptchaSession() {
 }
 
 watch(providerId, (v, previous) => {
+  resetThunderVerification()
   info('login', 'login provider selected', { provider: v, previous_provider: previous || '' })
   localStorage.setItem('login_provider', v)
   form.value = defaultLoginForm(v)
@@ -223,14 +329,20 @@ watch(providerId, (v, previous) => {
 })
 
 watch(() => form.value.login_mode, () => {
+  resetThunderVerification()
   pan139SMSRequired.value = false
   pan189Captcha.value = ''
+  errorText.value = ''
+  passwordVisibility.value = {}
+  delete form.value.password
   delete form.value.validate_code
   delete form.value.sms_code
-  if (smsTimer) clearInterval(smsTimer)
-  smsTimer = null
-  smsCountdown.value = 0
-})
+  refreshSmsCountdown()
+}, { flush: 'sync' })
+
+watch([hasPasswordSmsSwitch, form], ([enabled]) => {
+  if (enabled && !['password', 'sms'].includes(form.value.login_mode)) form.value.login_mode = 'password'
+}, { immediate: true })
 
 // A hidden or removed provider must not remain selected through an old
 // localStorage value while the visible panel falls back to another item.
@@ -253,6 +365,7 @@ onMounted(() => {
     providerListObserver.observe(providerListEl.value)
   }
   window.addEventListener('keydown', onKey)
+  offThunderVerification = onEvent('thunder:verification:completed', (payload) => { void completeThunderVerification(payload) })
   offPikPakCaptchaCompleted = onEvent('pikpak:captcha:completed', (payload) => {
 	info('captcha', 'PikPak captcha completion event received', { session_id: String(payload?.session_id || ''), has_token: !!String(payload?.captcha_token || '').trim() })
     void completePikPakCaptcha(payload)
@@ -261,6 +374,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	debug('login', 'login modal unmounted')
   loginModalDisposed = true
+  resetThunderVerification()
+  offThunderVerification?.()
   providerListObserver?.disconnect()
   window.removeEventListener('keydown', onKey)
   if (offPikPakCaptchaCompleted) offPikPakCaptchaCompleted()
@@ -414,18 +529,23 @@ function resetCaptcha(closeSession = false) {
 }
 
 async function sendSms() {
+  if (smsBusy.value || smsCountdown.value > 0) return
   if (!String(form.value.phone || '').trim()) { errorText.value = '请先填写手机号'; return }
+  const phone = form.value.phone
+  const requestVersion = smsContextVersion
   smsBusy.value = true
 	info('login', 'SMS verification request started', { provider: providerId.value })
   errorText.value = ''
   try {
-    const r = await SendGuangyaSms(form.value.phone)
+    const r = await SendGuangyaSms(phone)
+    if (loginModalDisposed || requestVersion !== smsContextVersion) return
     form.value.verification_id = r.verification_id
     form.value.device_id = r.device_id
     form.value.captcha_token = r.captcha_token || ''
     emit('toast', '验证码已发送', 'success')
     startSmsCountdown()
   } catch (e) {
+    if (loginModalDisposed || requestVersion !== smsContextVersion) return
 		warn('login', 'SMS verification request failed', { error: formatErrorText(e) })
     errorText.value = friendlyLoginError(e, '发送短信验证码')
   } finally {
@@ -437,18 +557,58 @@ async function sendPan139Sms() {
   if (smsBusy.value) return
   if (!String(form.value.username || '').trim()) { errorText.value = '请先填写账号'; return }
   const username = String(form.value.username).trim()
+  const requestVersion = smsContextVersion
   smsBusy.value = true
   errorText.value = ''
   try {
     await SendPan139SMS(username)
-    if (loginModalDisposed || providerId.value !== 'pan139' || form.value.login_mode !== 'sms' || String(form.value.username || '').trim() !== username) return
+    if (loginModalDisposed || requestVersion !== smsContextVersion || providerId.value !== 'pan139' || form.value.login_mode !== 'sms' || String(form.value.username || '').trim() !== username) return
     emit('toast', '验证码已发送', 'success')
     startSmsCountdown()
   } catch (e) {
+    if (loginModalDisposed || requestVersion !== smsContextVersion) return
     warn('login', '139 SMS verification request failed', { error: formatErrorText(e) })
     errorText.value = friendlyLoginError(e, '发送短信验证码')
   } finally {
     smsBusy.value = false
+  }
+}
+
+async function sendThunderSms() {
+  if (smsBusy.value || busy.value || smsCountdown.value > 0) return
+  const username = String(form.value.username || '').trim()
+  if (!/^(?:\+86\s*)?1\d{10}$/.test(username)) { errorText.value = '请先填写正确的 11 位手机号'; return }
+  const attemptConfig = { ...form.value }
+  const requestVersion = smsContextVersion
+  const isCurrent = () => !loginModalDisposed && requestVersion === smsContextVersion && providerId.value === 'thunder' && form.value.login_mode === 'sms' && String(form.value.username || '').trim() === username
+  smsBusy.value = true
+  errorText.value = ''
+  try {
+    const result = await SendThunderSMS(attemptConfig)
+    if (!isCurrent()) { await CancelThunderLogin(result.login_attempt || '', '').catch(() => {}); return }
+    form.value.login_attempt = result.login_attempt
+    if (result.device_id) form.value.device_id = result.device_id
+    delete form.value.captcha_token
+    delete form.value.captcha_verified
+    delete form.value.creditkey
+    delete form.value.sms_code
+    emit('toast', '验证码已发送', 'success')
+    startSmsCountdown()
+  } catch (err) {
+    if (!isCurrent()) {
+      const message = String(err)
+      await CancelThunderLogin(message.match(/\nattempt=(\S+)/)?.[1] || '', message.match(/\nsession=(\S+)/)?.[1] || '').catch(() => {})
+      return
+    }
+    if (parseThunderVerification(err, 'sms')) await openThunderVerification()
+    else { resetThunderVerification(); errorText.value = friendlyLoginError(err, '发送短信验证码') }
+  } finally {
+    smsBusy.value = false
+    if (pendingThunderVerification) {
+      const payload = pendingThunderVerification
+      pendingThunderVerification = null
+      void completeThunderVerification(payload)
+    }
   }
 }
 
@@ -457,11 +617,12 @@ async function sendPan189Sms() {
   const username = String(form.value.username || '').trim()
   if (!username) { errorText.value = '请先填写手机号'; return }
   const attemptProvider = providerId.value
+  const requestVersion = smsContextVersion
   smsBusy.value = true
   errorText.value = ''
   try {
     const image = await SendPan189SMS(username, String(form.value.validate_code || '').trim())
-    if (loginModalDisposed || providerId.value !== attemptProvider || form.value.login_mode !== 'sms' || String(form.value.username || '').trim() !== username) return
+    if (loginModalDisposed || requestVersion !== smsContextVersion || providerId.value !== attemptProvider || form.value.login_mode !== 'sms' || String(form.value.username || '').trim() !== username) return
     if (image) {
       pan189Captcha.value = image
       form.value.validate_code = ''
@@ -471,7 +632,7 @@ async function sendPan189Sms() {
       errorText.value = '短信验证码已发送，请填写后登录'
     }
   } catch (e) {
-    if (providerId.value === attemptProvider) errorText.value = friendlyLoginError(e, '发送短信验证码')
+    if (!loginModalDisposed && requestVersion === smsContextVersion && providerId.value === attemptProvider) errorText.value = friendlyLoginError(e, '发送短信验证码')
   } finally {
     smsBusy.value = false
   }
@@ -515,6 +676,12 @@ function validate() {
     if (!value('sms_code')) return '请填写短信验证码'
     return ''
   }
+  if (providerId.value === 'thunder' && value('login_mode') === 'sms') {
+    if (!value('username')) return '请填写手机号'
+    if (!/^\d{6}$/.test(value('sms_code'))) return '请填写 6 位短信验证码'
+    if (!value('login_attempt')) return '请先获取短信验证码'
+    return ''
+  }
   if (providerId.value === 'pan189' && pan189Captcha.value && !value('validate_code')) {
     return '请填写图形验证码'
   }
@@ -527,7 +694,7 @@ function validate() {
     }
     return ''
   }
-  for (const f of visibleFields.value) {
+  for (const f of visibleFields.value.filter(isLoginFieldVisible)) {
     if (isFieldRequired(f) && !value(f.key)) return `请填写${f.label}`
   }
   // 全可选字段的 provider 至少填一项
@@ -538,7 +705,7 @@ function validate() {
 }
 
 async function submit() {
-  if (busy.value) return
+  if (busy.value || smsBusy.value) return
   const attemptProvider = providerId.value
   const attemptMounted = isMounted.value
   const attemptOAuth = isOAuth.value
@@ -546,6 +713,11 @@ async function submit() {
   captchaSubmitting.value = true
   errorText.value = ''
   try {
+    if (attemptProvider === 'thunder') {
+      await captchaClosePromise
+      if (loginModalDisposed || providerId.value !== attemptProvider) return
+      if (thunderVerification.value) { busy.value = false; await continueThunderVerification(); return }
+    }
 	  debug('login', 'login form submit started', { provider: attemptProvider, config_keys: configKeys(attemptMounted ? mountedForm.value : form.value), has_captcha: !!captchaUrl.value })
   // The callback normally resumes login automatically. Keep a manual
   // fallback for dev WebView/browser environments where the event bridge can
@@ -592,8 +764,17 @@ async function submit() {
 		info('login', 'login form submit completed', { provider: attemptProvider })
     emit('close')
   } catch (e) {
+    if (attemptProvider === 'thunder' && (loginModalDisposed || providerId.value !== attemptProvider)) {
+      const message = String(e)
+      const attemptID = message.match(/\nattempt=(\S+)/)?.[1] || ''
+      const sessionID = message.match(/\nsession=(\S+)/)?.[1] || ''
+      if (attemptID || sessionID) await CancelThunderLogin(attemptID, sessionID).catch(() => {})
+      return
+    }
     try {
-      if (attemptProvider === 'pikpak' && handlePikPakRateLimit(e)) {
+      if (attemptProvider === 'thunder' && parseThunderVerification(e)) {
+        await openThunderVerification()
+      } else if (attemptProvider === 'pikpak' && handlePikPakRateLimit(e)) {
         // Keep the challenge state intact while the provider cooldown runs.
       } else if (attemptProvider === 'pikpak' && parseCaptcha(e)) {
         await openCaptchaWindow()
@@ -606,6 +787,7 @@ async function submit() {
       } else if (attemptProvider === 'pan139' && parsePan139SMSRequired(e)) {
         // 账密登录已建立临时会话，切换到短信二次验证，不重复提交密码。
       } else {
+        if (attemptProvider === 'thunder') resetThunderVerification()
         errorText.value = friendlyLoginError(e)
       }
 		warn('login', 'login form submit failed', { provider: attemptProvider, error: formatErrorText(e) })
@@ -617,6 +799,11 @@ async function submit() {
   } finally {
     busy.value = false
     captchaSubmitting.value = false
+    if (pendingThunderVerification) {
+      const payload = pendingThunderVerification
+      pendingThunderVerification = null
+      void completeThunderVerification(payload)
+    }
     if (pendingCaptchaCompletion) {
       const payload = pendingCaptchaCompletion
       pendingCaptchaCompletion = null
@@ -710,10 +897,13 @@ async function submit() {
 
                 <!-- 常规表单 -->
                 <template v-else-if="!isOAuth">
+                  <div v-if="hasPasswordSmsSwitch" class="login-method-switch" role="group" aria-label="登录方式">
+                    <button v-for="method in loginMethodOptions" :key="method.value" type="button" :class="{ active: form.login_mode === method.value }" :aria-pressed="form.login_mode === method.value" :disabled="busy || smsBusy || thunderOpening" @click="form.login_mode = method.value">{{ method.label }}</button>
+                  </div>
                   <div v-if="visibleFields.length" class="login-section">
-                    <div v-for="f in visibleFields" v-show="isPan139FieldVisible(f)" :key="f.key" class="field login-field">
+                    <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field">
                       <label>{{ f.label }}</label>
-                      <textarea v-if="isLongText(f.key)" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
+                      <textarea v-if="isLongText(f.key) && f.type !== 'password'" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
                       <div v-else-if="f.type === 'password'" class="password-input-wrap"><input class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="15" /></button></div>
                       <input v-else class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
@@ -730,6 +920,9 @@ async function submit() {
                       <div v-if="providerId === 'pan189' && f.key === 'sms_code'" class="field-action-row">
                         <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendPan189Sms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
                       </div>
+                      <div v-if="providerId === 'thunder' && f.key === 'sms_code'" class="field-action-row">
+                        <button class="btn sm" :disabled="busy || smsBusy || smsCountdown > 0 || !!thunderVerification" type="button" @click="sendThunderSms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
+                      </div>
                     </div>
                   </div>
                   <div v-else class="login-empty-state">该网盘无需填写表单，直接点击登录。</div>
@@ -739,6 +932,21 @@ async function submit() {
                 <button v-if="providerHelp" type="button" class="login-help" @click="openHelp">
                   <UiIcon name="external" :size="12" /><span>{{ providerHelp.label }}</span>
                 </button>
+
+                <div v-if="thunderVerification" class="login-state-card captcha-box">
+                  <div class="captcha-head">
+                    <div>
+                      <strong>请完成迅雷官方安全验证</strong>
+                      <p>{{ thunderOpening ? '正在打开验证页面…' : (thunderVerification.purpose === 'sms' ? '完成安全验证后将发送短信验证码，收到后在登录页填写。' : '完成滑块或短信验证后将继续登录，不需要填写 Token 或签名。') }}</p>
+                    </div>
+                    <button v-if="thunderNativeWindow" class="btn sm" type="button" :disabled="busy || thunderOpening" @click="openThunderVerification">打开验证窗口</button>
+                  </div>
+                  <iframe v-if="!thunderNativeWindow && !thunderOpening" class="captcha-frame" :src="thunderVerification.url" title="迅雷官方安全验证" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
+                  <div class="field-action-row">
+                    <button class="btn sm" type="button" :disabled="busy || smsBusy || thunderOpening" @click="continueThunderVerification()">{{ thunderVerification.purpose === 'sms' ? '已完成验证，发送短信' : '已完成验证，继续登录' }}</button>
+                    <button class="btn sm" type="button" :disabled="busy" @click="resetThunderVerification">取消验证</button>
+                  </div>
+                </div>
 
                 <!-- PikPak 滑块安全验证 -->
                 <div v-if="captchaUrl" class="login-state-card captcha-box">
@@ -769,7 +977,7 @@ async function submit() {
 
               <div class="modal-actions login-actions">
                 <button class="btn" type="button" @click="emit('close')">取消</button>
-                <button class="btn primary" type="submit" :disabled="busy || (providerId === 'pikpak' && pikpakCooldownSeconds > 0)">
+                <button class="btn primary" type="submit" :disabled="busy || smsBusy || thunderOpening || (providerId === 'pikpak' && pikpakCooldownSeconds > 0)">
                   <span v-if="busy" class="spin spin-on-primary"></span>
                   {{ busy ? '处理中…' : (providerId === 'pikpak' && captchaUrl ? '继续登录' : (isOAuth ? '浏览器授权' : (isMounted ? '保存连接' : '登录'))) }}
                 </button>
@@ -876,6 +1084,20 @@ async function submit() {
   padding: 24px; overflow-y: auto; scrollbar-gutter: stable;
 }
 .login-section { display: grid; gap: 12px; width: min(100%, 480px); }
+.login-method-switch {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%;
+  padding: 4px; box-sizing: border-box; border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm); background: var(--bg-hover);
+}
+.login-method-switch > button {
+  min-width: 0; min-height: 36px; padding: 8px 10px; border: 0;
+  border-radius: var(--radius-xs); background: transparent; color: var(--text-secondary);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.login-method-switch > button.active { background: var(--bg-surface); color: var(--color-primary); font-weight: 600; }
+.login-method-switch > button:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.login-method-switch > button:disabled { cursor: wait; opacity: .62; }
 .login-field { margin: 0 !important; }
 .login-field > label {
   display: block;

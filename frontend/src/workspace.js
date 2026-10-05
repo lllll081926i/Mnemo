@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { DOWNLOAD_SOUNDS } from './download-sounds'
 
 function providerFromUserId(userId) {
   const value = String(userId || '')
@@ -108,6 +109,7 @@ export function cleanBackupPrefs(prefs) {
   for (const key of ['oledBackground', 'hoverPreview', 'downloadSound', 'autoCloseOnEnd', 'autoLoadSubtitles', 'defaultSortAsc']) if (typeof prefs?.[key] === 'boolean') clean[key] = prefs[key]
   for (const [key, [min, max]] of Object.entries({ defaultVolume: [0, 200], defaultSpeed: [0.25, 4], seekStep: [1, 300], sideWidth: [160, 500] })) if (Number.isFinite(prefs?.[key])) clean[key] = Math.max(min, Math.min(max, prefs[key]))
   if (['list', 'grid'].includes(prefs?.viewMode)) clean.viewMode = prefs.viewMode
+  if (DOWNLOAD_SOUNDS.some(sound => sound.value === prefs?.downloadSoundType)) clean.downloadSoundType = prefs.downloadSoundType
   if (['name', 'time', 'size'].includes(prefs?.defaultSortKey)) clean.defaultSortKey = prefs.defaultSortKey
   if (Array.isArray(prefs?.accountOrder)) clean.accountOrder = [...new Set(prefs.accountOrder.filter(id => typeof id === 'string' && id.length < 512))]
   for (const key of ['accountAliases', 'accountIcons']) {

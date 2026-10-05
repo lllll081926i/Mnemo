@@ -5,13 +5,14 @@ import {
   PauseDownload, ResumeDownload, CancelDownload, ClearDownloads,
   RemoveDownload, PrioritizeDownload, OpenFile,
   CancelUpload, ClearUploads, DownloadURL, ResumeUpload,
-  ListOfflineTasks, OfflineDownload, DeleteOfflineTask,
+  ListOfflineTasks, refreshOfflineTasks, OfflineDownload, DeleteOfflineTask,
   ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs, VerifyMigration,
   EventsOn, RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
 } from '../api'
 import { getPrefs } from '../appearance'
+import { createDownloadSoundPlayer } from '../download-sounds'
 import Modal from '../components/Modal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import ContextMenu from '../components/ContextMenu.vue'
@@ -51,7 +52,7 @@ async function verifyMigration() {
 }
 watch(detailID, () => { verificationSeq++; verifying.value = false; verification.value = {} })
 const detailJob = computed(() => migrateJobs.value.find(j => j.id === detailID.value))
-const verificationLabels = { unverified: '未校验', size: '传输大小已核对', 'provider-hash': '服务商已接受哈希' }
+const verificationLabels = { unverified: '未校验', size: '传输大小已核对', 'transferred-size': '传输大小已核对', 'remote-size': '目标大小已核对', 'remote-hash': '目标哈希已核对', 'provider-hash': '服务商已接受哈希' }
 
 // ---------- 菜单 / 账号筛选 ----------
 const menu = ref('downloading')
@@ -90,16 +91,10 @@ let pendingDownloadEvents = null
 let pendingUploadEvents = null
 
 // 下载完成提示音
-let finishAudio = null
+const finishSoundPlayer = createDownloadSoundPlayer()
 function playFinishSound() {
-  try {
-    if (!getPrefs().downloadSound) return
-    if (!finishAudio) {
-      finishAudio = new Audio(new URL('../assets/audio/download_finished.mp3', import.meta.url).href)
-    }
-    finishAudio.currentTime = 0
-    finishAudio.play().catch(() => {})
-  } catch { /* 忽略音频播放限制 */ }
+  const prefs = getPrefs()
+  if (prefs.downloadSound) void finishSoundPlayer.play(prefs.downloadSoundType)
 }
 
 async function refresh() {
@@ -281,6 +276,7 @@ function toggleSelectAllActive() {
 const downStatusText = (s) => ({ queued: '排队中', downloading: '下载中', paused: '已暂停', completed: '已完成', failed: '失败', canceled: '已取消' }[s] || s)
 const downTaskStatus = (t) => t.status === 'downloading' ? ({ resolving: '获取下载链接', connecting: '建立连接', scanning: '扫描目录' }[t.stage] || downStatusText(t.status)) : downStatusText(t.status)
 const downStatusBadge = (s) => ({ downloading: 'primary', queued: 'primary', completed: 'success', failed: 'error', canceled: 'warn', paused: 'warn' }[s] || '')
+const downProgress = (t) => Number.isFinite(t.progress) ? Math.max(0, Math.min(100, Math.round(t.progress))) : 0
 
 function upStatus(t) {
   const u = t.Upload || {}
@@ -691,12 +687,16 @@ const offlineDriveId = computed(() => {
 async function refreshOffline() {
   const seq = ++offlineRefreshSeq
   const userID = offlineUser.value
+  const driveID = offlineDriveId.value
   if (!userID) { offlineTasks.value = []; offlineError.value = ''; offlineLoading.value = false; return }
   offlineLoading.value = true
   try {
     const list = (await ListOfflineTasks(userID)) || []
     if (seq !== offlineRefreshSeq || userID !== offlineUser.value) return
-    offlineTasks.value = list
+    offlineTasks.value = list.filter(task => task.drive_id === driveID)
+    const remote = (await refreshOfflineTasks(userID, driveID)) || []
+    if (seq !== offlineRefreshSeq || userID !== offlineUser.value || driveID !== offlineDriveId.value) return
+    offlineTasks.value = remote
     offlineError.value = ''
   } catch (e) {
     if (seq === offlineRefreshSeq && userID === offlineUser.value) offlineError.value = String(e && e.message ? e.message : e)
@@ -740,10 +740,12 @@ async function submitOffline() {
   }
 }
 const offProgress = (t) => Math.max(0, Math.min(100, Math.round(t.progress || 0)))
+const offStatusText = (status) => ({ queued: '排队中', running: '进行中', completed: '已完成', failed: '失败', canceled: '已取消', partial: '部分完成', unknown: '状态未知', PHASE_TYPE_PENDING: '排队中', PHASE_TYPE_RUNNING: '进行中', PHASE_TYPE_COMPLETE: '已完成', PHASE_TYPE_ERROR: '失败' }[status] || status || '状态未知')
+const offProgressClass = (status) => ['completed', 'PHASE_TYPE_COMPLETE'].includes(status) ? 'succeed' : ['failed', 'PHASE_TYPE_ERROR'].includes(status) ? 'error' : ['partial', 'canceled'].includes(status) ? 'warning' : 'active'
 
 async function delOfflineTask(t) {
   const userID = offlineUser.value, driveID = offlineDriveId.value, taskID = t.task_id || t.id
-  askConfirm(`删除离线任务「${t.file_name || t.url || t.task_id}」？`, async () => {
+  askConfirm(`删除离线任务「${t.file_name || t.url || t.task_id}」并同时删除对应网盘文件？`, async () => {
     if (offlineUser.value !== userID || offlineDriveId.value !== driveID) { emit('toast', '账号已切换，请重新选择任务', 'warn'); return }
     // 乐观剔除
     offlineTasks.value = offlineTasks.value.filter((x) => x.task_id !== taskID && x.id !== taskID)
@@ -923,6 +925,7 @@ onMounted(activateView)
 onActivated(activateView)
 onDeactivated(deactivateView)
 onBeforeUnmount(() => {
+  finishSoundPlayer.stop()
   deactivateView()
   clearTimeout(taskFilterTimer)
 })
@@ -1059,16 +1062,16 @@ onBeforeUnmount(() => {
                     <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details" @click.stop>
                       <summary>查看文件（{{ Math.min(filteredGroupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ filteredGroupChildren(t.id).length }}）</summary>
                       <button class="btn sm" type="button" @click.stop="toggleFailedGroup(t.id)">{{ failedGroupOnly[t.id] ? '查看全部' : '只看失败项' }}</button>
-                      <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath"><span>{{ child.name }} · {{ downTaskStatus(child) }} <template v-if="child.status === 'downloading'">{{ child.progress || 0 }}%</template></span><button v-if="['failed', 'paused'].includes(child.status)" class="btn sm" type="button" @click.stop="retryGroupChild(t, child)">重试</button></div>
+                      <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath"><span>{{ child.name }} · {{ downTaskStatus(child) }} <template v-if="child.status === 'downloading'">{{ downProgress(child) }}%</template></span><button v-if="['failed', 'paused'].includes(child.status)" class="btn sm" type="button" @click.stop="retryGroupChild(t, child)">重试</button></div>
                       <button v-if="filteredGroupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
                     </details>
                   </div>
                     <div class="filesize">{{ t.isDir && !t.scanDone ? '扫描中' : formatBytes(t.size) }}</div>
                   <div class="downprogress">
                     <div class="transfering-state">
-                      <p class="text-state"><span class="badge" :class="downStatusBadge(t.status)">{{ downTaskStatus(t) }}</span><span>{{ t.isDir && !t.scanDone ? '…' : t.stage && t.status === 'downloading' ? '…' : `${t.progress || 0}%` }}</span></p>
+                      <p class="text-state"><span class="badge" :class="downStatusBadge(t.status)">{{ downTaskStatus(t) }}</span><span>{{ t.isDir && !t.scanDone ? '…' : t.stage && t.status === 'downloading' ? '…' : `${downProgress(t)}%` }}</span></p>
                       <div class="progress-total">
-                        <div :class="t.status === 'downloading' || t.status === 'queued' ? 'progress-current active' : t.status === 'completed' ? 'progress-current succeed' : t.status === 'failed' ? 'progress-current error' : 'progress-current'" :style="{ width: (t.progress || 0) + '%' }"></div>
+                        <div :class="t.status === 'downloading' || t.status === 'queued' ? 'progress-current active' : t.status === 'completed' ? 'progress-current succeed' : t.status === 'failed' ? 'progress-current error' : 'progress-current'" :style="{ width: downProgress(t) + '%' }"></div>
                       </div>
                       <p v-if="t.status === 'failed' && t.error" class="text-error" :title="taskErrorText(t.error, '下载文件')">{{ taskErrorText(t.error, '下载文件') }}</p>
                     </div>
@@ -1269,13 +1272,14 @@ onBeforeUnmount(() => {
                   <div>{{ t.file_name || t.url }}</div>
                   <div class="fsub">{{ t.url }}<template v-if="t.created"> · {{ formatTime(t.created) }}</template></div>
                 </div>
-                <div class="filesize"></div>
+                <div class="filesize">{{ t.file_size ? formatBytes(t.file_size) : '' }}</div>
                 <div class="downprogress">
                   <div class="transfering-state">
-                    <p class="text-state"><span>{{ t.status || '进行中' }}</span><span>{{ offProgress(t) }}%</span></p>
+                    <p class="text-state"><span>{{ offStatusText(t.status) }}</span><span>{{ offProgress(t) }}%</span></p>
                     <div class="progress-total">
-                      <div :class="offProgress(t) >= 100 ? 'progress-current succeed' : 'progress-current active'" :style="{ width: offProgress(t) + '%' }"></div>
+                      <div :class="['progress-current', offProgressClass(t.status)]" :style="{ width: offProgress(t) + '%' }"></div>
                     </div>
+                    <p v-if="t.message" class="text-error">{{ t.message }}</p>
                   </div>
                 </div>
                 <div class="downspeed"></div>
@@ -1392,7 +1396,7 @@ onBeforeUnmount(() => {
       <div class="td-row"><span class="td-label">文件名</span><span class="td-val">{{ detailTask.name }}</span></div>
       <div class="td-row"><span class="td-label">任务 ID</span><span class="td-val">{{ detailTask.id }}</span></div>
       <div class="td-row"><span class="td-label">保存路径</span><span class="td-val">{{ detailTask.localPath || '-' }}</span></div>
-      <div class="td-row"><span class="td-label">大小</span><span class="td-val">{{ formatBytes(detailTask.downloaded) }} / {{ formatBytes(detailTask.size) }}（{{ detailTask.progress || 0 }}%）</span></div>
+      <div class="td-row"><span class="td-label">大小</span><span class="td-val">{{ formatBytes(detailTask.downloaded) }} / {{ formatBytes(detailTask.size) }}（{{ downProgress(detailTask) }}%）</span></div>
       <div class="td-row"><span class="td-label">状态</span><span class="td-val">{{ statusText(detailTask.status) }}</span></div>
       <div class="td-row" v-if="detailTask.speed"><span class="td-label">速度</span><span class="td-val">{{ formatSpeed(detailTask.speed) }}</span></div>
       <div class="td-row" v-if="detailTask.url"><span class="td-label">来源链接</span><span class="td-val td-url">{{ detailTask.url }}</span></div>

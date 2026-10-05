@@ -50,6 +50,7 @@ const api = vi.hoisted(() => ({
   GetDownloadDirectory: vi.fn().mockResolvedValue('D:/系统下载'),
   OpenDownloadDirectory: vi.fn().mockResolvedValue(undefined),
   SaveSettings: vi.fn(),
+  RespondQuit: vi.fn().mockResolvedValue(undefined),
   GetLogPath: vi.fn(),
   ClearCache: vi.fn(),
   RevealInFolder: vi.fn(),
@@ -70,12 +71,15 @@ const api = vi.hoisted(() => ({
   SendGuangyaSms: vi.fn(),
   SendPan139SMS: vi.fn(),
   SendPan189SMS: vi.fn(),
+  SendThunderSMS: vi.fn(),
   providerIconUrl: vi.fn(() => ''),
   OpenBrowser: vi.fn(),
   OpenFile: vi.fn(),
   onEvent: vi.fn(() => () => {}),
   ClosePikPakCaptcha: vi.fn(),
   ShowPikPakCaptcha: vi.fn(),
+  ShowThunderVerification: vi.fn().mockResolvedValue(true),
+  CancelThunderLogin: vi.fn().mockResolvedValue(undefined),
   refreshAccountSilently: vi.fn(),
   refreshAccountNow: vi.fn(),
   accountName: vi.fn((account) => account?.user_id || ''),
@@ -109,6 +113,7 @@ const api = vi.hoisted(() => ({
   CancelDownload: vi.fn().mockResolvedValue(undefined),
   ListMigrateJobs: vi.fn().mockResolvedValue([]),
   ListOfflineTasks: vi.fn().mockResolvedValue([]),
+  refreshOfflineTasks: vi.fn().mockResolvedValue([]),
   DownloadURL: vi.fn().mockResolvedValue(undefined),
   OfflineDownload: vi.fn().mockResolvedValue(undefined),
   DeleteOfflineTask: vi.fn().mockResolvedValue(undefined),
@@ -168,6 +173,7 @@ beforeEach(() => {
   api.CancelDownload.mockReset().mockResolvedValue(undefined)
   api.ListMigrateJobs.mockReset().mockResolvedValue([])
   api.ListOfflineTasks.mockReset().mockResolvedValue([])
+  api.refreshOfflineTasks.mockReset().mockResolvedValue([])
   api.DownloadURL.mockReset().mockResolvedValue(undefined)
   api.OfflineDownload.mockReset().mockResolvedValue(undefined)
   api.DeleteOfflineTask.mockReset().mockResolvedValue(undefined)
@@ -591,7 +597,7 @@ describe('传输页面任务提交', () => {
     const first = { user_id: 'pikpak:delete-first', drive_id: 'first-drive' }
     const second = { user_id: 'pikpak:delete-second', drive_id: 'second-drive' }
     api.capsOf.mockReturnValue({ offlineDownload: true })
-    api.ListOfflineTasks.mockResolvedValue([{ task_id: 'task-1', file_name: '测试任务' }])
+    api.refreshOfflineTasks.mockResolvedValue([{ task_id: 'task-1', file_name: '测试任务', drive_id: first.drive_id }])
     const wrapper = mountAttached(TransferView, { props: { accounts: [first, second] } })
     await flushPromises()
     await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('云离线')).trigger('click')
@@ -603,6 +609,228 @@ describe('传输页面任务提交', () => {
     await flushPromises()
     expect(api.DeleteOfflineTask).not.toHaveBeenCalled()
     expect(wrapper.emitted('toast')).toContainEqual(['账号已切换，请重新选择任务', 'warn'])
+  })
+})
+
+describe('迅雷登录安全验证', () => {
+  const providers = [{ ID: 'thunder', Meta: { label: '迅雷网盘' }, Login: { fields: [
+    { key: 'username', type: 'text', label: '手机号', required: true },
+    { key: 'password', type: 'password', label: '密码', required: true },
+  ] } }]
+
+  beforeEach(() => {
+    api.login.mockReset().mockRejectedValueOnce(new Error('thunder_verification_required\nurl=https://captcha.xunlei.com/verify\nattempt=attempt-1\nsession=session-1')).mockResolvedValue(undefined)
+    api.ShowThunderVerification.mockReset().mockResolvedValue(true)
+    api.CancelThunderLogin.mockReset().mockResolvedValue(undefined)
+  })
+
+  async function prepare() {
+    const wrapper = mountAttached(LoginModal, { props: { initialProvider: 'thunder', providers }, global: { stubs: { UiIcon: true } } })
+    await nextTick()
+    const fields = [...document.body.querySelectorAll('.login-field input')]
+    await setDomInput(fields[0], '13800138000')
+    await setDomInput(fields[1], 'login-password')
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    return wrapper
+  }
+
+  it('打开官方验证窗口，回调后携带内部会话自动续办', async () => {
+    const wrapper = await prepare()
+    expect(api.ShowThunderVerification).toHaveBeenCalledExactlyOnceWith('session-1', 'https://captcha.xunlei.com/verify')
+    expect(document.body.textContent).toContain('请完成迅雷官方安全验证')
+    expect([...document.body.querySelectorAll('.login-field label')].map(label => label.textContent)).toEqual(['手机号', '密码'])
+    const notify = api.onEvent.mock.calls.find(([name]) => name === 'thunder:verification:completed')[1]
+    notify({ session_id: 'stale', captcha_token: 'wrong-token' })
+    await flushPromises()
+    expect(api.login).toHaveBeenCalledOnce()
+    notify({ session_id: 'session-1', captcha_token: 'verified-token' })
+    await flushPromises()
+    expect(api.login).toHaveBeenLastCalledWith('thunder', expect.objectContaining({ username: '13800138000', password: 'login-password', login_attempt: 'attempt-1', captcha_verified: 'true', captcha_token: 'verified-token' }))
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    notify({ session_id: 'session-1', captcha_token: 'duplicate-token' })
+    await flushPromises()
+    expect(api.login).toHaveBeenCalledTimes(2)
+  })
+
+  it('不支持原生窗口时显示验证页，并可在完成后继续', async () => {
+    api.ShowThunderVerification.mockResolvedValue(false)
+    await prepare()
+    expect(document.querySelector('iframe[title="迅雷官方安全验证"]').getAttribute('src')).toBe('https://captcha.xunlei.com/verify')
+    ;[...document.querySelectorAll('button')].find(button => button.textContent.includes('已完成验证，继续登录')).click()
+    await flushPromises()
+    expect(api.login).toHaveBeenLastCalledWith('thunder', expect.objectContaining({ login_attempt: 'attempt-1', captcha_verified: 'true' }))
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('', 'session-1')
+  })
+
+  it('短信验证回传信任参数，不混入滑块 Token', async () => {
+    const wrapper = await prepare()
+    const notify = api.onEvent.mock.calls.find(([name]) => name === 'thunder:verification:completed')[1]
+    notify({ session_id: 'session-1', captcha_token: '', creditkey: 'verified-credit-key' })
+    await flushPromises()
+    expect(api.login).toHaveBeenLastCalledWith('thunder', expect.objectContaining({ login_attempt: 'attempt-1', captcha_verified: 'true', creditkey: 'verified-credit-key' }))
+    expect(api.login.mock.calls.at(-1)[1].captcha_token).toBeUndefined()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('取消验证清理临时会话，不再接受旧回调', async () => {
+    const wrapper = await prepare()
+    const notify = api.onEvent.mock.calls.find(([name]) => name === 'thunder:verification:completed')[1]
+    ;[...document.querySelectorAll('button')].find(button => button.textContent.trim() === '取消验证').click()
+    await flushPromises()
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('attempt-1', 'session-1')
+    expect(wrapper.vm.form.login_attempt).toBeUndefined()
+    notify({ session_id: 'session-1', captcha_token: 'late-token' })
+    await flushPromises()
+    expect(api.login).toHaveBeenCalledOnce()
+  })
+
+  it('验证期间修改手机号会丢弃原账号的验证会话', async () => {
+    const wrapper = await prepare()
+    await setDomInput(document.querySelector('.login-field input'), '13900139000')
+    await flushPromises()
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('attempt-1', 'session-1')
+    expect(wrapper.vm.form.login_attempt).toBeUndefined()
+    expect(document.body.textContent).not.toContain('请完成迅雷官方安全验证')
+  })
+
+  it('关闭登录框后到达的验证挑战会被清理，不再打开窗口', async () => {
+    let rejectLogin
+    api.login.mockReset().mockImplementation(() => new Promise((_resolve, reject) => { rejectLogin = reject }))
+    const wrapper = await prepare()
+    expect(api.login).toHaveBeenCalledOnce()
+    wrapper.unmount()
+    rejectLogin(new Error('thunder_verification_required\nurl=https://captcha.xunlei.com/verify\nattempt=late-attempt\nsession=late-session'))
+    await flushPromises()
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('late-attempt', 'late-session')
+    expect(api.ShowThunderVerification).not.toHaveBeenCalled()
+  })
+})
+
+describe('密码和短信登录切换', () => {
+  const modeField = { key: 'login_mode', type: 'select', label: '登录方式', required: true, options: [{ value: 'password', label: '账号密码' }, { value: 'sms', label: '短信验证码' }] }
+  const dualProvider = id => ({ ID: id, Meta: { label: id }, Login: { fields: [
+    modeField,
+    { key: 'username', type: 'text', label: '手机号', required: true },
+    { key: 'password', type: 'password', label: '密码', required: true },
+    { key: 'sms_code', type: 'text', label: '短信验证码' },
+  ] } })
+  const field = label => [...document.querySelectorAll('.login-field')].find(item => item.querySelector('label')?.textContent === label)
+  const methods = () => [...document.querySelectorAll('.login-method-switch button')]
+  const smsButton = () => field('短信验证码').querySelector('button')
+
+  beforeEach(() => {
+    api.login.mockReset().mockResolvedValue(undefined)
+    api.SendThunderSMS.mockReset().mockResolvedValue({ login_attempt: 'sms-attempt', retry_after: '60' })
+    api.CancelThunderLogin.mockReset().mockResolvedValue(undefined)
+    api.ShowThunderVerification.mockReset().mockResolvedValue(true)
+  })
+
+  async function prepare(id = 'thunder') {
+    const wrapper = mountAttached(LoginModal, { props: { initialProvider: id, providers: [dualProvider(id)] }, global: { stubs: { UiIcon: true } } })
+    await nextTick()
+    await setDomInput(field('手机号').querySelector('input'), '13800138000')
+    return wrapper
+  }
+
+  it.each(['thunder', 'pan139', 'pan189'])('%s 使用统一的双选项按钮，切换保留手机号并清理另一方式凭据', async id => {
+    const wrapper = await prepare(id)
+    expect(methods().map(button => button.textContent)).toEqual(['密码登录', '短信验证码登录'])
+    expect(methods()[0].getAttribute('aria-pressed')).toBe('true')
+    expect(wrapper.findComponent(UiSelect).exists()).toBe(false)
+    expect(field('登录方式')).toBeUndefined()
+    await setDomInput(field('密码').querySelector('input'), 'old-password')
+    methods()[1].click()
+    await nextTick()
+    expect(field('密码').style.display).toBe('none')
+    expect(field('短信验证码').style.display).not.toBe('none')
+    expect(wrapper.vm.form.password).toBeUndefined()
+    expect(wrapper.vm.form.username).toBe('13800138000')
+    await setDomInput(field('短信验证码').querySelector('input'), '123456')
+    methods()[0].click()
+    await nextTick()
+    expect(wrapper.vm.form.sms_code).toBeUndefined()
+    expect(field('密码').style.display).not.toBe('none')
+    expect(methods()[0].getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('迅雷可从登录页发送短信并无密码登录', async () => {
+    const wrapper = await prepare()
+    methods()[1].click()
+    await nextTick()
+    smsButton().click()
+    await flushPromises()
+    expect(api.SendThunderSMS).toHaveBeenCalledWith(expect.objectContaining({ login_mode: 'sms', username: '13800138000' }))
+    expect(api.SendThunderSMS.mock.calls[0][0].password).toBeUndefined()
+    expect(smsButton().disabled).toBe(true)
+    await setDomInput(field('短信验证码').querySelector('input'), '123456')
+    document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(api.login).toHaveBeenCalledWith('thunder', expect.objectContaining({ login_mode: 'sms', login_attempt: 'sms-attempt', sms_code: '123456' }))
+    expect(api.login.mock.calls[0][1].password).toBeUndefined()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('发送前的安全验证完成后只续办短信发送，不错误提交登录', async () => {
+    api.SendThunderSMS.mockRejectedValueOnce(new Error('thunder_verification_required\nurl=https://captcha.xunlei.com/verify\nattempt=challenge-attempt\nsession=challenge-session'))
+    await prepare()
+    methods()[1].click()
+    await nextTick()
+    smsButton().click()
+    await flushPromises()
+    expect(api.ShowThunderVerification).toHaveBeenCalledWith('challenge-session', 'https://captcha.xunlei.com/verify')
+    const notify = api.onEvent.mock.calls.find(([name]) => name === 'thunder:verification:completed')[1]
+    notify({ session_id: 'challenge-session', captcha_token: 'send-verified-token' })
+    await flushPromises()
+    expect(api.SendThunderSMS).toHaveBeenLastCalledWith(expect.objectContaining({ login_attempt: 'challenge-attempt', captcha_verified: 'true', captcha_token: 'send-verified-token' }))
+    expect(api.SendThunderSMS).toHaveBeenCalledTimes(2)
+    expect(api.login).not.toHaveBeenCalled()
+    expect(smsButton().disabled).toBe(true)
+  })
+
+  it('切回密码登录会取消迅雷短信会话', async () => {
+    const wrapper = await prepare()
+    methods()[1].click()
+    await nextTick()
+    smsButton().click()
+    await flushPromises()
+    methods()[0].click()
+    await nextTick()
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('sms-attempt', '')
+    expect(wrapper.vm.form.login_attempt).toBeUndefined()
+    methods()[1].click()
+    await nextTick()
+    expect(smsButton().disabled).toBe(true)
+    expect(smsButton().textContent).toContain('秒后重发')
+  })
+
+  it('短信请求期间禁止重复发送和提交，手机号改变后丢弃迟到结果', async () => {
+    let complete
+    api.SendThunderSMS.mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    const wrapper = await prepare()
+    methods()[1].click()
+    await nextTick()
+    smsButton().click()
+    await nextTick()
+    expect(methods().every(button => button.disabled)).toBe(true)
+    expect(document.querySelector('button[type="submit"]').disabled).toBe(true)
+    await setDomInput(field('手机号').querySelector('input'), '13900139000')
+    complete({ login_attempt: 'late-attempt' })
+    await flushPromises()
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('late-attempt', '')
+    expect(wrapper.vm.form.login_attempt).toBeUndefined()
+    expect(smsButton().disabled).toBe(false)
+    expect(api.login).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { ID: 'guangya', Meta: { label: '光鸭' }, Login: { fields: [{ key: 'phone', type: 'text', label: '手机号' }, { key: 'sms_code', type: 'text', label: '短信验证码' }] } },
+    { ID: 'pikpak', Meta: { label: 'PikPak' }, Login: { fields: [{ key: 'username', type: 'text', label: '账号' }, { key: 'password', type: 'password', label: '密码' }] } },
+    { ID: 'onedrive', Meta: { label: 'OneDrive' }, Login: { fields: [{ key: 'oauth', type: 'oauth', label: '授权' }] } },
+  ])('单一登录方式的 $ID 不显示虚假的双选项入口', async provider => {
+    mountAttached(LoginModal, { props: { initialProvider: provider.ID, providers: [provider] }, global: { stubs: { UiIcon: true } } })
+    await nextTick()
+    expect(document.querySelector('.login-method-switch')).toBeNull()
   })
 })
 
@@ -624,6 +852,96 @@ describe('主窗口顶栏', () => {
       await nextTick()
       expect(wrapper.findComponent(QuickOpen).props('show')).toBe(true)
     } finally { vi.unstubAllGlobals() }
+  })
+})
+
+describe('主窗口退出确认', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    vi.stubGlobal('runtime', { Quit: vi.fn() })
+    api.listAccounts.mockResolvedValue([])
+    api.listProviders.mockResolvedValue([])
+    api.GetSettings.mockResolvedValue({ theme: 'light', autoUpdate: false })
+    api.RespondQuit.mockReset().mockResolvedValue(undefined)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function prepare() {
+    const wrapper = mountAttached(App, { global: { stubs: { WorkspaceView: true, AccountAvatar: true } } })
+    await flushPromises()
+    const notify = api.onEvent.mock.calls.find(([name]) => name === 'app:quit-confirm')[1]
+    notify(1)
+    await nextTick()
+    return { wrapper, notify }
+  }
+
+  it('使用应用内弹窗，确认后调用后端退出而非再次普通关闭', async () => {
+    const { wrapper } = await prepare()
+    const dialog = document.querySelector('[role="dialog"][aria-label="退出 Mnemo"]')
+    expect(dialog.textContent).toContain('还有 1 个下载任务')
+    expect(dialog.textContent).toContain('下次启动可继续')
+    dialog.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    expect(api.RespondQuit).toHaveBeenCalledExactlyOnceWith(true)
+    expect(window.runtime.Quit).not.toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'ConfirmModal' }).exists()).toBe(false)
+  })
+
+  it.each(['继续下载', '关闭对话框', 'Escape', '遮罩'])('%s 会取消退出并通知后端', async (action) => {
+    await prepare()
+    if (action === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    else if (action === '遮罩') document.querySelector('.modal-mask').click()
+    else if (action === '关闭对话框') document.querySelector('[aria-label="关闭对话框"]').click()
+    else document.querySelector('.modal-actions .btn:not(.primary)').click()
+    await flushPromises()
+    expect(api.RespondQuit).toHaveBeenCalledExactlyOnceWith(false)
+    expect(document.querySelector('[aria-label="退出 Mnemo"]')).toBeNull()
+  })
+
+  it('重复退出请求只保留一个弹窗，提交时禁用按钮', async () => {
+    const { notify } = await prepare()
+    notify(2)
+    await nextTick()
+    expect(document.querySelectorAll('[aria-label="退出 Mnemo"]')).toHaveLength(1)
+    let finish
+    api.RespondQuit.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    document.querySelector('.modal-actions .btn.primary').click()
+    await nextTick()
+    expect([...document.querySelectorAll('.modal-actions button')].every(button => button.disabled)).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    document.querySelector('.modal-actions .btn.primary').click()
+    expect(api.RespondQuit).toHaveBeenCalledTimes(1)
+    finish()
+    await flushPromises()
+  })
+
+  it('退出请求失败时保留弹窗并允许重试', async () => {
+    api.RespondQuit.mockRejectedValueOnce(new Error('连接中断'))
+    const { wrapper } = await prepare()
+    document.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    expect(wrapper.text()).toContain('退出操作失败')
+    expect(document.querySelector('.modal-actions .btn.primary').disabled).toBe(false)
+    document.querySelector('.modal-actions .btn.primary').click()
+    await flushPromises()
+    expect(api.RespondQuit).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('[aria-label="退出 Mnemo"]')).toBeNull()
+  })
+
+  it('设置尚未加载时就开始监听退出确认，卸载时注销', async () => {
+    let finishSettings
+    const stop = vi.fn()
+    api.onEvent.mockImplementationOnce(() => stop)
+    api.GetSettings.mockImplementationOnce(() => new Promise(resolve => { finishSettings = resolve }))
+    const wrapper = mountAttached(App, { global: { stubs: { WorkspaceView: true, AccountAvatar: true } } })
+    expect(api.onEvent).toHaveBeenCalledWith('app:quit-confirm', expect.any(Function))
+    api.onEvent.mock.calls.find(([name]) => name === 'app:quit-confirm')[1](1)
+    await nextTick()
+    expect(document.querySelector('[aria-label="退出 Mnemo"]')).not.toBeNull()
+    finishSettings({ theme: 'light', autoUpdate: false })
+    await flushPromises()
+    wrapper.unmount()
+    expect(stop).toHaveBeenCalledOnce()
   })
 })
 
@@ -1009,7 +1327,7 @@ describe('关键交互组件', () => {
     api.listDir.mockImplementation(async user => user === accounts[0].user_id
       ? [{ file_id: 'folder', name: '文件夹', isDir: true }, { file_id: 'file', name: '文档.txt', isDir: false }]
       : [{ file_id: 'destination', name: '目标文件夹', isDir: true }])
-    api.capsOf.mockReturnValue({ download: true, upload: true, move: true, copy: true })
+    api.capsOf.mockReturnValue({ download: true, upload: true, move: true, copy: true, recycleBin: true })
     const wrapper = mountAttached(WorkspaceView, { props: { account: accounts[0], accounts, providers: [], dual: true } })
     await flushPromises()
     const panes = wrapper.findAll('.workspace-pane')
@@ -2041,6 +2359,37 @@ describe('关键交互组件', () => {
     expect(trigger.attributes('aria-expanded')).toBe('false')
   })
 
+  it('迅雷只显示手机号和密码，设备 ID 自动生成并在重新打开后复用', async () => {
+    localStorage.setItem('login_provider', 'thunder')
+    api.login.mockResolvedValueOnce(undefined)
+    mountAttached(LoginModal, {
+      props: { providers: [{
+        ID: 'thunder', Meta: { label: '迅雷网盘' }, Login: { fields: [
+          { key: 'username', type: 'text', label: '手机号', required: true },
+          { key: 'password', type: 'password', label: '密码', required: true },
+        ] },
+      }] },
+      global: { stubs: { UiIcon: true } },
+    })
+    await nextTick()
+    const fields = [...document.body.querySelectorAll('.login-field')]
+    expect(fields.map(field => field.querySelector('label')?.textContent)).toEqual(['手机号', '密码'])
+    const phoneInput = fields[0].querySelector('input')
+    const passwordInput = fields[1].querySelector('input')
+    expect(passwordInput.type).toBe('password')
+    expect(phoneInput.getAttribute('inputmode')).toBe('numeric')
+    await setDomInput(phoneInput, '13800138000')
+    await setDomInput(passwordInput, 'login-password')
+    const deviceID = localStorage.getItem('mnemo.thunder.deviceId')
+    expect(deviceID).toMatch(/^[a-f0-9]{32}$/)
+    document.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(api.login).toHaveBeenCalledWith('thunder', { username: '13800138000', password: 'login-password', device_id: deviceID, login_mode: 'password' })
+    expect(JSON.stringify([...storage.values()])).not.toContain('login-password')
+    const next = mountAttached(LoginModal, { props: { initialProvider: 'thunder', providers: [{ ID: 'thunder', Meta: { label: '迅雷网盘' }, Login: { fields: [] } }] }, global: { stubs: { UiIcon: true } } })
+    expect(next.vm.form.device_id).toBe(deviceID)
+  })
+
   it('WebDAV 预设会同时填写连接名称和地址，且密码只有一个自定义切换按钮', async () => {
     localStorage.setItem('login_provider', 'webdav')
     const wrapper = mountAttached(LoginModal, {
@@ -2119,8 +2468,10 @@ describe('关键交互组件', () => {
         { key: 'validate_code', type: 'text', label: '图形验证码' },
       ] } }] }, global: { stubs: { UiIcon: true } },
     })
-    const mode = wrapper.findComponent(UiSelect)
-    mode.vm.$emit('update:modelValue', 'sms')
+    const mode = document.querySelector('.login-method-switch')
+    expect(mode.querySelectorAll('button')).toHaveLength(2)
+    expect(wrapper.findComponent(UiSelect).exists()).toBe(false)
+    mode.querySelectorAll('button')[1].click()
     await nextTick()
     const field = (label) => [...document.body.querySelectorAll('.login-field')].find((f) => f.querySelector('label')?.textContent === label)
     expect(field('密码').style.display).toBe('none')

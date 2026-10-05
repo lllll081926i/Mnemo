@@ -1,6 +1,7 @@
 // 外观应用：主题（明/暗）。强调色固定为品牌紫，不再提供色包切换。
 import { WindowSetDarkTheme, WindowSetLightTheme, WindowSetSystemDefaultTheme, EventsEmit } from '../wailsjs/runtime/runtime'
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { DEFAULT_DOWNLOAD_SOUND, downloadSoundOf } from './download-sounds'
 
 export function isDarkMode(theme) {
   return theme === 'dark' || (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -37,6 +38,7 @@ const PREFS_DEFAULTS = {
   viewMode: 'list',       // 网盘默认视图 list | grid
   hoverPreview: true,     // 目录树悬停预览
   downloadSound: true,    // 传输完成提示音
+  downloadSoundType: DEFAULT_DOWNLOAD_SOUND,
   defaultVolume: 100,     // 播放器默认音量 0-200
   defaultSpeed: 1,        // 播放器默认倍速
   seekStep: 10,           // 快进/快退步长（秒）
@@ -50,15 +52,21 @@ const PREFS_DEFAULTS = {
 }
 
 export function getPrefs() {
-  if (window.__mnemoPreviewPrefs) return { ...PREFS_DEFAULTS, ...window.__mnemoPreviewPrefs }
+  if (window.__mnemoPreviewPrefs) return resolvePrefs(window.__mnemoPreviewPrefs)
   try {
     const raw = localStorage.getItem(PREFS_KEY) || '{}'
     if (raw !== cachedPrefsRaw) {
       cachedPrefs = JSON.parse(raw) || {}
       cachedPrefsRaw = raw
     }
-    return { ...PREFS_DEFAULTS, ...cachedPrefs }
+    return resolvePrefs(cachedPrefs)
   } catch { return { ...PREFS_DEFAULTS } }
+}
+
+function resolvePrefs(prefs) {
+  const resolved = { ...PREFS_DEFAULTS, ...prefs }
+  resolved.downloadSoundType = downloadSoundOf(resolved.downloadSoundType).value
+  return resolved
 }
 
 export function setPref(key, value) {
