@@ -42,8 +42,8 @@ func accountFor(user string) drive.Context {
 func TestThunderRegistrationAndLogin(t *testing.T) {
 	registered := drive.Require(model.ProviderThunder)
 	caps := registered.Caps
-	if !caps.Download || !caps.OfflineDownload || !caps.CloudVideoPreview || !caps.Copy || !caps.Move || !caps.Rename || !caps.RecycleBin || caps.Upload || caps.Search || caps.CreateShare || caps.TrashRestore || caps.PermanentDelete || caps.UploadMode != drive.UploadModeNone {
-		t.Fatalf("迅雷能力声明与首版范围不符: %+v", caps)
+	if !caps.Download || !caps.OfflineDownload || !caps.CloudVideoPreview || !caps.Copy || !caps.Move || !caps.Rename || !caps.RecycleBin || caps.Upload || caps.Search || !caps.CreateShare || !caps.TrashView || !caps.TrashRestore || !caps.PermanentDelete || !caps.CancelCreatedShares || caps.SharePassword || caps.ImportShare || caps.UploadMode != drive.UploadModeNone {
+		t.Fatalf("迅雷能力声明与实现范围不符: %+v", caps)
 	}
 	if drive.ResolveProvider("thunder_123", "", "") != model.ProviderThunder || registered.Meta.RootKey != RootID || registered.Meta.Icon != "drive-icons/thunder.svg" {
 		t.Fatal("迅雷账号命名空间或显示信息未注册")
@@ -266,6 +266,9 @@ func TestThunderRefreshExpiryAndRejectedCredentials(t *testing.T) {
 			calls := 0
 			mockHTTP(t, func(request *http.Request) (*http.Response, error) {
 				calls++
+				if request.URL.Path == "/drive/v1/about" && !invalid {
+					return response(request, 200, `{"quota":{"limit":"100","usage":"20"}}`), nil
+				}
 				if request.URL.Path != "/v1/auth/token" {
 					t.Fatal("账号刷新不应请求其他接口")
 				}
@@ -275,7 +278,11 @@ func TestThunderRefreshExpiryAndRejectedCredentials(t *testing.T) {
 				return response(request, 200, `{"access_token":"access-new","refresh_token":"refresh-new","user_id":"expired","expires_in":3600}`), nil
 			})
 			_, err := (&Driver{}).RefreshAccount(context.Background(), account, account.Token)
-			if calls != 1 || invalid != errors.Is(err, drive.ErrUnauthorized) || !invalid && err != nil {
+			wantCalls := 2
+			if invalid {
+				wantCalls = 1
+			}
+			if calls != wantCalls || invalid != errors.Is(err, drive.ErrUnauthorized) || !invalid && (err != nil || account.Token.TotalSize != 100) {
 				t.Fatalf("过期刷新重复或失效分类错误: %d, %v", calls, err)
 			}
 		})
@@ -290,7 +297,7 @@ func TestThunderRejectsMissingLinksAndAsyncFailures(t *testing.T) {
 		if request.URL.Path == "/drive/v1/files:batchCopy" {
 			return response(request, 200, `{"task":{"id":"copy-task","phase":"PHASE_TYPE_RUNNING"}}`), nil
 		}
-		return response(request, 200, `{"tasks":[{"id":"copy-task","phase":"PHASE_TYPE_ERROR"}]}`), nil
+		return response(request, 200, `{"id":"copy-task","phase":"PHASE_TYPE_ERROR"}`), nil
 	})
 	account := accountFor("failures")
 	if _, err := (&Driver{}).GetDownloadURL(context.Background(), account, "video", 0); err == nil {

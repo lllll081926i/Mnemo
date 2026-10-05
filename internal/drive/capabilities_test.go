@@ -24,7 +24,7 @@ func TestProviderDeleteCapabilitiesAreExplicit(t *testing.T) {
 		model.ProviderYike:     {recycle: true, permanent: false},
 		model.ProviderAliopen:  {recycle: true, permanent: true},
 		model.ProviderGuangya:  {recycle: true, permanent: false},
-		model.ProviderThunder:  {recycle: true, permanent: false},
+		model.ProviderThunder:  {recycle: true, permanent: true},
 		model.ProviderWebdav:   {recycle: false, permanent: true},
 		model.ProviderS3:       {recycle: false, permanent: true},
 	}

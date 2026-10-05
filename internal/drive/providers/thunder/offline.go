@@ -131,18 +131,14 @@ func (cl *client) mutate(ctx context.Context, method, path string, body any) err
 		if task.Phase == "PHASE_TYPE_ERROR" {
 			return errors.New("迅雷文件操作任务失败，请刷新目录检查结果")
 		}
-		var listing struct {
-			Tasks []remoteTask `json:"tasks"`
-		}
-		if err := cl.request(ctx, http.MethodGet, "/tasks?limit=100", nil, &listing); err != nil {
+		var current remoteTask
+		if err := cl.request(ctx, http.MethodGet, "/tasks/"+url.PathEscape(task.TaskID), nil, &current); err != nil {
 			return err
 		}
-		for _, remote := range listing.Tasks {
-			if current := remote.model(); current.TaskID == task.TaskID {
-				task = current
-				break
-			}
+		if current.model().TaskID != task.TaskID {
+			return errors.New("迅雷操作任务响应缺少匹配的任务 ID")
 		}
+		task = current.model()
 		if task.Phase == "PHASE_TYPE_COMPLETE" {
 			return nil
 		}

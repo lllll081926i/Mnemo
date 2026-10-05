@@ -42,6 +42,8 @@ type file struct {
 	Size         integer   `json:"size"`
 	ModifiedTime time.Time `json:"modified_time"`
 	CreatedTime  time.Time `json:"created_time"`
+	Trashed      bool      `json:"trashed"`
+	DeleteTime   string    `json:"delete_time"`
 	Thumbnail    string    `json:"thumbnail_link"`
 	DownloadLink string    `json:"web_content_link"`
 	Medias       []struct {
@@ -79,13 +81,17 @@ func (entry file) model(driveID string) model.File {
 	return result
 }
 
-func (cl *client) filePage(ctx context.Context, dirID, marker string) (*struct {
+func (cl *client) filePage(ctx context.Context, dirID, marker string, trashed bool) (*struct {
 	Files []file `json:"files"`
 	Next  string `json:"next_page_token"`
 }, error) {
 	query := url.Values{"parent_id": {parentID(dirID)}, "page_token": {marker}, "limit": {"100"}, "space": {""},
 		"__type": {"drive"}, "refresh": {"true"}, "__sync": {"true"}, "with_audit": {"true"},
 		"filters": {`{"phase":{"eq":"PHASE_TYPE_COMPLETE"},"trashed":{"eq":false}}`},
+	}
+	if trashed {
+		query.Del("parent_id")
+		query.Set("filters", `{"trashed":{"eq":true}}`)
 	}
 	var result struct {
 		Files []file `json:"files"`
@@ -98,12 +104,13 @@ func (cl *client) filePage(ctx context.Context, dirID, marker string) (*struct {
 }
 
 func (*Driver) ListPaged(ctx context.Context, account drive.Context, dirID, marker string, opts *drive.ListOptions) (*drive.DirPage, error) {
-	if opts != nil && (opts.Trashed || opts.Search != "") {
+	if opts != nil && opts.Search != "" {
 		return nil, drive.ErrNotImplemented
 	}
 	result := &drive.DirPage{}
 	err := withClient(ctx, account, func(cl *client) error {
-		page, err := cl.filePage(ctx, dirID, marker)
+		trashed := opts != nil && opts.Trashed
+		page, err := cl.filePage(ctx, dirID, marker, trashed)
 		if err != nil {
 			return err
 		}
@@ -112,7 +119,16 @@ func (*Driver) ListPaged(ctx context.Context, account drive.Context, dirID, mark
 			if entry.ID == "" || entry.Name == "" {
 				return errors.New("迅雷列表包含缺少 ID 或名称的文件")
 			}
-			result.Items = append(result.Items, entry.model(account.DriveID))
+			mapped := entry.model(account.DriveID)
+			if trashed {
+				if !entry.Trashed {
+					return errors.New("迅雷回收站响应包含未删除文件，请刷新后重试")
+				}
+				if deleted, err := time.Parse(time.RFC3339, entry.DeleteTime); err == nil {
+					mapped.Time, mapped.TimeStr = deleted.Unix(), deleted.Local().Format("2006-01-02 15:04:05")
+				}
+			}
+			result.Items = append(result.Items, mapped)
 		}
 		return nil
 	})
@@ -123,12 +139,19 @@ func (driver *Driver) List(ctx context.Context, account drive.Context, dirID str
 	var result []model.File
 	marker := ""
 	seen := make(map[string]bool)
+	seenIDs := make(map[string]bool)
 	for page := 0; page < 200; page++ {
 		current, err := driver.ListPaged(ctx, account, dirID, marker, opts)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, current.Items...)
+		for _, entry := range current.Items {
+			if seenIDs[entry.FileID] {
+				return nil, errors.New("迅雷文件分页包含重复文件，请刷新后重试")
+			}
+			seenIDs[entry.FileID] = true
+			result = append(result, entry)
+		}
 		if current.NextMarker == "" {
 			return result, nil
 		}
@@ -195,7 +218,7 @@ func (driver *Driver) GetDownloadURL(ctx context.Context, account drive.Context,
 	if !validLink(link) {
 		return nil, errors.New("迅雷未返回可用下载链接，文件可能尚未完成或账号无下载权限")
 	}
-	return &model.DownloadURL{DriveID: account.DriveID, FileID: fileID, URL: link, Size: int64(entry.Size), DownloadMode: "redirect", Headers: downloadHeaders()}, nil
+	return &model.DownloadURL{DriveID: account.DriveID, FileID: fileID, URL: link, Size: int64(entry.Size), DownloadMode: "redirect", Headers: downloadHeaders(), RetrySingleConnection: true}, nil
 }
 
 func (driver *Driver) GetVideoPreview(ctx context.Context, account drive.Context, fileID string) (*model.VideoPreview, error) {
@@ -231,10 +254,7 @@ func (driver *Driver) GetVideoPreview(ctx context.Context, account drive.Context
 func (*Driver) RefreshAccount(ctx context.Context, account drive.Context, token *model.TokenInfo) (*model.TokenInfo, error) {
 	account.Token = token
 	err := withClient(ctx, account, func(cl *client) error {
-		if cl.changed {
-			return nil
-		}
-		return cl.refresh(ctx)
+		return cl.refreshQuota(ctx)
 	})
 	return token, err
 }
@@ -290,10 +310,15 @@ func validateIDs(ids []string) error {
 	if len(ids) == 0 {
 		return errors.New("迅雷操作缺少文件或任务 ID")
 	}
+	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		if strings.TrimSpace(id) == "" {
 			return errors.New("迅雷文件或任务 ID 不能为空")
 		}
+		if seen[id] {
+			return errors.New("迅雷文件或任务 ID 不能重复")
+		}
+		seen[id] = true
 	}
 	return nil
 }
@@ -321,8 +346,4 @@ func (*Driver) Move(ctx context.Context, account drive.Context, refs []drive.Fil
 
 func (*Driver) Copy(ctx context.Context, account drive.Context, refs []drive.FileRef, parent, _ string) ([]string, error) {
 	return batch(ctx, account, refs, parent, "batchCopy")
-}
-
-func (*Driver) Delete(context.Context, drive.Context, []drive.FileRef) ([]string, error) {
-	return nil, drive.NotSupported("永久删除")
 }

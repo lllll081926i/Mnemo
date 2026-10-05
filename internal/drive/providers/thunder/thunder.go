@@ -18,7 +18,13 @@ func init() {
 		Caps: drive.NewCapabilities(model.ProviderThunder, map[string]bool{
 			"upload": false, "createTextFile": false, "offlineDownload": true,
 			"cloudVideoPreview": true, "recycleBin": true,
-		}, func(caps *drive.Capabilities) { caps.SetUploadMode(drive.UploadModeNone) }),
+			"trashView": true, "trashRestore": true, "permanentDelete": true,
+			"createShare": true, "shareExpiration": true, "combinedShare": true,
+			"shareHistory": true, "manageCreatedShares": true, "cancelCreatedShares": true,
+		}, func(caps *drive.Capabilities) {
+			caps.SetUploadMode(drive.UploadModeNone)
+			caps.SetShareExpirationOptions(0, 1, 2, 3, 4, 5, 6, 7)
+		}),
 		Login: drive.LoginConfig{Fields: []drive.LoginField{
 			{Key: "login_mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "密码登录"}, {Value: "sms", Label: "短信验证码登录"}}},
 			{Key: "username", Type: "text", Label: "手机号", Required: true, Placeholder: "请输入迅雷账号绑定的手机号"},
