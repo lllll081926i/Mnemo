@@ -17,8 +17,8 @@ import (
 	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
-	"mnemo-go/internal/netx"
 	"mnemo-go/internal/store"
+	"mnemo-go/internal/transfer/dlengine"
 )
 
 // Job is a type alias for model.MigrateJob so existing callers (app layer,
@@ -30,22 +30,41 @@ type OnProgress func(j *Job)
 
 // Engine runs migration jobs.
 type Engine struct {
-	store      *store.Store
-	onProgress OnProgress
-	persistMu  sync.Mutex
+	downloadOptions func() (dlengine.Options, error)
+	store           *store.Store
+	onProgress      OnProgress
+	persistMu       sync.Mutex
 	// cancels stores per-job cancel funcs so Cancel(jobID) can abort a Run.
 	cancelsMu sync.Mutex
 	cancels   map[string]context.CancelFunc
+	done      map[string]chan struct{}
+	closed    bool
 }
 
 // NewEngine creates the migration engine. store may be nil (disables
 // persistence and startup recovery).
-func NewEngine(st *store.Store, onProgress OnProgress) *Engine {
-	return &Engine{
+func NewEngine(st *store.Store, onProgress OnProgress, options ...func(*Engine)) *Engine {
+	engine := &Engine{
 		store:      st,
 		onProgress: onProgress,
 		cancels:    make(map[string]context.CancelFunc),
+		done:       make(map[string]chan struct{}),
 	}
+	for _, option := range options {
+		option(engine)
+	}
+	return engine
+}
+
+func WithDownloadOptions(fn func() (dlengine.Options, error)) func(*Engine) {
+	return func(engine *Engine) { engine.downloadOptions = fn }
+}
+
+func (e *Engine) sourceOptions() (dlengine.Options, error) {
+	if e.downloadOptions != nil {
+		return e.downloadOptions()
+	}
+	return dlengine.Options{}, nil
 }
 
 // Cancel cancels the migration job with the given id.
@@ -64,13 +83,21 @@ func (e *Engine) Cancel(jobID string) {
 // shutdown so no migration can continue after the Wails context is gone.
 func (e *Engine) CancelAll() {
 	e.cancelsMu.Lock()
+	e.closed = true
 	cancels := make([]context.CancelFunc, 0, len(e.cancels))
+	finished := make([]chan struct{}, 0, len(e.done))
 	for _, cancel := range e.cancels {
 		cancels = append(cancels, cancel)
+	}
+	for _, done := range e.done {
+		finished = append(finished, done)
 	}
 	e.cancelsMu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+	for _, done := range finished {
+		<-done
 	}
 }
 
@@ -81,12 +108,13 @@ func (e *Engine) registerCancel(parent context.Context, jobID string) (context.C
 		parent = context.Background()
 	}
 	e.cancelsMu.Lock()
-	if _, exists := e.cancels[jobID]; exists {
+	if _, exists := e.cancels[jobID]; exists || e.closed {
 		e.cancelsMu.Unlock()
 		return nil, nil, false
 	}
 	ctx, cancel := context.WithCancel(parent)
 	e.cancels[jobID] = cancel
+	e.done[jobID] = make(chan struct{})
 	e.cancelsMu.Unlock()
 	return ctx, cancel, true
 }
@@ -95,6 +123,10 @@ func (e *Engine) registerCancel(parent context.Context, jobID string) (context.C
 func (e *Engine) releaseCancel(jobID string) {
 	e.cancelsMu.Lock()
 	delete(e.cancels, jobID)
+	if done, exists := e.done[jobID]; exists {
+		close(done)
+		delete(e.done, jobID)
+	}
 	e.cancelsMu.Unlock()
 }
 
@@ -109,7 +141,10 @@ func (e *Engine) saveJob(job *Job) error {
 	if err != nil {
 		logging.Warn("migration checkpoint persistence failed", "job_id", job.ID, "error", err)
 	}
-	return err
+	if err != nil {
+		return errors.Join(errCheckpoint, err)
+	}
+	return nil
 }
 
 // RecoverUnfinished marks any persisted jobs that were still running/pending
@@ -145,12 +180,19 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	if job.ID == "" {
 		return errors.New("migrate: job id is empty")
 	}
+	seenIDs := make(map[string]bool, len(job.FileIDs))
+	for _, fileID := range job.FileIDs {
+		if strings.TrimSpace(fileID) == "" || seenIDs[fileID] {
+			return errors.New("迁移文件 ID 不能为空或重复")
+		}
+		seenIDs[fileID] = true
+	}
 	if err := ValidateEndpoints(job.SrcUser, job.SrcDrive, job.DstUser, job.DstDrive); err != nil {
 		return err
 	}
 	ctx, cancel, registered := e.registerCancel(ctx, job.ID)
 	if !registered {
-		return fmt.Errorf("migrate: job %q is already running", job.ID)
+		return fmt.Errorf("migrate: job %q is already running or engine is closed", job.ID)
 	}
 	defer func() {
 		cancel()
@@ -175,7 +217,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	}
 	job.UpdatedAt = time.Now().Unix()
 	if err := e.saveJob(job); err != nil {
-		return err
+		return e.finishCheckpointFailure(job, err)
 	}
 	e.emit(job)
 	succeeded := completedTopLevel
@@ -189,6 +231,9 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 		}
 		err := e.migrateOne(ctx, job, fileID)
 		if err != nil {
+			if errors.Is(err, errCheckpoint) {
+				return e.finishCheckpointFailure(job, err)
+			}
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				return e.finishCanceled(job, ctx.Err())
 			}
@@ -200,7 +245,9 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 		}
 		job.Processed++
 		job.UpdatedAt = time.Now().Unix()
-		e.saveJob(job)
+		if err := e.saveJob(job); err != nil {
+			return e.finishCheckpointFailure(job, err)
+		}
 		e.emit(job)
 	}
 	job.Status = migrationResultStatus(job.Failed, succeeded, partial)
@@ -208,9 +255,21 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	job.StageName = ""
 	job.StageProgress = 0
 	job.UpdatedAt = time.Now().Unix()
-	e.saveJob(job)
+	if err := e.saveJob(job); err != nil {
+		return e.finishCheckpointFailure(job, err)
+	}
 	e.emit(job)
 	return nil
+}
+
+var errCheckpoint = errors.New("迁移恢复记录保存失败")
+
+func (e *Engine) finishCheckpointFailure(job *Job, cause error) error {
+	job.Status = "failed"
+	job.Stage, job.StageName, job.StageProgress = "", "", 0
+	job.Message = cause.Error()
+	e.emit(job)
+	return cause
 }
 
 // ValidateEndpoints rejects migrations whose source and target identify the
@@ -246,7 +305,10 @@ func (e *Engine) finishCanceled(job *Job, cause error) error {
 	job.StageProgress = 0
 	job.Message = cause.Error()
 	job.UpdatedAt = time.Now().Unix()
-	e.saveJob(job)
+	if err := e.saveJob(job); err != nil {
+		cause = errors.Join(cause, err)
+		job.Message = cause.Error()
+	}
 	e.emit(job)
 	return cause
 }
@@ -278,6 +340,9 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		job.StageName = ""
 		job.StageProgress = 0
 		item.TargetID = job.Items[fileID].TargetID
+		if verification := job.Items[fileID].Verification; verification == "remote-size" || verification == "remote-hash" {
+			item.Verification = verification
+		}
 		if resultErr != nil {
 			item.Status = "failed"
 			item.Error = resultErr.Error()
@@ -288,11 +353,13 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 			item.Status = "completed"
 		}
 		job.Items[fileID] = item
-		e.saveJob(job)
+		if err := e.saveJob(job); err != nil {
+			resultErr = errors.Join(resultErr, err)
+		}
 		e.emit(job)
 	}()
 	// resolve source file
-	srcFile, err := drive.GetFileContext(ctx, job.SrcUser, job.SrcDrive, fileID)
+	srcFile, err := drive.GetFileFreshContext(ctx, job.SrcUser, job.SrcDrive, fileID)
 	if err != nil {
 		return err
 	}
@@ -310,8 +377,7 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		if err := e.finalizeMove(ctx, job, srcFile); err != nil {
 			return err
 		}
-		e.markCompleted(job, srcFile.FileID)
-		return nil
+		return e.markCompleted(job, srcFile.FileID)
 	}
 	item.Name = srcFile.Name
 	item.Size = srcFile.Size
@@ -329,6 +395,9 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		}
 		return e.completeResource(ctx, job, srcFile)
 	}
+	if err := drive.ValidateUploadItemsContext(ctx, job.DstUser, job.DstDrive, []drive.UploadValidationItem{{Name: srcFile.Name, Size: srcFile.Size}}); err != nil {
+		return err
+	}
 	// accumulate total bytes for progress
 	job.TotalBytes += srcFile.Size
 	progressStart := job.ProcessedBytes
@@ -337,9 +406,7 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 	// 1) Try rapid upload (秒传).
 	if migrated, err := e.tryRapidMigrate(ctx, job, srcFile, targetParent); migrated {
 		if err == nil {
-			item.Verification = "provider-hash"
 			completeBytes(job, progressStart, srcFile.Size)
-			item.Verification = "size"
 			return e.completeResource(ctx, job, srcFile)
 		}
 		// rapid upload failed — fall through to stream/spool.
@@ -363,7 +430,7 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 			return e.completeResource(ctx, job, srcFile)
 		}
 		// streaming succeeded; handle move cleanup.
-		item.Verification = "size"
+		item.Verification = "transferred-size"
 		completeBytes(job, progressStart, srcFile.Size)
 		return e.completeResource(ctx, job, srcFile)
 	}
@@ -373,7 +440,7 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		return err
 	}
 	completeBytes(job, progressStart, srcFile.Size)
-	item.Verification = "size"
+	item.Verification = "transferred-size"
 	return e.completeResource(ctx, job, srcFile)
 }
 
@@ -393,8 +460,7 @@ func (e *Engine) completeResource(ctx context.Context, job *Job, srcFile *model.
 			return err
 		}
 	}
-	e.markCompleted(job, srcFile.FileID)
-	return nil
+	return e.markCompleted(job, srcFile.FileID)
 }
 
 // tryRapidMigrate attempts a hash-based秒传: if both the source provider can
@@ -460,15 +526,6 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 		}
 		return true, nil
 	}
-	if result != nil && result.FileID != "" {
-		if job.Items != nil {
-			item := job.Items[srcFile.FileID]
-			item.TargetID = result.FileID
-			job.Items[srcFile.FileID] = item
-		}
-		// some providers return a file id without setting Reuse=true.
-		return true, nil
-	}
 	return true, fmt.Errorf("rapid: target did not accept hash %s", method)
 }
 
@@ -518,16 +575,20 @@ func (e *Engine) tryStreamMigrate(ctx context.Context, job *Job, srcFile *model.
 	}
 
 	start := job.ProcessedBytes
+	opts, err := e.sourceOptions()
+	if err != nil {
+		return true, err
+	}
 	err = streamMigration(ctx, dl, job, func(reader io.Reader) error {
 		return streamUploader(ctx, targetParent, srcFile.Name, srcFile.Size, reader)
-	})
+	}, opts)
 	if err == nil && srcFile.Size >= 0 && job.ProcessedBytes-start != srcFile.Size {
 		err = fmt.Errorf("stream: size mismatch: expected %d, received %d", srcFile.Size, job.ProcessedBytes-start)
 	}
 	return true, err
 }
 
-func streamMigration(ctx context.Context, dl *model.DownloadURL, job *Job, upload func(io.Reader) error) error {
+func streamMigration(ctx context.Context, dl *model.DownloadURL, job *Job, upload func(io.Reader) error, options ...dlengine.Options) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// set up the io.Pipe: the download goroutine writes to pw, the upload
@@ -538,7 +599,7 @@ func streamMigration(ctx context.Context, dl *model.DownloadURL, job *Job, uploa
 	// goroutine: stream the download into the pipe writer.
 	downloadErrCh := make(chan error, 1)
 	go func() {
-		err := downloadToCounted(ctx, dl, pw, job)
+		err := downloadToCounted(ctx, dl, pw, job, options...)
 		_ = pw.CloseWithError(err)
 		downloadErrCh <- err
 	}()
@@ -582,7 +643,11 @@ func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
-	if err := downloadToCounted(ctx, dl, tmp, job); err != nil {
+	opts, err := e.sourceOptions()
+	if err != nil {
+		return err
+	}
+	if err := downloadToCounted(ctx, dl, tmp, job, opts); err != nil {
 		return err
 	}
 	if stat, err := tmp.Stat(); err != nil {
@@ -645,6 +710,9 @@ func (e *Engine) finalizeMove(ctx context.Context, job *Job, srcFile *model.File
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if err := verifyMoveTarget(ctx, job, srcFile); err != nil {
+		return newPartialMigrationError(err, 1)
 	}
 	if srcFile.IsDir {
 		children, err := drive.ListDirAllContext(ctx, job.SrcUser, job.SrcDrive, srcFile.FileID, nil)
@@ -709,7 +777,9 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 			return newMigrationError(fmt.Errorf("migrate: create target folder %q returned empty id", dir.Name), 1)
 		}
 		targetParent = mk.FileID
-		e.markTargetDirectory(job, dir.FileID, targetParent)
+		if err := e.markTargetDirectory(job, dir.FileID, targetParent); err != nil {
+			return newPartialMigrationError(err, 1)
+		}
 	}
 	// list source dir
 	children, err := drive.ListDirAllContext(ctx, job.SrcUser, job.SrcDrive, dir.FileID, nil)
@@ -730,7 +800,7 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 			continue
 		}
 		if err := e.migrateOneTo(ctx, job, child.FileID, targetParent); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, errCheckpoint) {
 				return err
 			}
 			childFailures += failureCount(err)
@@ -749,7 +819,7 @@ func (e *Engine) migrateDir(ctx context.Context, job *Job, dir *model.File, targ
 
 func (e *Engine) emit(job *Job) {
 	if e.onProgress != nil {
-		e.onProgress(job)
+		e.onProgress(Snapshot(job))
 	}
 }
 
@@ -761,8 +831,14 @@ func (p partialError) Error() string { return string(p) }
 
 func isPartialError(err error) bool {
 	var p partialError
-	return errors.As(err, &p)
+	var partial *partialMigrationError
+	return errors.As(err, &p) || errors.As(err, &partial)
 }
+
+type partialMigrationError struct{ cause error }
+
+func (err *partialMigrationError) Error() string { return err.cause.Error() }
+func (err *partialMigrationError) Unwrap() error { return err.cause }
 
 type migrationError struct {
 	err      error
@@ -786,7 +862,7 @@ func newPartialMigrationError(err error, failures int64) error {
 	if err == nil {
 		return nil
 	}
-	return newMigrationError(partialError(err.Error()), failures)
+	return newMigrationError(&partialMigrationError{cause: err}, failures)
 }
 
 func migrationResultStatus(failed, succeeded int64, partial bool) string {
@@ -852,11 +928,15 @@ func (e *Engine) markCopied(job *Job, fileID string) error {
 	if job == nil {
 		return nil
 	}
-	if !jobHasID(job.CopiedFileIDs, fileID) {
+	alreadyCopied := jobHasID(job.CopiedFileIDs, fileID)
+	if !alreadyCopied {
 		job.CopiedFileIDs = append(job.CopiedFileIDs, fileID)
 	}
 	job.UpdatedAt = time.Now().Unix()
 	if err := e.saveJob(job); err != nil {
+		if !alreadyCopied {
+			job.CopiedFileIDs = removeJobID(job.CopiedFileIDs, fileID)
+		}
 		return err
 	}
 	e.emit(job)
@@ -867,31 +947,37 @@ func sourceHash(file *model.File) string { return file.ContentHashName + ":" + f
 
 // markCompleted persists a resource that no longer needs any transfer or
 // source-cleanup work. It is deliberately called for nested files too.
-func (e *Engine) markCompleted(job *Job, fileID string) {
+func (e *Engine) markCompleted(job *Job, fileID string) error {
 	if job == nil || jobHasID(job.CompletedFileIDs, fileID) {
-		return
+		return nil
 	}
 	job.CompletedFileIDs = append(job.CompletedFileIDs, fileID)
 	job.CopiedFileIDs = removeJobID(job.CopiedFileIDs, fileID)
 	job.UpdatedAt = time.Now().Unix()
-	e.saveJob(job)
+	if err := e.saveJob(job); err != nil {
+		return err
+	}
 	e.emit(job)
+	return nil
 }
 
-func (e *Engine) markTargetDirectory(job *Job, sourceID, targetID string) {
+func (e *Engine) markTargetDirectory(job *Job, sourceID, targetID string) error {
 	if job == nil || strings.TrimSpace(sourceID) == "" || strings.TrimSpace(targetID) == "" {
-		return
+		return errors.New("迁移目标目录记录缺少 ID")
 	}
 	if job.TargetDirectoryIDs == nil {
 		job.TargetDirectoryIDs = make(map[string]string)
 	}
 	if job.TargetDirectoryIDs[sourceID] == targetID {
-		return
+		return nil
 	}
 	job.TargetDirectoryIDs[sourceID] = targetID
 	job.UpdatedAt = time.Now().Unix()
-	e.saveJob(job)
+	if err := e.saveJob(job); err != nil {
+		return err
+	}
 	e.emit(job)
+	return nil
 }
 
 // downloadTo streams a download url into a writer.
@@ -901,24 +987,21 @@ func downloadTo(ctx context.Context, dl *model.DownloadURL, w io.Writer) error {
 
 // downloadToCounted is like downloadTo but accumulates the byte count into
 // job.ProcessedBytes when job is non-nil.
-func downloadToCounted(ctx context.Context, dl *model.DownloadURL, w io.Writer, job *Job) error {
+func downloadToCounted(ctx context.Context, dl *model.DownloadURL, w io.Writer, job *Job, options ...dlengine.Options) error {
 	if dl == nil || strings.TrimSpace(dl.URL) == "" {
 		return errors.New("migrate: empty download url")
 	}
-	hc := netx.NewClient(0) // honors global proxy; no total timeout for large files
-	req, err := hc.Req(ctx, http.MethodGet, dl.URL, nil)
+	var opts dlengine.Options
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	hc := dlengine.NewHTTPClient(opts)
+	defer hc.CloseIdleConnections()
+	req, err := dlengine.NewRequest(ctx, http.MethodGet, dl.URL, dlengine.Options{Headers: dl.Headers, RequestAuth: dl.RequestAuth})
 	if err != nil {
 		return err
 	}
-	for key, value := range dl.Headers {
-		req.Header.Set(key, value)
-	}
-	if dl.RequestAuth != nil {
-		if err := dl.RequestAuth(req); err != nil {
-			return err
-		}
-	}
-	resp, err := hc.HTTP.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -932,8 +1015,27 @@ func downloadToCounted(ctx context.Context, dl *model.DownloadURL, w io.Writer, 
 	if job != nil {
 		counter = &countingWriter{w: w, job: job, emit: func() {}}
 	}
-	_, err = io.Copy(counter, resp.Body)
+	if opts.Limiter != nil {
+		counter = &downloadLimitedWriter{ctx: ctx, writer: counter, limiter: opts.Limiter}
+	}
+	written, err := io.Copy(counter, resp.Body)
+	if err == nil && dl.Size > 0 && written != dl.Size {
+		return fmt.Errorf("migrate: 下载长度 %d 与文件大小 %d 不符", written, dl.Size)
+	}
 	return err
+}
+
+type downloadLimitedWriter struct {
+	ctx     context.Context
+	writer  io.Writer
+	limiter dlengine.RateLimiter
+}
+
+func (writer *downloadLimitedWriter) Write(data []byte) (int, error) {
+	if err := writer.limiter.Wait(writer.ctx, int64(len(data))); err != nil {
+		return 0, err
+	}
+	return writer.writer.Write(data)
 }
 
 // countingWriter wraps a writer and increments job.ProcessedBytes.

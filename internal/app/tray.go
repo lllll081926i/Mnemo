@@ -103,7 +103,16 @@ func (a *App) BeforeClose(ctx context.Context) bool {
 	if applyingUpdate {
 		return false
 	}
-	realQuit := a.forceQuit.Load()
+	a.quitMu.Lock()
+	confirmed, pending := a.quitConfirmed, a.quitPending
+	a.quitMu.Unlock()
+	if confirmed {
+		return false
+	}
+	if pending {
+		return true
+	}
+	realQuit := a.forceQuit.Load() || !TrayAvailable()
 	if TrayAvailable() && !realQuit {
 		if st, err := a.storeOrError(); err == nil {
 			if s, serr := st.GetSettings(); serr == nil && !s.CloseToTrayEnabled() {
@@ -117,47 +126,74 @@ func (a *App) BeforeClose(ctx context.Context) bool {
 		return true
 	}
 	if a.confirmQuitWithActiveDownloads(ctx) {
-		return true // 用户在确认弹窗中取消
+		return true
 	}
 	return false
 }
 
-// confirmQuitWithActiveDownloads 有进行中的下载任务时弹窗确认；
-// 返回 true 表示用户取消退出。
+// confirmQuitWithActiveDownloads 有进行中的下载任务时请求前端确认；
+// 返回 true 表示等待用户回复，暂时阻止退出。
 func (a *App) confirmQuitWithActiveDownloads(ctx context.Context) bool {
 	dl := a.downloadManager()
 	if dl == nil {
 		return false
 	}
-	active := 0
-	for _, t := range dl.List() {
-		if t.Status == "queued" || t.Status == "downloading" {
-			active++
-		}
-	}
+	active := activeDownloadCount(dl.List())
 	if active == 0 {
 		return false
 	}
-	logging.Info("quit blocked for confirmation", "active_downloads", active)
-	// 窗口可能处于托盘隐藏状态，先唤回再弹窗
-	runtime.WindowUnminimise(ctx)
-	runtime.WindowShow(ctx)
-	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
-		Type:          runtime.QuestionDialog,
-		Title:         "退出 Mnemo",
-		Message:       fmt.Sprintf("还有 %d 个下载任务正在进行，退出后任务将暂停，下次启动可继续。\n确定要退出吗？", active),
-		Buttons:       []string{"退出", "取消"},
-		DefaultButton: "取消",
-		CancelButton:  "取消",
-	})
-	if err != nil {
-		logging.Warn("quit confirmation dialog failed", "error", err)
-		return false // 弹窗失败不阻塞退出
-	}
-	if choice != "退出" {
-		logging.Info("quit cancelled by user")
-		a.forceQuit.Store(false) // 托盘触发的退出被取消时复位标记
+	if !a.beginQuitConfirmation() {
 		return true
 	}
-	return false
+	logging.Info("quit blocked for confirmation", "active_downloads", active)
+	runtime.WindowUnminimise(ctx)
+	runtime.WindowShow(ctx)
+	runtime.EventsEmit(ctx, "app:quit-confirm", active)
+	return true
+}
+
+func activeDownloadCount(tasks []model.DownloadTask) int {
+	active := 0
+	for _, task := range tasks {
+		if task.Status == "queued" || task.Status == "downloading" {
+			active++
+		}
+	}
+	return active
+}
+
+func (a *App) beginQuitConfirmation() bool {
+	a.quitMu.Lock()
+	defer a.quitMu.Unlock()
+	if a.quitPending || a.quitConfirmed {
+		return false
+	}
+	a.quitPending = true
+	return true
+}
+
+func (a *App) resolveQuitConfirmation(confirmed bool) bool {
+	a.quitMu.Lock()
+	defer a.quitMu.Unlock()
+	if !a.quitPending {
+		return false
+	}
+	a.quitPending = false
+	a.quitConfirmed = confirmed
+	a.forceQuit.Store(confirmed)
+	return confirmed
+}
+
+func (a *App) RespondQuit(confirmed bool) {
+	a.respondQuit(confirmed, runtime.Quit)
+}
+
+func (a *App) respondQuit(confirmed bool, requestQuit func(context.Context)) {
+	if !a.resolveQuitConfirmation(confirmed) {
+		return
+	}
+	logging.Info("quit confirmed by user")
+	if ctx, ok := a.wailsContext(); ok {
+		requestQuit(ctx)
+	}
 }

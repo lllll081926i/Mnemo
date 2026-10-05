@@ -26,6 +26,7 @@ import (
 	"mnemo-go/internal/drive/providers/pan139"
 	"mnemo-go/internal/drive/providers/pan189"
 	"mnemo-go/internal/drive/providers/pikpak"
+	"mnemo-go/internal/drive/providers/thunder"
 	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
@@ -69,6 +70,9 @@ type App struct {
 	keepAliveCancel context.CancelFunc
 	shutdownOnce    sync.Once
 	forceQuit       atomic.Bool
+	quitMu          sync.Mutex
+	quitPending     bool
+	quitConfirmed   bool
 
 	accountRefreshMu         sync.Mutex
 	accountRefreshLast       map[string]time.Time
@@ -396,7 +400,7 @@ func (a *App) startup(ctx context.Context) {
 		if j != nil {
 			a.emit("migrate:progress", *j)
 		}
-	})
+	}, migrate.WithDownloadOptions(a.downloadOptions))
 	a.stateMu.Lock()
 	a.migrate = migrations
 	a.stateMu.Unlock()
@@ -565,7 +569,7 @@ type ProviderInfo struct {
 
 // ---- providers ----
 
-// ListProviders returns the 13 in-scope drive providers (JSON-safe DTOs).
+// ListProviders 返回在役网盘的前端安全描述。
 func (a *App) ListProviders() []ProviderInfo {
 	regs := drive.All()
 	out := make([]ProviderInfo, 0, len(regs))
@@ -623,6 +627,14 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		// it to an already-issued URL cannot change the provider-side redirect.
 		config["captcha_redirect_uri"] = captcha.RedirectURI(*session)
 	}
+	if provider == model.ProviderThunder && strings.TrimSpace(config["refresh_token"]) == "" {
+		session, err := a.startThunderVerification()
+		if err != nil {
+			return nil, err
+		}
+		captchaSession = session
+		config["captcha_redirect_uri"] = captcha.RedirectURI(*session)
+	}
 	secrets := a.secretsSnapshot()
 	if secrets.OnedriveClientID != "" {
 		config["onedrive_client_id"] = secrets.OnedriveClientID
@@ -645,6 +657,10 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		},
 	})
 	if err != nil {
+		var thunderChallenge *thunder.VerificationRequiredError
+		if captchaSession != nil && errors.As(err, &thunderChallenge) {
+			return nil, fmt.Errorf("%w\nsession=%s", err, captchaSession.ID)
+		}
 		var challenge *pikpak.CaptchaRequiredError
 		if captchaSession != nil && errors.As(err, &challenge) {
 			logging.Info("provider login challenge required", "provider", provider, "session_id", captchaSession.ID)
@@ -652,12 +668,12 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 		}
 		logging.Warn("provider login failed", "provider", provider, "error", err, "duration", logging.Duration(started))
 		if captchaSession != nil {
-			captcha.Close()
+			captcha.CloseSession(captchaSession.ID)
 		}
 		return nil, err
 	}
 	if captchaSession != nil {
-		captcha.Close()
+		captcha.CloseSession(captchaSession.ID)
 	}
 	if tok == nil {
 		logging.Error("provider login returned empty session", "provider", provider)
@@ -1286,6 +1302,9 @@ func (a *App) SaveSettings(s store.Settings) error {
 	if s.MaxConcurrentDownloads > 0 && dl != nil {
 		dl.SetConcurrency(s.MaxConcurrentDownloads)
 	}
+	if dl != nil {
+		dl.SetDownloadSpeed(s.MaxDownloadSpeed)
+	}
 	// apply proxy globally (affects netx clients + download engine)
 	netx.SetGlobalProxy(s.Proxy)
 	// apply upload speed cap at runtime (direct uploads via ProgressReader)
@@ -1729,6 +1748,9 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	if !srcCaps.Download {
 		return nil, fmt.Errorf("源网盘不支持下载，无法迁移")
 	}
+	if move && !srcCaps.RecycleBin && !srcCaps.PermanentDelete {
+		return nil, fmt.Errorf("源网盘不支持移除文件，请改用复制")
+	}
 	if !dstCaps.Upload && len(dstCaps.RapidUploadHashes) == 0 {
 		return nil, fmt.Errorf("目标网盘不支持上传，无法迁移")
 	}
@@ -1756,8 +1778,9 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	a.emit("migrate:progress", *job)
 	// derive from the app context so migrations are canceled on shutdown
 	ctx := a.appContext()
+	snapshot := migrate.Snapshot(job)
 	go func() { _ = eng.Run(ctx, job) }()
-	return job, nil
+	return snapshot, nil
 }
 
 // ListMigrateJobs returns persisted migration jobs, including jobs from a
@@ -1827,8 +1850,9 @@ func (a *App) ResumeMigrate(id string) (*migrate.Job, error) {
 		a.emit("migrate:progress", job)
 		// Derive from the app context so a resumed job is canceled on shutdown.
 		ctx := a.appContext()
+		snapshot := migrate.Snapshot(&job)
 		go func() { _ = eng.Run(ctx, &job) }()
-		return &job, nil
+		return snapshot, nil
 	}
 	return nil, fmt.Errorf("迁移任务不存在")
 }

@@ -37,7 +37,7 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 		if len(seen) > 20000 {
 			return fmt.Errorf("预检超过 20000 项，请分批迁移")
 		}
-		file, err := drive.GetFileContext(ctx, srcUser, srcDrive, id)
+		file, err := drive.GetFileFreshContext(ctx, srcUser, srcDrive, id)
 		if err != nil {
 			return err
 		}
@@ -78,7 +78,7 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 			return nil, err
 		}
 	}
-	if err := drive.ValidateUploadItems(dstUser, dstDrive, items); err != nil {
+	if err := drive.ValidateUploadItemsContext(ctx, dstUser, dstDrive, items); err != nil {
 		return nil, err
 	}
 	if st, err := a.storeOrError(); err == nil {
@@ -135,14 +135,28 @@ func (a *App) VerifyMigration(id string) ([]MigrationVerification, error) {
 				out = append(out, result)
 				continue
 			}
-			if target.Size != item.Size {
+			if target.IsDir || target.Size != item.Size {
 				result.Status = "mismatch"
-				result.Detail = "目标大小与迁移记录不同"
+				result.Detail = "目标类型或大小与迁移记录不同"
 				out = append(out, result)
 				continue
 			}
 			result.Status = "size"
 			result.Detail = "目标大小一致；未比较内容哈希"
+			if recorded := strings.SplitN(item.SourceHash, ":", 2); item.SourceRecorded && len(recorded) == 2 && recorded[0] != "" && recorded[1] != "" {
+				targetHash := target.ContentHash
+				if !strings.EqualFold(target.ContentHashName, recorded[0]) || targetHash == "" {
+					targetHash, _ = drive.ResolveTransferHashContext(ctx, job.DstUser, job.DstDrive, target.FileID, recorded[0], false)
+				}
+				if targetHash != "" {
+					result.Status, result.Detail = "hash", recorded[0]+" 哈希与迁移时来源一致"
+					if !strings.EqualFold(recorded[1], targetHash) {
+						result.Status, result.Detail = "mismatch", recorded[0]+" 哈希与迁移时来源不一致"
+					}
+					out = append(out, result)
+					continue
+				}
+			}
 			srcCaps := drive.RegistryCaps(drive.ProviderOf(job.SrcUser, job.SrcDrive, ""))
 			dstCaps := drive.RegistryCaps(drive.ProviderOf(job.DstUser, job.DstDrive, ""))
 			for _, method := range srcCaps.ProvideHashes {

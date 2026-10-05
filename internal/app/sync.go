@@ -11,6 +11,7 @@ import (
 	"mnemo-go/internal/logging"
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/sync"
+	"mnemo-go/internal/transfer/dlengine"
 )
 
 type activeSyncRun struct {
@@ -86,10 +87,18 @@ func (a *App) newSyncEngine(st sync.SnapshotStore, progress bool) *sync.Engine {
 	}
 	return sync.NewEngine(onProgress,
 		sync.WithSnapshotStore(st),
+		sync.WithDownloadOptions(a.downloadOptions),
 		sync.WithLogger(func(jobID, event, detail string) {
 			a.handleSyncLog(jobID, event, detail)
 		}),
 	)
+}
+
+func (a *App) downloadOptions() (dlengine.Options, error) {
+	if manager := a.downloadManager(); manager != nil {
+		return manager.DownloadOptions()
+	}
+	return dlengine.Options{}, nil
 }
 
 // ListRunningSyncIDs returns both manually and scheduler-started jobs so a

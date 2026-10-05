@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +16,123 @@ import (
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/transfer"
 )
+
+func TestPikPakOfflineDownloadDispatchesAndPersists(t *testing.T) {
+	registration := drive.Require(model.ProviderPikpak)
+	if !registration.Caps.OfflineDownload {
+		t.Fatal("PikPak 必须声明云离线能力")
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const userID = "pikpak_offline-test"
+	const driveID = "offline-drive"
+	const magnet = "magnet:?xt=urn:btih:0123456789012345678901234567890123456789"
+	drive.SetTokenResolver(func(user, space string) (*model.TokenInfo, error) {
+		if user != userID || space != driveID {
+			t.Fatalf("错误的离线账号: %s, %s", user, space)
+		}
+		return &model.TokenInfo{AccessToken: "offline-token", DeviceID: "offline-device", UserID: userID}, nil
+	})
+	previous := netx.TestTransportHook
+	t.Cleanup(func() {
+		netx.TestTransportHook = previous
+		drive.SetTokenResolver(nil)
+	})
+	requests := 0
+	netx.TestTransportHook = favoriteTestTransport(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Method != http.MethodPost || req.URL.Host != "api-drive.mypikpak.com" || req.URL.Path != "/drive/v1/files" {
+			t.Fatalf("意外的离线请求: %s %s", req.Method, req.URL)
+		}
+		var body struct {
+			Kind       string            `json:"kind"`
+			UploadType string            `json:"upload_type"`
+			FolderType string            `json:"folder_type"`
+			Name       string            `json:"name"`
+			URL        map[string]string `json:"url"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if req.Header.Get("Authorization") != "Bearer offline-token" || body.Kind != "drive#file" || body.UploadType != "UPLOAD_TYPE_URL" || body.FolderType != "DOWNLOAD" || body.Name != "测试磁力" || body.URL["url"] != magnet {
+			t.Fatalf("错误的离线请求参数: %+v", body)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"task":{"task_id":"offline-task"},"file":{"id":"offline-file"}}`)), Request: req}, nil
+	})
+	app := &App{store: st}
+	task, err := app.OfflineDownload(userID, driveID, magnet, "测试磁力")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || task.ID != "offline-task" || task.FileID != "offline-file" || task.Status != "running" || task.UserID != userID || task.DriveID != driveID || task.URL != magnet {
+		t.Fatalf("错误的离线任务: %+v，请求次数: %d", task, requests)
+	}
+	saved := app.ListOfflineTasks(userID)
+	if len(saved) != 1 || saved[0] != *task {
+		t.Fatalf("离线任务没有正确保存: %+v", saved)
+	}
+}
+
+func TestThunderOfflineApplicationFlow(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const userID = "thunder_offline-app"
+	const driveID = "offline-app"
+	drive.SetTokenResolver(func(user, space string) (*model.TokenInfo, error) {
+		if user != userID || space != driveID {
+			t.Fatal("迅雷离线任务调用了错误账号")
+		}
+		return &model.TokenInfo{AccessToken: "thunder-access", RefreshToken: `{"refresh_token":"thunder-refresh","user_id":"offline-app","device_id":"0123456789abcdef0123456789abcdef"}`}, nil
+	})
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { drive.SetTokenResolver(nil); netx.TestTransportHook = previous })
+	deleted := false
+	netx.TestTransportHook = favoriteTestTransport(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "api-pan.xunlei.com" || request.Header.Get("Authorization") != "Bearer thunder-access" {
+			t.Fatal("迅雷请求使用了错误的服务或凭据")
+		}
+		body := `{"task":{"id":"thunder-task","file_id":"thunder-file"}}`
+		if request.Method == http.MethodGet {
+			body = `{"tasks":[{"id":"thunder-task","file_id":"thunder-file","phase":"PHASE_TYPE_COMPLETE","file_size":"1024","progress":100}]}`
+		} else if request.Method == http.MethodDelete {
+			deleted = request.URL.Query().Get("task_ids") == "thunder-task" && request.URL.Query().Get("delete_files") == "false"
+			body = `{}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+	})
+	app := &App{store: st}
+	task, err := app.OfflineDownload(userID, driveID, "magnet:?xt=urn:btih:test", "测试")
+	if err != nil || task.ID != "thunder-task" {
+		t.Fatalf("应用未能调用迅雷离线创建: %+v, %v", task, err)
+	}
+	tasks, err := app.RefreshOfflineTasks(userID, driveID)
+	if err != nil || len(tasks) != 1 || tasks[0].Status != "PHASE_TYPE_COMPLETE" || tasks[0].FileSize != 1024 {
+		t.Fatalf("应用未能刷新迅雷任务: %+v, %v", tasks, err)
+	}
+	if err := app.DeleteOfflineTask(userID, driveID, task.ID, false); err != nil || !deleted {
+		t.Fatalf("应用未能删除迅雷任务: %v", err)
+	}
+	if tasks := app.ListOfflineTasks(userID); len(tasks) != 0 {
+		t.Fatalf("已删除的迅雷任务仍在本地: %+v", tasks)
+	}
+}
+
+func TestOfflineCapabilitiesReachFrontend(testContext *testing.T) {
+	providers := (&App{}).ListProviders()
+	if len(providers) != drive.Count() {
+		testContext.Fatal("前端网盘列表遗漏注册驱动")
+	}
+	for _, provider := range providers {
+		_, implemented := drive.Require(provider.ID).Factory().(drive.OfflineDriver)
+		if provider.Capabilities.OfflineDownload != implemented {
+			testContext.Errorf("%s 的前端云离线开关=%v，完整实现=%v", provider.ID, provider.Capabilities.OfflineDownload, implemented)
+		}
+	}
+}
 
 func TestFavoritesBackupListsLocalRecordsWithoutNetwork(t *testing.T) {
 	st, err := store.Open(t.TempDir())

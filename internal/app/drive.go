@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"mnemo-go/internal/drive"
-	"mnemo-go/internal/drive/providers/pikpak"
 	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
@@ -506,14 +505,14 @@ func (a *App) RemoveFavorite(userID, driveID, fileID string) error {
 	return nil
 }
 
-// ---- offline download (PikPak cloud) ----
+// ---- 云离线下载 ----
 
-// OfflineDownload submits a PikPak cloud offline task.
+// OfflineDownload 提交当前网盘的云离线任务。
 func (a *App) OfflineDownload(userID, driveID, url, fileName string) (*model.OfflineTask, error) {
 	return a.offlineCreate(userID, driveID, url, fileName)
 }
 
-// offlineCreate creates an offline task through the pikpak driver.
+// offlineCreate 通过统一离线契约创建并保存任务。
 func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.OfflineTask, error) {
 	ctx := context.Background()
 	c, err := drive.BuildContext(userID, driveID, "")
@@ -524,14 +523,11 @@ func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.Offli
 	if err != nil {
 		return nil, err
 	}
-	type offlineDriver interface {
-		OfflineCreate(ctx context.Context, url, fileName, parentID string) (taskID, fileID string, err error)
-	}
-	od, ok := d.(offlineDriver)
+	od, ok := d.(drive.OfflineDriver)
 	if !ok {
 		return nil, fmt.Errorf("当前网盘不支持云离线")
 	}
-	taskID, fileID, err := od.OfflineCreate(ctx, url, fileName, "")
+	taskID, fileID, err := od.OfflineCreate(ctx, c, url, fileName, "")
 	if err != nil {
 		return nil, err
 	}
@@ -588,10 +584,7 @@ func (a *App) RefreshOfflineTasks(userID, driveID string) ([]model.OfflineTask, 
 	if err != nil {
 		return nil, err
 	}
-	type lister interface {
-		OfflineList(ctx context.Context, c drive.Context) ([]pikpak.OfflineTask, error)
-	}
-	l, ok := d.(lister)
+	l, ok := d.(drive.OfflineDriver)
 	if !ok {
 		return nil, fmt.Errorf("当前网盘不支持云离线")
 	}
@@ -636,7 +629,7 @@ func firstNonEmptyOfflineStatus(values ...string) string {
 	return "unknown"
 }
 
-// DeleteOfflineTask cancels and removes a PikPak cloud offline task.
+// DeleteOfflineTask 取消并移除当前网盘的云离线任务。
 func (a *App) DeleteOfflineTask(userID, driveID, taskID string, deleteFiles bool) error {
 	ctx := context.Background()
 	c, err := drive.BuildContext(userID, driveID, "")
@@ -647,10 +640,7 @@ func (a *App) DeleteOfflineTask(userID, driveID, taskID string, deleteFiles bool
 	if err != nil {
 		return err
 	}
-	type deleter interface {
-		OfflineDelete(ctx context.Context, c drive.Context, taskIDs []string, deleteFiles bool) error
-	}
-	del, ok := d.(deleter)
+	del, ok := d.(drive.OfflineDriver)
 	if !ok {
 		return fmt.Errorf("当前网盘不支持删除云离线任务")
 	}
