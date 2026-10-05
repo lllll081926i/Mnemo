@@ -60,6 +60,7 @@ type Options struct {
 	ReadIdleTimeout           time.Duration
 	RetrySingleConnection     bool
 	AllowLastModifiedFallback bool
+	streamContinuations       int
 	// RequestAuth runs after static headers are applied, once per outbound
 	// request. It is used for request-bound schemes such as HTTP Digest.
 	RequestAuth func(*http.Request) error
@@ -117,6 +118,8 @@ type state struct {
 	PartialBytes []int64 `json:"partial_bytes,omitempty"`
 	ETag         string  `json:"etag,omitempty"`
 	LastModified string  `json:"last_modified,omitempty"`
+	Stream       bool    `json:"stream,omitempty"`
+	StreamBytes  int64   `json:"stream_bytes,omitempty"`
 }
 
 type resourceValidator struct {
@@ -251,7 +254,12 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 		resourceHash = urlFingerprint(opts.ResourceID)
 	}
 	st := &state{URLHash: urlHash, ResourceHash: resourceHash, Total: total, Chunk: opts.ChunkSize, ETag: validator.ETag, LastModified: validator.LastModified}
-	if total == 0 || !acceptRanges || total < opts.MinSize {
+	previousStream := false
+	if data, readErr := os.ReadFile(statePath); readErr == nil {
+		var previous state
+		previousStream = json.Unmarshal(data, &previous) == nil && previous.Stream
+	}
+	if total == 0 || !acceptRanges || total < opts.MinSize || previousStream {
 		// single stream
 		return singleStream(ctx, hc, opts, url, localPath, total, validator, onProgress)
 	}
@@ -267,10 +275,12 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	// Resume from state only when both the remote identity and local data match.
 	if b, err := os.ReadFile(statePath); err == nil {
 		var prev state
-		if partIntact && json.Unmarshal(b, &prev) == nil && validResumeProgress(prev) && stateResourceMatches(prev, url, urlHash, resourceHash, validator) && prev.Total == total && prev.Chunk > 0 && (autoChunk || prev.Chunk == opts.ChunkSize) &&
+		if partIntact && json.Unmarshal(b, &prev) == nil && !prev.Stream && validResumeProgress(prev) && stateResourceMatches(prev, url, urlHash, resourceHash, validator) && prev.Total == total && prev.Chunk > 0 && (autoChunk || prev.Chunk == opts.ChunkSize) &&
 			resumeIdentityMatches(prev, validator) {
 			st = &prev
 			opts.ChunkSize = prev.Chunk
+		} else {
+			logging.Warn("download resume checkpoint discarded", "reason", "local_data_or_resource_identity_mismatch", "part_intact", partIntact, "saved_total", prev.Total, "current_total", total)
 		}
 	}
 	numChunks := int((total-1)/opts.ChunkSize + 1)
@@ -295,6 +305,12 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 		return err
 	}
 	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := persistState(statePath, st); err != nil {
+		return err
+	}
 
 	var limiter RateLimiter = opts.Limiter
 	if limiter == nil {
@@ -314,7 +330,9 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 		onProgress(Progress{Downloaded: current, Total: total, Percent: percent(current, total)})
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	workContext, cancelWork := context.WithCancel(ctx)
+	defer cancelWork()
+	g, gctx := errgroup.WithContext(workContext)
 	var mu sync.Mutex // guards st.Done writes
 	lastCheckpoint := time.Now()
 
@@ -338,6 +356,9 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 		for attempt := 0; attempt < MaxRetriesPerChunk; {
 			err := fetchRange(gctx, hc, opts, url, remainingStart, remainingLength, total, validator, f, limiter, func(n int64) {
 				downloaded.Add(n)
+				mu.Lock()
+				st.PartialBytes[chunkIdx] += n
+				mu.Unlock()
 			})
 			var partial *partialRangeReadError
 			continued := errors.As(err, &partial) && partial.written > 0 && partial.written <= remainingLength
@@ -416,6 +437,7 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	// progress ticker
 	done := make(chan struct{})
 	progressDone := make(chan struct{})
+	var periodicCheckpointError error
 	speed := newSpeedEstimator(time.Now(), downloaded.Load())
 	go func() {
 		defer close(progressDone)
@@ -426,6 +448,19 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 			case <-done:
 				return
 			case <-ticker.C:
+				mu.Lock()
+				if time.Since(lastCheckpoint) >= time.Second {
+					periodicCheckpointError = f.Sync()
+					if periodicCheckpointError == nil {
+						periodicCheckpointError = persistState(statePath, st)
+					}
+					lastCheckpoint = time.Now()
+				}
+				mu.Unlock()
+				if periodicCheckpointError != nil {
+					cancelWork()
+					return
+				}
 				cur := downloaded.Load()
 				if onProgress != nil {
 					onProgress(Progress{Downloaded: cur, Total: total, Speed: speed.Observe(time.Now(), cur), Percent: percent(cur, total)})
@@ -437,11 +472,20 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	err = g.Wait()
 	close(done)
 	<-progressDone
+	if periodicCheckpointError != nil && ctx.Err() == nil {
+		err = periodicCheckpointError
+	} else {
+		err = errors.Join(err, periodicCheckpointError)
+	}
 	if syncErr := f.Sync(); syncErr != nil {
 		return errors.Join(err, syncErr)
 	}
 	if checkpointErr := persistState(statePath, st); checkpointErr != nil {
 		return errors.Join(err, checkpointErr)
+	}
+	if err != nil && onProgress != nil {
+		current := downloaded.Load()
+		onProgress(Progress{Downloaded: current, Total: total, Percent: percent(current, total)})
 	}
 	lastModifiedFallback := opts.AllowLastModifiedFallback && errors.Is(err, errLastModifiedChanged)
 	if (errors.Is(err, errRangeIgnored) || lastModifiedFallback) && ctx.Err() == nil {
@@ -565,7 +609,13 @@ func parseContentRange(value string) (start, end, total int64, ok bool) {
 
 func resumeIdentityMatches(previous state, current resourceValidator) bool {
 	if previous.ETag != "" || current.ETag != "" {
-		return previous.ETag != "" && current.ETag != "" && previous.ETag == current.ETag
+		if previous.ETag == "" || current.ETag == "" || previous.ETag != current.ETag {
+			return false
+		}
+		if strongETag(previous.ETag) != "" {
+			return true
+		}
+		return previous.LastModified != "" && current.LastModified != "" && lastModifiedMatches(previous.LastModified, current.LastModified)
 	}
 	if previous.LastModified != "" || current.LastModified != "" {
 		return previous.LastModified != "" && current.LastModified != "" && lastModifiedMatches(previous.LastModified, current.LastModified)
@@ -574,6 +624,9 @@ func resumeIdentityMatches(previous state, current resourceValidator) bool {
 }
 
 func validResumeProgress(previous state) bool {
+	if previous.Stream {
+		return previous.Total > 0 && previous.StreamBytes >= 0 && previous.StreamBytes <= previous.Total && previous.Chunk == 0 && len(previous.Done) == 0 && len(previous.PartialBytes) == 0
+	}
 	if previous.Total <= 0 || previous.Chunk <= 0 {
 		return false
 	}
@@ -744,25 +797,73 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	return nil
 }
 
-func singleStream(ctx context.Context, hc *http.Client, opts Options, url, localPath string, total int64, validator resourceValidator, onProgress func(Progress)) error {
-	req, err := NewRequest(ctx, http.MethodGet, url, opts)
+func singleStream(ctx context.Context, hc *http.Client, opts Options, url, localPath string, total int64, validator resourceValidator, onProgress func(Progress)) (result error) {
+	workContext, cancelWork := context.WithCancel(ctx)
+	defer cancelWork()
+	partPath := localPath + ".part"
+	statePath := localPath + ".state.json"
+	resourceHash := ""
+	if opts.ResourceID != "" {
+		resourceHash = urlFingerprint(opts.ResourceID)
+	}
+	var previous state
+	var offset int64
+	if data, err := os.ReadFile(statePath); err == nil && json.Unmarshal(data, &previous) == nil && previous.Stream && validResumeProgress(previous) && previous.Total == total {
+		previousValidator := resourceValidator{ETag: previous.ETag, LastModified: previous.LastModified}
+		sameResource := previous.ResourceHash == resourceHash && resourceHash != ""
+		sameURL := stateURLMatches(previous, url, urlFingerprint(url))
+		identityAvailable := previousValidator.ifRange() != ""
+		if (sameResource || sameURL && (previous.ResourceHash == "" || previous.ResourceHash == resourceHash)) && identityAvailable {
+			if info, err := os.Stat(partPath); err == nil && info.Mode().IsRegular() && info.Size() >= previous.StreamBytes {
+				offset = min(previous.StreamBytes, max(0, total-1))
+			}
+		}
+	}
+	if previous.Stream && previous.StreamBytes > 0 && offset == 0 {
+		logging.Warn("download resume checkpoint discarded", "reason", "stream_data_or_identity_unavailable", "saved_bytes", previous.StreamBytes, "saved_total", previous.Total, "current_total", total)
+	}
+	req, err := NewRequest(workContext, http.MethodGet, url, opts)
 	if err != nil {
 		return err
 	}
-	validator.setFullRequestCondition(req)
+	if offset > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, total-1))
+		validator = resourceValidator{ETag: previous.ETag, LastModified: previous.LastModified}
+		req.Header.Set("If-Range", validator.ifRange())
+	} else {
+		validator.setFullRequestCondition(req)
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusPreconditionFailed {
+		if offset > 0 {
+			logging.Warn("download resume checkpoint discarded", "reason", "stream_precondition_failed", "saved_bytes", offset)
+			if removeErr := os.Remove(statePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return errors.Join(errResourceChanged, removeErr)
+			}
+		}
 		return errResourceChanged
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && !(offset > 0 && resp.StatusCode == http.StatusPartialContent) {
 		return responseStatusError("stream", resp)
 	}
+	if offset > 0 && resp.StatusCode == http.StatusOK {
+		logging.Warn("download resume restarted", "reason", "conditional_range_returned_full_response", "saved_bytes", offset)
+		offset = 0
+		validator = resourceValidator{}
+	}
 	if err := validator.verifyResponse(resp.Header); err != nil {
-		if opts.AllowLastModifiedFallback && errors.Is(err, errLastModifiedChanged) && ctx.Err() == nil {
+		if offset > 0 && errors.Is(err, errResourceChanged) {
+			logging.Warn("download resume checkpoint discarded", "reason", "stream_resource_changed", "saved_bytes", offset, "error", err)
+			if removeErr := os.Remove(statePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return errors.Join(err, removeErr)
+			}
+			return err
+		}
+		if offset == 0 && opts.AllowLastModifiedFallback && errors.Is(err, errLastModifiedChanged) && ctx.Err() == nil {
 			if removeErr := os.Remove(localPath + ".state.json"); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 				return removeErr
 			}
@@ -776,39 +877,125 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 		}
 		return err
 	}
-	if resp.ContentLength >= 0 {
-		if total > 0 && total != resp.ContentLength {
-			return fmt.Errorf("%w: 下载长度由 %d 变为 %d", errResourceChanged, total, resp.ContentLength)
+	responseEnd := total - 1
+	if offset > 0 {
+		start, end, responseTotal, ok := parseContentRange(resp.Header.Get("Content-Range"))
+		if !ok || start != offset || end >= total || responseTotal != total || resp.ContentLength >= 0 && resp.ContentLength != end-start+1 {
+			return fmt.Errorf("%w: invalid stream resume Content-Range", errInvalidRangeResponse)
 		}
-		total = resp.ContentLength
+		responseEnd = end
+		if !resumeIdentityMatches(previous, resourceValidator{ETag: strings.TrimSpace(resp.Header.Get("ETag")), LastModified: strings.TrimSpace(resp.Header.Get("Last-Modified"))}) {
+			logging.Warn("download resume checkpoint discarded", "reason", "stream_resume_identity_missing", "saved_bytes", offset)
+			if removeErr := os.Remove(statePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return errors.Join(errResourceChanged, removeErr)
+			}
+			return fmt.Errorf("%w: stream resume identity no longer matches", errResourceChanged)
+		}
+	}
+	continuation := offset > 0 && responseEnd < total-1
+	if resp.ContentLength >= 0 && !continuation {
+		responseTotal := resp.ContentLength + offset
+		if total > 0 && total != responseTotal {
+			return fmt.Errorf("%w: 下载长度由 %d 变为 %d", errResourceChanged, total, responseTotal)
+		}
+		total = responseTotal
+		responseEnd = total - 1
 	}
 	if onProgress != nil {
-		onProgress(Progress{Total: total})
+		onProgress(Progress{Downloaded: offset, Total: total, Percent: percent(offset, total)})
 	}
-	partPath := localPath + ".part"
-	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	if err := f.Truncate(offset); err != nil {
+		return err
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	st := &state{Stream: true, Total: total, URLHash: urlFingerprint(url), ResourceHash: resourceHash, ETag: strings.TrimSpace(resp.Header.Get("ETag")), LastModified: strings.TrimSpace(resp.Header.Get("Last-Modified"))}
+	written := offset
+	var checkpointMutex sync.Mutex
+	checkpoint := func() error {
+		checkpointMutex.Lock()
+		defer checkpointMutex.Unlock()
+		if err := f.Sync(); err != nil {
+			return err
+		}
+		st.StreamBytes = written
+		return persistState(statePath, st)
+	}
+	if err := checkpoint(); err != nil {
+		return err
+	}
+	finished := false
+	defer func() {
+		if !finished {
+			result = errors.Join(result, checkpoint())
+			if onProgress != nil {
+				onProgress(Progress{Downloaded: written, Total: total, Percent: percent(written, total)})
+			}
+		}
+	}()
+	stopCheckpoint := make(chan struct{})
+	checkpointDone := make(chan struct{})
+	var periodicError error
+	go func() {
+		defer close(checkpointDone)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCheckpoint:
+				return
+			case <-ticker.C:
+				if periodicError = checkpoint(); periodicError != nil {
+					cancelWork()
+					return
+				}
+			}
+		}
+	}()
+	var stopOnce sync.Once
+	stopPeriodicCheckpoint := func() {
+		stopOnce.Do(func() {
+			close(stopCheckpoint)
+			<-checkpointDone
+		})
+	}
+	defer func() {
+		stopPeriodicCheckpoint()
+		if periodicError != nil && ctx.Err() == nil && errors.Is(result, context.Canceled) {
+			result = periodicError
+		} else {
+			result = errors.Join(result, periodicError)
+		}
+	}()
 	var limiter RateLimiter = opts.Limiter
 	if limiter == nil {
 		limiter = newSpeedLimiter(opts.MaxSpeed)
 	}
 	buf := make([]byte, 256<<10)
-	var written int64
 	last := time.Now()
-	speed := newSpeedEstimator(last, 0)
+	speed := newSpeedEstimator(last, written)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
-			if err := limiter.Wait(ctx, int64(n)); err != nil {
+			if err := limiter.Wait(workContext, int64(n)); err != nil {
 				return err
 			}
-			if _, werr := f.Write(buf[:n]); werr != nil {
+			if total > 0 && int64(n) > responseEnd+1-written {
+				return fmt.Errorf("%w: stream exceeds expected size", errResourceChanged)
+			}
+			checkpointMutex.Lock()
+			count, werr := f.Write(buf[:n])
+			written += int64(count)
+			checkpointMutex.Unlock()
+			if werr != nil {
 				return werr
 			}
-			written += int64(n)
 			if onProgress != nil && time.Since(last) >= progressInterval {
 				now := time.Now()
 				last = now
@@ -822,17 +1009,37 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 			return rerr
 		}
 	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
+	if err := checkpoint(); err != nil {
 		return err
 	}
 	if total > 0 && written != total {
+		if continuation && written == responseEnd+1 && ctx.Err() == nil && opts.streamContinuations < MaxPartialRangeRequests {
+			stopPeriodicCheckpoint()
+			if periodicError != nil {
+				return periodicError
+			}
+			finished = true
+			if err := f.Close(); err != nil {
+				return err
+			}
+			if err := resp.Body.Close(); err != nil {
+				return err
+			}
+			opts.streamContinuations++
+			return singleStream(ctx, hc, opts, url, localPath, total, validator, onProgress)
+		}
 		return fmt.Errorf("dlengine: downloaded %d != total %d", written, total)
 	}
 	if total <= 0 {
 		total = written
+	}
+	stopPeriodicCheckpoint()
+	if periodicError != nil {
+		return periodicError
+	}
+	finished = true
+	if err := f.Close(); err != nil {
+		return err
 	}
 	if err := commitPart(partPath, localPath); err != nil {
 		return err
@@ -955,6 +1162,14 @@ func percent(done, total int64) int {
 
 func persistState(path string, st *state) error {
 	safeState := *st
+	safeState.Done = append([]bool(nil), st.Done...)
+	safeState.PartialBytes = append([]int64(nil), st.PartialBytes...)
+	for chunk, partial := range safeState.PartialBytes {
+		if chunk < len(safeState.Done) && !safeState.Done[chunk] && partial == chunkLen(&safeState, chunk) {
+			safeState.Done[chunk] = true
+			safeState.PartialBytes[chunk] = 0
+		}
+	}
 	if safeState.URLHash == "" && safeState.URL != "" {
 		safeState.URLHash = urlFingerprint(safeState.URL)
 	}

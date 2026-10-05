@@ -129,9 +129,10 @@ func TestLastModifiedMismatchRestartsSafely(t *testing.T) {
 	}
 }
 
-func TestInterruptedLastModifiedFallbackInvalidatesCheckpoint(t *testing.T) {
+func TestInterruptedLastModifiedFallbackReplacesSegmentedCheckpoint(t *testing.T) {
 	payload := bytes.Repeat([]byte("guangya"), 2048)
 	var interrupted atomic.Bool
+	var resumedStart atomic.Int64
 	interrupted.Store(true)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Range") == "" {
@@ -148,6 +149,11 @@ func TestInterruptedLastModifiedFallbackInvalidatesCheckpoint(t *testing.T) {
 		writer.Header().Set("Last-Modified", rangeModified)
 		if end == 0 {
 			writer.Header().Set("Last-Modified", probeModified)
+		} else if !interrupted.Load() {
+			resumedStart.Store(start)
+			if request.Header.Get("If-Range") != rangeModified {
+				t.Error("光鸭顺序续传没有使用实际完整响应的修改时间")
+			}
 		}
 		writeTestRange(writer, start, end, int64(len(payload)), payload[start:end+1])
 	}))
@@ -164,15 +170,15 @@ func TestInterruptedLastModifiedFallbackInvalidatesCheckpoint(t *testing.T) {
 	if err := Download(t.Context(), opts, server.URL, path, nil); err == nil {
 		t.Fatal("整流中断未报错")
 	}
-	if _, err := os.Stat(path + ".state.json"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("整流中断后仍保留旧分片断点")
+	if progress, ok := CheckpointProgress(path, ""); !ok || progress.Downloaded != 100 {
+		t.Fatalf("整流中断后未保存新的顺序断点：%+v, %v", progress, ok)
 	}
 	interrupted.Store(false)
 	if err := Download(t.Context(), opts, server.URL, path, nil); err != nil {
 		t.Fatal(err)
 	}
 	actual, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(actual, payload) {
+	if err != nil || !bytes.Equal(actual, payload) || resumedStart.Load() != 100 {
 		t.Fatal("后续下载混入了旧分片内容")
 	}
 }

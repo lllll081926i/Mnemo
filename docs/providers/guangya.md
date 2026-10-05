@@ -40,6 +40,8 @@ ShareExpirationOptions: [0, 1, 7, 30]
 
 下载器兼容 Range 探测返回 `200 + Content-Length: 1` 的响应：不把该 1 字节当作完整文件大小，有效 `Content-Range` 可用于取总大小，但只有 `206` 才启用分段。单流开始后以完整响应的 `Content-Length` 更新任务大小，缺少长度时回退已知文件大小或在完成后记录实际字节数。前后端百分比均限制在 0–100%，历史异常进度也不会撑破进度条。对应回归测试：`internal/e2e/dlengine_test.go`、`internal/transfer/dlengine/progress_test.go`、`frontend/src/views/TransferView.test.js`。
 
+2026-10-05 补齐单流断点：降级后的完整响应保存实际 ETag/修改时间和已同步的连续字节数，不再复用原分片位图。暂停或重启后优先从顺序断点发送条件 Range，请求通过身份、范围和长度校验后才追加；探测修改时间与实际完整响应不同不会单独导致丢弃该断点。分段和单流均定期保存有效进度，任务管理器重启时从检查点恢复显示。服务端忽略 Range 时完整重下；实际资源身份变化时拒绝混合旧数据。真实 CDN 是否稳定提供这些条件仍需账号验收。
+
 ✅ `guangya.go:267-288` DownloadInfo → `:398-415` GetDownloadURL proxy；使用旧版稳定的 `/nd.bizuserres.s/v1/get_res_download_url`，优先解析 `data.signedURL`，兼容 `downloadUrl`。
 
 ---
