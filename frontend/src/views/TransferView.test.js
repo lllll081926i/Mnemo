@@ -150,6 +150,18 @@ describe('传输页刷新调度', () => {
     expect(api.ListDownloads).toHaveBeenCalledOnce()
   })
 
+  it('下载详情保留具体 HTTP 错误而不是只显示通用提示', async () => {
+    const task = { id: 'failed', name: '文件.sup', status: 'failed', error: 'dlengine: chunk 2 rejected: range http 503' }
+    api.ListDownloads.mockResolvedValueOnce([task])
+    wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true, teleport: true } } })
+    await flushPromises()
+    await wrapper.find('.taskrow').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    wrapper.vm.onCtxSelect('detail')
+    await flushPromises()
+    expect(wrapper.text()).toContain('错误详情')
+    expect(wrapper.text()).toContain('range http 503')
+  })
+
   it('文件夹只占用一条下载行，子任务在行内展开', async () => {
     api.ListDownloads.mockResolvedValueOnce([
       { id: 'folder', isDir: true, name: '文件夹', status: 'downloading', stage: 'scanning', totalFiles: 1, completedFiles: 0, localPath: 'folder' },

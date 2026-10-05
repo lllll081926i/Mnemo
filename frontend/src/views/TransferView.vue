@@ -1401,6 +1401,7 @@ onBeforeUnmount(() => {
       <div class="td-row" v-if="detailTask.speed"><span class="td-label">速度</span><span class="td-val">{{ formatSpeed(detailTask.speed) }}</span></div>
       <div class="td-row" v-if="detailTask.url"><span class="td-label">来源链接</span><span class="td-val td-url">{{ detailTask.url }}</span></div>
       <div class="td-row" v-if="detailTask.error"><span class="td-label">失败原因</span><span class="td-val" style="color:var(--color-error)">{{ taskErrorText(detailTask.error, '下载文件') }}</span></div>
+      <div class="td-row" v-if="detailTask.error"><span class="td-label">错误详情</span><span class="td-val">{{ detailTask.error }}</span></div>
       <div class="td-row"><span class="td-label">创建时间</span><span class="td-val">{{ formatTime(detailTask.created) }}</span></div>
       <template #actions>
         <button class="btn primary" @click="detailTask = null">关闭</button>

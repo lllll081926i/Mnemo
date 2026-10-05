@@ -33,6 +33,7 @@ func applyDownloadPolicy(opts *dlengine.Options, settings store.Settings, source
 	opts.ChunkSize = source.ChunkSize
 	opts.Headers = source.Headers
 	opts.RequestAuth = source.RequestAuth
+	opts.RetrySingleConnection = source.RetrySingleConnection
 }
 
 func (m *Manager) DownloadOptions() (dlengine.Options, error) {

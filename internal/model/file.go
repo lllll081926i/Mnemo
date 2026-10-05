@@ -106,18 +106,19 @@ type VideoPreview struct {
 
 // DownloadURL holds a resolvable direct download source for a file.
 type DownloadURL struct {
-	DriveID             string               `json:"drive_id"`
-	FileID              string               `json:"file_id"`
-	ExpireTime          int64                `json:"expire_time"`
-	URL                 string               `json:"url"`
-	Size                int64                `json:"size"`
-	Headers             map[string]string    `json:"headers,omitempty"`
-	RequestAuth         RequestAuthenticator `json:"-"`
-	DownloadMode        string               `json:"downloadMode,omitempty"` // redirect | proxy
-	ForceLocalProxy     bool                 `json:"forceLocalProxy,omitempty"`
-	Concurrency         int                  `json:"concurrency,omitempty"`
-	ChunkSize           int64                `json:"chunkSize,omitempty"`
-	AllowPrivateNetwork bool                 `json:"allow_private_network,omitempty"`
+	DriveID               string               `json:"drive_id"`
+	FileID                string               `json:"file_id"`
+	ExpireTime            int64                `json:"expire_time"`
+	URL                   string               `json:"url"`
+	Size                  int64                `json:"size"`
+	Headers               map[string]string    `json:"headers,omitempty"`
+	RequestAuth           RequestAuthenticator `json:"-"`
+	DownloadMode          string               `json:"downloadMode,omitempty"` // redirect | proxy
+	RetrySingleConnection bool                 `json:"-"`
+	ForceLocalProxy       bool                 `json:"forceLocalProxy,omitempty"`
+	Concurrency           int                  `json:"concurrency,omitempty"`
+	ChunkSize             int64                `json:"chunkSize,omitempty"`
+	AllowPrivateNetwork   bool                 `json:"allow_private_network,omitempty"`
 }
 
 // FolderSize aggregates a folder subtree size/count.

@@ -649,12 +649,14 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	// running. Re-resolve once for account-backed tasks and reuse the .part
 	// file; direct URL tasks have no provider context and remain unchanged.
 	if err != nil && t.UserID != "" && isExpiredDownloadError(err) && ctx.Err() == nil {
+		logging.Warn("download link refresh started", "task_id", t.ID, "error", err)
 		m.mu.Lock()
 		t.Stage = "resolving"
 		m.mu.Unlock()
 		m.update(t)
 		rememberDownloadSource(t)
-		if fresh, refreshErr := drive.GetDownloadURLContext(ctx, t.UserID, t.DriveID, t.FileID, 14400); refreshErr == nil && fresh != nil && fresh.URL != "" {
+		fresh, refreshErr := drive.GetDownloadURLContext(ctx, t.UserID, t.DriveID, t.FileID, 14400)
+		if refreshErr == nil && fresh != nil && fresh.URL != "" {
 			url = fresh.URL
 			applyDownloadPolicy(&opts, s, fresh)
 			m.mu.Lock()
@@ -667,6 +669,12 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			m.mu.Unlock()
 			m.update(t)
 			err = dlengine.Download(ctx, opts, url, t.LocalPath, progress)
+		} else {
+			if refreshErr == nil {
+				refreshErr = errors.New("网盘重新获取下载地址未返回有效链接")
+			}
+			logging.Warn("download link refresh failed", "task_id", t.ID, "error", refreshErr)
+			err = errors.Join(err, refreshErr)
 		}
 	}
 
@@ -696,9 +704,14 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	}
 	t.Updated = time.Now().Unix()
 	t.Stage = ""
+	status, failure := t.Status, t.Error
+	downloaded, total := t.Downloaded, t.Size
 	m.mu.Unlock()
 	m.update(t)
-	logging.Info("download worker finished", "task_id", t.ID, "status", t.Status, "error_present", t.Error != "", "duration", logging.Duration(started))
+	if status == "failed" {
+		logging.Warn("download worker failed", "task_id", t.ID, "stage", "transferring", "error", failure, "downloaded", downloaded, "total", total, "configured_connections", opts.Concurrency, "duration", logging.Duration(started))
+	}
+	logging.Info("download worker finished", "task_id", t.ID, "status", status, "error_present", failure != "", "duration", logging.Duration(started))
 }
 
 func (m *Manager) refreshFolderSummary(groupID string) {

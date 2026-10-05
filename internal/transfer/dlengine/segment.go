@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/netx"
 
 	"golang.org/x/sync/errgroup"
@@ -51,12 +52,13 @@ type Options struct {
 	// ExpectedSize is optional provider metadata. It is used only when the
 	// download server omits Content-Length, so a chunked response can still
 	// report progress and be verified after a single-stream download.
-	ExpectedSize    int64
-	ResourceID      string
-	Limiter         RateLimiter
-	Headers         map[string]string
-	UserAgent       string
-	ReadIdleTimeout time.Duration
+	ExpectedSize          int64
+	ResourceID            string
+	Limiter               RateLimiter
+	Headers               map[string]string
+	UserAgent             string
+	ReadIdleTimeout       time.Duration
+	RetrySingleConnection bool
 	// RequestAuth runs after static headers are applied, once per outbound
 	// request. It is used for request-bound schemes such as HTTP Digest.
 	RequestAuth func(*http.Request) error
@@ -192,13 +194,41 @@ func (s *speedEstimator) Observe(now time.Time, downloaded int64) int64 {
 // Download fetches url to localPath (plus a .part temp file) using segmented
 // parallel range requests. It resumes from the .part file when present.
 func Download(ctx context.Context, opts Options, url, localPath string, onProgress func(Progress)) error {
+	normalized := opts
+	normalized.Normalize()
+	hc := NewHTTPClient(normalized)
+	defer hc.CloseIdleConnections()
+	err := download(ctx, opts, url, localPath, onProgress, hc)
+	if opts.RetrySingleConnection && normalized.Concurrency > 1 && ctx.Err() == nil && canRetrySingleConnection(err) {
+		logging.Warn("download retry with one connection", "error", err, "previous_connections", normalized.Concurrency)
+		var status *httpStatusError
+		if errors.As(err, &status) && status.retryAfter > 0 {
+			hc.Transport.(*downloadTransport).deferRequests(status.retryAfter)
+		}
+		opts.Concurrency = 1
+		return download(ctx, opts, url, localPath, onProgress, hc)
+	}
+	return err
+}
+
+func canRetrySingleConnection(err error) bool {
+	var pathError *os.PathError
+	var linkError *os.LinkError
+	if errors.As(err, &pathError) || errors.As(err, &linkError) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) {
+		return false
+	}
+	var status *httpStatusError
+	if !errors.As(err, &status) || status.stage != "range" || status.retryAfter > 120*time.Second {
+		return false
+	}
+	return status.status == http.StatusRequestTimeout || status.status == http.StatusInternalServerError || status.status == http.StatusBadGateway || status.status == http.StatusServiceUnavailable || status.status == http.StatusGatewayTimeout
+}
+
+func download(ctx context.Context, opts Options, url, localPath string, onProgress func(Progress), hc *http.Client) error {
 	autoChunk := opts.ChunkSize <= 0
 	opts.Normalize()
 	partPath := localPath + ".part"
 	statePath := localPath + ".state.json"
-
-	hc := NewHTTPClient(opts)
-	defer hc.CloseIdleConnections()
 
 	// Resolve size + range support.
 	total, acceptRanges, validator, err := probe(ctx, hc, opts, url)
@@ -476,7 +506,7 @@ func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int6
 			total = 0
 		}
 	default:
-		return 0, false, resourceValidator{}, &httpStatusError{stage: "probe", status: resp.StatusCode}
+		return 0, false, resourceValidator{}, responseStatusError("probe", resp)
 	}
 	if total <= 0 {
 		// Chunked CDN responses legitimately omit Content-Length. They cannot
@@ -577,7 +607,7 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-		return &httpStatusError{stage: "range", status: resp.StatusCode}
+		return responseStatusError("range", resp)
 	}
 	if resp.StatusCode == http.StatusOK {
 		if validator.ifRange() != "" {
@@ -668,7 +698,7 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 		return errResourceChanged
 	}
 	if resp.StatusCode != http.StatusOK {
-		return &httpStatusError{status: resp.StatusCode}
+		return responseStatusError("stream", resp)
 	}
 	if err := validator.verifyResponse(resp.Header); err != nil {
 		return err

@@ -56,8 +56,13 @@ func NewHTTPClient(opts Options) *http.Client {
 }
 
 type httpStatusError struct {
-	stage  string
-	status int
+	stage      string
+	status     int
+	retryAfter time.Duration
+}
+
+func responseStatusError(stage string, response *http.Response) error {
+	return &httpStatusError{stage: stage, status: response.StatusCode, retryAfter: retryAfter(response.Header.Get("Retry-After"), time.Now())}
 }
 
 func (err *httpStatusError) Error() string {
