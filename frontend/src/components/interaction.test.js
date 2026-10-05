@@ -663,6 +663,21 @@ describe('迅雷登录安全验证', () => {
     expect(api.CancelThunderLogin).toHaveBeenCalledWith('', 'session-1')
   })
 
+  it('内嵌验证使用左侧二级弹窗，Esc 只关闭验证，不关闭登录页', async () => {
+    api.ShowThunderVerification.mockResolvedValue(false)
+    const wrapper = await prepare()
+    const verification = document.querySelector('.verification-mask .login-verification')
+    expect(verification.getAttribute('aria-label')).toBe('迅雷官方安全验证')
+    expect(verification.querySelector('.modal-window-close')).not.toBeNull()
+    expect(document.querySelector('.login-form iframe')).toBeNull()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(document.querySelector('.login-verification')).toBeNull()
+    expect(document.querySelector('.login-modal')).not.toBeNull()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(api.CancelThunderLogin).toHaveBeenCalledWith('attempt-1', 'session-1')
+  })
+
   it('短信验证回传信任参数，不混入滑块 Token', async () => {
     const wrapper = await prepare()
     const notify = api.onEvent.mock.calls.find(([name]) => name === 'thunder:verification:completed')[1]
@@ -737,6 +752,7 @@ describe('密码和短信登录切换', () => {
     const wrapper = await prepare(id)
     expect(methods().map(button => button.textContent)).toEqual(['密码登录', '短信验证码登录'])
     expect(methods()[0].getAttribute('aria-pressed')).toBe('true')
+    expect(field('短信验证码').classList.contains('login-sms-field')).toBe(true)
     expect(wrapper.findComponent(UiSelect).exists()).toBe(false)
     expect(field('登录方式')).toBeUndefined()
     await setDomInput(field('密码').querySelector('input'), 'old-password')
@@ -1049,6 +1065,20 @@ afterEach(async () => {
 })
 
 describe('关键交互组件', () => {
+  it('无标题的通用二级弹窗也提供右上角关闭按钮', async () => {
+    const wrapper = mountAttached(Modal, { global: { stubs: { UiIcon: true } } })
+    await nextTick()
+    document.querySelector('.modal-head .modal-window-close').click()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('快捷命令面板提供独立关闭按钮', async () => {
+    const wrapper = mountAttached(QuickOpen, { props: { show: true }, global: { stubs: { UiIcon: true } } })
+    await nextTick()
+    document.querySelector('.qo-close').click()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
   it('添加网盘弹窗只保留紧凑标题，关闭键在标题栏末端', async () => {
     localStorage.setItem('login_provider', 'pikpak')
     const wrapper = mountAttached(LoginModal, {
@@ -1056,12 +1086,12 @@ describe('关键交互组件', () => {
       global: { stubs: { UiIcon: true } },
     })
     await nextTick()
-    const head = document.querySelector('.login-modal-head')
+    const head = document.querySelector('.login-modal .modal-head')
     expect(head.textContent.trim()).toBe('添加网盘')
-    expect(head.lastElementChild.classList.contains('login-close')).toBe(true)
-    expect(head.querySelector('.login-close').getAttribute('aria-label')).toBe('关闭添加网盘')
+    expect(head.querySelector('.modal-window-controls').lastElementChild.classList.contains('modal-window-close')).toBe(true)
+    expect(head.querySelector('.modal-window-close').getAttribute('aria-label')).toBe('关闭添加网盘')
     expect([...document.querySelectorAll('.login-actions .btn')]).toHaveLength(2)
-    head.querySelector('.login-close').click()
+    head.querySelector('.modal-window-close').click()
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
   it('切换网盘时选中高亮沿侧栏移动', async () => {

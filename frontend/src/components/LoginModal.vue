@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { login, saveMounted, validateMountedWrite, SendGuangyaSms, SendPan139SMS, SendPan189SMS, SendThunderSMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha, ShowPikPakCaptcha, ShowThunderVerification, CancelThunderLogin } from '../api'
 import UiIcon from './UiIcon.vue'
 import UiSelect from './UiSelect.vue'
+import Modal from './Modal.vue'
 import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
 import { driveErrorNotice } from '../workspace'
 
@@ -355,7 +356,6 @@ watch(availableProviders, (list) => {
   if (!list.some((p) => p.ID === providerId.value)) providerId.value = list[0].ID
 }, { immediate: true })
 
-function onKey(e) { if (e.key === 'Escape') emit('close') }
 onMounted(() => {
 	debug('login', 'login modal mounted', { provider: providerId.value })
   loginModalDisposed = false
@@ -364,7 +364,6 @@ onMounted(() => {
     providerListObserver = new ResizeObserver(() => updateProviderSelection())
     providerListObserver.observe(providerListEl.value)
   }
-  window.addEventListener('keydown', onKey)
   offThunderVerification = onEvent('thunder:verification:completed', (payload) => { void completeThunderVerification(payload) })
   offPikPakCaptchaCompleted = onEvent('pikpak:captcha:completed', (payload) => {
 	info('captcha', 'PikPak captcha completion event received', { session_id: String(payload?.session_id || ''), has_token: !!String(payload?.captcha_token || '').trim() })
@@ -377,7 +376,6 @@ onBeforeUnmount(() => {
   resetThunderVerification()
   offThunderVerification?.()
   providerListObserver?.disconnect()
-  window.removeEventListener('keydown', onKey)
   if (offPikPakCaptchaCompleted) offPikPakCaptchaCompleted()
   offPikPakCaptchaCompleted = null
   void closePikPakCaptchaSession()
@@ -814,15 +812,7 @@ async function submit() {
 </script>
 
 <template>
-  <teleport to="body">
-    <transition name="modal-fade">
-      <div class="modal-mask" @click.self="emit('close')">
-        <div class="modal login-modal">
-          <div class="modal-head login-modal-head">
-            <h3>添加网盘</h3>
-            <button type="button" class="login-close" title="关闭 (Esc)" aria-label="关闭添加网盘" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
-          </div>
-          <div class="login-body">
+  <Modal title="添加网盘" dialog-class="login-modal" body-class="login-body" :window-controls="false" close-label="关闭添加网盘" @close="emit('close')">
             <aside class="login-side">
               <div class="login-side-heading"><span>选择服务</span><span>{{ availableProviders.length }}</span></div>
               <div ref="providerListEl" class="login-provider-list" role="tablist" aria-label="网盘服务">
@@ -901,7 +891,7 @@ async function submit() {
                     <button v-for="method in loginMethodOptions" :key="method.value" type="button" :class="{ active: form.login_mode === method.value }" :aria-pressed="form.login_mode === method.value" :disabled="busy || smsBusy || thunderOpening" @click="form.login_mode = method.value">{{ method.label }}</button>
                   </div>
                   <div v-if="visibleFields.length" class="login-section">
-                    <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field">
+                    <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field" :class="{ 'login-sms-field': f.key === 'sms_code' && ['thunder', 'pan139', 'pan189', 'guangya'].includes(providerId) && !(providerId === 'guangya' && hasRefreshToken) }">
                       <label>{{ f.label }}</label>
                       <textarea v-if="isLongText(f.key) && f.type !== 'password'" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
@@ -933,7 +923,7 @@ async function submit() {
                   <UiIcon name="external" :size="12" /><span>{{ providerHelp.label }}</span>
                 </button>
 
-                <div v-if="thunderVerification" class="login-state-card captcha-box">
+                <div v-if="thunderVerification && (thunderNativeWindow || thunderOpening)" class="login-state-card captcha-box">
                   <div class="captcha-head">
                     <div>
                       <strong>请完成迅雷官方安全验证</strong>
@@ -941,7 +931,6 @@ async function submit() {
                     </div>
                     <button v-if="thunderNativeWindow" class="btn sm" type="button" :disabled="busy || thunderOpening" @click="openThunderVerification">打开验证窗口</button>
                   </div>
-                  <iframe v-if="!thunderNativeWindow && !thunderOpening" class="captcha-frame" :src="thunderVerification.url" title="迅雷官方安全验证" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
                   <div class="field-action-row">
                     <button class="btn sm" type="button" :disabled="busy || smsBusy || thunderOpening" @click="continueThunderVerification()">{{ thunderVerification.purpose === 'sms' ? '已完成验证，发送短信' : '已完成验证，继续登录' }}</button>
                     <button class="btn sm" type="button" :disabled="busy" @click="resetThunderVerification">取消验证</button>
@@ -949,7 +938,7 @@ async function submit() {
                 </div>
 
                 <!-- PikPak 滑块安全验证 -->
-                <div v-if="captchaUrl" class="login-state-card captcha-box">
+                <div v-if="captchaUrl && (captchaNativeWindow || captchaOpening)" class="login-state-card captcha-box">
                   <div class="captcha-head">
                     <div>
                       <strong>{{ captchaNativeWindow ? '请在独立窗口中完成安全验证' : '请完成安全验证' }}</strong>
@@ -958,15 +947,6 @@ async function submit() {
                     <button class="btn sm" type="button" :disabled="captchaSubmitting || pikpakCooldownSeconds > 0" @click="reloadCaptcha">重新加载</button>
                     <button v-if="captchaNativeWindow" class="btn sm" type="button" :disabled="captchaOpening || busy" @click="openCaptchaWindow">打开验证窗口</button>
                   </div>
-                  <iframe
-                    v-if="!captchaNativeWindow && !captchaOpening"
-                    class="captcha-frame"
-                    :src="captchaUrl"
-                    title="PikPak 安全验证"
-                    referrerpolicy="strict-origin-when-cross-origin"
-                    allow="clipboard-read; clipboard-write"
-                    @load="captchaFrameReady = true"
-                  ></iframe>
                 </div>
 
                 <!-- 统一错误提示（带 Shake 抖动动画） -->
@@ -983,30 +963,26 @@ async function submit() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      </div>
-    </transition>
-  </teleport>
+  </Modal>
+  <Modal v-if="thunderVerification && !thunderNativeWindow && !thunderOpening" title="迅雷官方安全验证" width="480px" dialog-class="login-verification" mask-class="verification-mask" :window-controls="false" @close="resetThunderVerification">
+    <p class="verification-hint">{{ thunderVerification.purpose === 'sms' ? '完成安全验证后发送短信验证码。' : '完成安全验证后继续登录。' }}</p>
+    <iframe class="captcha-frame" :src="thunderVerification.url" title="迅雷官方安全验证" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
+    <template #actions>
+      <button class="btn" type="button" :disabled="busy" @click="resetThunderVerification">取消验证</button>
+      <button class="btn primary" type="button" :disabled="busy || smsBusy || thunderOpening" @click="continueThunderVerification()">{{ thunderVerification.purpose === 'sms' ? '已完成验证，发送短信' : '已完成验证，继续登录' }}</button>
+    </template>
+  </Modal>
+  <Modal v-if="captchaUrl && !captchaNativeWindow && !captchaOpening" title="PikPak 安全验证" width="480px" dialog-class="login-verification" mask-class="verification-mask" :window-controls="false" @close="resetCaptcha(true)">
+    <p class="verification-hint">{{ captchaFrameReady ? '验证完成后将自动继续登录。' : '正在加载验证页面…' }}</p>
+    <iframe class="captcha-frame" :src="captchaUrl" title="PikPak 安全验证" referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write" @load="captchaFrameReady = true"></iframe>
+    <template #actions>
+      <button class="btn" type="button" :disabled="captchaSubmitting || pikpakCooldownSeconds > 0" @click="reloadCaptcha">重新加载</button>
+      <button class="btn" type="button" @click="resetCaptcha(true)">取消验证</button>
+    </template>
+  </Modal>
 </template>
 
 <style scoped>
-.login-modal-head {
-  height: 40px; min-height: 40px; flex: 0 0 40px; padding: 0 0 0 16px;
-  border-bottom: 1px solid var(--border-light);
-  background: var(--bg-surface);
-}
-.login-modal-head h3 { font-size: 14px; font-weight: 650; letter-spacing: 0; }
-.login-close {
-  display: inline-flex; align-items: center; justify-content: center;
-  align-self: stretch; width: 48px; height: 40px; margin-left: auto; padding: 0;
-  border: 0; border-radius: 0; background: transparent; color: var(--text-secondary);
-  cursor: pointer; transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
-  --wails-draggable: no-drag;
-}
-.login-close:hover { color: #fff; background: #c43d4b; }
-.login-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -3px; }
-.login-body { background: var(--bg-surface); }
 .login-side {
   display: flex; flex-direction: column; min-height: 0;
   padding: 14px 8px 10px;
@@ -1016,9 +992,10 @@ async function submit() {
 .login-side-heading span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: 0; }
 .login-provider-list {
   position: relative; display: grid; align-content: start; gap: 2px;
-  min-height: 0; overflow-y: auto; padding: 0 2px 0 0;
-  scrollbar-width: thin; scrollbar-gutter: stable;
+  min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0;
+  scrollbar-width: none; overscroll-behavior: contain;
 }
+.login-provider-list::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .lp-selection {
   position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none;
   border-radius: var(--radius-sm); background: var(--listselectbg);
@@ -1061,13 +1038,13 @@ async function submit() {
 }
 .login-provider-heading {
   display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
-  min-height: 68px; padding: 10px 24px;
+  min-height: 84px; padding: 18px 24px;
   border-bottom: 1px solid var(--border-lighter);
   color: var(--text-primary); font-size: 14px;
 }
-.login-provider-intro { display: grid; gap: 2px; min-width: 0; }
-.login-provider-intro strong { font-size: 14px; line-height: 1.2; }
-.login-provider-intro span { color: var(--text-tertiary); font-size: 11.5px; }
+.login-provider-intro { display: grid; gap: 5px; min-width: 0; }
+.login-provider-intro strong { font-size: 17px; line-height: 1.25; }
+.login-provider-intro span { color: var(--text-tertiary); font-size: 12px; }
 .login-provider-logo {
   display: inline-flex; align-items: center; justify-content: center;
   box-sizing: border-box; width: 40px; height: 40px; flex: 0 0 40px;
@@ -1081,9 +1058,10 @@ async function submit() {
 }
 .login-form-content {
   display: grid; align-content: start; gap: 16px; flex: 1; min-height: 0;
-  padding: 24px; overflow-y: auto; scrollbar-gutter: stable;
+  padding: 22px 24px; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain;
 }
-.login-section { display: grid; gap: 12px; width: min(100%, 480px); }
+.login-form-content::-webkit-scrollbar { display: none; }
+.login-section { display: grid; gap: 18px; width: 100%; min-width: 0; }
 .login-method-switch {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%;
   padding: 4px; box-sizing: border-box; border: 1px solid var(--border-light);
@@ -1099,6 +1077,18 @@ async function submit() {
 .login-method-switch > button:focus-visible { outline: none; box-shadow: var(--ring-focus); }
 .login-method-switch > button:disabled { cursor: wait; opacity: .62; }
 .login-field { margin: 0 !important; }
+.login-field > .input, .login-field .password-input-wrap > .input { min-height: 44px; padding-block: 10px; border-radius: var(--radius-sm); }
+.login-field > .textarea { border-radius: var(--radius-sm); }
+.login-sms-field { position: relative; }
+.login-sms-field > .input { padding-right: 150px; }
+.login-sms-field > .field-action-row { position: absolute; right: 5px; bottom: 5px; margin: 0; }
+.login-sms-field > .field-action-row .btn {
+  min-height: 34px; min-width: 122px; padding: 6px 10px;
+  border: 0; border-radius: var(--radius-xs); font-size: 12px; font-weight: 600;
+  color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 10%, var(--bg-surface));
+}
+.login-sms-field > .field-action-row .btn:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary) 18%, var(--bg-surface)); }
+.login-sms-field > .field-action-row .btn:disabled { cursor: not-allowed; opacity: .55; }
 .login-field > label {
   display: block;
   font-size: 12.5px;
@@ -1177,12 +1167,13 @@ async function submit() {
   flex-shrink: 0; margin: 0; padding: 12px 24px;
   border-top: 1px solid var(--border-light); background: var(--bg-surface);
 }
-.login-actions .btn { width: 104px; min-height: 36px; padding-inline: 8px; }
+.verification-hint { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.login-actions .btn { min-height: 40px; padding-inline: 18px; }
+.login-actions .btn.primary { flex: 1; }
 @media (max-width: 760px) {
   .login-side { width: 176px; }
 }
 @media (max-width: 640px) {
-  .login-modal-head { padding-left: 14px; }
   .login-side { display: block; padding: 7px 10px; }
   .login-side-heading { display: none; }
   .login-provider-list { display: flex; overflow-x: auto; overflow-y: hidden; padding: 0; }

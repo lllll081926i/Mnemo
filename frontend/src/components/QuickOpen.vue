@@ -164,6 +164,7 @@ function scrollActiveIntoView() {
               @keydown="onKeyDown"
             />
             <span class="qo-badge">{{ shortcutLabel }}</span>
+            <button type="button" class="qo-close" title="关闭 (Esc)" aria-label="关闭快捷命令面板" @click="emit('close')"><UiIcon name="close" :size="15" /></button>
           </div>
 
           <div ref="listEl" class="qo-list" role="listbox" aria-label="快捷命令">
@@ -210,9 +211,9 @@ function scrollActiveIntoView() {
   width: 570px;
   max-width: 92vw;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-light);
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-modal);
+  box-shadow: var(--shadow-modal), 0 0 0 1px var(--border-light);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -222,11 +223,14 @@ function scrollActiveIntoView() {
   align-items: center;
   gap: 10px;
   min-height: 58px;
-  padding: 12px 17px;
+  height: 58px; padding: 0 0 0 17px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-surface);
 }
 .qo-search-icon { color: var(--color-primary); flex-shrink: 0; }
+.qo-close { display: inline-flex; align-items: center; justify-content: center; align-self: stretch; flex: 0 0 44px; margin: 0; padding: 0; border: 0; border-radius: 0; color: var(--text-secondary); background: transparent; cursor: pointer; }
+.qo-close:hover { color: #fff; background: #c43d4b; }
+.qo-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -3px; }
 .qo-input {
   flex: 1;
   min-width: 0;

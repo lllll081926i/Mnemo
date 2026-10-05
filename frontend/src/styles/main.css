@@ -552,8 +552,9 @@ html.dark .account-rail .rail-active-indicator {
   display: flex; align-items: center; justify-content: center;
 }
 .modal {
-  background: var(--bg-elevated); border: 1px solid var(--border-light);
-  border-radius: var(--radius-xl); box-shadow: var(--shadow-modal);
+  background: var(--bg-elevated); border: 0;
+  border-radius: var(--radius-xl); box-shadow: var(--shadow-modal), 0 0 0 1px var(--border-light);
+  overflow: hidden;
   width: 460px; max-width: 92vw; max-height: 86vh;
   display: flex; flex-direction: column;
   transform-origin: center center;
@@ -565,14 +566,14 @@ html.dark .account-rail .rail-active-indicator {
   height: min(760px, 82vh);
   max-height: 82vh;
 }
-.modal.preview-modal .modal-head { min-height: 32px; padding-left: 12px; }
+.modal.preview-modal .modal-head { height: 32px; min-height: 32px; padding-left: 12px; }
 .modal.preview-modal .modal-window-btn { height: 32px; }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
-  min-height: 52px;
+  height: 52px; min-height: 52px; flex: none;
   padding: 0 0 0 20px;
 }
-.modal-head h3 { font-size: 16px; font-weight: 700; }
+.modal-head h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 700; }
 .modal-head-actions { display: flex; align-self: stretch; align-items: stretch; margin-left: auto; }
 .modal-head-extra { display: flex; align-items: center; }
 .modal-window-controls {
@@ -588,7 +589,7 @@ html.dark .account-rail .rail-active-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px; height: 52px;
+  width: 44px; height: 100%; flex: none;
   min-height: 0;
   margin: 0;
   padding: 0;
@@ -770,6 +771,11 @@ html.dark .account-rail .rail-active-indicator {
   border-right: 1px solid var(--border-light); overflow: hidden;
 }
 .login-form { flex: 1; min-width: 0; min-height: 0; }
+.modal.login-modal .modal-head { height: 40px; min-height: 40px; padding-left: 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); }
+.modal.login-modal .modal-head h3 { font-size: 14px; font-weight: 650; }
+.modal.login-modal .modal-window-btn { width: 48px; }
+.modal-mask.verification-mask { justify-content: flex-start; }
+.modal.login-verification { max-height: 94vh; }
 
 @media (max-width: 640px) {
   .login-modal { width: 92vw; height: 86vh; max-height: 86vh; }
@@ -778,7 +784,6 @@ html.dark .account-rail .rail-active-indicator {
     width: 100%; max-height: 142px;
     border-right: 0; border-bottom: 1px solid var(--border-lighter);
   }
-  .login-form { padding: 18px; }
 }
 
 /* ============ 传输页 ============ */

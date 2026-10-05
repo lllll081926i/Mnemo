@@ -7,6 +7,16 @@ const path = require('node:path')
 const output = process.env.QA_OUTPUT || path.join(require('node:os').tmpdir(), 'mnemo-workspace-qa')
 fs.mkdirSync(output, { recursive: true })
 
+async function assertDialogCorners(page) {
+  const offsets = await page.locator('.modal').evaluateAll(panels => panels.map(panel => {
+    const close = panel.querySelector('.modal-window-close')
+    const bounds = panel.getBoundingClientRect()
+    const button = close.getBoundingClientRect()
+    return { title: panel.getAttribute('aria-label'), top: button.top - bounds.top, right: bounds.right - button.right }
+  }))
+  for (const offset of offsets) assert(Math.abs(offset.top) < 1 && Math.abs(offset.right) < 1, `二级弹窗关闭键没有贴角：${JSON.stringify(offset)}`)
+}
+
 async function main() {
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -47,6 +57,40 @@ async function main() {
   try {
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:5173')
     await page.locator('.fileitem').first().waitFor()
+    if (process.env.QA_DIALOG_LAYOUT_ONLY === '1') {
+      const checked = []
+      async function checkDialog(title) {
+        await page.getByRole('dialog', { name: title, exact: true }).waitFor()
+        await assertDialogCorners(page)
+        checked.push(title)
+        await page.getByRole('button', { name: '关闭对话框', exact: true }).click()
+        await page.getByRole('dialog', { name: title, exact: true }).waitFor({ state: 'detached' })
+      }
+      for (const label of ['自定义', '账号信息']) {
+        await page.locator('.rail-item').first().click({ button: 'right' })
+        await page.getByRole('menuitem', { name: label, exact: true }).click()
+        await checkDialog(label)
+      }
+      await page.getByRole('button', { name: '全盘搜索', exact: true }).click()
+      await checkDialog('搜索')
+      await page.getByRole('button', { name: '分享', exact: true }).click()
+      await page.getByRole('button', { name: '导入分享', exact: true }).first().click()
+      await checkDialog('导入分享')
+      await page.getByRole('button', { name: '同步', exact: true }).click()
+      await page.getByTitle('编辑', { exact: true }).click()
+      await checkDialog('编辑同步任务')
+      await page.getByTitle('预览同步').click()
+      await checkDialog('同步预览')
+      await page.getByTitle('设置 (Alt+5)').click()
+      await page.getByRole('button', { name: '恢复', exact: true }).click()
+      await page.locator('.modal').waitFor()
+      await assertDialogCorners(page)
+      checked.push('恢复确认')
+      await page.getByRole('button', { name: '关闭对话框', exact: true }).click()
+      assert.deepEqual(errors, [], '二级弹窗布局检查不应产生浏览器错误')
+      console.log(JSON.stringify({ passed: true, checked, errors }, null, 2))
+      return
+    }
     assert(await page.locator('.fileitem').count() < 100, '10k files must stay virtualized')
     for (let i=0;i<10;i++) { await page.locator('.rail-item').nth(i).click(); await page.waitForTimeout(50) }
     await page.mouse.move(1000,100); await page.waitForTimeout(400)
@@ -59,6 +103,7 @@ async function main() {
     await page.screenshot({path:path.join(output,'dual-dark.png')})
     await page.getByRole('button',{name:'搜索',exact:true}).first().click()
     await page.getByPlaceholder('搜索所有账号的文件').fill('资料')
+    await assertDialogCorners(page)
     await page.locator('.modal').getByRole('button',{name:'搜索',exact:true}).click()
     await page.locator('.workspace-result').first().waitFor()
     await page.locator('.workspace-result').first().click()
@@ -66,6 +111,7 @@ async function main() {
     await page.getByRole('button',{name:'分享',exact:true}).click()
     await page.getByRole('button',{name:'导入分享',exact:true}).first().click()
     await page.getByPlaceholder('粘贴链接或分享文案').fill('资料 https://www.alipan.com/s/abc 提取码：A1b2')
+    await assertDialogCorners(page)
     assert.equal(await page.getByPlaceholder('没有提取码可留空').inputValue(),'A1b2')
     await page.getByRole('button',{name:'解析分享',exact:true}).click()
     await page.getByText('分享资料',{exact:true}).waitFor()
@@ -74,10 +120,12 @@ async function main() {
     await page.getByRole('button',{name:'同步',exact:true}).click()
     await page.getByTitle('预览同步').click()
     await page.getByText('资料.txt',{exact:true}).waitFor()
+    await assertDialogCorners(page)
     await page.screenshot({path:path.join(output,'sync.png')})
     await page.getByRole('button',{name:'执行',exact:true}).click()
     await page.getByTitle('设置 (Alt+5)').click()
     await page.getByRole('button',{name:'恢复',exact:true}).click()
+    await assertDialogCorners(page)
     await page.locator('.modal').getByRole('button',{name:'确定',exact:true}).click()
     await page.waitForTimeout(300)
     assert(await page.locator('html').evaluate(el=>el.classList.contains('oled')),'OLED preference restored')

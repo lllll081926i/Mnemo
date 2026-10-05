@@ -23,6 +23,9 @@ const props = defineProps({
   width: { type: String, default: '' },
   bodyClass: { type: String, default: 'modal-body' },
   dialogClass: { type: String, default: '' },
+  maskClass: { type: String, default: '' },
+  windowControls: { type: Boolean, default: true },
+  closeLabel: { type: String, default: '关闭对话框' },
   dialogStyle: { type: Object, default: () => ({}) },
   // 沉浸式媒体预览在自身舞台中提供关闭/窗口控制，不渲染通用实体标题栏。
   hideHead: { type: Boolean, default: false },
@@ -104,7 +107,7 @@ onBeforeUnmount(() => {
 <template>
   <teleport to="body">
     <transition name="modal-fade">
-      <div class="modal-mask" @click.self="emit('close')">
+      <div class="modal-mask" :class="maskClass" @click.self="emit('close')">
         <div
           ref="dialogEl"
           class="modal"
@@ -116,20 +119,20 @@ onBeforeUnmount(() => {
           tabindex="-1"
           @keydown="onDialogKeydown"
         >
-          <div v-if="!hideHead && (title || $slots.head)" class="modal-head">
+          <div v-if="!hideHead" class="modal-head">
             <slot name="head">
               <h3>{{ title }}</h3>
             </slot>
             <div class="modal-head-actions">
               <div class="modal-head-extra"><slot name="head-extra" /></div>
               <div class="modal-window-controls" aria-label="窗口控制">
-                <button type="button" class="modal-window-btn" title="最小化" aria-label="最小化窗口" @click="minimiseWindow">
+                <button v-if="windowControls" type="button" class="modal-window-btn" title="最小化" aria-label="最小化窗口" @click="minimiseWindow">
                   <UiIcon name="window-minimize" :size="14" />
                 </button>
-                <button type="button" class="modal-window-btn" :title="windowMaximized ? '还原窗口' : '最大化窗口'" :aria-label="windowMaximized ? '还原窗口' : '最大化窗口'" @click="toggleWindowMaximise">
+                <button v-if="windowControls" type="button" class="modal-window-btn" :title="windowMaximized ? '还原窗口' : '最大化窗口'" :aria-label="windowMaximized ? '还原窗口' : '最大化窗口'" @click="toggleWindowMaximise">
                   <UiIcon :name="windowMaximized ? 'window-restore' : 'window-maximize'" :size="14" />
                 </button>
-                <button type="button" class="modal-window-btn modal-window-close" title="关闭 (Esc)" aria-label="关闭对话框" @click="emit('close')">
+                <button type="button" class="modal-window-btn modal-window-close" title="关闭 (Esc)" :aria-label="closeLabel" @click="emit('close')">
                   <UiIcon name="close" :size="15" />
                 </button>
               </div>
