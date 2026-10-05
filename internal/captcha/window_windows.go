@@ -99,6 +99,53 @@ type captchaWindow struct {
 	readyOnce  sync.Once
 	closed     bool
 	visible    bool
+	bounds     nativeRECT
+	owner      uintptr
+}
+
+type nativeMonitorInfo struct {
+	Size    uint32
+	Monitor nativeRECT
+	Work    nativeRECT
+	Flags   uint32
+}
+
+func fitCaptchaWindow(anchor, work nativeRECT) nativeRECT {
+	width := min(int32(520), work.Right-work.Left)
+	height := min(int32(720), work.Bottom-work.Top)
+	left := max(work.Left, min(anchor.Left, work.Right-width))
+	top := max(work.Top, min(anchor.Top, work.Bottom-height))
+	return nativeRECT{Left: left, Top: top, Right: left + width, Bottom: top + height}
+}
+
+func nativeCaptchaBounds() (nativeRECT, uintptr) {
+	foreground, _, _ := captchaUser32.NewProc("GetForegroundWindow").Call()
+	var processID uint32
+	captchaUser32.NewProc("GetWindowThreadProcessId").Call(foreground, uintptr(unsafe.Pointer(&processID)))
+	owner := uintptr(0)
+	if foreground != 0 && processID == uint32(os.Getpid()) {
+		owner = foreground
+		if current, ok := nativeWindows.Load(owner); ok {
+			owner = current.(*captchaWindow).owner
+		}
+	}
+	monitorWindow := foreground
+	if owner != 0 {
+		monitorWindow = owner
+	}
+	monitor, _, _ := captchaUser32.NewProc("MonitorFromWindow").Call(monitorWindow, 2)
+	info := nativeMonitorInfo{}
+	info.Size = uint32(unsafe.Sizeof(info))
+	if ok, _, _ := captchaUser32.NewProc("GetMonitorInfoW").Call(monitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
+		return nativeRECT{Right: 520, Bottom: 720}, owner
+	}
+	anchor := info.Work
+	if owner != 0 {
+		if ok, _, _ := captchaUser32.NewProc("GetWindowRect").Call(owner, uintptr(unsafe.Pointer(&anchor))); ok == 0 {
+			anchor = info.Work
+		}
+	}
+	return fitCaptchaWindow(anchor, info.Work), owner
 }
 
 func startNativeWindow(ctx context.Context, session Session, rawURL, profile string, visible bool) error {
@@ -106,6 +153,7 @@ func startNativeWindow(ctx context.Context, session Session, rawURL, profile str
 		return err
 	}
 	w := &captchaWindow{ctx: ctx, session: session, url: rawURL, ready: make(chan error, 1), visible: visible}
+	w.bounds, w.owner = nativeCaptchaBounds()
 	go w.run(profile)
 	select {
 	case err := <-w.ready:
@@ -146,7 +194,7 @@ func (w *captchaWindow) run(profile string) {
 	if w.session.Provider == "thunder" {
 		title = windows.StringToUTF16Ptr("迅雷安全验证")
 	}
-	hwnd, _, err := captchaUser32.NewProc("CreateWindowExW").Call(0, uintptr(unsafe.Pointer(nativeClassName)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow|wsClipChildren, 0x80000000, 0x80000000, 520, 720, 0, 0, instance, 0)
+	hwnd, _, err := captchaUser32.NewProc("CreateWindowExW").Call(0, uintptr(unsafe.Pointer(nativeClassName)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow|wsClipChildren, uintptr(w.bounds.Left), uintptr(w.bounds.Top), uintptr(w.bounds.Right-w.bounds.Left), uintptr(w.bounds.Bottom-w.bounds.Top), w.owner, 0, instance, 0)
 	if hwnd == 0 {
 		w.signal(err)
 		return

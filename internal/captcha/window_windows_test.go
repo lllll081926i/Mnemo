@@ -33,6 +33,26 @@ func TestNativeThunderPageInitialization(t *testing.T) {
 	}
 }
 
+func TestCaptchaWindowAlignsWithLeftEdgeAndStaysInWorkArea(t *testing.T) {
+	for _, sample := range []struct {
+		name   string
+		anchor nativeRECT
+		work   nativeRECT
+		want   nativeRECT
+	}{
+		{name: "主窗口左侧", anchor: nativeRECT{Left: 180, Top: 80}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Left: 180, Top: 80, Right: 700, Bottom: 800}},
+		{name: "负坐标副屏", anchor: nativeRECT{Left: -1800, Top: 70}, work: nativeRECT{Left: -1920, Right: 0, Bottom: 1040}, want: nativeRECT{Left: -1800, Top: 70, Right: -1280, Bottom: 790}},
+		{name: "小屏保留完整窗口", anchor: nativeRECT{Left: 900, Top: 900}, work: nativeRECT{Left: 20, Top: 30, Right: 420, Bottom: 630}, want: nativeRECT{Left: 20, Top: 30, Right: 420, Bottom: 630}},
+		{name: "最大化边框越界", anchor: nativeRECT{Left: -8, Top: -8}, work: nativeRECT{Right: 1920, Bottom: 1040}, want: nativeRECT{Right: 520, Bottom: 720}},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			if got := fitCaptchaWindow(sample.anchor, sample.work); got != sample.want {
+				t.Fatalf("验证窗口位置 = %+v，期望 %+v", got, sample.want)
+			}
+		})
+	}
+}
+
 func TestNativeThunderCreditKeyIntercept(t *testing.T) {
 	results := make(chan VerificationResult, 1)
 	session, err := StartForProviderWithResult("thunder", func(_ Session, result VerificationResult) { results <- result })
