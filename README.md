@@ -8,13 +8,13 @@
 
 在一个应用中管理多个网盘：浏览文件、上传下载、跨盘迁移、双向同步、创建分享和在线播放。
 
-[![最新版本](https://img.shields.io/github/v/release/lllll081926i/mnemo-go?style=flat-square&color=7c6cf0)](https://github.com/lllll081926i/mnemo-go/releases/latest)
-[![构建状态](https://img.shields.io/github/actions/workflow/status/lllll081926i/mnemo-go/release.yml?style=flat-square&label=%E6%9E%84%E5%BB%BA)](https://github.com/lllll081926i/mnemo-go/actions/workflows/release.yml)
+[![最新版本](https://img.shields.io/github/v/release/lllll081926i/Mnemo?style=flat-square&color=7c6cf0)](https://github.com/lllll081926i/Mnemo/releases/latest)
+[![构建状态](https://img.shields.io/github/actions/workflow/status/lllll081926i/Mnemo/release.yml?style=flat-square&label=%E6%9E%84%E5%BB%BA)](https://github.com/lllll081926i/Mnemo/actions/workflows/release.yml)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-E0342F?style=flat-square)](https://wails.io/)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL--3.0-blue?style=flat-square)](LICENSE)
 
-[下载应用](https://github.com/lllll081926i/mnemo-go/releases/latest) · [功能概览](#核心能力) · [从源码构建](#从源码构建) · [项目文档](#文档与参与)
+[下载应用](https://github.com/lllll081926i/Mnemo/releases/latest) · [功能概览](#核心能力) · [从源码构建](#从源码构建) · [项目文档](#文档与参与)
 
 </div>
 
@@ -36,7 +36,7 @@ Mnemo 面向同时使用多个云存储服务的人。它不托管文件、不�
 
 ### 下载并安装
 
-从 [Releases](https://github.com/lllll081926i/mnemo-go/releases/latest) 下载适合系统架构的安装包。每个发布均附带 `SHA256SUMS.txt`，可用于校验下载完整性。
+从 [Releases](https://github.com/lllll081926i/Mnemo/releases/latest) 下载适合系统架构的安装包。每个发布均附带 `SHA256SUMS.txt`，可用于校验下载完整性。
 
 | 平台 | 架构 | 发布格式 |
 |---|---|---|

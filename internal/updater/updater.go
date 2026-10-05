@@ -24,7 +24,7 @@ import (
 
 const (
 	repoOwner      = "lllll081926i"
-	repoName       = "mnemo-go"
+	repoName       = "Mnemo"
 	apiReleases    = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
 	ReleasePage    = "https://github.com/" + repoOwner + "/" + repoName + "/releases/latest"
 	maxUpdateBytes = int64(2 << 30)

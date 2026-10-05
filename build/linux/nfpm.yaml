@@ -9,7 +9,7 @@ section: utils
 priority: optional
 maintainer: lllll081926
 description: Mnemo multi-drive file manager
-homepage: https://github.com/lllll081926i/mnemo-go
+homepage: https://github.com/lllll081926i/Mnemo
 license: MIT
 
 contents:

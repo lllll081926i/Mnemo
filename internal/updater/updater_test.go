@@ -14,6 +14,12 @@ import (
 	"mnemo-go/internal/netx"
 )
 
+func TestOfficialReleaseRepository(t *testing.T) {
+	if apiReleases != "https://api.github.com/repos/lllll081926i/Mnemo/releases/latest" || ReleasePage != "https://github.com/lllll081926i/Mnemo/releases/latest" {
+		t.Fatal("更新源与正式发布仓库不一致")
+	}
+}
+
 func TestParseChecksumsUsesOnlyValidSHA256Entries(t *testing.T) {
 	valid := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	got := parseChecksums([]byte(valid + "  Mnemo-windows-x64-Setup.exe\ninvalid  ignored\n"))

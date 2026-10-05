@@ -314,7 +314,7 @@ describe('网盘文件选择与目录切换', () => {
     expect(wrapper.vm.snapshot().files).toHaveLength(0)
   })
 
-  it('右键已选中的多项文件时下载整个选择集，纯文件夹不提供下载', async () => {
+  it('右键多项文件下载整个选择集，文件夹下载加入目录任务', async () => {
     api.capsOf.mockReturnValue({ download: true, rename: true })
     api.listDir.mockResolvedValue(files)
     api.download.mockResolvedValue(undefined)
@@ -335,7 +335,12 @@ describe('网盘文件选择与目录切换', () => {
     await flushPromises()
     expect(wrapper.find('.pan-file-toolbar').text()).not.toContain('下载')
     await wrapper.get('.fileitem').trigger('contextmenu')
-    expect([...document.querySelectorAll('.ctx-menu [role="menuitem"]')].some(item => item.textContent.includes('下载'))).toBe(false)
+    const folderDownload = [...document.querySelectorAll('.ctx-menu [role="menuitem"]')].find(item => item.textContent.trim() === '下载')
+    expect(folderDownload).toBeDefined()
+    folderDownload.click()
+    await flushPromises()
+    expect(api.download).toHaveBeenCalledTimes(3)
+    expect(api.download).toHaveBeenLastCalledWith(account.user_id, account.drive_id, expect.objectContaining({ file_id: 'folder', isDir: true }))
   })
 
   it('批量下载单项失败后继续入队其余文件，并报告实际成功数', async () => {

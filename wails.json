@@ -1,7 +1,10 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "Mnemo",
-  "version": "0.4.3",
+  "version": "0.4.4",
+  "info": {
+    "productVersion": "0.4.4"
+  },
   "outputfilename": "Mnemo",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",

@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26.6'
   NODE_VERSION: '20'
 
 permissions:
@@ -62,12 +62,14 @@ jobs:
           set -euo pipefail
           app_version="$(sed -nE 's/^const AppVersion = "([^"]+)"/\1/p' internal/config/config.go)"
           wails_version="$(node -p "require('./wails.json').version")"
+          product_version="$(node -p "require('./wails.json').info.productVersion")"
           frontend_version="$(node -p "require('./frontend/package.json').version")"
           lock_version="$(node -p "require('./frontend/package-lock.json').version")"
           lock_root_version="$(node -p "require('./frontend/package-lock.json').packages[''].version")"
           installer_version="$(sed -nE 's/^[[:space:]]*#define MyAppVersion "([^"]+)"/\1/p' build/windows/installer.iss)"
           test -n "$app_version"
           test "$app_version" = "$wails_version"
+          test "$app_version" = "$product_version"
           test "$app_version" = "$frontend_version"
           test "$app_version" = "$lock_version"
           test "$app_version" = "$lock_root_version"
@@ -87,6 +89,9 @@ jobs:
 
       - name: Run Go tests
         run: go test ./...
+
+      - name: Run Go race tests
+        run: go test -race ./...
 
       - name: Run frontend tests
         working-directory: frontend
@@ -322,8 +327,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          expected_assets=(
+            Mnemo-windows-x64-Setup.exe
+            Mnemo-windows-arm64-Setup.exe
+            Mnemo-linux-x64.deb
+            Mnemo-linux-x64.rpm
+            Mnemo-linux-x64.pkg.tar.zst
+            Mnemo-linux-x64.AppImage
+            Mnemo-linux-x64.tar.gz
+            Mnemo-linux-arm64.deb
+            Mnemo-linux-arm64.rpm
+            Mnemo-linux-arm64.pkg.tar.zst
+            Mnemo-linux-arm64.AppImage
+            Mnemo-linux-arm64.tar.gz
+            Mnemo-macos-arm64.dmg
+            Mnemo-macos-arm64.tar.gz
+          )
+          for asset in "${expected_assets[@]}"; do
+            test -s "release-assets/$asset"
+          done
+          test "$(find release-assets -maxdepth 1 -type f ! -name SHA256SUMS.txt | wc -l)" -eq "${#expected_assets[@]}"
           find release-assets -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 \
             | sort -z | xargs -0 sha256sum | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
 
       - name: Create or update GitHub Release
         env:
@@ -340,9 +366,17 @@ jobs:
           fi
           is_pre='false'
           [[ "$tag" == *preview* || "$tag" == *beta* || "$tag" == *rc* || "$tag" == *alpha* ]] && is_pre='true'
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            if [[ "$is_pre" == 'true' ]]; then gh release create "$tag" --verify-tag --title="Mnemo $tag" "${notes_args[@]}" --prerelease
-            else gh release create "$tag" --verify-tag --title="Mnemo $tag" "${notes_args[@]}" --latest
+          if gh release view "$tag" >/dev/null 2>&1; then
+            test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = 'true' || { echo '已公开版本不能覆盖，请创建新版本'; exit 1; }
+            gh release edit "$tag" --title="Mnemo $tag" "${notes_args[@]}"
+          else
+            if [[ "$is_pre" == 'true' ]]; then gh release create "$tag" --verify-tag --draft --title="Mnemo $tag" "${notes_args[@]}" --prerelease
+            else gh release create "$tag" --verify-tag --draft --title="Mnemo $tag" "${notes_args[@]}"
             fi
           fi
           find release-assets -maxdepth 1 -type f -print0 | xargs -0 gh release upload "$tag" --clobber
+          if [[ "$is_pre" == 'true' ]]; then
+            gh release edit "$tag" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$tag" --draft=false --prerelease=false --latest
+          fi
