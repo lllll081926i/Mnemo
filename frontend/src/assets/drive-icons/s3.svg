@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 101.8 101.9">
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  <g transform="matrix(0.72 0 0 0.72 3.3 3.3)">
+    
 <!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
   <style type="text/css">.cls-0 {fill:#F4F5F7;}
 .cls-1 {fill:#FFFFFF;stroke:#E6E7EA;stroke-miterlimit:10;}
@@ -50,4 +53,6 @@
   <polygon class="cls-7" points="30.9 46.7 50.1 56.5 69.4 46.8 68.4 46.3 50.2 55.4 33.1 46.8 49.9 38 50 37.3"/>
   <polygon class="cls-7" points="29.4 49.1 29.6 49.6 46.9 59 48.1 59 48.1 86.9 48.7 86.9 48.7 59"/>
   <polygon class="cls-7" points="51.7 59 51.8 87 52.4 86.6 52.4 59.4 70.8 49.7 70.8 49.3"/>
+
+  </g>
 </svg>

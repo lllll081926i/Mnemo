@@ -1,1 +1,6 @@
-<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg t="1721573529765" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="4580" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200"><path d="M301.227 35.776L0 232.469l208.277 166.784L512 211.712zM0 566.037l301.227 196.694L512 586.795 208.277 399.253z m512 20.758L722.773 762.73 1024 566.037 815.723 399.253z m512-354.347L722.773 35.776 512 211.712l303.723 187.52z" fill="#007BE9" p-id="4581"></path><path d="M512.619 624.64L301.205 800.043l-90.453-59.051v66.219l301.867 181.013 301.866-181.013v-66.219l-90.453 59.05z" fill="#007BE9" p-id="4582"></path></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  <g transform="translate(8.5, 11.5) scale(0.0615)">
+    <path d="M260.6 0L0 166.4L188.7 320L449.3 153.6L260.6 0ZM763.4 0L574.7 153.6L835.3 320L1024 166.4L763.4 0ZM0 473.6L260.6 640L449.3 486.4L188.7 320L0 473.6ZM835.3 320L574.7 486.4L763.4 640L1024 473.6L835.3 320ZM512 537.6L323.3 691.2L260.6 640V704L512 870.4L763.4 704V640L700.7 691.2L512 537.6Z" fill="#0061FE"/>
+  </g>
+</svg>

@@ -1,11 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
-  <style type="text/css">.cls-0 {fill:url(#SVGID_1_);}
+  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  <g transform="matrix(1.38 0 0 1.38 -15.2 -15.2)">
+    <style type="text/css">.cls-0 {fill:url(#SVGID_1_);}
 .cls-1 {opacity:0.9;fill:#F672E0;}
 .cls-2 {fill:#0CE1EF;}
 .cls-3 {fill:url(#SVGID_2_);}
 .cls-4 {fill:url(#SVGID_3_);}
 .cls-5 {fill:#3ED1FE;}</style>
-  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  
   <g transform="translate(19.0, 14.24) scale(0.28)">
     <linearGradient id="SVGID_1_" x1="61" x2="141.7" y1="59.23" y2="59.23" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FD6DE9" offset="0"/>
@@ -36,5 +38,6 @@
     </linearGradient>
     <path d="m62 67c0-7-1.6-13.4-3.9-20.8l-20.7 12.3c-16.6 9.3-31.9 27.9-32.8 49.7l-0.2 4.8c-0.4 10.2 2.1 21.5 6.5 33.4l51.1-30.8v-48.6z" fill="url(#SVGID_5_)"/>
     <path class="cls-5" d="m17.8 148.2c7.7 11.7 21.7 24.5 44 27.1v-53.7l-44 26.6z"/>
+  </g>
   </g>
 </svg>

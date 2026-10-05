@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144.9 154">
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+  <rect width="80" height="80" rx="18" fill="#5B93E8"/>
+  <g transform="matrix(0.66 0 0 0.66 -7.8 -11.0)">
+    
 <!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
   <style type="text/css">.cls-0 {fill:#F6F7FA;}
 .cls-1 {fill:url(#SVGID_1_);}
@@ -28,4 +31,6 @@
     <stop stop-color="#2EC1EE" offset="1"/>
   </linearGradient>
   <path d="m105.9 56.3c-3-8.7-12.6-23.2-33.1-23-14.5 0-26.7 9.2-32.8 23.4-7.1 1.4-22.2 9.1-22 26.7 0.2 8.5 6.6 27.1 26.8 27.7h13.2v-10.1h-12c-10.5 0-18.3-7.1-18.5-17.4s8.1-18 20.1-17.8c1-7.9 7.8-23.6 25.4-24.2 12.7-0.2 23.5 11 25.1 24.1 11-0.7 19.8 6.6 20.2 17.6 0 6.5-5 17-17 17.5h-13.3v10.3h13.7c8.9-0.1 26.2-6.8 26.5-27.7-0.4-12.2-9.2-24.8-22.3-27.1z" fill="none" stroke="url(#SVGID_4_)" stroke-linejoin="round" stroke-miterlimit="10" stroke-width="1.043"/>
+
+  </g>
 </svg>

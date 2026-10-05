@@ -1,10 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
-  <style type="text/css">.cls-0 {fill:url(#SVGID_1_);}
+  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  <g transform="matrix(1.42 0 0 1.42 -16.8 -16.8)">
+    <style type="text/css">.cls-0 {fill:url(#SVGID_1_);}
 .cls-1 {fill:#2E78BC;}
 .cls-2 {opacity:0.3;fill:url(#SVGID_2_);enable-background:new    ;}
 .cls-3 {fill:url(#SVGID_3_);}
 .cls-4 {opacity:0.6;fill:none;stroke:#8AB9DA;stroke-width:1.055;stroke-miterlimit:10;}</style>
-  <rect width="80" height="80" rx="18" fill="#FFFFFF"/>
+  
   <g transform="translate(13.56, 22.9) scale(0.36)">
     <linearGradient id="SVGID_1_" x1="88.11" x2="61.8" y1="-1.058" y2="76.34" gradientTransform="matrix(1 0 0 -1 0 84)" gradientUnits="userSpaceOnUse">
       <stop stop-color="#2EB2FB" offset="0"/>
@@ -29,5 +31,6 @@
       <stop stop-color="#DFEFFA" offset="1"/>
     </linearGradient>
     <path d="m63.8 47.7c-3.8-9.3-8.8-22.3-20.8-22.7-10.6-0.9-21.8 7-21.1 20.5-10.2 2.2-18.9 9.5-18.9 21.5 0 12.7 8.9 24.2 22.6 24.2l79.4-0.2c-5.8-0.6-31-9.7-41.2-43.3z" enable-background="new" fill="url(#SVGID_4_)" opacity=".6"/>
+  </g>
   </g>
 </svg>
