@@ -34,6 +34,14 @@ type UploadQueue struct {
 	generations     map[string]uint64
 	handlerResolver func(userID, driveID string) (func(context.Context, *model.UploadingUI) error, error)
 	persistMu       sync.Mutex
+	workers         sync.WaitGroup
+	closeOnce       sync.Once
+	speedSamples    map[string]uploadSpeedSample
+}
+
+type uploadSpeedSample struct {
+	at   time.Time
+	done int64
 }
 
 type uploadRun struct {
@@ -70,6 +78,7 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 		sem:             make(chan struct{}, maxConc),
 		runs:            map[string]*uploadRun{},
 		generations:     map[string]uint64{},
+		speedSamples:    map[string]uploadSpeedSample{},
 		handlerResolver: drive.QueueUploadHandler,
 	}
 	if !keepTasks {
@@ -81,10 +90,13 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 	if list, err := st.ListUploadTasks(); err == nil {
 		for i := range list {
 			j := list[i]
-			if j.Upload.IsDowning {
+			if !j.Upload.IsCompleted && !j.Upload.IsFailed {
 				j.Upload.IsDowning = false
+				j.Upload.IsStop = true
 				j.Upload.DownState = "paused"
 			}
+			j.Upload.DownSpeed = 0
+			j.Upload.DownSpeedStr = ""
 			q.jobs[j.UploadID] = &j
 		}
 	}
@@ -114,8 +126,8 @@ func (q *UploadQueue) update(j *model.UploadingUI) {
 		return
 	}
 	q.mu.Lock()
-	q.jobs[j.UploadID] = j
 	snapshot := *j
+	q.jobs[j.UploadID] = &snapshot
 	shouldPersist := q.shouldPersistLocked(snapshot)
 	q.mu.Unlock()
 	q.publishSnapshot(snapshot, shouldPersist)
@@ -145,7 +157,18 @@ func (q *UploadQueue) mutateJob(id string, mutate func(*model.UploadingUI)) bool
 func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist bool) {
 	if shouldPersist {
 		q.persistMu.Lock()
-		_ = q.store.SaveUploadTask(&snapshot)
+		q.mu.Lock()
+		current := q.jobs[snapshot.UploadID]
+		if current == nil {
+			q.mu.Unlock()
+			q.persistMu.Unlock()
+			return
+		}
+		snapshot = *current
+		q.mu.Unlock()
+		if err := q.store.SaveUploadTask(&snapshot); err != nil {
+			logging.Warn("上传任务保存失败", "job_id", snapshot.UploadID, "error", err)
+		}
 		q.persistMu.Unlock()
 	}
 	if q.onEvent != nil {
@@ -154,6 +177,7 @@ func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist 
 			ID: snapshot.UploadID, Name: snapshot.Info.Name, Size: snapshot.Info.Size,
 			Downloaded: snapshot.Upload.DownSize, Speed: snapshot.Upload.DownSpeed,
 			Progress: snapshot.Upload.DownProcess, Status: uploadStatus(snapshot.Upload),
+			UserID: snapshot.UserID, DriveID: snapshot.Info.DriveID, Error: snapshot.Upload.FailedMessage,
 			Created: snapshot.Upload.DownTime, Updated: time.Now().Unix(),
 		}
 		q.onEvent(TaskEvent{Kind: "upload", Task: t})
@@ -189,6 +213,18 @@ func (q *UploadQueue) reportRunProgress(id string, generation uint64, done int64
 	j.Upload.DownProcess = percent
 	j.Upload.Stage = "uploading"
 	j.Upload.StageProgress = percent
+	if sample, exists := q.speedSamples[id]; exists {
+		if done < sample.done {
+			j.Upload.DownSpeed = 0
+			q.speedSamples[id] = uploadSpeedSample{at: now, done: done}
+		} else if elapsed := now.Sub(sample.at); elapsed >= 500*time.Millisecond {
+			j.Upload.DownSpeed = int64(float64(done-sample.done) / elapsed.Seconds())
+			q.speedSamples[id] = uploadSpeedSample{at: now, done: done}
+		}
+	} else {
+		q.speedSamples[id] = uploadSpeedSample{at: now, done: done}
+	}
+	j.Upload.DownSpeedStr = model.FormatBytes(j.Upload.DownSpeed) + "/s"
 	last := q.lastProgress[id]
 	publish := last.IsZero() || now.Sub(last) >= 500*time.Millisecond || percent >= 100
 	if publish {
@@ -267,6 +303,9 @@ func (q *UploadQueue) AddFiles(userID, driveID, parentID, conflictPolicy string,
 }
 
 func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPath, name string, size int64) *model.UploadingUI {
+	if q.ctx.Err() != nil {
+		return nil
+	}
 	relative := normalizeUploadPath(name)
 	if relative == "" {
 		relative = normalizeUploadPath(filepath.Base(localPath))
@@ -405,6 +444,10 @@ func isMnemoEditTemp(path string) bool {
 
 func (q *UploadQueue) startUpload(id string) error {
 	q.mu.Lock()
+	if q.ctx.Err() != nil {
+		q.mu.Unlock()
+		return errors.New("上传服务已停止")
+	}
 	j, ok := q.jobs[id]
 	if !ok {
 		q.mu.Unlock()
@@ -424,6 +467,7 @@ func (q *UploadQueue) startUpload(id string) error {
 	}
 	userID := j.UserID
 	driveID := j.Info.DriveID
+	q.workers.Add(1)
 	q.mu.Unlock()
 
 	go q.runUpload(userID, driveID, id, generation, ctx)
@@ -435,6 +479,7 @@ func (q *UploadQueue) finishUploadRun(id string, generation uint64) {
 	if run, ok := q.runs[id]; ok && run.generation == generation {
 		delete(q.runs, id)
 		delete(q.lastProgress, id)
+		delete(q.speedSamples, id)
 		close(run.done)
 	}
 	q.mu.Unlock()
@@ -524,6 +569,7 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 // for a global concurrency slot and runs under a cancelable context so Cancel
 // can stop the provider request, not just flip a UI flag.
 func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, ctx context.Context) {
+	defer q.workers.Done()
 	defer q.finishUploadRun(id, generation)
 	q.mu.Lock()
 	run := q.runs[id]
@@ -555,6 +601,8 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 			return
 		}
 		j.Upload.IsDowning = true
+		j.Upload.DownSpeed = 0
+		j.Upload.DownSpeedStr = ""
 		j.Upload.DownState = "uploading"
 		j.Upload.Stage = "uploading"
 		j.Upload.StageProgress = 0
@@ -687,6 +735,8 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		j.Upload.IsStop = false
 		j.Upload.IsFailed = false
 		j.Upload.IsCompleted = true
+		j.Upload.DownSpeed = 0
+		j.Upload.DownSpeedStr = ""
 		j.Upload.DownProcess = 100
 		j.Upload.DownSize = j.Info.Size
 		j.Upload.DownState = "completed"
@@ -719,16 +769,24 @@ func (q *UploadQueue) Cancel(id string) {
 		j.Upload.IsStop = true
 		j.Upload.IsDowning = false
 		j.Upload.DownState = "stopped"
+		j.Upload.DownSpeed = 0
+		j.Upload.DownSpeedStr = ""
+		snapshot := *j
+		shouldPersist := q.shouldPersistLocked(snapshot)
+		q.mu.Unlock()
+		q.publishSnapshot(snapshot, shouldPersist)
+		return
 	}
 	q.mu.Unlock()
-	if ok {
-		q.update(j)
-	}
 }
 
 // Resume restarts a paused, failed or stopped job.
 func (q *UploadQueue) Resume(id string) error {
 	q.mu.Lock()
+	if q.ctx.Err() != nil {
+		q.mu.Unlock()
+		return errors.New("上传服务已停止")
+	}
 	j, ok := q.jobs[id]
 	if !ok {
 		q.mu.Unlock()
@@ -751,8 +809,10 @@ func (q *UploadQueue) Resume(id string) error {
 	j.Upload.IsFailed = false
 	j.Upload.FailedMessage = ""
 	j.Upload.DownState = "queued"
+	snapshot := *j
+	shouldPersist := q.shouldPersistLocked(snapshot)
 	q.mu.Unlock()
-	q.update(j)
+	q.publishSnapshot(snapshot, shouldPersist)
 	return q.startUpload(id)
 }
 
@@ -768,6 +828,7 @@ func (q *UploadQueue) ClearCompleted() {
 			delete(q.lastPersist, id)
 			delete(q.generations, id)
 			delete(q.lastProgress, id)
+			delete(q.speedSamples, id)
 		}
 	}
 	q.mu.Unlock()
@@ -790,24 +851,29 @@ func DownloadDir(st *store.Store) (string, error) {
 
 // Close cancels all in-flight uploads and persists pending state.
 func (q *UploadQueue) Close() {
-	if q.cancel != nil {
+	q.closeOnce.Do(func() {
+		q.mu.Lock()
 		q.cancel()
-	}
-	q.mu.Lock()
-	var pending []*model.UploadingUI
-	for _, run := range q.runs {
-		run.cancel()
-	}
-	for _, j := range q.jobs {
-		if !j.Upload.IsCompleted && !j.Upload.IsFailed && !j.Upload.IsStop {
-			snapshot := *j
-			pending = append(pending, &snapshot)
+		for _, run := range q.runs {
+			run.cancel()
 		}
-	}
-	q.mu.Unlock()
-	q.persistMu.Lock()
-	for _, j := range pending {
-		_ = q.store.SaveUploadTask(j)
-	}
-	q.persistMu.Unlock()
+		q.mu.Unlock()
+		q.workers.Wait()
+		q.mu.Lock()
+		var pending []model.UploadingUI
+		for _, job := range q.jobs {
+			if !job.Upload.IsCompleted && !job.Upload.IsFailed {
+				job.Upload.IsDowning = false
+				job.Upload.IsStop = true
+				job.Upload.DownState = "paused"
+				job.Upload.DownSpeed = 0
+				job.Upload.DownSpeedStr = ""
+				pending = append(pending, *job)
+			}
+		}
+		q.mu.Unlock()
+		for _, job := range pending {
+			q.publishSnapshot(job, true)
+		}
+	})
 }
