@@ -1,5 +1,7 @@
 # 迅雷网盘接入规范
 
+首版范围保留为历史提案。2026-10-05 已扩展容量、回收站和分享能力，当前契约以 `THUNDER_QUOTA_TRASH_SHARE.md` 及 `docs/providers/thunder.md` 为准。
+
 ## 首版范围
 
 - 插件 ID 为 `thunder`，与既有账号隔离；统一走 `drive.Driver` 和能力声明。
