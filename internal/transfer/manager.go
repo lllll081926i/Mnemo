@@ -217,6 +217,15 @@ func (m *Manager) loadPersisted() {
 			t.Status = "paused" // interrupted on exit
 			dirty = true
 		}
+		if !t.IsDir && (t.Status == "paused" || t.Status == "failed") && t.UserID != "" {
+			resourceID := t.UserID + "\x00" + t.DriveID + "\x00" + t.FileID
+			if checkpoint, ok := dlengine.CheckpointProgress(t.LocalPath, resourceID); ok {
+				t.Downloaded, t.Size, t.Progress = checkpoint.Downloaded, checkpoint.Total, checkpoint.Percent
+				dirty = true
+			}
+			dirty = dirty || t.Speed != 0 || t.Stage != ""
+			t.Speed, t.Stage = 0, ""
+		}
 		if t.UserID == "" && t.Status != "completed" && t.Status != "canceled" {
 			t.Status = "failed"
 			t.Error = "直链任务的地址和请求头不会落盘；应用重启后请重新添加任务"
