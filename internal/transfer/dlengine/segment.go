@@ -52,13 +52,14 @@ type Options struct {
 	// ExpectedSize is optional provider metadata. It is used only when the
 	// download server omits Content-Length, so a chunked response can still
 	// report progress and be verified after a single-stream download.
-	ExpectedSize          int64
-	ResourceID            string
-	Limiter               RateLimiter
-	Headers               map[string]string
-	UserAgent             string
-	ReadIdleTimeout       time.Duration
-	RetrySingleConnection bool
+	ExpectedSize              int64
+	ResourceID                string
+	Limiter                   RateLimiter
+	Headers                   map[string]string
+	UserAgent                 string
+	ReadIdleTimeout           time.Duration
+	RetrySingleConnection     bool
+	AllowLastModifiedFallback bool
 	// RequestAuth runs after static headers are applied, once per outbound
 	// request. It is used for request-bound schemes such as HTTP Digest.
 	RequestAuth func(*http.Request) error
@@ -124,6 +125,7 @@ type resourceValidator struct {
 
 var (
 	errResourceChanged      = errors.New("dlengine: remote resource changed")
+	errLastModifiedChanged  = fmt.Errorf("%w: Last-Modified no longer matches", errResourceChanged)
 	errInvalidRangeResponse = errors.New("dlengine: invalid range response")
 	errShortRangeResponse   = errors.New("dlengine: server returned a shorter valid range")
 	errRangeIgnored         = errors.New("dlengine: server ignored range request")
@@ -425,7 +427,8 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 	if checkpointErr := persistState(statePath, st); checkpointErr != nil {
 		return errors.Join(err, checkpointErr)
 	}
-	if errors.Is(err, errRangeIgnored) && ctx.Err() == nil {
+	lastModifiedFallback := opts.AllowLastModifiedFallback && errors.Is(err, errLastModifiedChanged)
+	if (errors.Is(err, errRangeIgnored) || lastModifiedFallback) && ctx.Err() == nil {
 		// No ranged body was accepted from the rejecting request. All workers
 		// are now stopped; restart as a full stream rather than retrying an
 		// unsupported range forever. If-Range identity failures stay errors.
@@ -436,6 +439,11 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 		// survive an interrupted fallback and be reused on a later attempt.
 		if removeErr := os.Remove(statePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			return removeErr
+		}
+		if lastModifiedFallback {
+			logging.Warn("download restarted as full stream", "reason", "last_modified_mismatch", "configured_connections", opts.Concurrency)
+			validator.LastModified = ""
+			opts.AllowLastModifiedFallback = false
 		}
 		return singleStream(ctx, hc, opts, url, localPath, total, validator, onProgress)
 	}
@@ -544,7 +552,7 @@ func resumeIdentityMatches(previous state, current resourceValidator) bool {
 		return previous.ETag != "" && current.ETag != "" && previous.ETag == current.ETag
 	}
 	if previous.LastModified != "" || current.LastModified != "" {
-		return previous.LastModified != "" && current.LastModified != "" && previous.LastModified == current.LastModified
+		return previous.LastModified != "" && current.LastModified != "" && lastModifiedMatches(previous.LastModified, current.LastModified)
 	}
 	return true
 }
@@ -555,6 +563,15 @@ func strongETag(value string) string {
 		return ""
 	}
 	return value
+}
+
+func lastModifiedMatches(expected, actual string) bool {
+	if expected == actual {
+		return true
+	}
+	expectedTime, expectedErr := http.ParseTime(expected)
+	actualTime, actualErr := http.ParseTime(actual)
+	return expectedErr == nil && actualErr == nil && expectedTime.Equal(actualTime)
 }
 
 func (v resourceValidator) ifRange() string {
@@ -576,13 +593,17 @@ func (v resourceValidator) setFullRequestCondition(req *http.Request) {
 
 func (v resourceValidator) verifyResponse(header http.Header) error {
 	if v.ETag != "" {
-		if responseETag := strings.TrimSpace(header.Get("ETag")); responseETag != "" && responseETag != v.ETag {
+		responseETag := strings.TrimSpace(header.Get("ETag"))
+		if responseETag != "" && responseETag != v.ETag {
 			return fmt.Errorf("%w: ETag no longer matches", errResourceChanged)
+		}
+		if responseETag == v.ETag && strongETag(v.ETag) != "" {
+			return nil
 		}
 	}
 	if v.LastModified != "" {
-		if responseModified := strings.TrimSpace(header.Get("Last-Modified")); responseModified != "" && responseModified != v.LastModified {
-			return fmt.Errorf("%w: Last-Modified no longer matches", errResourceChanged)
+		if responseModified := strings.TrimSpace(header.Get("Last-Modified")); responseModified != "" && !lastModifiedMatches(v.LastModified, responseModified) {
+			return errLastModifiedChanged
 		}
 	}
 	return nil
@@ -701,6 +722,18 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 		return responseStatusError("stream", resp)
 	}
 	if err := validator.verifyResponse(resp.Header); err != nil {
+		if opts.AllowLastModifiedFallback && errors.Is(err, errLastModifiedChanged) && ctx.Err() == nil {
+			if removeErr := os.Remove(localPath + ".state.json"); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return removeErr
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return closeErr
+			}
+			logging.Warn("download restarted as full stream", "reason", "last_modified_mismatch", "configured_connections", opts.Concurrency)
+			validator.LastModified = ""
+			opts.AllowLastModifiedFallback = false
+			return singleStream(ctx, hc, opts, url, localPath, total, validator, onProgress)
+		}
 		return err
 	}
 	if resp.ContentLength >= 0 {

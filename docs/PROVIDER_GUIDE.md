@@ -86,6 +86,7 @@ UI 使用 `App.AddFavorite` / `App.RemoveFavorite` / `App.ListFavorites`；本�
 - `DownloadMode`、`ForceLocalProxy` 用于前端/播放策略，不隐含限制本地下载并发。
 - `Concurrency > 0` 表示插件允许的请求并发上限；最终值不超过用户单文件设置。0 表示使用用户设置，而不是单请求。
 - `RetrySingleConnection` 是不序列化到前端的可选恢复策略；分段请求遇到短期 HTTP 服务错误且常规重试耗尽后，降为单连接重试一次。权限、限流、长时间 Retry-After、校验和本地文件错误不降级。当前仅迅雷启用，普通下载与目录同步消费该策略。
+- `AllowLastModifiedFallback` 是仅供后端消费的可选策略，当前仅光鸭启用。修改时间响应不一致且没有匹配的强 ETag 时，停止分段并废弃旧断点，以完整单流重新下载一次；不复用旧分片，不忽略 ETag 或长度变化。正常分段下载不限制并发。
 - `ChunkSize > 0` 为显式分片大小；0 使用下载器自适应策略。没有真实协议/账号证据时，不擅自增减插件现有连接限制。
 - `RequestAuth` 为请求绑定鉴权器，必须可为每次请求重新签名。Digest 需要保序时应同时声明 `Concurrency: 1`。
 - 普通账号下载每次启动/恢复重新取得完整源；不能只缓存 URL 而丢弃头、鉴权器和策略。

@@ -555,6 +555,7 @@ func downloadToWithOptions(ctx context.Context, u *model.DownloadURL, path strin
 	}
 	opts.ChunkSize = u.ChunkSize
 	opts.RetrySingleConnection = u.RetrySingleConnection
+	opts.AllowLastModifiedFallback = u.AllowLastModifiedFallback
 	opts.ExpectedSize = u.Size
 	if u.DriveID != "" && u.FileID != "" {
 		opts.ResourceID = u.DriveID + "\x00" + u.FileID

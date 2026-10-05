@@ -36,6 +36,8 @@ ShareExpirationOptions: [0, 1, 7, 30]
 
 ## 3. 下载（guangya.go）
 
+2026-10-05 修复下载探测与分段响应 `Last-Modified` 不一致导致立即失败的问题。相同强 ETag 优先确认资源身份，HTTP 日期按时间值比较而不是原始文本比较。光鸭启用内部 `AllowLastModifiedFallback`：无法以强 ETag 确认且修改时间不一致时，停止所有分段、废弃旧分片断点，从头下载一条完整响应；保留 ETag 条件和总长度校验，不混合旧分片。正常响应仍遵从用户并发设置。普通下载与目录同步均消费该策略。已完成本地 HTTP 回归，真实 CDN 下载仍需账号验收。
+
 下载器兼容 Range 探测返回 `200 + Content-Length: 1` 的响应：不把该 1 字节当作完整文件大小，有效 `Content-Range` 可用于取总大小，但只有 `206` 才启用分段。单流开始后以完整响应的 `Content-Length` 更新任务大小，缺少长度时回退已知文件大小或在完成后记录实际字节数。前后端百分比均限制在 0–100%，历史异常进度也不会撑破进度条。对应回归测试：`internal/e2e/dlengine_test.go`、`internal/transfer/dlengine/progress_test.go`、`frontend/src/views/TransferView.test.js`。
 
 ✅ `guangya.go:267-288` DownloadInfo → `:398-415` GetDownloadURL proxy；使用旧版稳定的 `/nd.bizuserres.s/v1/get_res_download_url`，优先解析 `data.signedURL`，兼容 `downloadUrl`。

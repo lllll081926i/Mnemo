@@ -23,7 +23,7 @@ func TestDownloadUsesGuangyaHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.Headers["Referer"] != "https://www.guangyapan.com/" || source.Headers["User-Agent"] != ua || source.Concurrency != 0 {
+	if source.Headers["Referer"] != "https://www.guangyapan.com/" || source.Headers["User-Agent"] != ua || source.Concurrency != 0 || !source.AllowLastModifiedFallback {
 		t.Fatalf("光鸭下载策略错误: %+v", source)
 	}
 }

@@ -495,6 +495,7 @@ func (d *Driver) GetDownloadURL(ctx context.Context, c drive.Context, fileID str
 	}
 	return &model.DownloadURL{
 		DriveID: c.DriveID, FileID: fileID, URL: u, DownloadMode: "proxy",
+		AllowLastModifiedFallback: true,
 		Headers: map[string]string{
 			"Referer":    "https://www.guangyapan.com/",
 			"User-Agent": ua,

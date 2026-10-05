@@ -488,9 +488,9 @@ func TestDownloadPolicyHonorsExplicitLimitsNotPreviewMode(t *testing.T) {
 		{"redirect", 16, 8},
 	} {
 		opts := dlengine.Options{Concurrency: 1, ChunkSize: 123}
-		source := &model.DownloadURL{DownloadMode: test.mode, Concurrency: test.limit, ChunkSize: 456, Headers: map[string]string{"User-Agent": "provider"}}
+		source := &model.DownloadURL{DownloadMode: test.mode, Concurrency: test.limit, ChunkSize: 456, Headers: map[string]string{"User-Agent": "provider"}, AllowLastModifiedFallback: test.mode == "proxy", RetrySingleConnection: test.mode == "redirect"}
 		applyDownloadPolicy(&opts, settings, source)
-		if opts.Concurrency != test.want || opts.ChunkSize != 456 || opts.Headers["User-Agent"] != "provider" || opts.RetrySingleConnection != source.RetrySingleConnection {
+		if opts.Concurrency != test.want || opts.ChunkSize != 456 || opts.Headers["User-Agent"] != "provider" || opts.RetrySingleConnection != source.RetrySingleConnection || opts.AllowLastModifiedFallback != source.AllowLastModifiedFallback {
 			t.Fatalf("策略不匹配: %+v", opts)
 		}
 	}
