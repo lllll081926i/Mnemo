@@ -15,15 +15,18 @@ import (
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
+	"mnemo-go/internal/transfer/dlengine"
 )
 
 type blockingURLDriver struct {
 	drive.Driver
-	entered     chan context.Context
-	release     chan struct{}
-	files       map[string][]model.File
-	listCalls   int
-	downloadURL string
+	entered         chan context.Context
+	release         chan struct{}
+	files           map[string][]model.File
+	listCalls       int
+	downloadURL     string
+	downloadHeaders map[string]string
+	downloadAuth    model.RequestAuthenticator
 }
 
 func (d *blockingURLDriver) ListPaged(ctx context.Context, c drive.Context, dirID, marker string, opts *drive.ListOptions) (*drive.DirPage, error) {
@@ -219,7 +222,7 @@ func TestFolderDownloadCompletesWithEmptyDirectory(t *testing.T) {
 }
 func (d *blockingURLDriver) GetDownloadURL(ctx context.Context, c drive.Context, id string, expires int) (*model.DownloadURL, error) {
 	if d.downloadURL != "" {
-		return &model.DownloadURL{URL: d.downloadURL + "/" + id, Size: 5}, nil
+		return &model.DownloadURL{URL: d.downloadURL + "/" + id, Size: 5, Headers: d.downloadHeaders, RequestAuth: d.downloadAuth}, nil
 	}
 	d.entered <- ctx
 	select {
@@ -459,15 +462,100 @@ func TestPerFileDownloadConcurrencyIsBounded(t *testing.T) {
 		configured int
 		want       int
 	}{
-		{configured: 0, want: 3},
+		{configured: 0, want: 8},
 		{configured: 1, want: 1},
 		{configured: 3, want: 3},
-		{configured: 8, want: maxPerDownloadConnections},
+		{configured: 8, want: 8},
+		{configured: 100, want: maxPerDownloadConnections},
 	}
 	for _, tc := range cases {
-		if got := concurrencyFromSettings(store.Settings{MaxConcurrentDownloads: tc.configured}); got != tc.want {
+		if got := concurrencyFromSettings(store.Settings{MaxConcurrentDownloads: 1, MaxDownloadConnections: tc.configured}); got != tc.want {
 			t.Errorf("concurrencyFromSettings(%d) = %d, want %d", tc.configured, got, tc.want)
 		}
+	}
+}
+
+func TestDownloadPolicyHonorsExplicitLimitsNotPreviewMode(t *testing.T) {
+	settings := store.Settings{MaxConcurrentDownloads: 1, MaxDownloadConnections: 8}
+	for _, test := range []struct {
+		mode  string
+		limit int
+		want  int
+	}{
+		{"proxy", 0, 8},
+		{"redirect", 1, 1},
+		{"proxy", 2, 2},
+		{"redirect", 16, 8},
+	} {
+		opts := dlengine.Options{Concurrency: 1, ChunkSize: 123}
+		source := &model.DownloadURL{DownloadMode: test.mode, Concurrency: test.limit, ChunkSize: 456, Headers: map[string]string{"User-Agent": "provider"}}
+		applyDownloadPolicy(&opts, settings, source)
+		if opts.Concurrency != test.want || opts.ChunkSize != 456 || opts.Headers["User-Agent"] != "provider" {
+			t.Fatalf("策略不匹配: %+v", opts)
+		}
+	}
+}
+
+func TestDownloadOptionsShareLimiterAndApplyLiveSpeedChanges(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(st, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	first, err := manager.DownloadOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.DownloadOptions()
+	if err != nil || first.Limiter != second.Limiter || first.Concurrency != 8 {
+		t.Fatal("普通下载、同步和迁移应共享一个限速器")
+	}
+	manager.SetDownloadSpeed(1)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := first.Limiter.Wait(ctx, 100); err == nil {
+		t.Fatal("运行中限速设置没有应用")
+	}
+	manager.SetDownloadSpeed(0)
+	if err := second.Limiter.Wait(t.Context(), 100); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAccountDownloadReResolvesCachedURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("User-Agent") != "provider-UA" || request.Header.Get("X-Request-Auth") != "signed" {
+			t.Error("恢复下载未重新取得下载头或鉴权器")
+			http.Error(writer, "missing auth", http.StatusUnauthorized)
+			return
+		}
+		http.ServeContent(writer, request, "file", time.Time{}, bytes.NewReader([]byte("hello")))
+	}))
+	defer server.Close()
+	downloadTestDriver = &blockingURLDriver{downloadURL: server.URL, downloadHeaders: map[string]string{"User-Agent": "provider-UA"}, downloadAuth: func(request *http.Request) error {
+		request.Header.Set("X-Request-Auth", "signed")
+		return nil
+	}}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(st, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	task := &model.DownloadTask{ID: "refresh-cached", UserID: "webdav:test", DriveID: "webdav:test", FileID: "file", URL: ":expired", Name: "file", Status: "queued"}
+	if err := manager.addDownloadTask(task, task.Name); err != nil {
+		t.Fatal(err)
+	}
+	manager.runDownload(task)
+	if task.Status != "completed" || task.URL != server.URL+"/file" {
+		t.Fatalf("恢复没有重新解析: 状态=%s 错误=%s", task.Status, task.Error)
 	}
 }
 
@@ -491,6 +579,53 @@ func TestManagerShutdownCancelsContext(t *testing.T) {
 		// expected: ctx is done after Shutdown
 	default:
 		t.Error("ctx should be done after Shutdown")
+	}
+}
+
+func TestShutdownWaitsForDownloadWorkers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.ServeContent(writer, request, "file", time.Time{}, strings.NewReader("payload"))
+	}))
+	defer server.Close()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	manager, err := NewManager(st, t.TempDir(), func(event TaskEvent) {
+		if event.Task.Status == "completed" {
+			close(entered)
+			<-release
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		manager.Shutdown()
+	})
+	if _, err := manager.AddDownloadURL("file", server.URL, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("下载线程未完成")
+	}
+	stopped := make(chan struct{})
+	go func() { manager.Shutdown(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Shutdown 未等待下载线程")
+	case <-time.After(20 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Shutdown 没有在下载线程结束后返回")
 	}
 }
 

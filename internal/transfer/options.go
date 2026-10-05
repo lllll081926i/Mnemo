@@ -1,26 +1,49 @@
 package transfer
 
-import "mnemo-go/internal/store"
+import (
+	"mnemo-go/internal/model"
+	"mnemo-go/internal/store"
+	"mnemo-go/internal/transfer/dlengine"
+)
 
-const maxPerDownloadConnections = 4
+const maxPerDownloadConnections = 16
 
 // DefaultConcurrencyFromSettings returns a sane default concurrency.
 // Deprecated: use concurrencyFromSettings which reads the real value.
 func DefaultConcurrencyFromSettings() int {
-	return maxPerDownloadConnections
+	return dlengine.DefaultConcurrency
 }
 
-// concurrencyFromSettings derives the per-file range connection count without
-// allowing the global queue setting to multiply resource use unchecked. At
-// most four buffers/connections are used for one file; the manager separately
-// controls how many files run at once.
 func concurrencyFromSettings(s store.Settings) int {
-	n := s.MaxConcurrentDownloads
+	n := s.MaxDownloadConnections
 	if n <= 0 {
-		n = 3
+		n = dlengine.DefaultConcurrency
 	}
 	if n > maxPerDownloadConnections {
 		return maxPerDownloadConnections
 	}
 	return n
+}
+
+func applyDownloadPolicy(opts *dlengine.Options, settings store.Settings, source *model.DownloadURL) {
+	opts.Concurrency = concurrencyFromSettings(settings)
+	if source.Concurrency > 0 && source.Concurrency < opts.Concurrency {
+		opts.Concurrency = source.Concurrency
+	}
+	opts.ChunkSize = source.ChunkSize
+	opts.Headers = source.Headers
+	opts.RequestAuth = source.RequestAuth
+}
+
+func (m *Manager) DownloadOptions() (dlengine.Options, error) {
+	settings, err := m.store.GetSettings()
+	if err != nil {
+		return dlengine.Options{}, err
+	}
+	m.speedLimiter.SetRate(settings.MaxDownloadSpeed)
+	return dlengine.Options{Concurrency: concurrencyFromSettings(settings), Limiter: m.speedLimiter}, nil
+}
+
+func (m *Manager) SetDownloadSpeed(rate int64) {
+	m.speedLimiter.SetRate(rate)
 }

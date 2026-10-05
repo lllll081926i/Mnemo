@@ -11,7 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
+	"math"
+	"math/bits"
 	"net/http"
 	"net/url"
 	"os"
@@ -50,11 +51,12 @@ type Options struct {
 	// ExpectedSize is optional provider metadata. It is used only when the
 	// download server omits Content-Length, so a chunked response can still
 	// report progress and be verified after a single-stream download.
-	ExpectedSize int64
-	ResourceID   string
-	Limiter      RateLimiter
-	Headers      map[string]string
-	UserAgent    string
+	ExpectedSize    int64
+	ResourceID      string
+	Limiter         RateLimiter
+	Headers         map[string]string
+	UserAgent       string
+	ReadIdleTimeout time.Duration
 	// RequestAuth runs after static headers are applied, once per outbound
 	// request. It is used for request-bound schemes such as HTTP Digest.
 	RequestAuth func(*http.Request) error
@@ -78,7 +80,18 @@ func (o *Options) Normalize() {
 		o.MinSize = DefaultMinSize
 	}
 	if o.UserAgent == "" {
-		o.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Mnemo/1.0"
+		for header, value := range o.Headers {
+			if strings.EqualFold(header, "User-Agent") {
+				o.UserAgent = value
+				break
+			}
+		}
+		if o.UserAgent == "" {
+			o.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Mnemo/1.0"
+		}
+	}
+	if o.ReadIdleTimeout <= 0 {
+		o.ReadIdleTimeout = 60 * time.Second
 	}
 }
 
@@ -179,30 +192,12 @@ func (s *speedEstimator) Observe(now time.Time, downloaded int64) int64 {
 // Download fetches url to localPath (plus a .part temp file) using segmented
 // parallel range requests. It resumes from the .part file when present.
 func Download(ctx context.Context, opts Options, url, localPath string, onProgress func(Progress)) error {
+	autoChunk := opts.ChunkSize <= 0
 	opts.Normalize()
 	partPath := localPath + ".part"
 	statePath := localPath + ".state.json"
 
-	// 不能用 http.Client.Timeout（它是含 body 读取的总超时，大文件必超时）。
-	// 只限制连接/响应头阶段，body 读取不设总时限（对齐 aria2 的空闲超时语义）。
-	hc := &http.Client{
-		Transport: &http.Transport{
-			Proxy: proxyFunc(),
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ResponseHeaderTimeout: 60 * time.Second,
-			TLSHandshakeTimeout:   30 * time.Second,
-			MaxIdleConns:          64,
-			MaxIdleConnsPerHost:   32,
-			IdleConnTimeout:       90 * time.Second,
-			// A custom DialContext otherwise makes net/http conservatively
-			// disable HTTP/2. Let CDN endpoints use HTTP/2 when available while
-			// retaining HTTP/1.1 fallback for every existing provider.
-			ForceAttemptHTTP2: true,
-		},
-	}
+	hc := NewHTTPClient(opts)
 	defer hc.CloseIdleConnections()
 
 	// Resolve size + range support.
@@ -212,6 +207,9 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	}
 	if total <= 0 && opts.ExpectedSize > 0 {
 		total = opts.ExpectedSize
+	}
+	if autoChunk && total > 0 {
+		opts.ChunkSize = min(DefaultChunkSize, max(1<<20, (total-1)/int64(opts.Concurrency)+1))
 	}
 
 	urlHash := urlFingerprint(url)
@@ -236,12 +234,13 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	// Resume from state only when both the remote identity and local data match.
 	if b, err := os.ReadFile(statePath); err == nil {
 		var prev state
-		if partIntact && json.Unmarshal(b, &prev) == nil && stateResourceMatches(prev, url, urlHash, resourceHash, validator) && prev.Total == total && prev.Chunk == opts.ChunkSize &&
+		if partIntact && json.Unmarshal(b, &prev) == nil && stateResourceMatches(prev, url, urlHash, resourceHash, validator) && prev.Total == total && prev.Chunk > 0 && (autoChunk || prev.Chunk == opts.ChunkSize) &&
 			resumeIdentityMatches(prev, validator) {
 			st = &prev
+			opts.ChunkSize = prev.Chunk
 		}
 	}
-	numChunks := int((total + opts.ChunkSize - 1) / opts.ChunkSize)
+	numChunks := int((total-1)/opts.ChunkSize + 1)
 	if len(st.Done) != numChunks {
 		st.Done = make([]bool, numChunks)
 	}
@@ -273,82 +272,96 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 		}
 	}
 
-	sem := make(chan struct{}, opts.Concurrency)
 	g, gctx := errgroup.WithContext(ctx)
 	var mu sync.Mutex // guards st.Done writes
+	lastCheckpoint := time.Now()
 
-	for i := 0; i < numChunks; i++ {
-		if st.Done[i] {
-			continue
-		}
-		chunkIdx := i
-		g.Go(func() error {
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-gctx.Done():
+	fetchChunk := func(chunkIdx int) error {
+		start := int64(chunkIdx) * opts.ChunkSize
+		length := chunkLen(st, chunkIdx)
+		remainingStart := start
+		remainingLength := length
+		var lastErr error
+		partialRequests := 0
+		for attempt := 0; attempt < MaxRetriesPerChunk; {
+			err := fetchRange(gctx, hc, opts, url, remainingStart, remainingLength, total, validator, f, limiter, func(n int64) {
+				downloaded.Add(n)
+			})
+			if err == nil {
+				mu.Lock()
+				st.Done[chunkIdx] = true
+				var checkpointErr error
+				if time.Since(lastCheckpoint) >= time.Second {
+					checkpointErr = f.Sync()
+					if checkpointErr == nil {
+						checkpointErr = persistState(statePath, st)
+					}
+					lastCheckpoint = time.Now()
+				}
+				mu.Unlock()
+				return checkpointErr
+			}
+			lastErr = err
+			var statusErr *httpStatusError
+			if errors.As(err, &statusErr) || errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) || errors.Is(err, errRangeIgnored) {
+				if resumed := remainingStart - start; resumed > 0 {
+					downloaded.Add(-resumed)
+				}
+				return fmt.Errorf("dlengine: chunk %d rejected: %w", chunkIdx, err)
+			}
+			if gctx.Err() != nil {
+				if resumed := remainingStart - start; resumed > 0 {
+					downloaded.Add(-resumed)
+				}
 				return gctx.Err()
 			}
-			start := int64(chunkIdx) * opts.ChunkSize
-			length := chunkLen(st, chunkIdx)
-			remainingStart := start
-			remainingLength := length
-			var lastErr error
-			partialRequests := 0
-			for attempt := 0; attempt < MaxRetriesPerChunk; {
-				err := fetchRange(gctx, hc, opts, url, remainingStart, remainingLength, total, validator, f, limiter, func(n int64) {
-					downloaded.Add(n)
-				})
-				if err == nil {
-					mu.Lock()
-					st.Done[chunkIdx] = true
-					// Persist while holding the same lock that protects st.Done;
-					// otherwise parallel chunks can overwrite each other's state.
-					_ = persistState(statePath, st)
-					mu.Unlock()
+			var partial *partialRangeReadError
+			if errors.As(err, &partial) && partial.written > 0 && partial.written < remainingLength {
+				remainingStart += partial.written
+				remainingLength -= partial.written
+				partialRequests++
+				if partialRequests <= MaxPartialRangeRequests {
+					// This is a continuation, not a blind retry: the next request
+					// starts exactly after the already persisted bytes.
+					continue
+				}
+			}
+			attempt++
+			if attempt >= MaxRetriesPerChunk {
+				break
+			}
+			select {
+			case <-time.After(time.Duration(500*attempt) * time.Millisecond):
+			case <-gctx.Done():
+				if resumed := remainingStart - start; resumed > 0 {
+					downloaded.Add(-resumed)
+				}
+				return gctx.Err()
+			}
+		}
+		if resumed := remainingStart - start; resumed > 0 {
+			downloaded.Add(-resumed)
+		}
+		return fmt.Errorf("dlengine: chunk %d failed after %d attempts: %w", chunkIdx, MaxRetriesPerChunk, lastErr)
+	}
+	var nextChunk atomic.Int64
+	for worker := 0; worker < min(opts.Concurrency, numChunks); worker++ {
+		g.Go(func() error {
+			for {
+				if err := gctx.Err(); err != nil {
+					return err
+				}
+				chunkIdx := int(nextChunk.Add(1) - 1)
+				if chunkIdx >= numChunks {
 					return nil
 				}
-				lastErr = err
-				if errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) || errors.Is(err, errRangeIgnored) {
-					if resumed := remainingStart - start; resumed > 0 {
-						downloaded.Add(-resumed)
-					}
-					return fmt.Errorf("dlengine: chunk %d rejected: %w", chunkIdx, err)
+				if st.Done[chunkIdx] {
+					continue
 				}
-				if gctx.Err() != nil {
-					if resumed := remainingStart - start; resumed > 0 {
-						downloaded.Add(-resumed)
-					}
-					return gctx.Err()
-				}
-				var partial *partialRangeReadError
-				if errors.As(err, &partial) && partial.written > 0 && partial.written < remainingLength {
-					remainingStart += partial.written
-					remainingLength -= partial.written
-					partialRequests++
-					if partialRequests <= MaxPartialRangeRequests {
-						// This is a continuation, not a blind retry: the next request
-						// starts exactly after the already persisted bytes.
-						continue
-					}
-				}
-				attempt++
-				if attempt >= MaxRetriesPerChunk {
-					break
-				}
-				select {
-				case <-time.After(time.Duration(500*attempt) * time.Millisecond):
-				case <-gctx.Done():
-					if resumed := remainingStart - start; resumed > 0 {
-						downloaded.Add(-resumed)
-					}
-					return gctx.Err()
+				if err := fetchChunk(chunkIdx); err != nil {
+					return err
 				}
 			}
-			if resumed := remainingStart - start; resumed > 0 {
-				downloaded.Add(-resumed)
-			}
-			return fmt.Errorf("dlengine: chunk %d failed after %d attempts: %w", chunkIdx, MaxRetriesPerChunk, lastErr)
 		})
 	}
 
@@ -376,6 +389,12 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	err = g.Wait()
 	close(done)
 	<-progressDone
+	if syncErr := f.Sync(); syncErr != nil {
+		return errors.Join(err, syncErr)
+	}
+	if checkpointErr := persistState(statePath, st); checkpointErr != nil {
+		return errors.Join(err, checkpointErr)
+	}
 	if errors.Is(err, errRangeIgnored) && ctx.Err() == nil {
 		// No ranged body was accepted from the rejecting request. All workers
 		// are now stopped; restart as a full stream rather than retrying an
@@ -393,10 +412,9 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 	if err != nil {
 		return err
 	}
-	if err := f.Sync(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
-	_ = f.Close()
 
 	// sanity check
 	if downloaded.Load() != total {
@@ -415,11 +433,8 @@ func Download(ctx context.Context, opts Options, url, localPath string, onProgre
 
 // probe determines the file size, range support and resource validators.
 func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int64, bool, resourceValidator, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := NewRequest(ctx, http.MethodGet, url, opts)
 	if err != nil {
-		return 0, false, resourceValidator{}, err
-	}
-	if err := setRequestHeaders(req, opts); err != nil {
 		return 0, false, resourceValidator{}, err
 	}
 	req.Header.Set("Range", "bytes=0-0")
@@ -428,7 +443,6 @@ func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int6
 		return 0, false, resourceValidator{}, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 	// A server advertising Accept-Ranges can still ignore a particular probe.
 	// Only a real 206 response proves that segmented requests are usable.
 	acceptRanges := resp.StatusCode == http.StatusPartialContent
@@ -446,11 +460,23 @@ func probe(ctx context.Context, hc *http.Client, opts Options, url string) (int6
 		if resp.ContentLength >= 0 && resp.ContentLength != 1 {
 			return 0, false, resourceValidator{}, fmt.Errorf("%w: probe Content-Length is %d, want 1", errInvalidRangeResponse, resp.ContentLength)
 		}
+		if _, err := io.CopyN(io.Discard, resp.Body, 1); err != nil {
+			return 0, false, resourceValidator{}, err
+		}
 		total = parsedTotal
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		total = resp.ContentLength
+		if contentRange := resp.Header.Get("Content-Range"); contentRange != "" {
+			start, end, parsedTotal, ok := parseContentRange(contentRange)
+			if !ok || start != 0 || resp.ContentLength >= 0 && resp.ContentLength != end-start+1 {
+				return 0, false, resourceValidator{}, fmt.Errorf("%w: invalid probe Content-Range", errInvalidRangeResponse)
+			}
+			total = parsedTotal
+		} else if total == 1 {
+			total = 0
+		}
 	default:
-		return 0, false, resourceValidator{}, fmt.Errorf("dlengine: probe http %d", resp.StatusCode)
+		return 0, false, resourceValidator{}, &httpStatusError{stage: "probe", status: resp.StatusCode}
 	}
 	if total <= 0 {
 		// Chunked CDN responses legitimately omit Content-Length. They cannot
@@ -537,11 +563,8 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	if start < 0 || length <= 0 || total <= 0 || start > total-length {
 		return errors.New("dlengine: invalid range length")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := NewRequest(ctx, http.MethodGet, url, opts)
 	if err != nil {
-		return err
-	}
-	if err := setRequestHeaders(req, opts); err != nil {
 		return err
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+length-1))
@@ -554,7 +577,7 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("dlengine: range http %d", resp.StatusCode)
+		return &httpStatusError{stage: "range", status: resp.StatusCode}
 	}
 	if resp.StatusCode == http.StatusOK {
 		if validator.ifRange() != "" {
@@ -631,11 +654,8 @@ func fetchRange(ctx context.Context, hc *http.Client, opts Options, url string, 
 }
 
 func singleStream(ctx context.Context, hc *http.Client, opts Options, url, localPath string, total int64, validator resourceValidator, onProgress func(Progress)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := NewRequest(ctx, http.MethodGet, url, opts)
 	if err != nil {
-		return err
-	}
-	if err := setRequestHeaders(req, opts); err != nil {
 		return err
 	}
 	validator.setFullRequestCondition(req)
@@ -647,11 +667,20 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	if resp.StatusCode == http.StatusPreconditionFailed {
 		return errResourceChanged
 	}
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("dlengine: http %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return &httpStatusError{status: resp.StatusCode}
 	}
 	if err := validator.verifyResponse(resp.Header); err != nil {
 		return err
+	}
+	if resp.ContentLength >= 0 {
+		if total > 0 && total != resp.ContentLength {
+			return fmt.Errorf("%w: 下载长度由 %d 变为 %d", errResourceChanged, total, resp.ContentLength)
+		}
+		total = resp.ContentLength
+	}
+	if onProgress != nil {
+		onProgress(Progress{Total: total})
 	}
 	partPath := localPath + ".part"
 	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -699,6 +728,9 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	if total > 0 && written != total {
 		return fmt.Errorf("dlengine: downloaded %d != total %d", written, total)
 	}
+	if total <= 0 {
+		total = written
+	}
 	if err := commitPart(partPath, localPath); err != nil {
 		return err
 	}
@@ -713,6 +745,11 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 // rename over an existing file, so move the old destination aside first and
 // restore it if the commit fails.
 func commitPart(partPath, localPath string) error {
+	if info, err := os.Lstat(localPath); err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("dlengine: 目标不是普通文件: %s", localPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if err := os.Rename(partPath, localPath); err == nil {
 		return nil
 	} else if runtime.GOOS != "windows" {
@@ -756,7 +793,9 @@ func setHeaders(req *http.Request, headers map[string]string, ua string) {
 
 func setRequestHeaders(req *http.Request, opts Options) error {
 	setHeaders(req, opts.Headers, opts.UserAgent)
+	req.Header.Set("Accept-Encoding", "identity")
 	if opts.RequestAuth != nil {
+		*req = *req.WithContext(context.WithValue(req.Context(), retryAuthKey{}, retryAuth{scheme: req.URL.Scheme, host: req.URL.Host, auth: opts.RequestAuth}))
 		return opts.RequestAuth(req)
 	}
 	return nil
@@ -793,17 +832,22 @@ func ensureFile(path string, size int64) error {
 
 func chunkLen(st *state, idx int) int64 {
 	start := int64(idx) * st.Chunk
-	if start+st.Chunk > st.Total {
+	if st.Chunk > st.Total-start {
 		return st.Total - start
 	}
 	return st.Chunk
 }
 
 func percent(done, total int64) int {
-	if total <= 0 {
+	if total <= 0 || done <= 0 {
 		return 0
 	}
-	return int(done * 100 / total)
+	if done >= total {
+		return 100
+	}
+	high, low := bits.Mul64(uint64(done), 100)
+	percentage, _ := bits.Div64(high, low, uint64(total))
+	return int(percentage)
 }
 
 func persistState(path string, st *state) error {
@@ -880,14 +924,18 @@ func stateResourceMatches(previous state, rawURL, urlHash, resourceHash string, 
 
 // speedLimiter is a token-bucket style throttle (per second).
 type speedLimiter struct {
-	mu     sync.Mutex
-	rate   int64
-	window int64
-	start  time.Time
+	mu      sync.Mutex
+	rate    int64
+	window  int64
+	start   time.Time
+	tokens  float64
+	last    time.Time
+	changed chan struct{}
 }
 
 func newSpeedLimiter(rate int64) *speedLimiter {
-	return &speedLimiter{rate: rate, start: time.Now()}
+	now := time.Now()
+	return &speedLimiter{rate: rate, start: now, last: now, changed: make(chan struct{})}
 }
 
 func (l *speedLimiter) waitN(n int64) {
@@ -898,38 +946,55 @@ func (l *speedLimiter) Wait(ctx context.Context, n int64) error {
 	if n <= 0 {
 		return nil
 	}
-	l.mu.Lock()
-	if l.rate <= 0 {
+	accounted := false
+	for remaining := n; remaining > 0; {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		l.mu.Lock()
+		if l.rate <= 0 {
+			l.mu.Unlock()
+			return nil
+		}
+		now := time.Now()
+		if !accounted {
+			if now.Sub(l.start) >= time.Second {
+				l.start = now
+				l.window = 0
+			}
+			l.window += n
+			accounted = true
+		}
+		burst := max(int64(1), l.rate/10)
+		if l.last.IsZero() {
+			l.last = now
+		}
+		l.tokens = min(float64(burst), l.tokens+now.Sub(l.last).Seconds()*float64(l.rate))
+		l.last = now
+		quantum := min(remaining, burst)
+		if l.tokens >= float64(quantum) {
+			l.tokens -= float64(quantum)
+			remaining -= quantum
+			l.mu.Unlock()
+			continue
+		}
+		delay := time.Duration(math.Ceil((float64(quantum) - l.tokens) / float64(l.rate) * float64(time.Second)))
+		if l.changed == nil {
+			l.changed = make(chan struct{})
+		}
+		changed := l.changed
 		l.mu.Unlock()
-		return nil
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-changed:
+			timer.Stop()
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
 	}
-	now := time.Now()
-	// slide the window: if more than 1s has passed since the last reset,
-	// reset the accumulator and the start timestamp so the limiter keeps
-	// tracking the recent rate rather than a lifetime average that drifts.
-	if now.Sub(l.start) >= time.Second {
-		l.start = now
-		l.window = 0
-	}
-	l.window += n
-	elapsed := now.Sub(l.start).Seconds()
-	allowed := float64(l.rate) * elapsed
-	wait := time.Duration(0)
-	if float64(l.window) > allowed {
-		wait = time.Duration((float64(l.window) - allowed) / float64(l.rate) * float64(time.Second))
-	}
-	l.mu.Unlock()
-	if wait <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return nil
 }
 
 // SharedLimiter is a process-wide cap shared by all downloads in a Manager.
@@ -945,9 +1010,15 @@ func (l *SharedLimiter) SetRate(rate int64) {
 	}
 	l.mu.Lock()
 	if l.rate != rate {
+		if l.changed != nil {
+			close(l.changed)
+		}
+		l.changed = make(chan struct{})
 		l.rate = rate
 		l.window = 0
 		l.start = time.Now()
+		l.last = l.start
+		l.tokens = 0
 	}
 	l.mu.Unlock()
 }

@@ -60,6 +60,7 @@ type Manager struct {
 	concurrencyChanged chan struct{}
 	speedLimiter       *dlengine.SharedLimiter
 	shutdownOnce       sync.Once
+	workers            sync.WaitGroup
 }
 
 // NewManager creates a download manager.
@@ -166,6 +167,10 @@ func (m *Manager) SetConcurrency(n int) {
 func (m *Manager) acquireSlot(ctx context.Context) error {
 	for {
 		m.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			m.mu.Unlock()
+			return err
+		}
 		if m.activeConcurrent < m.maxConcurrent {
 			m.activeConcurrent++
 			m.mu.Unlock()
@@ -418,8 +423,10 @@ func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.Down
 	if err := m.addDownloadTask(t, f.Name); err != nil {
 		return nil, err
 	}
-	go m.runDownload(t)
+	m.mu.Lock()
 	result := safeDownloadTask(*t)
+	m.mu.Unlock()
+	m.startDownload(t)
 	return &result, nil
 }
 
@@ -443,9 +450,25 @@ func (m *Manager) AddDownloadURL(name, url string, headers map[string]string) (*
 	if err := m.addDownloadTask(t, name); err != nil {
 		return nil, err
 	}
-	go m.runDownload(t)
+	m.mu.Lock()
 	result := safeDownloadTask(*t)
+	m.mu.Unlock()
+	m.startDownload(t)
 	return &result, nil
+}
+
+func (m *Manager) startDownload(task *model.DownloadTask) {
+	m.mu.Lock()
+	if m.ctx.Err() != nil {
+		m.mu.Unlock()
+		return
+	}
+	m.workers.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.workers.Done()
+		m.runDownload(task)
+	}()
 }
 
 func (m *Manager) runDownload(t *model.DownloadTask) {
@@ -539,7 +562,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		m.speedLimiter.SetRate(0)
 	}
 	opts.Limiter = m.speedLimiter
-	if url == "" && t.UserID != "" {
+	if t.UserID != "" {
 		m.mu.Lock()
 		t.Stage = "resolving"
 		m.mu.Unlock()
@@ -578,12 +601,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			t.Size = u.Size
 		}
 		m.mu.Unlock()
-		if u.ForceLocalProxy || u.DownloadMode == "proxy" {
-			opts.Concurrency = 1
-			if u.Concurrency > 1 {
-				opts.Concurrency = u.Concurrency
-			}
-		}
+		applyDownloadPolicy(&opts, s, u)
 	}
 	if url == "" {
 		m.mu.Lock()
@@ -638,8 +656,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		rememberDownloadSource(t)
 		if fresh, refreshErr := drive.GetDownloadURLContext(ctx, t.UserID, t.DriveID, t.FileID, 14400); refreshErr == nil && fresh != nil && fresh.URL != "" {
 			url = fresh.URL
-			opts.Headers = fresh.Headers
-			opts.RequestAuth = fresh.RequestAuth
+			applyDownloadPolicy(&opts, s, fresh)
 			m.mu.Lock()
 			t.URL = url
 			t.Stage = "connecting"
@@ -648,12 +665,6 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			}
 			opts.ExpectedSize = t.Size
 			m.mu.Unlock()
-			if fresh.ForceLocalProxy || fresh.DownloadMode == "proxy" {
-				opts.Concurrency = 1
-				if fresh.Concurrency > 1 {
-					opts.Concurrency = fresh.Concurrency
-				}
-			}
 			m.update(t)
 			err = dlengine.Download(ctx, opts, url, t.LocalPath, progress)
 		}
@@ -759,7 +770,7 @@ func (m *Manager) Resume(id string) {
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
-		go m.runDownload(t)
+		m.startDownload(t)
 		return
 	}
 	m.mu.Unlock()
@@ -859,7 +870,7 @@ func (m *Manager) Prioritize(id string) {
 	}
 	m.update(t)
 	if start {
-		go m.runDownload(t)
+		m.startDownload(t)
 	}
 }
 
@@ -877,15 +888,16 @@ func (m *Manager) Shutdown() {
 	m.shutdownOnce.Do(func() {
 		// cancel the root context so goroutines waiting for a slot or in flight
 		// unblock immediately, in addition to any in-flight task contexts.
+		m.mu.Lock()
 		if m.cancel != nil {
 			m.cancel()
 		}
-		m.mu.Lock()
 		for _, c := range m.cancels {
 			c()
 		}
 		m.mu.Unlock()
 		close(m.stop)
+		m.workers.Wait()
 	})
 }
 

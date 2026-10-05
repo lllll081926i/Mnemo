@@ -66,9 +66,10 @@ type LogFunc func(jobID, event, detail string)
 
 // Engine executes sync jobs.
 type Engine struct {
-	onProgress func(jobID string, done, total int)
-	snapshots  SnapshotStore
-	logger     LogFunc
+	downloadOptions func() (dlengine.Options, error)
+	onProgress      func(jobID string, done, total int)
+	snapshots       SnapshotStore
+	logger          LogFunc
 }
 
 // NewEngine creates the sync engine.
@@ -90,6 +91,10 @@ func WithSnapshotStore(s SnapshotStore) func(*Engine) {
 // WithLogger sets the logger callback on the engine.
 func WithLogger(fn LogFunc) func(*Engine) {
 	return func(e *Engine) { e.logger = fn }
+}
+
+func WithDownloadOptions(fn func() (dlengine.Options, error)) func(*Engine) {
+	return func(engine *Engine) { engine.downloadOptions = fn }
 }
 
 // log is a nil-safe helper.
@@ -468,7 +473,7 @@ func (e *Engine) pull(ctx context.Context, cfg Config) error {
 			failures = append(failures, fmt.Errorf("create local directory for %s: %w", f.RemoteName, mkErr))
 			continue
 		}
-		if err := downloadTo(ctx, u, localPath); err != nil {
+		if err := e.downloadTo(ctx, u, localPath); err != nil {
 			failures = append(failures, fmt.Errorf("download %s: %w", f.RemoteName, err))
 			continue
 		}
@@ -526,19 +531,38 @@ func (e *Engine) twoWay(ctx context.Context, cfg Config) error {
 // downloadTo streams a download url to a local file via the segmented engine.
 // It accepts the caller's context so downloads can be cancelled reliably.
 func downloadTo(ctx context.Context, u *model.DownloadURL, path string) error {
+	return downloadToWithOptions(ctx, u, path, dlengine.Options{})
+}
+
+func (e *Engine) downloadTo(ctx context.Context, source *model.DownloadURL, path string) error {
+	var opts dlengine.Options
+	if e.downloadOptions != nil {
+		var err error
+		opts, err = e.downloadOptions()
+		if err != nil {
+			return err
+		}
+	}
+	return downloadToWithOptions(ctx, source, path, opts)
+}
+
+func downloadToWithOptions(ctx context.Context, u *model.DownloadURL, path string, opts dlengine.Options) error {
 	if u == nil || u.URL == "" {
 		return fmt.Errorf("sync: download URL is empty")
 	}
-	opts := dlengine.Options{}
+	if opts.Concurrency <= 0 {
+		opts.Concurrency = dlengine.DefaultConcurrency
+	}
+	opts.ChunkSize = u.ChunkSize
+	opts.ExpectedSize = u.Size
+	if u.DriveID != "" && u.FileID != "" {
+		opts.ResourceID = u.DriveID + "\x00" + u.FileID
+	}
+	opts.Headers = u.Headers
 	opts.RequestAuth = u.RequestAuth
-	if u.ForceLocalProxy || u.DownloadMode == "proxy" {
-		opts.Concurrency = 1
+	if u.Concurrency > 0 && u.Concurrency < opts.Concurrency {
+		opts.Concurrency = u.Concurrency
 	}
-	if u.Headers != nil {
-		opts.Headers = u.Headers
-	}
-	// single-stream download for sync simplicity
-	opts.Concurrency = 1
 	return dlengine.Download(ctx, opts, u.URL, path, nil)
 }
 

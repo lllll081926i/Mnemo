@@ -235,3 +235,111 @@ func TestSegmentedDownloadRejectsResourceChangedAfterProbe(t *testing.T) {
 }
 
 var _ = io.Copy
+
+func TestDownloadSizeFallbacks(t *testing.T) {
+	payload := strings.Repeat("完整文件", 128)
+	for _, test := range []struct {
+		name          string
+		payload       string
+		expectedSize  int64
+		probeRange    bool
+		probeFullBody bool
+		chunked       bool
+	}{
+		{name: "无长度但有文件元数据", payload: payload, expectedSize: int64(len(payload)), chunked: true},
+		{name: "无长度也无文件元数据", payload: payload, chunked: true},
+		{name: "无长度但有探测总大小", payload: payload, probeRange: true, chunked: true},
+		{name: "探测总大小优先于错误元数据", payload: payload, expectedSize: 1, probeRange: true, chunked: true},
+		{name: "忽略Range并返回完整ContentRange", payload: payload, probeRange: true, probeFullBody: true},
+		{name: "真实的一字节文件", payload: "X"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, req *http.Request) {
+				if req.Header.Get("Range") == "bytes=0-0" {
+					length := 1
+					if test.probeFullBody {
+						length = len(test.payload)
+					}
+					if test.probeRange {
+						writer.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", length-1, len(test.payload)))
+					}
+					writer.Header().Set("Content-Length", fmt.Sprintf("%d", length))
+					_, _ = io.WriteString(writer, test.payload[:length])
+					return
+				}
+				if test.chunked {
+					writer.WriteHeader(http.StatusOK)
+					writer.(http.Flusher).Flush()
+				} else {
+					writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(test.payload)))
+				}
+				_, _ = io.WriteString(writer, test.payload)
+			}))
+			defer srv.Close()
+			var last dlengine.Progress
+			path := filepath.Join(t.TempDir(), "fallback.bin")
+			err := dlengine.Download(context.Background(), dlengine.Options{ExpectedSize: test.expectedSize}, srv.URL, path, func(progress dlengine.Progress) {
+				if progress.Percent < 0 || progress.Percent > 100 || progress.Total != 0 && progress.Total != int64(len(test.payload)) {
+					t.Errorf("错误的下载进度: %+v", progress)
+				}
+				last = progress
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, err := os.ReadFile(path)
+			if err != nil || string(actual) != test.payload {
+				t.Fatalf("下载内容不一致: %v", err)
+			}
+			if last.Total != int64(len(test.payload)) || last.Downloaded != last.Total || last.Percent != 100 {
+				t.Fatalf("下载完成进度不正确: %+v", last)
+			}
+		})
+	}
+}
+
+func TestDownloadUsesFullResponseSizeAfterOneByteProbe(t *testing.T) {
+	for _, probeRange := range []bool{false, true} {
+		t.Run(fmt.Sprintf("content_range_%t", probeRange), func(t *testing.T) {
+			payload := strings.Repeat("光鸭下载内容", 128)
+			srv := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, req *http.Request) {
+				if req.Header.Get("Range") == "bytes=0-0" {
+					if probeRange {
+						writer.Header().Set("Content-Range", fmt.Sprintf("bytes 0-0/%d", len(payload)))
+					}
+					writer.Header().Set("Content-Length", "1")
+					writer.WriteHeader(http.StatusOK)
+					_, _ = writer.Write([]byte(payload[:1]))
+					return
+				}
+				writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+				_, _ = io.WriteString(writer, payload)
+			}))
+			defer srv.Close()
+			var snapshots []dlengine.Progress
+			path := filepath.Join(t.TempDir(), "download.bin")
+			err := dlengine.Download(context.Background(), dlengine.Options{}, srv.URL, path, func(progress dlengine.Progress) {
+				snapshots = append(snapshots, progress)
+			})
+			if err != nil {
+				t.Fatalf("探测响应的 1 字节不能当作完整文件大小: %v", err)
+			}
+			actual, err := os.ReadFile(path)
+			if err != nil || string(actual) != payload {
+				t.Fatalf("下载内容不一致: %v", err)
+			}
+			if len(snapshots) == 0 {
+				t.Fatal("下载没有报告进度")
+			}
+			for _, progress := range snapshots {
+				if progress.Total != int64(len(payload)) || progress.Percent < 0 || progress.Percent > 100 {
+					t.Fatalf("错误的下载大小或百分比: %+v", progress)
+				}
+			}
+			last := snapshots[len(snapshots)-1]
+			if last.Downloaded != int64(len(payload)) || last.Percent != 100 {
+				t.Fatalf("下载完成进度不正确: %+v", last)
+			}
+		})
+	}
+}

@@ -492,7 +492,7 @@ func (e *Engine) downloadEntry(ctx context.Context, cfg Config, entry Entry, nam
 	if err != nil {
 		return err
 	}
-	if err := downloadTo(ctx, url, path); err != nil {
+	if err := e.downloadTo(ctx, url, path); err != nil {
 		return err
 	}
 	stat, err := os.Stat(path)

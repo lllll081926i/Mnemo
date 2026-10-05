@@ -18,6 +18,7 @@ type Settings struct {
 	DownloadDir string `json:"downloadDir,omitempty"`
 
 	MaxConcurrentDownloads int   `json:"maxConcurrentDownloads"`
+	MaxDownloadConnections int   `json:"maxDownloadConnections"`
 	MaxDownloadSpeed       int64 `json:"maxDownloadSpeed"` // bytes/s, 0 = unlimited
 	MaxUploadSpeed         int64 `json:"maxUploadSpeed"`
 
@@ -40,6 +41,7 @@ func DefaultSettings() Settings {
 		Theme:                  "system",
 		DefaultTab:             "pan",
 		MaxConcurrentDownloads: 3,
+		MaxDownloadConnections: 8,
 		MaxDownloadSpeed:       0,
 		MaxUploadSpeed:         0,
 		AutoUpdate:             true,
@@ -64,6 +66,10 @@ func (s *Store) GetSettings() (Settings, error) {
 
 // SetSettings persists settings.
 func (s *Store) SetSettings(st Settings) error {
+	if st.MaxDownloadConnections <= 0 {
+		st.MaxDownloadConnections = DefaultSettings().MaxDownloadConnections
+	}
+	st.MaxDownloadConnections = min(st.MaxDownloadConnections, 16)
 	return s.writeJSON(settingsFile, st)
 }
 

@@ -712,7 +712,7 @@ func TestPikPakOfflineUsesLegacyPayloadAndPagination(t *testing.T) {
 		t.Fatalf("offline url body = %#v", createBody["url"])
 	}
 	lister, ok := d.(interface {
-		OfflineList(context.Context, drive.Context) ([]pikpak.OfflineTask, error)
+		OfflineList(context.Context, drive.Context) ([]drive.OfflineTask, error)
 	})
 	if !ok {
 		t.Fatal("pikpak offline lister missing")

@@ -89,7 +89,7 @@ func (m *Manager) AddDownloadFolder(userID, driveID string, file model.File, ski
 	}
 	m.update(task)
 	result := safeDownloadTask(*task)
-	go m.runDownload(task)
+	m.startDownload(task)
 	return &result, false, nil
 }
 
@@ -406,7 +406,7 @@ func (m *Manager) runFolderDownload(task *model.DownloadTask) {
 			m.update(child)
 			retried[id] = true
 			active++
-			go m.runDownload(child)
+			m.startDownload(child)
 		}
 		m.mu.Lock()
 		finished := active == 0 && completed+failed == task.TotalFiles && task.Status == "downloading"
