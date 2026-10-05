@@ -18,9 +18,12 @@ func TestDownloadIndicatorAggregatesBytesAndClearsFinishedTasks(t *testing.T) {
 	}{
 		{"weighted", []model.DownloadTask{{Status: "downloading", Size: 100, Downloaded: 50}, {Status: "queued", Size: 300}}, 2, 12},
 		{"unknown", []model.DownloadTask{{Status: "downloading"}}, 1, 0},
-		{"paused", []model.DownloadTask{{Status: "paused", Size: 100, Downloaded: 25}}, 8, 25},
-		{"failed", []model.DownloadTask{{Status: "failed"}}, 4, 100},
+		{"paused", []model.DownloadTask{{Status: "paused", Size: 100, Downloaded: 25}}, 0, 0},
+		{"failed", []model.DownloadTask{{Status: "failed"}}, 0, 0},
 		{"finished", []model.DownloadTask{{Status: "completed", Size: 100, Downloaded: 100}, {Status: "canceled"}}, 0, 0},
+		{"finished_with_history", []model.DownloadTask{{Status: "completed", Size: 100, Downloaded: 100}, {Status: "failed"}, {Status: "paused", Size: 300, Downloaded: 150}}, 0, 0},
+		{"active_with_history", []model.DownloadTask{{Status: "downloading", Size: 100, Downloaded: 50}, {Status: "paused", Size: 300, Downloaded: 300}, {Status: "failed"}, {Status: "completed", Size: 1000, Downloaded: 1000}}, 2, 50},
+		{"active_with_unknown_paused", []model.DownloadTask{{Status: "downloading", Size: 100, Downloaded: 50}, {Status: "paused"}}, 2, 50},
 		{"clamped", []model.DownloadTask{{Status: "downloading", Size: 100, Downloaded: 110}}, 2, 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -29,6 +32,25 @@ func TestDownloadIndicatorAggregatesBytesAndClearsFinishedTasks(t *testing.T) {
 				t.Fatalf("got %+v", got)
 			}
 		})
+	}
+}
+
+func TestDownloadIndicatorReturnsToIdleAfterLastDownload(t *testing.T) {
+	tasks := []model.DownloadTask{
+		{Status: "downloading", Size: 100, Downloaded: 99},
+		{Status: "completed", Size: 200, Downloaded: 200},
+		{Status: "failed"},
+		{Status: "paused", Size: 300, Downloaded: 150},
+	}
+	if got := summarizeDownloads(tasks); got.state != 2 || got.percent != 99 {
+		t.Fatalf("下载中进度不正确：%+v", got)
+	}
+	tasks[0].Status, tasks[0].Downloaded = "completed", 100
+	if got := summarizeDownloads(tasks); got.state != 0 || got.percent != 0 {
+		t.Fatalf("最后一个下载完成后未清除任务栏进度：%+v", got)
+	}
+	if got := summarizeDownloads(tasks[:2]); got.label != "Mnemo · 无下载任务" {
+		t.Fatalf("已完成记录未恢复空闲提示：%+v", got)
 	}
 }
 

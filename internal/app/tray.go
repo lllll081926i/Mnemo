@@ -27,12 +27,11 @@ func summarizeDownloads(tasks []model.DownloadTask) downloadIndicator {
 			active++
 		case "paused":
 			paused++
+			continue
 		case "failed":
 			failed++
-		default:
 			continue
-		}
-		if task.Status == "failed" {
+		default:
 			continue
 		}
 		if task.Size <= 0 {
@@ -54,10 +53,8 @@ func summarizeDownloads(tasks []model.DownloadTask) downloadIndicator {
 			progress.label = fmt.Sprintf("Mnemo · 正在下载 · %d 个任务", active)
 		}
 	} else if paused > 0 {
-		progress.state = 8
-		progress.label = fmt.Sprintf("Mnemo · 已暂停 %d%% · %d 个任务", progress.percent, paused)
+		progress.label = fmt.Sprintf("Mnemo · 已暂停 %d 个任务", paused)
 	} else if failed > 0 {
-		progress.state, progress.percent = 4, 100
 		progress.label = fmt.Sprintf("Mnemo · %d 个下载失败", failed)
 	}
 	return progress
