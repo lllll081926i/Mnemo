@@ -91,7 +91,7 @@ export function dispatchDriveNotice(notice) {
 export function recordAccountHealth(userId, error = null) {
   if (!userId) return
   const notice = error ? driveErrorNotice(error, '检查账号') : null
-  const confirmedExpiry = error && /账号已从本机移除/.test(rawErrorText(error))
+  const confirmedExpiry = error && /账号已从本机移除|账号和任务已保留|需要重新授权/.test(rawErrorText(error))
   const ambiguousAuth = notice?.category === 'auth' && !confirmedExpiry
   const message = ambiguousAuth ? '账号检查暂时失败，请稍后重试' : notice?.message || ''
   const status = !error ? 'ok'
