@@ -236,6 +236,12 @@ func (*Driver) OfflineList(ctx context.Context, account drive.Context) (tasks []
 		if response.Data == nil || response.Data.List == nil {
 			return nil, errors.New("光鸭云离线列表响应缺少任务数据")
 		}
+		if len(response.Data.List) == 0 {
+			if response.Data.HasMore != nil && *response.Data.HasMore {
+				return nil, errors.New("光鸭云离线返回空页但仍声明存在下一页")
+			}
+			return result, nil
+		}
 		added := 0
 		for _, item := range response.Data.List {
 			task, err := item.model()
