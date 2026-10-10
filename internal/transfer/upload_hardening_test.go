@@ -11,7 +11,9 @@ import (
 
 func TestClearCompletedPreservesFailedAndPausedUploads(t *testing.T) {
 	st, err := store.Open(t.TempDir())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	q := NewUploadQueue(st, nil)
 	defer q.Close()
 	for _, job := range []model.UploadingUI{
@@ -23,14 +25,20 @@ func TestClearCompletedPreservesFailedAndPausedUploads(t *testing.T) {
 	}
 	q.ClearCompleted()
 	remaining := map[string]bool{}
-	for _, task := range q.List() { remaining[task.UploadID] = true }
+	for _, task := range q.List() {
+		remaining[task.UploadID] = true
+	}
 	if remaining["done"] || !remaining["failed"] || !remaining["paused"] {
 		t.Fatalf("completed cleanup removed retryable task: %+v", remaining)
 	}
 	saved, err := st.ListUploadTasks()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	kept := map[string]bool{}
-	for _, task := range saved { kept[task.UploadID] = true }
+	for _, task := range saved {
+		kept[task.UploadID] = true
+	}
 	if kept["done"] || !kept["failed"] || !kept["paused"] {
 		t.Fatalf("persisted upload task cleanup mismatch: %+v", kept)
 	}
@@ -38,7 +46,9 @@ func TestClearCompletedPreservesFailedAndPausedUploads(t *testing.T) {
 
 func TestLateCancellationCannotDowngradeConfirmedUpload(t *testing.T) {
 	st, err := store.Open(t.TempDir())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	q := NewUploadQueue(st, nil)
 	defer q.Close()
 	done := make(chan struct{})
@@ -50,7 +60,9 @@ func TestLateCancellationCannotDowngradeConfirmedUpload(t *testing.T) {
 		}, nil
 	}
 	job := q.enqueue("account", "drive", "root", "rename", "source", "source", 0)
-	if job == nil { t.Fatal("failed to enqueue") }
+	if job == nil {
+		t.Fatal("failed to enqueue")
+	}
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -58,7 +70,9 @@ func TestLateCancellationCannotDowngradeConfirmedUpload(t *testing.T) {
 	}
 	q.workers.Wait()
 	list := q.List()
-	if len(list) != 1 { t.Fatalf("tasks: %+v", list) }
+	if len(list) != 1 {
+		t.Fatalf("tasks: %+v", list)
+	}
 	if !list[0].Upload.IsCompleted || list[0].Upload.IsStop {
 		t.Errorf("confirmed success downgraded after cancellation: %+v", list[0].Upload)
 	}
