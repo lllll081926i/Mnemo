@@ -593,6 +593,12 @@ func mapFile(item *File, driveID, parentID string) model.File {
 		f.Thumbnail = item.Thumbnail
 	}
 	f.Starred = item.Starred
+	for _, tag := range item.Tags {
+		if strings.EqualFold(strings.TrimSpace(tag.Name), "STAR") {
+			f.Starred = true
+			break
+		}
+	}
 	f.Ext = item.FileExtension
 	f.Category = driveutil.GuessCategory(item.Name)
 	f.Description = item.Phase
