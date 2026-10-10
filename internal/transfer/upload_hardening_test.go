@@ -2,7 +2,6 @@ package transfer
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -63,5 +62,4 @@ func TestLateCancellationCannotDowngradeConfirmedUpload(t *testing.T) {
 	if !list[0].Upload.IsCompleted || list[0].Upload.IsStop {
 		t.Errorf("confirmed success downgraded after cancellation: %+v", list[0].Upload)
 	}
-	_ = errors.New // reserved for future provider error cases
 }
