@@ -272,34 +272,14 @@ func uploadStatus(u model.UploadState) string {
 	}
 }
 
-// AddFiles enqueues local files/dirs into a parent folder.
+// AddFiles keeps the original public API for legacy callers. Use
+// AddFilesChecked when an RPC needs a user-visible error.
 func (q *UploadQueue) AddFiles(userID, driveID, parentID, conflictPolicy string, localPaths []string) []*model.UploadingUI {
-	var created []*model.UploadingUI
-	for _, p := range localPaths {
-		info, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		if info.IsDir() {
-			// walk folder
-			_ = filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
-					return nil
-				}
-				rel, _ := filepath.Rel(filepath.Dir(p), path)
-				name := strings.ReplaceAll(rel, "\\", "/")
-				if j := q.enqueue(userID, driveID, parentID, conflictPolicy, path, name, fi.Size()); j != nil {
-					created = append(created, j)
-				}
-				return nil
-			})
-		} else {
-			if j := q.enqueue(userID, driveID, parentID, conflictPolicy, p, info.Name(), info.Size()); j != nil {
-				created = append(created, j)
-			}
-		}
+	jobs, err := q.AddFilesChecked(userID, driveID, parentID, conflictPolicy, localPaths)
+	if err != nil {
+		logging.Warn("upload source validation failed", "error", err)
 	}
-	return created
+	return jobs
 }
 
 func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPath, name string, size int64) *model.UploadingUI {
