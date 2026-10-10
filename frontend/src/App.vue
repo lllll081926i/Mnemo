@@ -499,6 +499,7 @@ onMounted(async () => {
     onEvent('app:ready', refresh),
     onEvent('transfer:event', onTransferNotice),
     onEvent('upload:scan-error', (ev) => toast(String(ev?.error || '上传文件扫描失败，请重新选择文件'), 'error')),
+    onEvent('offline:history-error', (ev) => toast(String(ev?.error || '云离线任务已提交，但本地记录保存失败'), 'warn')),
     onEvent('share:history-error', (ev) => {
       error('share', 'share history persistence failed', { error: errorText(ev?.error) })
       toast('分享已创建，但本地历史记录保存失败，请稍后重试', 'warn')
