@@ -23,8 +23,8 @@ func TestPikPakOverwriteConflictDoesNotTrashExistingFile(t *testing.T) {
 	})
 	cl := newClient("access", "device", "account")
 	ui := &model.UploadingUI{Info: model.UploadInfo{
-		Name: "protected.mkv",
-		ParentFileID: RootID,
+		Name:           "protected.mkv",
+		ParentFileID:   RootID,
 		ConflictPolicy: "overwrite",
 	}}
 	proceed, err := (&Driver{}).prepareUploadTarget(t.Context(), cl, ui)
