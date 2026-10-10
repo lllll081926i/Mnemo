@@ -34,9 +34,9 @@ func TestWebDAVPutNotAbortedByShortControlRequestTimeout(t *testing.T) {
 				}
 				return &http.Response{
 					StatusCode: 201,
-					Header: make(http.Header),
-					Body: io.NopCloser(strings.NewReader("")),
-					Request: req,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("")),
+					Request:    req,
 				}, nil
 			}),
 		},
