@@ -439,6 +439,11 @@ func parseRetryAfterHeader(value string) int {
 	return parseRetryAfterSeconds(json.RawMessage(strconv.Quote(value)))
 }
 
+// pikpakFileTag is a provider system tag, including the STAR bookmark.
+type pikpakFileTag struct {
+	Name string `json:"name"`
+}
+
 // File is a raw PikPak drive file item.
 type File struct {
 	ID             string         `json:"id"`
@@ -450,9 +455,7 @@ type File struct {
 	ModifiedTime   string         `json:"modified_time"`
 	Trashed        bool           `json:"trashed"`
 	Starred        bool           `json:"starred"`
-	Tags           []struct {
-		Name string `json:"name"`
-	} `json:"tags"`
+	Tags           []pikpakFileTag `json:"tags"`
 	Thumbnail      string         `json:"thumbnail_link"`
 	WebContentLink string         `json:"web_content_link"`
 	Medias         []Media        `json:"medias"`
