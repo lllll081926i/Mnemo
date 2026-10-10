@@ -23,7 +23,7 @@ func TestWebDAVPutNotAbortedByShortControlRequestTimeout(t *testing.T) {
 	}
 	requests := 0
 	client := &Client{
-		HTTP: &http.Client{
+		HTTP:     &http.Client{
 			Timeout: 15 * time.Millisecond,
 			Transport: testUploadTransport(func(req *http.Request) (*http.Response, error) {
 				requests++
@@ -41,7 +41,7 @@ func TestWebDAVPutNotAbortedByShortControlRequestTimeout(t *testing.T) {
 			}),
 		},
 		Endpoint: base.String(),
-		base: base,
+		base:     base,
 	}
 	if err := client.Put(context.Background(), "/file.bin", strings.NewReader("hello"), 5); err != nil {
 		t.Fatalf("long PUT was terminated by short control timeout: %v", err)
