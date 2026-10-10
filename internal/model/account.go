@@ -112,6 +112,7 @@ type Account struct {
 	Token      *TokenInfo `json:"token,omitempty"`
 	Order      int64      `json:"order,omitempty"`
 	Disabled   bool       `json:"disabled,omitempty"`
+	AuthState  string     `json:"auth_state,omitempty"` // healthy or reauth_required
 	CustomName string     `json:"custom_name,omitempty"`
 	CustomIcon string     `json:"custom_icon,omitempty"`
 	// Usage is a cached quota snapshot for display.
