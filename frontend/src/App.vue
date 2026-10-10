@@ -289,16 +289,12 @@ function handleAccountExpired(event) {
   const meta = providers.value.find(item => item.ID === provider)
   const providerName = meta?.Meta?.label || provider || '网盘'
   const account = String(event?.accountName || '').trim()
-  if (userId) {
-    delete accountHealth[userId]
-    if (current.value?.user_id === userId) current.value = null
-    if (infoAcc.value?.user_id === userId) infoAcc.value = null
-    const saved = getLastDriveSelection()
-    if (saved?.userId === userId) clearLastDriveSelection()
-  }
+  // Expired credentials do not remove a persisted account. Keep the selected
+  // drive, task history and bookmarks so a later login can reuse the ID.
+  if (userId) accountHealth[userId] = 'reauth_required'
   refresh()
   const subject = account ? `「${account}」` : '该账号'
-  toast(`${providerName}${subject}的登录凭据已过期，账号已从本机移除；云端文件不会被删除，请在需要时重新登录。`, 'warn')
+  toast(`${providerName}${subject}的登录凭据已失效；账号及任务已保留，请重新登录授权。`, 'warn')
 }
 
 function closeLogin() {
