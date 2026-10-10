@@ -78,13 +78,21 @@ func TestPikPakStarAndUnstarUseBatchEndpoints(t *testing.T) {
 			return nil, fmt.Errorf("unexpected star request %s %s", req.Method, req.URL)
 		}
 		operations++
-		var b struct { IDs []string `json:"ids"` }
-		if err := json.NewDecoder(req.Body).Decode(&b); err != nil { return nil, err }
-		if len(b.IDs) != 1 || b.IDs[0] != "file-id" { t.Errorf("star ids: %+v", b.IDs) }
+		var b struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&b); err != nil {
+			return nil, err
+		}
+		if len(b.IDs) != 1 || b.IDs[0] != "file-id" {
+			t.Errorf("star ids: %+v", b.IDs)
+		}
 		return pikpakResponse(req, 200, `{}`), nil
 	})
 	cl := newClient("access", "device", "account")
 	if err := cl.Star(t.Context(), []string{"file-id"}, true); err != nil { t.Fatal(err) }
 	if err := cl.Star(t.Context(), []string{"file-id"}, false); err != nil { t.Fatal(err) }
-	if operations != 2 { t.Fatalf("star operations=%d", operations) }
+	if operations != 2 {
+		t.Fatalf("star operations=%d", operations)
+	}
 }
