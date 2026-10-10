@@ -291,7 +291,7 @@ function handleAccountExpired(event) {
   const account = String(event?.accountName || '').trim()
   // Expired credentials do not remove a persisted account. Keep the selected
   // drive, task history and bookmarks so a later login can reuse the ID.
-  if (userId) accountHealth[userId] = 'reauth_required'
+  if (userId) accountHealth[userId] = { status: 'auth', message: '登录凭据已过期，请重新授权', checkedAt: Date.now() }
   refresh()
   const subject = account ? `「${account}」` : '该账号'
   toast(`${providerName}${subject}的登录凭据已失效；账号及任务已保留，请重新登录授权。`, 'warn')
