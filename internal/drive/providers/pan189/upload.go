@@ -376,7 +376,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		// Persist the remote session immediately so a stop or process exit
 		// before the first part still has something to resume.
-		_ = drive.SaveUploadSessionState(sessionKey, uploadFileID, nil)
+		if err := drive.SaveUploadSessionState(sessionKey, uploadFileID, nil); err != nil {
+			return errors.Join(errors.New("天翼云盘上传会话无法持久化"), err)
+		}
 	}
 
 	uploaded := pan189UploadedBytes(size, slice, uploadedSet)
@@ -405,7 +407,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return err
 		}
 		uploadedSet[i] = true
-		_ = drive.SaveUploadSessionState(sessionKey, uploadFileID, drive.SortedUniqueParts(uploadedSet))
+		if err := drive.SaveUploadSessionState(sessionKey, uploadFileID, drive.SortedUniqueParts(uploadedSet)); err != nil {
+			return errors.Join(errors.New("天翼云盘上传续传进度无法持久化"), err)
+		}
 		uploaded += cur
 		setUploadState(ui, uploaded, size)
 	}
