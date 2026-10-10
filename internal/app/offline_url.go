@@ -47,10 +47,13 @@ func safeOfflineDisplayURL(raw string) string {
 		// A magnet's xt=urn:btih identifies the resource; it is not a
 		// presigned HTTP credential. Drop trackers if present.
 		q := parsed.Query()
-		q.Del("tr")
-		q.Del("ws")
-		parsed.RawQuery = q.Encode()
-		return parsed.String()
+		if q.Has("tr") || q.Has("ws") {
+			q.Del("tr")
+			q.Del("ws")
+			parsed.RawQuery = q.Encode()
+			return parsed.String()
+		}
+		return strings.TrimSpace(raw)
 	case "ed2k":
 		return parsed.String()
 	default:
