@@ -23,7 +23,7 @@ func TestWebDAVPutNotAbortedByShortControlRequestTimeout(t *testing.T) {
 	}
 	requests := 0
 	client := &Client{
-		HTTP:     &http.Client{
+		HTTP: &http.Client{
 			Timeout: 15 * time.Millisecond,
 			Transport: testUploadTransport(func(req *http.Request) (*http.Response, error) {
 				requests++
