@@ -1554,7 +1554,11 @@ func (a *App) UploadFiles(userID, driveID, parentID, conflictPolicy string, loca
 	// provider metadata is loading. Canonicalize it before the asynchronous
 	// queue starts resolving the remote parent.
 	parentID = canonicalUploadParent(userID, driveID, parentID)
-	items := uploads.AddFiles(userID, driveID, parentID, conflictPolicy, localPaths)
+	items, scanErr := uploads.AddFilesChecked(userID, driveID, parentID, conflictPolicy, localPaths)
+	if scanErr != nil {
+		logging.Warn("upload selection rejected", "error", scanErr)
+		a.emit("upload:scan-error", map[string]string{"error": scanErr.Error()})
+	}
 	logging.Info("upload items enqueued", "count", len(items))
 	return items
 }
