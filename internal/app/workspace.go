@@ -4,20 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
-	"os"
-	"strings"
-	"time"
 )
 
 type MigrationPreview struct {
 	Files     int      `json:"files"`
 	Bytes     int64    `json:"bytes"`
 	Conflicts []string `json:"conflicts"`
-	Warnings  []s// PreviewMigration detects conflicts throughout the destination hierarchy,
+	Warnings  []string `json:"warnings"`
+}
+
+// PreviewMigration detects conflicts throughout the destination hierarchy,
 // not just the first level. The preview fails closed when a directory cannot
 // be enumerated, since missing a conflict is riskier than aborting a preview.
 func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent string, ids []string) (*MigrationPreview, error) {
@@ -115,11 +119,6 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 			if account.Usage.Size-account.Usage.Used < out.Bytes {
 				out.Warnings = append(out.Warnings, "按最近容量记录，目标剩余空间可能不足")
 			}
-		}
-	}
-	return out, nil
-}
-
 		}
 	}
 	return out, nil
