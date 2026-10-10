@@ -450,6 +450,9 @@ type File struct {
 	ModifiedTime   string         `json:"modified_time"`
 	Trashed        bool           `json:"trashed"`
 	Starred        bool           `json:"starred"`
+	Tags           []struct {
+		Name string `json:"name"`
+	} `json:"tags"`
 	Thumbnail      string         `json:"thumbnail_link"`
 	WebContentLink string         `json:"web_content_link"`
 	Medias         []Media        `json:"medias"`
@@ -1291,8 +1294,10 @@ func (c *client) Copy(ctx context.Context, ids []string, toParentID string) erro
 }
 
 // ListFavorites reads the global starred feed with cursor pagination.
+// Starred is a system tag: ordinary file listings may report starred=false
+// even after a successful star operation (PikPak SDK live probe, 2026-09-24).
 func (c *client) ListFavorites(ctx context.Context) ([]File, error) {
-	q := url.Values{"limit": {"100"}, "parent_id": {"*"}, "thumbnail_size": {"SIZE_LARGE"}, "filters": {`{"starred":{"eq":true},"trashed":{"eq":false},"phase":{"eq":"PHASE_TYPE_COMPLETE"}}`}}
+	q := url.Values{"limit": {"100"}, "parent_id": {"*"}, "thumbnail_size": {"SIZE_LARGE"}, "filters": {`{"starred":{"eq":true},"trashed":{"eq":false}}`}}
 	out := []File{}
 	seen := map[string]bool{}
 	for {
