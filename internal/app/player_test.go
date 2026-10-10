@@ -241,7 +241,7 @@ func TestRefreshAccountNowKeepsShortManualGap(t *testing.T) {
 	}
 }
 
-func TestDriveUnauthorizedRemovesOnlyExpiredLocalAccount(t *testing.T) {
+func TestDriveUnauthorizedPreservesAccountAndCacheForReauthorization(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -265,11 +265,12 @@ func TestDriveUnauthorizedRemovesOnlyExpiredLocalAccount(t *testing.T) {
 
 	a.handleDriveOperationError(account.UserID, account.DriveID, drive.ErrUnauthorized)
 
-	if _, err := st.GetAccount(account.UserID); !os.IsNotExist(err) {
-		t.Fatalf("expired account still exists: %v", err)
+	kept, err := st.GetAccount(account.UserID)
+	if err != nil || kept == nil || kept.AuthState != "reauth_required" {
+		t.Fatalf("expired account was not preserved for reauthorization: %+v %v", kept, err)
 	}
-	if files, err := st.LoadDirectoryCache(cacheKey); err != nil || files != nil {
-		t.Fatalf("expired account directory cache remains: files=%#v err=%v", files, err)
+	if files, err := st.LoadDirectoryCache(cacheKey); err != nil || len(files) != 1 || files[0].FileID != "cached-file" {
+		t.Fatalf("expired account directory cache was lost: files=%#v err=%v", files, err)
 	}
 }
 
