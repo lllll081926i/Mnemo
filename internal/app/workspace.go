@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
 	"os"
 	"strings"
@@ -16,17 +17,36 @@ type MigrationPreview struct {
 	Files     int      `json:"files"`
 	Bytes     int64    `json:"bytes"`
 	Conflicts []string `json:"conflicts"`
-	Warnings  []string `json:"warnings"`
-}
-
+	Warnings  []s// PreviewMigration detects conflicts throughout the destination hierarchy,
+// not just the first level. The preview fails closed when a directory cannot
+// be enumerated, since missing a conflict is riskier than aborting a preview.
 func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent string, ids []string) (*MigrationPreview, error) {
 	ctx, cancel := context.WithTimeout(a.appContext(), 60*time.Second)
 	defer cancel()
 	out := &MigrationPreview{Conflicts: []string{}, Warnings: []string{}}
 	items := []drive.UploadValidationItem{}
 	seen := map[string]bool{}
-	var walk func(string, string) error
-	walk = func(id, parent string) error {
+	targetListings := map[string][]model.File{}
+	if strings.TrimSpace(dstParent) == "" || dstParent == "root" {
+		root, err := drive.RootID(dstUser, dstDrive)
+		if err != nil {
+			return nil, fmt.Errorf("无法识别迁移目标根目录: %w", err)
+		}
+		dstParent = root
+	}
+	listTarget := func(parent string) ([]model.File, error) {
+		if cached, ok := targetListings[parent]; ok {
+			return cached, nil
+		}
+		result, err := drive.ListDirAllContext(ctx, dstUser, dstDrive, parent, nil)
+		if err != nil {
+			return nil, fmt.Errorf("检查迁移目标目录失败: %w", err)
+		}
+		targetListings[parent] = result
+		return result, nil
+	}
+	var walk func(id, targetParent, relative string, targetExists bool) error
+	walk = func(id, targetParent, relative string, targetExists bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -44,16 +64,25 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 		if file == nil {
 			return fmt.Errorf("来源文件不存在")
 		}
-		if parent != "" {
-			existing, err := drive.ListDirAllContext(ctx, dstUser, dstDrive, parent, nil)
+		path := file.Name
+		if relative != "" {
+			path = relative + "/" + file.Name
+		}
+		var correspondingFolder string
+		if targetExists {
+			targetItems, err := listTarget(targetParent)
 			if err != nil {
 				return err
 			}
-			for _, target := range existing {
-				if target.Name == file.Name {
-					out.Conflicts = append(out.Conflicts, file.Name)
-					break
+			for _, target := range targetItems {
+				if target.Name != file.Name {
+					continue
 				}
+				out.Conflicts = append(out.Conflicts, path)
+				if file.IsDir && target.IsDir {
+					correspondingFolder = target.FileID
+				}
+				break
 			}
 		}
 		if !file.IsDir {
@@ -67,14 +96,14 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 			return err
 		}
 		for _, child := range children {
-			if err := walk(child.FileID, ""); err != nil {
+			if err := walk(child.FileID, correspondingFolder, path, correspondingFolder != ""); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	for _, id := range ids {
-		if err := walk(id, dstParent); err != nil {
+		if err := walk(id, dstParent, "", true); err != nil {
 			return nil, err
 		}
 	}
@@ -86,6 +115,11 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 			if account.Usage.Size-account.Usage.Used < out.Bytes {
 				out.Warnings = append(out.Warnings, "按最近容量记录，目标剩余空间可能不足")
 			}
+		}
+	}
+	return out, nil
+}
+
 		}
 	}
 	return out, nil
