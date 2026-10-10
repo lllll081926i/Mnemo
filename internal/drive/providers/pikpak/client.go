@@ -446,24 +446,24 @@ type pikpakFileTag struct {
 
 // File is a raw PikPak drive file item.
 type File struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Kind           string         `json:"kind"`
-	Size           int64          `json:"size"`
-	ParentID       string         `json:"parent_id"`
-	CreatedTime    string         `json:"created_time"`
-	ModifiedTime   string         `json:"modified_time"`
-	Trashed        bool           `json:"trashed"`
-	Starred        bool           `json:"starred"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Kind           string          `json:"kind"`
+	Size           int64           `json:"size"`
+	ParentID       string          `json:"parent_id"`
+	CreatedTime    string          `json:"created_time"`
+	ModifiedTime   string          `json:"modified_time"`
+	Trashed        bool            `json:"trashed"`
+	Starred        bool            `json:"starred"`
 	Tags           []pikpakFileTag `json:"tags"`
-	Thumbnail      string         `json:"thumbnail_link"`
-	WebContentLink string         `json:"web_content_link"`
-	Medias         []Media        `json:"medias"`
-	Phase          string         `json:"phase"`
-	FileExtension  string         `json:"file_extension"`
-	MimeType       string         `json:"mime_type"`
-	Duration       any            `json:"duration"`
-	Params         map[string]any `json:"params"`
+	Thumbnail      string          `json:"thumbnail_link"`
+	WebContentLink string          `json:"web_content_link"`
+	Medias         []Media         `json:"medias"`
+	Phase          string          `json:"phase"`
+	FileExtension  string          `json:"file_extension"`
+	MimeType       string          `json:"mime_type"`
+	Duration       any             `json:"duration"`
+	Params         map[string]any  `json:"params"`
 	Links          *struct {
 		ApplicationOctetStream *struct {
 			URL string `json:"url"`
