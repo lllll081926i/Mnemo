@@ -316,8 +316,19 @@ func (s *Store) SaveUploadTask(j *model.UploadingUI) error {
 	return s.writeJSONUnlocked(uploadsFile, list)
 }
 
-// ClearUploadTasks removes finished upload jobs.
+// ClearUploadTasks clears completed uploads only. Failed or stopped
+// uploads remain available for manual retry.
 func (s *Store) ClearUploadTasks() error {
+	return s.clearUploadTasks(false)
+}
+
+// ClearFinishedUploadTasks applies the explicit "do not keep tasks" setting,
+// including failed and stopped attempts as in previous versions.
+func (s *Store) ClearFinishedUploadTasks() error {
+	return s.clearUploadTasks(true)
+}
+
+func (s *Store) clearUploadTasks(includeRetryable bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var list []model.UploadingUI
@@ -330,7 +341,7 @@ func (s *Store) ClearUploadTasks() error {
 	}
 	out := list[:0]
 	for i := range list {
-		if list[i].Upload.IsCompleted {
+		if list[i].Upload.IsCompleted || (includeRetryable && (list[i].Upload.IsFailed || list[i].Upload.IsStop)) {
 			continue
 		}
 		out = append(out, list[i])
