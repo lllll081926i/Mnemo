@@ -90,8 +90,12 @@ func TestPikPakStarAndUnstarUseBatchEndpoints(t *testing.T) {
 		return pikpakResponse(req, 200, `{}`), nil
 	})
 	cl := newClient("access", "device", "account")
-	if err := cl.Star(t.Context(), []string{"file-id"}, true); err != nil { t.Fatal(err) }
-	if err := cl.Star(t.Context(), []string{"file-id"}, false); err != nil { t.Fatal(err) }
+	if err := cl.Star(t.Context(), []string{"file-id"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.Star(t.Context(), []string{"file-id"}, false); err != nil {
+		t.Fatal(err)
+	}
 	if operations != 2 {
 		t.Fatalf("star operations=%d", operations)
 	}
