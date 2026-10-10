@@ -712,6 +712,12 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	if err != nil {
 		return nil, err
 	}
+	if prior, lookupErr := st.GetAccount(acc.UserID); lookupErr == nil && prior != nil {
+		acc.Order = prior.Order
+		acc.CustomName = prior.CustomName
+		acc.CustomIcon = prior.CustomIcon
+	}
+	acc.AuthState = ""
 	if err := st.SaveAccount(acc); err != nil {
 		logging.Error("provider account persistence failed", "provider", provider, "error", err)
 		return nil, err
@@ -1077,7 +1083,7 @@ func (a *App) refreshAccount(ctx context.Context, userID string, removeOnUnautho
 		if refreshErr != nil {
 			if removeOnUnauthorized && errors.Is(refreshErr, drive.ErrUnauthorized) {
 				a.handleDriveOperationError(userID, current.DriveID, refreshErr)
-				return nil, fmt.Errorf("网盘登录已失效，账号已从本机移除: %w", refreshErr)
+				return nil, fmt.Errorf("网盘登录凭据已失效，账号和任务已保留，请重新授权: %w", refreshErr)
 			}
 			a.markAccountRefreshFailure(userID, refreshErr)
 			// The provider layer may already have persisted a rotated token even
@@ -1107,6 +1113,8 @@ func (a *App) refreshAccount(ctx context.Context, userID string, removeOnUnautho
 			current.DriveID = normalizedDriveID(provider, accountID, tok.DefaultDriveID)
 		}
 		markQuotaRefreshSuccess(current)
+		current.AuthState = ""
+		a.expiredAccounts.Delete(userID)
 		if saveErr := st.SaveAccount(current); saveErr != nil {
 			logging.Error("refreshed account persistence failed", "account_id", redactID(userID), "error", saveErr)
 			return current, fmt.Errorf("保存账号失败: %w", saveErr)
@@ -1162,9 +1170,9 @@ func (a *App) RemoveAccount(userID string) error {
 	return nil
 }
 
-// handleDriveOperationError removes only accounts whose provider explicitly
-// classified the credentials as unusable. Network errors, rate limits, 5xx,
-// and ordinary authorization failures never reach this branch.
+// handleDriveOperationError preserves account identity, download/upload
+// checkpoints and cache when a provider confirms that its credentials are
+// invalid. Reauthorizing the same provider identity can then resume work.
 func (a *App) handleDriveOperationError(userID, driveID string, operationErr error) {
 	if a == nil || strings.TrimSpace(userID) == "" || !errors.Is(operationErr, drive.ErrUnauthorized) {
 		return
@@ -1188,18 +1196,13 @@ func (a *App) handleDriveOperationError(userID, driveID string, operationErr err
 		logging.Warn("expired account drive mismatch", "account_id", redactID(userID))
 		return
 	}
-	if err := st.DeleteAccount(userID); err != nil {
+	account.AuthState = "reauth_required"
+	if err := st.SaveAccount(account); err != nil {
 		a.expiredAccounts.Delete(userID)
-		logging.Warn("expired account removal failed", "account_id", redactID(userID), "error", err)
+		logging.Warn("expired account status persistence failed", "account_id", redactID(userID), "error", err)
 		return
 	}
-	if err := st.DeleteDirectoryCachesForAccount(userID); err != nil {
-		logging.Warn("expired account cache cleanup failed", "account_id", redactID(userID), "error", err)
-	}
-	a.accountRefreshMu.Lock()
-	delete(a.accountRefreshLast, userID)
-	delete(a.accountRefreshRetryAfter, userID)
-	a.accountRefreshMu.Unlock()
+	a.markAccountRefreshFailure(userID, operationErr)
 	provider := account.Provider()
 	name := strings.TrimSpace(account.CustomName)
 	if name == "" && account.Token != nil {
@@ -1209,14 +1212,12 @@ func (a *App) handleDriveOperationError(userID, driveID string, operationErr err
 			}
 		}
 	}
-	a.emit("account:changed", map[string]string{"removed": userID})
+	a.emit("account:changed", account)
 	a.emit("account:expired", map[string]string{
-		"userId":      userID,
-		"driveId":     account.DriveID,
-		"provider":    provider,
-		"accountName": name,
+		"userId": userID, "driveId": account.DriveID, "provider": provider,
+		"accountName": name, "preserved": "true",
 	})
-	logging.Warn("expired account removed", "provider", provider, "account_id", redactID(userID))
+	logging.Warn("expired account marked for reauthorization", "provider", provider, "account_id", redactID(userID))
 }
 
 // GetSettings loads app settings.
