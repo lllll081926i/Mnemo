@@ -98,8 +98,8 @@ func TestGuangyaOfflineListFollowsPageAndMapsStatus(t *testing.T) {
 		if calls == 1 {
 			return guangyaResponse(request, 200, `{"code":0,"data":{"list":[{"taskId":"running","status":1,"progress":"43.5","totalSize":"9007199254740993"}],"hasMore":true,"cursor":"next"}}`), nil
 		}
-		if body["cursor"] != "next" {
-			t.Fatal("未沿用官方分页游标")
+		if body["page"] != float64(1) {
+			t.Fatal("未按官方页码查询第二页")
 		}
 		return guangyaResponse(request, 200, `{"code":0,"data":{"list":[{"taskId":"done","status":"2","progress":80},{"taskId":"partial","status":5,"progress":60},{"taskId":"running","status":1}],"hasMore":false}}`), nil
 	})
