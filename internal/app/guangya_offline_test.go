@@ -36,13 +36,13 @@ func TestGuangyaOfflineApplicationFlow(t *testing.T) {
 		}
 		body := ""
 		switch request.URL.Path {
-		case "/cloudcollection/v1/resolve_res":
+		case "/nd.bizcloudcollection.s/v1/resolve_res":
 			body = `{"code":0,"data":{"url":"magnet:?xt=urn:btih:test"}}`
-		case "/cloudcollection/v1/create_task":
+		case "/nd.bizcloudcollection.s/v1/create_task":
 			body = `{"code":0,"data":{"taskId":"guangya-task","fileId":"guangya-file"}}`
-		case "/cloudcollection/v1/list_task":
+		case "/nd.bizcloudcollection.s/v1/list_task":
 			body = `{"code":0,"data":{"list":[{"taskId":"guangya-task","fileId":"guangya-file","status":5,"progress":"70","fileName":"测试资源","totalSize":"1024"}]}}`
-		case "/cloudcollection/v2/delete_task":
+		case "/nd.bizcloudcollection.s/v2/delete_task":
 			var params struct {
 				TaskIDs    []string `json:"taskIds"`
 				DeleteFile bool     `json:"deleteFile"`
