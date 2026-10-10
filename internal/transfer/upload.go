@@ -82,7 +82,7 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 		handlerResolver: drive.QueueUploadHandler,
 	}
 	if !keepTasks {
-		if err := st.ClearUploadTasks(); err != nil {
+		if err := st.ClearFinishedUploadTasks(); err != nil {
 			logging.Warn("upload task history cleanup failed", "error", err)
 		}
 	}
