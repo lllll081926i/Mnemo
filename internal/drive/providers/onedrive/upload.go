@@ -189,7 +189,9 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 		}
 		pos += int64(n)
 		// Persist progress incrementally (byte offset as single-element part list)
-		_ = drive.SaveUploadSessionState(sessionKey, sess.UploadURL, []int{int(pos)})
+		if err := drive.SaveUploadSessionState(sessionKey, sess.UploadURL, []int{int(pos)}); err != nil {
+			return fmt.Errorf("onedrive: 保存上传续传进度失败: %w", err)
+		}
 		if ui != nil {
 			ui.ReportUploadProgress(pos, size)
 		}
