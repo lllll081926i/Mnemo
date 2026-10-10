@@ -162,7 +162,7 @@ func (*Driver) OfflineCreate(ctx context.Context, account drive.Context, link, n
 			EmuleResInfo *offlineResource `json:"emuleResInfo"`
 		} `json:"data"`
 	}
-	if err = cl.post(ctx, "/cloudcollection/v1/resolve_res", map[string]string{"url": link}, &resolved); err != nil {
+	if err = cl.post(ctx, "/nd.bizcloudcollection.s/v1/resolve_res", map[string]string{"url": link}, &resolved); err != nil {
 		return "", "", err
 	}
 	if resolved.Code != 0 {
@@ -193,7 +193,7 @@ func (*Driver) OfflineCreate(ctx context.Context, account drive.Context, link, n
 			FileID string `json:"fileId"`
 		} `json:"data"`
 	}
-	if err = cl.post(ctx, "/cloudcollection/v1/create_task", body, &created); err != nil {
+	if err = cl.post(ctx, "/nd.bizcloudcollection.s/v1/create_task", body, &created); err != nil {
 		return "", "", err
 	}
 	if created.Code != 0 {
@@ -205,15 +205,16 @@ func (*Driver) OfflineCreate(ctx context.Context, account drive.Context, link, n
 	return created.Data.TaskID, created.Data.FileID, nil
 }
 
+// OfflineList uses the zero-based page pagination documented by the provider
+// web API. A cursor field is not an input to /v1/list_task.
 func (*Driver) OfflineList(ctx context.Context, account drive.Context) (tasks []drive.OfflineTask, err error) {
 	cl, err := clientOf(account)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, drive.PersistToken(account)) }()
+	const pageSize = 50
 	result := make([]drive.OfflineTask, 0)
-	cursor := ""
-	seenCursors := make(map[string]bool)
 	seenTasks := make(map[string]bool)
 	for page := 0; page < 200; page++ {
 		var response struct {
@@ -221,15 +222,12 @@ func (*Driver) OfflineList(ctx context.Context, account drive.Context) (tasks []
 			Msg  string `json:"msg"`
 			Data *struct {
 				List    []offlineRemoteTask `json:"list"`
-				HasMore bool                `json:"hasMore"`
-				Cursor  string              `json:"cursor"`
+				HasMore *bool               `json:"hasMore"`
+				Total   json.Number         `json:"total"`
 			} `json:"data"`
 		}
-		body := map[string]any{"pageSize": 100, "status": []int{0, 1, 2, 3, 4, 5}}
-		if cursor != "" {
-			body["cursor"] = cursor
-		}
-		if err := cl.post(ctx, "/cloudcollection/v1/list_task", body, &response); err != nil {
+		body := map[string]any{"page": page, "pageSize": pageSize, "status": []int{0, 1, 2, 3, 4, 5}}
+		if err := cl.post(ctx, "/nd.bizcloudcollection.s/v1/list_task", body, &response); err != nil {
 			return nil, err
 		}
 		if response.Code != 0 {
@@ -238,6 +236,7 @@ func (*Driver) OfflineList(ctx context.Context, account drive.Context) (tasks []
 		if response.Data == nil || response.Data.List == nil {
 			return nil, errors.New("光鸭云离线列表响应缺少任务数据")
 		}
+		added := 0
 		for _, item := range response.Data.List {
 			task, err := item.model()
 			if err != nil {
@@ -246,16 +245,28 @@ func (*Driver) OfflineList(ctx context.Context, account drive.Context) (tasks []
 			if !seenTasks[task.TaskID] {
 				result = append(result, task)
 				seenTasks[task.TaskID] = true
+				added++
 			}
 		}
-		if !response.Data.HasMore {
-			return result, nil
+		// Do not mask a provider that ignores the page index.
+		if page > 0 && len(response.Data.List) > 0 && added == 0 {
+			return nil, errors.New("光鸭云离线分页返回了重复任务，可能忽略了页码")
 		}
-		cursor = response.Data.Cursor
-		if cursor == "" || seenCursors[cursor] {
-			return nil, errors.New("光鸭云离线分页游标缺失或重复")
+		if response.Data.HasMore != nil {
+			if !*response.Data.HasMore {
+				return result, nil
+			}
+		} else {
+			if response.Data.Total != "" {
+				total, parseErr := response.Data.Total.Int64()
+				if parseErr == nil && total >= 0 && int64((page+1)*pageSize) >= total {
+					return result, nil
+				}
+			}
+			if len(response.Data.List) < pageSize {
+				return result, nil
+			}
 		}
-		seenCursors[cursor] = true
 	}
 	return nil, errors.New("光鸭云离线分页超过安全上限")
 }
@@ -281,7 +292,7 @@ func (*Driver) OfflineDelete(ctx context.Context, account drive.Context, taskIDs
 			DeleteFileTaskID string `json:"deleteFileTaskId"`
 		} `json:"data"`
 	}
-	if err := cl.post(ctx, "/cloudcollection/v2/delete_task", map[string]any{"taskIds": taskIDs, "deleteFile": deleteFiles}, &response); err != nil {
+	if err := cl.post(ctx, "/nd.bizcloudcollection.s/v2/delete_task", map[string]any{"taskIds": taskIDs, "deleteFile": deleteFiles}, &response); err != nil {
 		return err
 	}
 	if response.Code == nil {
