@@ -46,7 +46,7 @@ func TestOverwriteVirtualDirectoryNeverDeletesExistingObjects(t *testing.T) {
 	ui := &model.UploadingUI{Info: model.UploadInfo{
 		LocalFilePath: "not-opened-on-conflict",
 		Name: "occupied",
-		ParentFileID: RootID,
+		ParentFileID: "/",
 		ConflictPolicy: "overwrite",
 	}}
 	err := (&Driver{}).UploadOneFile(context.Background(), account, ui)
