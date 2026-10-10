@@ -515,6 +515,10 @@ func (a *App) OfflineDownload(userID, driveID, url, fileName string) (*model.Off
 // offlineCreate 通过统一离线契约创建并保存任务。
 func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.OfflineTask, error) {
 	ctx := context.Background()
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
 	c, err := drive.BuildContext(userID, driveID, "")
 	if err != nil {
 		return nil, err
@@ -542,10 +546,6 @@ func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.Offli
 	}
 	if t.ID == "" {
 		return nil, fmt.Errorf("云离线任务响应缺少任务或文件 ID")
-	}
-	st, err := a.storeOrError()
-	if err != nil {
-		return nil, err
 	}
 	if err := st.SaveOfflineTask(t); err != nil {
 		// The remote provider already accepted this task. Returning an error
