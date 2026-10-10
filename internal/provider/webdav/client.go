@@ -186,7 +186,23 @@ func (c *Client) applyDigestAuth(req *http.Request) error {
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	send := c.HTTP.Do
 	if req.Method == http.MethodPut {
-		send = func(r *http.Request) (*http.Response, error) { return netx.DoUpload(c.HTTP, r) }
+		// Client.Timeout bounds the entire exchange, including every byte of
+		// an intentionally throttled upload. Keep the caller's cancellable
+		// context and bound response headers separately from body duration.
+		uploadClient := *c.HTTP
+		uploadClient.Timeout = 0
+		if transport, ok := c.HTTP.Transport.(*http.Transport); ok {
+			bounded := transport.Clone()
+			bounded.ResponseHeaderTimeout = 90 * time.Second
+			uploadClient.Transport = bounded
+			defer bounded.CloseIdleConnections()
+		} else if c.HTTP.Transport == nil {
+			bounded := http.DefaultTransport.(*http.Transport).Clone()
+			bounded.ResponseHeaderTimeout = 90 * time.Second
+			uploadClient.Transport = bounded
+			defer bounded.CloseIdleConnections()
+		}
+		send = func(r *http.Request) (*http.Response, error) { return netx.DoUpload(&uploadClient, r) }
 	}
 	resp, err := send(req)
 	if err != nil || resp == nil || (c.authMode != webDAVAuthAuto && c.authMode != webDAVAuthDigest) {
