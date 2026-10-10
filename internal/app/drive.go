@@ -651,7 +651,7 @@ func (a *App) DeleteOfflineTask(userID, driveID, taskID string, deleteFiles bool
 	if err != nil {
 		return err
 	}
-	return st.DeleteOfflineTask(taskID)
+	return st.DeleteOfflineTaskScoped(userID, driveID, taskID)
 }
 
 func firstFileID(ids []string) string {
