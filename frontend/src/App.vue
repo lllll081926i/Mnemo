@@ -4,7 +4,7 @@ import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, ren
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta, useOrderedAccounts } from './appearance'
 import PanView from './views/PanView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
-import { accountHealth, healthLabels, recordAccountHealth } from './workspace'
+import { accountHealth, healthLabels, recordAccountHealth, syncAccountAuthState } from './workspace'
 import { refreshAccountNow } from './api'
 import AccountRail from './components/AccountRail.vue'
 import AccountAvatar from './components/AccountAvatar.vue'
@@ -250,6 +250,7 @@ function refresh() {
   listAccounts().then((list) => {
     if (my !== refreshEpoch) return
     accounts.value = list || []
+    syncAccountAuthState(accounts.value)
     const available = orderedAccounts.value
     if (current.value) {
       const found = available.find((a) => a.user_id === current.value.user_id)
@@ -289,16 +290,12 @@ function handleAccountExpired(event) {
   const meta = providers.value.find(item => item.ID === provider)
   const providerName = meta?.Meta?.label || provider || '网盘'
   const account = String(event?.accountName || '').trim()
-  if (userId) {
-    delete accountHealth[userId]
-    if (current.value?.user_id === userId) current.value = null
-    if (infoAcc.value?.user_id === userId) infoAcc.value = null
-    const saved = getLastDriveSelection()
-    if (saved?.userId === userId) clearLastDriveSelection()
-  }
+  // Expired credentials do not remove a persisted account. Keep the selected
+  // drive, task history and bookmarks so a later login can reuse the ID.
+  if (userId) accountHealth[userId] = { status: 'auth', message: '登录凭据已过期，请重新授权', checkedAt: Date.now() }
   refresh()
   const subject = account ? `「${account}」` : '该账号'
-  toast(`${providerName}${subject}的登录凭据已过期，账号已从本机移除；云端文件不会被删除，请在需要时重新登录。`, 'warn')
+  toast(`${providerName}${subject}的登录凭据已失效；账号及任务已保留，请重新登录授权。`, 'warn')
 }
 
 function closeLogin() {
@@ -498,6 +495,8 @@ onMounted(async () => {
     onEvent('account:expired', handleAccountExpired),
     onEvent('app:ready', refresh),
     onEvent('transfer:event', onTransferNotice),
+    onEvent('upload:scan-error', (ev) => toast(String(ev?.error || '上传文件扫描失败，请重新选择文件'), 'error')),
+    onEvent('offline:history-error', (ev) => toast(String(ev?.error || '云离线任务已提交，但本地记录保存失败'), 'warn')),
     onEvent('share:history-error', (ev) => {
       error('share', 'share history persistence failed', { error: errorText(ev?.error) })
       toast('分享已创建，但本地历史记录保存失败，请稍后重试', 'warn')

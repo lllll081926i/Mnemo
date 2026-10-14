@@ -1013,14 +1013,16 @@ func TestPikPakUploadHonorsConflictPolicy(t *testing.T) {
 	overwrite := &model.UploadingUI{Info: model.UploadInfo{
 		LocalFilePath: filePath, ParentFileID: "pikpak_root", Name: "same.bin", ConflictPolicy: "overwrite",
 	}}
-	if err := driver.UploadOneFile(context.Background(), ctx, overwrite); err != nil {
-		t.Fatalf("overwrite: %v", err)
+	if err := driver.UploadOneFile(context.Background(), ctx, overwrite); err == nil || !strings.Contains(err.Error(), "安全覆盖") {
+		t.Fatalf("unsafe overwrite was not rejected: %v", err)
 	}
-	if listCalls != 5 || trashCalls != 1 || createCalls != 2 {
+	// Refuse and skip never write; rename creates one safe copy; overwrite
+	// must not trash or create anything before original data is protected.
+	if listCalls != 5 || trashCalls != 0 || createCalls != 1 {
 		t.Fatalf("list/trash/create = %d/%d/%d", listCalls, trashCalls, createCalls)
 	}
-	if overwrite.Upload.FileID != "new-file" || overwrite.Upload.DownSize != int64(len("pikpak-upload")) || overwrite.Upload.DownProcess != 100 || !overwrite.Upload.IsCompleted {
-		t.Fatalf("upload state = %#v", overwrite.Upload)
+	if overwrite.Upload.FileID != "" || overwrite.Upload.IsCompleted {
+		t.Fatalf("rejected overwrite reported success: %#v", overwrite.Upload)
 	}
 }
 

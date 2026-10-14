@@ -955,10 +955,11 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				}
 			}
 		case driveutil.ConflictOverwrite:
+			// An S3 "directory" may represent an entire non-empty prefix.
+			// Never delete its descendants as a side effect of uploading one
+			// regular file. The caller must explicitly resolve this conflict.
 			if isDir {
-				if err := cc.deleteRecursive(ctx, key); err != nil {
-					return fmt.Errorf("s3: 覆盖目录失败: %w", err)
-				}
+				return errors.New("s3: 目标名称对应目录，无法安全覆盖；请重命名文件或选择其他位置")
 			}
 		}
 	}

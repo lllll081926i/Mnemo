@@ -337,9 +337,8 @@ func pikpakConflictName(name string, index int) string {
 	return fmt.Sprintf("%s (%d)%s", stem, index, ext)
 }
 
-// prepareUploadTarget applies the shared conflict policy before hashing. This
-// avoids expensive GCID work for refuse/skip and mirrors the legacy trash-based
-// overwrite behavior.
+// prepareUploadTarget applies the shared conflict policy before hashing.
+// It must not trash an existing file before a replacement is confirmed.
 func (d *Driver) prepareUploadTarget(ctx context.Context, cl *client, ui *model.UploadingUI) (bool, error) {
 	name := strings.TrimSpace(ui.Info.Name)
 	if name == "" {
@@ -347,7 +346,8 @@ func (d *Driver) prepareUploadTarget(ctx context.Context, cl *client, ui *model.
 		ui.Info.Name = name
 	}
 	policy := driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy)
-	for index := 1; ; index++ {
+	originalName := name
+	for index := 1; index <= 9999; index++ {
 		conflict, err := cl.findUploadConflict(ctx, ui.Info.ParentFileID, name)
 		if err != nil {
 			return false, err
@@ -362,14 +362,16 @@ func (d *Driver) prepareUploadTarget(ctx context.Context, cl *client, ui *model.
 		case driveutil.ConflictSkip:
 			return false, nil
 		case driveutil.ConflictRename:
-			name = pikpakConflictName(name, index)
+			name = pikpakConflictName(originalName, index)
+		case driveutil.ConflictOverwrite:
+			// PikPak has no transactional replace operation in this driver.
+			// Trashing first risks losing the original when upload fails.
+			return false, fmt.Errorf("目标目录已有同名文件 %q；PikPak 暂不支持安全覆盖，请改用自动重命名或先手动处理原文件", conflict.Name)
 		default:
-			if err := cl.Trash(ctx, []string{conflict.ID}); err != nil {
-				return false, fmt.Errorf("处理同名文件失败：%w", err)
-			}
-			return true, nil
+			return false, fmt.Errorf("不支持的上传冲突策略")
 		}
 	}
+	return false, errors.New("PikPak 无法生成不重复的上传文件名")
 }
 
 func markPikPakUploadComplete(ui *model.UploadingUI, fileID string) {
@@ -591,6 +593,12 @@ func mapFile(item *File, driveID, parentID string) model.File {
 		f.Thumbnail = item.Thumbnail
 	}
 	f.Starred = item.Starred
+	for _, tag := range item.Tags {
+		if strings.EqualFold(strings.TrimSpace(tag.Name), "STAR") {
+			f.Starred = true
+			break
+		}
+	}
 	f.Ext = item.FileExtension
 	f.Category = driveutil.GuessCategory(item.Name)
 	f.Description = item.Phase

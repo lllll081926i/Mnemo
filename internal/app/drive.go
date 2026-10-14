@@ -515,6 +515,10 @@ func (a *App) OfflineDownload(userID, driveID, url, fileName string) (*model.Off
 // offlineCreate 通过统一离线契约创建并保存任务。
 func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.OfflineTask, error) {
 	ctx := context.Background()
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
 	c, err := drive.BuildContext(userID, driveID, "")
 	if err != nil {
 		return nil, err
@@ -537,18 +541,18 @@ func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.Offli
 	}
 	t := &model.OfflineTask{
 		ID: localID, UserID: userID, DriveID: driveID,
-		TaskID: taskID, FileID: fileID, URL: url, FileName: fileName,
+		TaskID: taskID, FileID: fileID, URL: safeOfflineDisplayURL(url), FileName: fileName,
 		Status: "running",
 	}
 	if t.ID == "" {
 		return nil, fmt.Errorf("云离线任务响应缺少任务或文件 ID")
 	}
-	st, err := a.storeOrError()
-	if err != nil {
-		return nil, err
-	}
 	if err := st.SaveOfflineTask(t); err != nil {
-		return nil, err
+		// The remote provider already accepted this task. Returning an error
+		// here encourages the user to submit a duplicate cloud operation.
+		logging.Warn("offline task accepted but local history failed", "account_id", redactID(userID), "error", err)
+		a.emit("offline:history-error", map[string]string{"error": "云离线任务已提交，但本地记录保存失败，请到服务商任务列表确认，不要重复提交"})
+		return t, nil
 	}
 	return t, nil
 }
@@ -604,7 +608,7 @@ func (a *App) RefreshOfflineTasks(userID, driveID string) ([]model.OfflineTask, 
 		}
 		ot := model.OfflineTask{
 			ID: localID, UserID: userID, DriveID: driveID,
-			TaskID: t.TaskID, FileID: t.FileID, URL: t.URL, FileName: t.Name,
+			TaskID: t.TaskID, FileID: t.FileID, URL: safeOfflineDisplayURL(t.URL), FileName: t.Name,
 			Status: firstNonEmptyOfflineStatus(t.Phase, t.Status), Progress: t.Progress,
 			Message: t.Message, FileSize: t.FileSize,
 			CreatedTime: t.CreatedTime, UpdatedTime: t.UpdatedTime,
@@ -651,7 +655,7 @@ func (a *App) DeleteOfflineTask(userID, driveID, taskID string, deleteFiles bool
 	if err != nil {
 		return err
 	}
-	return st.DeleteOfflineTask(taskID)
+	return st.DeleteOfflineTaskScoped(userID, driveID, taskID)
 }
 
 func firstFileID(ids []string) string {

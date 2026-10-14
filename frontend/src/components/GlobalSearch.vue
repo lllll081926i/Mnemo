@@ -45,6 +45,7 @@ async function run() {
       try {
         const files = await search(acc.user_id, acc.drive_id, query)
         if (seq !== epoch) return
+        if ((files || []).length > 500) errors.value.push(`${accountName(acc)}：结果超过 500 条，已截断，请缩小搜索范围`)
         onlineResults.push(...(files || []).slice(0, 500).map(file => ({ userId: acc.user_id, driveId: acc.drive_id, parentId: file.parent_file_id, file, source: '在线', updatedAt: Date.now() / 1000 })))
         updateResults()
       } catch { if (seq === epoch) errors.value.push(`${accountName(acc)}：在线搜索失败`) }
@@ -72,12 +73,13 @@ function open(result) {
       <motion.div class="global-search" :initial="compactReveal.initial" :animate="compactReveal.animate" :transition="compactReveal.transition">
         <form class="global-search-form" @submit.prevent="run">
           <UiIcon name="search" :size="17" class="global-search-icon" />
-          <input class="input" v-model="keyword" placeholder="搜索所有账号的文件" autofocus />
+          <input class="input" v-model="keyword" placeholder="搜索已缓存文件，或开启在线搜索" autofocus />
           <button class="btn primary" :disabled="busy">{{ busy ? '搜索中' : '搜索' }}</button>
         </form>
         <div class="global-search-options">
           <label class="global-search-toggle"><input type="checkbox" v-model="remote" /><span>同时在线搜索</span></label>
-          <span>缓存与在线并行，重复文件以在线结果为准</span>
+          <span v-if="!remote">当前仅搜索本机缓存，未浏览过的目录可能缺失</span>
+          <span v-else>在线搜索受网盘能力限制；每个网盘最多显示前 500 条</span>
         </div>
         <div v-if="busy" class="global-search-status" role="status"><span class="spin"></span><span>正在搜索…</span><button class="tbtn" type="button" @click="stop">停止</button></div>
         <div v-for="error in errors" :key="error" class="global-search-error" role="alert"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div>

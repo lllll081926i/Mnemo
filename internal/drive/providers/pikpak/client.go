@@ -439,25 +439,31 @@ func parseRetryAfterHeader(value string) int {
 	return parseRetryAfterSeconds(json.RawMessage(strconv.Quote(value)))
 }
 
+// pikpakFileTag is a provider system tag, including the STAR bookmark.
+type pikpakFileTag struct {
+	Name string `json:"name"`
+}
+
 // File is a raw PikPak drive file item.
 type File struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Kind           string         `json:"kind"`
-	Size           int64          `json:"size"`
-	ParentID       string         `json:"parent_id"`
-	CreatedTime    string         `json:"created_time"`
-	ModifiedTime   string         `json:"modified_time"`
-	Trashed        bool           `json:"trashed"`
-	Starred        bool           `json:"starred"`
-	Thumbnail      string         `json:"thumbnail_link"`
-	WebContentLink string         `json:"web_content_link"`
-	Medias         []Media        `json:"medias"`
-	Phase          string         `json:"phase"`
-	FileExtension  string         `json:"file_extension"`
-	MimeType       string         `json:"mime_type"`
-	Duration       any            `json:"duration"`
-	Params         map[string]any `json:"params"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Kind           string          `json:"kind"`
+	Size           int64           `json:"size"`
+	ParentID       string          `json:"parent_id"`
+	CreatedTime    string          `json:"created_time"`
+	ModifiedTime   string          `json:"modified_time"`
+	Trashed        bool            `json:"trashed"`
+	Starred        bool            `json:"starred"`
+	Tags           []pikpakFileTag `json:"tags"`
+	Thumbnail      string          `json:"thumbnail_link"`
+	WebContentLink string          `json:"web_content_link"`
+	Medias         []Media         `json:"medias"`
+	Phase          string          `json:"phase"`
+	FileExtension  string          `json:"file_extension"`
+	MimeType       string          `json:"mime_type"`
+	Duration       any             `json:"duration"`
+	Params         map[string]any  `json:"params"`
 	Links          *struct {
 		ApplicationOctetStream *struct {
 			URL string `json:"url"`
@@ -1291,8 +1297,10 @@ func (c *client) Copy(ctx context.Context, ids []string, toParentID string) erro
 }
 
 // ListFavorites reads the global starred feed with cursor pagination.
+// Starred is a system tag: ordinary file listings may report starred=false
+// even after a successful star operation (PikPak SDK live probe, 2026-09-24).
 func (c *client) ListFavorites(ctx context.Context) ([]File, error) {
-	q := url.Values{"limit": {"100"}, "parent_id": {"*"}, "thumbnail_size": {"SIZE_LARGE"}, "filters": {`{"starred":{"eq":true},"trashed":{"eq":false},"phase":{"eq":"PHASE_TYPE_COMPLETE"}}`}}
+	q := url.Values{"limit": {"100"}, "parent_id": {"*"}, "thumbnail_size": {"SIZE_LARGE"}, "filters": {`{"starred":{"eq":true},"trashed":{"eq":false}}`}}
 	out := []File{}
 	seen := map[string]bool{}
 	for {

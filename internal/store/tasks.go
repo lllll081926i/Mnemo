@@ -227,7 +227,7 @@ func (s *Store) SaveOfflineTask(t *model.OfflineTask) error {
 	}
 	replaced := false
 	for i := range list {
-		if list[i].ID == t.ID {
+		if list[i].ID == t.ID && list[i].UserID == t.UserID && list[i].DriveID == t.DriveID {
 			list[i] = *t
 			replaced = true
 			break
@@ -242,8 +242,16 @@ func (s *Store) SaveOfflineTask(t *model.OfflineTask) error {
 	return s.writeJSONUnlocked(offlineFile, list)
 }
 
-// DeleteOfflineTask removes an offline task.
+// DeleteOfflineTask removes the matching remote task record. A legacy
+// unscoped call is retained for older callers; new callers must use
+// DeleteOfflineTaskScoped to avoid deleting another account's equal ID.
 func (s *Store) DeleteOfflineTask(id string) error {
+	return s.DeleteOfflineTaskScoped("", "", id)
+}
+
+// DeleteOfflineTaskScoped removes a task only within the requested account
+// and drive. The remote task ID remains unchanged for provider API calls.
+func (s *Store) DeleteOfflineTaskScoped(userID, driveID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var list []model.OfflineTask
@@ -256,7 +264,7 @@ func (s *Store) DeleteOfflineTask(id string) error {
 	}
 	out := list[:0]
 	for i := range list {
-		if list[i].ID == id {
+		if list[i].ID == id && (userID == "" || list[i].UserID == userID) && (driveID == "" || list[i].DriveID == driveID) {
 			continue
 		}
 		out = append(out, list[i])
@@ -308,8 +316,45 @@ func (s *Store) SaveUploadTask(j *model.UploadingUI) error {
 	return s.writeJSONUnlocked(uploadsFile, list)
 }
 
-// ClearUploadTasks removes finished upload jobs.
+// ClearUploadTasks clears completed uploads only. Failed or stopped
+// uploads remain available for manual retry.
 func (s *Store) ClearUploadTasks() error {
+	return s.clearUploadTasks(false)
+}
+
+func (s *Store) DeleteUploadTasks(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.UploadingUI
+	if err := s.readJSON(uploadsFile, &list); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	selected := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		selected[id] = true
+	}
+	remaining := list[:0]
+	for _, task := range list {
+		if !selected[task.UploadID] {
+			remaining = append(remaining, task)
+		}
+	}
+	return s.writeJSONUnlocked(uploadsFile, remaining)
+}
+
+// ClearFinishedUploadTasks applies the explicit "do not keep tasks" setting,
+// including failed and stopped attempts as in previous versions.
+func (s *Store) ClearFinishedUploadTasks() error {
+	return s.clearUploadTasks(true)
+}
+
+func (s *Store) clearUploadTasks(includeRetryable bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var list []model.UploadingUI
@@ -322,7 +367,7 @@ func (s *Store) ClearUploadTasks() error {
 	}
 	out := list[:0]
 	for i := range list {
-		if list[i].Upload.IsCompleted || list[i].Upload.IsFailed || list[i].Upload.IsStop {
+		if list[i].Upload.IsCompleted || (includeRetryable && (list[i].Upload.IsFailed || list[i].Upload.IsStop)) {
 			continue
 		}
 		out = append(out, list[i])

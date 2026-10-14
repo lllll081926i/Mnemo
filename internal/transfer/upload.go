@@ -82,7 +82,7 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 		handlerResolver: drive.QueueUploadHandler,
 	}
 	if !keepTasks {
-		if err := st.ClearUploadTasks(); err != nil {
+		if err := st.ClearFinishedUploadTasks(); err != nil {
 			logging.Warn("upload task history cleanup failed", "error", err)
 		}
 	}
@@ -272,34 +272,14 @@ func uploadStatus(u model.UploadState) string {
 	}
 }
 
-// AddFiles enqueues local files/dirs into a parent folder.
+// AddFiles keeps the original public API for legacy callers. Use
+// AddFilesChecked when an RPC needs a user-visible error.
 func (q *UploadQueue) AddFiles(userID, driveID, parentID, conflictPolicy string, localPaths []string) []*model.UploadingUI {
-	var created []*model.UploadingUI
-	for _, p := range localPaths {
-		info, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		if info.IsDir() {
-			// walk folder
-			_ = filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
-					return nil
-				}
-				rel, _ := filepath.Rel(filepath.Dir(p), path)
-				name := strings.ReplaceAll(rel, "\\", "/")
-				if j := q.enqueue(userID, driveID, parentID, conflictPolicy, path, name, fi.Size()); j != nil {
-					created = append(created, j)
-				}
-				return nil
-			})
-		} else {
-			if j := q.enqueue(userID, driveID, parentID, conflictPolicy, p, info.Name(), info.Size()); j != nil {
-				created = append(created, j)
-			}
-		}
+	jobs, err := q.AddFilesChecked(userID, driveID, parentID, conflictPolicy, localPaths)
+	if err != nil {
+		logging.Warn("upload source validation failed", "error", err)
 	}
-	return created
+	return jobs
 }
 
 func (q *UploadQueue) enqueue(userID, driveID, parentID, conflictPolicy, localPath, name string, size int64) *model.UploadingUI {
@@ -711,20 +691,9 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		logging.Warn("upload worker failed", "job_id", id, "error", handlerErr, "duration", logging.Duration(started))
 		return
 	}
-	if wasStopped {
-		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
-			cleanupLocalFile := j.Info.CleanupLocalFile
-			j.Info = worker.Info
-			j.Info.CleanupLocalFile = cleanupLocalFile || worker.Info.CleanupLocalFile
-			j.Upload.FileID = worker.Upload.FileID
-			j.Upload.UploadID = worker.Upload.UploadID
-			j.Upload.IsDowning = false
-			j.Upload.IsStop = true
-			j.Upload.DownState = "stopped"
-		})
-		logging.Info("upload worker stopped", "job_id", id, "duration", logging.Duration(started))
-		return
-	}
+	// A nil handler error is a confirmed remote success. Cancellation
+	// requested just as the provider returns must not turn it into a paused
+	// job that the user could upload a second time.
 	if q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
 		cleanupLocalFile := j.Info.CleanupLocalFile
 		j.Info = worker.Info
@@ -817,27 +786,34 @@ func (q *UploadQueue) Resume(id string) error {
 }
 
 // ClearCompleted removes finished uploads.
-func (q *UploadQueue) ClearCompleted() {
+func (q *UploadQueue) ClearCompleted() error {
+	q.persistMu.Lock()
+	defer q.persistMu.Unlock()
 	q.mu.Lock()
+	defer q.mu.Unlock()
+	var completedIDs []string
 	for id, j := range q.jobs {
 		if _, active := q.runs[id]; active {
 			continue
 		}
-		if j.Upload.IsCompleted || j.Upload.IsFailed || j.Upload.IsStop {
-			delete(q.jobs, id)
-			delete(q.lastPersist, id)
-			delete(q.generations, id)
-			delete(q.lastProgress, id)
-			delete(q.speedSamples, id)
+		if j.Upload.IsCompleted {
+			completedIDs = append(completedIDs, id)
 		}
 	}
-	q.mu.Unlock()
-	q.dirMu.Lock()
-	q.dirIDs = map[string]string{}
-	q.dirMu.Unlock()
-	q.persistMu.Lock()
-	_ = q.store.ClearUploadTasks()
-	q.persistMu.Unlock()
+	if len(completedIDs) == 0 {
+		return nil
+	}
+	if err := q.store.DeleteUploadTasks(completedIDs); err != nil {
+		return err
+	}
+	for _, id := range completedIDs {
+		delete(q.jobs, id)
+		delete(q.lastPersist, id)
+		delete(q.generations, id)
+		delete(q.lastProgress, id)
+		delete(q.speedSamples, id)
+	}
+	return nil
 }
 
 // DownloadDir returns the configured download dir (helper).

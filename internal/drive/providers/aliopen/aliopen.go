@@ -2098,7 +2098,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	// Persist the remote session before requesting pre-signed URLs so a
 	// transient URL request failure can still resume the same upload task.
-	_ = drive.SaveUploadSessionState(sessionKey, encodeAliOpenUploadSession(uploadID, fileID), drive.SortedUniqueParts(uploadedSet))
+	if err := drive.SaveUploadSessionState(sessionKey, encodeAliOpenUploadSession(uploadID, fileID), drive.SortedUniqueParts(uploadedSet)); err != nil {
+		return fmt.Errorf("aliopen: 保存上传会话失败: %w", err)
+	}
 	if err := cl.fillUploadURLs(ctx, ref.Scope, fileID, uploadID, parts, uploadedSet); err != nil {
 		return err
 	}
@@ -2199,7 +2201,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		// Persist uploaded part number incrementally
 		if !uploadedSet[part.PartNumber] {
 			uploadedSet[part.PartNumber] = true
-			_ = drive.SaveUploadSessionState(sessionKey, encodeAliOpenUploadSession(uploadID, fileID), drive.SortedUniqueParts(uploadedSet))
+			if err := drive.SaveUploadSessionState(sessionKey, encodeAliOpenUploadSession(uploadID, fileID), drive.SortedUniqueParts(uploadedSet)); err != nil {
+				return fmt.Errorf("aliopen: 保存上传续传进度失败: %w", err)
+			}
 		}
 		uploadedSize += length
 		if ui != nil {

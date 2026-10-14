@@ -53,7 +53,7 @@ func TestGuangyaOfflineCreateUsesResolvedResource(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch request.URL.Path {
-				case "/cloudcollection/v1/resolve_res":
+				case "/nd.bizcloudcollection.s/v1/resolve_res":
 					if body["url"] != link {
 						t.Fatal("链接解析参数不正确")
 					}
@@ -62,7 +62,7 @@ func TestGuangyaOfflineCreateUsesResolvedResource(t *testing.T) {
 						resource = `,"btResInfo":{"subfilesNum":3,"excludeIndices":[1],"subfiles":[{"fileIndex":0},{"isDir":true,"subfiles":[{"fileIndex":1},{"fileIndex":"2"}]}]}`
 					}
 					return guangyaResponse(request, 200, fmt.Sprintf(`{"code":0,"data":{"url":%q%s}}`, resolvedLink, resource)), nil
-				case "/cloudcollection/v1/create_task":
+				case "/nd.bizcloudcollection.s/v1/create_task":
 					if body["url"] != resolvedLink || body["parentId"] != "" || body["newName"] != "测试资源" {
 						t.Fatalf("任务参数不正确：%+v", body)
 					}
@@ -86,20 +86,20 @@ func TestGuangyaOfflineCreateUsesResolvedResource(t *testing.T) {
 	}
 }
 
-func TestGuangyaOfflineListFollowsCursorAndMapsStatus(t *testing.T) {
+func TestGuangyaOfflineListFollowsPageAndMapsStatus(t *testing.T) {
 	calls := 0
 	mockOfflineHTTP(t, func(request *http.Request) (*http.Response, error) {
 		calls++
 		var body map[string]any
 		json.NewDecoder(request.Body).Decode(&body)
-		if request.URL.Path != "/cloudcollection/v1/list_task" || body["pageSize"] != float64(100) || len(body["status"].([]any)) != 6 {
+		if request.URL.Path != "/nd.bizcloudcollection.s/v1/list_task" || body["pageSize"] != float64(50) || len(body["status"].([]any)) != 6 {
 			t.Fatal("分页或状态筛选参数不正确")
 		}
 		if calls == 1 {
 			return guangyaResponse(request, 200, `{"code":0,"data":{"list":[{"taskId":"running","status":1,"progress":"43.5","totalSize":"9007199254740993"}],"hasMore":true,"cursor":"next"}}`), nil
 		}
-		if body["cursor"] != "next" {
-			t.Fatal("未沿用官方分页游标")
+		if body["page"] != float64(1) {
+			t.Fatal("未按官方页码查询第二页")
 		}
 		return guangyaResponse(request, 200, `{"code":0,"data":{"list":[{"taskId":"done","status":"2","progress":80},{"taskId":"partial","status":5,"progress":60},{"taskId":"running","status":1}],"hasMore":false}}`), nil
 	})
@@ -154,7 +154,7 @@ func TestGuangyaOfflineRejectsMalformedResponses(t *testing.T) {
 		{"list", `{"code":403,"msg":"无权限"}`},
 		{"list", `{"code":0}`},
 		{"list", `{"code":0,"data":{"list":[{"status":1}]}}`},
-		{"list", `{"code":0,"data":{"list":[],"hasMore":true,"cursor":"loop"}}`},
+		{"list", `{"code":0,"data":{"list":[{"taskId":"repeated","status":1}],"hasMore":true}}`},
 		{"delete", `{"code":403,"msg":"无权限"}`},
 		{"delete", `{}`},
 	} {

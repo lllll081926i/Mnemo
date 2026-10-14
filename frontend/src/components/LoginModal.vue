@@ -170,7 +170,6 @@ const hasEmailLogin = computed(() => fields.value.some((field) => field.key === 
 const isOAuth = computed(() => !isMounted.value && !hasAccountLogin.value && fields.value.length > 0 && fields.value.every(isOAuthField))
 // 按盘隐藏的可选高级字段（保持界面精简，需要时可从此处移除恢复）
 const HIDDEN_LOGIN_FIELDS = {
-  aliopen: ['client_id', 'client_secret'],
   guangya: ['refresh_token'],
   pan139: ['authorization'],
 }
@@ -385,7 +384,7 @@ onBeforeUnmount(() => {
 
 // 逐网盘附加帮助（后端 Login.fields 之外的引导）
 const PROVIDER_HELP = {
-  aliopen: { label: '如何获取 refresh_token？', url: 'https://alist.nn.ci/tool/aliyundrive/request' },
+  aliopen: { label: '如何获取阿里云盘 Open API Refresh Token（非 Cookie）？', url: 'https://alistgo.com/zh/tool/aliyundrive/request.html' },
 }
 const providerHelp = computed(() => PROVIDER_HELP[providerId.value] || null)
 function openHelp() { if (providerHelp.value) OpenBrowser(providerHelp.value.url).catch(() => {}) }
