@@ -1627,10 +1627,11 @@ func (a *App) CancelUpload(id string) {
 }
 
 // ClearUploads removes finished uploads.
-func (a *App) ClearUploads() {
+func (a *App) ClearUploads() error {
 	if uploads := a.uploadQueue(); uploads != nil {
-		uploads.ClearCompleted()
+		return uploads.ClearCompleted()
 	}
+	return nil
 }
 
 // ResumeUpload restarts a paused or failed upload job.

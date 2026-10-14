@@ -322,6 +322,32 @@ func (s *Store) ClearUploadTasks() error {
 	return s.clearUploadTasks(false)
 }
 
+func (s *Store) DeleteUploadTasks(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.UploadingUI
+	if err := s.readJSON(uploadsFile, &list); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	selected := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		selected[id] = true
+	}
+	remaining := list[:0]
+	for _, task := range list {
+		if !selected[task.UploadID] {
+			remaining = append(remaining, task)
+		}
+	}
+	return s.writeJSONUnlocked(uploadsFile, remaining)
+}
+
 // ClearFinishedUploadTasks applies the explicit "do not keep tasks" setting,
 // including failed and stopped attempts as in previous versions.
 func (s *Store) ClearFinishedUploadTasks() error {

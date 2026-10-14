@@ -786,27 +786,34 @@ func (q *UploadQueue) Resume(id string) error {
 }
 
 // ClearCompleted removes finished uploads.
-func (q *UploadQueue) ClearCompleted() {
+func (q *UploadQueue) ClearCompleted() error {
+	q.persistMu.Lock()
+	defer q.persistMu.Unlock()
 	q.mu.Lock()
+	defer q.mu.Unlock()
+	var completedIDs []string
 	for id, j := range q.jobs {
 		if _, active := q.runs[id]; active {
 			continue
 		}
 		if j.Upload.IsCompleted {
-			delete(q.jobs, id)
-			delete(q.lastPersist, id)
-			delete(q.generations, id)
-			delete(q.lastProgress, id)
-			delete(q.speedSamples, id)
+			completedIDs = append(completedIDs, id)
 		}
 	}
-	q.mu.Unlock()
-	q.dirMu.Lock()
-	q.dirIDs = map[string]string{}
-	q.dirMu.Unlock()
-	q.persistMu.Lock()
-	_ = q.store.ClearUploadTasks()
-	q.persistMu.Unlock()
+	if len(completedIDs) == 0 {
+		return nil
+	}
+	if err := q.store.DeleteUploadTasks(completedIDs); err != nil {
+		return err
+	}
+	for _, id := range completedIDs {
+		delete(q.jobs, id)
+		delete(q.lastPersist, id)
+		delete(q.generations, id)
+		delete(q.lastProgress, id)
+		delete(q.speedSamples, id)
+	}
+	return nil
 }
 
 // DownloadDir returns the configured download dir (helper).

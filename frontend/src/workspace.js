@@ -32,6 +32,18 @@ export function parseShareText(text) {
 
 export const accountHealth = reactive({})
 
+export function syncAccountAuthState(accounts) {
+  for (const account of accounts) {
+    const userId = account.user_id
+    if (!userId) continue
+    if (account.auth_state === 'reauth_required') {
+      accountHealth[userId] = { status: 'auth', message: '登录凭据已过期，请重新授权', checkedAt: Date.now() }
+    } else if (accountHealth[userId]?.status === 'auth') {
+      delete accountHealth[userId]
+    }
+  }
+}
+
 function rawErrorText(error) {
   return String(error?.message || error || '').replace(/^Error:\s*/i, '').trim()
 }

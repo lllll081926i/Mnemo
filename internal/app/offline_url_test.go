@@ -13,7 +13,7 @@ func TestSafeOfflineDisplayURLRedactsCredentials(t *testing.T) {
 			t.Fatalf("sensitive credential in persisted task URL: %q", got)
 		}
 	}
-	if !strings.Contains(got, "example.test/download") || !strings.Contains(got, "file=ok") {
+	if got != "https://example.test/download" {
 		t.Fatalf("redaction destroyed harmless resource metadata: %q", got)
 	}
 	if safeOfflineDisplayURL("magnet:?xt=urn:btih:hash") != "magnet:?xt=urn:btih:hash" {

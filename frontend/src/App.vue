@@ -4,7 +4,7 @@ import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, ren
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta, useOrderedAccounts } from './appearance'
 import PanView from './views/PanView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
-import { accountHealth, healthLabels, recordAccountHealth } from './workspace'
+import { accountHealth, healthLabels, recordAccountHealth, syncAccountAuthState } from './workspace'
 import { refreshAccountNow } from './api'
 import AccountRail from './components/AccountRail.vue'
 import AccountAvatar from './components/AccountAvatar.vue'
@@ -250,6 +250,7 @@ function refresh() {
   listAccounts().then((list) => {
     if (my !== refreshEpoch) return
     accounts.value = list || []
+    syncAccountAuthState(accounts.value)
     const available = orderedAccounts.value
     if (current.value) {
       const found = available.find((a) => a.user_id === current.value.user_id)

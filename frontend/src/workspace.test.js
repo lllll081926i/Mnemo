@@ -1,7 +1,18 @@
 import { describe, it, expect } from 'vitest'
-import { parseShareText, cleanBackupPrefs, recordAccountHealth, accountHealth, directoryCacheKey, driveErrorNotice } from './workspace'
+import { parseShareText, cleanBackupPrefs, recordAccountHealth, accountHealth, directoryCacheKey, driveErrorNotice, syncAccountAuthState } from './workspace'
 
 describe('工作区辅助逻辑', () => {
+  it('账号刷新只同步认证状态，不覆盖网络和容量诊断', () => {
+    accountHealth.networkAccount = { status: 'network' }
+    accountHealth.quotaAccount = { status: 'quota' }
+    accountHealth.authorizedAccount = { status: 'auth' }
+    syncAccountAuthState(['networkAccount', 'quotaAccount', 'authorizedAccount'].map(user_id => ({ user_id })))
+    expect(accountHealth.networkAccount.status).toBe('network')
+    expect(accountHealth.quotaAccount.status).toBe('quota')
+    expect(accountHealth.authorizedAccount).toBeUndefined()
+    delete accountHealth.networkAccount
+    delete accountHealth.quotaAccount
+  })
   it('目录缓存键统一编码账号、存储和根目录标识', () => {
     expect(directoryCacheKey('webdav:home', 'webdav:home', 'list', '/', '')).toBe('webdav|webdav%3Ahome|webdav%3Ahome|list|%2F|')
     expect(directoryCacheKey('pikpak_user', 'drive', 'list', 'pikpak_root', '')).toBe('pikpak|pikpak_user|drive|list|pikpak_root|')

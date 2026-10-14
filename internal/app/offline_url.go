@@ -21,27 +21,8 @@ func safeOfflineDisplayURL(raw string) string {
 		}
 		parsed.User = nil
 		parsed.Fragment = ""
-		q := parsed.Query()
-		for key, values := range q {
-			lower := strings.ToLower(key)
-			if strings.Contains(lower, "token") ||
-				strings.Contains(lower, "secret") ||
-				strings.Contains(lower, "sign") ||
-				strings.Contains(lower, "auth") ||
-				strings.Contains(lower, "credential") ||
-				strings.Contains(lower, "password") ||
-				strings.Contains(lower, "passwd") ||
-				strings.Contains(lower, "policy") ||
-				strings.Contains(lower, "key") ||
-				strings.HasPrefix(lower, "x-amz-") ||
-				strings.HasPrefix(lower, "x-oss-") {
-				for i := range values {
-					values[i] = "[redacted]"
-				}
-				q[key] = values
-			}
-		}
-		parsed.RawQuery = q.Encode()
+		parsed.RawQuery = ""
+		parsed.ForceQuery = false
 		return parsed.String()
 	case "magnet":
 		// A magnet's xt=urn:btih identifies the resource; it is not a
