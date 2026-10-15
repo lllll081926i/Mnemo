@@ -242,6 +242,10 @@ export function ListShareHistory(arg1) {
   return window['go']['app']['App']['ListShareHistory'](arg1);
 }
 
+export function ListShareImportReceipts(arg1, arg2) {
+  return window['go']['app']['App']['ListShareImportReceipts'](arg1, arg2);
+}
+
 export function ListSyncConfigs() {
   return window['go']['app']['App']['ListSyncConfigs']();
 }
@@ -370,6 +374,10 @@ export function RefreshOfflineTasks(arg1, arg2) {
   return window['go']['app']['App']['RefreshOfflineTasks'](arg1, arg2);
 }
 
+export function RefreshShareImportReceipt(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RefreshShareImportReceipt'](arg1, arg2, arg3);
+}
+
 export function RemoveAccount(arg1) {
   return window['go']['app']['App']['RemoveAccount'](arg1);
 }
@@ -448,6 +456,10 @@ export function SaveDirectoryCachePage(arg1, arg2, arg3) {
 
 export function SaveImportedShare(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['SaveImportedShare'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SaveImportedShareDetailed(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SaveImportedShareDetailed'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SaveLocalTag(arg1) {

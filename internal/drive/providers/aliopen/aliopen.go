@@ -2351,8 +2351,20 @@ func aliShareListAll(ctx context.Context, cl *client, shareID, shareToken, paren
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	items, err := d.SaveShareReceipt(ctx, c, session, fileIDs, toParentID)
+	return drive.AcceptedShareIDs(items), err
+}
+
+func (d *Driver) ValidateShareSession(session *drive.ShareImportSession) error {
 	if session == nil || session.Provider != providerID || strings.TrimSpace(session.ShareID) == "" || strings.TrimSpace(session.ShareToken) == "" {
-		return nil, errors.New("aliopen: 分享会话无效或已过期")
+		return errors.New("aliopen: 分享会话无效或已过期")
+	}
+	return nil
+}
+
+func (d *Driver) SaveShareReceipt(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]model.ShareImportItem, error) {
+	if err := d.ValidateShareSession(session); err != nil {
+		return nil, err
 	}
 	cl, err := clientOf(c)
 	if err != nil {
@@ -2373,7 +2385,7 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 		parent = "root"
 	}
 	hdrs := map[string]string{"x-share-token": session.ShareToken}
-	var saved []string
+	var saved []model.ShareImportItem
 	var failed []error
 	for _, fileID := range fileIDs {
 		body := map[string]any{
@@ -2383,11 +2395,26 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 			"to_parent_file_id": parent,
 			"auto_rename":       true,
 		}
-		if err := cl.apiPostWith(ctx, "/adrive/v1.0/openFile/copy", body, nil, hdrs); err != nil {
+		var receipt struct {
+			FileID  string `json:"file_id"`
+			TaskID  string `json:"async_task_id"`
+			DriveID string `json:"drive_id"`
+		}
+		if err := cl.apiPostWith(ctx, "/adrive/v1.0/openFile/copy", body, &receipt, hdrs); err != nil {
+			saved = append(saved, model.ShareImportItem{SourceID: fileID, Status: "unknown"})
 			failed = append(failed, fmt.Errorf("%s: %w", fileID, err))
 			continue
 		}
-		saved = append(saved, fileID)
+		item := model.ShareImportItem{SourceID: fileID, TaskID: receipt.TaskID, Status: "submitted"}
+		if receipt.DriveID != "" && receipt.DriveID != targetDrive {
+			item.Status = "unknown"
+		} else if receipt.FileID != "" {
+			item.TargetID = wrapRef(ref.Scope, receipt.FileID)
+			if receipt.TaskID == "" {
+				item.Status = "completed"
+			}
+		}
+		saved = append(saved, item)
 	}
 	return saved, errors.Join(failed...)
 }

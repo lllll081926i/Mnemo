@@ -188,7 +188,9 @@ export function DeleteOfflineTask(userId, driveId, taskId, deleteFiles) { return
 
 // ---------- share import ----------
 export function importShare(userId, driveId, shareUrl, password) { return driveCall('读取分享链接', App.ImportShare(userId, driveId, shareUrl, password)) }
-export function saveImportedShare(userId, driveId, session, fileIDs, toParentId) { return driveCall('保存分享文件', App.SaveImportedShare(userId, driveId, session, fileIDs, toParentId)) }
+export function saveImportedShare(userId, driveId, session, fileIDs, toParentId) { return driveCall('保存分享文件', App.SaveImportedShareDetailed(userId, driveId, session, fileIDs, toParentId)) }
+export function listShareImportReceipts(userId, driveId) { return driveCall('加载转存回执', App.ListShareImportReceipts(userId, driveId)) }
+export function refreshShareImportReceipt(userId, driveId, receiptId) { return driveCall('核对转存任务', App.RefreshShareImportReceipt(userId, driveId, receiptId)) }
 export function listShareHistory(userId) { return driveCall('加载分享记录', App.ListShareHistory(userId)) }
 export function ListShareHistory(userId) { return listShareHistory(userId) }
 

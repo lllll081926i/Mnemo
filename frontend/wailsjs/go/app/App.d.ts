@@ -126,6 +126,8 @@ export function ListRunningSyncIDs():Promise<Array<string>>;
 
 export function ListShareHistory(arg1:string):Promise<Array<model.ShareHistoryEntry>>;
 
+export function ListShareImportReceipts(arg1:string,arg2:string):Promise<Array<model.ShareImportReceipt>>;
+
 export function ListSyncConfigs():Promise<Array<sync.Config>>;
 
 export function ListTrash(arg1:string,arg2:string):Promise<Array<model.File>>;
@@ -190,6 +192,8 @@ export function RefreshAccountNow(arg1:string):Promise<model.Account>;
 
 export function RefreshOfflineTasks(arg1:string,arg2:string):Promise<Array<model.OfflineTask>>;
 
+export function RefreshShareImportReceipt(arg1:string,arg2:string,arg3:string):Promise<model.ShareImportReceipt>;
+
 export function RemoveAccount(arg1:string):Promise<void>;
 
 export function RemoveDownload(arg1:string):Promise<void>;
@@ -229,6 +233,8 @@ export function SaveDirectoryCache(arg1:string,arg2:Array<model.File>):Promise<v
 export function SaveDirectoryCachePage(arg1:string,arg2:Array<model.File>,arg3:string):Promise<void>;
 
 export function SaveImportedShare(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<Array<string>>;
+
+export function SaveImportedShareDetailed(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<model.ShareImportReceipt>;
 
 export function SaveLocalTag(arg1:store.LocalTag):Promise<void>;
 

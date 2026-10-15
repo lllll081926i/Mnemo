@@ -65,6 +65,8 @@ const api = vi.hoisted(() => ({
   capsOf: vi.fn(),
   importShare: vi.fn(),
   saveImportedShare: vi.fn(),
+  listShareImportReceipts: vi.fn().mockResolvedValue([]),
+  refreshShareImportReceipt: vi.fn(),
   cancelShare: vi.fn(),
   saveMounted: vi.fn(),
   validateMountedWrite: vi.fn(),

@@ -39,11 +39,11 @@ async function main() {
       ListDir:async(user,drive,dir)=>{await new Promise(r=>setTimeout(r,20));return dir==='root'? files : [files[0]]},
       ListFavorites:async()=>[],GetDirectoryCache:async()=>null,SaveDirectoryCache:async()=>{},DeleteDirectoryCache:async()=>{},
       ListDownloads:async()=>[],ListUploads:async()=>[],ListOfflineTasks:async()=>[],
-      ListShareHistory:async()=>[], GetLogPath:async()=>'',
+      ListShareHistory:async()=>[], ListShareImportReceipts:async()=>[], GetLogPath:async()=>'',
       SetAccountCustomMeta:async(id,name,icon)=>{const a=accounts.find(a=>a.user_id===id);a.custom_name=name;a.custom_icon=icon;window.runtime.EventsEmit('account:changed')},
       SearchCachedFiles:async()=>[{userId:accounts[0].user_id,driveId:accounts[0].drive_id,parentId:'root',file:files[0],updatedAt:1700000000}],
       SearchFiles:async()=>[files[1]],
-      ImportShare:async()=>({files:[{fileId:'import-1',name:'分享资料',size:10,isDir:false}]}), SaveImportedShare:async()=>['import-1'],
+      ImportShare:async()=>({files:[{fileId:'import-1',name:'分享资料',size:10,isDir:false}]}), SaveImportedShareDetailed:async(user,drive,session,ids,parent)=>({id:'receipt',accountId:user,driveId:drive,parentId:parent,historySaved:true,items:ids.map(sourceId=>({sourceId,status:'submitted'}))}),
       PreviewMigration:async()=>({files:1,bytes:1024,conflicts:[],warnings:[]}),MigrateFiles:async()=>({id:'new-migration',status:'pending'}),
       ListSyncConfigs:async()=>[{id:'sync1',name:'资料同步',user_id:accounts[0].user_id,drive_id:accounts[0].drive_id,local_dir:'D:/QA',remote_dir:'root',direction:'two-way',enabled:false}],ListRunningSyncIDs:async()=>[],
       PreviewSync:async()=>({token:'test-token',changes:[{path:'资料.txt',action:'conflict',local:{size:10},remote:{size:20}}]}),RunSyncPlan:async()=>{},
@@ -102,7 +102,7 @@ async function main() {
     assert.equal(await page.locator('.workspace-pane').nth(0).locator('.fileitem.selected').count(),0,'selection must stay in focused pane')
     await page.screenshot({path:path.join(output,'dual-dark.png')})
     await page.getByRole('button',{name:'全盘搜索',exact:true}).click()
-    await page.getByPlaceholder('搜索所有账号的文件').fill('资料')
+    await page.getByRole('textbox', { name: '跨盘搜索名称' }).fill('资料')
     await assertDialogCorners(page)
     await page.locator('.modal').getByRole('button',{name:'搜索',exact:true}).click()
     await page.locator('.workspace-result').first().waitFor()

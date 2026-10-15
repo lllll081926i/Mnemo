@@ -321,7 +321,11 @@ func (a *App) ImportShare(userID, driveID, shareURL, password string) (*drive.Sh
 // SaveImportedShare transfers selected files from a parsed share session
 // into the account's folder toParentID.
 func (a *App) SaveImportedShare(userID, driveID string, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
-	return drive.SaveImportedShare(userID, driveID, session, fileIDs, toParentID)
+	receipt, err := a.SaveImportedShareDetailed(userID, driveID, session, fileIDs, toParentID)
+	if err != nil {
+		return nil, err
+	}
+	return drive.AcceptedShareIDs(receipt.Items), nil
 }
 
 // ---- local tags & favorites ----

@@ -998,28 +998,62 @@ func ImportShare(userID, driveID, shareURL, password string) (session *ShareImpo
 // into the account's folder toParentID. Returns the provider-side ids of
 // the saved files.
 func SaveImportedShare(userID, driveID string, session *ShareImportSession, fileIDs []string, toParentID string) (ids []string, err error) {
-	if session == nil || strings.TrimSpace(session.Provider) == "" {
-		return nil, errors.New("drive: 分享会话无效")
+	items, err := SaveImportedShareReceipt(context.Background(), userID, driveID, session, fileIDs, toParentID)
+	return AcceptedShareIDs(items), err
+}
+
+func SaveImportedShareReceipt(ctx context.Context, userID, driveID string, session *ShareImportSession, fileIDs []string, toParentID string) (items []model.ShareImportItem, err error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if len(fileIDs) == 0 {
-		return nil, errors.New("drive: 至少选择一个分享文件")
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	for _, fileID := range fileIDs {
-		if strings.TrimSpace(fileID) == "" {
-			return nil, errors.New("drive: 分享文件 ID 不能为空")
-		}
+	if err := ValidateImportedShare(userID, driveID, session, fileIDs); err != nil {
+		return nil, err
 	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	sd, ok := d.(ShareImportDriver)
+	if detailed, ok := d.(ShareReceiptDriver); ok {
+		return detailed.SaveShareReceipt(ctx, c, session, fileIDs, toParentID)
+	}
+	accepted, operationErr := d.(ShareImportDriver).SaveShare(ctx, c, session, fileIDs, toParentID)
+	for _, fileID := range accepted {
+		items = append(items, model.ShareImportItem{SourceID: fileID, Status: "submitted"})
+	}
+	return items, operationErr
+}
+
+func ValidateImportedShare(userID, driveID string, session *ShareImportSession, fileIDs []string) error {
+	if session == nil || strings.TrimSpace(session.Provider) == "" {
+		return errors.New("drive: 分享会话无效")
+	}
+	if len(fileIDs) == 0 {
+		return errors.New("drive: 至少选择一个分享文件")
+	}
+	seen := map[string]bool{}
+	for _, fileID := range fileIDs {
+		if strings.TrimSpace(fileID) == "" {
+			return errors.New("drive: 分享文件 ID 不能为空")
+		}
+		if seen[fileID] {
+			return errors.New("drive: 分享文件 ID 不能重复")
+		}
+		seen[fileID] = true
+	}
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return err
+	}
+	_, ok := d.(ShareImportDriver)
 	if !ok {
-		return nil, ErrNotImplemented
+		return ErrNotImplemented
 	}
 	if session.Provider != c.TokenFrom {
-		return nil, fmt.Errorf("drive: 分享来源网盘与目标账号不匹配")
+		return fmt.Errorf("drive: 分享来源网盘与目标账号不匹配")
 	}
 	allowed := make(map[string]struct{}, len(session.Files))
 	for _, file := range session.Files {
@@ -1029,10 +1063,13 @@ func SaveImportedShare(userID, driveID string, session *ShareImportSession, file
 	}
 	for _, fileID := range fileIDs {
 		if _, exists := allowed[fileID]; !exists {
-			return nil, fmt.Errorf("drive: 分享文件不属于当前分享会话: %s", fileID)
+			return fmt.Errorf("drive: 分享文件不属于当前分享会话: %s", fileID)
 		}
 	}
-	return sd.SaveShare(context.Background(), c, session, fileIDs, toParentID)
+	if validator, ok := d.(ShareSessionValidator); ok {
+		return validator.ValidateShareSession(session)
+	}
+	return nil
 }
 
 // RootID returns the provider root id for an account.

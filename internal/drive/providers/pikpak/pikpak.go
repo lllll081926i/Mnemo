@@ -737,6 +737,11 @@ func pikpakShareListAll(ctx context.Context, cl *client, shareID, passCodeToken,
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	items, err := d.SaveShareReceipt(ctx, c, session, fileIDs, toParentID)
+	return drive.AcceptedShareIDs(items), err
+}
+
+func (d *Driver) SaveShareReceipt(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]model.ShareImportItem, error) {
 	if session == nil || (session.Provider != "" && session.Provider != providerID) || strings.TrimSpace(session.ShareID) == "" || strings.TrimSpace(session.PassCodeToken) == "" {
 		return nil, errors.New("pikpak: 分享会话无效")
 	}
@@ -757,10 +762,15 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 		"file_ids":        fileIDs,
 		"parent_id":       parent,
 	}
-	if err := cl.jsonDo(ctx, http.MethodPost, "/drive/v1/share/restore", body, nil, nil); err != nil {
+	var receipt shareTaskReceipt
+	if err := cl.jsonDo(ctx, http.MethodPost, "/drive/v1/share/restore", body, &receipt, nil); err != nil {
 		return nil, err
 	}
-	return fileIDs, nil
+	items := make([]model.ShareImportItem, 0, len(fileIDs))
+	for _, sourceID := range fileIDs {
+		items = append(items, model.ShareImportItem{SourceID: sourceID, Status: "submitted", TaskIDs: receipt.taskIDs()})
+	}
+	return items, nil
 }
 
 // parsePikPakShareURL extracts share_id from a PikPak share URL.

@@ -1758,8 +1758,20 @@ func pan123ShareList(ctx context.Context, d *Driver, c drive.Context, shareKey, 
 
 // SaveShare implements drive.ShareImportDriver.
 func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]string, error) {
+	items, err := d.SaveShareReceipt(ctx, c, session, fileIDs, toParentID)
+	return drive.AcceptedShareIDs(items), err
+}
+
+func (d *Driver) ValidateShareSession(session *drive.ShareImportSession) error {
 	if session == nil || (session.Provider != "" && session.Provider != providerID) || strings.TrimSpace(session.ShareKey) == "" {
-		return nil, errors.New("123: 分享会话无效")
+		return errors.New("123: 分享会话无效")
+	}
+	return nil
+}
+
+func (d *Driver) SaveShareReceipt(ctx context.Context, c drive.Context, session *drive.ShareImportSession, fileIDs []string, toParentID string) ([]model.ShareImportItem, error) {
+	if err := d.ValidateShareSession(session); err != nil {
+		return nil, err
 	}
 	if len(fileIDs) == 0 {
 		return nil, errors.New("123: 至少选择一个分享文件")
@@ -1776,10 +1788,18 @@ func (d *Driver) SaveShare(ctx context.Context, c drive.Context, session *drive.
 		"shareKey":     session.ShareKey,
 		"sharePwd":     session.Password,
 	}
-	if _, err := d.api(ctx, c, http.MethodPost, apiFileAsync, body, nil); err != nil {
+	response, err := d.api(ctx, c, http.MethodPost, apiFileAsync, body, nil)
+	if err != nil {
 		return nil, err
 	}
-	return fileIDs, nil
+	var receipt map[string]any
+	_ = json.Unmarshal(response.Data, &receipt)
+	taskID := asString(pick(receipt, "taskId", "task_id", "TaskId"))
+	items := make([]model.ShareImportItem, 0, len(fileIDs))
+	for _, fileID := range fileIDs {
+		items = append(items, model.ShareImportItem{SourceID: fileID, TaskID: taskID, Status: "submitted"})
+	}
+	return items, nil
 }
 
 // parsePan123ShareURL extracts shareKey from a 123 pan share URL.

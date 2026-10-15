@@ -15,6 +15,8 @@ const api = vi.hoisted(() => ({
   copyText: vi.fn(),
   importShare: vi.fn(),
   saveImportedShare: vi.fn(),
+  listShareImportReceipts: vi.fn().mockResolvedValue([]),
+  refreshShareImportReceipt: vi.fn(),
   cancelShare: vi.fn(),
 }))
 
@@ -30,6 +32,18 @@ afterEach(() => {
 })
 
 describe('分享页面交互', () => {
+  it('未知转存回执不提示成功，也不丢弃可核对记录', async () => {
+    api.saveImportedShare.mockResolvedValueOnce({ id: 'receipt', accountId: 'pikpak:test', driveId: 'drive', updatedAt: 1, items: [{ sourceId: 'file', status: 'unknown' }], historySaved: true, message: '转存结果未确认' })
+    wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    wrapper.vm.openImport()
+    wrapper.vm.importSession = { provider: 'pikpak', files: [{ fileId: 'file' }] }
+    wrapper.vm.importSelected = ['file']
+    await wrapper.vm.saveImport()
+    expect(wrapper.emitted('toast').at(-1)).toEqual(['转存结果未确认', 'warn'])
+    expect(wrapper.vm.lastImportReceipt.items[0].status).toBe('unknown')
+    expect(wrapper.vm.importOpen).toBe(false)
+  })
   it('转存无回执时不误报全部成功，保留选择', async () => {
     api.saveImportedShare.mockResolvedValueOnce([])
     wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
@@ -44,7 +58,7 @@ describe('分享页面交互', () => {
   })
 
   it('请求被接收只提示已提交，不承诺远端落盘完成', async () => {
-    api.saveImportedShare.mockResolvedValueOnce(['file'])
+    api.saveImportedShare.mockResolvedValueOnce({ id: 'receipt', accountId: 'pikpak:test', driveId: 'drive', items: [{ sourceId: 'file', status: 'submitted' }], historySaved: true })
     wrapper = mount(ShareView, { props: { accounts: [{ user_id: 'pikpak:test', drive_id: 'drive' }] }, global: { stubs: { UiIcon: true } } })
     await flushPromises()
     wrapper.vm.openImport()

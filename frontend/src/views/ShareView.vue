@@ -7,6 +7,7 @@ import UiSelect from '../components/UiSelect.vue'
 import Modal from '../components/Modal.vue'
 import SelectDirModal from '../components/SelectDirModal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import ShareImportHistory from '../components/ShareImportHistory.vue'
 import { parseShareText } from '../workspace'
 
 const props = defineProps({
@@ -15,6 +16,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['toast', 'navigate'])
 const importedLocation = ref(null)
+const lastImportReceipt = ref(null)
 
 const history = ref([])
 const loading = ref(false)
@@ -159,11 +161,15 @@ async function saveImport() {
       importDir.value.id,
     )
     if (seq !== importSeq) return
-    const count = Array.isArray(saved) ? saved.length : 0
-    if (count !== importSelected.value.length) {
-      throw new Error(`转存提交结果不完整（${count}/${importSelected.value.length}），请先检查目标目录，避免重复转存`)
+    const items = saved?.items
+    const sourceIDs = new Set(Array.isArray(items) ? items.map(item => item.sourceId) : [])
+    if (!saved?.id || !Array.isArray(items) || items.length !== importSelected.value.length || sourceIDs.size !== items.length || !importSelected.value.every(id => sourceIDs.has(id))) {
+      throw new Error('转存提交结果不完整，请先检查目标目录，避免重复转存')
     }
-    emit('toast', `已提交转存 ${count} 个项目，请在目标目录确认结果`, 'success')
+    lastImportReceipt.value = saved
+    const completed = items.every(item => item.status === 'completed')
+    const uncertain = items.some(item => !['completed', 'submitted'].includes(item.status)) || !saved.historySaved
+    emit('toast', saved.message || (completed ? `已确认转存 ${items.length} 个项目` : `已提交转存 ${items.length} 个项目，等待服务端确认`), uncertain ? 'warn' : 'success')
     importedLocation.value = { userId: importTarget.value.user_id, dirId: importDir.value.id, name: importDir.value.name }
     importOpen.value = false
     importDirPick.value = false
@@ -405,6 +411,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       </header>
 
       <section class="share-content">
+        <ShareImportHistory :accounts="accounts" :latest="lastImportReceipt" @toast="(message, type) => emit('toast', message, type)" @navigate="location => emit('navigate', location)" />
         <div v-if="loadError" role="alert" class="share-refresh-error">
           <span>{{ loadError }}{{ history.length ? '，已保留上次加载的记录。' : '' }}</span>
           <button class="btn" :disabled="loading" @click="refresh">重新加载</button>

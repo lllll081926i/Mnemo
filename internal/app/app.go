@@ -1156,6 +1156,11 @@ func (a *App) RefreshAccountNow(userID string) (*model.Account, error) {
 // RemoveAccount deletes an account.
 func (a *App) RemoveAccount(userID string) error {
 	logging.Info("account removal started", "account_id", redactID(userID))
+	unlock, err := drive.LockTarget(a.appContext(), userID, "", "share-import", "")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := a.storeOrError()
 	if err != nil {
 		return err
@@ -1167,9 +1172,14 @@ func (a *App) RemoveAccount(userID string) error {
 	if err := st.DeleteDirectoryCachesForAccount(userID); err != nil {
 		logging.Warn("removed account cache cleanup failed", "account_id", redactID(userID), "error", err)
 	}
+	var cleanupErrors []error
 	if err := st.ClearDeletionRecordsForAccount(userID); err != nil {
 		logging.Warn("removed account deletion history cleanup failed", "account_id", redactID(userID), "error", err)
-		return err
+		cleanupErrors = append(cleanupErrors, err)
+	}
+	if err := st.ClearShareImportsForAccount(userID); err != nil {
+		logging.Warn("removed account share import cleanup failed", "account_id", redactID(userID), "error", err)
+		cleanupErrors = append(cleanupErrors, err)
 	}
 	a.accountRefreshMu.Lock()
 	delete(a.accountRefreshLast, userID)
@@ -1178,7 +1188,7 @@ func (a *App) RemoveAccount(userID string) error {
 	a.expiredAccounts.Delete(userID)
 	a.emit("account:changed", map[string]string{"removed": userID})
 	logging.Info("account removal completed", "account_id", redactID(userID))
-	return nil
+	return errors.Join(cleanupErrors...)
 }
 
 // handleDriveOperationError preserves account identity, download/upload
