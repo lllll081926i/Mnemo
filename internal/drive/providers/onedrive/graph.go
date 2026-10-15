@@ -76,7 +76,14 @@ type client struct {
 }
 
 func newClient(token string) *client {
-	return &client{http: netx.NewClient(60 * time.Second), token: token}
+	httpClient := netx.NewClient(60 * time.Second)
+	httpClient.HTTP.CheckRedirect = func(request *http.Request, previous []*http.Request) error {
+		if len(previous) >= 10 || !trustedGraphURL(request.URL.String()) {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}
+	return &client{http: httpClient, token: token}
 }
 
 func (c *client) headers(extra map[string]string) map[string]string {
@@ -97,14 +104,21 @@ func trustedGraphURL(raw string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	return u.Scheme == "https" && (u.Port() == "" || u.Port() == "443") &&
-		(host == "graph.microsoft.com" || strings.HasSuffix(host, ".sharepoint.com") ||
-			strings.HasSuffix(host, ".sharepoint-df.com") || strings.HasSuffix(host, ".1drv.com"))
+	return u.Scheme == "https" && u.User == nil && u.Fragment == "" && (u.Port() == "" || u.Port() == "443") && host == "graph.microsoft.com"
+}
+
+func trustedMonitorURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Fragment != "" || parsed.Port() != "" && parsed.Port() != "443" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "graph.microsoft.com" || strings.HasSuffix(host, ".sharepoint.com") || strings.HasSuffix(host, ".sharepoint-df.com") || strings.HasSuffix(host, ".1drv.com")
 }
 
 func (c *client) getJSON(ctx context.Context, pathOrURL string, out any) error {
 	target := pathOrURL
-	if !strings.HasPrefix(target, "https://") {
+	if strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "//") {
 		target = graphHost + pathOrURL
 	} else if !trustedGraphURL(target) {
 		return errors.New("onedrive: invalid pagination url")
@@ -356,7 +370,7 @@ func (c *client) Copy(ctx context.Context, fileID, targetParentID, name string) 
 	if monitorURL == "" {
 		return errors.New("onedrive: copy monitor url missing")
 	}
-	if !trustedGraphURL(monitorURL) {
+	if !trustedMonitorURL(monitorURL) {
 		return errors.New("onedrive: invalid copy monitor url")
 	}
 	deadline := time.Now().Add(10 * time.Minute)
@@ -380,12 +394,31 @@ func (c *client) Copy(ctx context.Context, fileID, targetParentID, name string) 
 }
 
 func (c *client) pollCopy(ctx context.Context, monitorURL string) (string, error) {
-	resp, err := c.http.Do(ctx, http.MethodGet, monitorURL, c.headers(nil), nil)
+	if !trustedMonitorURL(monitorURL) {
+		return "", errors.New("onedrive: invalid copy monitor url")
+	}
+	var headers map[string]string
+	if trustedGraphURL(monitorURL) {
+		headers = c.headers(nil)
+	}
+	monitorClient := *c.http.HTTP
+	monitorClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, monitorURL, nil)
+	if err != nil {
+		return "", err
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	resp, err := monitorClient.Do(request)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode == 303 {
 		return "", nil
 	}
@@ -404,10 +437,14 @@ func (c *client) pollCopy(ctx context.Context, monitorURL string) (string, error
 	var st struct {
 		Status string `json:"status"`
 	}
-	_ = json.Unmarshal(body, &st)
+	if json.Unmarshal(body, &st) != nil {
+		return "", errors.New("onedrive: 复制回执无法解析，完成状态未确认")
+	}
 	switch strings.ToLower(st.Status) {
-	case "", "completed":
+	case "completed":
 		return "", nil
+	case "":
+		return "", errors.New("onedrive: 复制回执缺少状态，完成状态未确认")
 	case "failed", "deletefailed":
 		return "", errors.New("onedrive: copy failed")
 	}

@@ -8,14 +8,13 @@
 //   - /local/ only serves individually registered files under configured
 //     download roots. Browser-visible URLs contain an opaque grant id, not a
 //     local absolute path.
-//   - /proxy/ validates the target URL scheme (http/https only) and blocks
-//     private/loopback/link-local addresses to prevent SSRF.
+//   - /stream/ 只接收后端登记的不透明会话；旧 /proxy/ 路由返回 410。
 //   - CORS is restricted to the Wails origin (http://localhost:* /
 //     wails://localhost) instead of "*".
 //
 // Routes:
 //
-//	GET /proxy/?u=<url>&h=<base64json>&t=<token>   streaming proxy (Range supported)
+//	GET /stream/<session-id>?t=<token>            streaming proxy (Range supported)
 //	GET /local/<grant-id>?t=<token>                local file serving (Range)
 package preview
 
@@ -25,7 +24,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -225,20 +223,15 @@ func (s *Server) BaseURL() string { return fmt.Sprintf("http://127.0.0.1:%d", s.
 // optional display name forwarded to the browser via Content-Disposition so
 // the preview shows the real file name instead of a guessed one.
 func (s *Server) ProxyURL(target string, headers map[string]string, filename string) string {
-	s.rememberProxyHost(target, false)
-	hdrs, _ := json.Marshal(headers)
-	q := url.Values{}
-	q.Set("u", target)
-	q.Set("h", base64.StdEncoding.EncodeToString(hdrs))
-	q.Set("t", s.token)
-	if filename != "" {
-		q.Set("f", filename)
+	localURL, err := s.PlaybackURL(PlaybackSource{URL: target, Headers: headers, Filename: filename})
+	if err != nil {
+		return ""
 	}
-	return fmt.Sprintf("%s/proxy/?%s", s.BaseURL(), q.Encode())
+	return localURL
 }
 
 // PlaybackURL registers a source-backed stream session and returns its local
-// URL. Unlike ProxyURL, this does not put the upstream URL or auth headers in
+// URL. ProxyURL 兼容入口也使用此会话，不将上游 URL 或凭据放入
 // the browser-visible query string. The session is also the anchor used to
 // rewrite HLS playlist references to local proxy routes.
 func (s *Server) PlaybackURL(source PlaybackSource) (string, error) {
@@ -641,25 +634,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	target := r.URL.Query().Get("u")
-	if target == "" {
-		http.Error(w, "missing url", http.StatusBadRequest)
-		return
-	}
-	if !s.isSafeProxyURL(target) {
-		http.Error(w, "url not allowed", http.StatusBadRequest)
-		return
-	}
-	var headers map[string]string
-	if h := r.URL.Query().Get("h"); h != "" {
-		if b, err := base64.StdEncoding.DecodeString(h); err == nil {
-			_ = json.Unmarshal(b, &headers)
-		}
-	}
-	// strip hop-by-hop and sensitive headers
-	filtered := filterProxyHeaders(headers)
-	filename := r.URL.Query().Get("f")
-	proxyRequest(s, w, r, target, filtered, filename)
+	http.Error(w, "旧预览地址已停用，请重新打开文件", http.StatusGone)
 }
 
 // handleStream serves an opaque playback session. The optional path suffix is

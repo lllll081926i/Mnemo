@@ -98,7 +98,7 @@ func TestMoveChecksDestinationBeforeDeletingSource(t *testing.T) {
 				item := job.Items["/source"]
 				item.SourceRecorded, item.SourceTime, item.SourceHash, item.Size = true, source.Time, sourceHash(source), source.Size
 				job.Items["/source"] = item
-				if err := NewEngine(nil, nil).Run(t.Context(), job); err != nil || deleted || job.Status != "partial" {
+				if err := NewEngine(nil, nil).Run(t.Context(), job); err == nil || deleted || job.Status != "partial" {
 					t.Fatalf("旧复制检查点恢复时绕过了目标验证: deleted=%v, status=%s, err=%v", deleted, job.Status, err)
 				}
 			}

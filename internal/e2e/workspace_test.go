@@ -64,8 +64,8 @@ func TestMigrationMovePreservesChangesMadeDuringCopy(t *testing.T) {
 			})
 			defer drive.SetTokenResolver(nil)
 			job := &migrate.Job{ID: "safe-move", SrcUser: "webdav_source", SrcDrive: "webdav:source", DstUser: "webdav_target", DstDrive: "webdav:target", DstParent: "/", FileIDs: []string{selected}, Move: true}
-			if err := migrate.NewEngine(nil, nil).Run(context.Background(), job); err != nil {
-				t.Fatal(err)
+			if err := migrate.NewEngine(nil, nil).Run(context.Background(), job); err == nil {
+				t.Fatal("来源变化必须返回错误并保留来源")
 			}
 			if job.Status != "partial" {
 				t.Fatalf("move must stop source cleanup after change: %+v", job)

@@ -27,6 +27,8 @@ type remoteTask struct {
 	URL      string  `json:"url"`
 }
 
+func (*Driver) OfflineListIsComplete() bool { return true }
+
 func (task remoteTask) model() drive.OfflineTask {
 	id := task.ID
 	if id == "" {

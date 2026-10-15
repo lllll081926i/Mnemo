@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const bridge = vi.hoisted(() => ({
   GetDirectoryCache: vi.fn(),
   SaveDirectoryCache: vi.fn(),
+  SaveDirectoryCachePage: vi.fn(),
   DeleteDirectoryCache: vi.fn(),
   ClearCache: vi.fn(),
   ListDir: vi.fn(),
@@ -17,6 +18,7 @@ import { ClearCache, GetDirectoryCache, SaveDirectoryCache, listDir, listDirSile
 beforeEach(() => {
   bridge.GetDirectoryCache.mockReset()
   bridge.SaveDirectoryCache.mockReset()
+  bridge.SaveDirectoryCachePage.mockReset()
   bridge.DeleteDirectoryCache.mockReset()
   bridge.ClearCache.mockReset()
   bridge.ListDir.mockReset()
@@ -110,7 +112,7 @@ describe('根目录长期预缓存', () => {
     const result = await prewarmRootDirectories([account], providers)
     expect(result).toEqual({ cached: 0, warmed: 1, failed: 0 })
     expect(bridge.ListDirPage).toHaveBeenCalledWith(account.user_id, account.drive_id, '/', '')
-    expect(bridge.SaveDirectoryCache).toHaveBeenCalledWith('webdav|webdav%3Ahome|webdav%3Ahome|list|%2F|', files)
+    expect(bridge.SaveDirectoryCachePage).toHaveBeenCalledWith('webdav|webdav%3Ahome|webdav%3Ahome|list|%2F|', files, 'page-2')
   })
 
   it('不支持分页的网盘回退到普通目录接口', async () => {
@@ -130,5 +132,6 @@ describe('根目录长期预缓存', () => {
     const result = await prewarmRootDirectories([account], providers)
     expect(result).toEqual({ cached: 1, warmed: 0, failed: 0 })
     expect(bridge.SaveDirectoryCache).not.toHaveBeenCalled()
+    expect(bridge.SaveDirectoryCachePage).not.toHaveBeenCalled()
   })
 })

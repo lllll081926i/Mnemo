@@ -374,12 +374,19 @@ func ListDirAllContext(ctx context.Context, userID, driveID, dirID string, opts 
 
 // SearchDir performs server-side search.
 func SearchDir(userID, driveID, keyword string) (files []model.File, err error) {
+	return SearchDirContext(context.Background(), userID, driveID, keyword)
+}
+
+func SearchDirContext(ctx context.Context, userID, driveID, keyword string) (files []model.File, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.Search(context.Background(), c, keyword)
+	return d.Search(ctx, c, keyword)
 }
 
 // WebEditURL 返回网盘提供的浏览器文档地址。
@@ -852,6 +859,11 @@ func RapidUploadByHashContext(ctx context.Context, userID, driveID string, req R
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	release, err := LockTarget(ctx, userID, driveID, req.ParentID, req.FileName)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
@@ -905,6 +917,14 @@ func QueueUploadHandlerContext(ctx context.Context, userID, driveID string) (fun
 		return nil, err
 	}
 	return func(ctx context.Context, ui *model.UploadingUI) error {
+		if ui == nil {
+			return errors.New("上传任务为空")
+		}
+		release, lockErr := LockTarget(ctx, userID, driveID, ui.Info.ParentFileID, ui.Info.Name)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
 		opErr := d.UploadOneFile(ctx, c, ui)
 		return withTokenPersist(opErr, c)
 	}, nil
@@ -937,6 +957,11 @@ func StreamUploadHandlerContext(ctx context.Context, userID, driveID string) (fu
 		return nil, err
 	}
 	return func(ctx context.Context, parentID, name string, size int64, reader io.Reader) error {
+		release, lockErr := LockTarget(ctx, userID, driveID, parentID, name)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
 		opErr := su.UploadStream(ctx, c, parentID, name, size, reader)
 		return withTokenPersist(opErr, c)
 	}, nil

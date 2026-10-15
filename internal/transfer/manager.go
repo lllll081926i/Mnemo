@@ -417,6 +417,7 @@ func (m *Manager) AddDownload(userID, driveID string, f model.File) (*model.Down
 	// in a later detail response.
 	drive.RememberFile(userID, driveID, f)
 	t := &model.DownloadTask{
+		ContentHash: f.ContentHash, ContentHashName: f.ContentHashName,
 		ID:         newID("dl"),
 		UserID:     userID,
 		DriveID:    driveID,
@@ -561,6 +562,24 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		return
 	}
 	opts := dlengine.Options{Concurrency: concurrencyFromSettings(s)}
+	m.mu.Lock()
+	t.Verification = "size"
+	if s.VerifyDownloadHash && dlengine.ValidContentHash(t.ContentHashName, t.ContentHash) {
+		opts.ExpectedHash, opts.HashAlgorithm = t.ContentHash, t.ContentHashName
+		t.Verification = "pending"
+	}
+	m.mu.Unlock()
+	opts.OnVerification = func(done, total int64) {
+		m.mu.Lock()
+		t.Stage = "verifying"
+		t.Speed = 0
+		t.StageProgress = 100
+		if total > 0 {
+			t.StageProgress = int(done * 100 / total)
+		}
+		m.mu.Unlock()
+		m.update(t)
+	}
 	if t.UserID != "" && t.DriveID != "" && t.FileID != "" {
 		opts.ResourceID = t.UserID + "\x00" + t.DriveID + "\x00" + t.FileID
 	}
@@ -689,6 +708,11 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 
 	m.mu.Lock()
 	removed := m.removed[t.ID]
+	if errors.Is(err, dlengine.ErrHashMismatch) {
+		t.Verification = "failed"
+	} else if err == nil && opts.ExpectedHash != "" {
+		t.Verification = "hash:" + strings.ToLower(opts.HashAlgorithm)
+	}
 	if err != nil {
 		if t.Status == "canceled" {
 			// Cancel has already set the terminal state.

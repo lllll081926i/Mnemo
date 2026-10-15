@@ -21,6 +21,7 @@ type Settings struct {
 	MaxDownloadConnections int   `json:"maxDownloadConnections"`
 	MaxDownloadSpeed       int64 `json:"maxDownloadSpeed"` // bytes/s, 0 = unlimited
 	MaxUploadSpeed         int64 `json:"maxUploadSpeed"`
+	VerifyDownloadHash     bool  `json:"verifyDownloadHash"`
 
 	AutoUpdate     bool   `json:"autoUpdate"`
 	ConfirmUpdate  bool   `json:"confirmUpdate"`

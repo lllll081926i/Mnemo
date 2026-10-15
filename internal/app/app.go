@@ -81,8 +81,11 @@ type App struct {
 	expiredAccounts          sync.Map // user id -> struct{}; deduplicates removal/events from concurrent provider calls
 	favoriteLocks            sync.Map // account/drive -> *sync.Mutex; serializes cloud snapshots and edits
 
-	syncRunMu sync.Mutex
-	syncRuns  map[string]*activeSyncRun
+	syncRunMu      sync.Mutex
+	syncRuns       map[string]*activeSyncRun
+	searchMu       sync.Mutex
+	searchRuns     map[string]context.CancelFunc
+	searchStopping bool
 }
 
 const (
@@ -449,6 +452,7 @@ func (a *App) Shutdown(ctx context.Context) {
 		return
 	}
 	a.shutdownOnce.Do(func() {
+		a.cancelAllSearches()
 		a.CancelUpdate()
 		a.previewStopping.Store(true)
 		a.previewWindows.Range(func(_, value any) bool { value.(*previewProcess).cancel(); return true })
@@ -1405,6 +1409,17 @@ func (a *App) SaveDirectoryCache(key string, files []model.File) error {
 	return st.SaveDirectoryCache(key, files)
 }
 
+func (a *App) SaveDirectoryCachePage(key string, files []model.File, nextMarker string) error {
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("缓存键为空")
+	}
+	st, err := a.storeOrError()
+	if err != nil {
+		return err
+	}
+	return st.SaveDirectoryCachePage(key, files, nextMarker)
+}
+
 // DeleteDirectoryCache invalidates one persisted directory snapshot.
 func (a *App) DeleteDirectoryCache(key string) error {
 	if strings.TrimSpace(key) == "" {
@@ -1785,7 +1800,11 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	// derive from the app context so migrations are canceled on shutdown
 	ctx := a.appContext()
 	snapshot := migrate.Snapshot(job)
-	go func() { _ = eng.Run(ctx, job) }()
+	go func() {
+		if err := eng.Run(ctx, job); err != nil {
+			logging.Warn("迁移任务结束且存在错误", "job_id", job.ID, "error", err)
+		}
+	}()
 	return snapshot, nil
 }
 
@@ -1857,7 +1876,11 @@ func (a *App) ResumeMigrate(id string) (*migrate.Job, error) {
 		// Derive from the app context so a resumed job is canceled on shutdown.
 		ctx := a.appContext()
 		snapshot := migrate.Snapshot(&job)
-		go func() { _ = eng.Run(ctx, &job) }()
+		go func() {
+			if err := eng.Run(ctx, &job); err != nil {
+				logging.Warn("恢复迁移失败", "job_id", job.ID, "error", err)
+			}
+		}()
 		return snapshot, nil
 	}
 	return nil, fmt.Errorf("迁移任务不存在")

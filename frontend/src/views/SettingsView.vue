@@ -74,6 +74,7 @@ const defaults = {
   downloadDir: '',
   maxConcurrentDownloads: 3,
   maxDownloadConnections: 8,
+  verifyDownloadHash: false,
   maxDownloadSpeed: 0,
   maxUploadSpeed: 0,
   autoUpdate: true,
@@ -560,6 +561,16 @@ async function exportLogs() {
                   <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 10240 }" @click="setDownloadLimitPreset(10240)">10M</button>
                   <button class="pill-btn" :class="{ active: settings.maxDownloadSpeed === 20480 }" @click="setDownloadLimitPreset(20480)">20M</button>
                 </div>
+              </div>
+            </div>
+
+            <div class="sg-row">
+              <div class="sg-text">
+                <span class="sg-label">下载内容校验</span>
+                <span class="sg-desc">下载完成后校验网盘提供的 MD5、SHA-1 或 SHA-256；无可信摘要时仅校验长度，会增加磁盘读取</span>
+              </div>
+              <div class="sg-control">
+                <button type="button" class="switch" role="switch" aria-label="下载内容校验" :aria-checked="settings.verifyDownloadHash" :class="{ on: settings.verifyDownloadHash }" @click="toggle('verifyDownloadHash')"></button>
               </div>
             </div>
 

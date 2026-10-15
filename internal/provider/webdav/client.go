@@ -717,6 +717,7 @@ func unescapeDAVPath(raw string) (string, error) {
 
 // Entry is a normalized directory listing entry.
 type Entry struct {
+	ETag     string
 	Name     string
 	Path     string
 	IsDir    bool
@@ -984,7 +985,7 @@ func (c *Client) stat(ctx context.Context, href, properties string) (*Entry, err
 	if s := strings.TrimSpace(r.davValue("getlastmodified")); s != "" {
 		mod, _ = time.Parse(http.TimeFormat, s)
 	}
-	return &Entry{Name: path.Base(strings.TrimRight(p, "/")), Path: p, IsDir: isDir, Size: size, Modified: mod}, nil
+	return &Entry{Name: path.Base(strings.TrimRight(p, "/")), Path: p, IsDir: isDir, Size: size, Modified: mod, ETag: strings.TrimSpace(r.davValue("getetag"))}, nil
 }
 
 // Quota reads the optional RFC 4331 quota properties for a collection. A
@@ -1118,7 +1119,7 @@ func (c *Client) Copy(ctx context.Context, from, to string) error {
 }
 
 // Put uploads a body to href.
-func (c *Client) Put(ctx context.Context, href string, body io.Reader, size int64) error {
+func (c *Client) Put(ctx context.Context, href string, body io.Reader, size int64, conditions ...map[string]string) error {
 	req, err := c.newReq(ctx, "PUT", href, body, map[string]string{
 		"Content-Type": "application/octet-stream",
 	})
@@ -1127,6 +1128,11 @@ func (c *Client) Put(ctx context.Context, href string, body io.Reader, size int6
 	}
 	if size >= 0 {
 		req.ContentLength = size
+	}
+	for _, headers := range conditions {
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
 	}
 	resp, err := c.do(req)
 	if err != nil {

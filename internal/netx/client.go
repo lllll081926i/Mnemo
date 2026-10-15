@@ -180,7 +180,8 @@ func (c UploadHTTPClient) Do(req *http.Request) (*http.Response, error) {
 func DoUpload(client interface {
 	Do(*http.Request) (*http.Response, error)
 }, req *http.Request) (*http.Response, error) {
-	copy := req.Clone(req.Context())
+	ctx, cancel := context.WithCancel(req.Context())
+	copy := req.Clone(context.WithValue(ctx, uploadRequestKey{}, true))
 	if req.Body != nil && req.Body != http.NoBody {
 		copy.Body = &uploadBody{ReadCloser: req.Body, ctx: req.Context()}
 		if req.GetBody != nil {
@@ -194,7 +195,23 @@ func DoUpload(client interface {
 			}
 		}
 	}
-	return client.Do(copy)
+	if base, ok := client.(*http.Client); ok {
+		upload := *base
+		upload.Timeout = 0
+		transport := upload.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
+		}
+		if original, ok := transport.(*http.Transport); ok {
+			bounded := BoundedUploadTransport(original, 90*time.Second)
+			upload.Transport = bounded
+			defer bounded.CloseIdleConnections()
+		}
+		response, err := upload.Do(copy)
+		return boundedUploadResponse(response, err, cancel)
+	}
+	response, err := client.Do(copy)
+	return boundedUploadResponse(response, err, cancel)
 }
 
 func (c *Client) DoUpload(ctx context.Context, method, target string, headers map[string]string, body io.Reader) (*http.Response, error) {
@@ -213,7 +230,7 @@ func NewClient(timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	c := &Client{HTTP: &http.Client{Timeout: timeout}, UA: DefaultUA}
+	c := &Client{HTTP: &http.Client{Timeout: timeout, Transport: &uploadRoutingTransport{control: http.DefaultTransport}}, UA: DefaultUA}
 	if TestTransportHook != nil {
 		c.HTTP = &http.Client{Timeout: timeout, Transport: TestTransportHook}
 		return c
@@ -321,7 +338,7 @@ func (c *Client) WithProxy(proxyURL string) *Client {
 	if u, err := url.Parse(proxyURL); err == nil && u.Scheme != "" {
 		transport.Proxy = http.ProxyURL(u)
 	}
-	clone.HTTP = &http.Client{Transport: transport, Timeout: c.HTTP.Timeout}
+	clone.HTTP = &http.Client{Transport: &uploadRoutingTransport{control: transport}, Timeout: c.HTTP.Timeout}
 	clone.Proxy = proxyURL
 	return &clone
 }

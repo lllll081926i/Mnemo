@@ -342,6 +342,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	target := driveutil.JoinPath(pathOf(ui.Info.ParentFileID), ui.Info.Name)
+	conditions := map[string]string{"If-None-Match": "*"}
 
 	switch driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) {
 	case driveutil.ConflictRefuse:
@@ -369,6 +370,16 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if !isNotFound(e) {
 			return fmt.Errorf("webdav: 检查目标文件失败: %w", e)
 		}
+	case driveutil.ConflictOverwrite:
+		previous, err := client.Stat(ctx, target)
+		if err == nil {
+			if previous.IsDir || previous.ETag == "" || strings.HasPrefix(previous.ETag, "W/") {
+				return errors.New("webdav: 目标缺少可用于条件写入的版本标识，无法安全覆盖")
+			}
+			conditions = map[string]string{"If-Match": previous.ETag}
+		} else if !isNotFound(err) {
+			return err
+		}
 	}
 
 	f, err := os.Open(ui.Info.LocalFilePath)
@@ -386,7 +397,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	pr := driveutil.NewProgressOnlyReader(f, size, func(read int64) {
 		ui.ReportUploadProgress(read, size)
 	})
-	if err := client.Put(ctx, target, pr, size); err != nil {
+	if err := client.Put(ctx, target, pr, size, conditions); err != nil {
 		return err
 	}
 	ui.Upload.FileID = target

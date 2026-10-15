@@ -229,7 +229,7 @@ func (m *Manager) scanDownloadFolder(ctx context.Context, task *model.DownloadTa
 			}
 			seen[file.FileID] = true
 			relative := allocateFolderName(occupied, entry.RelativePath, file.Name)
-			task.FolderEntries = append(task.FolderEntries, model.DownloadEntry{FileID: file.FileID, ParentFileID: entry.FileID, SourcePath: file.Path, Name: file.Name, RelativePath: relative, Size: file.Size, IsDir: file.IsDir})
+			task.FolderEntries = append(task.FolderEntries, model.DownloadEntry{FileID: file.FileID, ParentFileID: entry.FileID, SourcePath: file.Path, Name: file.Name, RelativePath: relative, Size: file.Size, IsDir: file.IsDir, ContentHash: file.ContentHash, ContentHashName: file.ContentHashName})
 			if !file.IsDir {
 				task.TotalFiles++
 				task.Size += max(0, file.Size)
@@ -384,7 +384,7 @@ func (m *Manager) runFolderDownload(task *model.DownloadTask) {
 				continue
 			}
 			if child == nil {
-				child = &model.DownloadTask{ID: id, GroupID: task.ID, UserID: task.UserID, DriveID: task.DriveID, Provider: task.Provider, FileID: entry.FileID, SourcePath: entry.SourcePath, Name: entry.Name, LocalPath: target, Size: entry.Size, Created: time.Now().Unix()}
+				child = &model.DownloadTask{ID: id, GroupID: task.ID, UserID: task.UserID, DriveID: task.DriveID, Provider: task.Provider, FileID: entry.FileID, SourcePath: entry.SourcePath, Name: entry.Name, LocalPath: target, Size: entry.Size, Created: time.Now().Unix(), ContentHash: entry.ContentHash, ContentHashName: entry.ContentHashName}
 				m.tasks[id] = child
 			}
 			child.Status, child.Error = "queued", ""

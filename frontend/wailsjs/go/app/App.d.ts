@@ -18,6 +18,8 @@ export function CancelDownload(arg1:string):Promise<void>;
 
 export function CancelMigrate(arg1:string):Promise<void>;
 
+export function CancelSearch(arg1:string):Promise<void>;
+
 export function CancelShare(arg1:model.ShareHistoryEntry):Promise<void>;
 
 export function CancelSync(arg1:string):Promise<boolean>;
@@ -214,6 +216,8 @@ export function SaveCloudTextFile(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function SaveDirectoryCache(arg1:string,arg2:Array<model.File>):Promise<void>;
 
+export function SaveDirectoryCachePage(arg1:string,arg2:Array<model.File>,arg3:string):Promise<void>;
+
 export function SaveImportedShare(arg1:string,arg2:string,arg3:drive.ShareImportSession,arg4:Array<string>,arg5:string):Promise<Array<string>>;
 
 export function SaveLocalTag(arg1:store.LocalTag):Promise<void>;
@@ -229,6 +233,8 @@ export function SaveSyncConfig(arg1:sync.Config):Promise<void>;
 export function SearchCachedFiles(arg1:string):Promise<Array<store.CachedSearchResult>>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:string):Promise<Array<model.File>>;
+
+export function SearchFilesCancelable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<model.File>>;
 
 export function SendGuangyaSms(arg1:string):Promise<Record<string, string>>;
 

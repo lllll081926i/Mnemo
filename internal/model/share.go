@@ -30,19 +30,22 @@ type ShareItem struct {
 	Status          string   `json:"status,omitempty"`
 	UpdatedAt       string   `json:"updated_at,omitempty"`
 	IsShareSaved    bool     `json:"is_share_saved,omitempty"`
+	RemoteSuccess   bool     `json:"remote_success"`
+	HistorySaved    bool     `json:"history_saved"`
 }
 
 // ShareHistoryEntry is a locally persisted share record (searchable history).
 type ShareHistoryEntry struct {
-	ShareID   string `json:"share_id"`
-	AccountID string `json:"account_id"`
-	DriveID   string `json:"drive_id"`
-	FileID    string `json:"file_id"`
-	ShareURL  string `json:"share_url"`
-	SharePwd  string `json:"share_pwd,omitempty"`
-	ShareName string `json:"share_name"`
-	CreatedAt int64  `json:"created_at"`
-	Provider  string `json:"provider"`
+	ShareID      string `json:"share_id"`
+	AccountID    string `json:"account_id"`
+	DriveID      string `json:"drive_id"`
+	FileID       string `json:"file_id"`
+	ShareURL     string `json:"share_url"`
+	SharePwd     string `json:"share_pwd,omitempty"`
+	ShareName    string `json:"share_name"`
+	CreatedAt    int64  `json:"created_at"`
+	Provider     string `json:"provider"`
+	RemoteStatus string `json:"remote_status,omitempty"`
 }
 
 // ImportedShareResult is the outcome of importing a share link.

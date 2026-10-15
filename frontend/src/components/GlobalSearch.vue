@@ -8,33 +8,44 @@ import { compactReveal, reducedMotion } from '../motion/presets'
 const props = defineProps({ accounts: Array, providers: Array })
 const emit = defineEmits(['close', 'navigate'])
 const keyword = ref(''), results = ref([]), errors = ref([]), busy = ref(false), remote = ref(false), stopped = ref(false)
+const accountStates = ref([]), visibleCount = ref(200)
+const activeRequests = new Set()
+const searchSession = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
 let epoch = 0
-onBeforeUnmount(() => ++epoch)
+function cancelRequests() {
+  for (const requestId of activeRequests) {
+    Promise.resolve(window.go?.app?.App?.CancelSearch?.(requestId)).catch(() => {})
+  }
+  activeRequests.clear()
+}
+onBeforeUnmount(() => { ++epoch; cancelRequests() })
 const ordered = computed(() => {
   const rank = new Map(props.accounts.map((a, i) => [a.user_id, i]))
   return results.value.filter(r => rank.has(r.userId)).sort((a,b) => rank.get(a.userId) - rank.get(b.userId))
 })
 function account(id) { return props.accounts.find(a => a.user_id === id) }
 async function run() {
+  cancelRequests()
   const query = keyword.value.trim()
   const seq = ++epoch
   stopped.value = false
-  results.value = []; errors.value = []
+  results.value = []; errors.value = []; accountStates.value = []; visibleCount.value = 200
   if (!query) { busy.value = false; return }
   busy.value = true
   let cachedResults = []
   const onlineResults = []
   const updateResults = () => {
     if (seq !== epoch) return
-    const onlineKeys = new Set(onlineResults.map(result => `${result.userId}\u0000${result.file.file_id}`))
+    const onlineKeys = new Set(onlineResults.map(result => `${result.userId}\u0000${result.driveId}\u0000${result.file.file_id}`))
     results.value = [
-      ...cachedResults.filter(result => !onlineKeys.has(`${result.userId}\u0000${result.file.file_id}`)),
+      ...cachedResults.filter(result => !onlineKeys.has(`${result.userId}\u0000${result.driveId}\u0000${result.file.file_id}`)),
       ...onlineResults,
     ]
   }
   const cachedTask = Promise.resolve().then(() => window.go.app.App.SearchCachedFiles(query)).then(cached => {
     if (seq !== epoch) return
-    cachedResults = (cached || []).map(result => ({ ...result, source: '缓存' }))
+    cachedResults = (cached || []).map(result => ({ ...result, source: result.partial ? '缓存（部分目录）' : '缓存' }))
+    if ((cached || []).length >= 1000) errors.value.push('缓存结果达到 1000 条显示上限，请缩小搜索范围')
     updateResults()
   }).catch(() => { if (seq === epoch) errors.value.push('缓存搜索失败，请重试') })
   let onlineAccounts = []
@@ -42,23 +53,37 @@ async function run() {
     while (onlineAccounts.length && seq === epoch) {
       const acc = onlineAccounts.shift()
       if (!props.accounts.some(current => current.user_id === acc.user_id && current.drive_id === acc.drive_id)) continue
+      const state = accountStates.value.find(item => item.userId === acc.user_id && item.driveId === acc.drive_id)
+      const requestId = `${searchSession}:${seq}:${acc.user_id}:${acc.drive_id}`
+      activeRequests.add(requestId)
+      if (state) state.status = '搜索中'
       try {
-        const files = await search(acc.user_id, acc.drive_id, query)
+        const files = await search(acc.user_id, acc.drive_id, query, requestId)
         if (seq !== epoch) return
-        if ((files || []).length > 500) errors.value.push(`${accountName(acc)}：结果超过 500 条，已截断，请缩小搜索范围`)
-        onlineResults.push(...(files || []).slice(0, 500).map(file => ({ userId: acc.user_id, driveId: acc.drive_id, parentId: file.parent_file_id, file, source: '在线', updatedAt: Date.now() / 1000 })))
+        if (state) state.status = `在线查询完成 · ${(files || []).length} 项`
+        onlineResults.push(...(files || []).map(file => ({ userId: acc.user_id, driveId: acc.drive_id, parentId: file.parent_file_id, file, source: '在线', updatedAt: Date.now() / 1000 })))
         updateResults()
-      } catch { if (seq === epoch) errors.value.push(`${accountName(acc)}：在线搜索失败`) }
+      } catch {
+        if (seq === epoch) {
+          if (state) state.status = '失败，结果不完整'
+          errors.value.push(`${accountName(acc)}：在线搜索失败`)
+        }
+      } finally { activeRequests.delete(requestId) }
     }
   }
   try {
-    onlineAccounts = remote.value ? props.accounts.filter(acc => capsOf(acc, props.providers).search) : []
+    if (remote.value) {
+      accountStates.value = props.accounts.map(acc => ({ userId: acc.user_id, driveId: acc.drive_id, name: accountName(acc), status: capsOf(acc, props.providers).search ? '等待查询' : '不支持在线搜索，仅缓存结果' }))
+      onlineAccounts = props.accounts.filter(acc => capsOf(acc, props.providers).search)
+    }
     await Promise.all([cachedTask, worker(), worker()])
   } catch { if (seq === epoch) errors.value.push('搜索失败，请重试') }
   finally { if (seq === epoch) busy.value = false }
 }
 function stop() {
   ++epoch
+  cancelRequests()
+  accountStates.value.forEach(state => { if (['搜索中', '等待查询'].includes(state.status)) state.status = '已停止，结果不完整' })
   busy.value = false
   stopped.value = true
 }
@@ -73,21 +98,23 @@ function open(result) {
       <motion.div class="global-search" :initial="compactReveal.initial" :animate="compactReveal.animate" :transition="compactReveal.transition">
         <form class="global-search-form" @submit.prevent="run">
           <UiIcon name="search" :size="17" class="global-search-icon" />
-          <input class="input" v-model="keyword" placeholder="搜索已缓存文件，或开启在线搜索" autofocus />
+          <input class="input" v-model="keyword" aria-label="跨盘搜索名称" placeholder="搜索已缓存文件，或开启在线搜索" autofocus />
           <button class="btn primary" :disabled="busy">{{ busy ? '搜索中' : '搜索' }}</button>
         </form>
         <div class="global-search-options">
           <label class="global-search-toggle"><input type="checkbox" v-model="remote" /><span>同时在线搜索</span></label>
           <span v-if="!remote">当前仅搜索本机缓存，未浏览过的目录可能缺失</span>
-          <span v-else>在线搜索受网盘能力限制；每个网盘最多显示前 500 条</span>
+          <span v-else>在线搜索范围由网盘提供；结果分批显示，不截断查询结果</span>
         </div>
         <div v-if="busy" class="global-search-status" role="status"><span class="spin"></span><span>正在搜索…</span><button class="tbtn" type="button" @click="stop">停止</button></div>
         <div v-for="error in errors" :key="error" class="global-search-error" role="alert"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div>
+        <div v-for="state in accountStates" :key="state.userId + state.driveId" class="global-search-status" role="status">{{ state.name }}：{{ state.status }}</div>
         <div class="workspace-results global-search-results">
-          <button v-for="r in ordered" :key="r.userId + r.file.file_id" class="workspace-result" @click="open(r)">
+          <button v-for="r in ordered.slice(0, visibleCount)" :key="r.userId + r.driveId + r.file.file_id" class="workspace-result" @click="open(r)">
             <img :src="providerIconUrl(providerMetaOf(account(r.userId), providers))" alt="" />
             <span><strong>{{ r.file.name }}</strong><small>{{ accountName(account(r.userId)) }} · {{ r.parentId || '路径由网盘提供' }} · {{ r.source }} · {{ new Date(r.updatedAt*1000).toLocaleString() }}</small></span><UiIcon name="chevron-right" :size="14" />
           </button>
+          <button v-if="ordered.length > visibleCount" class="btn" type="button" @click="visibleCount += 200">显示更多（已显示 {{ visibleCount }} / {{ ordered.length }} 项）</button>
           <div v-if="!busy && !ordered.length && !errors.length" class="workspace-empty-state global-search-empty">
             <UiIcon name="search" :size="22" />
             <span>{{ stopped ? '搜索已停止，可重新搜索' : keyword ? '没有匹配的文件' : '输入名称，查找散落在各个网盘的文件' }}</span>

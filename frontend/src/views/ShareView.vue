@@ -453,6 +453,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
                 <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
               </div>
               <div class="share-record-side">
+				<span class="sg-desc">{{ h.remote_status === 'active' ? '创建时已确认，后续状态未复核' : '本地记录 · 远端状态未复核' }}</span>
                 <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
                 <div class="share-record-actions">
                   <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>

@@ -88,17 +88,7 @@ func (s *Store) writeAccountsUnlocked(list []*model.Account) error {
 	if err != nil {
 		return err
 	}
-	p := s.path(accountsFile)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, []byte(enc), 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := renameWithRetry(tmp, p); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return durableWrite(s.path(accountsFile), []byte(enc))
 }
 
 // ListAccounts returns all persisted accounts sorted by order then user id.

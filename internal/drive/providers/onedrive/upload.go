@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/model"
@@ -87,7 +88,7 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 	var pos int64
 	if savedSessionID != "" {
 		candidate := &UploadSessionItem{UploadURL: savedSessionID}
-		if qPos, qFile, completed, usable := querySessionPosition(ctx, candidate.UploadURL, c); usable {
+		if qPos, qFile, completed, usable, status := querySessionPosition(ctx, candidate.UploadURL, c); usable {
 			sess, pos = candidate, qPos
 			if completed {
 				if ui != nil {
@@ -96,6 +97,8 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 				drive.ClearUploadSession(sessionKey)
 				return nil
 			}
+		} else if status != http.StatusNotFound {
+			return fmt.Errorf("onedrive: 上传会话状态暂不明确（HTTP %d），保留会话等待重试", status)
 		}
 	}
 	if sess == nil {
@@ -114,7 +117,7 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 	// Query a newly-created session too; this keeps the handling consistent
 	// when the provider returns an already-initialized session.
 	if pos == 0 {
-		if qPos, qFile, completed, usable := querySessionPosition(ctx, sess.UploadURL, c); usable {
+		if qPos, qFile, completed, usable, _ := querySessionPosition(ctx, sess.UploadURL, c); usable {
 			if completed {
 				if ui != nil {
 					ui.Upload.FileID = qFile
@@ -129,6 +132,8 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 	}
 
 	buf := make([]byte, sessionChunkSize)
+	retries := make(map[int64]int)
+	recoveryCount := 0
 	for pos < size {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -147,29 +152,49 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 		req.Header.Set("Content-Range", "bytes "+strconv.FormatInt(pos, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(size, 10))
 		req.Header.Set("Content-Length", strconv.Itoa(n))
 		resp, err := netx.DoUpload(c.http.HTTP, req)
-		if err != nil {
-			return err
+		var body []byte
+		var readErr error
+		if resp != nil {
+			body, readErr = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
 		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if readErr != nil {
-			return readErr
+		if err != nil || readErr != nil || resp != nil && (resp.StatusCode == 416 || resp.StatusCode == 429 || resp.StatusCode >= 500) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if retries[pos] >= 3 || recoveryCount >= 12 {
+				return errors.New("onedrive: 上传分片恢复次数已达上限，会话已保留")
+			}
+			delay := time.Second << retries[pos]
+			retries[pos]++
+			recoveryCount++
+			if resp != nil && resp.Header.Get("Retry-After") != "" {
+				if err := waitUploadRetry(ctx, resp.Header.Get("Retry-After"), delay); err != nil {
+					return err
+				}
+			}
+			qPos, qFile, completed, usable, _ := querySessionPosition(ctx, sess.UploadURL, c)
+			if completed && usable {
+				ui.Upload.FileID = qFile
+				ui.ReportUploadProgress(size, size)
+				drive.ClearUploadSession(sessionKey)
+				return nil
+			}
+			if !usable || qPos < 0 || qPos > size {
+				return errors.New("onedrive: 远端回执不明且无法查询会话，保留检查点，不重复提交")
+			}
+			if qPos == pos && (resp == nil || resp.Header.Get("Retry-After") == "") {
+				if err := waitUploadRetry(ctx, "", delay); err != nil {
+					return err
+				}
+			}
+			pos = qPos
+			if err := drive.SaveUploadSessionState(sessionKey, sess.UploadURL, []int{int(pos)}); err != nil {
+				return err
+			}
+			continue
 		}
 		if resp.StatusCode >= 300 && resp.StatusCode != 201 && resp.StatusCode != 202 && resp.StatusCode != 200 {
-			// 416 → already uploaded; query position to advance
-			if resp.StatusCode == 416 {
-				if qPos, qFile, completed, usable := querySessionPosition(ctx, sess.UploadURL, c); usable && completed {
-					if ui != nil {
-						ui.Upload.FileID = qFile
-					}
-					drive.ClearUploadSession(sessionKey)
-					return nil
-				} else if usable && qPos > pos && qPos <= size {
-					pos = qPos
-					continue
-				}
-				return errors.New("onedrive: upload session rejected range and position is unknown")
-			}
 			return graphError(body, resp.StatusCode)
 		}
 		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
@@ -187,7 +212,17 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 			drive.ClearUploadSession(sessionKey)
 			return nil
 		}
-		pos += int64(n)
+		var pending struct {
+			NextExpectedRanges []string `json:"nextExpectedRanges"`
+		}
+		if json.Unmarshal(body, &pending) != nil || len(pending.NextExpectedRanges) == 0 {
+			return errors.New("onedrive: 分片回执缺少续传位置，会话已保留")
+		}
+		next, err := strconv.ParseInt(strings.SplitN(pending.NextExpectedRanges[0], "-", 2)[0], 10, 64)
+		if err != nil || next <= pos || next > pos+int64(n) || next > size {
+			return errors.New("onedrive: 分片回执位置异常，会话已保留")
+		}
+		pos = next
 		// Persist progress incrementally (byte offset as single-element part list)
 		if err := drive.SaveUploadSessionState(sessionKey, sess.UploadURL, []int{int(pos)}); err != nil {
 			return fmt.Errorf("onedrive: 保存上传续传进度失败: %w", err)
@@ -196,7 +231,7 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 			ui.ReportUploadProgress(pos, size)
 		}
 	}
-	if _, fileID, completed, usable := querySessionPosition(ctx, sess.UploadURL, c); usable && completed {
+	if _, fileID, completed, usable, _ := querySessionPosition(ctx, sess.UploadURL, c); usable && completed {
 		ui.Upload.FileID = fileID
 		drive.ClearUploadSession(sessionKey)
 		return nil
@@ -207,37 +242,41 @@ func (c *client) sessionUpload(ctx context.Context, dc drive.Context, f *os.File
 // querySessionPosition queries the Graph upload session URL to discover the
 // next expected byte range (resumable upload). Returns position, fileId (when
 // the session is already complete), and a completed flag.
-func querySessionPosition(ctx context.Context, uploadURL string, c *client) (pos int64, fileID string, completed, usable bool) {
+func querySessionPosition(ctx context.Context, uploadURL string, c *client) (pos int64, fileID string, completed, usable bool, status int) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uploadURL, nil)
 	if err != nil {
-		return 0, "", false, false
+		return 0, "", false, false, 0
 	}
 	resp, err := c.http.HTTP.Do(req)
 	if err != nil {
-		return 0, "", false, false
+		return 0, "", false, false, 0
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	status = resp.StatusCode
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return 0, "", false, false, status
+	}
 	// 200/201/202 with a file id = session complete
 	if resp.StatusCode == 200 || resp.StatusCode == 201 || resp.StatusCode == 202 {
 		var done struct {
 			ID string `json:"id"`
 		}
 		if json.Unmarshal(body, &done) == nil && done.ID != "" {
-			return 0, done.ID, true, true
+			return 0, done.ID, true, true, status
 		}
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		return 0, "", false, false
+		return 0, "", false, false, status
 	}
 	var data struct {
 		NextExpectedRanges []string `json:"nextExpectedRanges"`
 	}
 	if json.Unmarshal(body, &data) != nil {
-		return 0, "", false, false
+		return 0, "", false, false, status
 	}
 	if len(data.NextExpectedRanges) == 0 {
-		return 0, "", false, false
+		return 0, "", false, false, status
 	}
 	first := data.NextExpectedRanges[0]
 	if idx := indexByte(first, '-'); idx > 0 {
@@ -245,9 +284,32 @@ func querySessionPosition(ctx context.Context, uploadURL string, c *client) (pos
 	}
 	position, err := strconv.ParseInt(first, 10, 64)
 	if err != nil || position < 0 {
-		return 0, "", false, false
+		return 0, "", false, false, status
 	}
-	return position, "", false, true
+	return position, "", false, true, status
+}
+
+func waitUploadRetry(ctx context.Context, retryAfter string, fallback time.Duration) error {
+	delay := fallback
+	if seconds, err := strconv.ParseInt(retryAfter, 10, 64); err == nil && seconds >= 0 {
+		if seconds > 300 {
+			return errors.New("onedrive: 服务端要求长时间冷却，请稍后恢复任务")
+		}
+		delay = time.Duration(seconds) * time.Second
+	} else if until, err := http.ParseTime(retryAfter); err == nil {
+		delay = max(time.Duration(0), time.Until(until))
+	}
+	if delay > 5*time.Minute {
+		return errors.New("onedrive: 服务端要求长时间冷却，请稍后恢复任务")
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func indexByte(s string, b byte) int {

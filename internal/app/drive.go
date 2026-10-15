@@ -219,6 +219,9 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 	if err != nil {
 		logging.Warn("share creation failed", "error", err)
 	}
+	if err == nil && item != nil {
+		item.RemoteSuccess = true
+	}
 	if err == nil && shouldPersistShareHistory(item) {
 		st, storeErr := a.storeOrError()
 		if storeErr != nil {
@@ -228,9 +231,11 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 		if storeErr = st.SaveShareHistory(model.ShareHistoryEntry{
 			ShareID: item.ShareID, AccountID: userID, DriveID: driveID,
 			FileID: firstFileID(params.FileIDs), ShareURL: item.ShareURL,
-			SharePwd: item.SharePwd, ShareName: item.ShareName, Provider: drive.ProviderOf(userID, driveID, ""),
+			SharePwd: item.SharePwd, ShareName: item.ShareName, Provider: drive.ProviderOf(userID, driveID, ""), RemoteStatus: "active",
 		}); storeErr != nil {
 			a.emit("share:history-error", map[string]string{"error": storeErr.Error()})
+		} else {
+			item.HistorySaved = true
 		}
 	}
 	if err == nil && item != nil {
@@ -259,7 +264,7 @@ func (a *App) CancelShare(entry model.ShareHistoryEntry) error {
 	if err != nil {
 		return fmt.Errorf("云端分享已取消，但无法清理本地记录: %w", err)
 	}
-	if err := st.DeleteShareHistory(userID, entry.ShareID, entry.ShareURL); err != nil {
+	if err := st.DeleteShareHistoryScoped(userID, driveID, entry.ShareID, entry.ShareURL); err != nil {
 		return fmt.Errorf("云端分享已取消，但本地记录清理失败: %w", err)
 	}
 	a.emit("share:history-changed", map[string]string{"account_id": userID, "share_id": entry.ShareID})
@@ -618,12 +623,13 @@ func (a *App) RefreshOfflineTasks(userID, driveID string) ([]model.OfflineTask, 
 		if ot.ID == "" {
 			continue
 		}
-		if err := st.SaveOfflineTask(&ot); err != nil {
-			return nil, err
-		}
 		out = append(out, ot)
 	}
-	return out, nil
+	complete := false
+	if lister, ok := d.(drive.CompleteOfflineLister); ok {
+		complete = lister.OfflineListIsComplete()
+	}
+	return st.ReconcileOfflineTasks(userID, driveID, out, complete)
 }
 
 func firstNonEmptyOfflineStatus(values ...string) string {

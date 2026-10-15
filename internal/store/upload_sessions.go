@@ -76,20 +76,11 @@ func SaveUploadSessionState(key, sessionID string, partNumbers []int) error {
 		UploadedPartNumbers: partNumbers,
 	}
 	path := filepath.Join(dir, key+".json")
-	tmp := path + ".tmp"
 	b, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := renameWithRetry(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Chmod(path, 0o600)
+	return durableWrite(path, b)
 }
 
 // LoadUploadSession returns the persisted uploaded part numbers for a key,

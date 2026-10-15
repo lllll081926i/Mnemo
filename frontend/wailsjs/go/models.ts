@@ -764,6 +764,7 @@ export namespace model {
 	    token?: TokenInfo;
 	    order?: number;
 	    disabled?: boolean;
+	    auth_state?: string;
 	    custom_name?: string;
 	    custom_icon?: string;
 	    usage?: Quota;
@@ -780,6 +781,7 @@ export namespace model {
 	        this.token = this.convertValues(source["token"], TokenInfo);
 	        this.order = source["order"];
 	        this.disabled = source["disabled"];
+	        this.auth_state = source["auth_state"];
 	        this.custom_name = source["custom_name"];
 	        this.custom_icon = source["custom_icon"];
 	        this.usage = this.convertValues(source["usage"], Quota);
@@ -806,6 +808,8 @@ export namespace model {
 	}
 	
 	export class DownloadEntry {
+	    content_hash?: string;
+	    content_hash_name?: string;
 	    fileId: string;
 	    parentFileId?: string;
 	    sourcePath?: string;
@@ -821,6 +825,8 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content_hash = source["content_hash"];
+	        this.content_hash_name = source["content_hash_name"];
 	        this.fileId = source["fileId"];
 	        this.parentFileId = source["parentFileId"];
 	        this.sourcePath = source["sourcePath"];
@@ -832,6 +838,9 @@ export namespace model {
 	    }
 	}
 	export class DownloadTask {
+	    content_hash?: string;
+	    content_hash_name?: string;
+	    verification?: string;
 	    isDir?: boolean;
 	    groupId?: string;
 	    totalFiles?: number;
@@ -867,6 +876,9 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content_hash = source["content_hash"];
+	        this.content_hash_name = source["content_hash_name"];
+	        this.verification = source["verification"];
 	        this.isDir = source["isDir"];
 	        this.groupId = source["groupId"];
 	        this.totalFiles = source["totalFiles"];
@@ -1184,6 +1196,7 @@ export namespace model {
 	    share_name: string;
 	    created_at: number;
 	    provider: string;
+	    remote_status?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ShareHistoryEntry(source);
@@ -1200,6 +1213,7 @@ export namespace model {
 	        this.share_name = source["share_name"];
 	        this.created_at = source["created_at"];
 	        this.provider = source["provider"];
+	        this.remote_status = source["remote_status"];
 	    }
 	}
 	export class ShareItem {
@@ -1231,6 +1245,8 @@ export namespace model {
 	    status?: string;
 	    updated_at?: string;
 	    is_share_saved?: boolean;
+	    remote_success: boolean;
+	    history_saved: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ShareItem(source);
@@ -1266,6 +1282,8 @@ export namespace model {
 	        this.status = source["status"];
 	        this.updated_at = source["updated_at"];
 	        this.is_share_saved = source["is_share_saved"];
+	        this.remote_success = source["remote_success"];
+	        this.history_saved = source["history_saved"];
 	    }
 	}
 	export class Subtitle {
@@ -1501,6 +1519,7 @@ export namespace model {
 export namespace store {
 	
 	export class CachedSearchResult {
+	    partial: boolean;
 	    userId: string;
 	    driveId: string;
 	    parentId: string;
@@ -1513,6 +1532,7 @@ export namespace store {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.partial = source["partial"];
 	        this.userId = source["userId"];
 	        this.driveId = source["driveId"];
 	        this.parentId = source["parentId"];
@@ -1615,6 +1635,7 @@ export namespace store {
 	    maxDownloadConnections: number;
 	    maxDownloadSpeed: number;
 	    maxUploadSpeed: number;
+	    verifyDownloadHash: boolean;
 	    autoUpdate: boolean;
 	    confirmUpdate: boolean;
 	    playbackResume: boolean;
@@ -1636,6 +1657,7 @@ export namespace store {
 	        this.maxDownloadConnections = source["maxDownloadConnections"];
 	        this.maxDownloadSpeed = source["maxDownloadSpeed"];
 	        this.maxUploadSpeed = source["maxUploadSpeed"];
+	        this.verifyDownloadHash = source["verifyDownloadHash"];
 	        this.autoUpdate = source["autoUpdate"];
 	        this.confirmUpdate = source["confirmUpdate"];
 	        this.playbackResume = source["playbackResume"];

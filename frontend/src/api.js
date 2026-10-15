@@ -125,7 +125,7 @@ export function listDir(userId, driveId, dirId) { return driveCall('加载目录
 // 启动恢复、后台预取等非用户发起的目录读取不能抢占界面错误提示；调用方仍会
 // 接收到原始失败，以便在当前视图内保留加载状态或安排重试。
 export function listDirSilently(userId, driveId, dirId) { return App.ListDir(userId, driveId, dirId) }
-export function search(userId, driveId, kw) { return driveCall('搜索文件', App.SearchFiles(userId, driveId, kw)) }
+export function search(userId, driveId, kw, requestId) { return driveCall('搜索文件', requestId ? App.SearchFilesCancelable(requestId, userId, driveId, kw) : App.SearchFiles(userId, driveId, kw)) }
 export function listTrash(userId, driveId) { return driveCall('加载回收站', App.ListTrash(userId, driveId)) }
 export function mkdir(userId, driveId, parentId, name) { return driveCall('创建文件夹', App.Mkdir(userId, driveId, parentId, name)) }
 export function rename(userId, driveId, fileId, name) { return driveCall('重命名', App.RenameFile(userId, driveId, fileId, name)) }
@@ -236,12 +236,12 @@ function validDirectorySnapshot(files) {
 async function fetchRootFirstPage(account, rootId) {
   try {
     const page = await App.ListDirPage(account.user_id, account.drive_id || '', rootId, '')
-    return page?.items
+    return { files: page?.items, nextMarker: page?.nextMarker || '' }
   } catch (cause) {
     // Older/non-paginated providers can only expose ListDir. Keep the fallback
     // narrow so a network/auth failure never causes a duplicate cloud request.
     if (!/listpaged.*not supported|capability not implemented/i.test(errorText(cause))) throw cause
-    return App.ListDir(account.user_id, account.drive_id || '', rootId)
+    return { files: await App.ListDir(account.user_id, account.drive_id || '', rootId), nextMarker: '' }
   }
 }
 
@@ -253,14 +253,14 @@ function prewarmRootAccount(account, providers) {
   const task = (async () => {
     const cached = await GetDirectoryCache(key)
     if (Array.isArray(cached)) return 'cached'
-    const files = await fetchRootFirstPage(account, rootId)
+    const { files, nextMarker } = await fetchRootFirstPage(account, rootId)
     if (!validDirectorySnapshot(files)) throw new Error('root directory prewarm returned an invalid snapshot')
     // PanView may have completed a full foreground load while this first-page
     // request was in flight. Re-check so prewarming never downgrades a newer,
     // complete snapshot to the first page.
     const latest = await GetDirectoryCache(key)
     if (Array.isArray(latest)) return 'cached'
-    await SaveDirectoryCache(key, files)
+    await enqueueCacheRpc(() => App.SaveDirectoryCachePage(key, files, nextMarker))
     return 'warmed'
   })().finally(() => rootPrewarmTasks.delete(key))
   rootPrewarmTasks.set(key, task)

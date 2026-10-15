@@ -22,9 +22,10 @@ import (
 // Most files live in dir; accountsDir overrides the location of
 // accounts.json only (login credentials persist across installs).
 type Store struct {
-	dir         string
-	accountsDir string
-	mu          sync.Mutex
+	dir            string
+	accountsDir    string
+	mu             sync.Mutex
+	directoryIndex []CachedSearchResult
 }
 
 // Open creates (if needed) and opens the store directory.
@@ -51,9 +52,11 @@ func (s *Store) SetAccountsDir(d string) {
 func (s *Store) Dir() string { return s.dir }
 
 type directoryCacheDoc struct {
-	Key       string       `json:"key,omitempty"`
-	UpdatedAt int64        `json:"updatedAt"`
-	Files     []model.File `json:"files"`
+	Complete   *bool        `json:"complete,omitempty"`
+	NextMarker string       `json:"nextMarker,omitempty"`
+	Key        string       `json:"key,omitempty"`
+	UpdatedAt  int64        `json:"updatedAt"`
+	Files      []model.File `json:"files"`
 }
 
 // LoadDirectoryCache reads one account-isolated directory snapshot. Cache
@@ -78,8 +81,13 @@ func (s *Store) LoadDirectoryCache(key string) ([]model.File, error) {
 // SaveDirectoryCache persists one directory snapshot without mixing it with
 // accounts, transfer history, settings, or playback state.
 func (s *Store) SaveDirectoryCache(key string, files []model.File) error {
+	return s.SaveDirectoryCachePage(key, files, "")
+}
+
+func (s *Store) SaveDirectoryCachePage(key string, files []model.File, nextMarker string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.directoryIndex = nil
 	name := directoryCacheName(key)
 	if err := os.MkdirAll(filepath.Dir(s.path(name)), 0o755); err != nil {
 		return err
@@ -94,10 +102,12 @@ func (s *Store) SaveDirectoryCache(key string, files []model.File) error {
 	if snapshot == nil && files != nil {
 		snapshot = []model.File{}
 	}
-	return s.writeJSONUnlocked(name, directoryCacheDoc{Key: key, UpdatedAt: time.Now().Unix(), Files: snapshot})
+	complete := nextMarker == ""
+	return s.writeJSONUnlocked(name, directoryCacheDoc{Key: key, UpdatedAt: time.Now().Unix(), Files: snapshot, Complete: &complete, NextMarker: nextMarker})
 }
 
 type CachedSearchResult struct {
+	Partial   bool       `json:"partial"`
 	UserID    string     `json:"userId"`
 	DriveID   string     `json:"driveId"`
 	ParentID  string     `json:"parentId"`
@@ -113,14 +123,31 @@ func (s *Store) SearchDirectoryCache(keyword string) ([]CachedSearchResult, erro
 	if keyword == "" {
 		return out, nil
 	}
-	entries, err := os.ReadDir(s.path(filepath.Join("cache", "directories")))
+	if s.directoryIndex != nil {
+		for _, result := range s.directoryIndex {
+			if strings.Contains(strings.ToLower(result.File.Name), keyword) {
+				out = append(out, result)
+				if len(out) >= 1000 {
+					break
+				}
+			}
+		}
+		return out, nil
+	}
+	directoryPath := s.path(filepath.Join("cache", "directories"))
+	if info, err := os.Stat(directoryPath); err == nil && !info.IsDir() {
+		return nil, fmt.Errorf("缓存索引路径不是目录")
+	}
+	entries, err := os.ReadDir(directoryPath)
 	if os.IsNotExist(err) {
+		s.directoryIndex = []CachedSearchResult{}
 		return out, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
+	index := []CachedSearchResult{}
+	seen := map[string]int{}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -138,14 +165,21 @@ func (s *Store) SearchDirectoryCache(keyword string) ([]CachedSearchResult, erro
 		}
 		for _, file := range doc.Files {
 			key := parts[1] + "|" + parts[2] + "|" + file.FileID
-			if seen[key] || !strings.Contains(strings.ToLower(file.Name), keyword) {
-				continue
+			result := CachedSearchResult{UserID: parts[1], DriveID: parts[2], ParentID: parts[4], UpdatedAt: doc.UpdatedAt, File: file, Partial: doc.Complete == nil || !*doc.Complete}
+			if position, exists := seen[key]; exists {
+				if result.UpdatedAt >= index[position].UpdatedAt {
+					index[position] = result
+				}
+			} else {
+				seen[key] = len(index)
+				index = append(index, result)
 			}
-			seen[key] = true
-			out = append(out, CachedSearchResult{parts[1], parts[2], parts[4], doc.UpdatedAt, file})
-			if len(out) >= 1000 {
-				return out, nil
-			}
+		}
+	}
+	s.directoryIndex = index
+	for _, result := range index {
+		if strings.Contains(strings.ToLower(result.File.Name), keyword) && len(out) < 1000 {
+			out = append(out, result)
 		}
 	}
 	return out, nil
@@ -155,6 +189,7 @@ func (s *Store) SearchDirectoryCache(keyword string) ([]CachedSearchResult, erro
 func (s *Store) DeleteDirectoryCache(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.directoryIndex = nil
 	err := os.Remove(s.path(directoryCacheName(key)))
 	if os.IsNotExist(err) {
 		return nil
@@ -168,6 +203,7 @@ func (s *Store) DeleteDirectoryCache(key string) error {
 func (s *Store) DeleteDirectoryCachesForAccount(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.directoryIndex = nil
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil
@@ -209,6 +245,7 @@ func (s *Store) DeleteDirectoryCachesForAccount(userID string) error {
 func (s *Store) ClearCache() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.directoryIndex = nil
 	target := filepath.Join(s.dir, "cache")
 	if err := os.RemoveAll(target); err != nil {
 		return err
@@ -254,19 +291,7 @@ func (s *Store) writeJSONUnlocked(name string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path(name + ".tmp")
-	// Store documents may contain share passwords, proxy credentials, or
-	// transfer metadata. Keep every document private to the current user.
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	target := s.path(name)
-	if err := renameWithRetry(tmp, target); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Chmod(target, 0o600)
+	return durableWrite(s.path(name), b)
 }
 
 // renameWithRetry wraps os.Rename with a short retry loop. On Windows the

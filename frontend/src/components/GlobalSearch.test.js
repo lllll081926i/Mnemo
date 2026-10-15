@@ -23,6 +23,37 @@ afterEach(() => {
 })
 
 describe('全盘搜索', () => {
+  it('在线结果不截断，并按批次显示', async () => {
+    vi.stubGlobal('go', { app: { App: { SearchCachedFiles: vi.fn().mockResolvedValue([]) } } })
+    api.search.mockResolvedValue(Array.from({ length: 601 }, (_, index) => ({ file_id: `file-${index}`, name: `文件-${index}` })))
+    wrapper = mount(GlobalSearch, { props: { accounts: [account], providers: [] }, global: { stubs: { UiIcon: true } } })
+    wrapper.vm.keyword = '文件'
+    wrapper.vm.remote = true
+    await wrapper.vm.run()
+    await flushPromises()
+    expect(wrapper.vm.results).toHaveLength(601)
+    expect(document.body.querySelectorAll('.workspace-result')).toHaveLength(200)
+    expect(document.body.textContent).toContain('显示更多')
+    expect(wrapper.vm.errors).toEqual([])
+  })
+
+  it('停止在线搜索时取消后端请求', async () => {
+    let finishOnline
+    const cancel = vi.fn().mockResolvedValue()
+    vi.stubGlobal('go', { app: { App: { SearchCachedFiles: vi.fn().mockResolvedValue([]), CancelSearch: cancel } } })
+    api.search.mockImplementationOnce(() => new Promise(resolve => { finishOnline = resolve }))
+    wrapper = mount(GlobalSearch, { props: { accounts: [account], providers: [] }, global: { stubs: { UiIcon: true } } })
+    wrapper.vm.keyword = '文件'
+    wrapper.vm.remote = true
+    const running = wrapper.vm.run()
+    await flushPromises()
+    wrapper.vm.stop()
+    expect(cancel).toHaveBeenCalledWith(api.search.mock.calls.at(-1)[3])
+    finishOnline([{ file_id: 'late', name: '迟到文件' }])
+    await running
+    expect(wrapper.vm.results).toEqual([])
+  })
+
   it('缓存未返回时先展示在线结果，缓存晚到也不覆盖在线版本', async () => {
     let finishCache
     vi.stubGlobal('go', { app: { App: { SearchCachedFiles: vi.fn(() => new Promise(resolve => { finishCache = resolve })) } } })
@@ -35,8 +66,8 @@ describe('全盘搜索', () => {
     await flushPromises()
     expect(wrapper.vm.results.map(result => result.file.name)).toEqual(['在线版本'])
     finishCache([
-      { userId: account.user_id, file: { file_id: 'same', name: '过期缓存' } },
-      { userId: account.user_id, file: { file_id: 'other', name: '缓存独有' } },
+      { userId: account.user_id, driveId: account.drive_id, file: { file_id: 'same', name: '过期缓存' } },
+      { userId: account.user_id, driveId: account.drive_id, file: { file_id: 'other', name: '缓存独有' } },
     ])
     await running
     expect(wrapper.vm.results.map(result => result.file.name)).toEqual(['缓存独有', '在线版本'])

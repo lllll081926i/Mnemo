@@ -274,7 +274,7 @@ function toggleSelectAllActive() {
 }
 
 const downStatusText = (s) => ({ queued: '排队中', downloading: '下载中', paused: '已暂停', completed: '已完成', failed: '失败', canceled: '已取消' }[s] || s)
-const downTaskStatus = (t) => t.status === 'downloading' ? ({ resolving: '获取下载链接', connecting: '建立连接', scanning: '扫描目录' }[t.stage] || downStatusText(t.status)) : downStatusText(t.status)
+const downTaskStatus = (t) => t.status === 'downloading' ? ({ resolving: '获取下载链接', connecting: '建立连接', scanning: '扫描目录', verifying: `校验内容 ${t.stageProgress || 0}%` }[t.stage] || downStatusText(t.status)) : downStatusText(t.status)
 const downStatusBadge = (s) => ({ downloading: 'primary', queued: 'primary', completed: 'success', failed: 'error', canceled: 'warn', paused: 'warn' }[s] || '')
 const downProgress = (t) => Number.isFinite(t.progress) ? Math.max(0, Math.min(100, Math.round(t.progress))) : 0
 
@@ -740,7 +740,7 @@ async function submitOffline() {
   }
 }
 const offProgress = (t) => Math.max(0, Math.min(100, Math.round(t.progress || 0)))
-const offStatusText = (status) => ({ queued: '排队中', running: '进行中', completed: '已完成', failed: '失败', canceled: '已取消', partial: '部分完成', unknown: '状态未知', PHASE_TYPE_PENDING: '排队中', PHASE_TYPE_RUNNING: '进行中', PHASE_TYPE_COMPLETE: '已完成', PHASE_TYPE_ERROR: '失败' }[status] || status || '状态未知')
+const offStatusText = (status) => ({ queued: '排队中', running: '进行中', completed: '已完成', failed: '失败', canceled: '已取消', partial: '部分完成', unknown: '状态未知', notFoundOnServer: '服务端未返回', PHASE_TYPE_PENDING: '排队中', PHASE_TYPE_RUNNING: '进行中', PHASE_TYPE_COMPLETE: '已完成', PHASE_TYPE_ERROR: '失败' }[status] || status || '状态未知')
 const offProgressClass = (status) => ['completed', 'PHASE_TYPE_COMPLETE'].includes(status) ? 'succeed' : ['failed', 'PHASE_TYPE_ERROR'].includes(status) ? 'error' : ['partial', 'canceled'].includes(status) ? 'warning' : 'active'
 
 async function delOfflineTask(t) {

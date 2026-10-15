@@ -502,44 +502,54 @@ func (q *UploadQueue) ensureRemoteParent(ctx context.Context, userID, driveID, b
 		return baseParent, nil
 	}
 
-	q.dirMu.Lock()
-	defer q.dirMu.Unlock()
 	current := baseParent
 	for _, segment := range parts[:len(parts)-1] {
 		key := strings.Join([]string{userID, driveID, baseParent, current, segment}, "\x00")
-		if id := q.dirIDs[key]; id != "" {
-			current = id
-			continue
-		}
-
-		items, err := drive.ListDirContext(ctx, userID, driveID, current, nil)
-		if err != nil {
-			return "", fmt.Errorf("查找远端目录 %q 失败: %w", segment, err)
-		}
-		found := ""
-		for _, item := range items {
-			if item.IsDir && item.Name == segment {
-				found = item.FileID
-				break
+		found, err := func() (string, error) {
+			release, err := drive.LockTarget(ctx, userID, driveID, current, segment)
+			if err != nil {
+				return "", err
 			}
-		}
-		if found == "" {
-			result, mkdirErr := drive.MkdirContext(ctx, userID, driveID, current, segment)
-			if mkdirErr != nil {
-				return "", fmt.Errorf("创建远端目录 %q 失败: %w", segment, mkdirErr)
+			defer release()
+			q.dirMu.Lock()
+			cached := q.dirIDs[key]
+			q.dirMu.Unlock()
+			if cached != "" {
+				if item, infoErr := drive.GetFileFreshContext(ctx, userID, driveID, cached); infoErr == nil && item != nil && item.IsDir {
+					return cached, nil
+				}
+				q.dirMu.Lock()
+				delete(q.dirIDs, key)
+				q.dirMu.Unlock()
+			}
+
+			items, err := drive.ListDirAllContext(ctx, userID, driveID, current, nil)
+			if err != nil {
+				return "", fmt.Errorf("查找远端目录 %q 失败: %w", segment, err)
+			}
+			for _, item := range items {
+				if item.IsDir && item.Name == segment {
+					return item.FileID, nil
+				}
+			}
+			result, err := drive.MkdirContext(ctx, userID, driveID, current, segment)
+			if err != nil {
+				return "", fmt.Errorf("创建远端目录 %q 失败: %w", segment, err)
 			}
 			if result == nil || result.FileID == "" {
-				if result != nil && result.Error != "" {
-					return "", fmt.Errorf("创建远端目录 %q 失败: %s", segment, result.Error)
-				}
 				return "", fmt.Errorf("创建远端目录 %q 未返回目录 id", segment)
 			}
-			found = result.FileID
+			return result.FileID, nil
+		}()
+		if err != nil {
+			return "", err
 		}
+		q.dirMu.Lock()
 		if len(q.dirIDs) >= maxUploadDirectoryCacheEntries {
 			q.dirIDs = map[string]string{}
 		}
 		q.dirIDs[key] = found
+		q.dirMu.Unlock()
 		current = found
 	}
 	return current, nil

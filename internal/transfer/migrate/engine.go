@@ -222,6 +222,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	e.emit(job)
 	succeeded := completedTopLevel
 	partial := false
+	var failures []error
 	for _, fileID := range job.FileIDs {
 		if ctx.Err() != nil {
 			return e.finishCanceled(job, ctx.Err())
@@ -238,6 +239,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 				return e.finishCanceled(job, ctx.Err())
 			}
 			job.Failed += failureCount(err)
+			failures = append(failures, fmt.Errorf("%s: %w", fileID, err))
 			partial = partial || isPartialError(err)
 			job.Message = err.Error()
 		} else {
@@ -259,7 +261,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 		return e.finishCheckpointFailure(job, err)
 	}
 	e.emit(job)
-	return nil
+	return errors.Join(failures...)
 }
 
 var errCheckpoint = errors.New("迁移恢复记录保存失败")

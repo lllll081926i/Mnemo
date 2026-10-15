@@ -45,10 +45,13 @@ const (
 
 // Options tunes the download behaviour.
 type Options struct {
-	Concurrency int   // parallel connections
-	ChunkSize   int64 // range chunk size
-	MinSize     int64 // files smaller than this use a single stream
-	MaxSpeed    int64 // global speed cap in bytes/s (0 = unlimited)
+	ExpectedHash   string
+	HashAlgorithm  string
+	OnVerification func(int64, int64)
+	Concurrency    int   // parallel connections
+	ChunkSize      int64 // range chunk size
+	MinSize        int64 // files smaller than this use a single stream
+	MaxSpeed       int64 // global speed cap in bytes/s (0 = unlimited)
 	// ExpectedSize is optional provider metadata. It is used only when the
 	// download server omits Content-Length, so a chunked response can still
 	// report progress and be verified after a single-stream download.
@@ -519,6 +522,9 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 		return fmt.Errorf("dlengine: downloaded %d != total %d", downloaded.Load(), total)
 	}
 	// commit: rename part -> final
+	if err := verifyBeforeCommit(ctx, opts, partPath, statePath); err != nil {
+		return err
+	}
 	if err := commitPart(partPath, localPath); err != nil {
 		return err
 	}
@@ -1039,6 +1045,9 @@ func singleStream(ctx context.Context, hc *http.Client, opts Options, url, local
 	}
 	finished = true
 	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := verifyBeforeCommit(ctx, opts, partPath, statePath); err != nil {
 		return err
 	}
 	if err := commitPart(partPath, localPath); err != nil {

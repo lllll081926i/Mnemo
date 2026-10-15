@@ -926,6 +926,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	key := cc.keyOf(driveutil.JoinPath(pathOf(ui.Info.ParentFileID), ui.Info.Name))
 
 	policy := driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy)
+	var ifMatch *string
+	ifNoneMatch := aws.String("*")
 	exists, isDir, err := cc.objectState(ctx, key)
 	if err != nil {
 		return fmt.Errorf("s3: 检查目标文件失败: %w", err)
@@ -961,6 +963,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			if isDir {
 				return errors.New("s3: 目标名称对应目录，无法安全覆盖；请重命名文件或选择其他位置")
 			}
+			head, err := cc.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(cc.bucket), Key: aws.String(key)})
+			if err != nil {
+				return err
+			}
+			if head.ETag == nil || *head.ETag == "" {
+				return errors.New("s3: 目标缺少版本标识，无法安全覆盖")
+			}
+			ifMatch, ifNoneMatch = head.ETag, nil
 		}
 	}
 
@@ -984,9 +994,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			Key:           aws.String(key),
 			Body:          pr,
 			ContentLength: aws.Int64(size),
+			IfMatch:       ifMatch, IfNoneMatch: ifNoneMatch,
 		}, func(o *s3.Options) { o.HTTPClient = netx.UploadHTTPClient{Client: o.HTTPClient} })
 	} else {
-		err = uploadMultipart(ctx, c, cc, key, f, ui)
+		err = uploadMultipart(ctx, c, cc, key, f, ui, ifMatch, ifNoneMatch)
 	}
 	if err != nil {
 		return fmt.Errorf("s3: upload: %w", err)
@@ -1004,7 +1015,7 @@ func updateUploadProgress(ui *model.UploadingUI, read int64) {
 	ui.ReportUploadProgress(read, ui.Info.Size)
 }
 
-func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key string, f *os.File, ui *model.UploadingUI) error {
+func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key string, f *os.File, ui *model.UploadingUI, conditions ...*string) error {
 	partSize := multipartPartSize(ui.Info.Size)
 	capacity := int((ui.Info.Size + partSize - 1) / partSize)
 	if capacity < 1 {
@@ -1024,6 +1035,9 @@ func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key s
 		return err
 	}
 	sessionName := fmt.Sprintf("%s|%x|%d", key, hasher.Sum(nil), partSize)
+	if len(conditions) == 2 {
+		sessionName += "|" + aws.ToString(conditions[0]) + "|" + aws.ToString(conditions[1])
+	}
 	sessionKey := drive.UploadSessionKey(account.UserID, account.DriveID, cc.bucket, sessionName, ui.Info.Size)
 	uploadID, _ := drive.LoadUploadSessionState(sessionKey)
 	remoteParts := map[int32]types.Part{}
@@ -1101,12 +1115,16 @@ func uploadMultipart(ctx context.Context, account drive.Context, cc *conn, key s
 	if total != ui.Info.Size {
 		return errors.New("multipart upload: 本地文件大小在上传期间变化，未提交远端文件")
 	}
-	_, err = cc.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+	completion := &s3.CompleteMultipartUploadInput{
 		Bucket:          aws.String(cc.bucket),
 		Key:             aws.String(key),
 		UploadId:        aws.String(uploadID),
 		MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
-	})
+	}
+	if len(conditions) == 2 {
+		completion.IfMatch, completion.IfNoneMatch = conditions[0], conditions[1]
+	}
+	_, err = cc.client.CompleteMultipartUpload(ctx, completion)
 	if err != nil {
 		return err
 	}

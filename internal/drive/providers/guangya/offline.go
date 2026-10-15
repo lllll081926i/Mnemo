@@ -207,6 +207,8 @@ func (*Driver) OfflineCreate(ctx context.Context, account drive.Context, link, n
 
 // OfflineList uses the zero-based page pagination documented by the provider
 // web API. A cursor field is not an input to /v1/list_task.
+func (*Driver) OfflineListIsComplete() bool { return true }
+
 func (*Driver) OfflineList(ctx context.Context, account drive.Context) (tasks []drive.OfflineTask, err error) {
 	cl, err := clientOf(account)
 	if err != nil {

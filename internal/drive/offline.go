@@ -21,3 +21,7 @@ type OfflineDriver interface {
 	OfflineList(ctx context.Context, c Context) ([]OfflineTask, error)
 	OfflineDelete(ctx context.Context, c Context, taskIDs []string, deleteFiles bool) error
 }
+
+type CompleteOfflineLister interface {
+	OfflineListIsComplete() bool
+}

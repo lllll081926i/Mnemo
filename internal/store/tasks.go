@@ -131,9 +131,12 @@ func (s *Store) SaveShareHistory(e model.ShareHistoryEntry) error {
 	if e.CreatedAt == 0 {
 		e.CreatedAt = time.Now().Unix()
 	}
+	if e.RemoteStatus == "" {
+		e.RemoteStatus = "unchecked"
+	}
 	replaced := false
 	for i := range list {
-		if list[i].ShareID == e.ShareID && list[i].AccountID == e.AccountID {
+		if sameShareHistoryIdentity(list[i], e) {
 			list[i] = e
 			replaced = true
 			break
@@ -143,6 +146,16 @@ func (s *Store) SaveShareHistory(e model.ShareHistoryEntry) error {
 		list = append(list, e)
 	}
 	return s.writeJSONUnlocked(shareHistoryFile, list)
+}
+
+func sameShareHistoryIdentity(first, second model.ShareHistoryEntry) bool {
+	if first.AccountID != second.AccountID || first.DriveID != second.DriveID {
+		return false
+	}
+	if first.ShareID != "" && second.ShareID != "" {
+		return first.ShareID == second.ShareID
+	}
+	return first.ShareURL != "" && first.ShareURL == second.ShareURL
 }
 
 // ListShareHistory returns share history of an account.
@@ -157,6 +170,9 @@ func (s *Store) ListShareHistory(userID string) ([]model.ShareHistoryEntry, erro
 	var out []model.ShareHistoryEntry
 	for _, e := range list {
 		if userID == "" || e.AccountID == userID {
+			if e.RemoteStatus == "" {
+				e.RemoteStatus = "unchecked"
+			}
 			out = append(out, e)
 		}
 	}
@@ -168,6 +184,17 @@ func (s *Store) ListShareHistory(userID string) ([]model.ShareHistoryEntry, erro
 // to the share URL. Account ID is always part of the match so equal provider
 // ids in multiple accounts cannot remove each other.
 func (s *Store) DeleteShareHistory(accountID, shareID, shareURL string) error {
+	return s.deleteShareHistory(accountID, nil, shareID, shareURL)
+}
+
+func (s *Store) DeleteShareHistoryScoped(accountID, driveID, shareID, shareURL string) error {
+	if strings.TrimSpace(accountID) == "" {
+		return errInvalid("删除分享记录需要账号")
+	}
+	return s.deleteShareHistory(accountID, &driveID, shareID, shareURL)
+}
+
+func (s *Store) deleteShareHistory(accountID string, driveID *string, shareID, shareURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var list []model.ShareHistoryEntry
@@ -182,7 +209,7 @@ func (s *Store) DeleteShareHistory(accountID, shareID, shareURL string) error {
 	shareURL = strings.TrimSpace(shareURL)
 	out := list[:0]
 	for _, entry := range list {
-		match := entry.AccountID == accountID
+		match := entry.AccountID == accountID && (driveID == nil || entry.DriveID == *driveID)
 		if match && shareID != "" {
 			match = entry.ShareID == shareID
 		} else if match {
@@ -288,6 +315,61 @@ func (s *Store) DeleteOfflineTaskScoped(userID, driveID, id string) error {
 	}
 	sanitizeOfflineTasks(out)
 	return s.writeJSONUnlocked(offlineFile, out)
+}
+
+func (s *Store) ReconcileOfflineTasks(userID, driveID string, remote []model.OfflineTask, complete bool) ([]model.OfflineTask, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errInvalid("离线任务对账需要账号")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []model.OfflineTask
+	if err := s.readJSON(offlineFile, &list); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	sanitizeOfflineTasks(list)
+	positions := map[string]int{}
+	for index, task := range list {
+		if task.UserID == userID && task.DriveID == driveID {
+			positions[task.ID] = index
+		}
+	}
+	seen := map[string]bool{}
+	for _, task := range remote {
+		if task.ID == "" || task.UserID != userID || task.DriveID != driveID {
+			return nil, errInvalid("离线列表身份与当前账号或空间不匹配")
+		}
+		task.URL = model.SafeOfflineDisplayURL(task.URL)
+		if index, exists := positions[task.ID]; exists {
+			if task.Created == 0 {
+				task.Created = list[index].Created
+			}
+			list[index] = task
+		} else {
+			if task.Created == 0 {
+				task.Created = time.Now().Unix()
+			}
+			positions[task.ID] = len(list)
+			list = append(list, task)
+		}
+		seen[task.ID] = true
+	}
+	result := []model.OfflineTask{}
+	for index := range list {
+		task := &list[index]
+		if task.UserID != userID || task.DriveID != driveID {
+			continue
+		}
+		if complete && !seen[task.ID] {
+			task.Status = "notFoundOnServer"
+			task.Message = "服务端完整列表未返回此任务，完成结果未确认；请核对目标目录"
+		}
+		result = append(result, *task)
+	}
+	if err := s.writeJSONUnlocked(offlineFile, list); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Upload tasks persistence.

@@ -154,45 +154,50 @@ func (u *UploadingUI) IsUploadStopRequested() bool {
 
 // DownloadTask is a transfer-center download task.
 type DownloadTask struct {
-	IsDir          bool              `json:"isDir,omitempty"`
-	GroupID        string            `json:"groupId,omitempty"`
-	TotalFiles     int               `json:"totalFiles,omitempty"`
-	CompletedFiles int               `json:"completedFiles,omitempty"`
-	FailedFiles    int               `json:"failedFiles,omitempty"`
-	ScanDone       bool              `json:"scanDone,omitempty"`
-	FolderEntries  []DownloadEntry   `json:"folderEntries,omitempty"`
-	Stage          string            `json:"stage,omitempty"`
-	StageProgress  int               `json:"stageProgress,omitempty"`
-	ID             string            `json:"id"`
-	UserID         string            `json:"user_id"`
-	DriveID        string            `json:"drive_id"`
-	Provider       string            `json:"provider"`
-	FileID         string            `json:"file_id"`
-	SourcePath     string            `json:"source_path,omitempty"`
-	Name           string            `json:"name"`
-	Size           int64             `json:"size"`
-	Downloaded     int64             `json:"downloaded"`
-	Speed          int64             `json:"speed"`
-	Progress       int               `json:"progress"`
-	Status         string            `json:"status"` // queued|downloading|paused|completed|failed|canceled
-	LocalPath      string            `json:"localPath"`
-	URL            string            `json:"url,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Error          string            `json:"error,omitempty"`
-	Created        int64             `json:"created"`
-	Updated        int64             `json:"updated"`
-	Concurrency    int               `json:"concurrency,omitempty"`
+	ContentHash     string            `json:"content_hash,omitempty"`
+	ContentHashName string            `json:"content_hash_name,omitempty"`
+	Verification    string            `json:"verification,omitempty"`
+	IsDir           bool              `json:"isDir,omitempty"`
+	GroupID         string            `json:"groupId,omitempty"`
+	TotalFiles      int               `json:"totalFiles,omitempty"`
+	CompletedFiles  int               `json:"completedFiles,omitempty"`
+	FailedFiles     int               `json:"failedFiles,omitempty"`
+	ScanDone        bool              `json:"scanDone,omitempty"`
+	FolderEntries   []DownloadEntry   `json:"folderEntries,omitempty"`
+	Stage           string            `json:"stage,omitempty"`
+	StageProgress   int               `json:"stageProgress,omitempty"`
+	ID              string            `json:"id"`
+	UserID          string            `json:"user_id"`
+	DriveID         string            `json:"drive_id"`
+	Provider        string            `json:"provider"`
+	FileID          string            `json:"file_id"`
+	SourcePath      string            `json:"source_path,omitempty"`
+	Name            string            `json:"name"`
+	Size            int64             `json:"size"`
+	Downloaded      int64             `json:"downloaded"`
+	Speed           int64             `json:"speed"`
+	Progress        int               `json:"progress"`
+	Status          string            `json:"status"` // queued|downloading|paused|completed|failed|canceled
+	LocalPath       string            `json:"localPath"`
+	URL             string            `json:"url,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	Created         int64             `json:"created"`
+	Updated         int64             `json:"updated"`
+	Concurrency     int               `json:"concurrency,omitempty"`
 }
 
 type DownloadEntry struct {
-	FileID       string `json:"fileId"`
-	ParentFileID string `json:"parentFileId,omitempty"`
-	SourcePath   string `json:"sourcePath,omitempty"`
-	Name         string `json:"name"`
-	RelativePath string `json:"relativePath"`
-	Size         int64  `json:"size"`
-	IsDir        bool   `json:"isDir"`
-	Scanned      bool   `json:"scanned,omitempty"`
+	ContentHash     string `json:"content_hash,omitempty"`
+	ContentHashName string `json:"content_hash_name,omitempty"`
+	FileID          string `json:"fileId"`
+	ParentFileID    string `json:"parentFileId,omitempty"`
+	SourcePath      string `json:"sourcePath,omitempty"`
+	Name            string `json:"name"`
+	RelativePath    string `json:"relativePath"`
+	Size            int64  `json:"size"`
+	IsDir           bool   `json:"isDir"`
+	Scanned         bool   `json:"scanned,omitempty"`
 }
 
 // OfflineTask is a provider-side (cloud) offline download task (PikPak).

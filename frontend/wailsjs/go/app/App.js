@@ -26,6 +26,10 @@ export function CancelMigrate(arg1) {
   return window['go']['app']['App']['CancelMigrate'](arg1);
 }
 
+export function CancelSearch(arg1) {
+  return window['go']['app']['App']['CancelSearch'](arg1);
+}
+
 export function CancelShare(arg1) {
   return window['go']['app']['App']['CancelShare'](arg1);
 }
@@ -418,6 +422,10 @@ export function SaveDirectoryCache(arg1, arg2) {
   return window['go']['app']['App']['SaveDirectoryCache'](arg1, arg2);
 }
 
+export function SaveDirectoryCachePage(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SaveDirectoryCachePage'](arg1, arg2, arg3);
+}
+
 export function SaveImportedShare(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['SaveImportedShare'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -448,6 +456,10 @@ export function SearchCachedFiles(arg1) {
 
 export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['SearchFiles'](arg1, arg2, arg3);
+}
+
+export function SearchFilesCancelable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['SearchFilesCancelable'](arg1, arg2, arg3, arg4);
 }
 
 export function SendGuangyaSms(arg1) {
