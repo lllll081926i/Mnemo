@@ -79,6 +79,12 @@ function onSortPick(action) {
 const rangIsSelecting = ref(false)
 const rangAnchor = ref('')
 const viewMode = ref(initialPrefs.viewMode || 'list')  // list | grid
+const workMode = ref('files')
+function setWorkMode(value) {
+  workMode.value = value
+  clearSelection()
+  viewMode.value = value === 'album' ? 'grid' : (getPrefs().viewMode || 'list')
+}
 const sideWidth = ref(initialPrefs.sideWidth || 220) // 侧边栏宽度
 const isSideResizing = ref(false)
 let sideResizing = null
@@ -854,7 +860,13 @@ function toggleRangSelect() {
   rangAnchor.value = ''
 }
 
-const listShown = computed(() => (mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value))
+const listShown = computed(() => {
+  const files = mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value
+  if (workMode.value === 'files' || mode.value === 'trash') return files
+  const kinds = workMode.value === 'album' ? ['image', 'video'] : ['text', 'pdf', 'docx', 'xlsx', 'pptx', 'audio', 'video']
+  const filtered = files.filter(file => !file.isDir && kinds.includes(openKindOf(file)))
+  return workMode.value === 'album' ? filtered.sort((first, second) => (second.time || 0) - (first.time || 0)) : filtered
+})
 watch(listShown, (list) => {
   const visible = new Map(list.map((file) => [file.file_id, file]))
   const next = selected.value.map((file) => visible.get(file.file_id)).filter(Boolean)
@@ -1837,6 +1849,7 @@ onBeforeUnmount(() => {
           <!-- 未选中时管理目录，选中后只显示选择操作。 -->
           <div class="toppanbtns pan-file-toolbar" :class="{ 'has-selection': selected.length }">
             <div v-if="!selected.length" class="toppanbtn">
+              <UiSelect v-if="mode !== 'trash'" aria-label="文件工作模式" :model-value="workMode" :options="[{ value: 'files', label: '文件列表' }, { value: 'album', label: '相册' }, { value: 'reader', label: '阅读与播放' }]" style="width:130px" @update:modelValue="setWorkMode" />
               <button v-if="mode === 'list' && pathStack.length" class="tbtn icon" title="后退 (Backspace)" @click="goUp"><UiIcon name="back" :size="16" /></button>
               <button class="tbtn icon" :disabled="loading" title="刷新 (F5)" @click="refresh"><UiIcon name="refresh" :size="16" /></button>
               <button v-if="caps.search && mode !== 'search'" class="tbtn icon" title="全盘搜索 (Ctrl/⌘+F)" @click="enterSearch"><UiIcon name="search" :size="16" /></button>
@@ -1889,6 +1902,7 @@ onBeforeUnmount(() => {
             <span>刷新失败，当前显示为本地缓存</span>
             <button type="button" :disabled="loading" @click="refresh">重试</button>
           </div>
+          <p v-if="workMode !== 'files' && mode !== 'trash'" class="directory-stale" role="status">{{ workMode === 'album' ? '仅显示当前视图已加载的图片与视频，按修改时间排列，不代表拍摄时间。' : '仅显示当前视图已加载的文档与影音；打开文件使用独立预览或播放器，实际格式支持取决于系统。' }}</p>
 
           <!-- 骨架屏加载状态 -->
           <div v-if="loading && !listShown.length" :class="viewMode === 'list' ? 'skeleton-list' : 'skeleton-grid'">
@@ -1990,7 +2004,7 @@ onBeforeUnmount(() => {
                 </template>
                 <template v-else>{{ r.f.name }}</template>
               </div>
-              <div class="gridinfo">{{ r.f.isDir ? '文件夹' : r.sizeText }}</div>
+              <div class="gridinfo">{{ workMode === 'album' ? (formatTime(r.f.time) || '日期未知') : r.f.isDir ? '文件夹' : r.sizeText }}</div>
             </div>
             <div v-if="gridVirtualized" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualBottom + 'px' }"></div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
