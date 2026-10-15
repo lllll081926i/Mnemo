@@ -39,7 +39,7 @@
 - 参考了项目行为、架构与公开 API 描述，**不直接复制 AGPL 源码**到 Mnemo。
 - 其 Kotlin Multiplatform 设计不能机械移植到 Mnemo 的 Go + Wails + Vue 架构；优先按现有架构原生实现。
 - SDK：https://github.com/NihilDigit/pikpak-kotlin/blob/main/src/commonMain/kotlin/io/github/nihildigit/pikpak/StarEndpoint.kt
-- 光鸭独立实现：https://github.com/DDSRem-Dev/guangyaclient/blob/main/guangyaclient/client.py
+- 光鸭独立实现：https://github.com/DDSRem-Dev/guangyaclient/blob/master/guangyaclient/client.py
 
 ## 4. 真账号测试清单（尚待执行）
 
