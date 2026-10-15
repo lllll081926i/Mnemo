@@ -12,6 +12,7 @@ import SegTabs from '../components/SegTabs.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import DiagnosticsPanel from '../components/DiagnosticsPanel.vue'
 import { cleanBackupPrefs } from '../workspace'
 import { ListFavorites, RestoreFavorite, listAccounts, setAccountCustomMeta as saveAccountMeta } from '../api'
 
@@ -777,6 +778,7 @@ async function exportLogs() {
               </div>
             </div>
           </div>
+          <DiagnosticsPanel @toast="(...args) => emit('toast', ...args)" />
         </section>
 
         <!-- 8. 更新 -->

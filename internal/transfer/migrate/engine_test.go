@@ -24,6 +24,9 @@ func TestMigrationFailureKeepsPerFileDetail(t *testing.T) {
 	if !ok || item.Status != "failed" || item.Error == "" || item.Verification != "unverified" {
 		t.Fatalf("missing failed detail: %+v", job.Items)
 	}
+	if item.Issue == nil || job.Issue == nil || item.Issue.Code == "" {
+		t.Fatal("迁移失败未记录结构化处理建议")
+	}
 }
 
 func TestSpoolMigrationPreservesExistingDestination(t *testing.T) {

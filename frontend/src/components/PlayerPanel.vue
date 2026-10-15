@@ -9,6 +9,7 @@ import { useSeekDisplay } from '../player/seek-display'
 import { createPreviewLease } from '../player/preview-lease'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
+import PlaybackInfo from './PlaybackInfo.vue'
 
 const props = defineProps({
   account: { type: Object, required: true },
@@ -39,6 +40,11 @@ const qualities = ref([])
 const currentQuality = ref('')
 const src = ref('')
 const streamType = ref('')
+const playbackDetails = ref({})
+function updatePlaybackDetails() {
+  const video = videoEl.value
+  playbackDetails.value = { type: streamType.value.toUpperCase(), width: video?.videoWidth || 0, height: video?.videoHeight || 0, audioTracks: video?.audioTracks?.length }
+}
 const looping = ref(false)
 const isFullscreen = ref(false)
 // 窗口控制（右上角）：全屏时隐藏
@@ -195,6 +201,7 @@ async function startPlayback() {
   activeSourceURL = ''
   playbackEnded = false
   streamType.value = ''
+  playbackDetails.value = {}
   subtitleSources.value = []
   subtitleTracks.value = []
   extraTextSubs.value = []
@@ -486,6 +493,7 @@ function setQualityOptions(preview) {
 function onLoaded() {
   const v = videoEl.value
   if (!v) return
+  updatePlaybackDetails()
   playbackEnded = false
   updateDuration(v)
   applyVolume()
@@ -1338,6 +1346,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
           class="pp-video"
           :style="{ filter: 'brightness(' + brightness / 100 + ')' }"
           @loadedmetadata="onLoaded"
+          @resize="updatePlaybackDetails"
           @loadeddata="onLoadedData"
           @durationchange="onDurationChange"
           @timeupdate="onTimeUpdate"
@@ -1529,6 +1538,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
               <button type="button" class="pp-btn" :class="{ active: activeMenu === 'more' }" title="更多播放选项" :aria-expanded="activeMenu === 'more'" @click.stop="toggleMenu('more')"><UiIcon name="more-horizontal" :size="20" /></button>
               <div v-if="activeMenu === 'more'" class="pp-pop">
                 <div class="pp-pop-title">播放选项</div>
+                <PlaybackInfo :details="playbackDetails" />
                 <button type="button" class="pp-pop-item" @click="screenshot(); closeMenu()"><UiIcon name="camera" :size="18" />保存截图<span class="pp-shortcut">S</span></button>
                 <button type="button" class="pp-pop-item" :class="{ on: pipActive }" @click="togglePip(); closeMenu()"><UiIcon name="picture-in-picture" :size="18" />画中画<span class="pp-shortcut">P</span></button>
                 <button type="button" class="pp-pop-item" :class="{ on: looping }" @click="toggleLoop()"><UiIcon name="repeat" :size="18" />循环播放<span class="pp-shortcut">{{ looping ? '开启' : '关闭' }}</span></button>

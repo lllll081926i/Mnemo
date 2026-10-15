@@ -261,6 +261,7 @@ func (m *Manager) runFolderDownload(task *model.DownloadTask) {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancels[task.ID] = cancel
 	task.Status, task.Stage = "downloading", "scanning"
+	task.Issue = nil
 	m.mu.Unlock()
 	var workErr error
 	defer func() {
@@ -272,6 +273,7 @@ func (m *Manager) runFolderDownload(task *model.DownloadTask) {
 				task.Status = "paused"
 			} else if workErr != nil {
 				task.Status, task.Error = "failed", workErr.Error()
+				task.Issue = drive.DescribeOperationError(workErr)
 			}
 		}
 		task.Speed = 0
@@ -413,8 +415,10 @@ func (m *Manager) runFolderDownload(task *model.DownloadTask) {
 		if finished {
 			if failed > 0 {
 				task.Status, task.Error = "failed", fmt.Sprintf("%d 个文件未完成，继续可重试", failed)
+				task.Issue = &model.OperationIssue{Code: "FOLDER_PARTIAL", Message: "部分子任务未完成，请查看子任务原因。继续只重试未完成项目。", Action: "manual_resume"}
 			} else {
 				task.Status, task.Progress = "completed", 100
+				task.Issue = nil
 			}
 		}
 		m.mu.Unlock()

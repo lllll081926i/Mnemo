@@ -36,6 +36,8 @@ type ShareItem struct {
 
 // ShareHistoryEntry is a locally persisted share record (searchable history).
 type ShareHistoryEntry struct {
+	Expiration   string `json:"expiration,omitempty"`
+	SharePolicy  string `json:"share_policy,omitempty"`
 	ShareID      string `json:"share_id"`
 	AccountID    string `json:"account_id"`
 	DriveID      string `json:"drive_id"`

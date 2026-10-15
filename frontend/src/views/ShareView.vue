@@ -9,6 +9,7 @@ import SelectDirModal from '../components/SelectDirModal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import ShareImportHistory from '../components/ShareImportHistory.vue'
 import { parseShareText } from '../workspace'
+import { shareExpiry } from '../share-expiry'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -19,6 +20,10 @@ const importedLocation = ref(null)
 const lastImportReceipt = ref(null)
 
 const history = ref([])
+const expiryNow = ref(Date.now())
+let expiryTimer
+onMounted(() => { expiryTimer = setInterval(() => { expiryNow.value = Date.now() }, 60000) })
+onBeforeUnmount(() => clearInterval(expiryTimer))
 const loading = ref(false)
 const loadError = ref('')
 const kw = ref('')
@@ -456,11 +461,12 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
                 <div class="share-record-name" :title="h.share_name">{{ h.share_name || '未命名分享' }}</div>
                 <div class="share-record-meta">
                   <span>创建于 {{ formatTime(h.created_at) }}</span>
+                  <span :class="{ 'share-expiry-warning': shareExpiry(h, expiryNow).warning }">{{ shareExpiry(h, expiryNow).label }}</span>
                 </div>
                 <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
               </div>
               <div class="share-record-side">
-				<span class="sg-desc">{{ h.remote_status === 'active' ? '已创建' : '本地记录' }}</span>
+				<span class="sg-desc">{{ h.remote_status === 'active' ? '已创建' : '本地记录' }} · {{ h.share_policy === 'public' ? '持链接可访问' : '访问范围未记录' }} · {{ h.share_pwd ? '含提取码' : '未记录提取码' }}</span>
                 <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
                 <div class="share-record-actions">
                   <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
@@ -569,6 +575,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
 </template>
 
 <style scoped>
+.share-expiry-warning { color: var(--color-warning); font-weight: 600; }
 .share-refresh-error { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 12px; margin-bottom:12px; border:1px solid var(--border-light); border-radius:var(--radius-md); background:var(--bg-subtle); color:var(--text-secondary); font-size:12.5px; }
 .share-refresh-error .btn { flex-shrink:0; }
 .import-summary { display:flex; flex-direction:column; gap:4px; padding:9px 10px; margin-bottom:10px; border:1px solid var(--border-lighter); border-radius:var(--radius-md); color:var(--text-secondary); font-size:12px; }

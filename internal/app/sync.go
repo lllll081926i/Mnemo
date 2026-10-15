@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"mnemo-go/internal/drive"
 	"mnemo-go/internal/logging"
+	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
 	"mnemo-go/internal/sync"
 	"mnemo-go/internal/transfer/dlengine"
@@ -64,7 +66,7 @@ func (a *App) beginSyncRun(parent context.Context, jobID, source string) (contex
 		} else if runErr != nil {
 			status = "failed"
 		}
-		a.emit("sync:state", map[string]any{"id": jobID, "running": false, "status": status})
+		a.emit("sync:state", map[string]any{"id": jobID, "running": false, "status": status, "issue": drive.DescribeOperationError(runErr)})
 	}
 	return ctx, finish, nil
 }
@@ -74,8 +76,47 @@ func (a *App) executeSync(parent context.Context, cfg sync.Config, engine *sync.
 	if err != nil {
 		return err
 	}
-	defer func() { finish(runErr) }()
+	st, storeErr := a.storeOrError()
+	if storeErr != nil {
+		finish(storeErr)
+		return storeErr
+	}
+	defer func() {
+		status := "completed"
+		if runErr != nil {
+			status = "failed"
+		}
+		if errors.Is(runErr, context.Canceled) {
+			status = "canceled"
+		}
+		if err := st.SaveSyncRunState(cfg.ID, store.SyncRunState{Status: status, Issue: drive.DescribeOperationError(runErr)}); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("同步结果记录保存失败，请核对目录后处理: %w", err))
+		}
+		finish(runErr)
+	}()
+	if err := st.SaveSyncRunState(cfg.ID, store.SyncRunState{Status: "running"}); err != nil {
+		return err
+	}
 	return engine.Run(ctx, cfg)
+}
+
+func (a *App) ListSyncRunStates() (map[string]store.SyncRunState, error) {
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
+	states, err := st.ListSyncRunStates()
+	if err != nil {
+		return nil, err
+	}
+	for id, state := range states {
+		if state.Status == "running" && !a.isSyncRunning(id) {
+			state.Status = "interrupted"
+			state.Issue = &model.OperationIssue{Code: "RESTART_INTERRUPTED", Message: "上次同步未记录完成结果，请重新预览差异后手动同步。", Action: "manual_resume"}
+			states[id] = state
+		}
+	}
+	return states, nil
 }
 
 func (a *App) newSyncEngine(st sync.SnapshotStore, progress bool) *sync.Engine {

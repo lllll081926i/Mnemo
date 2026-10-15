@@ -1310,6 +1310,7 @@ onBeforeUnmount(() => {
                       <div :class="['progress-current', offProgressClass(t.status)]" :style="{ width: offProgress(t) + '%' }"></div>
                     </div>
                     <p v-if="t.message" class="text-error">{{ t.message }}</p>
+                    <TaskIssue :issue="t.issue" @repair="action => emit('repair', { action, userId: t.user_id })" />
                   </div>
                 </div>
                 <div class="downspeed"></div>
@@ -1352,6 +1353,8 @@ onBeforeUnmount(() => {
                       <div :class="j.status === 'completed' ? 'progress-current succeed' : j.status === 'failed' ? 'progress-current error' : j.status === 'partial' ? 'progress-current warning' : 'progress-current active'" :style="{ width: migProgress(j) + '%' }"></div>
                     </div>
                     <p v-if="j.message" class="text-error" :title="['failed','partial'].includes(j.status) ? taskErrorText(j.message, '迁移文件') : j.message">{{ ['failed','partial'].includes(j.status) ? taskErrorText(j.message, '迁移文件') : j.message }}</p>
+                    <TaskIssue :issue="j.issue?.action === 'reauthorize' ? { ...j.issue, action: 'check_access' } : j.issue" write-operation @repair="action => emit('repair', { action })" />
+                    <div v-if="j.issue?.action === 'reauthorize'" class="migration-auth-actions"><button type="button" class="btn sm" @click="emit('repair', { action: 'reauthorize', userId: j.srcUser })">重新登录来源账号</button><button type="button" class="btn sm" @click="emit('repair', { action: 'reauthorize', userId: j.dstUser })">重新登录目标账号</button></div>
                   </div>
                 </div>
                 <div class="downspeed">{{ migProgressText(j) }}</div>

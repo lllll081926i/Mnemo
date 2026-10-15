@@ -231,6 +231,7 @@ func (a *App) CreateShare(userID, driveID string, params drive.ShareParams) (*mo
 		if storeErr = st.SaveShareHistory(model.ShareHistoryEntry{
 			ShareID: item.ShareID, AccountID: userID, DriveID: driveID,
 			FileID: firstFileID(params.FileIDs), ShareURL: item.ShareURL,
+			Expiration: item.Expiration, SharePolicy: item.SharePolicy,
 			SharePwd: item.SharePwd, ShareName: item.ShareName, Provider: drive.ProviderOf(userID, driveID, ""), RemoteStatus: "active",
 		}); storeErr != nil {
 			a.emit("share:history-error", map[string]string{"error": storeErr.Error()})
@@ -626,6 +627,10 @@ func (a *App) RefreshOfflineTasks(userID, driveID string) ([]model.OfflineTask, 
 		}
 		if ot.ID == "" {
 			continue
+		}
+		switch strings.ToUpper(ot.Status) {
+		case "FAILED", "ERROR", "PHASE_TYPE_ERROR", "PHASE_TYPE_FAILED":
+			ot.Issue = &model.OperationIssue{Code: "OFFLINE_REMOTE_FAILED", Message: "云端离线任务失败，请检查原账号的任务详情、资源与套餐限制。删除任务可能同步删除网盘文件。", Action: "inspect"}
 		}
 		out = append(out, ot)
 	}

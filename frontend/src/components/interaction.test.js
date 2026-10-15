@@ -46,6 +46,9 @@ const api = vi.hoisted(() => ({
   login: vi.fn(),
   ListShareHistory: vi.fn(),
   ListSyncConfigs: vi.fn(),
+  ListSyncRunStates: vi.fn().mockResolvedValue({}),
+  RunDiagnostics: vi.fn(),
+  ExportDiagnostics: vi.fn(),
   GetSettings: vi.fn(),
   GetDownloadDirectory: vi.fn().mockResolvedValue('D:/系统下载'),
   OpenDownloadDirectory: vi.fn().mockResolvedValue(undefined),
@@ -2347,6 +2350,28 @@ describe('关键交互组件', () => {
     expect(restored.findAll('.rail-list .rail-item').map(item => item.attributes('aria-label'))).toEqual([
       'pikpak · pikpak:two', 'pikpak · pikpak:three', 'pikpak · pikpak:one',
     ])
+  })
+
+  it('固定右栏目标后导航不会改变确认的复制位置', async () => {
+    const account = { user_id: 'webdav:pinned', drive_id: 'drive' }
+    api.listDir.mockResolvedValue([{ file_id: 'file', name: '文件.txt', isDir: false }])
+    api.capsOf.mockReturnValue({ copy: true })
+    api.copy.mockResolvedValue(['file'])
+    const wrapper = mountAttached(WorkspaceView, { props: { account, accounts: [account], providers: [], dual: true } })
+    await flushPromises()
+    const views = wrapper.findAllComponents(PanView)
+    await views[1].vm.navigate({ dirId: 'target', name: '固定位置' })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '固定右栏目标').trigger('click')
+    await views[1].vm.navigate({ dirId: 'other', name: '另一个位置' })
+    await flushPromises()
+    await views[0].get('.fileitem').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '复制到右栏').trigger('click')
+    await flushPromises()
+    expect(api.copy).not.toHaveBeenCalled()
+    expect(document.body.querySelector('.transfer-summary')?.textContent).toContain('固定位置')
+    await wrapper.vm.confirmTransfer()
+    expect(api.copy).toHaveBeenCalledWith(account.user_id, account.drive_id, ['file'], 'target')
   })
 
   it.each(['audio', 'text'])('%s 预览关闭后释放迟到的本机预览会话', async (kind) => {

@@ -60,7 +60,7 @@ const pageProps = computed(() => {
 const pageListeners = computed(() => {
   const listeners = { toast, navigate: navigateTo }
   if (tab.value === 'pan') listeners.go = onPanGo
-  if (tab.value === 'transfer') listeners.repair = repairTask
+  if (['transfer', 'sync'].includes(tab.value)) listeners.repair = repairTask
   if (tab.value === 'settings') {
     listeners.theme = applyTheme
     listeners.update = () => { pendingUpdateInfo.value = null; showUpdate.value = true }

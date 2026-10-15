@@ -165,6 +165,7 @@ func (e *Engine) RecoverUnfinished() {
 		case "running", "pending", "":
 			j.Status = "canceled"
 			j.Message = "recovered: job was interrupted; marked canceled on startup"
+			j.Issue = &model.OperationIssue{Code: "RESTART_INTERRUPTED", Message: "迁移在上次退出时尚未完成，请核对目标回执后手动继续。", Action: "manual_resume"}
 			_ = e.store.SaveMigrateJob(j)
 			e.emit(j)
 		}
@@ -210,6 +211,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 	job.ProcessedBytes = 0
 	job.Status = "running"
 	job.Message = ""
+	job.Issue = nil
 	job.Stage = ""
 	job.StageName = ""
 	job.StageProgress = 0
@@ -243,6 +245,7 @@ func (e *Engine) Run(ctx context.Context, job *Job) error {
 			failures = append(failures, fmt.Errorf("%s: %w", fileID, err))
 			partial = partial || isPartialError(err)
 			job.Message = err.Error()
+			job.Issue = drive.DescribeOperationError(err)
 		} else {
 			succeeded++
 		}
@@ -271,6 +274,7 @@ func (e *Engine) finishCheckpointFailure(job *Job, cause error) error {
 	job.Status = "failed"
 	job.Stage, job.StageName, job.StageProgress = "", "", 0
 	job.Message = cause.Error()
+	job.Issue = drive.DescribeOperationError(cause)
 	e.emit(job)
 	return cause
 }
@@ -303,6 +307,7 @@ func (e *Engine) finishCanceled(job *Job, cause error) error {
 		cause = context.Canceled
 	}
 	job.Status = "canceled"
+	job.Issue = drive.DescribeOperationError(cause)
 	job.Stage = ""
 	job.StageName = ""
 	job.StageProgress = 0
@@ -378,11 +383,13 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		if resultErr != nil {
 			item.Status = "failed"
 			item.Error = resultErr.Error()
+			item.Issue = drive.DescribeOperationError(resultErr)
 			if errors.Is(resultErr, context.Canceled) {
 				item.Status = "canceled"
 			}
 		} else {
 			item.Status = "completed"
+			item.Issue = nil
 		}
 		job.Items[fileID] = item
 		if err := e.saveJob(job); err != nil {

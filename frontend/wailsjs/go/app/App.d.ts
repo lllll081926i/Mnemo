@@ -70,6 +70,8 @@ export function DownloadURL(arg1:string,arg2:string,arg3:Record<string, string>)
 
 export function DownloadUpdate(arg1:string):Promise<string>;
 
+export function ExportDiagnostics():Promise<string>;
+
 export function ExportLogs():Promise<string>;
 
 export function ExportPreferences(arg1:string):Promise<string>;
@@ -129,6 +131,8 @@ export function ListShareHistory(arg1:string):Promise<Array<model.ShareHistoryEn
 export function ListShareImportReceipts(arg1:string,arg2:string):Promise<Array<model.ShareImportReceipt>>;
 
 export function ListSyncConfigs():Promise<Array<sync.Config>>;
+
+export function ListSyncRunStates():Promise<Record<string, store.SyncRunState>>;
 
 export function ListTrash(arg1:string,arg2:string):Promise<Array<model.File>>;
 
@@ -223,6 +227,8 @@ export function ResumeUpload(arg1:string):Promise<void>;
 export function ResumeUploadReviewed(arg1:string):Promise<void>;
 
 export function RevealInFolder(arg1:string):Promise<void>;
+
+export function RunDiagnostics(arg1:string,arg2:string,arg3:boolean):Promise<app.DiagnosticReport>;
 
 export function RunSync(arg1:string):Promise<void>;
 

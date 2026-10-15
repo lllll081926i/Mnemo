@@ -4,6 +4,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, PreviewSync, RunSync, RunSyncPlan, CancelSync, ListRunningSyncIDs, onEvent, accountName, providerMetaOf, providerIconUrl, PickDirectory } from '../api'
 import Modal from '../components/Modal.vue'
 import SegTabs from '../components/SegTabs.vue'
+import TaskIssue from '../components/TaskIssue.vue'
+import { ListSyncRunStates } from '../api'
 import SelectDirModal from '../components/SelectDirModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
@@ -15,7 +17,7 @@ const props = defineProps({
   accounts: { type: Array, default: () => [] },
   providers: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['toast'])
+const emit = defineEmits(['toast', 'repair'])
 
 const confirmDialog = ref(null)
 const preview = ref(null), previewJob = ref(null), previewBusy = ref(false), conflictChoices = ref({})
@@ -53,6 +55,7 @@ async function runPreview() {
 }
 
 const jobs = ref([])
+const runStates = ref({})
 const loadingJobs = ref(false)
 const jobsError = ref('')
 const progress = ref({}) // id -> { done, total }
@@ -87,6 +90,11 @@ async function refresh() {
   try {
     const list = await ListSyncConfigs()
     if (seq === refreshSeq) jobs.value = list || []
+    const requestedVersion = syncStateVersion
+    try {
+      const states = await ListSyncRunStates()
+      if (seq === refreshSeq && requestedVersion === syncStateVersion) runStates.value = states || {}
+    } catch { if (seq === refreshSeq) emit('toast', '同步运行记录读取失败，任务配置仍可使用', 'error') }
   } catch (e) {
     if (seq === refreshSeq) {
       jobsError.value = String(e)
@@ -274,6 +282,7 @@ onMounted(() => {
   offs.push(onEvent('sync:state', (ev) => {
     if (!ev || !ev.id) return
     syncStateVersion++
+    runStates.value = { ...runStates.value, [ev.id]: { status: ev.running ? 'running' : ev.status, issue: ev.issue } }
     const next = new Set(running.value)
     if (ev.running) next.add(ev.id)
     else next.delete(ev.id)
@@ -354,6 +363,7 @@ onBeforeUnmount(() => {
               <span>{{ progress[job.id].done || 0 }} / {{ progress[job.id].total || 0 }}（{{ pct(job.id) }}%）</span>
             </div>
           </div>
+          <TaskIssue :issue="runStates[job.id]?.issue" write-operation @repair="action => emit('repair', { action, userId: job.user_id })" />
         </div>
         <div class="sync-task-actions">
           <button type="button" class="switch" role="switch" :aria-label="'自动同步：' + job.name" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在保存…' : job.enabled ? '停用自动同步' : '启用自动同步'" @click="toggle(job)"></button>

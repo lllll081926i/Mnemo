@@ -130,6 +130,10 @@ export function DownloadUpdate(arg1) {
   return window['go']['app']['App']['DownloadUpdate'](arg1);
 }
 
+export function ExportDiagnostics() {
+  return window['go']['app']['App']['ExportDiagnostics']();
+}
+
 export function ExportLogs() {
   return window['go']['app']['App']['ExportLogs']();
 }
@@ -248,6 +252,10 @@ export function ListShareImportReceipts(arg1, arg2) {
 
 export function ListSyncConfigs() {
   return window['go']['app']['App']['ListSyncConfigs']();
+}
+
+export function ListSyncRunStates() {
+  return window['go']['app']['App']['ListSyncRunStates']();
 }
 
 export function ListTrash(arg1, arg2) {
@@ -436,6 +444,10 @@ export function ResumeUploadReviewed(arg1) {
 
 export function RevealInFolder(arg1) {
   return window['go']['app']['App']['RevealInFolder'](arg1);
+}
+
+export function RunDiagnostics(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RunDiagnostics'](arg1, arg2, arg3);
 }
 
 export function RunSync(arg1) {

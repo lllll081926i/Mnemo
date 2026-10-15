@@ -230,24 +230,26 @@ type DownloadEntry struct {
 
 // OfflineTask is a provider-side (cloud) offline download task (PikPak).
 type OfflineTask struct {
-	ID          string `json:"id"`
-	UserID      string `json:"user_id"`
-	DriveID     string `json:"drive_id"`
-	TaskID      string `json:"task_id,omitempty"`
-	FileID      string `json:"file_id,omitempty"`
-	URL         string `json:"url,omitempty"`
-	FileName    string `json:"file_name,omitempty"`
-	Status      string `json:"status"`
-	Progress    int    `json:"progress"`
-	Message     string `json:"message,omitempty"`
-	FileSize    int64  `json:"file_size,omitempty"`
-	CreatedTime string `json:"created_time,omitempty"`
-	UpdatedTime string `json:"updated_time,omitempty"`
-	Created     int64  `json:"created"`
+	Issue       *OperationIssue `json:"issue,omitempty"`
+	ID          string          `json:"id"`
+	UserID      string          `json:"user_id"`
+	DriveID     string          `json:"drive_id"`
+	TaskID      string          `json:"task_id,omitempty"`
+	FileID      string          `json:"file_id,omitempty"`
+	URL         string          `json:"url,omitempty"`
+	FileName    string          `json:"file_name,omitempty"`
+	Status      string          `json:"status"`
+	Progress    int             `json:"progress"`
+	Message     string          `json:"message,omitempty"`
+	FileSize    int64           `json:"file_size,omitempty"`
+	CreatedTime string          `json:"created_time,omitempty"`
+	UpdatedTime string          `json:"updated_time,omitempty"`
+	Created     int64           `json:"created"`
 }
 
 // MigrateJob is one cross-drive migration request.
 type MigrateJob struct {
+	Issue         *OperationIssue        `json:"issue,omitempty"`
 	Stage         string                 `json:"stage,omitempty"`
 	StageName     string                 `json:"stageName,omitempty"`
 	StageProgress int                    `json:"stageProgress,omitempty"`
@@ -284,17 +286,18 @@ type MigrateJob struct {
 }
 
 type MigrateItem struct {
-	CommitState    string `json:"commitState,omitempty"`
-	SourceRecorded bool   `json:"sourceRecorded,omitempty"`
-	SourceTime     int64  `json:"sourceTime,omitempty"`
-	SourceHash     string `json:"sourceHash,omitempty"`
-	TargetID       string `json:"targetId,omitempty"`
-	IsDir          bool   `json:"isDir"`
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	ParentID       string `json:"parentId"`
-	Status         string `json:"status"`
-	Error          string `json:"error,omitempty"`
-	Verification   string `json:"verification"`
-	Size           int64  `json:"size"`
+	Issue          *OperationIssue `json:"issue,omitempty"`
+	CommitState    string          `json:"commitState,omitempty"`
+	SourceRecorded bool            `json:"sourceRecorded,omitempty"`
+	SourceTime     int64           `json:"sourceTime,omitempty"`
+	SourceHash     string          `json:"sourceHash,omitempty"`
+	TargetID       string          `json:"targetId,omitempty"`
+	IsDir          bool            `json:"isDir"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	ParentID       string          `json:"parentId"`
+	Status         string          `json:"status"`
+	Error          string          `json:"error,omitempty"`
+	Verification   string          `json:"verification"`
+	Size           int64           `json:"size"`
 }

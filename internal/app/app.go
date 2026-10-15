@@ -43,6 +43,8 @@ import (
 
 // App is the root Wails-bound struct.
 type App struct {
+	diagnosticsMu   sync.Mutex
+	diagnostics     *DiagnosticReport
 	previewWindows  sync.Map
 	previewStopping atomic.Bool
 	stateMu         sync.RWMutex
