@@ -56,6 +56,7 @@ type Server struct {
 	mu                sync.Mutex // guards roots and allowedProxyHosts
 	sessionsMu        sync.Mutex
 	sessions          map[string]*playbackSession
+	closed            bool
 	localFilesMu      sync.Mutex
 	localFiles        map[string]localFileGrant
 }
@@ -88,6 +89,9 @@ type playbackSession struct {
 	resourceOrder   []playbackResourceRef
 	resourceSeq     uint64
 	refreshGate     chan struct{}
+	ctx             context.Context
+	cancel          context.CancelFunc
+	closed          bool
 }
 
 type localFileGrant struct {
@@ -255,15 +259,23 @@ func (s *Server) PlaybackURL(source PlaybackSource) (string, error) {
 	id := base64.RawURLEncoding.EncodeToString(idBytes)
 	now := time.Now()
 	s.sessionsMu.Lock()
+	if s.closed {
+		s.sessionsMu.Unlock()
+		return "", fmt.Errorf("预览服务已关闭")
+	}
 	for key, session := range s.sessions {
 		session.mu.Lock()
 		stale := now.Sub(session.lastUsed) > playbackSessionTTL
 		session.mu.Unlock()
 		if stale {
+			session.revoke()
 			delete(s.sessions, key)
 		}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	s.sessions[id] = &playbackSession{
+		ctx:             ctx,
+		cancel:          cancel,
 		source:          source,
 		lastUsed:        now,
 		resources:       make(map[string]string),
@@ -306,6 +318,7 @@ func (s *Server) getPlaybackSession(id string) *playbackSession {
 		s.sessionsMu.Lock()
 		if s.sessions[id] == session {
 			delete(s.sessions, id)
+			session.revoke()
 		}
 		s.sessionsMu.Unlock()
 		return nil
@@ -324,10 +337,16 @@ func (session *playbackSession) refreshRejected(ctx context.Context, rejected Pl
 }
 
 func (session *playbackSession) resolveRevision(ctx context.Context, forceRefresh bool, rejectedRevision *uint64) (PlaybackSource, error) {
+	ctx, cancel := session.requestContext(ctx)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return PlaybackSource{}, err
 	}
 	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		return PlaybackSource{}, context.Canceled
+	}
 	if session.refreshGate == nil {
 		session.refreshGate = make(chan struct{}, 1)
 	}
@@ -373,14 +392,59 @@ func (session *playbackSession) resolveRevision(ctx context.Context, forceRefres
 	}
 	fresh.revision = source.revision + 1
 	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		return PlaybackSource{}, context.Canceled
+	}
 	session.source = fresh
 	session.lastUsed = time.Now()
 	session.mu.Unlock()
 	return clonePlaybackSource(fresh), nil
 }
 
+func (session *playbackSession) requestContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	if session.ctx == nil {
+		return ctx, cancel
+	}
+	stop := context.AfterFunc(session.ctx, cancel)
+	if session.ctx.Err() != nil {
+		cancel()
+	}
+	return ctx, func() { stop(); cancel() }
+}
+
+func (session *playbackSession) revoke() {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	session.closed = true
+	if session.cancel != nil {
+		session.cancel()
+	}
+	session.source = PlaybackSource{}
+	clear(session.resources)
+	clear(session.resourceIDs)
+	clear(session.dashResources)
+	clear(session.dashResourceIDs)
+	session.resourceOrder = nil
+}
+
+func (s *Server) releasePlaybackSession(id string) {
+	s.sessionsMu.Lock()
+	session := s.sessions[id]
+	delete(s.sessions, id)
+	s.sessionsMu.Unlock()
+	if session != nil {
+		session.revoke()
+	}
+}
+
 func (s *Server) playbackResourceURL(sessionID string, session *playbackSession, target string) string {
 	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		return ""
+	}
 	if id, ok := session.resourceIDs[target]; ok {
 		session.lastUsed = time.Now()
 		session.mu.Unlock()
@@ -400,6 +464,10 @@ func (s *Server) playbackResourceURL(sessionID string, session *playbackSession,
 func (session *playbackSession) dashResourceID(baseURL, rawQuery string) (string, dashPlaybackResource) {
 	key := baseURL + "\x00" + rawQuery
 	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		return "", dashPlaybackResource{}
+	}
 	if id, ok := session.dashResourceIDs[key]; ok {
 		resource := session.dashResources[id]
 		session.lastUsed = time.Now()
@@ -454,6 +522,9 @@ func (s *Server) dashResourceURL(sessionID string, session *playbackSession, tar
 		User:   targetURL.User,
 	}).String()
 	resourceID, resource := session.dashResourceID(baseURL, targetURL.RawQuery)
+	if resourceID == "" {
+		return "", context.Canceled
+	}
 	path := targetURL.EscapedPath()
 	if path == "" {
 		path = "/"
@@ -652,7 +723,7 @@ func corsHeaders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Access-Control-Allow-Origin", origin)
-	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Range, Content-Type, Accept, If-Range")
 	w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Disposition, ETag")
 	w.Header().Set("Vary", "Origin")
@@ -685,8 +756,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodDelete {
+		w.Header().Set("Allow", "GET, HEAD, DELETE, OPTIONS")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -701,11 +772,23 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := parts[0]
+	if r.Method == http.MethodDelete {
+		if len(parts) != 1 || r.URL.Query().Get("t") != s.token {
+			http.Error(w, "invalid playback release", http.StatusBadRequest)
+			return
+		}
+		s.releasePlaybackSession(sessionID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	session := s.getPlaybackSession(sessionID)
 	if session == nil {
 		http.Error(w, "playback session expired", http.StatusGone)
 		return
 	}
+	ctx, cancel := session.requestContext(r.Context())
+	defer cancel()
+	r = r.WithContext(ctx)
 	resourceTarget := ""
 	if len(parts) > 1 {
 		if parts[1] == "r" {
@@ -1373,6 +1456,13 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.sessionsMu.Lock()
+	s.closed = true
+	for _, session := range s.sessions {
+		session.revoke()
+	}
+	clear(s.sessions)
+	s.sessionsMu.Unlock()
 	if s.proxyTransport != nil {
 		s.proxyTransport.CloseIdleConnections()
 	}

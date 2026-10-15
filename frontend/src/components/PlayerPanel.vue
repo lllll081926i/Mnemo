@@ -6,6 +6,7 @@ import { playVideo, playVideoQuality, pinFileSnapshot, getPlayCursor, savePlayCu
 import { getPrefs } from '../appearance'
 import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
 import { useSeekDisplay } from '../player/seek-display'
+import { createPreviewLease } from '../player/preview-lease'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 
@@ -109,6 +110,8 @@ let subtitleFetchController = null
 let localSubtitleReader = null
 const subtitleObjectURLs = new Set()
 const subtitleCueTimes = new WeakMap()
+const playbackLease = createPreviewLease()
+const subtitleLease = createPreviewLease()
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const speedOptions = SPEEDS.map((s) => ({ value: s, label: s + 'x' }))
@@ -146,6 +149,9 @@ onBeforeUnmount(() => {
   cancelLocalSubtitleReader()
   revokeSubtitleObjectURLs()
   destroyAdaptivePlayers()
+  clearVideoSource()
+  playbackLease.dispose()
+  subtitleLease.dispose()
   if (saveTimer) clearInterval(saveTimer)
   if (controlsTimer) clearTimeout(controlsTimer)
   if (centerTimer) clearTimeout(centerTimer)
@@ -198,6 +204,8 @@ async function startPlayback() {
   destroyAss()
   pendingResume = 0
   clearVideoSource()
+  playbackLease.clear()
+  subtitleLease.clear()
   try {
     await pinFileSnapshot(userID, driveID, file)
     if (unmounted || seq !== playbackSeq) return
@@ -209,7 +217,8 @@ async function startPlayback() {
     }
     if (unmounted || seq !== playbackSeq) return
     const preview = await playVideo(userID, driveID, file.file_id)
-    if (unmounted || seq !== playbackSeq) return
+    if (unmounted || seq !== playbackSeq) { playbackLease.discard(preview); return }
+    playbackLease.replace(preview)
     setQualityOptions(preview)
     if (preview && Number.isFinite(preview.duration) && preview.duration > 0) duration.value = preview.duration
     await mountCloudSubtitles()
@@ -885,7 +894,8 @@ async function mountCloudSubtitles() {
     const ext = extensionOf(sibling.name)
     try {
       const url = await previewUrl(props.account.user_id, props.account.drive_id, sibling.file_id)
-      if (unmounted || seq !== playbackSeq) return
+      if (unmounted || seq !== playbackSeq) { subtitleLease.discard(url); return }
+      subtitleLease.add(url)
       if (ext === 'sup') {
         supTracks.value = [...supTracks.value, { label: sibling.name, url }]
       } else if (ext === 'ass' || ext === 'ssa') {
@@ -1181,7 +1191,8 @@ async function switchQuality(quality) {
   const seq = playbackSeq
   try {
     const preview = await playVideoQuality(props.account.user_id, props.account.drive_id, props.file.file_id, quality)
-    if (unmounted || seq !== playbackSeq || requestSeq !== qualitySeq) return
+    if (unmounted || seq !== playbackSeq || requestSeq !== qualitySeq) { playbackLease.discard(preview); return }
+    playbackLease.replace(preview)
     setQualityOptions(preview)
     error.value = ''
     await loadPlaybackSource(preview, currentTime, wasPlaying, seq)
