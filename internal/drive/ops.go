@@ -939,6 +939,9 @@ func QueueUploadHandlerContext(ctx context.Context, userID, driveID string) (fun
 			return lockErr
 		}
 		defer release()
+		if err := ui.BeginUploadAttempt(); err != nil {
+			return err
+		}
 		opErr := d.UploadOneFile(ctx, c, ui)
 		return withTokenPersist(opErr, c)
 	}, nil

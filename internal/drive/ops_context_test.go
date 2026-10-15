@@ -174,6 +174,30 @@ func TestContextAwareDriveOpsCancelInFlightWebDAVRequests(t *testing.T) {
 
 type cancellationRoundTripFunc func(*http.Request) (*http.Response, error)
 
+func TestQueueUploadRequiresDurableAttemptBeforeProvider(testContext *testing.T) {
+	previousTransport := netx.TestTransportHook
+	netx.TestTransportHook = cancellationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		testContext.Error("提交记录失败仍调用了网盘")
+		return nil, errors.New("unexpected request")
+	})
+	testContext.Cleanup(func() { netx.TestTransportHook = previousTransport })
+	drive.SetTokenResolver(func(string, string) (*model.TokenInfo, error) {
+		return &model.TokenInfo{TokenFrom: model.ProviderWebdav, Conn: &model.ConnConfig{Endpoint: "http://127.0.0.1:1/"}}, nil
+	})
+	testContext.Cleanup(func() { drive.SetTokenResolver(nil) })
+	handler, err := drive.QueueUploadHandler("webdav:receipt", "webdav")
+	if err != nil {
+		testContext.Fatal(err)
+	}
+	expected := errors.New("receipt unavailable")
+	called := false
+	job := &model.UploadingUI{Info: model.UploadInfo{ParentFileID: "/", Name: "file"}}
+	job.ConfigureUploadAttempt(func() error { called = true; return expected })
+	if err := handler(testContext.Context(), job); !called || !errors.Is(err, expected) {
+		testContext.Fatalf("门面未等待提交记录: called=%v, %v", called, err)
+	}
+}
+
 func (f cancellationRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }

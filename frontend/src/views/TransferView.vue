@@ -4,7 +4,7 @@ import {
   ListDownloads, ListUploads,
   PauseDownload, ResumeDownload, CancelDownload, ClearDownloads,
   RemoveDownload, PrioritizeDownload, OpenFile,
-  CancelUpload, ClearUploads, DownloadURL, ResumeUpload,
+  CancelUpload, ClearUploads, DownloadURL, ResumeUpload, ResumeUploadReviewed,
   ListOfflineTasks, refreshOfflineTasks, OfflineDownload, DeleteOfflineTask,
   ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs, VerifyMigration,
   EventsOn, RevealInFolder,
@@ -287,6 +287,7 @@ const downProgress = (t) => Number.isFinite(t.progress) ? Math.max(0, Math.min(1
 function upStatus(t) {
   const u = t.Upload || {}
   if (u.IsCompleted) return '已完成'
+  if (!u.IsDowning && uploadNeedsReview(t)) return '待核对'
   if (u.IsFailed) return '失败'
   if (u.IsStop) return '已停止'
   if (u.stage === 'hashing') return '计算哈希'
@@ -297,7 +298,7 @@ function upStatus(t) {
   if (u.IsDowning) return '上传中'
   return '排队中'
 }
-const upStatusBadge = (t) => ({ 已完成: 'success', 失败: 'error', 已停止: 'warn' }[upStatus(t)] || 'primary')
+const upStatusBadge = (t) => ({ 已完成: 'success', 失败: 'error', 已停止: 'warn', 待核对: 'warn' }[upStatus(t)] || 'primary')
 const upName = (t) => (t.Info && t.Info.name) || ((t.Info && t.Info.localFilePath) || '').split(/[\\/]/).pop() || t.UploadID
 const upSize = (t) => (t.Info && (t.Info.sizeStr || formatBytes(t.Info.size))) || ''
 const upSpeed = (t) => (t.Upload && (t.Upload.DownSpeedStr || formatSpeed(t.Upload.DownSpeed || 0))) || ''
@@ -519,12 +520,29 @@ async function cancelUploadTask(t) {
 async function resumeUploadTask(t) {
   try {
     await ResumeUpload(t.UploadID)
-    emit('toast', '已恢复上传', 'success')
+    emit('toast', uploadNeedsReview(t) ? '已复核上传结果' : '已恢复上传', 'success')
     await refresh()
   } catch (e) {
     await refresh()
     emit('toast', String(e), 'error')
   }
+}
+
+function uploadNeedsReview(task) {
+  return ['pending', 'unknown'].includes(task.Upload?.attempt?.state) || task.Upload?.issue?.code === 'UPLOAD_RESULT_UNKNOWN'
+}
+
+function reviewAndResumeUpload(task) {
+  askConfirm('网盘可能已经接收文件。请先打开目标目录核对；仅在确认仍需上传时继续。继续可能产生重复文件，或按原冲突策略覆盖同名文件。', async () => {
+    try {
+      await ResumeUploadReviewed(task.UploadID)
+      emit('toast', '已按核对结果恢复上传', 'success')
+      await refresh()
+    } catch (error) {
+      await refresh()
+      emit('toast', String(error), 'error')
+    }
+  }, { title: '核对后重试上传', okText: '确认仍需上传', danger: true })
 }
 
 const copiedLinkMap = ref({})
@@ -1192,7 +1210,11 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="downspeed">{{ upSpeed(t) }}</div>
                 <div class="tactions">
-                  <button v-if="t.Upload && (t.Upload.IsFailed || t.Upload.IsStop)" class="btn-circle" title="重试上传" @click="resumeUploadTask(t)"><UiIcon name="refresh" :size="14" /></button>
+                  <template v-if="t.Upload && !t.Upload.IsDowning && (t.Upload.IsFailed || t.Upload.IsStop)">
+                    <button v-if="uploadNeedsReview(t)" class="btn sm" title="打开上传目标目录" @click="emit('navigate', { userId: t.user_id, driveId: t.Info?.drive_id, dirId: t.Upload?.attempt?.parentId || t.Info?.parent_file_id, name: '上传目标' })">目标目录</button>
+                    <button class="btn-circle" :title="uploadNeedsReview(t) ? '复核上传结果，不重新提交' : '重试上传'" @click="resumeUploadTask(t)"><UiIcon name="refresh" :size="14" /></button>
+                    <button v-if="uploadNeedsReview(t)" class="btn sm" @click="reviewAndResumeUpload(t)">核对后重试</button>
+                  </template>
                   <button class="btn-circle" title="取消上传" style="color:var(--color-error)" @click="cancelUploadTask(t)"><UiIcon name="x-circle" :size="14" /></button>
                 </div>
               </div>

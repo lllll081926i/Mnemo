@@ -1550,6 +1550,30 @@ export namespace model {
 	    }
 	}
 
+	export class UploadAttempt {
+	    state: string;
+	    startedAt: number;
+	    size: number;
+	    modTime: number;
+	    parentId: string;
+	    name: string;
+	    fileId?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new UploadAttempt(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.startedAt = source["startedAt"];
+	        this.size = source["size"];
+	        this.modTime = source["modTime"];
+	        this.parentId = source["parentId"];
+	        this.name = source["name"];
+	        this.fileId = source["fileId"];
+	    }
+	}
 	export class UploadInfo {
 	    localFilePath: string;
 	    parent_file_id: string;
@@ -1565,6 +1589,7 @@ export namespace model {
 	    crc64: string;
 	    conflictPolicy?: string;
 	    cleanupLocalFile?: boolean;
+	    parentResolved?: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new UploadInfo(source);
@@ -1586,9 +1611,11 @@ export namespace model {
 	        this.crc64 = source["crc64"];
 	        this.conflictPolicy = source["conflictPolicy"];
 	        this.cleanupLocalFile = source["cleanupLocalFile"];
+	        this.parentResolved = source["parentResolved"];
 	    }
 	}
 	export class UploadState {
+	    attempt: UploadAttempt;
 	    issue?: OperationIssue;
 	    stage?: string;
 	    stageProgress?: number;
@@ -1615,6 +1642,7 @@ export namespace model {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.attempt = this.convertValues(source["attempt"], UploadAttempt);
 	        this.issue = this.convertValues(source["issue"], OperationIssue);
 	        this.stage = source["stage"];
 	        this.stageProgress = source["stageProgress"];

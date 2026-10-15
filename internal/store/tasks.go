@@ -467,6 +467,10 @@ func (s *Store) clearUploadTasks(includeRetryable bool) error {
 	}
 	out := list[:0]
 	for i := range list {
+		if list[i].Upload.Attempt.State == "pending" || list[i].Upload.Attempt.State == "unknown" {
+			out = append(out, list[i])
+			continue
+		}
 		if list[i].Upload.IsCompleted || (includeRetryable && (list[i].Upload.IsFailed || list[i].Upload.IsStop)) {
 			continue
 		}

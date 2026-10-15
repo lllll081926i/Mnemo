@@ -220,6 +220,8 @@ export function ResumeMigrate(arg1:string):Promise<model.MigrateJob>;
 
 export function ResumeUpload(arg1:string):Promise<void>;
 
+export function ResumeUploadReviewed(arg1:string):Promise<void>;
+
 export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RunSync(arg1:string):Promise<void>;

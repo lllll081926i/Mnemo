@@ -21,10 +21,12 @@ type UploadInfo struct {
 	// CleanupLocalFile marks an application-owned temporary source that may be
 	// removed only after the remote upload has completed successfully.
 	CleanupLocalFile bool `json:"cleanupLocalFile,omitempty"`
+	ParentResolved   bool `json:"parentResolved,omitempty"`
 }
 
 // UploadState is the mutable progress/status of an upload job.
 type UploadState struct {
+	Attempt       UploadAttempt   `json:"attempt,omitzero"`
 	Issue         *OperationIssue `json:"issue,omitempty"`
 	Stage         string          `json:"stage,omitempty"` // hashing | checking | uploading
 	StageProgress int             `json:"stageProgress,omitempty"`
@@ -46,6 +48,16 @@ type UploadState struct {
 	IsBreakExist  bool            `json:"IsBreakExist"`
 }
 
+type UploadAttempt struct {
+	State     string `json:"state"`
+	StartedAt int64  `json:"startedAt"`
+	Size      int64  `json:"size"`
+	ModTime   int64  `json:"modTime"`
+	ParentID  string `json:"parentId"`
+	Name      string `json:"name"`
+	FileID    string `json:"fileId,omitempty"`
+}
+
 // UploadingUI is the full upload job view model (mirrors legacy IUploadingUI).
 type UploadingUI struct {
 	UploadID string      `json:"UploadID"`
@@ -56,6 +68,20 @@ type UploadingUI struct {
 	progressReporter func(done int64, percent int)   `json:"-"`
 	stageReporter    func(stage string, percent int) `json:"-"`
 	stopRequested    func() bool                     `json:"-"`
+	beginAttempt     func() error                    `json:"-"`
+}
+
+func (u *UploadingUI) ConfigureUploadAttempt(begin func() error) {
+	if u != nil {
+		u.beginAttempt = begin
+	}
+}
+
+func (u *UploadingUI) BeginUploadAttempt() error {
+	if u != nil && u.beginAttempt != nil {
+		return u.beginAttempt()
+	}
+	return nil
 }
 
 // ConfigureUploadRuntime installs queue-owned callbacks on a worker-local

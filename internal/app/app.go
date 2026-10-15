@@ -1675,6 +1675,14 @@ func (a *App) ResumeUpload(id string) error {
 	return uploads.Resume(id)
 }
 
+func (a *App) ResumeUploadReviewed(id string) error {
+	uploads := a.uploadQueue()
+	if uploads == nil {
+		return errors.New("上传服务未启动")
+	}
+	return uploads.ResumeReviewed(id)
+}
+
 // ---- preview ----
 
 // PreviewURL builds a proxied URL for a media file.

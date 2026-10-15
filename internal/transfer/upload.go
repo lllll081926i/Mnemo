@@ -34,6 +34,8 @@ type UploadQueue struct {
 	generations     map[string]uint64
 	handlerResolver func(userID, driveID string) (func(context.Context, *model.UploadingUI) error, error)
 	persistMu       sync.Mutex
+	recoveryMu      sync.Mutex
+	verifyFile      func(context.Context, string, string, string) (*model.File, error)
 	workers         sync.WaitGroup
 	closeOnce       sync.Once
 	speedSamples    map[string]uploadSpeedSample
@@ -80,6 +82,7 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 		generations:     map[string]uint64{},
 		speedSamples:    map[string]uploadSpeedSample{},
 		handlerResolver: drive.QueueUploadHandler,
+		verifyFile:      drive.GetFileFreshContext,
 	}
 	if !keepTasks {
 		if err := st.ClearFinishedUploadTasks(); err != nil {
@@ -90,6 +93,12 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 	if list, err := st.ListUploadTasks(); err == nil {
 		for i := range list {
 			j := list[i]
+			if j.Upload.Attempt.State == "pending" {
+				j.Upload.Attempt.State = "unknown"
+			}
+			if j.Upload.Attempt.State == "confirmed" {
+				completeReconciledUpload(&j)
+			}
 			if !j.Upload.IsCompleted && !j.Upload.IsFailed {
 				j.Upload.IsDowning = false
 				j.Upload.IsStop = true
@@ -98,6 +107,9 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 			}
 			j.Upload.DownSpeed = 0
 			j.Upload.DownSpeedStr = ""
+			if j.Upload.Attempt.State == "unknown" {
+				j.Upload.Issue = uploadReviewIssue()
+			}
 			q.jobs[j.UploadID] = &j
 		}
 	}
@@ -636,7 +648,10 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 			parentID = root
 		}
 	}
-	parentID, parentErr := q.ensureRemoteParent(ctx, userID, driveID, parentID, relative)
+	var parentErr error
+	if !worker.Info.ParentResolved {
+		parentID, parentErr = q.ensureRemoteParent(ctx, userID, driveID, parentID, relative)
+	}
 	if parentErr != nil {
 		q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
 			j.Upload.IsDowning = false
@@ -654,10 +669,12 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		return
 	}
 	worker.Info.ParentFileID = parentID
+	worker.Info.ParentResolved = true
 	q.mutateRunJob(id, generation, func(j *model.UploadingUI) {
 		j.Info.Path = worker.Info.Path
 		j.Info.Name = worker.Info.Name
 		j.Info.ParentFileID = worker.Info.ParentFileID
+		j.Info.ParentResolved = true
 		j.Upload.Stage = "uploading"
 		j.Upload.StageProgress = 0
 	})
@@ -680,7 +697,13 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		func() bool { return ctx.Err() != nil },
 	)
 	worker.ConfigureUploadStage(func(stage string, percent int) { q.reportRunStage(id, generation, stage, percent) })
+	worker.ConfigureUploadAttempt(func() error { return q.beginUploadAttempt(ctx, id, generation, &worker) })
 	handlerErr := handler(ctx, &worker)
+	if worker.Upload.Attempt.State == "pending" {
+		if receiptErr := q.finishUploadAttempt(id, generation, &worker, handlerErr); receiptErr != nil {
+			handlerErr = receiptErr
+		}
+	}
 	q.mu.Lock()
 	current := q.jobs[id]
 	wasStopped := ctx.Err() != nil || (current != nil && current.Upload.IsStop)
@@ -702,6 +725,9 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 				j.Upload.FailedMessage = handlerErr.Error()
 				j.Upload.Issue = drive.DescribeOperationError(handlerErr)
 				j.Upload.DownState = "failed"
+			}
+			if j.Upload.Attempt.State == "unknown" || j.Upload.Attempt.State == "pending" {
+				j.Upload.Issue = uploadReviewIssue()
 			}
 		})
 		logging.Warn("upload worker failed", "job_id", id, "error", handlerErr, "duration", logging.Duration(started))
@@ -769,6 +795,16 @@ func (q *UploadQueue) Cancel(id string) {
 
 // Resume restarts a paused, failed or stopped job.
 func (q *UploadQueue) Resume(id string) error {
+	return q.resumeUpload(id, false)
+}
+
+func (q *UploadQueue) ResumeReviewed(id string) error {
+	return q.resumeUpload(id, true)
+}
+
+func (q *UploadQueue) resumeUpload(id string, reviewed bool) error {
+	q.recoveryMu.Lock()
+	defer q.recoveryMu.Unlock()
 	q.mu.Lock()
 	if q.ctx.Err() != nil {
 		q.mu.Unlock()
@@ -790,6 +826,18 @@ func (q *UploadQueue) Resume(id string) error {
 	if j.Upload.IsCompleted {
 		q.mu.Unlock()
 		return errors.New("任务已完成")
+	}
+	if j.Upload.Attempt.State != "" {
+		snapshot := *j
+		q.mu.Unlock()
+		if !reviewed {
+			return q.reconcileUpload(snapshot)
+		}
+		if err := q.resetReviewedUpload(snapshot); err != nil {
+			return err
+		}
+		q.mu.Lock()
+		j = q.jobs[id]
 	}
 	// reset state and re-enqueue
 	j.Upload.IsStop = false

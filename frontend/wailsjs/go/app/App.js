@@ -430,6 +430,10 @@ export function ResumeUpload(arg1) {
   return window['go']['app']['App']['ResumeUpload'](arg1);
 }
 
+export function ResumeUploadReviewed(arg1) {
+  return window['go']['app']['App']['ResumeUploadReviewed'](arg1);
+}
+
 export function RevealInFolder(arg1) {
   return window['go']['app']['App']['RevealInFolder'](arg1);
 }

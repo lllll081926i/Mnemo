@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({
   ListDownloads: vi.fn().mockResolvedValue([]),
   ListUploads: vi.fn().mockResolvedValue([]),
+  ResumeUpload: vi.fn().mockResolvedValue(undefined),
+  ResumeUploadReviewed: vi.fn().mockResolvedValue(undefined),
   ListMigrateJobs: vi.fn().mockResolvedValue([]),
   ListOfflineTasks: vi.fn().mockResolvedValue([]),
   refreshOfflineTasks: vi.fn().mockResolvedValue([]),
@@ -33,10 +35,35 @@ afterEach(() => {
   api.capsOf.mockReset().mockReturnValue({})
   api.ListOfflineTasks.mockReset().mockResolvedValue([])
   api.refreshOfflineTasks.mockReset().mockResolvedValue([])
+  api.ListUploads.mockReset().mockResolvedValue([])
   vi.clearAllMocks()
 })
 
 describe('结构化任务原因', () => {
+
+  it('未知上传回执先复核，只有再次确认才允许重试，并保留目标作用域', async () => {
+    const task = { UploadID: 'unknown-upload', user_id: 'original-account', Info: { name: '文件.txt', drive_id: 'original-drive', parent_file_id: 'original-parent' }, Upload: { IsFailed: true, attempt: { state: 'unknown', parentId: 'resolved-parent' }, issue: { code: 'UPLOAD_RESULT_UNKNOWN', action: 'check_target' } } }
+    api.ListUploads.mockResolvedValue([task])
+    wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('正在上传')).trigger('click')
+    await wrapper.get('[title="复核上传结果，不重新提交"]').trigger('click')
+    expect(api.ResumeUpload).toHaveBeenCalledWith(task.UploadID)
+    expect(api.ResumeUploadReviewed).not.toHaveBeenCalled()
+    await wrapper.get('[title="打开上传目标目录"]').trigger('click')
+    expect(wrapper.emitted('navigate')[0][0]).toEqual({ userId: 'original-account', driveId: 'original-drive', dirId: 'resolved-parent', name: '上传目标' })
+    await wrapper.findAll('button').find(button => button.text() === '核对后重试').trigger('click')
+    expect(api.ResumeUploadReviewed).not.toHaveBeenCalled()
+    const dialog = document.querySelector('[role="dialog"]')
+    expect(dialog.textContent).toContain('可能产生重复文件')
+    ;[...dialog.querySelectorAll('button')].find(button => button.textContent === '取消').click()
+    await flushPromises()
+    expect(api.ResumeUploadReviewed).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text() === '核对后重试').trigger('click')
+    ;[...document.querySelector('[role="dialog"]').querySelectorAll('button')].find(button => button.textContent === '确认仍需上传').click()
+    await flushPromises()
+    expect(api.ResumeUploadReviewed).toHaveBeenCalledExactlyOnceWith(task.UploadID)
+  })
   it('结构化访问拒绝不会被原始 401 字符串误报为账号失效', async () => {
     api.ListDownloads.mockResolvedValueOnce([])
     api.ListUploads.mockResolvedValueOnce([])
