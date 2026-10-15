@@ -408,7 +408,12 @@ function applyTheme(theme) {
 }
 
 function onKey(e) {
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.code === 'KeyP')) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'KeyF') {
+    e.preventDefault()
+    showSearch.value = true
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (['p', 'k'].includes(e.key?.toLowerCase()) || ['KeyP', 'KeyK'].includes(e.code))) {
     e.preventDefault()
     showQuickOpen.value = !showQuickOpen.value
     return
@@ -545,7 +550,7 @@ onBeforeUnmount(() => {
         ><UiIcon :name="t.icon" :size="18" /></button>
       </div>
       <div class="spacer"></div>
-      <button class="icon-btn" title="全盘搜索" aria-label="全盘搜索" @click="showSearch = true"><UiIcon name="globe" :size="17" /></button>
+      <button class="icon-btn" title="全盘搜索" aria-label="全盘搜索" aria-keyshortcuts="Control+Shift+F Meta+Shift+F" @click="showSearch = true"><UiIcon name="globe" :size="17" /></button>
       <button v-if="tab === 'pan'" class="icon-btn" :class="{ active: dualPane }" :title="dualPane ? '切换单栏' : '切换双栏'" :aria-label="dualPane ? '切换单栏' : '切换双栏'" :aria-pressed="dualPane" @click="dualPane = !dualPane"><UiIcon :name="dualPane ? 'columns' : 'single-pane'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />

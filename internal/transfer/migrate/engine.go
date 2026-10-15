@@ -15,6 +15,7 @@ import (
 
 	"mnemo-go/internal/drive"
 	"mnemo-go/internal/drive/driveutil"
+	"mnemo-go/internal/localfs"
 	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
@@ -331,6 +332,34 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		job.Items = map[string]model.MigrateItem{}
 	}
 	previous := job.Items[fileID]
+	if previous.CommitState == "confirmed" && !jobHasID(job.CopiedFileIDs, fileID) {
+		if previous.TargetID == "" {
+			return errors.New("目标已受理但缺少可查询的文件 ID，未重复传输；请先核对目标目录")
+		}
+		source, err := drive.GetFileFreshContext(ctx, job.SrcUser, job.SrcDrive, fileID)
+		if err != nil {
+			return err
+		}
+		if source == nil || !previous.SourceRecorded || source.Size != previous.Size || source.Time != previous.SourceTime || sourceHash(source) != previous.SourceHash {
+			return errors.New("目标已提交，但来源已变化或缺少原始记录；未重复传输，已保留来源")
+		}
+		target, err := drive.GetFileFreshContext(ctx, job.DstUser, job.DstDrive, previous.TargetID)
+		if err != nil {
+			return err
+		}
+		if err := compareMoveTarget(source, target); err != nil {
+			return fmt.Errorf("目标已提交但复核失败，未重复传输: %w", err)
+		}
+		if err := e.completeResource(ctx, job, source); err != nil {
+			return err
+		}
+		previous.Status = "completed"
+		job.Items[fileID] = previous
+		return e.saveJob(job)
+	}
+	if previous.CommitState == "pending" || previous.CommitState == "unknown" {
+		return fmt.Errorf("目标提交结果未知，已阻止重复传输；请核对目标文件后处理：%s", previous.Name)
+	}
 	item := model.MigrateItem{ID: fileID, Name: fileID, ParentID: targetParent, Status: "running", Verification: "unverified"}
 	if job.Move && jobHasID(job.CopiedFileIDs, fileID) {
 		item = previous
@@ -342,6 +371,7 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 		job.StageName = ""
 		job.StageProgress = 0
 		item.TargetID = job.Items[fileID].TargetID
+		item.CommitState = job.Items[fileID].CommitState
 		if verification := job.Items[fileID].Verification; verification == "remote-size" || verification == "remote-hash" {
 			item.Verification = verification
 		}
@@ -411,8 +441,8 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 			completeBytes(job, progressStart, srcFile.Size)
 			return e.completeResource(ctx, job, srcFile)
 		}
-		// rapid upload failed — fall through to stream/spool.
 		job.ProcessedBytes = progressStart
+		return err
 	}
 	job.Stage = "uploading"
 	job.StageName = srcFile.Name
@@ -422,14 +452,8 @@ func (e *Engine) migrateOneTo(ctx context.Context, job *Job, fileID, targetParen
 	// 2) Attempt streaming migration; fall back to spool on failure.
 	if migrated, err := e.tryStreamMigrate(ctx, job, srcFile, targetParent); migrated {
 		if err != nil {
-			// streaming failed — fall back to spool.
 			job.ProcessedBytes = progressStart
-			if err := e.spoolMigrate(ctx, job, srcFile, targetParent); err != nil {
-				job.ProcessedBytes = progressStart
-				return err
-			}
-			completeBytes(job, progressStart, srcFile.Size)
-			return e.completeResource(ctx, job, srcFile)
+			return err
 		}
 		// streaming succeeded; handle move cleanup.
 		item.Verification = "transferred-size"
@@ -507,6 +531,9 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 	job.Stage = "checking"
 	job.StageProgress = 0
 	e.emit(job)
+	if err := e.setCommitState(job, srcFile.FileID, "pending"); err != nil {
+		return true, err
+	}
 
 	// attempt秒传 on the target.
 	result, err := drive.RapidUploadByHashContext(ctx, job.DstUser, job.DstDrive, drive.RapidUploadRequest{
@@ -518,7 +545,7 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 		Duplicate: 0, // rename
 	})
 	if err != nil {
-		return true, fmt.Errorf("rapid: %w", err)
+		return true, errors.Join(fmt.Errorf("秒传回执未确认，已停止自动降级: %w", err), e.setCommitState(job, srcFile.FileID, "unknown"))
 	}
 	if result != nil && result.Reuse {
 		if job.Items != nil {
@@ -526,9 +553,15 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 			item.TargetID = result.FileID
 			job.Items[srcFile.FileID] = item
 		}
-		return true, nil
+		return true, e.setCommitState(job, srcFile.FileID, "confirmed")
 	}
-	return true, fmt.Errorf("rapid: target did not accept hash %s", method)
+	if result == nil {
+		return true, errors.Join(errors.New("秒传未返回受理回执，已停止自动降级"), e.setCommitState(job, srcFile.FileID, "unknown"))
+	}
+	if err := e.setCommitState(job, srcFile.FileID, "not_committed"); err != nil {
+		return true, err
+	}
+	return false, nil
 }
 
 // rapidUploadAllowed keeps providers with incompatible transfer semantics out
@@ -566,8 +599,10 @@ func commonHashMethod(provide, rapid []string) string {
 func (e *Engine) tryStreamMigrate(ctx context.Context, job *Job, srcFile *model.File, targetParent string) (bool, error) {
 	streamUploader, err := drive.StreamUploadHandlerContext(ctx, job.DstUser, job.DstDrive)
 	if err != nil {
-		// target provider does not implement StreamUploader.
-		return false, nil
+		if errors.Is(err, drive.ErrNotImplemented) {
+			return false, nil
+		}
+		return true, err
 	}
 
 	// resolve the source download URL.
@@ -581,13 +616,19 @@ func (e *Engine) tryStreamMigrate(ctx context.Context, job *Job, srcFile *model.
 	if err != nil {
 		return true, err
 	}
+	if err := e.setCommitState(job, srcFile.FileID, "pending"); err != nil {
+		return true, err
+	}
 	err = streamMigration(ctx, dl, job, func(reader io.Reader) error {
 		return streamUploader(ctx, targetParent, srcFile.Name, srcFile.Size, reader)
 	}, opts)
 	if err == nil && srcFile.Size >= 0 && job.ProcessedBytes-start != srcFile.Size {
 		err = fmt.Errorf("stream: size mismatch: expected %d, received %d", srcFile.Size, job.ProcessedBytes-start)
 	}
-	return true, err
+	if err != nil {
+		return true, errors.Join(fmt.Errorf("流式提交结果未确认，未再次上传或本机中转: %w", err), e.setCommitState(job, srcFile.FileID, "unknown"))
+	}
+	return true, e.setCommitState(job, srcFile.FileID, "confirmed")
 }
 
 func streamMigration(ctx context.Context, dl *model.DownloadURL, job *Job, upload func(io.Reader) error, options ...dlengine.Options) error {
@@ -630,6 +671,9 @@ func streamMigration(ctx context.Context, dl *model.DownloadURL, job *Job, uploa
 // spoolMigrate downloads the source to a temp file then uploads it to the
 // target. This is the legacy/fallback path.
 func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File, targetParent string) error {
+	if err := requireSpoolSpace(os.TempDir(), srcFile.Size); err != nil {
+		return err
+	}
 	job.Stage = "downloading"
 	job.StageProgress = 0
 	e.emit(job)
@@ -657,7 +701,9 @@ func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File
 	} else if srcFile.Size >= 0 && stat.Size() != srcFile.Size {
 		return fmt.Errorf("migrate: size mismatch: expected %d, received %d", srcFile.Size, stat.Size())
 	}
-	_ = tmp.Sync()
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("本机中转文件落盘失败，未上传目标: %w", err)
+	}
 	// upload to target
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return err
@@ -691,15 +737,44 @@ func (e *Engine) spoolMigrate(ctx context.Context, job *Job, srcFile *model.File
 	if err != nil {
 		return err
 	}
-	if err := handler(ctx, ui); err != nil {
+	if err := e.setCommitState(job, srcFile.FileID, "pending"); err != nil {
 		return err
+	}
+	if err := handler(ctx, ui); err != nil {
+		return errors.Join(fmt.Errorf("目标上传回执未确认，已保留来源: %w", err), e.setCommitState(job, srcFile.FileID, "unknown"))
 	}
 	if job.Items != nil {
 		item := job.Items[srcFile.FileID]
 		item.TargetID = ui.Upload.FileID
 		job.Items[srcFile.FileID] = item
 	}
+	return e.setCommitState(job, srcFile.FileID, "confirmed")
+}
+
+func requireSpoolSpace(directory string, required int64) error {
+	available, err := localfs.AvailableBytes(directory)
+	if err != nil {
+		return fmt.Errorf("无法检查本机中转空间，未开始下载: %w", err)
+	}
+	if required < 0 {
+		return errors.New("来源文件大小未知，无法安全预留本机中转空间")
+	}
+	const reserve = 64 * 1024 * 1024
+	if available < reserve || uint64(required) > available-reserve {
+		return errors.New("本机临时盘空间不足，未开始中转；请释放空间或更改系统临时目录")
+	}
 	return nil
+}
+
+func (e *Engine) setCommitState(job *Job, fileID, state string) error {
+	if job.Items == nil {
+		job.Items = map[string]model.MigrateItem{}
+	}
+	item := job.Items[fileID]
+	item.ID = fileID
+	item.CommitState = state
+	job.Items[fileID] = item
+	return e.saveJob(job)
 }
 
 // finalizeMove deletes the source file in move mode. If deletion fails it

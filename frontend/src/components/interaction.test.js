@@ -856,6 +856,21 @@ describe('密码和短信登录切换', () => {
 })
 
 describe('主窗口顶栏', () => {
+  it('Ctrl+K 打开命令，Ctrl+Shift+F 打开跨盘搜索', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    api.listAccounts.mockResolvedValue([])
+    api.listProviders.mockResolvedValue([])
+    api.GetSettings.mockResolvedValue({ theme: 'light', autoUpdate: false })
+    const wrapper = mountAttached(App, { global: { stubs: { PanView: true, AccountAvatar: true, GlobalSearch: { template: '<div data-test="global-search" />' } } } })
+    await flushPromises()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }))
+    await nextTick()
+    expect(wrapper.findComponent(QuickOpen).props('show')).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', code: 'KeyF', ctrlKey: true, shiftKey: true, bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('[data-test="global-search"]').exists()).toBe(true)
+    vi.unstubAllGlobals()
+  })
   it('移除重复入口但保留搜索、设置与快捷命令', async () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     api.listAccounts.mockResolvedValue([])
@@ -873,6 +888,35 @@ describe('主窗口顶栏', () => {
       await nextTick()
       expect(wrapper.findComponent(QuickOpen).props('show')).toBe(true)
     } finally { vi.unstubAllGlobals() }
+  })
+})
+
+describe('声明式授权来源', () => {
+  it('确认第三方接收方后才能提交，切换自有应用清除中转同意和隐藏凭据', async () => {
+    const provider = { ID: 'aliopen', Meta: { label: '阿里云盘' }, Login: {
+      fields: [{ key: 'refresh_token', type: 'text', label: 'Refresh Token', required: true }, { key: 'client_id', type: 'text', label: 'Client ID' }, { key: 'client_secret', type: 'password', label: 'Client Secret' }],
+      methods: [{ id: 'relay', label: '导入已有令牌', fieldKeys: ['refresh_token'], recipient: 'https://api.alistgo.com/alist/ali_open/token', notice: '第三方中转', consent: '同意交换和刷新令牌' }, { id: 'own', label: '自有 OAuth 应用', fieldKeys: ['refresh_token', 'client_id', 'client_secret'], requiredKeys: ['client_id'], recipient: 'https://openapi.alipan.com/oauth/access_token', notice: '自有应用' }],
+    } }
+    const wrapper = mountAttached(LoginModal, { props: { initialProvider: 'aliopen', providers: [provider] } })
+    wrapper.vm.form.refresh_token = 'secret'
+    expect(wrapper.vm.validate()).toContain('令牌接收方')
+    expect(wrapper.find('#login-field-client_id').exists()).toBe(false)
+    const consent = document.querySelector('[aria-label="令牌使用说明"] input[type="checkbox"]')
+    expect(consent).not.toBeNull()
+    consent.checked = true
+    consent.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    expect(wrapper.vm.validate()).toBe('')
+    document.querySelectorAll('[aria-label="授权来源"] button')[1].click()
+    await nextTick()
+    expect(wrapper.vm.form.relay_consent).toBeUndefined()
+    expect(wrapper.vm.validate()).toContain('Client ID')
+    wrapper.vm.form.client_id = 'own'
+    wrapper.vm.form.client_secret = 'private'
+    document.querySelectorAll('[aria-label="授权来源"] button')[0].click()
+    await nextTick()
+    expect(wrapper.vm.form.client_secret).toBeUndefined()
+    expect(wrapper.vm.form.refresh_token).toBe('secret')
   })
 })
 

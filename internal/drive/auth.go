@@ -22,7 +22,18 @@ type AuthFunc func(ctx context.Context, req AuthRequest) (*model.TokenInfo, erro
 // LoginConfig declares the UI form fields needed to log into a provider.
 type LoginConfig struct {
 	// Fields is an ordered list of form inputs.
-	Fields []LoginField `json:"fields"`
+	Fields  []LoginField      `json:"fields"`
+	Methods []LoginMethodSpec `json:"methods,omitempty"`
+}
+
+type LoginMethodSpec struct {
+	ID           string   `json:"id"`
+	Label        string   `json:"label"`
+	FieldKeys    []string `json:"fieldKeys"`
+	RequiredKeys []string `json:"requiredKeys,omitempty"`
+	Recipient    string   `json:"recipient"`
+	Notice       string   `json:"notice"`
+	Consent      string   `json:"consent,omitempty"`
 }
 
 // LoginField is one login form input.

@@ -31,6 +31,9 @@ export namespace app {
 	    bytes: number;
 	    conflicts: string[];
 	    warnings: string[];
+	    transferMode: string;
+	    tempBytes: number;
+	    tempAvailable: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new MigrationPreview(source);
@@ -42,6 +45,9 @@ export namespace app {
 	        this.bytes = source["bytes"];
 	        this.conflicts = source["conflicts"];
 	        this.warnings = source["warnings"];
+	        this.transferMode = source["transferMode"];
+	        this.tempBytes = source["tempBytes"];
+	        this.tempAvailable = source["tempAvailable"];
 	    }
 	}
 	export class MigrationVerification {
@@ -341,6 +347,30 @@ export namespace drive {
 	        this.isDir = source["isDir"];
 	    }
 	}
+	export class LoginMethodSpec {
+	    id: string;
+	    label: string;
+	    fieldKeys: string[];
+	    requiredKeys?: string[];
+	    recipient: string;
+	    notice: string;
+	    consent?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new LoginMethodSpec(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.fieldKeys = source["fieldKeys"];
+	        this.requiredKeys = source["requiredKeys"];
+	        this.recipient = source["recipient"];
+	        this.notice = source["notice"];
+	        this.consent = source["consent"];
+	    }
+	}
 	export class LoginOption {
 	    value: string;
 	    label: string;
@@ -399,6 +429,7 @@ export namespace drive {
 	}
 	export class LoginConfig {
 	    fields: LoginField[];
+	    methods?: LoginMethodSpec[];
 	
 	    static createFrom(source: any = {}) {
 	        return new LoginConfig(source);
@@ -407,6 +438,7 @@ export namespace drive {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.fields = this.convertValues(source["fields"], LoginField);
+	        this.methods = this.convertValues(source["methods"], LoginMethodSpec);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -429,6 +461,7 @@ export namespace drive {
 	}
 	
 	
+
 	export class Meta {
 	    key: string;
 	    label: string;
@@ -892,6 +925,8 @@ export namespace model {
 		    return a;
 		}
 	}
+
+
 	export class DeletionRecord {
 	    userId: string;
 	    driveId: string;
@@ -1157,6 +1192,7 @@ export namespace model {
 	    }
 	}
 	export class MigrateItem {
+	    commitState?: string;
 	    sourceRecorded?: boolean;
 	    sourceTime?: number;
 	    sourceHash?: string;
@@ -1176,6 +1212,7 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.commitState = source["commitState"];
 	        this.sourceRecorded = source["sourceRecorded"];
 	        this.sourceTime = source["sourceTime"];
 	        this.sourceHash = source["sourceHash"];

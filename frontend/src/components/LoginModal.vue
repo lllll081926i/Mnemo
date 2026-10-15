@@ -15,6 +15,8 @@ const emit = defineEmits(['close', 'toast'])
 
 const providerId = ref(props.initialProvider || localStorage.getItem('login_provider') || 'pikpak')
 function defaultLoginForm(id) {
+  const methods = props.providers.find(provider => provider.ID === id)?.Login?.methods || []
+  if (methods.length) return { login_method: methods[0].id }
   if (id === 'thunder') {
     let deviceID = localStorage.getItem('mnemo.thunder.deviceId') || ''
     if (!/^[a-f0-9]{32}$/.test(deviceID)) {
@@ -151,6 +153,15 @@ const webdavAuthOptions = [
   { value: 'bearer', label: 'Bearer Token' },
 ]
 const fields = computed(() => (provider.value && provider.value.Login && provider.value.Login.fields) || [])
+const declaredMethods = computed(() => provider.value?.Login?.methods || [])
+const declaredMethod = computed(() => declaredMethods.value.find(method => method.id === form.value.login_method) || declaredMethods.value[0] || null)
+function selectDeclaredMethod(method) {
+  if (busy.value) return
+  const keep = new Set(method.fieldKeys)
+  form.value = Object.fromEntries(Object.entries(form.value).filter(([key]) => keep.has(key)))
+  form.value.login_method = method.id
+  errorText.value = ''
+}
 const loginModeField = computed(() => fields.value.find(field => field.key === 'login_mode'))
 const hasPasswordSmsSwitch = computed(() => {
   const options = loginModeField.value?.options || []
@@ -176,7 +187,7 @@ const HIDDEN_LOGIN_FIELDS = {
 
 const visibleFields = computed(() => {
   const hidden = HIDDEN_LOGIN_FIELDS[providerId.value] || []
-  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field) && !hidden.includes(field.key) && !(hasPasswordSmsSwitch.value && field.key === 'login_mode'))
+  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field) && !hidden.includes(field.key) && !(hasPasswordSmsSwitch.value && field.key === 'login_mode') && (!declaredMethod.value || declaredMethod.value.fieldKeys.includes(field.key)))
   // 有其它登录方式（账密/OAuth）时隐藏 Cookie 字段
   const hasAltLogin = hasAccountLogin.value || fields.value.some(isOAuthField)
   return hasAltLogin ? nonOAuthFields.filter((field) => !isCookieField(field)) : nonOAuthFields
@@ -658,6 +669,12 @@ function validate() {
   }
   if (isOAuth.value) return '' // OAuth 无表单校验
   const value = (key) => String(form.value[key] || '').trim()
+  if (declaredMethod.value) {
+    for (const key of declaredMethod.value.requiredKeys || []) {
+      if (!value(key)) return `请填写${fields.value.find(field => field.key === key)?.label || key}`
+    }
+    if (declaredMethod.value.consent && form.value.relay_consent !== 'true') return '请先确认令牌接收方与第三方中转说明'
+  }
   if (providerId.value === 'lanzou' && (!value('username') || !value('password'))) {
     return '请填写蓝奏云账号和密码'
   }
@@ -886,16 +903,23 @@ async function submit() {
 
                 <!-- 常规表单 -->
                 <template v-else-if="!isOAuth">
+                  <div v-if="declaredMethods.length" class="login-method-switch" role="group" aria-label="授权来源">
+                    <button v-for="method in declaredMethods" :key="method.id" type="button" :class="{ active: declaredMethod?.id === method.id }" :aria-pressed="declaredMethod?.id === method.id" :disabled="busy" @click="selectDeclaredMethod(method)">{{ method.label }}</button>
+                  </div>
+                  <section v-if="declaredMethod" class="login-state-card" aria-label="令牌使用说明">
+                    <p>{{ declaredMethod.notice }}</p><p class="hint" style="overflow-wrap:anywhere">令牌接收方：{{ declaredMethod.recipient }}</p>
+                    <label v-if="declaredMethod.consent" class="hint"><input v-model="form.relay_consent" type="checkbox" true-value="true" false-value="false" :disabled="busy" /> {{ declaredMethod.consent }}</label>
+                  </section>
                   <div v-if="hasPasswordSmsSwitch" class="login-method-switch" role="group" aria-label="登录方式">
                     <button v-for="method in loginMethodOptions" :key="method.value" type="button" :class="{ active: form.login_mode === method.value }" :aria-pressed="form.login_mode === method.value" :disabled="busy || smsBusy || thunderOpening" @click="form.login_mode = method.value">{{ method.label }}</button>
                   </div>
                   <div v-if="visibleFields.length" class="login-section">
                     <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field" :class="{ 'login-sms-field': f.key === 'sms_code' && ['thunder', 'pan139', 'pan189', 'guangya'].includes(providerId) && !(providerId === 'guangya' && hasRefreshToken) }">
-                      <label>{{ f.label }}</label>
-                      <textarea v-if="isLongText(f.key) && f.type !== 'password'" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
-                      <UiSelect v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options || []" block />
-                      <div v-else-if="f.type === 'password'" class="password-input-wrap"><input class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="15" /></button></div>
-                      <input v-else class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
+                      <label :for="'login-field-' + f.key">{{ f.label }}</label>
+                      <textarea v-if="isLongText(f.key) && f.type !== 'password'" :id="'login-field-' + f.key" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
+                      <UiSelect v-else-if="f.type === 'select'" :id="'login-field-' + f.key" v-model="form[f.key]" :aria-label="f.label" :options="f.options || []" block />
+                      <div v-else-if="f.type === 'password'" class="password-input-wrap"><input :id="'login-field-' + f.key" class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="15" /></button></div>
+                      <input v-else :id="'login-field-' + f.key" class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
                       <div v-if="providerId === 'pan189' && f.key === 'validate_code' && pan189Captcha" class="captcha-image-row">
                         <img :src="pan189Captcha" alt="图形验证码" />
                         <span>请输入图片中的字符</span>

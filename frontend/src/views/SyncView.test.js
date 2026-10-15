@@ -29,6 +29,25 @@ afterEach(() => {
 })
 
 describe('同步任务操作状态', () => {
+  it('删除计划必须再次确认，预览变化后不执行旧确认', async () => {
+    api.ListSyncConfigs.mockResolvedValue([])
+    api.ListRunningSyncIDs.mockResolvedValue([])
+    api.RunSyncPlan.mockResolvedValue()
+    wrapper = mount(SyncView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    wrapper.vm.previewJob = { id: 'job', name: '同步', local_dir: 'D:/source', remote_dir: '/target' }
+    wrapper.vm.preview = { token: 'one', changes: [{ path: '旧文件', action: 'delete-local' }] }
+    await wrapper.vm.executePreview()
+    expect(api.RunSyncPlan).not.toHaveBeenCalled()
+    expect(wrapper.vm.confirmDialog.message).toContain('本地 1 项')
+    const confirmOld = wrapper.vm.confirmDialog.onOk
+    wrapper.vm.preview = { token: 'two', changes: [{ path: '其他文件', action: 'delete-local' }] }
+    await confirmOld()
+    expect(api.RunSyncPlan).not.toHaveBeenCalled()
+    await wrapper.vm.executePreview()
+    await wrapper.vm.confirmDialog.onOk()
+    expect(api.RunSyncPlan).toHaveBeenCalledWith('job', 'two', {})
+  })
   it('首次加载失败时显示重试而非空任务提示', async () => {
     api.ListSyncConfigs.mockRejectedValueOnce(new Error('网络异常')).mockResolvedValue([])
     api.ListRunningSyncIDs.mockResolvedValue([])

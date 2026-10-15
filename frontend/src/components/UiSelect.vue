@@ -10,6 +10,7 @@ const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
   options: { type: Array, required: true },
   placeholder: { type: String, default: '请选择' },
+  ariaLabel: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   block: { type: Boolean, default: false }, // 宽度 100%
 })
@@ -126,6 +127,7 @@ onBeforeUnmount(() => {
       :class="{ open, placeholder: !current }"
       :disabled="disabled"
       role="combobox"
+      :aria-label="ariaLabel || placeholder"
       aria-haspopup="listbox"
       :aria-expanded="open"
       :aria-controls="listId"

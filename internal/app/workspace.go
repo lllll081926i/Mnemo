@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,15 +11,19 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"mnemo-go/internal/drive"
+	"mnemo-go/internal/localfs"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/store"
 )
 
 type MigrationPreview struct {
-	Files     int      `json:"files"`
-	Bytes     int64    `json:"bytes"`
-	Conflicts []string `json:"conflicts"`
-	Warnings  []string `json:"warnings"`
+	Files         int      `json:"files"`
+	Bytes         int64    `json:"bytes"`
+	Conflicts     []string `json:"conflicts"`
+	Warnings      []string `json:"warnings"`
+	TransferMode  string   `json:"transferMode"`
+	TempBytes     int64    `json:"tempBytes"`
+	TempAvailable uint64   `json:"tempAvailable"`
 }
 
 // PreviewMigration detects conflicts throughout the destination hierarchy,
@@ -120,6 +125,28 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 				out.Warnings = append(out.Warnings, "按最近容量记录，目标剩余空间可能不足")
 			}
 		}
+	}
+	if _, err := drive.StreamUploadHandlerContext(ctx, dstUser, dstDrive); err == nil {
+		out.TransferMode = "stream"
+		out.Warnings = append(out.Warnings, "优先秒传或直接流式传输；目标回执不明时停止，不自动重复提交")
+	} else if errors.Is(err, drive.ErrNotImplemented) {
+		out.TransferMode = "spool"
+		for _, item := range items {
+			if item.Size > out.TempBytes {
+				out.TempBytes = item.Size
+			}
+		}
+		available, err := localfs.AvailableBytes(os.TempDir())
+		if err != nil {
+			return nil, fmt.Errorf("无法检查本机临时盘空间: %w", err)
+		}
+		out.TempAvailable = available
+		if available < 64*1024*1024 || uint64(out.TempBytes) > available-64*1024*1024 {
+			return nil, fmt.Errorf("本机临时盘空间不足，至少需要容纳最大的单个文件及安全余量")
+		}
+		out.Warnings = append(out.Warnings, "无法直接流式上传时使用系统临时目录逐文件中转；文件在任务结束时清理，容量执行前再次检查")
+	} else {
+		return nil, err
 	}
 	return out, nil
 }

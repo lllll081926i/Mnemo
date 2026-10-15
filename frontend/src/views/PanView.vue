@@ -17,6 +17,7 @@ import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import TreeNode from '../components/TreeNode.vue'
 import DragDropZone from '../components/DragDropZone.vue'
+import SharePrivacyNotice from '../components/SharePrivacyNotice.vue'
 const DeletionHistory = defineAsyncComponent(() => import('../components/DeletionHistory.vue'))
 const showDeletionHistory = ref(false)
 async function openTrashWebsite() {
@@ -1509,7 +1510,7 @@ function onKey(e) {
   else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && mode.value === 'list' && fileClipboard.value) { pasteFiles(e.metaKey && e.altKey); e.preventDefault() }
   else if (e.code === 'F5') { refresh(); e.preventDefault() }
   else if (e.code === 'Backspace' && mode.value === 'list' && pathStack.value.length) { goUp(); e.preventDefault() }
-  else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF' && caps.value.search) { enterSearch(); e.preventDefault() }
+  else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyF' && caps.value.search) { enterSearch(); e.preventDefault() }
   else if (e.ctrlKey && e.shiftKey && e.code === 'KeyN' && caps.value.createFolder) { inputText.value = ''; modal.value = 'mkdir'; e.preventDefault() }
   else if (e.ctrlKey && e.code === 'KeyU' && caps.value.upload && mode.value === 'list') { pickUploadFiles(); e.preventDefault() }
   else if (e.ctrlKey && e.code === 'KeyH') { goHome(); e.preventDefault() }
@@ -2074,6 +2075,7 @@ onBeforeUnmount(() => {
 
     <!-- 创建分享 -->
     <Modal v-if="modal === 'share'" title="创建分享" @close="modal = null">
+      <SharePrivacyNotice :caps="caps" />
       <div class="field">
         <label>分享名称</label>
         <input class="input" v-model="shareForm.name" :disabled="modalBusy" />
@@ -2118,6 +2120,7 @@ onBeforeUnmount(() => {
     <!-- 跨盘迁移 -->
     <Modal v-if="modal === 'migrate'" title="迁移到其他网盘" @close="modal = null">
       <p v-if="migrationPreview" class="hint">{{ migrationPreview.files }} 个文件 · {{ formatBytes(migrationPreview.bytes) }}<template v-if="migrationPreview.conflicts.length"> · {{ migrationPreview.conflicts.length }} 个同名项目：{{ migrationPreview.conflicts.slice(0,5).join('、') }}，按网盘冲突策略处理</template></p>
+      <p v-if="migrationPreview?.transferMode === 'spool'" class="hint">本机逐文件中转：最大文件 {{ formatBytes(migrationPreview.tempBytes) }}，临时盘可用 {{ formatBytes(migrationPreview.tempAvailable) }}。迁移期间其他任务也会占用空间。</p>
       <p v-for="warning in migrationPreview?.warnings || []" :key="warning" role="alert">{{ warning }}</p>
       <div class="field">
         <label>来源账号</label>

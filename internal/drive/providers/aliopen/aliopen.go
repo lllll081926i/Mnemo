@@ -138,7 +138,10 @@ func init() {
 			c.SetHashes([]string{"sha1"}, []string{"sha1"}).SetConflictPolicies("refuse", "rename", "skip", "overwrite")
 		}),
 		Auth: authRefreshToken,
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
+		Login: drive.LoginConfig{Methods: []drive.LoginMethodSpec{
+			{ID: "relay", Label: "导入已有令牌", FieldKeys: []string{"refresh_token"}, Recipient: oauthDefault, Notice: "默认使用 AList 第三方令牌中转，首次登录及后续刷新都会向该服务发送 Open Refresh Token。这不是阿里官方令牌交换地址。不要填写 Cookie 或普通客户端令牌。", Consent: "我同意通过此第三方服务交换和刷新令牌"},
+			{ID: "own", Label: "自有 OAuth 应用", FieldKeys: []string{"refresh_token", "client_id", "client_secret"}, RequiredKeys: []string{"client_id"}, Recipient: apiHost + "/oauth/access_token", Notice: "使用已获批的自有应用，令牌必须由同一个 Client ID 签发。Client Secret 按应用要求填写。当前未提供 Mnemo 自有应用扫码授权，不会跳转至不明扫码服务。"},
+		}, Fields: []drive.LoginField{
 			{Key: "refresh_token", Type: "text", Label: "Refresh Token", Required: true, Placeholder: "粘贴阿里云盘 Open refresh_token"},
 			{Key: "client_id", Type: "text", Label: "Client ID（可选）", Required: false},
 			{Key: "client_secret", Type: "password", Label: "Client Secret（可选）", Required: false},
@@ -2491,6 +2494,19 @@ func authRefreshToken(ctx context.Context, req drive.AuthRequest) (*model.TokenI
 	}
 	clientID := strings.TrimSpace(req.Config["client_id"])
 	clientSecret := strings.TrimSpace(req.Config["client_secret"])
+	switch req.Config["login_method"] {
+	case "relay":
+		if req.Config["relay_consent"] != "true" || clientID != "" || clientSecret != "" {
+			return nil, errors.New("aliopen: 请确认第三方令牌接收方；自有应用请切换登录方式")
+		}
+	case "own":
+		if clientID == "" {
+			return nil, errors.New("aliopen: 自有应用登录需要 Client ID，未使用第三方中转")
+		}
+	case "":
+	default:
+		return nil, errors.New("aliopen: 不支持的登录方式")
+	}
 
 	sess := &Session{
 		RefreshToken: refreshToken,

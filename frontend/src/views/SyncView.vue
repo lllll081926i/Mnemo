@@ -8,6 +8,7 @@ import SelectDirModal from '../components/SelectDirModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import { summarizeSync } from '../sync-risk'
 
 const props = defineProps({
   account: { type: Object, default: null },
@@ -18,6 +19,7 @@ const emit = defineEmits(['toast'])
 
 const confirmDialog = ref(null)
 const preview = ref(null), previewJob = ref(null), previewBusy = ref(false), conflictChoices = ref({})
+const riskSummary = computed(() => summarizeSync(preview.value?.changes))
 const actionLabels = { upload: '上传', download: '下载', 'delete-local': '删除本地', 'delete-remote': '删除网盘', conflict: '冲突' }
 async function showPreview(job) {
   if (previewBusy.value || running.value.has(job.id)) return
@@ -28,6 +30,19 @@ async function showPreview(job) {
 }
 async function executePreview() {
   if (!preview.value || previewBusy.value || preview.value.blocked) return
+  if (riskSummary.value.deletes > 0) {
+    const token = preview.value.token
+    confirmDialog.value = { title: '确认同步删除', danger: true, message: `将删除本地 ${riskSummary.value['delete-local']} 项、网盘 ${riskSummary.value['delete-remote']} 项。删除可能无法恢复，请核对两侧路径。`, onOk: async () => {
+      confirmDialog.value = null
+      if (preview.value?.token !== token) { emit('toast', '同步预览已变化，请重新确认', 'warn'); return }
+      await runPreview()
+    } }
+    return
+  }
+  return runPreview()
+}
+async function runPreview() {
+  if (!preview.value || !previewJob.value || previewBusy.value || preview.value.blocked) return
   const job = previewJob.value, plan = preview.value
   previewBusy.value = true
   try {
@@ -285,8 +300,11 @@ onBeforeUnmount(() => {
   <div class="syncpage">
     <Modal v-if="previewJob" title="同步预览" width="760px" @close="!previewBusy && (previewJob = null)">
       <p>{{ previewJob.name }} · {{ preview?.changes?.length || 0 }} 项变化</p>
+      <p class="hint">上传 {{ riskSummary.upload }} · 下载 {{ riskSummary.download }} · 冲突 {{ riskSummary.conflict }} · 删除本地 {{ riskSummary['delete-local'] }} · 删除网盘 {{ riskSummary['delete-remote'] }}</p>
+      <p class="hint">本地：{{ previewJob.local_dir }} → 网盘：{{ previewJob.remote_name || previewJob.remote_dir }}</p>
+      <p v-if="riskSummary.deletes" role="alert">本轮包含删除。不是所有服务商都支持恢复；本地同步删除可能永久生效。</p><p v-else class="hint">本轮计划没有删除；冲突覆盖仍按所选策略处理。</p>
       <p v-if="previewBusy" role="status">正在处理…</p><p v-if="preview?.blocked" role="alert">{{ preview.blocked }}</p>
-      <div class="workspace-results"><div v-for="change in preview?.changes || []" :key="change.path" class="workspace-result"><span><strong>{{ change.path }}</strong><small>{{ actionLabels[change.action] }} · 本地 {{ change.local?.size ?? '不存在' }} / 网盘 {{ change.remote?.size ?? '不存在' }}</small></span><UiSelect v-if="change.action === 'conflict'" v-model="conflictChoices[change.path]" :disabled="previewBusy" :placeholder="'默认：' + ({local:'本地',remote:'网盘','keep-both':'保留两份'}[previewJob.conflictPolicy || 'keep-both'])" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地'},{value:'remote',label:'使用网盘'}]" /></div></div>
+      <div class="workspace-results"><div v-for="change in preview?.changes || []" :key="change.path" class="workspace-result"><span><strong>{{ change.path }}</strong><small>{{ actionLabels[change.action] }} · 本地 {{ change.local?.size ?? '不存在' }} / 网盘 {{ change.remote?.size ?? '不存在' }}</small><small v-if="change.action === 'conflict'">修改时间：本地 {{ change.local?.modTime ? new Date(change.local.modTime * 1000).toLocaleString() : '未知' }} / 网盘 {{ change.remote?.modTime ? new Date(change.remote.modTime * 1000).toLocaleString() : '未知' }}</small></span><UiSelect v-if="change.action === 'conflict'" v-model="conflictChoices[change.path]" :disabled="previewBusy" :aria-label="'冲突策略：' + change.path" :placeholder="'默认：' + ({local:'本地',remote:'网盘','keep-both':'保留两份'}[previewJob.conflictPolicy || 'keep-both'])" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地'},{value:'remote',label:'使用网盘'}]" /></div></div>
       <p class="hint">执行前会重新检查文件状态；预览过期时需要重新预览。删除超过快照一半时停止执行。</p>
       <template #actions><button class="btn" :disabled="previewBusy" @click="showPreview(previewJob)">刷新</button><button class="btn primary" :disabled="previewBusy || !preview || !!preview.blocked" @click="executePreview">执行</button></template>
     </Modal>
@@ -388,7 +406,7 @@ onBeforeUnmount(() => {
       <div class="field"><label>冲突处理</label><UiSelect v-model="form.conflictPolicy" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地'},{value:'remote',label:'使用网盘'}]" /><span class="hint">自动同步使用此策略，手动预览可逐项调整</span></div>
       <div class="field switch-row">
         <label>删除传播</label>
-        <div class="switch" :class="{ on: form.deletePropagation }" role="switch" :aria-checked="form.deletePropagation" @click="form.deletePropagation = !form.deletePropagation"></div>
+        <button type="button" class="switch" :class="{ on: form.deletePropagation }" role="switch" aria-label="删除传播" :aria-checked="form.deletePropagation" @click="form.deletePropagation = !form.deletePropagation"></button>
         <span class="hint">启用后会同步删除两端缺失的文件</span>
       </div>
       <template #actions>

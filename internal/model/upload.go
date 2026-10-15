@@ -256,6 +256,7 @@ type MigrateJob struct {
 }
 
 type MigrateItem struct {
+	CommitState    string `json:"commitState,omitempty"`
 	SourceRecorded bool   `json:"sourceRecorded,omitempty"`
 	SourceTime     int64  `json:"sourceTime,omitempty"`
 	SourceHash     string `json:"sourceHash,omitempty"`
