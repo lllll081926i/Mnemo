@@ -98,7 +98,16 @@ function collectInventory(root, output) {
     const installed = fs.existsSync(path.join(directory, 'package.json'))
     if (!installed && !entry.optional) throw new Error(`生产依赖未安装：${name}`)
     if (installed && JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')).version !== entry.version) throw new Error(`已安装版本与锁文件不符：${name}`)
-    components.push({ ecosystem: 'npm', name, version: entry.version, source: entry.resolved, integrity: entry.integrity, declaredLicense: entry.license || 'UNKNOWN', installed, licenseFiles: installed ? archiveLicenses(directory, `npm:${location}@${entry.version}`, output) : [] })
+    const files = installed ? archiveLicenses(directory, `npm:${location}@${entry.version}`, output) : []
+    let licenseSupplement
+    if (installed && !files.length && /^@napi-rs\/canvas(?:-[a-z0-9-]+)?$/.test(name) && entry.version === '1.0.9') {
+      const supplementDir = path.join(root, 'third_party/canvas-1.0.9')
+      const provenance = JSON.parse(fs.readFileSync(path.join(supplementDir, 'provenance.json'), 'utf8'))
+      if (digest(path.join(supplementDir, 'LICENSE')) !== provenance.sha256) throw new Error('Canvas 上游许可摘要不符')
+      files.push(...archiveLicenses(supplementDir, `upstream:${name}@${entry.version}`, output))
+      licenseSupplement = { source: provenance.source, revision: provenance.revision }
+    }
+    components.push({ ecosystem: 'npm', name, version: entry.version, source: entry.resolved, integrity: entry.integrity, declaredLicense: entry.license || 'UNKNOWN', installed, licenseFiles: files, licenseSupplement })
   }
   const modules = run('go', ['list', '-m', '-json', 'all'], root).split(/\r?\n(?=\{)/).map(document => JSON.parse(document))
   for (const entry of modules) {
@@ -107,7 +116,7 @@ function collectInventory(root, output) {
     if (!entry.Dir || !entry.Sum) throw new Error(`Go 模块未完整下载：${entry.Path}；先运行 go mod download`)
     components.push({ ecosystem: 'go', name: entry.Path, version: entry.Version, integrity: entry.Sum, source: `https://${entry.Path}`, licenseFiles: archiveLicenses(entry.Dir, `go:${entry.Path}@${entry.Version}`, output) })
   }
-  const inputs = ['go.mod', 'go.sum', 'frontend/package.json', 'frontend/package-lock.json', 'tools/supply-chain-policy.json', 'LICENSE'].map(file => ({ path: file, sha256: digest(path.join(root, file)) }))
+  const inputs = ['go.mod', 'go.sum', 'frontend/package.json', 'frontend/package-lock.json', 'tools/supply-chain-policy.json', 'LICENSE', 'third_party/canvas-1.0.9/LICENSE', 'third_party/canvas-1.0.9/provenance.json'].map(file => ({ path: file, sha256: digest(path.join(root, file)) }))
   fs.copyFileSync(path.join(root, 'LICENSE'), path.join(output, 'LICENSE'), fs.constants.COPYFILE_EXCL)
   const inventory = { format: 'mnemo-dependency-inventory', version: 1, commit: run('git', ['rev-parse', 'HEAD'], root), projectVersion: manifest.version, projectLicense: 'GPL-3.0-only', scope: 'Go 模块整体依赖与前端生产依赖；不是每种平台二进制的精确链接清单', tools: { node: process.version, go: run('go', ['version'], root) }, inputs, components }
   fs.writeFileSync(path.join(output, 'dependency-inventory.json'), JSON.stringify(inventory, null, 2) + '\n', { flag: 'wx' })
