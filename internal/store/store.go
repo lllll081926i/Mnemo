@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 )
 
@@ -31,7 +32,11 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	return &Store{dir: dir}, nil
+	storage := &Store{dir: dir}
+	if _, err := storage.ListOfflineTasks(); err != nil {
+		logging.Warn("离线历史迁移失败，其他存储服务继续可用", "error", err)
+	}
+	return storage, nil
 }
 
 // SetAccountsDir overrides the directory for accounts.json (login data).

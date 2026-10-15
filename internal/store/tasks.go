@@ -207,7 +207,24 @@ func (s *Store) ListOfflineTasks() ([]model.OfflineTask, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
+	if sanitizeOfflineTasks(list) {
+		if err := s.writeJSONUnlocked(offlineFile, list); err != nil {
+			return nil, err
+		}
+	}
 	return list, nil
+}
+
+func sanitizeOfflineTasks(list []model.OfflineTask) bool {
+	changed := false
+	for index := range list {
+		safeURL := model.SafeOfflineDisplayURL(list[index].URL)
+		if safeURL != list[index].URL {
+			list[index].URL = safeURL
+			changed = true
+		}
+	}
+	return changed
 }
 
 // SaveOfflineTask upserts an offline task.
@@ -225,33 +242,33 @@ func (s *Store) SaveOfflineTask(t *model.OfflineTask) error {
 	if err != nil {
 		return err
 	}
+	sanitizeOfflineTasks(list)
+	safeTask := *t
+	safeTask.URL = model.SafeOfflineDisplayURL(safeTask.URL)
 	replaced := false
 	for i := range list {
 		if list[i].ID == t.ID && list[i].UserID == t.UserID && list[i].DriveID == t.DriveID {
-			list[i] = *t
+			list[i] = safeTask
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		if t.Created == 0 {
-			t.Created = time.Now().Unix()
+		if safeTask.Created == 0 {
+			safeTask.Created = time.Now().Unix()
+			t.Created = safeTask.Created
 		}
-		list = append(list, *t)
+		list = append(list, safeTask)
 	}
 	return s.writeJSONUnlocked(offlineFile, list)
-}
-
-// DeleteOfflineTask removes the matching remote task record. A legacy
-// unscoped call is retained for older callers; new callers must use
-// DeleteOfflineTaskScoped to avoid deleting another account's equal ID.
-func (s *Store) DeleteOfflineTask(id string) error {
-	return s.DeleteOfflineTaskScoped("", "", id)
 }
 
 // DeleteOfflineTaskScoped removes a task only within the requested account
 // and drive. The remote task ID remains unchanged for provider API calls.
 func (s *Store) DeleteOfflineTaskScoped(userID, driveID, id string) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(id) == "" {
+		return errInvalid("删除离线记录需要账号和任务 ID")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var list []model.OfflineTask
@@ -264,11 +281,12 @@ func (s *Store) DeleteOfflineTaskScoped(userID, driveID, id string) error {
 	}
 	out := list[:0]
 	for i := range list {
-		if list[i].ID == id && (userID == "" || list[i].UserID == userID) && (driveID == "" || list[i].DriveID == driveID) {
+		if list[i].ID == id && list[i].UserID == userID && list[i].DriveID == driveID {
 			continue
 		}
 		out = append(out, list[i])
 	}
+	sanitizeOfflineTasks(out)
 	return s.writeJSONUnlocked(offlineFile, out)
 }
 

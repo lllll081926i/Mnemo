@@ -565,6 +565,8 @@ func (a *App) ListOfflineTasks(userID string) []model.OfflineTask {
 	}
 	list, err := st.ListOfflineTasks()
 	if err != nil {
+		logging.Warn("离线历史读取或迁移失败", "error", err)
+		a.emit("offline:history-error", map[string]string{"error": "本地离线历史读取或安全迁移失败，请检查数据目录权限及日志；原始记录已保留"})
 		return nil
 	}
 	var out []model.OfflineTask
