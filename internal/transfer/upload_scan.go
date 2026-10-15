@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,11 +23,21 @@ type uploadSource struct {
 // special files rather than accidentally uploading outside the selection or
 // treating a partially readable directory as a successful upload.
 func scanUploadSources(localPaths []string) ([]uploadSource, error) {
+	return scanUploadSourcesContext(context.Background(), localPaths)
+}
+
+func scanUploadSourcesContext(ctx context.Context, localPaths []string) ([]uploadSource, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(localPaths) == 0 {
 		return nil, errors.New("未选择上传文件")
 	}
 	sources := make([]uploadSource, 0, len(localPaths))
 	for _, input := range localPaths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(input) == "" {
 			return nil, errors.New("上传路径不能为空")
 		}
@@ -46,6 +57,9 @@ func scanUploadSources(localPaths []string) ([]uploadSource, error) {
 			continue
 		}
 		err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if walkErr != nil {
 				return fmt.Errorf("遍历上传目录 %q: %w", current, walkErr)
 			}
@@ -84,7 +98,7 @@ func scanUploadSources(localPaths []string) ([]uploadSource, error) {
 // AddFilesChecked returns a scan error rather than silently queuing an
 // incomplete subset. No upload begins until the entire selection is valid.
 func (q *UploadQueue) AddFilesChecked(userID, driveID, parentID, conflictPolicy string, localPaths []string) ([]*model.UploadingUI, error) {
-	sources, err := scanUploadSources(localPaths)
+	sources, err := scanUploadSourcesContext(q.ctx, localPaths)
 	if err != nil {
 		return nil, err
 	}

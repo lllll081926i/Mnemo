@@ -192,13 +192,11 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 		uploadClient := *c.HTTP
 		uploadClient.Timeout = 0
 		if transport, ok := c.HTTP.Transport.(*http.Transport); ok {
-			bounded := transport.Clone()
-			bounded.ResponseHeaderTimeout = 90 * time.Second
+			bounded := boundedUploadTransport(transport, 90*time.Second)
 			uploadClient.Transport = bounded
 			defer bounded.CloseIdleConnections()
 		} else if c.HTTP.Transport == nil {
-			bounded := http.DefaultTransport.(*http.Transport).Clone()
-			bounded.ResponseHeaderTimeout = 90 * time.Second
+			bounded := boundedUploadTransport(http.DefaultTransport.(*http.Transport), 90*time.Second)
 			uploadClient.Transport = bounded
 			defer bounded.CloseIdleConnections()
 		}

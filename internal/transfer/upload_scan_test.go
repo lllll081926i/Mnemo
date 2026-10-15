@@ -1,6 +1,8 @@
 package transfer
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,5 +55,13 @@ func TestScanUploadSourcesRejectsEmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scanUploadSources([]string{dir}); err == nil {
 		t.Fatal("empty folder must not appear to upload successfully")
+	}
+}
+
+func TestScanUploadSourcesHonorsCancellation(testContext *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := scanUploadSourcesContext(ctx, []string{testContext.TempDir()}); !errors.Is(err, context.Canceled) {
+		testContext.Fatalf("扫描没有响应取消: %v", err)
 	}
 }

@@ -116,5 +116,5 @@ func (a *App) refreshAllAccountSessions(parent context.Context) {
 }
 
 func shouldKeepAccountAlive(account *model.Account) bool {
-	return account != nil && !account.Disabled && account.UserID != "" && account.Token != nil
+	return account != nil && !account.Disabled && account.AuthState != "reauth_required" && account.UserID != "" && account.Token != nil
 }

@@ -36,6 +36,9 @@ func TestWaitAccountKeepAliveHonorsCancellation(t *testing.T) {
 }
 
 func TestShouldKeepAccountAlive(t *testing.T) {
+	if shouldKeepAccountAlive(&model.Account{UserID: "expired", AuthState: "reauth_required", Token: &model.TokenInfo{}}) {
+		t.Fatal("需要重新授权的账号不应继续自动保活")
+	}
 	if shouldKeepAccountAlive(nil) {
 		t.Fatal("空账号不应参与保活")
 	}
