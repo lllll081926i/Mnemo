@@ -17,8 +17,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: '1.26.6'
-  NODE_VERSION: '20'
+  GO_VERSION: '1.27.2'
+  GOTOOLCHAIN: local
+  NODE_VERSION: '24.22.0'
 
 permissions:
   contents: read
@@ -79,9 +80,21 @@ jobs:
             test -f "docs/releases/${GITHUB_REF_NAME}.md"
           fi
 
+      - name: Verify dependency sources and policy tests
+        run: |
+          node --test tools/supply-chain.test.cjs
+          node tools/supply-chain.cjs check
+
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      - name: Audit Go dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - name: Build frontend for Go embed
         working-directory: frontend
@@ -102,6 +115,24 @@ jobs:
 
       - name: Build backend
         run: go build ./...
+
+      - name: Generate dependency and license archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download all
+          node tools/supply-chain.cjs collect "$RUNNER_TEMP/mnemo-compliance"
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 mod -licenses -json -output "$RUNNER_TEMP/mnemo-compliance/sbom-go.cdx.json"
+          (cd frontend && npm sbom --sbom-format=cyclonedx --package-lock-only --omit=dev > "$RUNNER_TEMP/mnemo-compliance/sbom-frontend.cdx.json")
+          git diff --exit-code -- go.mod go.sum frontend/package.json frontend/package-lock.json
+          tar -czf "$RUNNER_TEMP/Mnemo-compliance.tar.gz" -C "$RUNNER_TEMP/mnemo-compliance" .
+
+      - name: Upload dependency and license archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mnemo-compliance-${{ github.sha }}
+          path: ${{ runner.temp }}/Mnemo-compliance.tar.gz
+          if-no-files-found: error
 
   build:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
@@ -163,7 +194,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Install Linux build deps
         if: matrix.kind == 'linux'
@@ -182,6 +213,22 @@ jobs:
           else
             wails build -platform "${{ matrix.platform }}" -clean
           fi
+
+      - name: Download dependency and license archive
+        uses: actions/download-artifact@v4
+        with:
+          name: Mnemo-compliance-${{ github.sha }}
+          path: build/compliance-archive
+
+      - name: Unpack dependency and license archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/compliance
+          tar -xzf build/compliance-archive/Mnemo-compliance.tar.gz -C build/compliance
+          test -s build/compliance/LICENSE
+          test -s build/compliance/dependency-inventory.json
+          test -s build/compliance/THIRD_PARTY_NOTICES.txt
 
       - name: Package Windows installer
         if: matrix.kind == 'windows'
@@ -210,14 +257,18 @@ jobs:
           trap 'rm -rf "$package_stage" "$archive_stage" "$appdir" "$tool_dir"' EXIT
           package_arch="amd64"
           appimage_arch="x86_64"
+          appimage_sha256="95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6"
           if [[ "${{ matrix.platform }}" == 'linux/arm64' ]]; then
             package_arch="arm64"
             appimage_arch="aarch64"
+            appimage_sha256="a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270"
           fi
 
           mkdir -p "$package_stage/data" "$archive_stage/data"
           cp -a "$binary" "$package_stage/Mnemo"
           cp -a "$binary" "$archive_stage/Mnemo"
+          cp -a build/compliance "$package_stage/licenses"
+          cp -a build/compliance "$archive_stage/licenses"
           cp -a build/appicon.png "$package_stage/mnemo.png"
           if [[ -f build/bin/data/secrets.json ]]; then
             cp -a build/bin/data/secrets.json "$package_stage/data/secrets.json"
@@ -240,6 +291,7 @@ jobs:
           export NFPM_DATA_DIR="$package_stage/data"
           export NFPM_DESKTOP_PATH="$package_stage/mnemo.desktop"
           export NFPM_ICON_PATH="$package_stage/mnemo.png"
+          export NFPM_LICENSE_DIR="$package_stage/licenses"
           nfpm package --config build/linux/nfpm.yaml --packager deb --target "${{ matrix.artifact }}.deb"
           nfpm package --config build/linux/nfpm.yaml --packager rpm --target "${{ matrix.artifact }}.rpm"
           nfpm package --config build/linux/nfpm.yaml --packager archlinux --target "${{ matrix.artifact }}.pkg.tar.zst"
@@ -249,6 +301,8 @@ jobs:
 
           mkdir -p "$appdir/usr/bin" "$appdir/usr/share/icons/hicolor/256x256/apps"
           cp -a "$binary" "$appdir/usr/bin/Mnemo"
+          mkdir -p "$appdir/usr/share/doc/mnemo"
+          cp -a build/compliance/. "$appdir/usr/share/doc/mnemo/"
           cp -a build/appicon.png "$appdir/mnemo.png"
           cp -a build/appicon.png "$appdir/usr/share/icons/hicolor/256x256/apps/mnemo.png"
           if [[ -f build/bin/data/secrets.json ]]; then
@@ -273,6 +327,7 @@ jobs:
           chmod 0755 "$appdir/AppRun"
           appimage_tool="$tool_dir/appimagetool-${appimage_arch}.AppImage"
           curl --fail --location --retry 3 --retry-delay 2 --output "$appimage_tool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimage_arch}.AppImage"
+          printf '%s  %s\n' "$appimage_sha256" "$appimage_tool" | sha256sum --check
           chmod 0755 "$appimage_tool"
           (
             cd "$tool_dir"
@@ -289,13 +344,15 @@ jobs:
         run: |
           set -euo pipefail
           test -d build/bin/Mnemo.app
+          mkdir -p build/bin/Mnemo.app/Contents/Resources/licenses
+          cp -a build/compliance/. build/bin/Mnemo.app/Contents/Resources/licenses/
           hdiutil create -volname Mnemo -srcfolder build/bin/Mnemo.app -ov -format UDZO "${{ matrix.artifact }}.dmg"
           tar -czf "${{ matrix.artifact }}.tar.gz" -C build/bin Mnemo.app
 
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}-${{ github.ref_name }}
+          name: ${{ matrix.artifact }}-${{ github.sha }}
           path: |
             ${{ matrix.artifact }}.deb
             ${{ matrix.artifact }}.rpm
@@ -313,13 +370,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: Mnemo-*-${{ github.ref_name }}
+          pattern: Mnemo-*-${{ github.sha }}
           path: release-assets
           merge-multiple: true
 
@@ -342,6 +401,7 @@ jobs:
             Mnemo-linux-arm64.tar.gz
             Mnemo-macos-arm64.dmg
             Mnemo-macos-arm64.tar.gz
+            Mnemo-compliance.tar.gz
           )
           for asset in "${expected_assets[@]}"; do
             test -s "release-assets/$asset"
@@ -350,6 +410,11 @@ jobs:
           find release-assets -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 \
             | sort -z | xargs -0 sha256sum | sed 's#  release-assets/#  #' > release-assets/SHA256SUMS.txt
           (cd release-assets && sha256sum --check SHA256SUMS.txt)
+
+      - name: Attest release artifacts and checksums
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: '${{ github.workspace }}/release-assets/*'
 
       - name: Create or update GitHub Release
         env:

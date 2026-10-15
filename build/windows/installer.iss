@@ -42,6 +42,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\bin\Mnemo.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\compliance\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\bin\data\secrets.json"; DestDir: "{app}\data"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]

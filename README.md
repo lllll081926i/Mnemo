@@ -10,7 +10,7 @@
 
 [![最新版本](https://img.shields.io/github/v/release/lllll081926i/Mnemo?style=flat-square&color=7c6cf0)](https://github.com/lllll081926i/Mnemo/releases/latest)
 [![构建状态](https://img.shields.io/github/actions/workflow/status/lllll081926i/Mnemo/release.yml?style=flat-square&label=%E6%9E%84%E5%BB%BA)](https://github.com/lllll081926i/Mnemo/actions/workflows/release.yml)
-[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-E0342F?style=flat-square)](https://wails.io/)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL--3.0-blue?style=flat-square)](LICENSE)
 
@@ -135,8 +135,8 @@ Vue 3 + Vite 前端（WebView）
 
 | 工具 | 版本或说明 |
 |---|---|
-| Go | 1.25 或更高版本 |
-| Node.js | 20 或更高版本 |
+| Go | 1.26 或更高版本；云端固定使用 1.27.2 |
+| Node.js | 24.22.0 或更高版本；云端固定使用 24.22.0 LTS |
 | Wails CLI | v2.14 |
 | C 编译工具链 | Windows 需要 GCC；其他平台请安装 Wails 所需的原生构建依赖 |
 
@@ -192,7 +192,7 @@ gofmt -w <修改过的 Go 文件>
 
 ### 登录失效会删除云端文件吗？
 
-不会。只有本机保存的账户凭据会在服务端明确确认失效后被移除；云端文件不会被删除。重新登录同一账户即可继续访问。
+不会。服务端明确确认凭据失效后，Mnemo 保留本机账号和目录缓存，并提示重新授权；云端文件不会被删除。重新授权原账号即可继续访问。
 
 ### 为什么刚打开目录时内容随后发生变化？
 
@@ -208,6 +208,7 @@ Mnemo 会先显示本地目录缓存以缩短等待时间，再后台请求网�
 - [网盘插件指南](docs/PROVIDER_GUIDE.md) — 驱动契约、能力声明与接入流程
 - [界面设计规范](docs/DESIGN.md) — 视觉 token 与组件约定
 - [发布记录](docs/releases/) — 版本更新与已知限制
+- [依赖与发布验证](docs/SUPPLY_CHAIN.md) — 许可证归档、依赖来源与构建来源证明
 
 提交问题或建议前，请尽量说明操作系统、应用版本、网盘类型、复现步骤和已脱敏的错误信息。请勿在 Issue、日志或截图中公开 Token、Cookie、访问密钥或私人分享链接。
 

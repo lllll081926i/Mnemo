@@ -32,6 +32,7 @@ describe('更新弹窗', () => {
     wrapper = mount(UpdateModal, { attachTo: document.body, props: { initialInfo: { available: true, version: '0.4.3' } }, global: { stubs: { UiIcon: true } } })
     await flushPromises()
     expect(document.body.textContent).toContain('发现新版本')
+    expect(document.body.textContent).toContain('不代表已验证发布者签名')
     expect(document.body.textContent).not.toContain('正在检查更新')
     finishStatus({ revision: 1, phase: 'idle' })
     await flushPromises()

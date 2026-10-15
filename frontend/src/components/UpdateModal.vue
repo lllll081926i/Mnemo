@@ -126,6 +126,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
   <Modal title="更新" width="500px" @close="emit('close')">
     <div class="upd-body">
       <p v-if="info?.currentVersion" class="upd-meta upd-current">当前版本 {{ info.currentVersion }}</p>
+      <p class="upd-meta" aria-label="更新来源与校验范围">发布渠道：GitHub · lllll081926i/Mnemo。应用内验证文件大小和 SHA-256，不代表已验证发布者签名；构建来源证明请在发布页按说明独立核验。</p>
       <Transition name="update-state" mode="out-in">
         <div :key="state">
           <div v-if="state === 'checking'" class="upd-state" role="status"><span class="spin"></span><span>正在检查更新…</span></div>
