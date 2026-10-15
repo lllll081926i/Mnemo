@@ -133,7 +133,9 @@ func (c *client) getJSON(ctx context.Context, pathOrURL string, out any) error {
 		return err
 	}
 	if resp.StatusCode >= 400 {
-		return graphError(body, resp.StatusCode)
+		failure := graphError(body, resp.StatusCode).(*graphAPIError)
+		failure.RetryAfter = resp.Header.Get("Retry-After")
+		return failure
 	}
 	if out == nil {
 		return nil
@@ -157,7 +159,9 @@ func (c *client) jsonDo(ctx context.Context, method, path string, body any, out 
 		return err
 	}
 	if resp.StatusCode >= 400 {
-		return graphError(data, resp.StatusCode)
+		failure := graphError(data, resp.StatusCode).(*graphAPIError)
+		failure.RetryAfter = resp.Header.Get("Retry-After")
+		return failure
 	}
 	if out == nil {
 		return nil
@@ -183,6 +187,7 @@ type graphAPIError struct {
 	StatusCode int
 	Code       string
 	Message    string
+	RetryAfter string
 }
 
 func (e *graphAPIError) Error() string {
@@ -195,6 +200,21 @@ func (e *graphAPIError) Error() string {
 	}
 	if e.Message != "" {
 		msg += ": " + e.Message
+	}
+	switch e.StatusCode {
+	case 401:
+		msg += "；登录已失效，请重新授权"
+	case 403:
+		msg += "；当前账号或租户未授权此操作，请使用官网或联系管理员"
+	case 404:
+		msg += "；项目或站点已失效，请在官网核对"
+	case 409:
+		msg += "；目标名称或原目录存在冲突，请在官网处理"
+	case 429:
+		msg += "；服务端限流，请稍后重试"
+		if e.RetryAfter != "" {
+			msg += "（Retry-After: " + e.RetryAfter + "）"
+		}
 	}
 	return msg
 }

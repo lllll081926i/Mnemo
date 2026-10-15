@@ -58,6 +58,10 @@ export function ClearCache() {
   return window['go']['app']['App']['ClearCache']();
 }
 
+export function ClearDeletionHistory(arg1, arg2) {
+  return window['go']['app']['App']['ClearDeletionHistory'](arg1, arg2);
+}
+
 export function ClearDownloads() {
   return window['go']['app']['App']['ClearDownloads']();
 }
@@ -194,6 +198,10 @@ export function ListAccounts() {
   return window['go']['app']['App']['ListAccounts']();
 }
 
+export function ListDeletionHistory(arg1, arg2) {
+  return window['go']['app']['App']['ListDeletionHistory'](arg1, arg2);
+}
+
 export function ListDir(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListDir'](arg1, arg2, arg3);
 }
@@ -298,6 +306,10 @@ export function OpenPreviewWindow(arg1) {
   return window['go']['app']['App']['OpenPreviewWindow'](arg1);
 }
 
+export function OpenTrashWebsite(arg1, arg2) {
+  return window['go']['app']['App']['OpenTrashWebsite'](arg1, arg2);
+}
+
 export function PauseDownload(arg1) {
   return window['go']['app']['App']['PauseDownload'](arg1);
 }
@@ -320,6 +332,10 @@ export function PlayVideo(arg1, arg2, arg3) {
 
 export function PlayVideoQuality(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['PlayVideoQuality'](arg1, arg2, arg3, arg4);
+}
+
+export function PreviewEnterpriseTrash(arg1, arg2) {
+  return window['go']['app']['App']['PreviewEnterpriseTrash'](arg1, arg2);
 }
 
 export function PreviewMigration(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -380,6 +396,10 @@ export function RenameMountedAccount(arg1, arg2) {
 
 export function RespondQuit(arg1) {
   return window['go']['app']['App']['RespondQuit'](arg1);
+}
+
+export function RestoreDeletionHistory(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RestoreDeletionHistory'](arg1, arg2, arg3);
 }
 
 export function RestoreFavorite(arg1) {

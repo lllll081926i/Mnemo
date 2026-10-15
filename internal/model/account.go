@@ -107,14 +107,16 @@ type ConnConfig struct {
 // Account is the persisted session record. UserID is the primary key and is
 // namespaced by provider prefix (e.g. pikpak_xxx).
 type Account struct {
-	UserID     string     `json:"user_id"`
-	DriveID    string     `json:"drive_id"`
-	Token      *TokenInfo `json:"token,omitempty"`
-	Order      int64      `json:"order,omitempty"`
-	Disabled   bool       `json:"disabled,omitempty"`
-	AuthState  string     `json:"auth_state,omitempty"` // healthy or reauth_required
-	CustomName string     `json:"custom_name,omitempty"`
-	CustomIcon string     `json:"custom_icon,omitempty"`
+	CapabilityOverrides map[string]bool            `json:"capability_overrides,omitempty"`
+	CapabilityStates    map[string]CapabilityState `json:"capability_states,omitempty"`
+	UserID              string                     `json:"user_id"`
+	DriveID             string                     `json:"drive_id"`
+	Token               *TokenInfo                 `json:"token,omitempty"`
+	Order               int64                      `json:"order,omitempty"`
+	Disabled            bool                       `json:"disabled,omitempty"`
+	AuthState           string                     `json:"auth_state,omitempty"` // healthy or reauth_required
+	CustomName          string                     `json:"custom_name,omitempty"`
+	CustomIcon          string                     `json:"custom_icon,omitempty"`
 	// Usage is a cached quota snapshot for display.
 	Usage       *Quota `json:"usage,omitempty"`
 	FamilyUsage *Quota `json:"family_usage,omitempty"`

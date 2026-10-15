@@ -352,6 +352,7 @@ func (a *App) startup(ctx context.Context) {
 	// upload session persistence so providers can resume interrupted uploads
 	store.InitUploadSessions(dataDir)
 	drive.SetUploadSessionStore(uploadSessionAdapter{})
+	drive.SetDeletionJournal(st)
 
 	// Internal media/preview server. /local/ access is restricted to exact
 	// registered files under the download directory. The application data
@@ -891,6 +892,8 @@ func (a *App) ListAccounts() []*model.Account {
 	}
 	for _, acc := range list {
 		syncAccountUsage(acc)
+		snapshot := drive.CapabilitiesForAccount(acc)
+		acc.CapabilityOverrides, acc.CapabilityStates = snapshot.Overrides, snapshot.States
 	}
 	logging.Debug("accounts listed", "count", len(list))
 	return list
@@ -1163,6 +1166,10 @@ func (a *App) RemoveAccount(userID string) error {
 	}
 	if err := st.DeleteDirectoryCachesForAccount(userID); err != nil {
 		logging.Warn("removed account cache cleanup failed", "account_id", redactID(userID), "error", err)
+	}
+	if err := st.ClearDeletionRecordsForAccount(userID); err != nil {
+		logging.Warn("removed account deletion history cleanup failed", "account_id", redactID(userID), "error", err)
+		return err
 	}
 	a.accountRefreshMu.Lock()
 	delete(a.accountRefreshLast, userID)

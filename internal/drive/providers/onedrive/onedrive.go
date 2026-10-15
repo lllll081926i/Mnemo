@@ -39,6 +39,7 @@ func init() {
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"sha1", "quickxorhash"}, nil)
 			c.TrashWebURL = "https://www.office.com/launch/onedrive"
+			c.LocalDeletionHistory = true
 		}),
 		Factory: func() drive.Driver { return &Driver{} },
 		Auth:    authPKCE,
@@ -434,9 +435,9 @@ func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string)
 				requestErr = cl.jsonDo(ctx, http.MethodPost, path, map[string]any{}, &item)
 			}
 		}
-		if requestErr != nil || item.ID == "" {
+		if requestErr != nil || item.ID != fileID {
 			if requestErr == nil {
-				requestErr = errors.New("恢复接口未返回文件 ID")
+				requestErr = errors.New("恢复接口返回的文件 ID 不匹配，结果尚未确认")
 			}
 			failed = append(failed, fmt.Errorf("%s: %w", fileID, requestErr))
 			continue

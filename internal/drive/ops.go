@@ -678,7 +678,7 @@ func TrashBatchContext(ctx context.Context, userID, driveID string, fileIDs []st
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.Trash(ctx, c, fileIDs)
+	return journaledTrash(ctx, d, c, fileIDs)
 }
 
 // DeleteBatch permanently deletes files (skips trash where implemented).
@@ -699,6 +699,13 @@ func DeleteBatchContext(ctx context.Context, userID, driveID string, fileIDs []F
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
+	if d.Capabilities().LocalDeletionHistory && !d.Capabilities().PermanentDelete {
+		plainIDs := make([]string, 0, len(fileIDs))
+		for _, ref := range fileIDs {
+			plainIDs = append(plainIDs, ref.ID)
+		}
+		return journaledTrash(ctx, d, c, plainIDs)
+	}
 	return d.Delete(ctx, c, fileIDs)
 }
 
@@ -709,7 +716,7 @@ func RestoreBatch(userID, driveID string, fileIDs []string) (ids []string, err e
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.Restore(context.Background(), c, fileIDs)
+	return journaledRestore(context.Background(), d, c, fileIDs)
 }
 
 // MoveBatch moves files to a target folder.

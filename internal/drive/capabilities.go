@@ -19,17 +19,18 @@ type Capabilities struct {
 	CreateDateFolder bool `json:"createDateFolder"`
 	CreateTextFile   bool `json:"createTextFile"`
 
-	Rename          bool   `json:"rename"`
-	Move            bool   `json:"move"`
-	Copy            bool   `json:"copy"`
-	RecycleBin      bool   `json:"recycleBin"`
-	PermanentDelete bool   `json:"permanentDelete"`
-	TrashView       bool   `json:"trashView"`
-	TrashRestore    bool   `json:"trashRestore"`
-	TrashPurge      bool   `json:"trashPurge"`
-	TrashClear      bool   `json:"trashClear"`
-	WebEdit         bool   `json:"webEdit"`
-	TrashWebURL     string `json:"trashWebUrl,omitempty"`
+	Rename               bool   `json:"rename"`
+	Move                 bool   `json:"move"`
+	Copy                 bool   `json:"copy"`
+	RecycleBin           bool   `json:"recycleBin"`
+	PermanentDelete      bool   `json:"permanentDelete"`
+	TrashView            bool   `json:"trashView"`
+	TrashRestore         bool   `json:"trashRestore"`
+	TrashPurge           bool   `json:"trashPurge"`
+	TrashClear           bool   `json:"trashClear"`
+	WebEdit              bool   `json:"webEdit"`
+	TrashWebURL          string `json:"trashWebUrl,omitempty"`
+	LocalDeletionHistory bool   `json:"localDeletionHistory"`
 
 	CreateShare     bool `json:"createShare"`
 	ShareExpiration bool `json:"shareExpiration"`

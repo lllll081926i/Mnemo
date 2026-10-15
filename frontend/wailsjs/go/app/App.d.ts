@@ -34,6 +34,8 @@ export function CheckUpdate():Promise<app.CheckUpdateResult>;
 
 export function ClearCache():Promise<void>;
 
+export function ClearDeletionHistory(arg1:string,arg2:string):Promise<void>;
+
 export function ClearDownloads():Promise<void>;
 
 export function ClearLogs():Promise<void>;
@@ -102,6 +104,8 @@ export function ImportShare(arg1:string,arg2:string,arg3:string,arg4:string):Pro
 
 export function ListAccounts():Promise<Array<model.Account>>;
 
+export function ListDeletionHistory(arg1:string,arg2:string):Promise<Array<model.DeletionRecord>>;
+
 export function ListDir(arg1:string,arg2:string,arg3:string):Promise<Array<model.File>>;
 
 export function ListDirPage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<drive.DirPage>;
@@ -154,6 +158,8 @@ export function OpenPikPakCaptcha(arg1:string):Promise<void>;
 
 export function OpenPreviewWindow(arg1:app.PreviewWindowSeed):Promise<void>;
 
+export function OpenTrashWebsite(arg1:string,arg2:string):Promise<void>;
+
 export function PauseDownload(arg1:string):Promise<void>;
 
 export function PickDirectory(arg1:string,arg2:string):Promise<string>;
@@ -165,6 +171,8 @@ export function PinFileSnapshot(arg1:string,arg2:string,arg3:model.File):Promise
 export function PlayVideo(arg1:string,arg2:string,arg3:string):Promise<model.VideoPreview>;
 
 export function PlayVideoQuality(arg1:string,arg2:string,arg3:string,arg4:string):Promise<model.VideoPreview>;
+
+export function PreviewEnterpriseTrash(arg1:string,arg2:string):Promise<drive.TrashSnapshot>;
 
 export function PreviewMigration(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:Array<string>):Promise<app.MigrationPreview>;
 
@@ -195,6 +203,8 @@ export function RenameFile(arg1:string,arg2:string,arg3:string,arg4:string):Prom
 export function RenameMountedAccount(arg1:string,arg2:string):Promise<model.Account>;
 
 export function RespondQuit(arg1:boolean):Promise<void>;
+
+export function RestoreDeletionHistory(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RestoreFavorite(arg1:store.Favorite):Promise<void>;
 

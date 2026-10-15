@@ -462,7 +462,7 @@ export function capsOf(account, providers) {
   if (!account) return {}
   const pid = providerOf(account.user_id)
   const p = (providers || []).find((x) => x.ID === pid)
-  return (p && p.Capabilities) || (p && p.capabilities) || {}
+  return { ...((p && p.Capabilities) || (p && p.capabilities) || {}), ...(account.capability_overrides || {}) }
 }
 
 export function providerMetaOf(account, providers) {

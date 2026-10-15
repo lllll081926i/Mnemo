@@ -1,5 +1,5 @@
 <script setup>
-import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, defineAsyncComponent } from 'vue'
 import {
   listDir, listDirSilently, listTrash, search, mkdir, rename, trash, remove, restore,
   move, copy, createShare, uploadFiles, validateUploadFiles, migrateFiles, PreviewMigration, download, downloadFolder,
@@ -17,6 +17,12 @@ import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import TreeNode from '../components/TreeNode.vue'
 import DragDropZone from '../components/DragDropZone.vue'
+const DeletionHistory = defineAsyncComponent(() => import('../components/DeletionHistory.vue'))
+const showDeletionHistory = ref(false)
+async function openTrashWebsite() {
+  try { await window.go.app.App.OpenTrashWebsite(uid.value, did.value) }
+  catch (failure) { emit('toast', String(failure), 'error') }
+}
 import { getPrefs, setPref } from '../appearance'
 import { createNavigationHistory } from '../navigation'
 import { directoryCacheKey, recordAccountHealth } from '../workspace'
@@ -1542,6 +1548,7 @@ function onKey(e) {
 
 watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKey.value], ([nextUid, nextDid]) => {
   const a = props.account
+  showDeletionHistory.value = false
   confirmDialog.value = null
   menu.value = null
   modal.value = null
@@ -1780,8 +1787,9 @@ onBeforeUnmount(() => {
             type="button"
             class="tree-node"
             title="当前授权接口不能列出回收站，前往网盘官网管理"
-            @click="OpenBrowser(caps.trashWebUrl).catch(error => emit('toast', String(error), 'error'))"
+            @click="openTrashWebsite"
           ><span class="tn-arrow"></span><UiIcon name="trash" :size="14" /><span class="tn-label">官网回收站</span></button>
+          <button v-if="caps.localDeletionHistory" type="button" class="tree-node" @click="showDeletionHistory = true"><span class="tn-arrow"></span><UiIcon name="restore" :size="14" /><span class="tn-label">本机删除记录</span></button>
           <div
             class="tree-node"
             :class="{ active: mode === 'list' && treeSelected === rootKey }"
@@ -2186,6 +2194,7 @@ onBeforeUnmount(() => {
         <button class="btn primary" @click="modal = null">关闭</button>
       </template>
     </Modal>
+    <DeletionHistory v-if="showDeletionHistory && props.account" :key="uid + ':' + did" :account="props.account" @close="showDeletionHistory = false" @toast="(...args) => emit('toast', ...args)" />
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
 
     <!-- 上传同名文件冲突选择 -->

@@ -220,6 +220,7 @@ export namespace drive {
 	    trashClear: boolean;
 	    webEdit: boolean;
 	    trashWebUrl?: string;
+	    localDeletionHistory: boolean;
 	    createShare: boolean;
 	    shareExpiration: boolean;
 	    shareExpirationOptions?: number[];
@@ -269,6 +270,7 @@ export namespace drive {
 	        this.trashClear = source["trashClear"];
 	        this.webEdit = source["webEdit"];
 	        this.trashWebUrl = source["trashWebUrl"];
+	        this.localDeletionHistory = source["localDeletionHistory"];
 	        this.createShare = source["createShare"];
 	        this.shareExpiration = source["shareExpiration"];
 	        this.shareExpirationOptions = source["shareExpirationOptions"];
@@ -583,6 +585,68 @@ export namespace drive {
 		    return a;
 		}
 	}
+	export class TrashSnapshotItem {
+	    id: string;
+	    idKind: string;
+	    siteId: string;
+	    name: string;
+	    size: number;
+	    location: string;
+	    deletedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new TrashSnapshotItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.idKind = source["idKind"];
+	        this.siteId = source["siteId"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.location = source["location"];
+	        this.deletedAt = source["deletedAt"];
+	    }
+	}
+	export class TrashSnapshot {
+	    source: string;
+	    scope: string;
+	    complete: boolean;
+	    updatedAt: number;
+	    items: TrashSnapshotItem[];
+
+	    static createFrom(source: any = {}) {
+	        return new TrashSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.source = source["source"];
+	        this.scope = source["scope"];
+	        this.complete = source["complete"];
+	        this.updatedAt = source["updatedAt"];
+	        this.items = this.convertValues(source["items"], TrashSnapshotItem);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 
@@ -758,7 +822,27 @@ export namespace model {
 		    return a;
 		}
 	}
+	export class CapabilityState {
+	    state: string;
+	    reason: string;
+	    requires?: string[];
+	    verifiedAt?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new CapabilityState(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.reason = source["reason"];
+	        this.requires = source["requires"];
+	        this.verifiedAt = source["verifiedAt"];
+	    }
+	}
 	export class Account {
+	    capability_overrides?: Record<string, boolean>;
+	    capability_states?: Record<string, CapabilityState>;
 	    user_id: string;
 	    drive_id: string;
 	    token?: TokenInfo;
@@ -776,6 +860,8 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.capability_overrides = source["capability_overrides"];
+	        this.capability_states = this.convertValues(source["capability_states"], CapabilityState, true);
 	        this.user_id = source["user_id"];
 	        this.drive_id = source["drive_id"];
 	        this.token = this.convertValues(source["token"], TokenInfo);
@@ -806,7 +892,40 @@ export namespace model {
 		    return a;
 		}
 	}
-	
+	export class DeletionRecord {
+	    userId: string;
+	    driveId: string;
+	    fileId: string;
+	    name: string;
+	    parentId: string;
+	    isDir: boolean;
+	    size: number;
+	    providerType: string;
+	    idKind: string;
+	    status: string;
+	    deletedAt: number;
+	    updatedAt: number;
+
+	    static createFrom(source: any = {}) {
+	        return new DeletionRecord(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.userId = source["userId"];
+	        this.driveId = source["driveId"];
+	        this.fileId = source["fileId"];
+	        this.name = source["name"];
+	        this.parentId = source["parentId"];
+	        this.isDir = source["isDir"];
+	        this.size = source["size"];
+	        this.providerType = source["providerType"];
+	        this.idKind = source["idKind"];
+	        this.status = source["status"];
+	        this.deletedAt = source["deletedAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class DownloadEntry {
 	    content_hash?: string;
 	    content_hash_name?: string;
@@ -1820,4 +1939,3 @@ export namespace sync {
 	}
 
 }
-

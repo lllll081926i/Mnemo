@@ -12,7 +12,9 @@
 favorite, search, createShare, shareExpiration, sharePassword, shareHistory: true
 SetHashes(["sha1", "quickxorhash"], nil)
 ```
-> trashView 未设；ProvideHashes 已声明；webEdit 已设，官网回收站入口实际指向 OneDrive 主页。
+> 默认不提供完整云端回收站。账号级能力区分个人恢复、企业只读试验与永久删除。官网回收站按个人版或可信 Graph 站点元数据定位。
+
+Mnemo 执行软删除前保存本机删除记录，记录按账号和空间隔离，不包含令牌或签名地址。个人版可从记录恢复已知 `driveItem`；恢复先写检查点，回执丢失时只查询原 ID，不自动重复 POST。企业版可主动读取 Graph beta 一级回收站快照，失败保留上次快照；不包含二级，不开放企业恢复和永久删除。Graph Token 不用于 SharePoint REST。上述路径通过自动化模拟验证，真实个人恢复与企业租户权限仍需专用账号验收。
 
 预览中的 DOCX/XLSX/PPTX 可从 Graph `webUrl` 在系统浏览器打开，由 OneDrive 官网提供编辑；PDF 仅可官网打开。浏览器需登录同一账号，应用不将修改后的二进制文档直接回传。Graph `/restore` 只对个人版已知文件 ID 可用；Graph 当前授权范围无法列出完整回收站，因此未在应用内显示虚假的可恢复列表。
 
@@ -43,7 +45,7 @@ SetHashes(["sha1", "quickxorhash"], nil)
 | $select 字段 | ✅ | `graph.go:270` downloadUrl/hashes/thumbnails | 无 |
 | $expand=thumbnails | ✅ | `graph.go:272` | 无 |
 | 分页防环 | ✅ | `graph.go:306-310` seen map | 无 |
-| 可信 URL 校验 | ✅ | `graph.go:50-58` trustedGraphURL 含 sharepoint/1drv | Go 版更严格 |
+| 可信 URL 校验 | ✅ | `graph.go` 分页严格限制 graph.microsoft.com | 非 Graph 监控地址不携带 Graph Bearer |
 
 ---
 
