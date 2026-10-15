@@ -32,6 +32,19 @@ afterEach(() => {
 })
 
 describe('设置页加载', () => {
+  it('设置开关、输入框与选择器均提供可访问名称', async () => {
+    api.GetSettings.mockResolvedValue({})
+    api.GetLogPath.mockResolvedValue('D:/logs/app.log')
+    wrapper = mount(SettingsView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    for (const control of wrapper.findAll('input, [role="switch"], [role="combobox"], [role="tablist"]')) {
+      const label = control.attributes('aria-label')
+      const labelledBy = control.attributes('aria-labelledby')
+      expect(Boolean(label || labelledBy), control.html()).toBe(true)
+      if (labelledBy) expect(wrapper.find(`[id="${labelledBy}"]`).exists()).toBe(true)
+      if (['switch', 'combobox'].includes(control.attributes('role'))) expect(control.element.tagName).toBe('BUTTON')
+    }
+  })
   it('下载文件数与单文件连接数独立，并保存连接数上限', async () => {
     api.GetSettings.mockResolvedValue({ maxConcurrentDownloads: 1 })
     api.GetLogPath.mockResolvedValue('D:/logs/app.log')

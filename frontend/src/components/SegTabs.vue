@@ -1,11 +1,13 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, useId } from 'vue'
 
 const props = defineProps({
   options: { type: Array, required: true }, // [{ key, label }]
   modelValue: { type: String, required: true },
+  ariaLabel: { type: String, default: '选项' },
 })
 const emit = defineEmits(['update:modelValue'])
+const tabId = `seg-tab-${useId()}`
 
 const index = computed(() => Math.max(0, props.options.findIndex((o) => o.key === props.modelValue)))
 
@@ -30,22 +32,22 @@ function onKeydown(e, i) {
   if (next >= 0) {
     e.preventDefault()
     selectAt(next)
-    requestAnimationFrame(() => document.getElementById(`seg-tab-${props.options[next].key}`)?.focus())
+    nextTick(() => document.getElementById(`${tabId}-${props.options[next].key}`)?.focus())
   }
 }
 </script>
 
 <template>
-  <div class="seg" role="tablist" aria-label="选项" :style="{ '--seg-count': options.length, '--seg-index': index }">
+  <div class="seg" role="tablist" :aria-label="ariaLabel" :style="{ '--seg-count': options.length, '--seg-index': index }">
     <div class="seg-slider"></div>
     <button
-      v-for="o in options"
+      v-for="(o, optionIndex) in options"
       :key="o.key"
-      :id="`seg-tab-${o.key}`"
+      :id="`${tabId}-${o.key}`"
       type="button"
       role="tab"
       :aria-selected="o.key === modelValue"
-      :tabindex="o.key === modelValue ? 0 : -1"
+      :tabindex="optionIndex === index ? 0 : -1"
       :class="{ active: o.key === modelValue }"
       @click="selectAt(options.indexOf(o))"
       @keydown="onKeydown($event, options.indexOf(o))"

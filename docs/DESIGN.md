@@ -90,6 +90,10 @@ Mnemo-Go 原生支持 **深色 (Dark)** 与 **浅色 (Light)** 两套完整的�
 ## 4. 核心组件系统规范 (Component Specifications)
 
 ### 4.1 下拉选择器 (`UiSelect.vue`)
+
+键盘约束：每个实例使用独立 ID。方向键只控制当前组合框，跳过禁用项；焦点保留在触发按钮，用 `aria-activedescendant` 关联活动选项。Escape 先关闭选项浮层，不同时关闭外层弹窗。Tab 关闭浮层后继续外层焦点循环。动态更新或禁用控件时清除失效的活动选项。
+
+通用弹窗必须排除隐藏、inert、原生禁用和负 tabindex 控件。关闭底层弹窗不能把焦点抢出仍打开的顶层弹窗。设置开关使用有名称的原生按钮；高对比度模式必须保留焦点与选中状态轮廓。
 - **禁止使用原生 `<select>`**；
 - **触发器**：`30px` 紧凑高度，`1px solid var(--control-border)` 细描边与柔和背景；悬停描边加深至 `--border-focus`，展开时呈现主题色微晕环；
 - **浮层面板**：毛玻璃材质（`backdrop-filter: blur(16px)` + `--bg-elevated`），带轻微缩放入场；

@@ -428,6 +428,7 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">默认启动页面</span></div>
               <div class="sg-control">
                 <SegTabs
+                  aria-label="默认启动页面"
                   :options="tabOptions"
                   :modelValue="settings.defaultTab || 'pan'"
                   @update:modelValue="(v) => { settings.defaultTab = v; save(true) }"
@@ -440,7 +441,7 @@ async function exportLogs() {
                 <span class="sg-label">最小化到托盘</span>
               </div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="settings.closeToTray !== false" :class="{ on: settings.closeToTray !== false }" @click="toggle('closeToTray')"></button>
+                <button type="button" class="switch" role="switch" aria-label="最小化到托盘" :aria-checked="settings.closeToTray !== false" :class="{ on: settings.closeToTray !== false }" @click="toggle('closeToTray')"></button>
               </div>
             </div>
 
@@ -456,7 +457,7 @@ async function exportLogs() {
                 <button v-if="prefs.downloadSound" class="tbtn xs" @click="playTestSound">
                   <UiIcon name="play" :size="12" />试听
                 </button>
-                <button type="button" class="switch" role="switch" :aria-checked="prefs.downloadSound" :class="{ on: prefs.downloadSound }" @click="onPref('downloadSound', !prefs.downloadSound)"></button>
+                <button type="button" class="switch" role="switch" aria-label="下载完成提示音" :aria-checked="prefs.downloadSound" :class="{ on: prefs.downloadSound }" @click="onPref('downloadSound', !prefs.downloadSound)"></button>
               </div>
             </div>
           </div>
@@ -470,6 +471,7 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">默认视图</span></div>
               <div class="sg-control">
                 <SegTabs
+                  aria-label="默认视图"
                   :options="[{ key: 'list', label: '列表' }, { key: 'grid', label: '网格' }]"
                   :modelValue="prefs.viewMode"
                   @update:modelValue="(v) => onPref('viewMode', v)"
@@ -481,12 +483,14 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">默认排序</span></div>
               <div class="sg-control">
                 <UiSelect
+                  aria-label="默认排序"
                   :modelValue="prefs.defaultSortKey || 'name'"
                   :options="sortKeyOptions"
                   style="width:116px"
                   @update:modelValue="(v) => onPref('defaultSortKey', v)"
                 />
                 <SegTabs
+                  aria-label="排序方向"
                   :options="[{ key: 'asc', label: '升序' }, { key: 'desc', label: '降序' }]"
                   :modelValue="prefs.defaultSortAsc ? 'asc' : 'desc'"
                   @update:modelValue="(v) => onPref('defaultSortAsc', v === 'asc')"
@@ -497,7 +501,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">目录树悬停预览</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="prefs.hoverPreview" :class="{ on: prefs.hoverPreview }" @click="onPref('hoverPreview', !prefs.hoverPreview)"></button>
+                <button type="button" class="switch" role="switch" aria-label="目录树悬停预览" :aria-checked="prefs.hoverPreview" :class="{ on: prefs.hoverPreview }" @click="onPref('hoverPreview', !prefs.hoverPreview)"></button>
               </div>
             </div>
           </div>
@@ -513,6 +517,7 @@ async function exportLogs() {
                 <input
                   class="input"
                   v-model="settings.downloadDir"
+                  aria-label="下载保存目录"
                   :placeholder="effectiveDownloadDir || '系统默认下载目录'"
                   :title="downloadDirError || effectiveDownloadDir"
                   @blur="onInputCommit"
@@ -534,6 +539,7 @@ async function exportLogs() {
                   min="1"
                   max="8"
                   v-model.number="settings.maxConcurrentDownloads"
+                  aria-label="最大并发下载数"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
                 />
@@ -551,6 +557,7 @@ async function exportLogs() {
                   type="number"
                   min="0"
                   v-model.number="settings.maxDownloadSpeed"
+                  aria-label="下载限速（KB/s，0 为不限速）"
                   placeholder="0"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
@@ -585,6 +592,7 @@ async function exportLogs() {
                   type="number"
                   min="0"
                   v-model.number="settings.maxUploadSpeed"
+                  aria-label="上传限速（KB/s，0 为不限速）"
                   placeholder="0"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
@@ -606,6 +614,7 @@ async function exportLogs() {
                 <input
                   class="input"
                   v-model="settings.proxy"
+                  aria-label="代理服务器"
                   placeholder="http://127.0.0.1:7890"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
@@ -625,6 +634,7 @@ async function exportLogs() {
                   min="1"
                   max="16"
                   v-model.number="settings.maxDownloadConnections"
+                  aria-label="单文件下载连接数"
                   @blur="onInputCommit"
                   @keydown.enter="onInputCommit"
                 />
@@ -634,7 +644,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">保留传输记录</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="settings.keepTasks" :class="{ on: settings.keepTasks }" @click="toggle('keepTasks')"></button>
+                <button type="button" class="switch" role="switch" aria-label="保留传输记录" :aria-checked="settings.keepTasks" :class="{ on: settings.keepTasks }" @click="toggle('keepTasks')"></button>
               </div>
             </div>
           </div>
@@ -647,7 +657,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">断点续播</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="settings.playbackResume" :class="{ on: settings.playbackResume }" @click="toggle('playbackResume')"></button>
+                <button type="button" class="switch" role="switch" aria-label="断点续播" :aria-checked="settings.playbackResume" :class="{ on: settings.playbackResume }" @click="toggle('playbackResume')"></button>
               </div>
             </div>
 
@@ -660,6 +670,8 @@ async function exportLogs() {
                   min="0"
                   max="200"
                   :value="prefs.defaultVolume"
+                  aria-label="默认播放音量"
+                  :aria-valuetext="prefs.defaultVolume + '%'"
                   @input="(e) => onPref('defaultVolume', Number(e.target.value))"
                 />
                 <span class="sg-value sg-value-num">{{ prefs.defaultVolume }}%</span>
@@ -670,6 +682,7 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">默认播放倍速</span></div>
               <div class="sg-control">
                 <UiSelect
+                  aria-label="默认播放倍速"
                   :modelValue="prefs.defaultSpeed"
                   :options="speedOptions"
                   style="width:116px"
@@ -682,6 +695,7 @@ async function exportLogs() {
               <div class="sg-text"><span class="sg-label">快进 / 快退步长</span></div>
               <div class="sg-control">
                 <UiSelect
+                  aria-label="快进或快退步长"
                   :modelValue="prefs.seekStep || 10"
                   :options="seekStepOptions"
                   style="width:116px"
@@ -693,14 +707,14 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">播放完自动收起</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="prefs.autoCloseOnEnd" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></button>
+                <button type="button" class="switch" role="switch" aria-label="播放完自动收起" :aria-checked="prefs.autoCloseOnEnd" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></button>
               </div>
             </div>
 
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">自动挂载同名字幕</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="prefs.autoLoadSubtitles" :class="{ on: prefs.autoLoadSubtitles }" @click="onPref('autoLoadSubtitles', !prefs.autoLoadSubtitles)"></button>
+                <button type="button" class="switch" role="switch" aria-label="自动挂载同名字幕" :aria-checked="prefs.autoLoadSubtitles" :class="{ on: prefs.autoLoadSubtitles }" @click="onPref('autoLoadSubtitles', !prefs.autoLoadSubtitles)"></button>
               </div>
             </div>
           </div>
@@ -730,6 +744,7 @@ async function exportLogs() {
               </div>
               <div class="sg-control">
                 <UiSelect
+                  aria-label="日志等级"
                   :modelValue="settings.logLevel || 'info'"
                   :options="[
                     { value: 'error', label: 'Error' },
@@ -772,14 +787,14 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">自动检查更新</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="settings.autoUpdate" :class="{ on: settings.autoUpdate }" @click="toggle('autoUpdate')"></button>
+                <button type="button" class="switch" role="switch" aria-label="自动检查更新" :aria-checked="settings.autoUpdate" :class="{ on: settings.autoUpdate }" @click="toggle('autoUpdate')"></button>
               </div>
             </div>
 
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">更新前确认</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" :aria-checked="settings.confirmUpdate" :class="{ on: settings.confirmUpdate }" @click="toggle('confirmUpdate')"></button>
+                <button type="button" class="switch" role="switch" aria-label="更新前确认" :aria-checked="settings.confirmUpdate" :class="{ on: settings.confirmUpdate }" @click="toggle('confirmUpdate')"></button>
               </div>
             </div>
 

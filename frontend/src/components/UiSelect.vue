@@ -1,10 +1,8 @@
 <script setup>
 // 统一自定义下拉选择器（替代原生 <select>）。
 // props: modelValue, options: [{ value, label, icon?(UiIcon 名), img?(图片URL), disabled }], placeholder, width
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, useId, watch } from 'vue'
 import UiIcon from './UiIcon.vue'
-
-let selectSequence = 0
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
@@ -19,18 +17,33 @@ const emit = defineEmits(['update:modelValue', 'change'])
 const open = ref(false)
 const root = ref(null)
 const btn = ref(null)
+const popup = ref(null)
 const dropStyle = ref({})
 const activeIndex = ref(-1)
-const listId = `uiselect-list-${++selectSequence}`
+const listId = `uiselect-list-${useId()}`
 
 const current = computed(() => props.options.find((o) => o.value === props.modelValue) || null)
+const availableIndexes = computed(() => props.options.flatMap((option, optionIndex) => option.disabled ? [] : [optionIndex]))
+
+function initialIndex() {
+  const selected = props.options.findIndex(option => option.value === props.modelValue && !option.disabled)
+  return selected >= 0 ? selected : (availableIndexes.value[0] ?? -1)
+}
+
+function showActive() {
+  nextTick(() => {
+    if (!open.value) return
+    popup.value?.querySelectorAll('.uiselect-opt')[activeIndex.value]?.scrollIntoView?.({ block: 'nearest' })
+  })
+}
 
 function toggle() {
   if (props.disabled) return
   open.value = !open.value
   if (open.value) {
     position()
-    activeIndex.value = Math.max(0, props.options.findIndex((o) => o.value === props.modelValue))
+    activeIndex.value = initialIndex()
+    showActive()
   }
 }
 
@@ -61,18 +74,19 @@ function pick(o) {
 }
 
 function onDown(e) {
-  if (open.value && root.value && !root.value.contains(e.target) && !(e.target.closest && e.target.closest('.uiselect-drop'))) open.value = false
-}
-function focusOption() {
-  nextTick(() => document.getElementById(listId)?.querySelectorAll('.uiselect-opt')[activeIndex.value]?.focus())
+  if (open.value && !root.value?.contains(e.target) && !popup.value?.contains(e.target)) open.value = false
 }
 
 function onKey(e) {
-  if (props.disabled || (!open.value && !root.value?.contains(e.target))) return
-  const available = props.options.filter((o) => !o.disabled)
+  if (props.disabled || e.isComposing) return
+  if (e.key === 'Tab') {
+    open.value = false
+    return
+  }
   if (e.key === 'Escape') {
     if (open.value) {
       e.preventDefault()
+      e.stopPropagation()
       open.value = false
       btn.value?.focus()
     }
@@ -80,9 +94,9 @@ function onKey(e) {
   }
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault()
+    e.stopPropagation()
     if (!open.value) {
       toggle()
-      focusOption()
       return
     }
     const option = props.options[activeIndex.value]
@@ -91,35 +105,46 @@ function onKey(e) {
   }
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
   e.preventDefault()
+  e.stopPropagation()
   if (!open.value) {
     open.value = true
     position()
+    activeIndex.value = props.options.findIndex(option => option.value === props.modelValue && !option.disabled)
   }
-  const current = Math.max(0, available.findIndex((o) => o.value === props.options[activeIndex.value]?.value))
+  const available = availableIndexes.value
+  const currentIndex = available.indexOf(activeIndex.value)
   const next = e.key === 'Home' ? 0
     : e.key === 'End' ? available.length - 1
-      : e.key === 'ArrowDown' ? Math.min(available.length - 1, current + 1)
-        : Math.max(0, current - 1)
-  const target = available[next]
-  activeIndex.value = target ? props.options.findIndex((o) => o.value === target.value) : -1
-  focusOption()
+      : e.key === 'ArrowDown' ? Math.min(available.length - 1, currentIndex + 1)
+        : currentIndex < 0 ? available.length - 1 : Math.max(0, currentIndex - 1)
+  activeIndex.value = available[next] ?? -1
+  btn.value?.focus()
+  showActive()
 }
 function onBlur() { open.value = false }
+function onFocus(event) {
+  if (!root.value?.contains(event.target) && !popup.value?.contains(event.target)) open.value = false
+}
+
+watch(() => props.disabled, disabled => { if (disabled) open.value = false })
+watch(() => [props.options, props.modelValue], () => {
+  if (open.value) { activeIndex.value = initialIndex(); showActive() }
+}, { deep: true })
 
 onMounted(() => {
   window.addEventListener('mousedown', onDown, true)
-  window.addEventListener('keydown', onKey)
+  window.addEventListener('focusin', onFocus)
   window.addEventListener('blur', onBlur)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('mousedown', onDown, true)
-  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('focusin', onFocus)
   window.removeEventListener('blur', onBlur)
 })
 </script>
 
 <template>
-  <div ref="root" class="uiselect" :class="{ block }" @keydown.stop="onKey">
+  <div ref="root" class="uiselect" :class="{ block }" @keydown="onKey">
     <button
       ref="btn"
       type="button"
@@ -141,19 +166,20 @@ onBeforeUnmount(() => {
     </button>
     <teleport to="body">
       <transition name="popover-zoom">
-        <div v-if="open" :id="listId" class="uiselect-drop" :style="dropStyle" role="listbox" :aria-label="placeholder || '选项'" @keydown.stop="onKey">
+        <div v-if="open" ref="popup" :id="listId" class="uiselect-drop" :style="dropStyle" role="listbox" :aria-label="ariaLabel || placeholder || '选项'" @keydown="onKey">
           <div v-if="!options.length" class="uiselect-empty">无可选项</div>
           <button
             v-for="(o, i) in options"
             :key="o.value"
             type="button"
             class="uiselect-opt"
-            :class="{ active: o.value === modelValue, disabled: o.disabled }"
+            :class="{ active: o.value === modelValue, highlighted: i === activeIndex, disabled: o.disabled }"
             :id="`${listId}-option-${i}`"
             role="option"
             :aria-selected="o.value === modelValue"
             :aria-disabled="o.disabled || undefined"
-            :tabindex="o.disabled ? -1 : (i === activeIndex ? 0 : -1)"
+            tabindex="-1"
+            :disabled="o.disabled"
             @click="pick(o)"
           >
             <img v-if="o.img" :src="o.img" class="uiselect-ico" alt="" />
@@ -225,6 +251,7 @@ onBeforeUnmount(() => {
   from { opacity: 0; transform: translateY(4px) scale(.98); }
 }
 .uiselect-opt:hover:not(.disabled) { background: var(--bg-hover); }
+.uiselect-opt.highlighted:not(.disabled) { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 .uiselect-opt:active:not(.disabled) { transform: scale(.98); }
 .uiselect-opt.active {
   color: var(--color-primary); font-weight: 600;

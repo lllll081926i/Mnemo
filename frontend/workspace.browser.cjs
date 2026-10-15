@@ -17,6 +17,62 @@ async function assertDialogCorners(page) {
   for (const offset of offsets) assert(Math.abs(offset.top) < 1 && Math.abs(offset.right) < 1, `二级弹窗关闭键没有贴角：${JSON.stringify(offset)}`)
 }
 
+async function assertKeyboardAccessibility(page) {
+  await page.getByTitle('设置 (Alt+5)').click()
+  await page.getByRole('combobox', { name: '默认排序', exact: true }).waitFor()
+  const duplicateIds = await page.locator('[id]').evaluateAll(elements => {
+    const ids = elements.map(element => element.id)
+    return ids.filter((id, index) => ids.indexOf(id) !== index)
+  })
+  assert.deepEqual(duplicateIds, [], '页面控件不能使用重复 ID')
+  const unnamed = await page.locator('[role="switch"], input, [role="combobox"]').evaluateAll(elements => elements.filter(element => !element.getAttribute('aria-label') && !element.getAttribute('aria-labelledby')).map(element => element.outerHTML))
+  assert.deepEqual(unnamed, [], '设置控件必须有名称')
+  const checked = []
+  for (const viewport of [{ width: 1024, height: 680 }, { width: 3840, height: 2160 }]) {
+    await page.setViewportSize(viewport)
+    for (const theme of ['light', 'dark', 'oled']) {
+      for (const zoom of [1, 1.25, 1.5]) {
+        await page.evaluate(({ theme, zoom }) => {
+          document.documentElement.classList.toggle('dark', theme !== 'light')
+          document.documentElement.classList.toggle('oled', theme === 'oled')
+          document.documentElement.style.zoom = String(zoom)
+        }, { theme, zoom })
+        const select = page.getByRole('combobox', { name: '默认排序', exact: true })
+        await select.focus()
+        await select.press('Enter')
+        await page.getByRole('listbox', { name: '默认排序', exact: true }).waitFor()
+        await select.press('End')
+        assert(await select.evaluate(element => document.activeElement === element && !!document.getElementById(element.getAttribute('aria-activedescendant'))), '键盘焦点和活动选项必须保持关联')
+        await select.press('Escape')
+        await page.getByRole('listbox', { name: '默认排序', exact: true }).waitFor({ state: 'detached' })
+        checked.push({ ...viewport, theme, zoom })
+      }
+    }
+  }
+  await page.evaluate(() => { document.documentElement.style.zoom = '' })
+  await page.setViewportSize({ width: 1024, height: 680 })
+  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' })
+  const select = page.getByRole('combobox', { name: '默认排序', exact: true })
+  await select.focus()
+  assert(await select.evaluate(element => { const style = getComputedStyle(element); return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2 }), '高对比度模式必须保留可见焦点')
+  await page.getByRole('button', { name: '同步', exact: true }).click()
+  const opener = page.getByTitle('编辑', { exact: true })
+  await opener.click()
+  const dialog = page.getByRole('dialog', { name: '编辑同步任务', exact: true })
+  await dialog.waitFor()
+  const choice = dialog.getByRole('combobox').first()
+  await choice.focus()
+  await choice.press('Enter')
+  await page.getByRole('listbox').waitFor()
+  await choice.press('Escape')
+  await page.getByRole('listbox').waitFor({ state: 'detached' })
+  assert(await dialog.isVisible(), '关闭下拉框不能同时关闭弹窗')
+  await choice.press('Escape')
+  await dialog.waitFor({ state: 'detached' })
+  assert(await opener.evaluate(element => document.activeElement === element), '关闭弹窗必须恢复触发按钮焦点')
+  return { checked, forcedColors: true, reducedMotion: true }
+}
+
 async function main() {
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -57,6 +113,12 @@ async function main() {
   try {
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:5173')
     await page.locator('.fileitem').first().waitFor()
+    if (process.env.QA_ACCESSIBILITY_ONLY === '1') {
+      const accessibility = await assertKeyboardAccessibility(page)
+      assert.deepEqual(errors, [], '无障碍验收不能出现页面异常')
+      console.log(JSON.stringify({ passed: true, accessibility, errors }, null, 2))
+      return
+    }
     if (process.env.QA_DIALOG_LAYOUT_ONLY === '1') {
       const checked = []
       async function checkDialog(title) {

@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="sync-task-actions">
-          <button class="switch" role="switch" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在更新任务' : job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></button>
+          <button type="button" class="switch" role="switch" :aria-label="'自动同步：' + job.name" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在更新任务' : job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></button>
           <button class="btn-circle" :disabled="toggling.has(job.id) || (!running.has(job.id) && !accountOf(job))" :title="running.has(job.id) ? '停止同步' : '预览同步'" @click="running.has(job.id) ? cancel(job) : showPreview(job)">
             <UiIcon :name="running.has(job.id) ? 'close' : 'play'" :size="14" />
           </button>

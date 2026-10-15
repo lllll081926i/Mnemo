@@ -4,11 +4,8 @@ const modalStack = []
 let globalKeydownBound = false
 
 function handleGlobalKeydown(e) {
-  if (e.key === 'Escape' && modalStack.length > 0) {
-    const topHandler = modalStack[modalStack.length - 1]
-    if (typeof topHandler === 'function') {
-      topHandler()
-    }
+  if (e.key === 'Escape' && !e.defaultPrevented && !e.isComposing && modalStack.length > 0) {
+    modalStack[modalStack.length - 1].close()
   }
 }
 </script>
@@ -41,11 +38,12 @@ const handleClose = () => emit('close')
 function focusableElements() {
   if (!dialogEl.value) return []
   return [...dialogEl.value.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-    .filter((el) => el.offsetParent !== null || el === document.activeElement)
+    .filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[inert], [hidden], [aria-hidden="true"]') && (el.getClientRects().length > 0 || el === document.activeElement))
 }
 
 function onDialogKeydown(e) {
   if (e.key !== 'Tab') return
+  if (modalStack.at(-1)?.close !== handleClose) return
   const items = focusableElements()
   if (!items.length) {
     e.preventDefault()
@@ -54,7 +52,11 @@ function onDialogKeydown(e) {
   }
   const first = items[0]
   const last = items[items.length - 1]
-  if (e.shiftKey && document.activeElement === first) {
+  if (document.activeElement === dialogEl.value || !dialogEl.value.contains(document.activeElement)) {
+    e.preventDefault()
+    const target = e.shiftKey ? last : first
+    target.focus()
+  } else if (e.shiftKey && document.activeElement === first) {
     e.preventDefault()
     last.focus()
   } else if (!e.shiftKey && document.activeElement === last) {
@@ -78,7 +80,7 @@ function toggleWindowMaximise() {
 onMounted(() => {
   previousActiveElement = document.activeElement
   try { WindowIsMaximised().then((value) => { windowMaximized.value = !!value }).catch(() => {}) } catch { /* browser preview */ }
-  modalStack.push(handleClose)
+  modalStack.push({ close: handleClose, element: dialogEl.value })
   if (!globalKeydownBound) {
     window.addEventListener('keydown', handleGlobalKeydown)
     globalKeydownBound = true
@@ -92,14 +94,18 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  const idx = modalStack.lastIndexOf(handleClose)
+  const idx = modalStack.findIndex(entry => entry.close === handleClose)
   if (idx >= 0) modalStack.splice(idx, 1)
   if (modalStack.length === 0 && globalKeydownBound) {
     window.removeEventListener('keydown', handleGlobalKeydown)
     globalKeydownBound = false
   }
   if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-    nextTick(() => previousActiveElement?.focus?.())
+    nextTick(() => {
+      const top = modalStack.at(-1)?.element
+      if (previousActiveElement?.isConnected && (!top || top.contains(previousActiveElement))) previousActiveElement.focus()
+      else top?.focus()
+    })
   }
 })
 </script>
