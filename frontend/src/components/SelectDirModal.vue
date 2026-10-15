@@ -95,7 +95,7 @@ onBeforeUnmount(() => { ++loadSeq })
         <span>{{ error }}</span>
         <button class="btn sm" @click="load(crumbs[crumbs.length - 1].id)">重试</button>
       </div>
-      <div v-else-if="!dirs.length" class="empty" style="padding:40px">此目录下没有子文件夹</div>
+      <div v-else-if="!dirs.length" class="empty" style="padding:40px">暂无子文件夹</div>
       <div v-if="!loading && crumbs.length > 1" class="tree-node" style="color:var(--text-tertiary)" @click="goUp">
         <UiIcon name="up-level" :size="15" /><span class="tn-label">返回上级</span>
       </div>

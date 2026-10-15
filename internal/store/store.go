@@ -35,7 +35,7 @@ func Open(dir string) (*Store, error) {
 	}
 	storage := &Store{dir: dir}
 	if _, err := storage.ListOfflineTasks(); err != nil {
-		logging.Warn("离线历史迁移失败，其他存储服务继续可用", "error", err)
+		logging.Warn("offline history migration failed, other stores remain available", "error", err)
 	}
 	return storage, nil
 }

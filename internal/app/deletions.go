@@ -25,7 +25,7 @@ func (a *App) RestoreDeletionHistory(userID, driveID, fileID string) error {
 			continue
 		}
 		if record.IDKind != "driveItem" || record.ProviderType != "personal" {
-			return errors.New("该记录不能通过个人版恢复接口处理，请到官网恢复")
+			return errors.New("此项目无法直接恢复，请前往官网回收站处理")
 		}
 		if record.Status == "restored" {
 			return nil
@@ -50,7 +50,7 @@ func (a *App) OpenTrashWebsite(userID, driveID string) error {
 		return err
 	}
 	if website == "" {
-		return errors.New("当前网盘未提供官网回收站入口")
+		return errors.New("此网盘未提供官网回收站入口")
 	}
 	return a.OpenBrowser(website)
 }

@@ -362,7 +362,7 @@ func (s *Store) ReconcileOfflineTasks(userID, driveID string, remote []model.Off
 		}
 		if complete && !seen[task.ID] {
 			task.Status = "notFoundOnServer"
-			task.Message = "服务端完整列表未返回此任务，完成结果未确认；请核对目标目录"
+			task.Message = "网盘列表未返回此任务，请检查目标目录"
 		}
 		result = append(result, *task)
 	}

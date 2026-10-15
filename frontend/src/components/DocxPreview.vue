@@ -42,12 +42,12 @@ async function renderDocument() {
     }
     try {
       await renderAsync(props.bytes, content.value, content.value, options)
-      if (!content.value.querySelector('section.docx')) throw new Error('文档没有可显示的页面')
+      if (!content.value.querySelector('section.docx')) throw new Error('未能解析出可显示的文档内容')
     } catch {
       if (disposed || !content.value) return
       content.value.replaceChildren()
       await renderAsync(props.bytes, content.value, content.value, { ...options, experimental: false, renderAltChunks: false })
-      if (!content.value.querySelector('section.docx')) throw new Error('文档没有可显示的页面')
+      if (!content.value.querySelector('section.docx')) throw new Error('未能解析出可显示的文档内容')
       compatibilityMode.value = true
     }
     if (disposed) return

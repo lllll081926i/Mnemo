@@ -25,24 +25,25 @@ type UploadInfo struct {
 
 // UploadState is the mutable progress/status of an upload job.
 type UploadState struct {
-	Stage         string `json:"stage,omitempty"` // hashing | checking | uploading
-	StageProgress int    `json:"stageProgress,omitempty"`
-	DownState     string `json:"DownState"` // queued | uploading | completed | failed | stopped
-	DownTime      int64  `json:"DownTime"`
-	DownSize      int64  `json:"DownSize"`
-	DownSpeed     int64  `json:"DownSpeed"`
-	DownSpeedStr  string `json:"DownSpeedStr"`
-	DownProcess   int    `json:"DownProcess"`
-	IsStop        bool   `json:"IsStop"`
-	IsDowning     bool   `json:"IsDowning"`
-	IsCompleted   bool   `json:"IsCompleted"`
-	IsFailed      bool   `json:"IsFailed"`
-	FailedCode    int    `json:"failedCode"`
-	FailedMessage string `json:"failedMessage"`
-	AutoTry       int    `json:"AutoTry"`
-	UploadID      string `json:"upload_id"`
-	FileID        string `json:"file_id"`
-	IsBreakExist  bool   `json:"IsBreakExist"`
+	Issue         *OperationIssue `json:"issue,omitempty"`
+	Stage         string          `json:"stage,omitempty"` // hashing | checking | uploading
+	StageProgress int             `json:"stageProgress,omitempty"`
+	DownState     string          `json:"DownState"` // queued | uploading | completed | failed | stopped
+	DownTime      int64           `json:"DownTime"`
+	DownSize      int64           `json:"DownSize"`
+	DownSpeed     int64           `json:"DownSpeed"`
+	DownSpeedStr  string          `json:"DownSpeedStr"`
+	DownProcess   int             `json:"DownProcess"`
+	IsStop        bool            `json:"IsStop"`
+	IsDowning     bool            `json:"IsDowning"`
+	IsCompleted   bool            `json:"IsCompleted"`
+	IsFailed      bool            `json:"IsFailed"`
+	FailedCode    int             `json:"failedCode"`
+	FailedMessage string          `json:"failedMessage"`
+	AutoTry       int             `json:"AutoTry"`
+	UploadID      string          `json:"upload_id"`
+	FileID        string          `json:"file_id"`
+	IsBreakExist  bool            `json:"IsBreakExist"`
 }
 
 // UploadingUI is the full upload job view model (mirrors legacy IUploadingUI).
@@ -154,6 +155,7 @@ func (u *UploadingUI) IsUploadStopRequested() bool {
 
 // DownloadTask is a transfer-center download task.
 type DownloadTask struct {
+	Issue           *OperationIssue   `json:"issue,omitempty"`
 	ContentHash     string            `json:"content_hash,omitempty"`
 	ContentHashName string            `json:"content_hash_name,omitempty"`
 	Verification    string            `json:"verification,omitempty"`

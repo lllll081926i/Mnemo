@@ -52,7 +52,7 @@ async function transfer(direction, dragged = null, folder = null, moving = false
   const src = dragged || (direction === 'right' ? left : right).value?.snapshot()
   const destination = (direction === 'right' ? right : left).value?.snapshot()
   const dst = destination && { ...destination, dirId: folder?.file_id || destination.dirId, path: folder ? [...destination.path, { id: folder.file_id }] : destination.path }
-  if (!src?.account || !dst?.account || !src.files.length || dst.mode !== 'list') { emit('toast', '请选择文件，并在另一栏打开目标目录', 'warn'); return }
+  if (!src?.account || !dst?.account || !src.files.length || dst.mode !== 'list') { emit('toast', '请选择要操作的文件，并在另一栏打开目标目录', 'warn'); return }
   busy.value = true
   try {
     const result = await transferFiles(src, dst, props.providers, moving)
@@ -61,7 +61,7 @@ async function transfer(direction, dragged = null, folder = null, moving = false
       if (result.completed.length !== src.files.length) throw new Error('部分项目未完成，请检查目录后重试')
       emit('toast', moving ? '已移动到目标目录' : '已复制到目标目录', 'success')
     } else {
-      emit('toast', moving ? '已提交移动迁移，成功传输后移除源项目；可在传输页查看进度' : '已提交复制迁移，可在传输页查看进度', 'success')
+      emit('toast', moving ? '已提交跨盘移动，可在传输页查看进度' : '已提交跨盘复制，可在传输页查看进度', 'success')
     }
   } catch(e) { emit('toast', String(e), 'error') }
   finally { busy.value = false }
@@ -94,8 +94,8 @@ defineExpose({
       <UiSelect v-model="rightId" :options="options" placeholder="右侧账号" />
     </div>
     <div class="workspace-panes" :class="{dual}">
-      <div class="workspace-pane" :class="{focused:focused === 'left', 'cloud-drop-active': dragOver === 'left'}" @pointerdown.capture="focused = 'left'" @focusin="focused = 'left'" @dragover="overPane('left', $event)" @dragleave="leavePane"><PanView ref="left" :account="account" :accounts="accounts" :providers="providers" :keyboard-active="!dual || focused === 'left'" :cloud-drag-enabled="dual && !busy" :cloud-drag-active="!!cloudDrag" @cloud-drag-start="(source, event) => startDrag('left', source, event)" @cloud-drag-end="endDrag" @cloud-drop="folder => dropOnPane('left', folder)" @toast="(...args) => emit('toast', ...args)" @go="emit('go', $event)" /><div v-if="dragOver === 'left'" class="cloud-drop-hint">释放以移动</div></div>
-      <div v-if="dual" class="workspace-pane workspace-pane-enter" :class="{focused:focused === 'right', 'cloud-drop-active': dragOver === 'right'}" @pointerdown.capture="focused = 'right'" @focusin="focused = 'right'" @dragover="overPane('right', $event)" @dragleave="leavePane"><PanView ref="right" :account="rightAccount" :accounts="accounts" :providers="providers" :keyboard-active="focused === 'right'" location-key="right" :cloud-drag-enabled="dual && !busy" :cloud-drag-active="!!cloudDrag" @cloud-drag-start="(source, event) => startDrag('right', source, event)" @cloud-drag-end="endDrag" @cloud-drop="folder => dropOnPane('right', folder)" @toast="(...args) => emit('toast', ...args)" @go="emit('go', $event)" /><div v-if="dragOver === 'right'" class="cloud-drop-hint">释放以移动</div></div>
+      <div class="workspace-pane" :class="{focused:focused === 'left', 'cloud-drop-active': dragOver === 'left'}" @pointerdown.capture="focused = 'left'" @focusin="focused = 'left'" @dragover="overPane('left', $event)" @dragleave="leavePane"><PanView ref="left" :account="account" :accounts="accounts" :providers="providers" :keyboard-active="!dual || focused === 'left'" :cloud-drag-enabled="dual && !busy" :cloud-drag-active="!!cloudDrag" @cloud-drag-start="(source, event) => startDrag('left', source, event)" @cloud-drag-end="endDrag" @cloud-drop="folder => dropOnPane('left', folder)" @toast="(...args) => emit('toast', ...args)" @go="emit('go', $event)" /><div v-if="dragOver === 'left'" class="cloud-drop-hint">松开以移动</div></div>
+      <div v-if="dual" class="workspace-pane workspace-pane-enter" :class="{focused:focused === 'right', 'cloud-drop-active': dragOver === 'right'}" @pointerdown.capture="focused = 'right'" @focusin="focused = 'right'" @dragover="overPane('right', $event)" @dragleave="leavePane"><PanView ref="right" :account="rightAccount" :accounts="accounts" :providers="providers" :keyboard-active="focused === 'right'" location-key="right" :cloud-drag-enabled="dual && !busy" :cloud-drag-active="!!cloudDrag" @cloud-drag-start="(source, event) => startDrag('right', source, event)" @cloud-drag-end="endDrag" @cloud-drop="folder => dropOnPane('right', folder)" @toast="(...args) => emit('toast', ...args)" @go="emit('go', $event)" /><div v-if="dragOver === 'right'" class="cloud-drop-hint">松开以移动</div></div>
     </div>
   </div>
 </template>

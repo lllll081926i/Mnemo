@@ -142,9 +142,9 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 		}
 		out.TempAvailable = available
 		if available < 64*1024*1024 || uint64(out.TempBytes) > available-64*1024*1024 {
-			return nil, fmt.Errorf("本机临时盘空间不足，至少需要容纳最大的单个文件及安全余量")
+			return nil, fmt.Errorf("本地临时磁盘空间不足")
 		}
-		out.Warnings = append(out.Warnings, "无法直接流式上传时使用系统临时目录逐文件中转；文件在任务结束时清理，容量执行前再次检查")
+		out.Warnings = append(out.Warnings, "迁移将使用本地临时磁盘逐文件中转，任务完成后自动清理临时文件")
 	} else {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func (a *App) VerifyMigration(id string) ([]MigrationVerification, error) {
 			continue
 		}
 		if job.Status == "running" || job.Status == "pending" {
-			return nil, fmt.Errorf("请等待迁移结束后校验")
+			return nil, fmt.Errorf("请等待迁移完成后再校验")
 		}
 		out := []MigrationVerification{}
 		for _, item := range job.Items {
@@ -184,9 +184,9 @@ func (a *App) VerifyMigration(id string) ([]MigrationVerification, error) {
 			if item.Status != "completed" || item.IsDir {
 				continue
 			}
-			result := MigrationVerification{ID: item.ID, Status: "unverified", Detail: "无法唯一确定目标文件"}
+			result := MigrationVerification{ID: item.ID, Status: "unverified", Detail: "未找到目标文件"}
 			if item.TargetID == "" {
-				result.Detail = "上传接口未返回目标 ID，无法可靠校验"
+				result.Detail = "网盘未返回目标文件标识，无法校验"
 				out = append(out, result)
 				continue
 			}
@@ -197,12 +197,12 @@ func (a *App) VerifyMigration(id string) ([]MigrationVerification, error) {
 			}
 			if target.IsDir || target.Size != item.Size {
 				result.Status = "mismatch"
-				result.Detail = "目标类型或大小与迁移记录不同"
+				result.Detail = "文件类型或大小与迁移记录不符"
 				out = append(out, result)
 				continue
 			}
 			result.Status = "size"
-			result.Detail = "目标大小一致；未比较内容哈希"
+			result.Detail = "文件大小一致（未比对哈希）"
 			if recorded := strings.SplitN(item.SourceHash, ":", 2); item.SourceRecorded && len(recorded) == 2 && recorded[0] != "" && recorded[1] != "" {
 				targetHash := target.ContentHash
 				if !strings.EqualFold(target.ContentHashName, recorded[0]) || targetHash == "" {

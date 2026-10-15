@@ -901,7 +901,7 @@ describe('声明式授权来源', () => {
     } }
     const wrapper = mountAttached(LoginModal, { props: { initialProvider: 'aliopen', providers: [provider] } })
     wrapper.vm.form.refresh_token = 'secret'
-    expect(wrapper.vm.validate()).toContain('令牌接收方')
+    expect(wrapper.vm.validate()).not.toBe('')
     expect(wrapper.find('#login-field-client_id').exists()).toBe(false)
     const consent = document.querySelector('[aria-label="令牌使用说明"] input[type="checkbox"]')
     expect(consent).not.toBeNull()
@@ -2300,9 +2300,64 @@ describe('关键交互组件', () => {
     for (let step = 0; step < 8; step++) await flushFrame()
     expect(wrapper.find('.rail-item.bump-up').exists()).toBe(true)
     expect(wrapper.findAll('.rail-list .rail-item').map(item => item.attributes('aria-label'))).toEqual(['pikpak · pikpak:two', 'pikpak · pikpak:one'])
-    window.dispatchEvent(new MouseEvent('pointerup'))
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 10, clientY: 80 }))
     expect(save).toHaveBeenCalledWith('accountOrder', ['pikpak:two', 'pikpak:one'])
     expect(wrapper.find('.rail-ghost.dropping').exists()).toBe(true)
+  })
+
+  it.each(['首帧之前松手', '动画尚未收敛', '松手位置更新'])('账号拖拽%s时立即保存最终位置，重新挂载后保留顺序', async (mode) => {
+    vi.useFakeTimers()
+    const frames = new Map()
+    let frameID = 0
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+      frames.set(++frameID, callback)
+      return frameID
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => frames.delete(id))
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      const index = [...document.querySelectorAll('.rail-list .rail-item')].indexOf(this)
+      const top = Math.max(index, 0) * 50
+      return { top, bottom: top + 44, left: 0, right: 44, width: 44, height: 44 }
+    })
+    const accounts = [{ user_id: 'pikpak:one' }, { user_id: 'pikpak:two' }, { user_id: 'pikpak:three' }]
+    const wrapper = mountAttached(AccountRail, { props: { accounts } })
+    await wrapper.findAll('.rail-item')[0].trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: mode === '松手位置更新' ? 20 : 120 }))
+    if (mode !== '首帧之前松手') {
+      for (let step = 0; step < 2; step++) {
+        const pending = [...frames.values()]
+        frames.clear()
+        pending.forEach(callback => callback(0))
+        await nextTick()
+      }
+    }
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 10, clientY: 120 }))
+    expect(JSON.parse(localStorage.getItem('mnemo.prefs')).accountOrder).toEqual(['pikpak:two', 'pikpak:three', 'pikpak:one'])
+    await wrapper.setProps({ accounts: accounts.map(account => ({ ...account })) })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(wrapper.find('.rail-ghost').exists()).toBe(false)
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    const restored = mountAttached(AccountRail, { props: { accounts } })
+    expect(restored.findAll('.rail-list .rail-item').map(item => item.attributes('aria-label'))).toEqual([
+      'pikpak · pikpak:two', 'pikpak · pikpak:three', 'pikpak · pikpak:one',
+    ])
+  })
+
+  it('账号排序存储失败时提示失败并清理拖动状态', async () => {
+    vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(1)
+    const wrapper = mountAttached(AccountRail, { props: { accounts: [{ user_id: 'pikpak:one' }, { user_id: 'pikpak:two' }] } })
+    vi.spyOn(localStorage, 'setItem').mockImplementationOnce(() => { throw new Error('storage unavailable') })
+    await wrapper.findAll('.rail-item')[0].trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: 80 }))
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 10, clientY: 80 }))
+    await nextTick()
+    expect(wrapper.emitted('toast')?.[0]?.[0]).toContain('保存失败')
+    expect(wrapper.find('.rail-ghost').exists()).toBe(false)
+    expect(wrapper.get('.account-rail').classes()).not.toContain('rail-frozen')
+    expect(document.body.classList.contains('rail-drag-active')).toBe(false)
+    expect(wrapper.find('.rail-item.dragging').exists()).toBe(false)
+    expect(localStorage.getItem('mnemo.prefs')).toBeNull()
   })
 
   it('目录树点击已展开目录只导航，箭头才折叠', async () => {

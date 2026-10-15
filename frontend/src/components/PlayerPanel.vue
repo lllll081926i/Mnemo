@@ -276,7 +276,7 @@ async function loadPlaybackSource(preview, resumeAt, autoplay, parentSeq) {
     return
   }
   if (UNSUPPORTED_WEB_CONTAINERS.has(streamType.value)) {
-    throw new Error(`网页播放器不支持 ${streamType.value.toUpperCase()} 容器，请下载后使用本地播放器打开`)
+    throw new Error(`暂不支持在线播放 ${streamType.value.toUpperCase()} 格式，请下载后使用本地播放器查看`)
   }
   await loadNativeSource(v, url, loadSeq)
 }
@@ -293,7 +293,7 @@ async function loadMPEGTS(v, url, loadSeq, preview) {
   const mod = await import('mpegts.js')
   if (unmounted || loadSeq !== sourceSeq || videoEl.value !== v) return
   const mpegts = mod.default || mod
-  if (!mpegts.isSupported()) throw new Error('当前系统 WebView 不支持 MPEG-TS 播放')
+  if (!mpegts.isSupported()) throw new Error('当前系统组件不支持 MPEG-TS 播放')
   const player = mpegts.createPlayer({
     type: 'mpegts', url, isLive: false,
     duration: Math.max(0, Number(preview?.duration) || 0) * 1000,
@@ -321,7 +321,7 @@ async function loadHLS(v, url, loadSeq) {
   }
   const Hls = await getHlsConstructor()
   if (unmounted || loadSeq !== sourceSeq) return
-  if (!Hls || !Hls.isSupported()) throw new Error('当前系统 WebView 不支持 HLS 播放')
+  if (!Hls || !Hls.isSupported()) throw new Error('当前系统组件不支持 HLS 播放')
   const player = new Hls({
     enableWorker: true,
     lowLatencyMode: false,
@@ -341,7 +341,7 @@ async function loadHLS(v, url, loadSeq) {
 }
 
 async function loadDASH(v, url, loadSeq, retrying = false) {
-  if (!window.MediaSource) throw new Error('当前系统 WebView 不支持 DASH 播放')
+  if (!window.MediaSource) throw new Error('当前系统组件不支持 DASH 播放')
   const dashjs = await getDashConstructor()
   if (unmounted || loadSeq !== sourceSeq) return
   const player = dashjs.MediaPlayer().create()
@@ -572,7 +572,7 @@ function onEnded() {
 function onError() {
   if (loading.value || suppressVideoErrors || hlsPlayer || dashPlayer || tsPlayer) return
   const code = videoEl.value && videoEl.value.error && videoEl.value.error.code
-  error.value = code === 4 ? '当前网页播放器不支持此视频的容器或编解码' : '视频加载失败，请检查网络或重新获取播放地址'
+  error.value = code === 4 ? '当前环境不支持播放该格式视频，请下载后查看' : '视频加载失败，请检查网络或重新播放'
 }
 function onVolumeChange() {
   const v = videoEl.value
@@ -799,7 +799,7 @@ async function togglePip() {
     if (document.pictureInPictureElement) await document.exitPictureInPicture()
     else if (document.pictureInPictureEnabled) await v.requestPictureInPicture()
     else if (typeof v.webkitSetPresentationMode === 'function') v.webkitSetPresentationMode('picture-in-picture')
-    else throw new Error('当前系统 WebView 不支持画中画')
+    else throw new Error('当前系统不支持画中画')
   } catch (e) {
     emit('toast', '画中画不可用: ' + String(e), 'error')
   }

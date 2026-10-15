@@ -87,8 +87,8 @@ onBeforeUnmount(() => {
       <div v-if="isDragging" class="drag-overlay">
         <div class="drag-box">
           <UiIcon name="upload" :size="36" class="drag-icon" />
-          <span class="drag-title">松开鼠标上传文件到当前目录</span>
-          <span class="drag-sub">支持直接拖拽单个/多个文件或文件夹</span>
+          <span class="drag-title">松开鼠标上传到当前目录</span>
+          <span class="drag-sub">支持拖拽文件或文件夹</span>
         </div>
       </div>
     </transition>

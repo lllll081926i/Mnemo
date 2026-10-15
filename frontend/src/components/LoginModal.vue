@@ -100,7 +100,7 @@ function handlePikPakRateLimit(error) {
 	const match = text.match(/(?:等待|wait(?:ing)?(?:\s+for)?|retry\s+after)\s*(\d+)\s*(?:秒|second)?/i)
   const riskBlocked = /access[ _-]*prohibited|risk[ _-]*control/i.test(text)
   startPikPakCooldown(match ? Number(match[1]) : (riskBlocked ? 60 : 30))
-  errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
+  errorText.value = `PikPak 登录请求过于频繁，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
   return true
 }
 const errorText = ref('')
@@ -634,10 +634,10 @@ async function sendPan189Sms() {
     if (image) {
       pan189Captcha.value = image
       form.value.validate_code = ''
-      errorText.value = '请填写图形验证码，再点击获取短信验证码'
+      errorText.value = '请输入图形验证码后重新获取短信验证码'
     } else {
       startSmsCountdown()
-      errorText.value = '短信验证码已发送，请填写后登录'
+      errorText.value = '短信验证码已发送'
     }
   } catch (e) {
     if (!loginModalDisposed && requestVersion === smsContextVersion && providerId.value === attemptProvider) errorText.value = friendlyLoginError(e, '发送短信验证码')
@@ -673,7 +673,7 @@ function validate() {
     for (const key of declaredMethod.value.requiredKeys || []) {
       if (!value(key)) return `请填写${fields.value.find(field => field.key === key)?.label || key}`
     }
-    if (declaredMethod.value.consent && form.value.relay_consent !== 'true') return '请先确认令牌接收方与第三方中转说明'
+    if (declaredMethod.value.consent && form.value.relay_consent !== 'true') return '请勾选同意令牌接收方说明'
   }
   if (providerId.value === 'lanzou' && (!value('username') || !value('password'))) {
     return '请填写蓝奏云账号和密码'
@@ -749,7 +749,7 @@ async function submit() {
       if (loginModalDisposed || providerId.value !== attemptProvider || captchaUrl.value) return
   }
     if (attemptProvider === 'pikpak' && pikpakCooldownSeconds.value > 0) {
-    errorText.value = `PikPak 暂时限制了登录请求，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
+    errorText.value = `PikPak 登录请求过于频繁，请等待 ${pikpakCooldownSeconds.value} 秒后再试`
     return
   }
   const err = validate()
@@ -856,7 +856,7 @@ async function submit() {
             <form v-if="provider" class="login-form" @submit.prevent="submit">
               <div class="login-provider-heading">
                 <span class="login-provider-logo"><img :src="providerIconUrl(provider.Meta)" alt="" /></span>
-                <div class="login-provider-intro"><strong>{{ provider.Meta.label }}</strong><span>{{ isOAuth ? '通过浏览器安全授权' : (isMounted ? '配置云端存储连接' : '填写账号信息以继续') }}</span></div>
+                <div class="login-provider-intro"><strong>{{ provider.Meta.label }}</strong><span>{{ isOAuth ? '通过浏览器授权登录' : (isMounted ? '配置存储连接信息' : '填写账号信息以继续') }}</span></div>
               </div>
               <div class="login-form-content" :key="providerId">
                 <!-- 挂载存储（WebDAV / S3） -->
@@ -922,7 +922,7 @@ async function submit() {
                       <input v-else :id="'login-field-' + f.key" class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />
                       <div v-if="providerId === 'pan189' && f.key === 'validate_code' && pan189Captcha" class="captcha-image-row">
                         <img :src="pan189Captcha" alt="图形验证码" />
-                        <span>请输入图片中的字符</span>
+                        <span>输入图形中的字符</span>
                       </div>
                       <div v-if="providerId === 'guangya' && f.key === 'sms_code' && !hasRefreshToken" class="field-action-row">
                         <button class="btn sm" :disabled="smsBusy || smsCountdown > 0" type="button" @click="sendSms">{{ smsBusy ? '发送中…' : (smsCountdown > 0 ? smsCountdown + ' 秒后重发' : '获取验证码') }}</button>
@@ -938,7 +938,7 @@ async function submit() {
                       </div>
                     </div>
                   </div>
-                  <div v-else class="login-empty-state">该网盘无需填写表单，直接点击登录。</div>
+                  <div v-else class="login-empty-state">无需配置额外参数，点击下方按钮直接登录。</div>
                 </template>
 
                 <!-- 网盘专属帮助链接 -->
@@ -950,7 +950,7 @@ async function submit() {
                   <div class="captcha-head">
                     <div>
                       <strong>请完成迅雷官方安全验证</strong>
-                      <p>{{ thunderOpening ? '正在打开验证页面…' : (thunderVerification.purpose === 'sms' ? '完成安全验证后将发送短信验证码，收到后在登录页填写。' : '完成滑块或短信验证后将继续登录，不需要填写 Token 或签名。') }}</p>
+                      <p>{{ thunderOpening ? '正在打开验证页面…' : (thunderVerification.purpose === 'sms' ? '完成验证后将发送短信验证码，收到后请在页面中输入' : '完成验证后将继续登录') }}</p>
                     </div>
                     <button v-if="thunderNativeWindow" class="btn sm" type="button" :disabled="busy || thunderOpening" @click="openThunderVerification">打开验证窗口</button>
                   </div>
@@ -965,7 +965,7 @@ async function submit() {
                   <div class="captcha-head">
                     <div>
                       <strong>{{ captchaNativeWindow ? '请在独立窗口中完成安全验证' : '请完成安全验证' }}</strong>
-                      <p>{{ captchaFrameReady ? '验证完成后将自动继续登录。' : '正在加载验证页面…' }}</p>
+                      <p>{{ captchaFrameReady ? '验证完成后将自动继续登录' : '正在加载验证页面…' }}</p>
                     </div>
                     <button class="btn sm" type="button" :disabled="captchaSubmitting || pikpakCooldownSeconds > 0" @click="reloadCaptcha">重新加载</button>
                     <button v-if="captchaNativeWindow" class="btn sm" type="button" :disabled="captchaOpening || busy" @click="openCaptchaWindow">打开验证窗口</button>
@@ -988,7 +988,7 @@ async function submit() {
             </form>
   </Modal>
   <Modal v-if="thunderVerification && !thunderNativeWindow && !thunderOpening" title="迅雷官方安全验证" width="480px" dialog-class="login-verification" mask-class="verification-mask" :window-controls="false" @close="resetThunderVerification">
-    <p class="verification-hint">{{ thunderVerification.purpose === 'sms' ? '完成安全验证后发送短信验证码。' : '完成安全验证后继续登录。' }}</p>
+    <p class="verification-hint">{{ thunderVerification.purpose === 'sms' ? '请完成安全验证以发送验证码' : '请完成安全验证以继续登录' }}</p>
     <iframe class="captcha-frame" :src="thunderVerification.url" title="迅雷官方安全验证" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
     <template #actions>
       <button class="btn" type="button" :disabled="busy" @click="resetThunderVerification">取消验证</button>
@@ -996,7 +996,7 @@ async function submit() {
     </template>
   </Modal>
   <Modal v-if="captchaUrl && !captchaNativeWindow && !captchaOpening" title="PikPak 安全验证" width="480px" dialog-class="login-verification" mask-class="verification-mask" :window-controls="false" @close="resetCaptcha(true)">
-    <p class="verification-hint">{{ captchaFrameReady ? '验证完成后将自动继续登录。' : '正在加载验证页面…' }}</p>
+    <p class="verification-hint">{{ captchaFrameReady ? '验证完成后将自动继续登录' : '正在加载验证页面…' }}</p>
     <iframe class="captcha-frame" :src="captchaUrl" title="PikPak 安全验证" referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write" @load="captchaFrameReady = true"></iframe>
     <template #actions>
       <button class="btn" type="button" :disabled="captchaSubmitting || pikpakCooldownSeconds > 0" @click="reloadCaptcha">重新加载</button>

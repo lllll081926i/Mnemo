@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,6 +41,13 @@ func TestDownloadFailureLogsConcreteErrorWithoutCredentials(t *testing.T) {
 	if task.Status != "failed" || !strings.Contains(task.Error, "probe http 404") {
 		t.Fatalf("下载具体错误丢失: %+v", task)
 	}
+	if task.Issue == nil || task.Issue.Code != "REMOTE_NOT_FOUND" {
+		t.Fatalf("下载结构化失败原因丢失: %+v", task.Issue)
+	}
+	stored, loadErr := st.ListDownloadTasks()
+	if loadErr != nil || len(stored) != 1 || stored[0].Issue == nil || stored[0].Issue.Code != "REMOTE_NOT_FOUND" {
+		t.Fatalf("下载诊断未保存: %+v %v", stored, loadErr)
+	}
 	logging.Close()
 	content, err := os.ReadFile(logPath)
 	if err != nil {
@@ -53,5 +61,37 @@ func TestDownloadFailureLogsConcreteErrorWithoutCredentials(t *testing.T) {
 	}
 	if strings.Contains(output, "private-signature") {
 		t.Fatal("下载日志泄露直链签名")
+	}
+}
+
+func TestFailurePathContainingCanceledIsNotUserPause(testContext *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Length", "5")
+		if request.Method != http.MethodHead {
+			_, _ = writer.Write([]byte("hello"))
+		}
+	}))
+	defer server.Close()
+	storage, err := store.Open(testContext.TempDir())
+	if err != nil {
+		testContext.Fatal(err)
+	}
+	manager, err := NewManager(storage, testContext.TempDir(), nil)
+	if err != nil {
+		testContext.Fatal(err)
+	}
+	defer manager.Shutdown()
+	blocked := filepath.Join(testContext.TempDir(), "canceled-parent-file")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0600); err != nil {
+		testContext.Fatal(err)
+	}
+	task := &model.DownloadTask{ID: "typed-cancel", URL: server.URL, Name: "source.bin", Status: "queued", Size: 5}
+	if err := manager.addDownloadTask(task, task.Name); err != nil {
+		testContext.Fatal(err)
+	}
+	task.LocalPath = filepath.Join(blocked, "payload.bin")
+	manager.runDownload(task)
+	if task.Status != "failed" || task.Error == "" {
+		testContext.Fatalf("路径文字不能改变失败状态：%+v", task)
 	}
 }

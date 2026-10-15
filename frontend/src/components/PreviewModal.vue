@@ -453,7 +453,7 @@ function onAudioMeta() {
 function onAudioError() {
   const el = audioEl.value
   if (!el || !el.src || el.src === window.location.href) return
-  audioError.value = '音频加载失败，请重试或下载后播放'
+  audioError.value = '音频加载失败，请重试或下载播放'
 }
 
 function switchAudio(step) {
@@ -841,7 +841,7 @@ async function loadPreview() {
   url.value = ''
   try {
     if (!['image', 'text', 'audio'].includes(kind.value)) {
-      throw new Error('此文件格式不支持在线预览，请下载后查看')
+      throw new Error('此格式不支持在线预览，请下载到本地查看')
     }
     await PinFileSnapshot(
       userID,
@@ -872,7 +872,7 @@ async function loadPreview() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
       const buf = await resp.arrayBuffer()
       if (seq !== loadSeq) return
-      if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，不支持在线预览，请下载后查看')
+      if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，请下载到本地查看')
       const decoded = decodeText(buf)
       text.value = decoded.text
       encoding.value = decoded.encoding
@@ -1404,7 +1404,7 @@ function decodeText(buf) {
     <ConfirmModal
       v-if="confirmLeaveDialog"
       title="存在未保存的修改"
-      message="文本内容已发生变更，未保存离开将丢失修改。确定要关闭吗？"
+      message="内容已修改，未保存离开将丢失改动。确定关闭？"
       ok-text="放弃修改并关闭"
       :danger="true"
       @ok="confirmLeaveDialog = false; emit('close')"

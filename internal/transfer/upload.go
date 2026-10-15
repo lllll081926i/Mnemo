@@ -94,6 +94,7 @@ func NewUploadQueue(st *store.Store, onEvent OnTaskEvent) *UploadQueue {
 				j.Upload.IsDowning = false
 				j.Upload.IsStop = true
 				j.Upload.DownState = "paused"
+				j.Upload.Issue = &model.OperationIssue{Code: "APP_RESTARTED", Message: "应用退出中断了任务，上传恢复能力取决于服务商；先核对目标目录", Action: "check_target"}
 			}
 			j.Upload.DownSpeed = 0
 			j.Upload.DownSpeedStr = ""
@@ -167,7 +168,7 @@ func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist 
 		snapshot = *current
 		q.mu.Unlock()
 		if err := q.store.SaveUploadTask(&snapshot); err != nil {
-			logging.Warn("上传任务保存失败", "job_id", snapshot.UploadID, "error", err)
+			logging.Warn("upload task persistence failed", "job_id", snapshot.UploadID, "error", err)
 		}
 		q.persistMu.Unlock()
 	}
@@ -178,6 +179,7 @@ func (q *UploadQueue) publishSnapshot(snapshot model.UploadingUI, shouldPersist 
 			Downloaded: snapshot.Upload.DownSize, Speed: snapshot.Upload.DownSpeed,
 			Progress: snapshot.Upload.DownProcess, Status: uploadStatus(snapshot.Upload),
 			UserID: snapshot.UserID, DriveID: snapshot.Info.DriveID, Error: snapshot.Upload.FailedMessage,
+			Issue:   snapshot.Upload.Issue,
 			Created: snapshot.Upload.DownTime, Updated: time.Now().Unix(),
 		}
 		q.onEvent(TaskEvent{Kind: "upload", Task: t})
@@ -594,6 +596,7 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		j.Upload.DownSpeed = 0
 		j.Upload.DownSpeedStr = ""
 		j.Upload.DownState = "uploading"
+		j.Upload.Issue = nil
 		j.Upload.Stage = "uploading"
 		j.Upload.StageProgress = 0
 		worker = *j
@@ -645,6 +648,7 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 				j.Upload.DownState = "failed"
 			}
 			j.Upload.FailedMessage = parentErr.Error()
+			j.Upload.Issue = drive.DescribeOperationError(parentErr)
 		})
 		logging.Warn("remote upload parent resolution failed", "job_id", id, "error", parentErr)
 		return
@@ -665,6 +669,7 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 			j.Upload.IsFailed = true
 			j.Upload.DownState = "failed"
 			j.Upload.FailedMessage = err.Error()
+			j.Upload.Issue = drive.DescribeOperationError(err)
 		})
 		logging.Warn("upload handler lookup failed", "job_id", id, "error", err)
 		return
@@ -695,6 +700,7 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 				j.Upload.IsFailed = true
 				j.Upload.FailedCode = 1
 				j.Upload.FailedMessage = handlerErr.Error()
+				j.Upload.Issue = drive.DescribeOperationError(handlerErr)
 				j.Upload.DownState = "failed"
 			}
 		})
@@ -723,6 +729,7 @@ func (q *UploadQueue) runUpload(userID, driveID, id string, generation uint64, c
 		j.Upload.StageProgress = 0
 		j.Upload.FailedCode = 0
 		j.Upload.FailedMessage = ""
+		j.Upload.Issue = nil
 	}) {
 		q.mu.Lock()
 		completed := q.jobs[id]
@@ -748,6 +755,7 @@ func (q *UploadQueue) Cancel(id string) {
 		j.Upload.IsStop = true
 		j.Upload.IsDowning = false
 		j.Upload.DownState = "stopped"
+		j.Upload.Issue = &model.OperationIssue{Code: "USER_CANCELED", Message: "上传由用户停止，恢复前请核对目标目录", Action: "check_target"}
 		j.Upload.DownSpeed = 0
 		j.Upload.DownSpeedStr = ""
 		snapshot := *j
@@ -787,6 +795,7 @@ func (q *UploadQueue) Resume(id string) error {
 	j.Upload.IsStop = false
 	j.Upload.IsFailed = false
 	j.Upload.FailedMessage = ""
+	j.Upload.Issue = nil
 	j.Upload.DownState = "queued"
 	snapshot := *j
 	shouldPersist := q.shouldPersistLocked(snapshot)

@@ -190,6 +190,9 @@ type graphAPIError struct {
 	RetryAfter string
 }
 
+func (e *graphAPIError) HTTPStatusCode() int    { return e.StatusCode }
+func (e *graphAPIError) HTTPRetryAfter() string { return e.RetryAfter }
+
 func (e *graphAPIError) Error() string {
 	if e == nil {
 		return "onedrive: request failed"

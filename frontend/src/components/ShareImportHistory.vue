@@ -40,7 +40,7 @@ async function load() {
   const entries = new Map(receipts.value.map(receipt => [keyOf(receipt), receipt]))
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
-      loadError.value = '部分转存回执加载失败，已保留原记录；可重新加载'
+      loadError.value = '部分转存记录加载失败，已保留原记录，可重新加载'
       return
     }
     const scope = scopes[index]
@@ -84,15 +84,15 @@ onBeforeUnmount(() => { ++sequence; offs.forEach(off => off?.()) })
 
 <template>
   <details v-if="visible.length || loadError" class="share-import-history" open>
-    <summary>本机转存回执 · {{ visible.length }} 批</summary>
-    <p class="hint">仅记录本机提交，不代表完整云端历史。未知结果不会自动重传；目标目录可能仍在处理。</p>
+    <summary>本机转存记录 · {{ visible.length }} 批</summary>
+    <p class="hint">仅记录本机提交的任务，不代表完整云端历史。未完成任务不会自动重试；目标网盘可能仍在处理中。</p>
     <p v-if="loadError" role="alert">{{ loadError }} <button class="tbtn" :disabled="loading" @click="load">重新加载</button></p>
     <div v-for="receipt in visible" :key="keyOf(receipt)" class="share-record">
       <div class="share-record-main">
         <strong>{{ accountName(accounts.find(account => account.user_id === receipt.accountId)) }} · {{ receipt.items?.length || 0 }} 项</strong>
         <p role="status">{{ statusOf(receipt) }}</p>
         <p v-if="receipt.message" class="hint">{{ receipt.message }}</p>
-        <p v-if="!receipt.historySaved" role="alert">最终回执未保存，请先保留此窗口并核对目标目录。</p>
+        <p v-if="!receipt.historySaved" role="alert">最终回执未保存，请检查目标目录文件。</p>
       </div>
       <div class="share-record-actions">
         <button class="tbtn" :disabled="checking.has(keyOf(receipt))" @click="check(receipt)">核对状态</button>

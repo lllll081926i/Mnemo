@@ -169,7 +169,7 @@ async function saveImport() {
     lastImportReceipt.value = saved
     const completed = items.every(item => item.status === 'completed')
     const uncertain = items.some(item => !['completed', 'submitted'].includes(item.status)) || !saved.historySaved
-    emit('toast', saved.message || (completed ? `已确认转存 ${items.length} 个项目` : `已提交转存 ${items.length} 个项目，等待服务端确认`), uncertain ? 'warn' : 'success')
+    emit('toast', saved.message || (completed ? `已确认转存 ${items.length} 个项目` : `已提交转存 ${items.length} 个项目，等待网盘处理`), uncertain ? 'warn' : 'success')
     importedLocation.value = { userId: importTarget.value.user_id, dirId: importDir.value.id, name: importDir.value.name }
     importOpen.value = false
     importDirPick.value = false
@@ -332,8 +332,8 @@ function askCancel(h, idx) {
   if (!canCancel(h) || isCancelling(h, idx)) return
   confirmDialog.value = {
     title: '取消分享',
-    message: '取消后，分享链接会立即失效。',
-    okText: '取消分享',
+    message: '取消分享后，链接将立即失效，其他人将无法访问。确定取消？',
+    okText: '确认取消',
     danger: true,
     onOk: () => cancelRemote(h, idx),
   }
@@ -431,12 +431,12 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <div class="share-empty-icon"><UiIcon name="link" :size="28" /></div>
           <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有分享记录' }}</span>
           <template v-if="!history.length">
-            <span class="wes-desc">在「网盘」页选中文件并创建分享后，可在这里查看链接、复制提取码和管理分享。</span>
-            <span class="wes-desc">收到别人的分享链接？可以直接导入到支持的网盘账号。</span>
+            <span class="wes-desc">在网盘中选中文件创建分享后，可在此查看链接、提取码及管理分享。</span>
+            <span class="wes-desc">收到分享链接时，也可直接转存到支持的网盘。</span>
             <button class="btn" @click="openImport"><UiIcon name="download" :size="14" />导入分享</button>
           </template>
           <template v-else>
-            <span class="wes-desc">试试其他关键词，或清除筛选查看全部记录。</span>
+            <span class="wes-desc">未找到相关记录，可尝试更换关键词或清除筛选。</span>
             <button class="btn" @click="kwRaw = ''; kw = ''; filterProvider = ''; filterAccount = ''">清除筛选</button>
           </template>
         </div>
@@ -460,7 +460,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
                 <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
               </div>
               <div class="share-record-side">
-				<span class="sg-desc">{{ h.remote_status === 'active' ? '创建时已确认，后续状态未复核' : '本地记录 · 远端状态未复核' }}</span>
+				<span class="sg-desc">{{ h.remote_status === 'active' ? '已创建' : '本地记录' }}</span>
                 <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
                 <div class="share-record-actions">
                   <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
@@ -495,7 +495,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
     <div v-if="!accounts.some(a => capsOf(a, providers).importShare)" class="workspace-empty-state">
       <UiIcon name="cloud" :size="32" />
       <strong>请先添加支持分享导入的网盘账号</strong>
-      <p>通过左侧「添加网盘」登录账号后，再来粘贴分享链接。导入能力取决于网盘支持情况。</p>
+      <p>请先在左侧登录支持该网盘的账号，再粘贴分享链接。</p>
     </div>
     <template v-else-if="importStep === 'form'">
       <div class="field">
@@ -505,8 +505,8 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       <div class="field">
         <label>分享链接</label>
         <textarea v-model="importForm.url" class="input" placeholder="粘贴链接或分享文案" :disabled="importBusy" rows="3" autofocus></textarea>
-        <span class="hint" v-if="detectedShare.provider">已识别 {{ providers.find(p => p.ID === detectedShare.provider)?.Meta?.label || detectedShare.provider }}，仅显示兼容账号</span>
-        <span v-if="!importAccounts.length" class="hint">没有兼容账号，请添加对应网盘，或更换分享链接</span>
+        <span class="hint" v-if="detectedShare.provider">已识别为 {{ providers.find(p => p.ID === detectedShare.provider)?.Meta?.label || detectedShare.provider }} 分享，仅列出兼容账号</span>
+        <span v-if="!importAccounts.length" class="hint">未登录该网盘账号，请先添加账号后再试</span>
       </div>
       <div class="field">
         <label>提取码（可选）</label>
@@ -557,7 +557,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
 
     <SelectDirModal
       v-if="importDirPick && importTarget"
-      title="选择分享保存目录"
+      title="选择保存目录"
       :account="importTarget"
       :providers="providers"
       @close="importDirPick = false"

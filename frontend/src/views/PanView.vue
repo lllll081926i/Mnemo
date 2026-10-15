@@ -372,7 +372,7 @@ async function load(id, options = {}) {
     // 时序保护：过期响应（账号/目录已切换或有更新请求）直接丢弃
     if (seq !== loadSeq || epoch !== cacheEpoch || snapMode !== mode.value || snapUid !== uid.value || snapDid !== did.value) return
     recordAccountHealth(snapUid)
-    if (!validDirectory(list)) throw new Error('目录数据包含空白或重复的文件 ID，请刷新重试')
+    if (!validDirectory(list)) throw new Error('目录数据异常，请刷新重试')
     files.value = list
     displayedContentKey = ckey
     // 清理当前目录已不存在的缩略图错误标记，避免瞬时失败被永久记住
@@ -422,7 +422,7 @@ function requestDirectory(user, drive, id, epoch = cacheEpoch, options = {}) {
       try {
         const result = await request(user, drive, id)
         const list = result || []
-        if (!validDirectory(list)) throw new Error('目录数据包含空白或重复的文件 ID，请刷新重试')
+        if (!validDirectory(list)) throw new Error('目录数据异常，请刷新重试')
         return list
       } catch (cause) {
         if (!silent || attempt > 0 || epoch !== cacheEpoch || user !== uid.value || drive !== did.value) throw cause
@@ -926,7 +926,7 @@ function onSelectionPick(action) {
 }
 
 const selectedMoreItems = computed(() => [
-  caps.value.download && selected.value.some(file => file.isDir) && { icon: 'download', label: '下载（跳过本地同名文件夹）', action: 'download-skip' },
+  caps.value.download && selected.value.some(file => file.isDir) && { icon: 'download', label: '下载（跳过同名文件夹）', action: 'download-skip' },
   { icon: 'star', label: selected.value.every(isFav) ? '移出收藏' : '加入收藏', action: 'favorite' },
   mode.value === 'list' && { icon: 'copy', label: '复制到剪贴板', action: 'clipboard-copy' },
   mode.value === 'list' && { icon: 'move', label: '剪切到剪贴板', action: 'clipboard-cut' },
@@ -952,7 +952,7 @@ async function openFile(file) {
   if (mode.value === 'trash') { emit('toast', '回收站中的文件无法打开', 'error'); return }
   const kind = openKindOf(file, caps.value)
   if (kind === 'download') {
-    askConfirm(`“${file.name}”不支持在线预览，是否下载到本地？`, () => doDownload([file]), { okText: '下载', title: '无法预览' })
+    askConfirm(`“${file.name}”暂不支持在线预览，是否下载到本地查看？`, () => doDownload([file]), { okText: '下载', title: '暂不支持预览' })
   } else {
     try {
       const accountId = uid.value, driveId = did.value, parentId = file.parent_file_id || dirId.value
@@ -1076,7 +1076,7 @@ function onCtx(e, file) {
   }
   const list = [
     caps.value.download && { icon: 'download', label: '下载', action: 'download' },
-    caps.value.download && targets(file).some(item => item.isDir) && { icon: 'download', label: '下载（跳过本地同名文件夹）', action: 'download-skip' },
+    caps.value.download && targets(file).some(item => item.isDir) && { icon: 'download', label: '下载（跳过同名文件夹）', action: 'download-skip' },
     caps.value.createShare && { icon: 'share', label: '分享', action: 'share' },
     { icon: 'star', label: removingFavorites(file) ? '移出收藏' : '加入收藏', action: 'fav' },
     { sep: true },
@@ -1089,7 +1089,7 @@ function onCtx(e, file) {
     caps.value.rename && selected.value.length === 1 && { icon: 'pencil', label: '重命名', action: 'rename' },
     caps.value.rename && selected.value.length > 1 && { icon: 'pencil', label: `批量重命名 (${selected.value.length})`, action: 'renamemulti' },
     { sep: true },
-    caps.value.recycleBin && mode.value !== 'trash' && { icon: 'trash', label: '放回收站', danger: true, action: 'trash' },
+    caps.value.recycleBin && mode.value !== 'trash' && { icon: 'trash', label: '移入回收站', danger: true, action: 'trash' },
     caps.value.permanentDelete && { icon: 'x-circle', label: '彻底删除', danger: true, action: 'delete' },
     { sep: true },
     { icon: 'copy', label: '复制文件名', action: 'copyname' },
@@ -1120,7 +1120,7 @@ function onMenuSelect(action) {
     case 'share': openShareDialog(list); break
     case 'fav': toggleFav(file); break
     case 'rename':
-      if (list.length !== 1) { emit('toast', '重命名仅支持单个文件', 'error'); return }
+      if (list.length !== 1) { emit('toast', '单次只能重命名单个文件', 'error'); return }
       modalFile.value = file
       inputText.value = file.name
       modal.value = 'rename'
@@ -1132,11 +1132,11 @@ function onMenuSelect(action) {
     case 'move': modalFile.value = list; modal.value = 'movedir'; break
     case 'copy': modalFile.value = list; modal.value = 'copydir'; break
     case 'migrate':
-      if (!canMigrate.value) { emit('toast', '没有支持接收迁移文件的目标账号', 'error'); return }
+      if (!canMigrate.value) { emit('toast', '暂无支持接收迁移的目标网盘账号', 'error'); return }
       modalFile.value = list; migrateTarget.value = ''; migrateDir.value = 'root'; migrateDirName.value = '根目录'; migrateDirPick.value = false; modal.value = 'migrate'; break
     case 'trash': run(() => trash(uid.value, did.value, ids), '已移入回收站'); break
     case 'delete':
-      askConfirm(`彻底删除 ${list.length} 项？删除后无法还原。`, () => run(() => remove(uid.value, did.value, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
+      askConfirm(`确定彻底删除选中的 ${list.length} 项？此操作不可撤销。`, () => run(() => remove(uid.value, did.value, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
       break
     case 'restore': run(() => restore(uid.value, did.value, ids), '已还原'); break
     case 'copyname': copyText(file.name).then(() => emit('toast', '已复制文件名', 'success')); break
@@ -1200,9 +1200,9 @@ async function doShare() {
       if (url) {
         const text = password ? `${url}\n提取码: ${password}` : url
         const copied = await copyText(text)
-        emit('toast', copied ? '分享链接已复制到剪贴板' : '分享已创建，但复制到剪贴板失败', copied ? 'success' : 'warn')
+        emit('toast', copied ? '分享链接已复制到剪贴板' : '分享已创建，复制链接失败', copied ? 'success' : 'warn')
       } else {
-        emit('toast', '分享已创建，但服务端未返回可复制链接', 'warn')
+        emit('toast', '分享已创建，未获取到链接', 'warn')
       }
     }, null)) {
       modal.value = null
@@ -1220,7 +1220,7 @@ function uploadDestinationMatches(destination) {
 
 function copyToFileClipboard(moving, list = selected.value) {
   if (mode.value !== 'list' || !setFileClipboard({ ...snapshot(), label: accountName(props.account), files: list }, moving)) {
-    emit('toast', '请先选择文件；进行中的迁移剪贴板不可覆盖', 'warn')
+    emit('toast', '请选择文件；正在迁移时无法复制', 'warn')
     return
   }
   emit('toast', `已${moving ? '剪切' : '复制'} ${fileClipboard.value.files.length} 项，可切换目录或账号后粘贴`, 'success')
@@ -1233,12 +1233,12 @@ function pasteFiles(moveOverride = false) {
   const moving = source.moving || moveOverride
   const target = snapshot()
   const pending = moving ? source : clipboardPasteSource(source, target)
-  if (!pending.files.length) { emit('toast', '该目录中的项目已复制；重新复制可再次粘贴', 'info'); return }
+  if (!pending.files.length) { emit('toast', '所选文件已在当前目录中', 'info'); return }
   const problem = transferProblem(pending, target, props.providers, moving)
   if (problem) { emit('toast', problem, 'warn'); return }
   const label = `${source.label || source.account.user_id} / ${pending.files.length} 项`
   const destination = `${accountName(props.account)} / ${crumbs.value.map(part => part.name).join(' / ')}`
-  const conflict = sameSpace(source, target) ? '盘内同名项由网盘处理，部分网盘可能覆盖目标文件。' : '跨盘同名文件将重命名保留。'
+  const conflict = sameSpace(source, target) ? '同名文件将由网盘直接处理或覆盖。' : '跨盘同名文件将自动重命名保留。'
   askConfirm(`${moving ? '移动' : '复制'} ${label} 到 ${destination}？${conflict}`, async () => {
     if (clipboardBusy.value || fileClipboard.value !== source) return
     clipboardBusy.value = true
@@ -1338,7 +1338,7 @@ async function pickUploadFolder() {
   const destination = uploadDestination()
   let dir
   try { dir = await PickDirectory('选择要上传的文件夹', '') } catch { return }
-  if (dir) await enqueueUpload([dir], destination, '已加入上传队列（文件夹）')
+  if (dir) await enqueueUpload([dir], destination, '文件夹已加入上传队列')
 }
 
 async function doOffline() {
@@ -1375,7 +1375,7 @@ watch(migrateTargetAcc, (account, previous) => {
 async function doMigrate() {
   const targetAcc = props.accounts.find((a) => a.user_id === migrateTarget.value)
   if (!targetAcc) { emit('toast', '请选择目标账号', 'error'); return }
-  if (!canReceiveMigration(targetAcc)) { emit('toast', '目标账号不支持上传，无法迁移', 'error'); return }
+  if (!canReceiveMigration(targetAcc)) { emit('toast', '目标网盘不支持上传，无法迁移', 'error'); return }
   const list = modalFile.value
   if (!list || modalBusy.value) return
   modalBusy.value = true
@@ -1392,7 +1392,7 @@ async function doMigrate() {
 // ---------- 工具条分享 ----------
 function openShareDialog(list) {
   if (!caps.value.combinedShare && list.length > 1) {
-    emit('toast', '该网盘一次只能分享一个文件或文件夹', 'warn')
+    emit('toast', '此网盘不支持批量分享，请单选文件', 'warn')
     return
   }
   shareForm.value = { name: list.length === 1 ? list[0].name : `${list.length} 个文件`, expiration: defaultShareExpiration(), password: '' }
@@ -1405,7 +1405,7 @@ function openShareModal() { openShareDialog(selected.value) }
 function confirmDeleteSelected() {
   if (!selected.value.length) return
   const ids = selIds(), snapUid = uid.value, snapDid = did.value
-  askConfirm(`彻底删除 ${ids.length} 项？删除后无法还原。`, () => run(() => remove(snapUid, snapDid, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
+  askConfirm(`确定彻底删除选中的 ${ids.length} 项？此操作不可撤销。`, () => run(() => remove(snapUid, snapDid, ids), '已彻底删除'), { danger: true, title: '彻底删除' })
 }
 
 // ---------- 收藏打开 ----------
@@ -1443,7 +1443,7 @@ function onTreeCtx(e, node) {
     { icon: 'star', label: '加入收藏', action: 'fav' },
     { sep: true },
     !isRoot && caps.value.rename && { icon: 'pencil', label: '重命名', action: 'rename' },
-    !isRoot && caps.value.recycleBin && { icon: 'trash', label: '放回收站', danger: true, action: 'trash' },
+    !isRoot && caps.value.recycleBin && { icon: 'trash', label: '移入回收站', danger: true, action: 'trash' },
     { icon: 'info', label: '属性', action: 'detail' },
   ].filter(Boolean)
   menu.value = { x: e.clientX, y: e.clientY, file, items }
@@ -1597,7 +1597,7 @@ watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKe
 
 async function onDropUpload(paths) {
   if (!props.account || mode.value !== 'list' || !caps.value.upload) return
-  if (paths?.length) await enqueueUpload(paths, uploadDestination(), `已添加拖拽上传（${paths.length} 项）`)
+  if (paths?.length) await enqueueUpload(paths, uploadDestination(), `已加入上传队列（${paths.length} 项）`)
 }
 
 function openMkdirModal() {
@@ -1787,7 +1787,7 @@ onBeforeUnmount(() => {
             v-else-if="caps.trashWebUrl"
             type="button"
             class="tree-node"
-            title="当前授权接口不能列出回收站，前往网盘官网管理"
+            title="此网盘不支持客户端回收站，前往官网管理"
             @click="openTrashWebsite"
           ><span class="tn-arrow"></span><UiIcon name="trash" :size="14" /><span class="tn-label">官网回收站</span></button>
           <button v-if="caps.localDeletionHistory" type="button" class="tree-node" @click="showDeletionHistory = true"><span class="tn-arrow"></span><UiIcon name="restore" :size="14" /><span class="tn-label">本机删除记录</span></button>
@@ -1848,7 +1848,7 @@ onBeforeUnmount(() => {
                   class="search-quick"
                   style="width:220px"
                   v-model="keyword"
-                  placeholder="输入关键字进行搜索 (Enter)"
+                  placeholder="搜索文件 (Enter)"
                   @keydown.enter="goSearch"
                   @keydown="onSearchKey"
                 />
@@ -1859,16 +1859,16 @@ onBeforeUnmount(() => {
               <button v-if="caps.createFolder" class="tbtn sm" title="新建文件夹 (Ctrl+Shift+N)" @click="inputText = ''; modal = 'mkdir'"><UiIcon name="plus" :size="14" />新建</button>
               <button v-if="caps.upload" class="tbtn sm" title="上传 (Ctrl+U)" @click="uploadPickModal = true"><UiIcon name="upload" :size="14" />上传</button>
               <button v-if="fileClipboard" class="tbtn sm" :disabled="clipboardBusy || !!fileClipboard.jobId" title="粘贴到当前目录 (Ctrl/⌘+V)" @click="pasteFiles"><UiIcon name="copy" :size="14" />粘贴 {{ fileClipboard.files.length }}</button>
-              <button v-if="fileClipboard" class="tbtn icon" :disabled="clipboardBusy" title="清空应用内文件剪贴板" @click="clearFileClipboard"><UiIcon name="close" :size="14" /></button>
+              <button v-if="fileClipboard" class="tbtn icon" :disabled="clipboardBusy" title="清空剪贴板" @click="clearFileClipboard"><UiIcon name="close" :size="14" /></button>
             </div>
             <div v-if="selected.length || listShown.length" class="toppanbtn sel-mgmt">
-              <DropdownBtn :label="selected.length ? `已选 ${selected.length} 项` : rangIsSelecting ? '区间选择中' : '选择'" icon="check" :items="selectionMenuItems" :class="{ 'selection-active': selected.length || rangIsSelecting }" title="管理文件选择" @select="onSelectionPick" />
+              <DropdownBtn :label="selected.length ? `已选 ${selected.length} 项` : rangIsSelecting ? '区间选择中' : '选择'" icon="check" :items="selectionMenuItems" :class="{ 'selection-active': selected.length || rangIsSelecting }" title="选择" @select="onSelectionPick" />
             </div>
             <div class="toppanbtn" v-if="selected.length && mode !== 'trash'">
               <button v-if="caps.download" class="tbtn" @click="doDownload()"><UiIcon name="download" :size="15" />下载</button>
               <button v-if="caps.createShare" class="tbtn" title="分享 (Ctrl+Shift+S)" @click="openShareModal"><UiIcon name="share" :size="15" />分享</button>
               <button v-if="caps.recycleBin" class="tbtn danger" title="删除 (Delete)" @click="run(() => trash(uid, did, selIds()), '已移入回收站')"><UiIcon name="trash" :size="15" />删除</button>
-              <DropdownBtn label="更多" icon="more-horizontal" :items="selectedMoreItems" title="更多文件操作" @select="onSelectedMorePick" />
+              <DropdownBtn label="更多" icon="more-horizontal" :items="selectedMoreItems" title="更多" @select="onSelectedMorePick" />
             </div>
             <div class="toppanbtn" v-if="mode === 'trash' && selected.length">
               <button v-if="caps.trashRestore" class="tbtn" @click="run(() => restore(uid, did, selIds()), '已还原')"><UiIcon name="restore" :size="15" />还原</button>
@@ -1886,7 +1886,7 @@ onBeforeUnmount(() => {
 
           <div v-if="staleError" class="directory-stale" role="status" :title="staleError">
             <UiIcon name="warning" :size="14" />
-            <span>云端刷新失败，当前显示缓存内容</span>
+            <span>刷新失败，当前显示为本地缓存</span>
             <button type="button" :disabled="loading" @click="refresh">重试</button>
           </div>
 
@@ -1954,7 +1954,7 @@ onBeforeUnmount(() => {
             <div v-if="listVirtualized" aria-hidden="true" :style="{ height: listVirtualBottom + 'px' }"></div>
             <div v-if="!listShown.length" class="workspace-empty-state">
               <UiIcon :name="mode === 'trash' ? 'trash' : mode === 'search' ? 'search' : mode === 'favorite' ? 'star' : 'folder'" :size="36" style="opacity:.4" />
-              <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有匹配的文件' : mode === 'favorite' ? '暂无收藏，右键文件加入收藏' : '空目录' }}</span>
+              <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有找到匹配文件' : mode === 'favorite' ? '暂无收藏' : '空目录' }}</span>
             </div>
           </div>
 
@@ -1995,7 +1995,7 @@ onBeforeUnmount(() => {
             <div v-if="gridVirtualized" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualBottom + 'px' }"></div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">
               <UiIcon name="folder" :size="36" style="opacity:.4" />
-              <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有匹配的文件' : mode === 'favorite' ? '暂无收藏' : '空目录' }}</span>
+              <span class="wes-title">{{ mode === 'trash' ? '回收站为空' : mode === 'search' ? '没有找到匹配文件' : mode === 'favorite' ? '暂无收藏' : '空目录' }}</span>
             </div>
           </div>
         </DragDropZone>
@@ -2035,10 +2035,10 @@ onBeforeUnmount(() => {
     <Modal v-if="uploadPickModal" title="上传" width="360px" @close="uploadPickModal = false">
       <div class="uppick">
         <button class="uppick-card" @click="uploadPickModal = false; pickUploadFiles()">
-          <UiIcon name="file" :size="24" /><span class="uppick-name">上传文件</span><span class="uppick-desc">选择一个或多个文件</span>
+          <UiIcon name="file" :size="24" /><span class="uppick-name">上传文件</span><span class="uppick-desc">支持单选或多选文件</span>
         </button>
         <button class="uppick-card" @click="uploadPickModal = false; pickUploadFolder()">
-          <UiIcon name="folder" :size="24" /><span class="uppick-name">上传文件夹</span><span class="uppick-desc">选择整个文件夹</span>
+          <UiIcon name="folder" :size="24" /><span class="uppick-name">上传文件夹</span><span class="uppick-desc">上传完整文件夹内容</span>
         </button>
       </div>
     </Modal>
@@ -2047,7 +2047,7 @@ onBeforeUnmount(() => {
     <Modal v-if="modal === 'mkdir'" title="新建文件夹" @close="modal = null">
       <div class="field">
         <label>文件夹名称</label>
-        <input class="input" v-model="inputText" placeholder="输入名称" @keyup.enter="doMkdir" autofocus :disabled="modalBusy" />
+        <input class="input" v-model="inputText" placeholder="输入文件夹名称" @keyup.enter="doMkdir" autofocus :disabled="modalBusy" />
       </div>
       <template #actions>
         <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
@@ -2062,7 +2062,7 @@ onBeforeUnmount(() => {
     <Modal v-if="modal === 'rename'" title="重命名" @close="modal = null">
       <div class="field">
         <label>新名称</label>
-        <input class="input" v-model="inputText" @keyup.enter="doRename" autofocus :disabled="modalBusy" />
+        <input class="input" v-model="inputText" placeholder="输入新名称" @keyup.enter="doRename" autofocus :disabled="modalBusy" />
       </div>
       <template #actions>
         <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
@@ -2091,7 +2091,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="field" v-if="caps.sharePassword">
         <label>提取码（可选）</label>
-        <input class="input" v-model="shareForm.password" placeholder="留空则自动生成或无提取码" :disabled="modalBusy" />
+        <input class="input" v-model="shareForm.password" placeholder="留空自动生成或公开分享" :disabled="modalBusy" />
       </div>
       <template #actions>
         <button class="btn" :disabled="modalBusy" @click="modal = null">取消</button>
@@ -2105,7 +2105,7 @@ onBeforeUnmount(() => {
     <!-- 云离线下载 -->
     <Modal v-if="modal === 'offline'" title="云离线下载" @close="modal = null">
       <div class="field">
-        <label>下载链接（磁力 / HTTP / ed2k）</label>
+        <label>离线下载链接（支持磁力链接、HTTP、ed2k）</label>
         <textarea class="textarea" v-model="inputText" placeholder="magnet:?xt=urn:btih:…" rows="3" :disabled="modalBusy"></textarea>
       </div>
       <template #actions>
@@ -2119,8 +2119,8 @@ onBeforeUnmount(() => {
 
     <!-- 跨盘迁移 -->
     <Modal v-if="modal === 'migrate'" title="迁移到其他网盘" @close="modal = null">
-      <p v-if="migrationPreview" class="hint">{{ migrationPreview.files }} 个文件 · {{ formatBytes(migrationPreview.bytes) }}<template v-if="migrationPreview.conflicts.length"> · {{ migrationPreview.conflicts.length }} 个同名项目：{{ migrationPreview.conflicts.slice(0,5).join('、') }}，按网盘冲突策略处理</template></p>
-      <p v-if="migrationPreview?.transferMode === 'spool'" class="hint">本机逐文件中转：最大文件 {{ formatBytes(migrationPreview.tempBytes) }}，临时盘可用 {{ formatBytes(migrationPreview.tempAvailable) }}。迁移期间其他任务也会占用空间。</p>
+      <p v-if="migrationPreview" class="hint">{{ migrationPreview.files }} 个文件 · {{ formatBytes(migrationPreview.bytes) }}<template v-if="migrationPreview.conflicts.length"> · {{ migrationPreview.conflicts.length }} 个同名项目（如 {{ migrationPreview.conflicts.slice(0,3).join('、') }} 等，同名将自动重命名）</template></p>
+      <p v-if="migrationPreview?.transferMode === 'spool'" class="hint">经本机临时中转：最大文件 {{ formatBytes(migrationPreview.tempBytes) }}，临时磁盘剩余 {{ formatBytes(migrationPreview.tempAvailable) }}。</p>
       <p v-for="warning in migrationPreview?.warnings || []" :key="warning" role="alert">{{ warning }}</p>
       <div class="field">
         <label>来源账号</label>
@@ -2135,7 +2135,7 @@ onBeforeUnmount(() => {
           placeholder="选择目标账号"
           :options="migrateAccounts.map((a) => ({ value: a.user_id, label: `${providerMetaOf(a, providers).label} · ${accountName(a)}`, img: providerIconUrl(providerMetaOf(a, providers)) }))"
         />
-        <div class="hint" v-if="!migrateAccounts.length">没有其他可用账号，请先在左侧添加网盘账号</div>
+        <div class="hint" v-if="!migrateAccounts.length">暂无其他可用账号，请先添加目标网盘账号</div>
       </div>
       <div class="field" v-if="migrateTarget">
         <label>目标目录</label>
@@ -2168,7 +2168,7 @@ onBeforeUnmount(() => {
     <!-- 迁移目标目录（浏览目标账号） -->
     <SelectDirModal
       v-if="migrateDirPick && migrateTargetAcc"
-      title="选择迁移目标目录"
+      title="选择目标目录"
       :account="migrateTargetAcc"
       :providers="providers"
       @close="migrateDirPick = false"
@@ -2212,7 +2212,7 @@ onBeforeUnmount(() => {
         <div class="conflict-actions">
           <button class="btn" @click="conflictModal.onPolicy(null)">取消上传</button>
           <button class="btn primary" @click="conflictModal.onPolicy('overwrite')">覆盖</button>
-          <button class="btn" @click="conflictModal.onPolicy('rename')">保留两者（新增后缀）</button>
+          <button class="btn" @click="conflictModal.onPolicy('rename')">自动重命名</button>
           <button class="btn ghost" @click="conflictModal.onPolicy('skip')">跳过</button>
         </div>
       </div>

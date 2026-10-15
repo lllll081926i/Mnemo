@@ -62,8 +62,8 @@ async function restorePrefs() {
     await SaveSettings({ ...current, theme: data.theme })
     prefs.value = getPrefs(); settings.value.theme = data.theme; emit('theme', data.theme)
     pendingBackup.value = null
-    emit('toast', '偏好已恢复，账号凭据不受影响', 'success')
-  } catch(e) { emit('toast', '恢复未完成，已恢复的项目会保留，可重试：' + String(e), 'error') }
+    emit('toast', '偏好设置已恢复', 'success')
+  } catch(e) { emit('toast', '恢复失败：' + String(e), 'error') }
   finally { backupBusy.value = false }
 }
 
@@ -351,7 +351,7 @@ async function exportLogs() {
 
 <template>
   <motion.div class="settings-layout settings-view" :initial="panelReveal.initial" :animate="panelReveal.animate" :transition="panelReveal.transition">
-    <ConfirmModal v-if="pendingBackup" title="恢复偏好" message="将覆盖备份中的偏好并合并收藏，是否继续？账号凭据不会更改。" @cancel="pendingBackup = null" @ok="restorePrefs" />
+    <ConfirmModal v-if="pendingBackup" title="恢复偏好设置" message="此操作将应用备份中的偏好设置并合并收藏。登录账号不受影响。确定恢复？" @cancel="pendingBackup = null" @ok="restorePrefs" />
     <aside class="settings-nav" aria-label="设置分类">
       <motion.div class="sn-active-pill" :animate="{ y: activeNavIndex * 54 }" :transition="compactSpring" />
       <button
@@ -376,13 +376,13 @@ async function exportLogs() {
       <div v-show="loaded" class="settings-column">
         <header class="settings-intro">
           <p>设置</p>
-          <span>个性化你的 Mnemo 使用方式</span>
+          <span>管理偏好、传输与系统设置</span>
         </header>
         <!-- 1. 基础 -->
         <section class="settings-group" id="sg-general">
           <header class="sg-heading"><div><h2>外观与基础</h2><p>主题、启动行为与个人偏好</p></div></header>
           <div class="sg-card">
-            <div class="sg-row"><div class="sg-text"><span class="sg-label">偏好备份</span><span class="sg-desc">备份外观、账号名称与图标、排序和收藏，不含登录凭据</span></div><div class="sg-control"><button class="btn" :disabled="backupBusy" @click="exportPrefs">导出</button><button class="btn" :disabled="backupBusy" @click="readBackup">恢复</button></div></div>
+            <div class="sg-row"><div class="sg-text"><span class="sg-label">偏好备份</span><span class="sg-desc">备份外观、自定义名称、排序与收藏，不包含登录凭据</span></div><div class="sg-control"><button class="btn" :disabled="backupBusy" @click="exportPrefs">导出</button><button class="btn" :disabled="backupBusy" @click="readBackup">恢复</button></div></div>
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">外观主题</span></div>
               <div class="sg-control">
@@ -415,7 +415,7 @@ async function exportLogs() {
             <div class="sg-row oled-background-row">
               <div class="sg-text">
                 <span class="sg-label" id="oled-background-label">OLED 纯黑背景</span>
-                <span class="sg-desc">适用于 OLED 屏幕，仅在深色模式下将背景改为纯黑，主题色保持不变</span>
+                <span class="sg-desc">深色模式下使用纯黑背景（省电且对比度更高）</span>
               </div>
               <div class="sg-control oled-background-control">
                 <button type="button" class="switch" role="switch" aria-labelledby="oled-background-label"
@@ -451,7 +451,7 @@ async function exportLogs() {
                 <UiSelect
                   :model-value="prefs.downloadSoundType"
                   :options="DOWNLOAD_SOUNDS"
-                  placeholder="选择下载完成提示音"
+                  placeholder="选择提示音"
                   @update:modelValue="(value) => onPref('downloadSoundType', value)"
                 />
                 <button v-if="prefs.downloadSound" class="tbtn xs" @click="playTestSound">
@@ -512,7 +512,7 @@ async function exportLogs() {
           <header class="sg-heading"><div><h2>传输与连接</h2><p>下载路径、带宽和网络代理</p></div></header>
           <div class="sg-card">
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">下载保存目录</span><span class="sg-desc">留空跟随系统下载位置</span></div>
+              <div class="sg-text"><span class="sg-label">下载保存目录</span><span class="sg-desc">留空默认保存至系统「下载」目录</span></div>
               <div class="sg-control sg-control-grow">
                 <input
                   class="input"
@@ -574,7 +574,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text">
                 <span class="sg-label">下载内容校验</span>
-                <span class="sg-desc">下载完成后校验网盘提供的 MD5、SHA-1 或 SHA-256；无可信摘要时仅校验长度，会增加磁盘读取</span>
+                <span class="sg-desc">下载完成后校验完整性，若网盘无哈希则仅校验文件大小</span>
               </div>
               <div class="sg-control">
                 <button type="button" class="switch" role="switch" aria-label="下载内容校验" :aria-checked="settings.verifyDownloadHash" :class="{ on: settings.verifyDownloadHash }" @click="toggle('verifyDownloadHash')"></button>
@@ -625,7 +625,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text">
                 <span class="sg-label">单文件下载连接数</span>
-                <span class="sg-desc">1–16，默认 8；网盘限制或不支持分段时自动减少，修改后对新启动和恢复的任务生效</span>
+                <span class="sg-desc">默认 8（范围 1–16）。修改对新建与恢复的任务生效</span>
               </div>
               <div class="sg-control">
                 <input
@@ -705,16 +705,16 @@ async function exportLogs() {
             </div>
 
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">播放完自动收起</span></div>
+              <div class="sg-text"><span class="sg-label">播放结束自动关闭</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" aria-label="播放完自动收起" :aria-checked="prefs.autoCloseOnEnd" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></button>
+                <button type="button" class="switch" role="switch" aria-label="播放结束自动关闭" :aria-checked="prefs.autoCloseOnEnd" :class="{ on: prefs.autoCloseOnEnd }" @click="onPref('autoCloseOnEnd', !prefs.autoCloseOnEnd)"></button>
               </div>
             </div>
 
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">自动挂载同名字幕</span></div>
+              <div class="sg-text"><span class="sg-label">自动加载同名字幕</span></div>
               <div class="sg-control">
-                <button type="button" class="switch" role="switch" aria-label="自动挂载同名字幕" :aria-checked="prefs.autoLoadSubtitles" :class="{ on: prefs.autoLoadSubtitles }" @click="onPref('autoLoadSubtitles', !prefs.autoLoadSubtitles)"></button>
+                <button type="button" class="switch" role="switch" aria-label="自动加载同名字幕" :aria-checked="prefs.autoLoadSubtitles" :class="{ on: prefs.autoLoadSubtitles }" @click="onPref('autoLoadSubtitles', !prefs.autoLoadSubtitles)"></button>
               </div>
             </div>
           </div>
@@ -727,7 +727,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text">
                 <span class="sg-label">目录与页面缓存</span>
-                <span class="sg-desc">目录与图片缓存默认保存在安装目录的 data/cache 中；安装目录不可写时转入用户数据目录。图片缓存最多 1 GB、7 天未使用自动过期。清理不会删除账号、传输记录或播放进度</span>
+                <span class="sg-desc">缓存包含缩略图与目录快照，清理不会影响账号、文件与传输记录</span>
               </div>
               <div class="sg-control">
                 <button class="btn sm" :disabled="clearingCache" @click="clearCache">
@@ -740,7 +740,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text">
                 <span class="sg-label">日志等级</span>
-                <span class="sg-desc">Info 默认记录关键流程；Debug 会增加网络细节，排查时临时开启</span>
+                <span class="sg-desc">默认 Info。排查问题时可切换为 Debug 记录详细网络请求</span>
               </div>
               <div class="sg-control">
                 <UiSelect
@@ -761,7 +761,7 @@ async function exportLogs() {
             <div class="sg-row">
               <div class="sg-text" style="min-width:0">
                 <span class="sg-label">日志文件</span>
-                <span class="sg-desc log-path" :title="logPath">{{ logPath || '未初始化' }}</span>
+                <span class="sg-desc log-path" :title="logPath">{{ logPath || '暂无日志文件' }}</span>
               </div>
               <div class="sg-control">
                 <button class="btn sm" :disabled="exportingLogs" @click="exportLogs">
@@ -783,7 +783,7 @@ async function exportLogs() {
         <section class="settings-group" id="sg-update">
           <header class="sg-heading"><div><h2>关于与更新</h2><p>版本信息和更新策略</p></div></header>
           <div class="sg-card">
-            <div class="sg-row"><div class="sg-text"><span class="sg-label">当前版本</span><span class="sg-desc">只检查正式版更新</span></div><div class="sg-control">{{ packageInfo.version }}</div></div>
+            <div class="sg-row"><div class="sg-text"><span class="sg-label">当前版本</span><span class="sg-desc">默认仅检查正式版更新</span></div><div class="sg-control">{{ packageInfo.version }}</div></div>
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">自动检查更新</span></div>
               <div class="sg-control">
@@ -799,7 +799,7 @@ async function exportLogs() {
             </div>
 
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">手动检查更新</span></div>
+              <div class="sg-text"><span class="sg-label">检查新版本</span></div>
               <div class="sg-control">
                 <button class="btn sm" @click="emit('update')">
                   <UiIcon name="refresh" :size="13" />立即检查

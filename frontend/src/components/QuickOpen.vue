@@ -159,7 +159,7 @@ function scrollActiveIntoView() {
               ref="inputEl"
               v-model="keyword"
               class="qo-input"
-              placeholder="输入命令、功能、或账号名称 (↑↓ 选择，Enter 确认)"
+              placeholder="搜索功能、命令或账号 (↑↓ 选择，Enter 确认)"
               spellcheck="false"
               @keydown="onKeyDown"
             />

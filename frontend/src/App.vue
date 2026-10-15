@@ -59,6 +59,7 @@ const pageProps = computed(() => {
 const pageListeners = computed(() => {
   const listeners = { toast, navigate: navigateTo }
   if (tab.value === 'pan') listeners.go = onPanGo
+  if (tab.value === 'transfer') listeners.repair = repairTask
   if (tab.value === 'settings') {
     listeners.theme = applyTheme
     listeners.update = () => { pendingUpdateInfo.value = null; showUpdate.value = true }
@@ -112,6 +113,14 @@ async function navigateTo(location) {
   for (let attempt = 0; attempt < 20 && !panView.value; attempt++) await new Promise(resolve => setTimeout(resolve, 30))
   try { await panView.value?.navigate(location) }
   catch (error) { toast(String(error), 'warn') }
+}
+function repairTask(request) {
+  if (request?.action === 'network_settings') { switchTab('settings'); return }
+  if (request?.action !== 'reauthorize') return
+  const account = accounts.value.find(item => item.user_id === request.userId)
+  if (!account) { toast('原账号已移除，请先核对任务所属账号', 'warn'); return }
+  loginProvider.value = providerOf(account.user_id)
+  showLogin.value = true
 }
 const showUpdate = ref(false)
 const pendingUpdateInfo = ref(null)
@@ -295,7 +304,7 @@ function handleAccountExpired(event) {
   if (userId) accountHealth[userId] = { status: 'auth', message: '登录凭据已过期，请重新授权', checkedAt: Date.now() }
   refresh()
   const subject = account ? `「${account}」` : '该账号'
-  toast(`${providerName}${subject}的登录凭据已失效；账号及任务已保留，请重新登录授权。`, 'warn')
+  toast(`${providerName}${subject} 登录已失效；账号及任务已保留，请重新登录授权。`, 'warn')
 }
 
 function closeLogin() {
@@ -316,7 +325,7 @@ function providerLabel(acc) {
 }
 
 function remove(acc) {
-  askConfirm(`移除账号「${accountName(acc)}」？只删除账号凭据，下载任务、收藏和同步配置等本地记录会保留。`, async () => {
+  askConfirm(`确定移除账号「${accountName(acc)}」？仅删除登录信息，本地任务与设置仍会保留。`, async () => {
     try {
       await removeAccount(acc.user_id)
       if (current.value && current.value.user_id === acc.user_id) current.value = null
@@ -504,7 +513,7 @@ onMounted(async () => {
     onEvent('offline:history-error', (ev) => toast(String(ev?.error || '云离线任务已提交，但本地记录保存失败'), 'warn')),
     onEvent('share:history-error', (ev) => {
       error('share', 'share history persistence failed', { error: errorText(ev?.error) })
-      toast('分享已创建，但本地历史记录保存失败，请稍后重试', 'warn')
+      toast('分享已创建，但本地记录保存失败', 'warn')
     }),
     // 原生传输悬浮窗点击/菜单「显示主窗口」时跳到传输页
     onEvent('nav:tab', (key) => { if (typeof key === 'string' && tabOrder.includes(key)) switchTab(key) }),
@@ -572,6 +581,7 @@ onBeforeUnmount(() => {
         @remove="remove"
         @info="infoAcc = $event"
         @rename="openRename"
+        @toast="toast"
       />
       <main class="page-host">
         <transition :name="pageTrans" mode="out-in">
@@ -662,7 +672,7 @@ onBeforeUnmount(() => {
               </button>
               <button class="btn sm" type="button" @click="showPresetIcons = !showPresetIcons">
                 <UiIcon name="grid" :size="13" />
-                <span>{{ showPresetIcons ? '收起内置预设' : '内置预设' }}</span>
+                <span>{{ showPresetIcons ? '收起预设图标' : '选择预设图标' }}</span>
               </button>
               <button
                 v-if="renameIcon"
@@ -730,7 +740,7 @@ onBeforeUnmount(() => {
     </transition-group>
 
     <ConfirmModal v-if="confirmDialog" :title="confirmDialog.title" :message="confirmDialog.message" :okText="confirmDialog.okText" :cancel-text="confirmDialog.cancelText" :danger="confirmDialog.danger" @ok="handleConfirmOk" @cancel="closeConfirm" />
-    <ConfirmModal v-if="quitDialog !== null" title="退出 Mnemo" :message="`还有 ${quitDialog} 个下载任务正在进行。退出后任务将暂停，下次启动可继续。确定要退出吗？`" ok-text="退出应用" cancel-text="继续下载" :busy="quitBusy" danger @ok="respondQuit(true)" @cancel="respondQuit(false)" />
+    <ConfirmModal v-if="quitDialog !== null" title="退出 Mnemo" :message="`还有 ${quitDialog} 个下载任务正在进行。退出后任务将暂停，下次启动可继续。确定退出？`" ok-text="退出应用" cancel-text="继续下载" :busy="quitBusy" danger @ok="respondQuit(true)" @cancel="respondQuit(false)" />
     <UpdateModal v-if="showUpdate" :initial-info="pendingUpdateInfo" @close="closeUpdateModal" />
   </div>
 </template>

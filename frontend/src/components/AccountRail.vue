@@ -12,7 +12,7 @@ const props = defineProps({
   providers: { type: Array, default: () => [] },
   current: { type: Object, default: null },
 })
-const emit = defineEmits(['select', 'add', 'remove', 'info', 'rename'])
+const emit = defineEmits(['select', 'add', 'remove', 'info', 'rename', 'toast'])
 
 const expanded = ref(false)
 const railEl = ref(null)
@@ -134,6 +134,7 @@ function onItemPointerDown(e, acc) {
   let bottomLimit = 0  // 末项静止 bottom（拖动垂直范围上限）
   let ghostTop0 = 0    // 幽灵初始 top（X 始终锁定，只允许上下）
   let ghostY = 0       // 弹簧当前位置（top）
+  let ghostHeight = 0
   let dropping = false
   let px = e.clientX
   let py = e.clientY
@@ -143,11 +144,11 @@ function onItemPointerDown(e, acc) {
   const frame = () => {
     rafId = 0
     if (!ghost || dropping) return
-    const desired = Math.min(Math.max(ghostTop0 + (py - startY), top0), bottomLimit - ghost.offsetHeight)
+    const desired = Math.min(Math.max(ghostTop0 + (py - startY), top0), bottomLimit - ghostHeight)
     ghostY += (desired - ghostY) * 0.32
     ghost.style.transform = `translate3d(0, ${ghostY - ghostTop0}px, 0) scale(1.04)`
-    if (heights && liveList.value) {
-      const target = slotAt(ghostY + ghost.offsetHeight / 2)
+    if (heights && ghostHeight > 0 && liveList.value) {
+      const target = slotAt(desired + ghostHeight / 2)
       const cur = dragIdx.value
       if (target !== cur && cur >= 0) {
         const before = liveList.value
@@ -191,7 +192,8 @@ function onItemPointerDown(e, acc) {
 
   // 拖动起点：冻结一切展开/收起过渡并等一帧让布局静止，再捕获几何与克隆
   const startDrag = () => {
-    if (!dragging) return
+    startRaf = 0
+    if (!dragging || ghost) return
     const items = [...listEl.querySelectorAll('.rail-item')]
     if (!items.length) return
     heights = new Map()
@@ -203,6 +205,7 @@ function onItemPointerDown(e, acc) {
     bumpMap.value = {}
     ghostTop0 = r.top
     ghostY = r.top
+    ghostHeight = r.height
     ghost = itemEl.cloneNode(true)
     ghost.tabIndex = -1
     ghost.setAttribute('aria-hidden', 'true')
@@ -257,21 +260,30 @@ function onItemPointerDown(e, acc) {
   }
   const onUp = (ev) => {
     if (ev?.pointerId !== undefined && e.pointerId !== undefined && ev.pointerId !== e.pointerId) return
-    const commit = ev?.type === 'pointerup'
+    let commit = ev?.type === 'pointerup'
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
     window.removeEventListener('blur', onUp)
     window.removeEventListener('keydown', onDragKey)
     cancelAnimationFrame(startRaf)
+    if (commit && dragging && liveList.value) {
+      if (Number.isFinite(ev.clientY)) py = ev.clientY
+      if (!ghost) startDrag()
+      cancelAnimationFrame(rafId)
+      rafId = 0
+      frame()
+      try {
+        setPref('accountOrder', liveList.value.map((a) => a.user_id))
+      } catch {
+        commit = false
+        emit('toast', '网盘排序保存失败，已恢复原顺序，请重试')
+      }
+      clickTimer = setTimeout(() => { suppressClick = false }, 0)
+    }
     cancelAnimationFrame(bumpRaf)
     clearTimeout(dropTimer)
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
-    if (commit && dragging && liveList.value) {
-      setPref('accountOrder', liveList.value.map((a) => a.user_id))
-      // click 紧跟 pointerup 触发，延后一帧清除以吞掉这次拖拽点击
-      clickTimer = setTimeout(() => { suppressClick = false }, 0)
-    }
     if (!commit) {
       ghost?.remove()
       ghost = null

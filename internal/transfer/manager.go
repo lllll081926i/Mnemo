@@ -215,6 +215,7 @@ func (m *Manager) loadPersisted() {
 		t = safeTask
 		if t.Status == "downloading" || t.Status == "queued" {
 			t.Status = "paused" // interrupted on exit
+			t.Issue = &model.OperationIssue{Code: "APP_RESTARTED", Message: "应用退出中断了任务，请核对断点后手动继续", Action: "manual_resume"}
 			dirty = true
 		}
 		if !t.IsDir && (t.Status == "paused" || t.Status == "failed") && t.UserID != "" {
@@ -229,6 +230,7 @@ func (m *Manager) loadPersisted() {
 		if t.UserID == "" && t.Status != "completed" && t.Status != "canceled" {
 			t.Status = "failed"
 			t.Error = "直链任务的地址和请求头不会落盘；应用重启后请重新添加任务"
+			t.Issue = &model.OperationIssue{Code: "SOURCE_REQUIRED", Message: t.Error, Action: "replace_source"}
 			dirty = true
 		}
 		m.tasks[t.ID] = &t
@@ -527,6 +529,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	defer cancel()
 	m.cancels[t.ID] = cancel
 	t.Status = "downloading"
+	t.Issue = nil
 	t.Stage = ""
 	t.Updated = time.Now().Unix()
 	m.mu.Unlock()
@@ -555,6 +558,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		if !m.removed[t.ID] && t.Status == "downloading" {
 			t.Status = "failed"
 			t.Error = "读取下载设置失败: " + settingsErr.Error()
+			t.Issue = drive.DescribeOperationError(settingsErr)
 			t.Updated = time.Now().Unix()
 		}
 		m.mu.Unlock()
@@ -602,6 +606,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 			if !m.removed[t.ID] && t.Status != "canceled" && t.Status != "paused" {
 				t.Status = "failed"
 				t.Error = err.Error()
+				t.Issue = drive.DescribeOperationError(err)
 			}
 			t.Updated = time.Now().Unix()
 			m.mu.Unlock()
@@ -716,7 +721,7 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 	if err != nil {
 		if t.Status == "canceled" {
 			// Cancel has already set the terminal state.
-		} else if errors.Is(ctx.Err(), context.Canceled) || strings.Contains(err.Error(), "canceled") {
+		} else if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 			// user paused or canceled
 			if t.Status != "canceled" && !removed {
 				t.Status = "paused"
@@ -724,9 +729,14 @@ func (m *Manager) runDownload(t *model.DownloadTask) {
 		} else if !removed {
 			t.Status = "failed"
 			t.Error = err.Error()
+			t.Issue = drive.DescribeOperationError(err)
+			if errors.Is(err, dlengine.ErrHashMismatch) {
+				t.Issue = &model.OperationIssue{Code: "INTEGRITY_MISMATCH", Message: "下载内容校验失败，未覆盖最终文件，请核对来源后重新下载", Action: "check_source"}
+			}
 		}
 	} else {
 		if !removed && t.Status != "canceled" && t.Status != "paused" {
+			t.Issue = nil
 			t.Status = "completed"
 			if t.Size <= 0 && t.Downloaded > 0 {
 				t.Size = t.Downloaded
@@ -797,6 +807,7 @@ func (m *Manager) Pause(id string) {
 	t, ok := m.tasks[id]
 	if ok && (t.Status == "downloading" || t.Status == "queued") {
 		t.Status = "paused"
+		t.Issue = &model.OperationIssue{Code: "USER_PAUSED", Message: "任务由用户暂停，需要手动继续", Action: "manual_resume"}
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
@@ -813,6 +824,7 @@ func (m *Manager) Resume(id string) {
 	if ok && !active && (t.Status == "paused" || t.Status == "failed") {
 		t.Status = "queued"
 		t.Error = ""
+		t.Issue = nil
 		t.Updated = time.Now().Unix()
 		m.mu.Unlock()
 		m.update(t)
@@ -907,6 +919,7 @@ func (m *Manager) Prioritize(id string) {
 	if _, active := m.cancels[id]; !active && (t.Status == "paused" || t.Status == "failed" || t.Status == "canceled") {
 		t.Status = "queued"
 		t.Error = ""
+		t.Issue = nil
 		t.Updated = time.Now().Unix()
 		start = true
 	}

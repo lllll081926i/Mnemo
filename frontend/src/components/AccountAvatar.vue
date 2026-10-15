@@ -74,7 +74,7 @@ const familyFree = computed(() => familyTotal.value - familyUsed.value)
 const familyPct = computed(() => hasFamilyQuota.value ? Math.min(100, Math.round((familyUsed.value / familyTotal.value) * 100)) : 0)
 const quotaStatus = computed(() => String(quota.value?.status || (hasQuota.value ? 'available' : 'unknown')))
 const quotaStatusText = computed(() => {
-  if (quota.value?.type === 'unlimited') return '总空间不限量；已用空间暂未提供'
+  if (quota.value?.type === 'unlimited') return '空间不限量'
   if (quota.value?.description) return quota.value.description
   if (quotaStatus.value === 'rate_limited') return '刷新受限'
   if (quotaStatus.value === 'error') return '刷新失败'

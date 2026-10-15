@@ -113,6 +113,44 @@ async function main() {
   try {
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:5173')
     await page.locator('.fileitem').first().waitFor()
+    if (process.env.QA_ACCOUNT_ORDER_ONLY === '1') {
+      const labels = await page.locator('.rail-list .rail-item').evaluateAll(items => items.map(item => item.getAttribute('aria-label')))
+      const expectedLabels = [labels[1], labels[2], labels[0], ...labels.slice(3)]
+      const saved = await page.evaluate(() => {
+        const items = [...document.querySelectorAll('.rail-list .rail-item')]
+        const first = items[0].getBoundingClientRect()
+        const target = items[2].getBoundingClientRect()
+        const pointer = { pointerId: 7, button: 0, clientX: first.left + first.width / 2, bubbles: true }
+        items[0].dispatchEvent(new PointerEvent('pointerdown', { ...pointer, clientY: first.top + first.height / 2 }))
+        window.dispatchEvent(new PointerEvent('pointermove', { ...pointer, clientY: target.top + target.height / 2 }))
+        window.dispatchEvent(new PointerEvent('pointerup', { ...pointer, clientY: target.top + target.height / 2 }))
+        return JSON.parse(localStorage.getItem('mnemo.prefs')).accountOrder
+      })
+      assert.deepEqual(saved.slice(0, 3), ['webdav:account-1', 'webdav:account-2', 'webdav:account-0'], '快速松手必须同步保存最终顺序')
+      await page.evaluate(() => window.runtime.EventsEmit('account:changed'))
+      await page.waitForTimeout(400)
+      assert.deepEqual(await page.locator('.rail-list .rail-item').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), expectedLabels, '账号刷新不能覆盖拖拽顺序')
+      assert.equal(await page.locator('.rail-ghost').count(), 0, '拖动结束必须移除幽灵')
+      await page.reload()
+      await page.locator('.fileitem').first().waitFor()
+      assert.deepEqual(await page.locator('.rail-list .rail-item').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), expectedLabels, '页面重载后必须恢复保存顺序')
+      assert.deepEqual(errors, [], '排序保存不能出现页面异常')
+      console.log(JSON.stringify({ passed: true, accountOrder: saved, reloadRestored: true, errors }, null, 2))
+      return
+    }
+    if (process.env.QA_TASK_ISSUE_ONLY === '1') {
+      await page.evaluate(() => {
+        window.go.app.App.ListDownloads = async () => [{ id: 'network-task', user_id: 'webdav:account-0', name: '网络失败任务.txt', status: 'failed', error: 'HTTP 401', issue: { code: 'NETWORK_UNAVAILABLE', message: '网络请求中断', action: 'network_settings' } }]
+      })
+      await page.getByRole('button', { name: '传输', exact: true }).click()
+      const recommendation = page.locator('.task-issue').first()
+      await recommendation.locator('summary').click()
+      await recommendation.getByRole('button', { name: '网络设置', exact: true }).click()
+      await page.getByRole('combobox', { name: '默认排序', exact: true }).waitFor()
+      assert.deepEqual(errors, [], '任务处理入口不能出现页面异常')
+      console.log(JSON.stringify({ passed: true, taskRepair: 'network_settings', errors }, null, 2))
+      return
+    }
     if (process.env.QA_ACCESSIBILITY_ONLY === '1') {
       const accessibility = await assertKeyboardAccessibility(page)
       assert.deepEqual(errors, [], '无障碍验收不能出现页面异常')

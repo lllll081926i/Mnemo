@@ -262,10 +262,10 @@ func (a *App) CancelShare(entry model.ShareHistoryEntry) error {
 	}
 	st, err := a.storeOrError()
 	if err != nil {
-		return fmt.Errorf("云端分享已取消，但无法清理本地记录: %w", err)
+		return fmt.Errorf("分享已取消，但本地记录清理失败: %w", err)
 	}
 	if err := st.DeleteShareHistoryScoped(userID, driveID, entry.ShareID, entry.ShareURL); err != nil {
-		return fmt.Errorf("云端分享已取消，但本地记录清理失败: %w", err)
+		return fmt.Errorf("分享已取消，但本地记录清理失败: %w", err)
 	}
 	a.emit("share:history-changed", map[string]string{"account_id": userID, "share_id": entry.ShareID})
 	logging.Info("share cancellation completed", "account_id", redactID(userID), "share_id", redactID(entry.ShareID))
@@ -398,7 +398,7 @@ func (a *App) ListFavorites(userID, driveID string) ([]store.Favorite, error) {
 		seen := map[string]bool{}
 		for _, f := range files {
 			if f.FileID == "" || seen[f.FileID] {
-				return nil, fmt.Errorf("云端收藏列表包含空白或重复文件 ID")
+				return nil, fmt.Errorf("云端收藏数据异常")
 			}
 			seen[f.FileID] = true
 			f.DriveID, f.Starred = driveID, true
@@ -560,7 +560,7 @@ func (a *App) offlineCreate(userID, driveID, url, fileName string) (*model.Offli
 		// The remote provider already accepted this task. Returning an error
 		// here encourages the user to submit a duplicate cloud operation.
 		logging.Warn("offline task accepted but local history failed", "account_id", redactID(userID), "error", err)
-		a.emit("offline:history-error", map[string]string{"error": "云离线任务已提交，但本地记录保存失败，请到服务商任务列表确认，不要重复提交"})
+		a.emit("offline:history-error", map[string]string{"error": "云离线任务已提交，但本地记录保存失败"})
 		return t, nil
 	}
 	return t, nil
@@ -574,8 +574,8 @@ func (a *App) ListOfflineTasks(userID string) []model.OfflineTask {
 	}
 	list, err := st.ListOfflineTasks()
 	if err != nil {
-		logging.Warn("离线历史读取或迁移失败", "error", err)
-		a.emit("offline:history-error", map[string]string{"error": "本地离线历史读取或安全迁移失败，请检查数据目录权限及日志；原始记录已保留"})
+		logging.Warn("offline history read or migration failed", "error", err)
+		a.emit("offline:history-error", map[string]string{"error": "离线历史读取失败，已保留原记录"})
 		return nil
 	}
 	var out []model.OfflineTask

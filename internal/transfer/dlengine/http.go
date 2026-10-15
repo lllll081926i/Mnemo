@@ -13,7 +13,13 @@ import (
 	"time"
 )
 
-var ErrReadIdleTimeout = errors.New("dlengine: 网络读取空闲超时")
+var ErrReadIdleTimeout error = readIdleTimeoutError{}
+
+type readIdleTimeoutError struct{}
+
+func (readIdleTimeoutError) Error() string   { return "dlengine: 网络读取空闲超时" }
+func (readIdleTimeoutError) Timeout() bool   { return true }
+func (readIdleTimeoutError) Temporary() bool { return true }
 
 type retryAuthKey struct{}
 
@@ -59,6 +65,11 @@ type httpStatusError struct {
 	stage      string
 	status     int
 	retryAfter time.Duration
+}
+
+func (err *httpStatusError) HTTPStatusCode() int { return err.status }
+func (err *httpStatusError) RetryAfter() time.Duration {
+	return err.retryAfter
 }
 
 func responseStatusError(stage string, response *http.Response) error {

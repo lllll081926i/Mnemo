@@ -20,7 +20,7 @@ var (
 
 // NotSupported returns a capability-gated error for a driver method.
 func NotSupported(what string) error {
-	return errors.New("drive: " + what + " not supported by this provider")
+	return fmt.Errorf("%w: %s not supported by this provider", ErrNotImplemented, what)
 }
 
 // AuthExpired marks a provider-confirmed credential expiration while keeping

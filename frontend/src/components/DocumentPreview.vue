@@ -24,7 +24,7 @@ async function load() {
   try {
     const limit = DOCUMENT_LIMITS[props.kind]
     if (!limit) throw new Error('不支持此文档格式')
-    if (props.file.size > limit) throw new Error('文件超过在线预览大小上限，请下载后查看')
+    if (props.file.size > limit) throw new Error('文档过大，请下载到本地查看')
     await PinFileSnapshot(props.account.user_id, props.account.drive_id, props.file)
     if (disposed) return
     let source

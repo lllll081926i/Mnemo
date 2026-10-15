@@ -1819,7 +1819,7 @@ func (a *App) MigrateFiles(srcUser, srcDrive, dstUser, dstDrive, dstParent strin
 	snapshot := migrate.Snapshot(job)
 	go func() {
 		if err := eng.Run(ctx, job); err != nil {
-			logging.Warn("迁移任务结束且存在错误", "job_id", job.ID, "error", err)
+			logging.Warn("migrate job finished with error", "job_id", job.ID, "error", err)
 		}
 	}()
 	return snapshot, nil
@@ -1895,7 +1895,7 @@ func (a *App) ResumeMigrate(id string) (*migrate.Job, error) {
 		snapshot := migrate.Snapshot(&job)
 		go func() {
 			if err := eng.Run(ctx, &job); err != nil {
-				logging.Warn("恢复迁移失败", "job_id", job.ID, "error", err)
+				logging.Warn("migrate job resume failed", "job_id", job.ID, "error", err)
 			}
 		}()
 		return snapshot, nil

@@ -126,7 +126,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
   <Modal title="更新" width="500px" @close="emit('close')">
     <div class="upd-body">
       <p v-if="info?.currentVersion" class="upd-meta upd-current">当前版本 {{ info.currentVersion }}</p>
-      <p class="upd-meta" aria-label="更新来源与校验范围">发布渠道：GitHub · lllll081926i/Mnemo。应用内验证文件大小和 SHA-256，不代表已验证发布者签名；构建来源证明请在发布页按说明独立核验。</p>
+      <p class="upd-meta" aria-label="更新来源与校验范围">发布渠道：GitHub (lllll081926i/Mnemo)。已通过 SHA-256 完整性校验（不代表已验证发布者签名）。</p>
       <Transition name="update-state" mode="out-in">
         <div :key="state">
           <div v-if="state === 'checking'" class="upd-state" role="status"><span class="spin"></span><span>正在检查更新…</span></div>
@@ -138,7 +138,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
             <UiIcon name="download" :size="30" />
             <p class="upd-title">{{ state === 'canceled' ? '下载已取消' : '发现新版本' }} <b>{{ info?.version }}</b></p>
             <p v-if="info?.size" class="upd-meta">更新包 {{ fmtBytes(info.size) }}</p>
-            <p v-if="!canInstall" class="upd-meta">下载后手动安装，现有应用保持运行。</p>
+            <p v-if="!canInstall" class="upd-meta">下载完成后请手动安装更新包。</p>
             <div class="upd-actions"><button class="btn primary" @click="startDownload">{{ state === 'canceled' ? '重新下载' : '下载更新' }}</button><button class="btn" @click="emit('close')">稍后</button></div>
           </div>
           <div v-else-if="state === 'downloading' || state === 'verifying'" class="upd-state" role="status">
@@ -155,7 +155,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
             <p v-if="!updatePath" class="upd-meta">安装包路径不可用，请重新下载或检查更新。</p>
             <p v-if="!canInstall" class="upd-meta">退出当前应用后，使用下载的更新包手动安装。</p>
           </div>
-          <div v-else-if="state === 'applying'" class="upd-state" role="status"><span class="spin"></span><span>正在启动安装程序，请完成系统授权…</span></div>
+          <div v-else-if="state === 'applying'" class="upd-state" role="status"><span class="spin"></span><span>正在启动安装程序，请在系统提示中允许授权…</span></div>
           <div v-else-if="state === 'error'" class="upd-state">
             <UiIcon name="warning" :size="30" /><p class="upd-title">更新未完成</p>
             <div class="upd-actions"><button v-if="canInstall && updatePath" class="btn primary" @click="install">重试安装</button><button v-if="info?.available" class="btn" @click="startDownload">重新下载</button><button class="btn" @click="check">重新检查</button></div>
@@ -167,7 +167,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
       <button v-if="info?.releaseUrl" class="tbtn upd-release" @click="openRelease">查看发布页</button>
     </div>
   </Modal>
-  <ConfirmModal v-if="installConfirmOpen" title="安装更新" message="安装会退出并重启 Mnemo，传输将中断。请先保存编辑内容，确认后继续。" ok-text="安装并重启" @ok="applyUpdate" @cancel="installConfirmOpen = false" />
+  <ConfirmModal v-if="installConfirmOpen" title="安装更新" message="安装更新将退出并重启应用，传输任务将会中断。是否继续？" ok-text="安装并重启" @ok="applyUpdate" @cancel="installConfirmOpen = false" />
 </template>
 
 <style scoped>

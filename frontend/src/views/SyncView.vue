@@ -32,7 +32,7 @@ async function executePreview() {
   if (!preview.value || previewBusy.value || preview.value.blocked) return
   if (riskSummary.value.deletes > 0) {
     const token = preview.value.token
-    confirmDialog.value = { title: '确认同步删除', danger: true, message: `将删除本地 ${riskSummary.value['delete-local']} 项、网盘 ${riskSummary.value['delete-remote']} 项。删除可能无法恢复，请核对两侧路径。`, onOk: async () => {
+    confirmDialog.value = { title: '确认同步删除', danger: true, message: `即将删除本地 ${riskSummary.value['delete-local']} 项、网盘 ${riskSummary.value['delete-remote']} 项（删除后可能无法找回）。是否继续？`, onOk: async () => {
       confirmDialog.value = null
       if (preview.value?.token !== token) { emit('toast', '同步预览已变化，请重新确认', 'warn'); return }
       await runPreview()
@@ -68,11 +68,11 @@ const form = ref(emptyForm())
 
 const dirOptions = [
   { key: 'two-way', label: '双向同步' },
-  { key: 'push', label: '仅上传' },
-  { key: 'pull', label: '仅下载' },
+  { key: 'push', label: '单向上传 (本地 → 网盘)' },
+  { key: 'pull', label: '单向下载 (网盘 → 本地)' },
 ]
 
-const dirLabel = { 'two-way': '双向', push: '仅上传', pull: '仅下载' }
+const dirLabel = { 'two-way': '双向', push: '单向上传', pull: '单向下载' }
 const dirArrow = { 'two-way': '⇄', push: '→', pull: '←' }
 
 function emptyForm() {
@@ -166,8 +166,8 @@ const savingEdit = ref(false)
 async function save() {
   if (savingEdit.value) return
   if (!form.value.name.trim()) { emit('toast', '请填写任务名称', 'error'); return }
-  if (!form.value.local_dir.trim()) { emit('toast', '请填写本地文件夹路径', 'error'); return }
-  if (!formAccount.value) { emit('toast', '请选择绑定账号', 'error'); return }
+  if (!form.value.local_dir.trim()) { emit('toast', '请选择本地文件夹', 'error'); return }
+  if (!formAccount.value) { emit('toast', '请选择关联的网盘账号', 'error'); return }
   savingEdit.value = true
   const version = editVersion
   const id = editingId.value || 'sync-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
@@ -232,7 +232,7 @@ async function cancel(job) {
   try {
     const accepted = await CancelSync(job.id)
     if (accepted) emit('toast', `正在停止「${job.name}」…`, 'info')
-    else emit('toast', '任务已经结束', 'info')
+    else emit('toast', '任务已结束', 'info')
   } catch (e) {
     emit('toast', String(e), 'error')
   }
@@ -243,7 +243,7 @@ function remove(job) {
     emit('toast', '任务正在同步或更新中，请稍后再删除', 'warn')
     return
   }
-  confirmDialog.value = { message: `删除同步任务「${job.name}」？本地与网盘文件不受影响。`, onOk: async () => {
+  confirmDialog.value = { message: `确定删除同步任务「${job.name}」？此操作不影响本地及网盘文件。`, onOk: async () => {
     confirmDialog.value = null
     if (running.value.has(job.id) || toggling.value.has(job.id)) {
       emit('toast', '任务正在同步或更新中，请稍后再删除', 'warn')
@@ -302,17 +302,17 @@ onBeforeUnmount(() => {
       <p>{{ previewJob.name }} · {{ preview?.changes?.length || 0 }} 项变化</p>
       <p class="hint">上传 {{ riskSummary.upload }} · 下载 {{ riskSummary.download }} · 冲突 {{ riskSummary.conflict }} · 删除本地 {{ riskSummary['delete-local'] }} · 删除网盘 {{ riskSummary['delete-remote'] }}</p>
       <p class="hint">本地：{{ previewJob.local_dir }} → 网盘：{{ previewJob.remote_name || previewJob.remote_dir }}</p>
-      <p v-if="riskSummary.deletes" role="alert">本轮包含删除。不是所有服务商都支持恢复；本地同步删除可能永久生效。</p><p v-else class="hint">本轮计划没有删除；冲突覆盖仍按所选策略处理。</p>
+      <p v-if="riskSummary.deletes" role="alert">本次同步包含删除操作。网盘或本地删除可能无法恢复，请确认。</p><p v-else class="hint">本次计划无删除操作；冲突文件按预设策略处理。</p>
       <p v-if="previewBusy" role="status">正在处理…</p><p v-if="preview?.blocked" role="alert">{{ preview.blocked }}</p>
       <div class="workspace-results"><div v-for="change in preview?.changes || []" :key="change.path" class="workspace-result"><span><strong>{{ change.path }}</strong><small>{{ actionLabels[change.action] }} · 本地 {{ change.local?.size ?? '不存在' }} / 网盘 {{ change.remote?.size ?? '不存在' }}</small><small v-if="change.action === 'conflict'">修改时间：本地 {{ change.local?.modTime ? new Date(change.local.modTime * 1000).toLocaleString() : '未知' }} / 网盘 {{ change.remote?.modTime ? new Date(change.remote.modTime * 1000).toLocaleString() : '未知' }}</small></span><UiSelect v-if="change.action === 'conflict'" v-model="conflictChoices[change.path]" :disabled="previewBusy" :aria-label="'冲突策略：' + change.path" :placeholder="'默认：' + ({local:'本地',remote:'网盘','keep-both':'保留两份'}[previewJob.conflictPolicy || 'keep-both'])" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地'},{value:'remote',label:'使用网盘'}]" /></div></div>
-      <p class="hint">执行前会重新检查文件状态；预览过期时需要重新预览。删除超过快照一半时停止执行。</p>
+      <p class="hint">执行前会重新比对文件状态。为保障数据安全，若单次删除文件超过 50% 将自动终止同步。</p>
       <template #actions><button class="btn" :disabled="previewBusy" @click="showPreview(previewJob)">刷新</button><button class="btn primary" :disabled="previewBusy || !preview || !!preview.blocked" @click="executePreview">执行</button></template>
     </Modal>
     <header class="syncpage-head">
       <div class="syncpage-title">
         <UiIcon name="refresh" :size="18" />
         <strong>文件夹同步</strong>
-        <span class="syncpage-sub">本地文件夹与网盘文件夹保持同步</span>
+        <span class="syncpage-sub">自动同步本地与网盘文件</span>
       </div>
       <button class="btn primary sm" :disabled="!accounts.length" @click="openCreate">
         <UiIcon name="plus" :size="13" /> 新建同步任务
@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
     <div v-else-if="!jobs.length" class="workspace-empty-state" style="flex:1">
       <UiIcon name="refresh" :size="40" style="opacity:.4" />
       <span class="wes-title">还没有同步任务</span>
-      <span class="wes-desc">新建一个任务，把本地文件夹和网盘文件夹关联起来</span>
+      <span class="wes-desc">新建任务后，即可在本地文件夹与网盘之间自动保持文件同步</span>
     </div>
 
     <div v-else class="syncpage-list">
@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
           <div class="sync-task-name">
             <strong>{{ job.name }}</strong>
             <span class="sync-task-direction">{{ dirLabel[job.direction] || job.direction }}</span>
-            <span v-if="!accountOf(job)" class="sync-task-warn">绑定账号不可用</span>
+            <span v-if="!accountOf(job)" class="sync-task-warn">账号未登录或已失效</span>
           </div>
           <div class="sync-task-paths">
             <span class="sync-path" :title="job.local_dir">本地：{{ job.local_dir }}</span>
@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="sync-task-actions">
-          <button type="button" class="switch" role="switch" :aria-label="'自动同步：' + job.name" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在更新任务' : job.enabled ? '点击停用' : '点击启用'" @click="toggle(job)"></button>
+          <button type="button" class="switch" role="switch" :aria-label="'自动同步：' + job.name" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在保存…' : job.enabled ? '停用自动同步' : '启用自动同步'" @click="toggle(job)"></button>
           <button class="btn-circle" :disabled="toggling.has(job.id) || (!running.has(job.id) && !accountOf(job))" :title="running.has(job.id) ? '停止同步' : '预览同步'" @click="running.has(job.id) ? cancel(job) : showPreview(job)">
             <UiIcon :name="running.has(job.id) ? 'close' : 'play'" :size="14" />
           </button>
@@ -400,14 +400,14 @@ onBeforeUnmount(() => {
         <SegTabs v-model="form.direction" :options="dirOptions" />
       </div>
       <div class="field">
-        <label>自动同步周期（分钟，0 为关闭）</label>
+        <label>自动同步间隔（分钟，填 0 则仅手动同步）</label>
         <input class="input" type="number" min="0" step="1" v-model.number="form.intervalMin" placeholder="0" />
       </div>
-      <div class="field"><label>冲突处理</label><UiSelect v-model="form.conflictPolicy" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地'},{value:'remote',label:'使用网盘'}]" /><span class="hint">自动同步使用此策略，手动预览可逐项调整</span></div>
+      <div class="field"><label>文件冲突策略</label><UiSelect v-model="form.conflictPolicy" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地文件'},{value:'remote',label:'使用网盘文件'}]" /><span class="hint">自动同步时生效；手动预览时也可单独调整</span></div>
       <div class="field switch-row">
-        <label>删除传播</label>
-        <button type="button" class="switch" :class="{ on: form.deletePropagation }" role="switch" aria-label="删除传播" :aria-checked="form.deletePropagation" @click="form.deletePropagation = !form.deletePropagation"></button>
-        <span class="hint">启用后会同步删除两端缺失的文件</span>
+        <label>同步删除</label>
+        <button type="button" class="switch" :class="{ on: form.deletePropagation }" role="switch" aria-label="同步删除" :aria-checked="form.deletePropagation" @click="form.deletePropagation = !form.deletePropagation"></button>
+        <span class="hint">在一侧删除文件时，另一侧也同步删除</span>
       </div>
       <template #actions>
         <button class="btn" :disabled="savingEdit" @click="closeEdit">取消</button>

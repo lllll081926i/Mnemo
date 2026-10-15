@@ -71,7 +71,7 @@ async function submit() {
     let ok = 0
     changed.forEach((p, i) => { if (list[i] && list[i].file_id) ok++ })
     const failedCount = changed.length - ok
-    if (failedCount) emit('toast', `${ok} 成功，${failedCount} 失败`, 'error')
+    if (failedCount) emit('toast', `${ok} 项成功，${failedCount} 项失败`, 'error')
     else emit('toast', `已重命名 ${ok} 项`, 'success')
     emit('done')
     emit('close')
@@ -129,9 +129,9 @@ async function submit() {
     </div>
 
     <template #actions>
-      <span class="panel-desc" style="margin-right:auto">{{ changedCount }} / {{ files.length }} 项将修改</span>
+      <span class="panel-desc" style="margin-right:auto">{{ changedCount }} / {{ files.length }} 项将重命名</span>
       <button class="btn" @click="emit('close')">取消</button>
-      <button class="btn primary" :disabled="!changedCount || busy" @click="submit">{{ busy ? '提交中…' : '应用重命名' }}</button>
+      <button class="btn primary" :disabled="!changedCount || busy" @click="submit">{{ busy ? '处理中…' : '应用重命名' }}</button>
     </template>
   </Modal>
 </template>

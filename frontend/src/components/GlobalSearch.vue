@@ -103,8 +103,8 @@ function open(result) {
         </form>
         <div class="global-search-options">
           <label class="global-search-toggle"><input type="checkbox" v-model="remote" /><span>同时在线搜索</span></label>
-          <span v-if="!remote">当前仅搜索本机缓存，未浏览过的目录可能缺失</span>
-          <span v-else>在线搜索范围由网盘提供；结果分批显示，不截断查询结果</span>
+          <span v-if="!remote">仅搜索本机已缓存的文件</span>
+          <span v-else>同时向网盘发起在线搜索（结果分批显示）</span>
         </div>
         <div v-if="busy" class="global-search-status" role="status"><span class="spin"></span><span>正在搜索…</span><button class="tbtn" type="button" @click="stop">停止</button></div>
         <div v-for="error in errors" :key="error" class="global-search-error" role="alert"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div>
@@ -117,7 +117,7 @@ function open(result) {
           <button v-if="ordered.length > visibleCount" class="btn" type="button" @click="visibleCount += 200">显示更多（已显示 {{ visibleCount }} / {{ ordered.length }} 项）</button>
           <div v-if="!busy && !ordered.length && !errors.length" class="workspace-empty-state global-search-empty">
             <UiIcon name="search" :size="22" />
-            <span>{{ stopped ? '搜索已停止，可重新搜索' : keyword ? '没有匹配的文件' : '输入名称，查找散落在各个网盘的文件' }}</span>
+            <span>{{ stopped ? '搜索已停止，可重新搜索' : keyword ? '没有匹配的文件' : '输入关键词搜索文件' }}</span>
           </div>
         </div>
       </motion.div>

@@ -267,7 +267,7 @@ func (a *App) ApplyUpdate(path string) (applyErr error) {
 	}
 	if !ready.info.CanInstall {
 		a.updateMu.Unlock()
-		return fmt.Errorf("请打开下载目录，手动安装此平台的更新包")
+		return fmt.Errorf("当前平台不支持自动安装，请打开下载目录手动安装")
 	}
 	a.updateApplying = true
 	a.updateMu.Unlock()

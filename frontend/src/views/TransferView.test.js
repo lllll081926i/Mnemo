@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../api', () => api)
 
 import TransferView from './TransferView.vue'
+import TaskIssue from '../components/TaskIssue.vue'
 import { DOWNLOAD_SOUNDS } from '../download-sounds'
 import { setPref } from '../appearance'
 
@@ -33,6 +34,50 @@ afterEach(() => {
   api.ListOfflineTasks.mockReset().mockResolvedValue([])
   api.refreshOfflineTasks.mockReset().mockResolvedValue([])
   vi.clearAllMocks()
+})
+
+describe('结构化任务原因', () => {
+  it('结构化访问拒绝不会被原始 401 字符串误报为账号失效', async () => {
+    api.ListDownloads.mockResolvedValueOnce([])
+    api.ListUploads.mockResolvedValueOnce([])
+    wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const listener = vi.fn()
+    window.addEventListener('mnemo:drive-notice', listener)
+    try {
+      const notify = api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
+      notify({ kind: 'download', task: { id: 'rejected', status: 'failed', error: 'HTTP 401', issue: { code: 'REMOTE_ACCESS_REJECTED', message: '链接访问被拒绝，请核对有效期', action: 'check_access' } } })
+      expect(listener.mock.calls[0][0].detail).toMatchObject({ category: 'permission', message: '链接访问被拒绝，请核对有效期' })
+    } finally {
+      window.removeEventListener('mnemo:drive-notice', listener)
+    }
+  })
+  it('原因随下载事件清除，网络入口保留原账号身份', async () => {
+    const issue = { code: 'NETWORK_UNAVAILABLE', message: '网络请求中断', action: 'network_settings' }
+    api.ListDownloads.mockResolvedValueOnce([{ id: 'issue-download', user_id: 'original-user', name: '文件', status: 'failed', error: 'raw', issue }])
+    api.ListUploads.mockResolvedValueOnce([])
+    wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const recommendation = wrapper.getComponent(TaskIssue)
+    await recommendation.get('button').trigger('click')
+    expect(wrapper.emitted('repair')).toEqual([[{ action: 'network_settings', userId: 'original-user' }]])
+    const notify = api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
+    notify({ kind: 'download', task: { id: 'issue-download', status: 'downloading' } })
+    await flushPromises()
+    expect(wrapper.vm.downloads[0].issue).toBeNull()
+  })
+
+  it('恢复上传事件清除旧失败原因与诊断，不把缺省字段当成保留旧错误', async () => {
+    api.ListDownloads.mockResolvedValueOnce([])
+    api.ListUploads.mockResolvedValueOnce([{ UploadID: 'issue-upload', Info: {}, Upload: { IsFailed: true, failedMessage: 'old-error', issue: { code: 'NEEDS_AUTH', action: 'reauthorize' } } }])
+    wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const notify = api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
+    notify({ kind: 'upload', task: { id: 'issue-upload', status: 'uploading' } })
+    await flushPromises()
+    expect(wrapper.vm.uploads[0].Upload.issue).toBeNull()
+    expect(wrapper.vm.uploads[0].Upload.failedMessage).toBe('')
+  })
 })
 
 describe('传输页刷新调度', () => {
