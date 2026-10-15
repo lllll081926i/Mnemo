@@ -7,6 +7,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, defineAsync
 import { PreviewURL, cachedPreviewImageURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, openCloudEditor, copyText, iconOf, getPlayCursor, savePlayCursor, onEvent } from '../api'
 import { getPrefs } from '../appearance'
 import { useSeekDisplay } from '../player/seek-display'
+import { createPreviewLease, createPreviewLeasePool } from '../player/preview-lease'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
@@ -195,14 +196,32 @@ function loadImageBitmap(url) {
 
 const imageCache = new Map()
 const imageLoads = new Map()
+const imageLeases = createPreviewLeasePool()
+const loadingImageLeases = new Set()
+const requestedImageLeases = new Set()
+const layerTimers = new Set()
 const IMAGE_CACHE_MAX_PIXELS = 64 * 1024 * 1024
 const IMAGE_CACHE_MAX_ITEMS = 32
 const IMAGE_DISK_MAX_FILE_BYTES = 64 * 1024 * 1024
 let cachedPixels = 0
 let cacheGeneration = 0
+let previewClosed = false
 
 function imageCacheKey(file) {
   return `${props.account.user_id}\0${props.account.drive_id}\0${file.file_id}\0${file.size || 0}\0${file.time || 0}\0${file.content_hash || ''}`
+}
+
+function imageLeaseKey(file) {
+  return `${cacheGeneration}\0${imageCacheKey(file)}`
+}
+
+function releaseUnusedImageLeases() {
+  imageLeases.retain([
+    ...[...imageCache.values()].map(entry => entry.leaseKey),
+    ...layers.value.map(layer => layer.leaseKey),
+    ...loadingImageLeases,
+    ...requestedImageLeases,
+  ])
 }
 
 function cachedImage(key) {
@@ -220,24 +239,32 @@ async function prepareImage(file) {
   if (cached) return cached
   if (imageLoads.has(key)) return imageLoads.get(key)
   const generation = cacheGeneration
+  const leaseKey = imageLeaseKey(file)
+  const lease = imageLeases.acquire(leaseKey)
+  loadingImageLeases.add(leaseKey)
   const task = (async () => {
     await PinFileSnapshot(userID, driveID, file)
+    if (previewClosed) throw new Error('预览已关闭')
     let previewUrl
     try {
       if (file.size > IMAGE_DISK_MAX_FILE_BYTES) throw new Error('图片超过单文件缓存上限')
       previewUrl = await cachedPreviewImageURL(userID, driveID, file)
     } catch {
+      if (previewClosed) throw new Error('预览已关闭')
       previewUrl = await PreviewURL(userID, driveID, file.file_id)
     }
+    lease.add(previewUrl)
+    if (previewClosed) throw new Error('预览已关闭')
     let bitmap
     try {
       bitmap = await loadImageBitmap(previewUrl)
     } catch (cause) {
       if (!previewUrl.includes('/local/')) throw cause
       previewUrl = await PreviewURL(userID, driveID, file.file_id)
+      lease.add(previewUrl)
       bitmap = await loadImageBitmap(previewUrl)
     }
-    const entry = { url: previewUrl, bitmap, w: bitmap.naturalWidth, h: bitmap.naturalHeight }
+    const entry = { url: previewUrl, bitmap, w: bitmap.naturalWidth, h: bitmap.naturalHeight, leaseKey }
     const pixels = entry.w * entry.h
     if (generation === cacheGeneration && pixels <= IMAGE_CACHE_MAX_PIXELS) {
       while (imageCache.size >= IMAGE_CACHE_MAX_ITEMS || (imageCache.size && cachedPixels + pixels > IMAGE_CACHE_MAX_PIXELS)) {
@@ -250,7 +277,10 @@ async function prepareImage(file) {
       cachedPixels += pixels
     }
     return entry
-  })().finally(() => { if (imageLoads.get(key) === task) imageLoads.delete(key) })
+  })().catch(cause => { lease.dispose(); throw cause }).finally(() => {
+    loadingImageLeases.delete(leaseKey)
+    if (imageLoads.get(key) === task) imageLoads.delete(key)
+  })
   imageLoads.set(key, task)
   return task
 }
@@ -258,6 +288,8 @@ async function prepareImage(file) {
 async function loadImage() {
   const seq = ++imgSeq
   const file = activeFile.value
+  const leaseKey = imageLeaseKey(file)
+  requestedImageLeases.add(leaseKey)
   imgSwitching.value = true
   error.value = ''
   try {
@@ -268,14 +300,21 @@ async function loadImage() {
     natural.value = { w: image.w, h: image.h }
     computeFit()
     resetImageTransform()
-    layers.value.push({ key: `${file.file_id}-${seq}`, url: image.url, file, w: image.w, h: image.h })
-    setTimeout(() => { layers.value = layers.value.filter((l) => !l.leaving) }, 300)
+    layers.value.push({ key: `${file.file_id}-${seq}`, url: image.url, file, w: image.w, h: image.h, leaseKey: image.leaseKey })
+    const timer = setTimeout(() => {
+      layerTimers.delete(timer)
+      layers.value = layers.value.filter((l) => !l.leaving)
+      releaseUnusedImageLeases()
+    }, 300)
+    layerTimers.add(timer)
     preloadNeighbors()
   } catch (e) {
     if (seq !== imgSeq) return
     // 首次加载失败才全屏报错；切换失败保留当前图
     if (!layers.value.length) error.value = String(e && e.message ? e.message : e)
   } finally {
+    requestedImageLeases.delete(leaseKey)
+    releaseUnusedImageLeases()
     if (seq === imgSeq) { imgSwitching.value = false; loading.value = false }
   }
 }
@@ -286,7 +325,7 @@ function preloadNeighbors() {
   for (const step of [1, -1]) {
     const f = list[(idx + step + list.length) % list.length]
     if (!f || f.file_id === activeFile.value.file_id) continue
-    void prepareImage(f).catch(() => {})
+    void prepareImage(f).catch(() => {}).finally(releaseUnusedImageLeases)
   }
 }
 
@@ -826,10 +865,14 @@ const renderedMarkdown = computed(() => renderMarkdown(text.value))
 let loadSeq = 0
 let textController = null
 let stopCacheCleared
+let contentLease = null
 async function loadPreview() {
   const seq = ++loadSeq
   textController?.abort()
   textController = null
+  contentLease?.dispose()
+  const requestLease = createPreviewLease()
+  contentLease = requestLease
   if (kind.value === 'image') return loadImage()
   if (documentKinds.has(kind.value)) { ++imgSeq; loading.value = false; error.value = ''; return }
   ++imgSeq
@@ -854,6 +897,7 @@ async function loadPreview() {
       driveID,
       file.file_id
     )
+    requestLease.replace(previewUrl)
     if (seq !== loadSeq) return
     if (kind.value === 'audio') {
       const resume = await getPlayCursor(userID, driveID, file.file_id).catch(() => 0)
@@ -871,6 +915,7 @@ async function loadPreview() {
       const resp = await fetch(previewUrl, { signal: textController.signal })
       if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
       const buf = await resp.arrayBuffer()
+      requestLease.dispose()
       if (seq !== loadSeq) return
       if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，请下载到本地查看')
       const decoded = decodeText(buf)
@@ -880,6 +925,7 @@ async function loadPreview() {
       textMode.value = isMarkdownFile.value ? 'markdown' : 'preview'
     }
   } catch (e) {
+    requestLease.dispose()
     if (seq !== loadSeq) return
     error.value = String(e && e.message ? e.message : e)
   } finally {
@@ -924,6 +970,7 @@ onMounted(() => {
     imageCache.clear()
     imageLoads.clear()
     cachedPixels = 0
+    releaseUnusedImageLeases()
   })
   try { WindowIsMaximised().then((v) => { winMax.value = !!v }).catch(() => {}) } catch { /* browser preview */ }
   window.addEventListener('keydown', onKey)
@@ -934,15 +981,20 @@ watch(stageEl, (el) => {
   if (el && stageRO) { stageRO.observe(el); nextTick(computeFit) }
 })
 onBeforeUnmount(() => {
+  previewClosed = true
   ++loadSeq
   ++imgSeq
   cacheGeneration++
   imageLoads.clear()
   imageCache.clear()
+  imageLeases.dispose()
+  for (const timer of layerTimers) clearTimeout(timer)
+  layerTimers.clear()
   cachedPixels = 0
   audioSeekDisplay.reset()
   stopCacheCleared?.()
   textController?.abort()
+  contentLease?.dispose()
   window.removeEventListener('keydown', onKey)
   clearTimeout(idleTimer)
   stageRO?.disconnect()

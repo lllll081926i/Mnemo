@@ -2344,6 +2344,23 @@ describe('关键交互组件', () => {
     ])
   })
 
+  it.each(['audio', 'text'])('%s 预览关闭后释放迟到的本机预览会话', async (kind) => {
+    vi.spyOn(api, 'openKindOf').mockReturnValue(kind)
+    api.PinFileSnapshot.mockResolvedValue(undefined)
+    let resolvePreview
+    api.PreviewURL.mockImplementationOnce(() => new Promise(resolve => { resolvePreview = resolve }))
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true })
+    const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: { file_id: 'late', name: kind === 'audio' ? 'late.wav' : 'late.txt' } } })
+    await flushPromises()
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    const address = 'http://127.0.0.1:45678/stream/late-preview?t=local-token'
+    resolvePreview(address)
+    await flushPromises()
+    expect(fetch).toHaveBeenCalledWith(address, expect.objectContaining({ method: 'DELETE', keepalive: true }))
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('账号排序存储失败时提示失败并清理拖动状态', async () => {
     vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(1)
     const wrapper = mountAttached(AccountRail, { props: { accounts: [{ user_id: 'pikpak:one' }, { user_id: 'pikpak:two' }] } })

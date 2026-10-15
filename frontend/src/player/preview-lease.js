@@ -57,3 +57,30 @@ export function createPreviewLease(release = releasePreviewURL) {
     dispose() { disposed = true; clear() },
   }
 }
+
+export function createPreviewLeasePool(release = releasePreviewURL) {
+  const leases = new Map()
+  let disposed = false
+  function clear() {
+    for (const lease of leases.values()) lease.dispose()
+    leases.clear()
+  }
+  return {
+    acquire(key) {
+      if (leases.has(key)) return leases.get(key)
+      const lease = createPreviewLease(release)
+      if (disposed) lease.dispose()
+      else leases.set(key, lease)
+      return lease
+    },
+    retain(keys) {
+      const retained = new Set(keys)
+      for (const [key, lease] of leases) {
+        if (retained.has(key)) continue
+        lease.dispose()
+        leases.delete(key)
+      }
+    },
+    dispose() { disposed = true; clear() },
+  }
+}

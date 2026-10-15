@@ -1,10 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createPreviewLease, releasePreviewURL } from './preview-lease'
+import { createPreviewLease, createPreviewLeasePool, releasePreviewURL } from './preview-lease'
 
 const address = name => `http://127.0.0.1:45678/stream/${name}?t=local-token`
 afterEach(() => vi.unstubAllGlobals())
 
 describe('播放会话所有权', () => {
+  it('图片缓存淘汰释放无引用会话，关闭后迟到地址立即释放', () => {
+    const release = vi.fn()
+    const pool = createPreviewLeasePool(release)
+    const old = pool.acquire('old')
+    old.add(address('old'))
+    pool.acquire('visible').add(address('visible'))
+    pool.retain(['visible'])
+    expect(release.mock.calls.flat()).toEqual([address('old')])
+    pool.dispose()
+    old.add(address('late-old'))
+    pool.acquire('late').add(address('late'))
+    expect(release.mock.calls.flat()).toEqual([address('old'), address('visible'), address('late-old'), address('late')])
+  })
   it('切换时释放旧主源与字幕，保留仍被使用的会话', () => {
     const release = vi.fn()
     const lease = createPreviewLease(release)

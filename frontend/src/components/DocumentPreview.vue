@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { PinFileSnapshot, PreviewURL, cachedPreviewDocumentURL } from '../api'
 import { DOCUMENT_LIMITS, readDocumentBytes } from '../documentPreview'
+import { createPreviewLease } from '../player/preview-lease'
 
 const props = defineProps({ account: Object, file: Object, kind: String })
 const renderers = {
@@ -17,8 +18,12 @@ const url = ref('')
 const bytes = shallowRef(null)
 const controller = new AbortController()
 let disposed = false
+let lease = null
 
 async function load() {
+  lease?.dispose()
+  const requestLease = createPreviewLease()
+  lease = requestLease
   loading.value = true
   error.value = ''
   try {
@@ -32,11 +37,17 @@ async function load() {
       try { source = await cachedPreviewDocumentURL(props.account.user_id, props.account.drive_id, props.file) }
       catch { /* 缓存不可用时仍可直接预览。 */ }
     }
+    if (disposed) return
     if (!source) source = await PreviewURL(props.account.user_id, props.account.drive_id, props.file.file_id)
+    requestLease.replace(source)
     if (disposed) return
     if (props.kind === 'pdf') url.value = source
-    else bytes.value = await readDocumentBytes(source, limit, controller.signal)
+    else {
+      bytes.value = await readDocumentBytes(source, limit, controller.signal)
+      requestLease.dispose()
+    }
   } catch (cause) {
+    requestLease.dispose()
     if (!disposed) error.value = String(cause?.message || cause)
   } finally {
     if (!disposed) loading.value = false
@@ -44,7 +55,7 @@ async function load() {
 }
 
 onMounted(load)
-onBeforeUnmount(() => { disposed = true; controller.abort() })
+onBeforeUnmount(() => { disposed = true; controller.abort(); lease?.dispose() })
 </script>
 
 <template>
