@@ -1,8 +1,7 @@
 // Package vault provides AES-256-GCM encryption for sensitive local data
 // (login credentials). On Windows the random master key is protected with
-// DPAPI; non-Windows platforms retain the legacy 0600 keyfile until a native
-// Keychain/Secret-Service adapter is added. Existing legacy keyfiles remain
-// readable for migration.
+// DPAPI; macOS/Linux use Keychain/Secret Service when available. Existing
+// legacy keyfiles remain readable for migration.
 package vault
 
 import (

@@ -2,11 +2,12 @@
 
 package vault
 
-import "os"
+import "runtime"
 
-// Native key storage is intentionally left to platform-specific adapters.
-// Returning os.ErrNotExist keeps the existing encrypted-file format working
-// on macOS/Linux without claiming that a process-local file is OS-protected.
-func readOSProtectedKey(string) ([]byte, error) { return nil, os.ErrNotExist }
+func readOSProtectedKey(dir string) ([]byte, error) {
+	return (desktopKeyring{platform: runtime.GOOS, run: runKeyringCommand}).read(dir)
+}
 
-func writeOSProtectedKey(string, []byte) error { return os.ErrNotExist }
+func writeOSProtectedKey(dir string, key []byte) error {
+	return (desktopKeyring{platform: runtime.GOOS, run: runKeyringCommand}).write(dir, key)
+}
