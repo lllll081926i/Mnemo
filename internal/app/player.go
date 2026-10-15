@@ -67,8 +67,8 @@ func (a *App) resolveVideoSource(userID, driveID, fileID, requestedQuality strin
 	filename := videoFileName(a, userID, driveID, fileID)
 	streamType := videoStreamType(quality.Type, filename)
 	selectedQuality := qualityIdentifier(quality)
-	refresh := func(_ context.Context) (previewserver.PlaybackSource, error) {
-		fresh, err := drive.GetVideoPreview(userID, driveID, fileID)
+	refresh := func(ctx context.Context) (previewserver.PlaybackSource, error) {
+		fresh, err := drive.GetVideoPreviewContext(ctx, userID, driveID, fileID)
 		if err != nil {
 			return previewserver.PlaybackSource{}, err
 		}
@@ -235,8 +235,8 @@ func (a *App) proxyVideoSubtitles(mediaProxy *previewserver.Server, userID, driv
 		}
 		language := strings.TrimSpace(subtitle.Language)
 		source := subtitlePlaybackSource(preview, subtitle, subtitleFileName(videoName, index, subtitle.URL))
-		source.Refresh = func(_ context.Context) (previewserver.PlaybackSource, error) {
-			fresh, err := drive.GetVideoPreview(userID, driveID, fileID)
+		source.Refresh = func(ctx context.Context) (previewserver.PlaybackSource, error) {
+			fresh, err := drive.GetVideoPreviewContext(ctx, userID, driveID, fileID)
 			if err != nil {
 				return previewserver.PlaybackSource{}, err
 			}

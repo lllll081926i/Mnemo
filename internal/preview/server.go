@@ -74,6 +74,7 @@ type PlaybackSource struct {
 	StreamType          string
 	ExpiresAt           time.Time
 	Refresh             func(context.Context) (PlaybackSource, error)
+	revision            uint64
 }
 
 type playbackSession struct {
@@ -86,6 +87,7 @@ type playbackSession struct {
 	dashResourceIDs map[string]string
 	resourceOrder   []playbackResourceRef
 	resourceSeq     uint64
+	refreshGate     chan struct{}
 }
 
 type localFileGrant struct {
@@ -314,30 +316,67 @@ func (s *Server) getPlaybackSession(id string) *playbackSession {
 }
 
 func (session *playbackSession) resolve(ctx context.Context, forceRefresh bool) (PlaybackSource, error) {
+	return session.resolveRevision(ctx, forceRefresh, nil)
+}
+
+func (session *playbackSession) refreshRejected(ctx context.Context, rejected PlaybackSource) (PlaybackSource, error) {
+	return session.resolveRevision(ctx, true, &rejected.revision)
+}
+
+func (session *playbackSession) resolveRevision(ctx context.Context, forceRefresh bool, rejectedRevision *uint64) (PlaybackSource, error) {
+	if err := ctx.Err(); err != nil {
+		return PlaybackSource{}, err
+	}
 	session.mu.Lock()
-	defer session.mu.Unlock()
-	now := time.Now()
-	needsRefresh := forceRefresh
-	if !needsRefresh && !session.source.ExpiresAt.IsZero() {
-		needsRefresh = !now.Before(session.source.ExpiresAt.Add(-30 * time.Second))
+	if session.refreshGate == nil {
+		session.refreshGate = make(chan struct{}, 1)
 	}
-	if needsRefresh && session.source.Refresh != nil {
-		refresh := session.source.Refresh
-		fresh, err := refresh(ctx)
-		if err != nil {
-			return PlaybackSource{}, err
-		}
-		fresh = clonePlaybackSource(fresh)
-		if strings.TrimSpace(fresh.URL) == "" {
-			return PlaybackSource{}, fmt.Errorf("refreshed playback source is empty")
-		}
-		if fresh.Refresh == nil {
-			fresh.Refresh = refresh
-		}
-		session.source = fresh
+	gate := session.refreshGate
+	initialRevision := session.source.revision
+	session.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+		defer func() { <-gate }()
+	case <-ctx.Done():
+		return PlaybackSource{}, ctx.Err()
 	}
-	session.lastUsed = now
-	return clonePlaybackSource(session.source), nil
+	if err := ctx.Err(); err != nil {
+		return PlaybackSource{}, err
+	}
+	session.mu.Lock()
+	source := clonePlaybackSource(session.source)
+	session.lastUsed = time.Now()
+	session.mu.Unlock()
+	if rejectedRevision != nil {
+		initialRevision = *rejectedRevision
+	}
+	needsRefresh := forceRefresh && source.revision == initialRevision
+	if !source.ExpiresAt.IsZero() && !time.Now().Before(source.ExpiresAt.Add(-30*time.Second)) {
+		needsRefresh = true
+	}
+	if !needsRefresh || source.Refresh == nil {
+		return source, nil
+	}
+	fresh, err := source.Refresh(ctx)
+	if err != nil {
+		return PlaybackSource{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return PlaybackSource{}, err
+	}
+	fresh = clonePlaybackSource(fresh)
+	if strings.TrimSpace(fresh.URL) == "" {
+		return PlaybackSource{}, fmt.Errorf("refreshed playback source is empty")
+	}
+	if fresh.Refresh == nil {
+		fresh.Refresh = source.Refresh
+	}
+	fresh.revision = source.revision + 1
+	session.mu.Lock()
+	session.source = fresh
+	session.lastUsed = time.Now()
+	session.mu.Unlock()
+	return clonePlaybackSource(fresh), nil
 }
 
 func (s *Server) playbackResourceURL(sessionID string, session *playbackSession, target string) string {
@@ -806,7 +845,7 @@ func (s *Server) proxySessionRequest(w http.ResponseWriter, r *http.Request, ses
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	for attempt := 0; attempt < 2; attempt++ {
-		source, err := session.resolve(ctx, attempt > 0 && resourceTarget == "")
+		source, err := session.resolve(ctx, false)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -843,11 +882,9 @@ func (s *Server) proxySessionRequest(w http.ResponseWriter, r *http.Request, ses
 			// the same signed path. Refresh the session first; retrying once still
 			// covers providers that rotate only headers, and the adaptive client
 			// then reloads the fresh root manifest if its old segment remains gone.
-			if resourceTarget != "" {
-				if _, err := session.resolve(ctx, true); err != nil {
-					http.Error(w, err.Error(), http.StatusBadGateway)
-					return
-				}
+			if _, err := session.refreshRejected(ctx, source); err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
 			}
 			continue
 		}
@@ -996,7 +1033,15 @@ func readPlaylistBody(resp *http.Response) ([]byte, error) {
 		defer gz.Close()
 		reader = gz
 	}
-	return io.ReadAll(io.LimitReader(reader, 8<<20))
+	const maxPlaylistBytes = 8 << 20
+	body, err := io.ReadAll(io.LimitReader(reader, maxPlaylistBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxPlaylistBytes {
+		return nil, fmt.Errorf("播放列表或字幕超过 8 MiB 上限")
+	}
+	return body, nil
 }
 
 func (s *Server) rewriteHLSPlaylist(sessionID string, session *playbackSession, playlistURL string, body []byte) ([]byte, error) {

@@ -601,12 +601,19 @@ func GetDownloadURLContext(ctx context.Context, userID, driveID, fileID string, 
 
 // GetVideoPreview resolves playback sources.
 func GetVideoPreview(userID, driveID, fileID string) (preview *model.VideoPreview, err error) {
+	return GetVideoPreviewContext(context.Background(), userID, driveID, fileID)
+}
+
+func GetVideoPreviewContext(ctx context.Context, userID, driveID, fileID string) (preview *model.VideoPreview, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d, c, err := driverAndCtx(userID, driveID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = withTokenPersist(err, c) }()
-	return d.GetVideoPreview(context.Background(), c, fileID)
+	return d.GetVideoPreview(ctx, c, fileID)
 }
 
 // Mkdir creates a folder.
