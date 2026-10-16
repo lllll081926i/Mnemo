@@ -36,7 +36,7 @@ async function exportReport() {
     <div class="diagnostics-actions">
       <button class="btn sm" :disabled="busy" @click="loadAccounts">加载本机账号</button>
       <UiSelect v-model="selected" aria-label="诊断账号" :options="options" :disabled="busy" style="min-width:160px" />
-      <label><input v-model="network" type="checkbox" :disabled="busy" />公共网络检测</label>
+      <label><input v-model="network" type="checkbox" aria-label="公共网络检测" :disabled="busy" />公共网络检测</label>
       <button class="btn sm primary" :disabled="busy" @click="run">{{ busy ? '诊断中…' : '运行诊断' }}</button>
       <button class="btn sm" :disabled="!report || busy || exporting" @click="exportReport">导出脱敏诊断</button>
     </div>
