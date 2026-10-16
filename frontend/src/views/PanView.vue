@@ -18,6 +18,7 @@ import UiSelect from '../components/UiSelect.vue'
 import TreeNode from '../components/TreeNode.vue'
 import DragDropZone from '../components/DragDropZone.vue'
 import SharePrivacyNotice from '../components/SharePrivacyNotice.vue'
+import AccountCapabilities from '../components/AccountCapabilities.vue'
 const DeletionHistory = defineAsyncComponent(() => import('../components/DeletionHistory.vue'))
 const showDeletionHistory = ref(false)
 async function openTrashWebsite() {
@@ -1766,6 +1767,7 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
+      <AccountCapabilities :key="account.user_id + ':' + account.drive_id" :account="account" />
       <div class="pan-split">
         <!-- 左侧：快捷入口 + 收藏 + 目录树 -->
         <div class="pan-left" :style="{ width: sideWidth + 'px' }">

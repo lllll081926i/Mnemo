@@ -1,5 +1,6 @@
 {
   "registries": ["https://registry.npmjs.org", "https://registry.npmmirror.com"],
+  "excludedPackages": ["abslink", "lfa-ponyfill", "throughput"],
   "externalPackages": [
     {
       "name": "xlsx",

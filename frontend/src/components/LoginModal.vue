@@ -6,6 +6,7 @@ import UiSelect from './UiSelect.vue'
 import Modal from './Modal.vue'
 import { debug, info, warn, error, errorText as formatErrorText, configKeys } from '../logger'
 import { driveErrorNotice } from '../workspace'
+import { loginDefaults, loginFields, loginFieldVisible, loginFieldRequired, selectLoginMethod } from '../login-schema'
 
 const props = defineProps({
   providers: { type: Array, default: () => [] },
@@ -15,8 +16,7 @@ const emit = defineEmits(['close', 'toast'])
 
 const providerId = ref(props.initialProvider || localStorage.getItem('login_provider') || 'pikpak')
 function defaultLoginForm(id) {
-  const methods = props.providers.find(provider => provider.ID === id)?.Login?.methods || []
-  if (methods.length) return { login_method: methods[0].id }
+  const defaults = loginDefaults(props.providers.find(provider => provider.ID === id)?.Login)
   if (id === 'thunder') {
     let deviceID = localStorage.getItem('mnemo.thunder.deviceId') || ''
     if (!/^[a-f0-9]{32}$/.test(deviceID)) {
@@ -24,12 +24,9 @@ function defaultLoginForm(id) {
       deviceID = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('')
       localStorage.setItem('mnemo.thunder.deviceId', deviceID)
     }
-    return { device_id: deviceID, login_mode: 'password' }
+    return { ...defaults, device_id: deviceID, login_mode: defaults.login_mode || 'password' }
   }
-  if (id === 'lanzou') return { upload_tier: 'v0' }
-  if (id === 'pan189') return { login_mode: 'password' }
-  if (id === 'pan139') return { login_mode: 'password' }
-  return {}
+  return defaults
 }
 const form = ref(defaultLoginForm(providerId.value))
 const initialMountedName = providerId.value === 'webdav' ? 'WebDAV' : (providerId.value === 's3' ? 'S3' : '')
@@ -157,9 +154,8 @@ const declaredMethods = computed(() => provider.value?.Login?.methods || [])
 const declaredMethod = computed(() => declaredMethods.value.find(method => method.id === form.value.login_method) || declaredMethods.value[0] || null)
 function selectDeclaredMethod(method) {
   if (busy.value) return
-  const keep = new Set(method.fieldKeys)
-  form.value = Object.fromEntries(Object.entries(form.value).filter(([key]) => keep.has(key)))
-  form.value.login_method = method.id
+  form.value = selectLoginMethod(form.value, method)
+  passwordVisibility.value = {}
   errorText.value = ''
 }
 const loginModeField = computed(() => fields.value.find(field => field.key === 'login_mode'))
@@ -173,40 +169,16 @@ const loginMethodOptions = [
 ]
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuthField = (field) => field.type === 'oauth'
-const isCookieField = (field) => /cookie|cookies|bduss/i.test(`${field.key} ${field.label}`)
-const isAccountField = (field) => /^(?:username|password|phone|email|sms_code)$/i.test(field.key)
-const hasAccountLogin = computed(() => fields.value.some(isAccountField))
-const hasPhoneLogin = computed(() => fields.value.some((field) => field.key === 'phone' || /手机/.test(field.label)))
-const hasEmailLogin = computed(() => fields.value.some((field) => field.key === 'email' || /邮箱/.test(field.label)))
-const isOAuth = computed(() => !isMounted.value && !hasAccountLogin.value && fields.value.length > 0 && fields.value.every(isOAuthField))
-// 按盘隐藏的可选高级字段（保持界面精简，需要时可从此处移除恢复）
-const HIDDEN_LOGIN_FIELDS = {
-  guangya: ['refresh_token'],
-  pan139: ['authorization'],
-}
-
-const visibleFields = computed(() => {
-  const hidden = HIDDEN_LOGIN_FIELDS[providerId.value] || []
-  const nonOAuthFields = fields.value.filter((field) => !isOAuthField(field) && !hidden.includes(field.key) && !(hasPasswordSmsSwitch.value && field.key === 'login_mode') && (!declaredMethod.value || declaredMethod.value.fieldKeys.includes(field.key)))
-  // 有其它登录方式（账密/OAuth）时隐藏 Cookie 字段
-  const hasAltLogin = hasAccountLogin.value || fields.value.some(isOAuthField)
-  return hasAltLogin ? nonOAuthFields.filter((field) => !isCookieField(field)) : nonOAuthFields
-})
-const isTokenField = (field) => /token|authorization|secret/i.test(`${field.key} ${field.label}`)
-const hasCookieLogin = computed(() => !hasAccountLogin.value && visibleFields.value.some(isCookieField))
-const hasTokenLogin = computed(() => !hasAccountLogin.value && visibleFields.value.some(isTokenField))
-const isLongText = (key) => /cookie|token|bduss|secret|authorization/i.test(key)
-const isPan139DirectLogin = computed(() => providerId.value === 'pan139' && String(form.value.authorization || '').trim() !== '')
+const isOAuth = computed(() => !isMounted.value && fields.value.length > 0 && fields.value.every(isOAuthField))
+const visibleFields = computed(() => loginFields(provider.value?.Login, declaredMethod.value))
 const hasRefreshToken = computed(() => String(form.value.refresh_token || '').trim() !== '')
 function isFieldRequired(field) {
-  if (loginModeField.value && ['password', 'sms_code'].includes(field.key)) return field.key === (form.value.login_mode === 'sms' ? 'sms_code' : 'password')
-  if (isPan139DirectLogin.value && (field.key === 'username' || field.key === 'password')) return false
-  return field.required
+  if (!field.purpose && loginModeField.value && ['password', 'sms_code'].includes(field.key)) return field.key === (form.value.login_mode === 'sms' ? 'sms_code' : 'password')
+  return loginFieldRequired(field, form.value.login_mode, declaredMethod.value)
 }
 function isLoginFieldVisible(field) {
-  const sms = form.value.login_mode === 'sms'
-  if (loginModeField.value && field.key === 'password') return !sms
-  if (loginModeField.value && field.key === 'sms_code') return sms
+  if (!loginFieldVisible(field, form.value.login_mode)) return false
+  if (!field.purpose && loginModeField.value && ['password', 'sms_code'].includes(field.key)) return field.key === (form.value.login_mode === 'sms' ? 'sms_code' : 'password')
   if (providerId.value === 'pan189' && field.key === 'validate_code') return !!pan189Captcha.value
   return true
 }
@@ -214,10 +186,7 @@ function fieldInputType(field) {
   return field.type === 'password' ? 'password' : 'text'
 }
 function fieldInputMode(field) {
-  if (providerId.value === 'thunder' && field.key === 'username') return 'numeric'
-  if (/phone|sms_code/i.test(field.key)) return 'numeric'
-  if (/email/i.test(field.key)) return 'email'
-  return undefined
+  return field.inputMode || undefined
 }
 
 function applyWebDAVPreset(id) {
@@ -355,6 +324,12 @@ watch([hasPasswordSmsSwitch, form], ([enabled]) => {
   if (enabled && !['password', 'sms'].includes(form.value.login_mode)) form.value.login_mode = 'password'
 }, { immediate: true })
 
+watch(() => provider.value?.Login, config => {
+  for (const [key, value] of Object.entries(loginDefaults(config))) {
+    if (form.value[key] === undefined) form.value[key] = value
+  }
+}, { immediate: true })
+
 // A hidden or removed provider must not remain selected through an old
 // localStorage value while the visible panel falls back to another item.
 watch(availableProviders, (list) => {
@@ -394,10 +369,7 @@ onBeforeUnmount(() => {
 })
 
 // 逐网盘附加帮助（后端 Login.fields 之外的引导）
-const PROVIDER_HELP = {
-  aliopen: { label: '如何获取阿里云盘 Open API Refresh Token（非 Cookie）？', url: 'https://alistgo.com/zh/tool/aliyundrive/request.html' },
-}
-const providerHelp = computed(() => PROVIDER_HELP[providerId.value] || null)
+const providerHelp = computed(() => provider.value?.Login?.helpUrl ? { label: provider.value.Login.helpLabel, url: provider.value.Login.helpUrl } : null)
 function openHelp() { if (providerHelp.value) OpenBrowser(providerHelp.value.url).catch(() => {}) }
 
 // PikPak 的验证页会回调应用创建的一次性 localhost 地址。不要依赖 iframe
@@ -773,7 +745,7 @@ async function submit() {
       ? '授权成功'
       : (attemptMounted && attemptProvider === 's3'
         ? (mountedForm.value.verifyWrite ? 'S3 已添加（浏览和写入权限已验证）' : 'S3 已添加（浏览权限已验证，写入权限将在首次上传时验证）')
-        : '登录成功')
+        : '登录成功；写入、套餐和目录权限以实际操作结果为准')
     emit('toast', successMessage, 'success')
 		info('login', 'login form submit completed', { provider: attemptProvider })
     emit('close')
@@ -859,6 +831,7 @@ async function submit() {
                 <div class="login-provider-intro"><strong>{{ provider.Meta.label }}</strong><span>{{ isOAuth ? '通过浏览器授权登录' : (isMounted ? '配置存储连接信息' : '填写账号信息以继续') }}</span></div>
               </div>
               <div class="login-form-content" :key="providerId">
+                <p v-if="provider.Login?.notice" class="hint">{{ provider.Login.notice }}</p>
                 <!-- 挂载存储（WebDAV / S3） -->
                 <template v-if="isMounted">
                   <div class="login-section">
@@ -916,7 +889,7 @@ async function submit() {
                   <div v-if="visibleFields.length" class="login-section">
                     <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field" :class="{ 'login-sms-field': f.key === 'sms_code' && ['thunder', 'pan139', 'pan189', 'guangya'].includes(providerId) && !(providerId === 'guangya' && hasRefreshToken) }">
                       <label :for="'login-field-' + f.key">{{ f.label }}</label>
-                      <textarea v-if="isLongText(f.key) && f.type !== 'password'" :id="'login-field-' + f.key" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
+                      <textarea v-if="f.multiline && f.type !== 'password'" :id="'login-field-' + f.key" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" :id="'login-field-' + f.key" v-model="form[f.key]" :aria-label="f.label" :options="f.options || []" block />
                       <div v-else-if="f.type === 'password'" class="password-input-wrap"><input :id="'login-field-' + f.key" class="input" :type="passwordVisible(f.key) ? 'text' : 'password'" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" /><button class="password-toggle" type="button" :title="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible(f.key) ? '隐藏密码' : '显示密码'" @click="togglePassword(f.key)"><UiIcon :name="passwordVisible(f.key) ? 'eye-off' : 'eye'" :size="15" /></button></div>
                       <input v-else :id="'login-field-' + f.key" class="input" :type="fieldInputType(f)" :inputmode="fieldInputMode(f)" v-model="form[f.key]" :placeholder="f.placeholder || ''" />

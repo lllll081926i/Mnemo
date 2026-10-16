@@ -27,9 +27,9 @@ func init() {
 		}, func(c *drive.Capabilities) {
 			c.SetHashes([]string{"md5"}, []string{"md5"})
 		}),
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "username", Type: "text", Label: "账号", Required: true},
-			{Key: "password", Type: "password", Label: "密码", Required: true},
+		Login: drive.LoginConfig{Notice: "账号和密码发送至蓝奏优享；凭据用于建立平台会话。", Fields: []drive.LoginField{
+			{Key: "username", Purpose: "account", Type: "text", Label: "账号", Required: true},
+			{Key: "password", Purpose: "password", Type: "password", Label: "密码", Required: true},
 		}},
 		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },

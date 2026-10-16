@@ -28,11 +28,11 @@ func init() {
 			"trashView":       true,
 			"trashRestore":    true,
 		}, nil),
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "cookie", Type: "text", Label: "蓝奏云 Cookie", Required: false, Hint: "粘贴 Cookie 直接登录"},
-			{Key: "username", Type: "text", Label: "账号", Required: false},
-			{Key: "password", Type: "password", Label: "密码", Required: false},
-			{Key: "upload_tier", Type: "select", Label: "会员等级", Options: []drive.LoginOption{
+		Login: drive.LoginConfig{Notice: "账号和密码发送至蓝奏云；会员等级仅用于配置上传限制，不会改变实际套餐。", Fields: []drive.LoginField{
+			{Key: "cookie", Multiline: true, Hidden: true, Purpose: "cookie", Type: "text", Label: "蓝奏云 Cookie", Required: false, Hint: "粘贴 Cookie 直接登录"},
+			{Key: "username", Purpose: "account", Type: "text", Label: "账号", Required: true},
+			{Key: "password", Purpose: "password", Type: "password", Label: "密码", Required: true},
+			{Key: "upload_tier", Default: "v0", Type: "select", Label: "会员等级", Options: []drive.LoginOption{
 				{Value: "v0", Label: "V0（100 MB）"},
 				{Value: "v1", Label: "V1（200 MB）"},
 				{Value: "v2", Label: "V2（300 MB）"},

@@ -2582,7 +2582,7 @@ describe('关键交互组件', () => {
     mountAttached(LoginModal, {
       props: { providers: [{
         ID: 'thunder', Meta: { label: '迅雷网盘' }, Login: { fields: [
-          { key: 'username', type: 'text', label: '手机号', required: true },
+          { key: 'username', purpose: 'account', inputMode: 'numeric', type: 'text', label: '手机号', required: true },
           { key: 'password', type: 'password', label: '密码', required: true },
         ] },
       }] },
@@ -2638,7 +2638,7 @@ describe('关键交互组件', () => {
           ID: 'lanzou', Meta: { label: '蓝奏云' }, Login: { fields: [
             { key: 'username', type: 'text', label: '账号', required: true },
             { key: 'password', type: 'password', label: '密码', required: true },
-            { key: 'upload_tier', type: 'select', label: '会员等级', options: [
+            { key: 'upload_tier', default: 'v0', type: 'select', label: '会员等级', options: [
               { value: 'v0', label: 'V0（100 MB）' },
               { value: 'v3', label: 'V3（550 MB）' },
             ] },

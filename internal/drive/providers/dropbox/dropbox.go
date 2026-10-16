@@ -56,8 +56,8 @@ func init() {
 		}),
 		Factory: func() drive.Driver { return &Driver{} },
 		Auth:    authPKCE,
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "action", Type: "oauth", Label: "OAuth 授权"},
+		Login: drive.LoginConfig{Notice: "通过 Dropbox 官方浏览器授权；后续使用授权令牌续期。可操作范围受应用授权限制。", Fields: []drive.LoginField{
+			{Key: "action", Purpose: "oauth", Type: "oauth", Label: "OAuth 授权"},
 		}},
 	})
 }

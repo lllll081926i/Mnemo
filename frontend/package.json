@@ -1,6 +1,6 @@
 {
   "name": "mnemo-frontend",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "license": "GPL-3.0-only",
   "engines": { "node": ">=24.22.0" },
@@ -17,7 +17,7 @@
     "dashjs": "^5.2.1",
     "docx-preview": "^0.4.0",
     "hls.js": "^1.6.19",
-    "jassub": "^2.5.14",
+    "jassub": "1.8.8",
     "motion-v": "2.4.4",
     "mpegts.js": "^1.8.2",
     "pdfjs-dist": "^6.2.108",

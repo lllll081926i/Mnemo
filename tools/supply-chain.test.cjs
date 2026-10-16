@@ -53,6 +53,22 @@ test('清单与锁文件必须保持相同的依赖范围和元数据', () => {
   }
 })
 
+test('拒绝重新引入许可正文不完整的依赖', () => {
+  const { manifest, policy, lock, entry } = fixture()
+  policy.excludedPackages = ['abslink']
+  lock.packages['node_modules/abslink'] = { ...entry, resolved: 'https://registry.npmjs.org/abslink/-/abslink-1.2.2.tgz' }
+  assert.throws(() => validateSources(manifest, lock, policy), /许可正文/)
+})
+
+test('归档预构建组件的 dist 署名，不递归收集代码', context => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mnemo-dist-license-'))
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  fs.mkdirSync(path.join(directory, 'dist'))
+  fs.writeFileSync(path.join(directory, 'dist', 'COPYRIGHT'), '上游构建组件原始署名与许可')
+  fs.writeFileSync(path.join(directory, 'dist', 'worker.js'), '不归档正文代码')
+  assert.deepEqual(licenseFiles(directory), [path.join('dist', 'COPYRIGHT')])
+})
+
 test('归档原始许可证与署名，不复制普通代码和凭据文件', context => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mnemo-license-test-'))
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }))

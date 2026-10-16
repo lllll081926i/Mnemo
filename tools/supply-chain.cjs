@@ -30,6 +30,7 @@ function validateSources(manifest, lock, policy) {
     if (!location) continue
     if (!location.startsWith('node_modules/') || location.includes('\\') || location.split('/').some(part => part === '..') || entry.link) throw new Error(`不允许本地替换依赖：${location}`)
     const name = packageName(location)
+    if ((policy.excludedPackages || []).includes(name)) throw new Error(`依赖缺少可归档的上游许可正文，禁止重新引入：${name}`)
     if (!entry.version || !entry.resolved || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.integrity || '')) throw new Error(`依赖缺少固定版本、来源或 SHA-512：${name}`)
     const source = new URL(entry.resolved)
     if (source.protocol !== 'https:' || source.username || source.password || source.port || source.hash || source.search) throw new Error(`依赖来源必须为无凭据 HTTPS：${name}`)
@@ -62,6 +63,11 @@ function licenseFiles(directory, relative = '', depth = 0) {
     const candidate = path.join(relative, entry.name)
     if (entry.isFile() && /^(?:licen[sc]e|copying|notice|copyright|authors)(?:[._-].*)?$/i.test(entry.name)) result.push(candidate)
     if (depth === 0 && entry.isFile() && /^readme(?:[._-].*)?$/i.test(entry.name) && /permission is hereby granted|redistribution and use in source and binary forms/i.test(fs.readFileSync(path.join(directory, candidate), 'utf8'))) result.push(candidate)
+    if (depth === 0 && entry.isDirectory() && entry.name === 'dist') {
+      for (const file of fs.readdirSync(path.join(directory, candidate), { withFileTypes: true })) {
+        if (file.isFile() && /^(?:licen[sc]e|copying|notice|copyright)(?:[._-].*)?$/i.test(file.name)) result.push(path.join(candidate, file.name))
+      }
+    }
     if (entry.isDirectory() && depth < 3 && (depth > 0 || /^(?:licenses?|licences?|notices?)$/i.test(entry.name))) {
       result.push(...licenseFiles(directory, candidate, depth + 1))
     } else if (depth > 0 && entry.isFile() && !result.includes(candidate)) {
@@ -107,6 +113,7 @@ function collectInventory(root, output) {
       files.push(...archiveLicenses(supplementDir, `upstream:${name}@${entry.version}`, output))
       licenseSupplement = { source: provenance.source, revision: provenance.revision }
     }
+    if (installed && !files.length) throw new Error(`生产依赖缺少可归档的许可正文：${name}@${entry.version}`)
     components.push({ ecosystem: 'npm', name, version: entry.version, source: entry.resolved, integrity: entry.integrity, declaredLicense: entry.license || 'UNKNOWN', installed, licenseFiles: files, licenseSupplement })
   }
   const modules = run('go', ['list', '-m', '-json', 'all'], root).split(/\r?\n(?=\{)/).map(document => JSON.parse(document))

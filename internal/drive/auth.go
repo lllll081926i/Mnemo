@@ -22,8 +22,11 @@ type AuthFunc func(ctx context.Context, req AuthRequest) (*model.TokenInfo, erro
 // LoginConfig declares the UI form fields needed to log into a provider.
 type LoginConfig struct {
 	// Fields is an ordered list of form inputs.
-	Fields  []LoginField      `json:"fields"`
-	Methods []LoginMethodSpec `json:"methods,omitempty"`
+	Fields    []LoginField      `json:"fields"`
+	Methods   []LoginMethodSpec `json:"methods,omitempty"`
+	Notice    string            `json:"notice,omitempty"`
+	HelpLabel string            `json:"helpLabel,omitempty"`
+	HelpURL   string            `json:"helpUrl,omitempty"`
 }
 
 type LoginMethodSpec struct {
@@ -38,13 +41,20 @@ type LoginMethodSpec struct {
 
 // LoginField is one login form input.
 type LoginField struct {
-	Key         string        `json:"key"`
-	Label       string        `json:"label"`
-	Type        string        `json:"type"` // text | password | token | endpoint | bucket | region | code | select
-	Required    bool          `json:"required"`
-	Hint        string        `json:"hint,omitempty"`
-	Placeholder string        `json:"placeholder,omitempty"`
-	Options     []LoginOption `json:"options,omitempty"`
+	Purpose       string        `json:"purpose,omitempty"`
+	Hidden        bool          `json:"hidden,omitempty"`
+	Multiline     bool          `json:"multiline,omitempty"`
+	InputMode     string        `json:"inputMode,omitempty"`
+	Default       string        `json:"default,omitempty"`
+	Modes         []string      `json:"modes,omitempty"`
+	RequiredModes []string      `json:"requiredModes,omitempty"`
+	Key           string        `json:"key"`
+	Label         string        `json:"label"`
+	Type          string        `json:"type"` // text | password | token | endpoint | bucket | region | code | select
+	Required      bool          `json:"required"`
+	Hint          string        `json:"hint,omitempty"`
+	Placeholder   string        `json:"placeholder,omitempty"`
+	Options       []LoginOption `json:"options,omitempty"`
 }
 
 // LoginOption is one selectable value exposed by a provider login field.

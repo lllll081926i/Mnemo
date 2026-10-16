@@ -44,9 +44,9 @@ func init() {
 			"favorite":            true,
 			"permanentDelete":     true,
 		}, nil),
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "username", Type: "text", Label: "账号（手机/邮箱）", Required: true},
-			{Key: "password", Type: "password", Label: "密码", Required: true},
+		Login: drive.LoginConfig{Notice: "账号和密码发送至 PikPak；安全验证使用平台验证页面。登录不代表所有套餐和目录写权限已验证。", Fields: []drive.LoginField{
+			{Key: "username", Purpose: "account", Type: "text", Label: "账号（手机/邮箱）", Required: true},
+			{Key: "password", Purpose: "password", Type: "password", Label: "密码", Required: true},
 		}},
 		Auth:    authSignIn,
 		Factory: func() drive.Driver { return &Driver{} },

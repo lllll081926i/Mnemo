@@ -452,6 +452,13 @@ export namespace drive {
 	    }
 	}
 	export class LoginField {
+	    purpose?: string;
+	    hidden?: boolean;
+	    multiline?: boolean;
+	    inputMode?: string;
+	    default?: string;
+	    modes?: string[];
+	    requiredModes?: string[];
 	    key: string;
 	    label: string;
 	    type: string;
@@ -473,6 +480,13 @@ export namespace drive {
 	        this.hint = source["hint"];
 	        this.placeholder = source["placeholder"];
 	        this.options = this.convertValues(source["options"], LoginOption);
+	        this.purpose = source["purpose"];
+	        this.hidden = source["hidden"];
+	        this.multiline = source["multiline"];
+	        this.inputMode = source["inputMode"];
+	        this.default = source["default"];
+	        this.modes = source["modes"];
+	        this.requiredModes = source["requiredModes"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -494,6 +508,9 @@ export namespace drive {
 		}
 	}
 	export class LoginConfig {
+	    notice?: string;
+	    helpLabel?: string;
+	    helpUrl?: string;
 	    fields: LoginField[];
 	    methods?: LoginMethodSpec[];
 
@@ -505,6 +522,9 @@ export namespace drive {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.fields = this.convertValues(source["fields"], LoginField);
 	        this.methods = this.convertValues(source["methods"], LoginMethodSpec);
+	        this.notice = source["notice"];
+	        this.helpLabel = source["helpLabel"];
+	        this.helpUrl = source["helpUrl"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

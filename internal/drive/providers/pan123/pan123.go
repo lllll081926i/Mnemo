@@ -91,9 +91,9 @@ func init() {
 			c.SetHashes([]string{"md5"}, []string{"md5"})
 		}),
 		Auth: authLogin,
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "username", Type: "text", Label: "手机号/邮箱", Required: true, Hint: "123 云盘账号"},
-			{Key: "password", Type: "password", Label: "密码", Required: true},
+		Login: drive.LoginConfig{Notice: "账号和密码发送至 123 云盘。下载与写入限制以账号套餐和平台响应为准。", Fields: []drive.LoginField{
+			{Key: "username", Purpose: "account", Type: "text", Label: "手机号/邮箱", Required: true, Hint: "123 云盘账号"},
+			{Key: "password", Purpose: "password", Type: "password", Label: "密码", Required: true},
 		}},
 		Factory: func() drive.Driver { return &Driver{} },
 	})

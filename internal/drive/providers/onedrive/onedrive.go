@@ -43,8 +43,8 @@ func init() {
 		}),
 		Factory: func() drive.Driver { return &Driver{} },
 		Auth:    authPKCE,
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "action", Type: "oauth", Label: "OAuth 授权"},
+		Login: drive.LoginConfig{Notice: "通过 Microsoft 官方浏览器授权；后续使用授权令牌续期。企业权限由租户管理员控制。", Fields: []drive.LoginField{
+			{Key: "action", Purpose: "oauth", Type: "oauth", Label: "OAuth 授权"},
 		}},
 	})
 }

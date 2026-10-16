@@ -53,10 +53,10 @@ func init() {
 			c.SetHashes([]string{"md5"}, nil)
 			c.SetShareExpirationOptions(0, 1, 7, 30)
 		}),
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "phone", Type: "text", Label: "手机号", Required: false},
-			{Key: "sms_code", Type: "text", Label: "短信验证码", Required: false},
-			{Key: "refresh_token", Type: "text", Label: "Refresh Token（可选，直接登录）", Required: false},
+		Login: drive.LoginConfig{Notice: "手机号和短信验证码发送至光鸭云盘。登录可能需要先完成平台安全验证。", Fields: []drive.LoginField{
+			{Key: "phone", InputMode: "numeric", Purpose: "account", Type: "text", Label: "手机号", Required: true},
+			{Key: "sms_code", InputMode: "numeric", Purpose: "sms", Type: "text", Label: "短信验证码", Required: true},
+			{Key: "refresh_token", Multiline: true, Hidden: true, Purpose: "token", Type: "text", Label: "Refresh Token（可选，直接登录）", Required: false},
 		}},
 		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },

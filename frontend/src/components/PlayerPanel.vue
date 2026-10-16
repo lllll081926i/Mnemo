@@ -7,6 +7,7 @@ import { getPrefs } from '../appearance'
 import { srtToVtt, parseSup, SupRenderer } from '../player/subtitles'
 import { useSeekDisplay } from '../player/seek-display'
 import { createPreviewLease } from '../player/preview-lease'
+import { loadASSRenderer } from '../player/ass-renderer'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 import PlaybackInfo from './PlaybackInfo.vue'
@@ -982,24 +983,6 @@ function stopSup() {
 }
 
 // ---- ASS/SSA 特效字幕（libass WASM 渲染，保留定位/颜色/卡拉 OK 等全部特效） ----
-let jassubPromise = null
-async function getJassub() {
-  if (!jassubPromise) {
-    jassubPromise = Promise.all([
-      import('jassub'),
-      import('jassub/dist/wasm/jassub-worker.js?url'),
-      import('jassub/dist/wasm/jassub-worker.wasm?url'),
-      import('jassub/dist/default.woff2?url'),
-    ]).then(([mod, worker, wasm, font]) => ({
-      JASSUB: mod.default,
-      workerUrl: worker.default,
-      wasmUrl: wasm.default,
-      fontUrl: font.default,
-    }))
-  }
-  return jassubPromise
-}
-
 async function selectAss(index) {
   const track = assTracks.value[index]
   if (!track) return
@@ -1016,10 +999,17 @@ async function selectAss(index) {
       content = await response.text()
     }
     if (unmounted || controller.signal.aborted) return
-    const { JASSUB, workerUrl, wasmUrl, fontUrl } = await getJassub()
+    const { Renderer, assets } = await loadASSRenderer()
     if (unmounted || controller.signal.aborted) return
     destroyAss()
-    assRenderer = new JASSUB({ video: videoEl.value, subContent: content, workerUrl, wasmUrl, fonts: [fontUrl], timeOffset: tsTimeBase })
+    assRenderer = new Renderer({ ...assets, video: videoEl.value, subContent: content, timeOffset: tsTimeBase })
+    const renderer = assRenderer
+    renderer.addEventListener('error', () => {
+      if (unmounted || assRenderer !== renderer) return
+      destroyAss()
+      currentSubtitle.value = ''
+      emit('toast', 'ASS 字幕渲染失败，请切换字幕或下载后使用本地播放器', 'error')
+    }, { once: true })
     assActive.value = true
     currentSubtitle.value = 'ass:' + index
   } catch (error) {

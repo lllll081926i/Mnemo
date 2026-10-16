@@ -48,8 +48,8 @@ func init() {
 			"move":             false,
 			"copy":             false,
 		}, nil),
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "cookie", Type: "text", Label: "BDUSS / Cookie", Required: true, Placeholder: "粘贴 BDUSS 或完整 Cookie"},
+		Login: drive.LoginConfig{Notice: "Cookie 是一刻相册访问凭据，请仅导入自己的有效凭据。", Fields: []drive.LoginField{
+			{Key: "cookie", Multiline: true, Purpose: "cookie", Type: "text", Label: "BDUSS / Cookie", Required: true, Placeholder: "粘贴 BDUSS 或完整 Cookie"},
 		}},
 		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },

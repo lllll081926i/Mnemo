@@ -138,13 +138,13 @@ func init() {
 			c.SetHashes([]string{"sha1"}, []string{"sha1"}).SetConflictPolicies("refuse", "rename", "skip", "overwrite")
 		}),
 		Auth: authRefreshToken,
-		Login: drive.LoginConfig{Methods: []drive.LoginMethodSpec{
+		Login: drive.LoginConfig{HelpLabel: "如何获取阿里云盘 Open API Refresh Token（非 Cookie）？", HelpURL: "https://alistgo.com/zh/tool/aliyundrive/request.html", Methods: []drive.LoginMethodSpec{
 			{ID: "relay", Label: "导入已有令牌", FieldKeys: []string{"refresh_token"}, Recipient: oauthDefault, Notice: "默认使用 AList 第三方令牌中转，首次登录及后续刷新都会向该服务发送 Open Refresh Token。这不是阿里官方令牌交换地址。不要填写 Cookie 或普通客户端令牌。", Consent: "我同意通过此第三方服务交换和刷新令牌"},
 			{ID: "own", Label: "自有 OAuth 应用", FieldKeys: []string{"refresh_token", "client_id", "client_secret"}, RequiredKeys: []string{"client_id"}, Recipient: apiHost + "/oauth/access_token", Notice: "使用已获批的自有应用，令牌必须由同一个 Client ID 签发。Client Secret 按应用要求填写。当前未提供 Mnemo 自有应用扫码授权，不会跳转至不明扫码服务。"},
 		}, Fields: []drive.LoginField{
-			{Key: "refresh_token", Type: "text", Label: "Refresh Token", Required: true, Placeholder: "粘贴阿里云盘 Open refresh_token"},
-			{Key: "client_id", Type: "text", Label: "Client ID（可选）", Required: false},
-			{Key: "client_secret", Type: "password", Label: "Client Secret（可选）", Required: false},
+			{Key: "refresh_token", Multiline: true, Purpose: "token", Type: "text", Label: "Refresh Token", Required: true, Placeholder: "粘贴阿里云盘 Open refresh_token"},
+			{Key: "client_id", Purpose: "application", Type: "text", Label: "Client ID（可选）", Required: false},
+			{Key: "client_secret", Purpose: "secret", Type: "password", Label: "Client Secret（可选）", Required: false},
 		}},
 		Factory: func() drive.Driver { return &Driver{} },
 	})

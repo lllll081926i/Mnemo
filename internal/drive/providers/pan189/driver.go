@@ -39,12 +39,12 @@ func init() {
 			c.TrashWebURL = "https://cloud.189.cn/web/main/file"
 		}),
 		Auth: login189,
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "login_mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "账号密码"}, {Value: "sms", Label: "短信验证码"}}},
-			{Key: "username", Type: "text", Label: "手机号/邮箱", Required: true},
-			{Key: "password", Type: "password", Label: "密码", Required: true},
-			{Key: "sms_code", Type: "text", Label: "短信验证码", Required: false},
-			{Key: "validate_code", Type: "text", Label: "图形验证码（需要时填写）", Required: false, Hint: "登录提示需要验证码时，输入图片中的字符后重试"},
+		Login: drive.LoginConfig{Notice: "账号、密码或短信验证码发送至天翼认证服务；需要图形验证码时会显示平台验证图片。", Fields: []drive.LoginField{
+			{Key: "login_mode", Default: "password", Purpose: "mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "账号密码"}, {Value: "sms", Label: "短信验证码"}}},
+			{Key: "username", Purpose: "account", Type: "text", Label: "手机号/邮箱", Required: true},
+			{Key: "password", RequiredModes: []string{"password"}, Modes: []string{"password"}, Purpose: "password", Type: "password", Label: "密码", Required: false},
+			{Key: "sms_code", RequiredModes: []string{"sms"}, Modes: []string{"sms"}, InputMode: "numeric", Purpose: "sms", Type: "text", Label: "短信验证码", Required: false},
+			{Key: "validate_code", Purpose: "captcha", Type: "text", Label: "图形验证码（需要时填写）", Required: false, Hint: "登录提示需要验证码时，输入图片中的字符后重试"},
 		}},
 		Factory: func() drive.Driver { return &Driver{} },
 	})

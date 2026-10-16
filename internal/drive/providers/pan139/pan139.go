@@ -129,13 +129,13 @@ func init() {
 			c.SetHashes([]string{"sha256"}, []string{"sha256"})
 			c.SetShareExpirationOptions(0, 1, 7)
 		}),
-		Login: drive.LoginConfig{Fields: []drive.LoginField{
-			{Key: "login_mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "账号密码"}, {Value: "sms", Label: "短信验证码"}}},
-			{Key: "username", Type: "text", Label: "手机号/账号", Required: true},
-			{Key: "password", Type: "password", Label: "密码", Required: false},
-			{Key: "sms_code", Type: "text", Label: "短信验证码", Required: false},
-			{Key: "authorization", Type: "text", Label: "Authorization（可选，粘贴直接登录）", Required: false},
-			{Key: "mail_cookies", Type: "text", Label: "Cookie（可选）", Required: false},
+		Login: drive.LoginConfig{Notice: "账号、密码或短信验证码发送至中国移动认证服务；个人云与家庭云权限分别由平台判断。", Fields: []drive.LoginField{
+			{Key: "login_mode", Default: "password", Purpose: "mode", Type: "select", Label: "登录方式", Required: true, Options: []drive.LoginOption{{Value: "password", Label: "账号密码"}, {Value: "sms", Label: "短信验证码"}}},
+			{Key: "username", Purpose: "account", Type: "text", Label: "手机号/账号", Required: true},
+			{Key: "password", RequiredModes: []string{"password"}, Modes: []string{"password"}, Purpose: "password", Type: "password", Label: "密码", Required: false},
+			{Key: "sms_code", RequiredModes: []string{"sms"}, Modes: []string{"sms"}, InputMode: "numeric", Purpose: "sms", Type: "text", Label: "短信验证码", Required: false},
+			{Key: "authorization", Multiline: true, Hidden: true, Purpose: "token", Type: "text", Label: "Authorization（可选，粘贴直接登录）", Required: false},
+			{Key: "mail_cookies", Multiline: true, Hidden: true, Purpose: "cookie", Type: "text", Label: "Cookie（可选）", Required: false},
 		}},
 		Auth:    authLogin,
 		Factory: func() drive.Driver { return &Driver{} },

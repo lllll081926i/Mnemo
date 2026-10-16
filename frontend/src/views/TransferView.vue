@@ -21,7 +21,7 @@ import UiSelect from '../components/UiSelect.vue'
 import TaskIssue from '../components/TaskIssue.vue'
 import { motion, MotionConfig } from 'motion-v'
 import { compactReveal, reducedMotion } from '../motion/presets'
-import { dispatchDriveNotice, driveErrorNotice } from '../workspace'
+import { taskErrorText, createTaskFailureNotifier } from '../task-notices'
 import { mergeLiveTasks } from '../transfer-refresh'
 
 const props = defineProps({
@@ -29,20 +29,7 @@ const props = defineProps({
   providers: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['toast', 'navigate', 'repair'])
-const notifiedTaskFailures = new Set()
-function taskErrorText(reason, action, issue) {
-  return issue?.message || (reason ? driveErrorNotice(reason, action).message : '')
-}
-function notifyTaskFailure(key, reason, action, issue) {
-  if ((!reason && !issue?.message) || notifiedTaskFailures.has(key)) return
-  notifiedTaskFailures.add(key)
-  const categories = { NEEDS_AUTH: 'auth', REMOTE_ACCESS_REJECTED: 'permission', PROVIDER_COOLDOWN: 'limited', NETWORK_UNAVAILABLE: 'network', REMOTE_NOT_FOUND: 'notFound', BLOCKED_BY_CONFLICT: 'conflict', UNSUPPORTED: 'unsupported' }
-  const notice = issue?.message
-    ? { category: categories[issue.code] || 'unknown', type: 'warn', message: issue.message }
-    : driveErrorNotice(reason, action)
-  dispatchDriveNotice(notice)
-}
-function clearTaskFailure(key) { notifiedTaskFailures.delete(key) }
+const { notifyTaskFailure, clearTaskFailure } = createTaskFailureNotifier()
 const detailID = ref('')
 const verifying = ref(false), verification = ref({})
 let verificationSeq = 0
