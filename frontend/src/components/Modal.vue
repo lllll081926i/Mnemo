@@ -21,7 +21,8 @@ const props = defineProps({
   bodyClass: { type: String, default: 'modal-body' },
   dialogClass: { type: String, default: '' },
   maskClass: { type: String, default: '' },
-  windowControls: { type: Boolean, default: true },
+  windowControls: { type: Boolean, default: false },
+  initialFocus: { type: String, default: '' },
   closeLabel: { type: String, default: '关闭对话框' },
   dialogStyle: { type: Object, default: () => ({}) },
   // 沉浸式媒体预览在自身舞台中提供关闭/窗口控制，不渲染通用实体标题栏。
@@ -37,7 +38,7 @@ const handleClose = () => emit('close')
 
 function focusableElements() {
   if (!dialogEl.value) return []
-  return [...dialogEl.value.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+  return [...dialogEl.value.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')]
     .filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[inert], [hidden], [aria-hidden="true"]') && (el.getClientRects().length > 0 || el === document.activeElement))
 }
 
@@ -79,7 +80,9 @@ function toggleWindowMaximise() {
 
 onMounted(() => {
   previousActiveElement = document.activeElement
-  try { WindowIsMaximised().then((value) => { windowMaximized.value = !!value }).catch(() => {}) } catch { /* browser preview */ }
+  if (props.windowControls) {
+    try { WindowIsMaximised().then((value) => { windowMaximized.value = !!value }).catch(() => {}) } catch {}
+  }
   modalStack.push({ close: handleClose, element: dialogEl.value })
   if (!globalKeydownBound) {
     window.addEventListener('keydown', handleGlobalKeydown)
@@ -88,7 +91,10 @@ onMounted(() => {
   nextTick(() => {
     if (!dialogEl.value || dialogEl.value.contains(document.activeElement)) return
     if (props.focusDialog) { dialogEl.value.focus(); return }
-    focusableElements()[0]?.focus()
+    const items = focusableElements()
+    const preferred = props.initialFocus ? items.find(element => element.matches(props.initialFocus)) : null
+    const input = items.find(element => element.matches('input:not([type="checkbox"]):not([type="radio"]), textarea, [role="combobox"]'))
+    ;(preferred || input || items.find(element => element.closest('.modal-actions')) || items[0])?.focus()
     if (!dialogEl.value.contains(document.activeElement)) dialogEl.value.focus()
   })
 })

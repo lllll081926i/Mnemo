@@ -1062,6 +1062,7 @@ function decodeText(buf) {
     :dialog-class="'preview-modal' + (isImmersive ? ' immersive' : '')"
     :hide-head="isImmersive"
     :focus-dialog="isImmersive"
+    :window-controls="true"
     width=""
     @close="handleCloseRequest"
     body-class="preview-body"

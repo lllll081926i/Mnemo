@@ -98,13 +98,12 @@ function open(result) {
       <motion.div class="global-search" :initial="compactReveal.initial" :animate="compactReveal.animate" :transition="compactReveal.transition">
         <form class="global-search-form" @submit.prevent="run">
           <UiIcon name="search" :size="17" class="global-search-icon" />
-          <input class="input" v-model="keyword" aria-label="跨盘搜索名称" placeholder="搜索已缓存文件，或开启在线搜索" autofocus />
+          <input class="input" v-model="keyword" aria-label="跨盘搜索名称" :placeholder="remote ? '搜索网盘文件' : '搜索已缓存文件'" autofocus />
           <button class="btn primary" :disabled="busy">{{ busy ? '搜索中' : '搜索' }}</button>
         </form>
         <div class="global-search-options">
           <label class="global-search-toggle"><input type="checkbox" v-model="remote" /><span>同时在线搜索</span></label>
           <span v-if="!remote">仅搜索本机已缓存的文件</span>
-          <span v-else>同时向网盘发起在线搜索（结果分批显示）</span>
         </div>
         <div v-if="busy" class="global-search-status" role="status"><span class="spin"></span><span>正在搜索…</span><button class="tbtn" type="button" @click="stop">停止</button></div>
         <div v-for="error in errors" :key="error" class="global-search-error" role="alert"><UiIcon name="warning" :size="14" /><span>{{ error }}</span></div>

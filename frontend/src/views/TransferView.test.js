@@ -108,6 +108,55 @@ describe('结构化任务原因', () => {
 })
 
 describe('传输页刷新调度', () => {
+  it('隐藏再打开传输页后，旧轮询响应不能建立第二组定时器', async () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const timers = vi.spyOn(globalThis, 'setTimeout')
+    let finish
+    api.ListDownloads.mockResolvedValueOnce([{ id: 'active', status: 'downloading' }])
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    try {
+      wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(finish).toBeTypeOf('function')
+      wrapper.vm.deactivateView()
+      wrapper.vm.activateView()
+      const count = () => timers.mock.calls.filter(([callback]) => callback.name === 'pollTransfers').length
+      expect(count()).toBe(2)
+      finish([])
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(count()).toBe(2)
+    } finally {
+      timers.mockRestore()
+      hidden.mockRestore()
+    }
+  })
+
+  it('连续进度更新复用任务索引，新增与移除后同步索引', async () => {
+    api.ListDownloads.mockResolvedValueOnce([{ id: 'indexed', status: 'downloading', name: '下载文件' }])
+    api.ListUploads.mockResolvedValueOnce([{ UploadID: 'upload-indexed', Info: { name: '上传文件' }, Upload: {} }])
+    wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const downloadsIndex = wrapper.vm.downloadByID
+    const uploadsIndex = wrapper.vm.uploadByID
+    const notify = api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
+    for (let progress = 1; progress <= 50; progress++) {
+      notify({ kind: 'download', task: { id: 'indexed', status: 'downloading', progress } })
+      notify({ kind: 'upload', task: { id: 'upload-indexed', status: 'uploading', progress } })
+    }
+    expect(wrapper.vm.downloadByID).toBe(downloadsIndex)
+    expect(wrapper.vm.uploadByID).toBe(uploadsIndex)
+    expect(downloadsIndex.get('indexed').progress).toBe(50)
+    expect(uploadsIndex.get('upload-indexed').Upload.DownProcess).toBe(50)
+    expect(uploadsIndex.get('upload-indexed').Info.name).toBe('上传文件')
+    notify({ kind: 'download', task: { id: 'new-task', status: 'queued' } })
+    expect(wrapper.vm.downloadByID.has('new-task')).toBe(true)
+    notify({ kind: 'download', task: { id: 'indexed', status: 'removed' } })
+    expect(wrapper.vm.downloadByID.has('indexed')).toBe(false)
+  })
+
   it('区分传输字节核对与远端目标校验', async () => {
     wrapper = mount(TransferView, { props: { accounts: [], providers: [] }, global: { stubs: { UiIcon: true } } })
     await flushPromises()

@@ -377,11 +377,10 @@ async function exportLogs() {
       <div v-show="loaded" class="settings-column">
         <header class="settings-intro">
           <p>设置</p>
-          <span>管理偏好、传输与系统设置</span>
         </header>
         <!-- 1. 基础 -->
         <section class="settings-group" id="sg-general">
-          <header class="sg-heading"><div><h2>外观与基础</h2><p>主题、启动行为与个人偏好</p></div></header>
+          <header class="sg-heading"><div><h2>外观与基础</h2></div></header>
           <div class="sg-card">
             <div class="sg-row"><div class="sg-text"><span class="sg-label">偏好备份</span><span class="sg-desc">备份外观、自定义名称、排序与收藏，不包含登录凭据</span></div><div class="sg-control"><button class="btn" :disabled="backupBusy" @click="exportPrefs">导出</button><button class="btn" :disabled="backupBusy" @click="readBackup">恢复</button></div></div>
             <div class="sg-row">
@@ -466,7 +465,7 @@ async function exportLogs() {
 
         <!-- 2. 文件 -->
         <section class="settings-group" id="sg-pan">
-          <header class="sg-heading"><div><h2>文件与浏览</h2><p>目录展示和默认排序方式</p></div></header>
+          <header class="sg-heading"><div><h2>文件与浏览</h2></div></header>
           <div class="sg-card">
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">默认视图</span></div>
@@ -510,7 +509,7 @@ async function exportLogs() {
 
         <!-- 3. 传输 -->
         <section class="settings-group" id="sg-transfer">
-          <header class="sg-heading"><div><h2>传输与连接</h2><p>下载路径、带宽和网络代理</p></div></header>
+          <header class="sg-heading"><div><h2>传输与连接</h2></div></header>
           <div class="sg-card">
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">下载保存目录</span><span class="sg-desc">留空默认保存至系统「下载」目录</span></div>
@@ -653,7 +652,7 @@ async function exportLogs() {
 
         <!-- 4. 播放 -->
         <section class="settings-group" id="sg-player">
-          <header class="sg-heading"><div><h2>媒体播放</h2><p>续播、音量和字幕行为</p></div></header>
+          <header class="sg-heading"><div><h2>媒体播放</h2></div></header>
           <div class="sg-card">
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">断点续播</span></div>
@@ -723,7 +722,7 @@ async function exportLogs() {
 
         <!-- 5. 数据与维护 -->
         <section class="settings-group" id="sg-maintenance">
-          <header class="sg-heading"><div><h2>数据与维护</h2><p>本地缓存和诊断日志</p></div></header>
+          <header class="sg-heading"><div><h2>数据与维护</h2></div></header>
           <div class="sg-card">
             <div class="sg-row">
               <div class="sg-text">
@@ -783,7 +782,7 @@ async function exportLogs() {
 
         <!-- 8. 更新 -->
         <section class="settings-group" id="sg-update">
-          <header class="sg-heading"><div><h2>关于与更新</h2><p>版本信息和更新策略</p></div></header>
+          <header class="sg-heading"><div><h2>关于与更新</h2></div></header>
           <div class="sg-card">
             <div class="sg-row"><div class="sg-text"><span class="sg-label">当前版本</span><span class="sg-desc">默认仅检查正式版更新</span></div><div class="sg-control">{{ packageInfo.version }}</div></div>
             <div class="sg-row">

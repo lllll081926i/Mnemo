@@ -51,7 +51,7 @@ onBeforeUnmount(() => { disposed = true })
 
 <template>
   <Modal title="我的空间" width="760px" @close="emit('close')">
-    <p class="overview-note">仅汇总本机缓存与任务记录，不会自动登录网盘。账号状态不是实时在线检测；缓存搜索不代表全盘搜索。</p>
+    <p class="overview-note" title="账号状态与任务统计来自本机记录，非实时检测">本机概览</p>
     <p v-if="failedSources.length" role="alert">{{ failedSources.join('、') }}读取失败，统计不完整。</p>
     <div class="overview-summary"><span>{{ accounts.length }} 个账号</span><span>{{ pending }} 项待处理</span><span>{{ failures.length }} 项异常</span></div>
     <div class="overview-accounts">
@@ -61,8 +61,8 @@ onBeforeUnmount(() => { disposed = true })
     <h3>最近使用</h3>
     <div class="overview-recent"><button v-for="item in recent" :key="JSON.stringify([item.userId, item.driveId, item.fileId])" class="btn sm" @click="emit('navigate', item)">{{ item.name }}</button><span v-if="!recent.length">{{ recentEnabled ? '暂无本机记录' : '最近使用记录已暂停' }}</span></div>
     <h3>待处理异常</h3>
-    <ul class="overview-failures"><li v-for="failure in failures.slice(0, 6)" :key="failure.key"><strong>{{ failure.name || '未命名任务' }}</strong> · {{ failure.message }}</li><li v-if="!failures.length">当前本机记录中没有失败任务。</li></ul>
-    <template #actions><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '读取中…' : '刷新本机记录' }}</button><button class="btn primary" @click="emit('tasks')">查看传输任务</button></template>
+    <ul class="overview-failures"><li v-for="failure in failures.slice(0, 6)" :key="failure.key"><strong>{{ failure.name || '未命名任务' }}</strong> · {{ failure.message }}</li><li v-if="!failures.length">暂无异常任务</li></ul>
+    <template #actions><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '读取中…' : '刷新' }}</button><button class="btn primary" @click="emit('tasks')">查看任务</button></template>
   </Modal>
 </template>
 

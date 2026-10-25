@@ -76,6 +76,8 @@ function accLabel(acc) { return accountName(acc) }
 // ---------- 下载 / 上传数据 ----------
 const downloads = ref([])
 const uploads = ref([])
+const downloadByID = computed(() => new Map(downloads.value.map(task => [task.id, task])))
+const uploadByID = computed(() => new Map(uploads.value.map(task => [task.UploadID, task])))
 const loading = ref(true)
 const refreshError = ref('')
 let refreshSeq = 0
@@ -136,10 +138,10 @@ function onTransferEvent(ev) {
     if (t.status === 'failed' && !t.groupId) notifyTaskFailure(failureKey, t.error, '下载文件', t.issue)
     else clearTaskFailure(failureKey)
     const list = downloads.value
-    const idx = list.findIndex((x) => x.id === t.id)
+    const existing = downloadByID.value.get(t.id)
     if (t.status === 'removed') {
       pendingDownloadEvents?.set(t.id, null)
-      if (idx >= 0) list.splice(idx, 1)
+      if (existing) list.splice(list.indexOf(existing), 1)
       if (selectedIds.value.has(t.id)) {
         const s = new Set(selectedIds.value)
         s.delete(t.id)
@@ -147,8 +149,8 @@ function onTransferEvent(ev) {
       }
       return
     }
-    if (idx >= 0) {
-      const prev = list[idx]
+    if (existing) {
+      const prev = existing
       if (prev.status !== 'completed' && t.status === 'completed') {
         if (!t.groupId) playFinishSound()
         // 完成后清理该项已选状态
@@ -158,24 +160,22 @@ function onTransferEvent(ev) {
           selectedIds.value = s
         }
       }
-      Object.assign(list[idx], t, { issue: t.issue || null })
+      Object.assign(existing, t, { issue: t.issue || null })
     } else {
       downloads.value.unshift(t)
     }
-    pendingDownloadEvents?.set(t.id, idx >= 0 ? list[idx] : t)
+    pendingDownloadEvents?.set(t.id, existing || t)
   } else if (ev.kind === 'upload') {
     const failureKey = `upload:${t.id}`
     if (t.status === 'failed') notifyTaskFailure(failureKey, t.error, '上传文件', t.issue)
     else clearTaskFailure(failureKey)
-    const list = uploads.value
-    const idx = list.findIndex((x) => x.UploadID === t.id)
-    if (idx < 0) {
+    const job = uploadByID.value.get(t.id)
+    if (!job) {
       // The enqueue event can arrive before the first list refresh. Fetch once
       // for the new task, then keep subsequent progress event-driven.
       scheduleRefresh(150)
       return
     }
-    const job = list[idx]
     const previous = upStatus(job)
     const next = {
       ...(job.Upload || {}),
@@ -686,9 +686,9 @@ watch(offlineAccounts, (list) => {
   if (!list.some((account) => account.user_id === offlineUser.value)) offlineUser.value = list[0]?.user_id || ''
 }, { immediate: true })
 
-watch(() => props.accounts, (list) => {
-  if (filterUser.value && !list.some((a) => a.user_id === filterUser.value)) filterUser.value = ''
-}, { deep: true })
+watch(() => props.accounts.map(account => account.user_id), (ids) => {
+  if (filterUser.value && !ids.includes(filterUser.value)) filterUser.value = ''
+})
 
 const offlineDriveId = computed(() => {
   const acc = offlineAccounts.value.find((a) => a.user_id === offlineUser.value)
@@ -869,6 +869,7 @@ const migProgressText = (j) => j.totalBytes > 0
 
 // ---------- 生命周期 ----------
 let pollTimer = null
+let pollEpoch = 0
 let offFns = []
 let viewActive = false
 
@@ -886,6 +887,7 @@ function unbindEvents() {
 }
 
 function stopPolling() {
+  pollEpoch++
   clearTimeout(pollTimer)
   clearTimeout(offlineTimer)
   pollTimer = null
@@ -894,18 +896,19 @@ function stopPolling() {
 
 function startPolling() {
   stopPolling()
+  const epoch = pollEpoch
   const pollTransfers = async () => {
-    if (!viewActive) return
+    if (!viewActive || epoch !== pollEpoch) return
     if (!document.hidden && (activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate')) {
       await refresh()
-      if (menu.value === 'migrate') await refreshMigrateJobs()
+      if (viewActive && epoch === pollEpoch && menu.value === 'migrate') await refreshMigrateJobs()
     }
-    pollTimer = setTimeout(pollTransfers, activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate' ? 5000 : 15000)
+    if (viewActive && epoch === pollEpoch) pollTimer = setTimeout(pollTransfers, activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate' ? 5000 : 15000)
   }
   const pollOffline = async () => {
-    if (!viewActive) return
+    if (!viewActive || epoch !== pollEpoch) return
     if (!document.hidden && menu.value === 'offline') await refreshOffline()
-    offlineTimer = setTimeout(pollOffline, menu.value === 'offline' ? 8000 : 20000)
+    if (viewActive && epoch === pollEpoch) offlineTimer = setTimeout(pollOffline, menu.value === 'offline' ? 8000 : 20000)
   }
   pollTimer = setTimeout(pollTransfers, 5000)
   offlineTimer = setTimeout(pollOffline, 8000)

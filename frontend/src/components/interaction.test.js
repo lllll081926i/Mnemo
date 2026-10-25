@@ -648,7 +648,7 @@ describe('迅雷登录安全验证', () => {
   it('打开官方验证窗口，回调后携带内部会话自动续办', async () => {
     const wrapper = await prepare()
     expect(api.ShowThunderVerification).toHaveBeenCalledExactlyOnceWith('session-1', 'https://captcha.xunlei.com/verify')
-    expect(document.body.textContent).toContain('请完成迅雷官方安全验证')
+    expect(document.body.textContent).toContain('请完成安全验证')
     expect([...document.body.querySelectorAll('.login-field label')].map(label => label.textContent)).toEqual(['手机号', '密码'])
     const notify = api.onEvent.mock.calls.find(([name]) => name === 'thunder:verification:completed')[1]
     notify({ session_id: 'stale', captcha_token: 'wrong-token' })
@@ -716,7 +716,7 @@ describe('迅雷登录安全验证', () => {
     await flushPromises()
     expect(api.CancelThunderLogin).toHaveBeenCalledWith('attempt-1', 'session-1')
     expect(wrapper.vm.form.login_attempt).toBeUndefined()
-    expect(document.body.textContent).not.toContain('请完成迅雷官方安全验证')
+    expect(document.body.textContent).not.toContain('请完成安全验证')
   })
 
   it('关闭登录框后到达的验证挑战会被清理，不再打开窗口', async () => {
@@ -760,23 +760,23 @@ describe('密码和短信登录切换', () => {
 
   it.each(['thunder', 'pan139', 'pan189'])('%s 使用统一的双选项按钮，切换保留手机号并清理另一方式凭据', async id => {
     const wrapper = await prepare(id)
-    expect(methods().map(button => button.textContent)).toEqual(['密码登录', '短信验证码登录'])
+    expect(methods().map(button => button.textContent)).toEqual(['密码登录', '短信登录'])
     expect(methods()[0].getAttribute('aria-pressed')).toBe('true')
-    expect(field('短信验证码').classList.contains('login-sms-field')).toBe(true)
+    expect(field('短信验证码')).toBeUndefined()
     expect(wrapper.findComponent(UiSelect).exists()).toBe(false)
     expect(field('登录方式')).toBeUndefined()
     await setDomInput(field('密码').querySelector('input'), 'old-password')
     methods()[1].click()
     await nextTick()
-    expect(field('密码').style.display).toBe('none')
-    expect(field('短信验证码').style.display).not.toBe('none')
+    expect(field('密码')).toBeUndefined()
+    expect(field('短信验证码').classList.contains('login-sms-field')).toBe(true)
     expect(wrapper.vm.form.password).toBeUndefined()
     expect(wrapper.vm.form.username).toBe('13800138000')
     await setDomInput(field('短信验证码').querySelector('input'), '123456')
     methods()[0].click()
     await nextTick()
     expect(wrapper.vm.form.sms_code).toBeUndefined()
-    expect(field('密码').style.display).not.toBe('none')
+    expect(field('密码')).toBeDefined()
     expect(methods()[0].getAttribute('aria-pressed')).toBe('true')
   })
 
@@ -897,6 +897,23 @@ describe('主窗口顶栏', () => {
 })
 
 describe('声明式授权来源', () => {
+  it('网盘选择支持方向键和首尾跳转，Tab 只停留在当前网盘', async () => {
+    mountAttached(LoginModal, { props: { initialProvider: 'pikpak', providers: ['pikpak', 'webdav', 's3'].map(id => ({ ID: id, Meta: { label: id }, Login: { fields: [] } })) } })
+    const list = document.querySelector('.login-provider-list')
+    const current = () => list.querySelector('[aria-selected="true"]')
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(current().dataset.providerId).toBe('webdav')
+    expect(document.activeElement).toBe(current())
+    expect(list.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(current().dataset.providerId).toBe('s3')
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(current().dataset.providerId).toBe('pikpak')
+  })
+
   it('确认第三方接收方后才能提交，切换自有应用清除中转同意和隐藏凭据', async () => {
     const provider = { ID: 'aliopen', Meta: { label: '阿里云盘' }, Login: {
       fields: [{ key: 'refresh_token', type: 'text', label: 'Refresh Token', required: true }, { key: 'client_id', type: 'text', label: 'Client ID' }, { key: 'client_secret', type: 'password', label: 'Client Secret' }],
@@ -2533,13 +2550,13 @@ describe('关键交互组件', () => {
     expect(document.activeElement).toBe(opener)
   })
 
-  it('普通弹窗统一提供经典三键，沉浸式弹窗不渲染实体标题栏', async () => {
+  it('普通弹窗只显示关闭键，沉浸式弹窗不渲染实体标题栏', async () => {
     const standard = mountAttached(Modal, { props: { title: '窗口控制' } })
     await nextTick()
 
     const controls = [...document.querySelectorAll('.modal-window-btn')]
-    expect(controls).toHaveLength(3)
-    expect(controls.map((button) => button.getAttribute('aria-label'))).toEqual(['最小化窗口', '最大化窗口', '关闭对话框'])
+    expect(controls).toHaveLength(1)
+    expect(controls.map((button) => button.getAttribute('aria-label'))).toEqual(['关闭对话框'])
 
     standard.unmount()
     wrappers.splice(wrappers.indexOf(standard), 1)
@@ -2624,7 +2641,7 @@ describe('关键交互组件', () => {
     await nextTick()
 
     const inputs = [...document.body.querySelectorAll('input')]
-    expect(inputs.find((input) => input.getAttribute('placeholder') === '我的 WebDAV / S3').value).toBe('坚果云')
+    expect(document.getElementById('mounted-name').value).toBe('坚果云')
     expect(inputs.find((input) => input.getAttribute('placeholder') === 'https://dav.example.com').value).toBe('https://dav.jianguoyun.com/dav/')
     expect(document.body.querySelectorAll('.password-toggle')).toHaveLength(1)
     expect(document.body.querySelector('[role="switch"]').getAttribute('aria-checked')).toBe('false')
@@ -2691,8 +2708,8 @@ describe('关键交互组件', () => {
     mode.querySelectorAll('button')[1].click()
     await nextTick()
     const field = (label) => [...document.body.querySelectorAll('.login-field')].find((f) => f.querySelector('label')?.textContent === label)
-    expect(field('密码').style.display).toBe('none')
-    expect(field('短信验证码').style.display).not.toBe('none')
+    expect(field('密码')).toBeUndefined()
+    expect(field('短信验证码')).toBeDefined()
     await setDomInput(field('手机号').querySelector('input'), '13800138000')
     await field('短信验证码').querySelector('button').click()
     await flushPromises()
@@ -2751,7 +2768,7 @@ describe('关键交互组件', () => {
       .find((field) => field.querySelector('label')?.textContent === '短信验证码')
     expect(smsField.style.display).not.toBe('none')
     expect([...document.body.querySelectorAll('.login-field')]
-      .find((field) => field.querySelector('label')?.textContent === '密码').style.display).toBe('none')
+      .find((field) => field.querySelector('label')?.textContent === '密码')).toBeUndefined()
 
     const sendButton = [...smsField.querySelectorAll('button')].find((button) => button.textContent.includes('获取验证码'))
     await sendButton.click()
@@ -2783,7 +2800,7 @@ describe('关键交互组件', () => {
 
     const values = { endpoint: 'https://s3.example.test', username: 'access-key', password: 'secret-key', bucket: 'mnemo' }
     const inputs = [...document.body.querySelectorAll('input')]
-    await setDomInput(inputs.find((input) => input.placeholder === 's3.us-east-1.amazonaws.com (可选，默认 AWS)'), values.endpoint)
+    await setDomInput(document.getElementById('mounted-endpoint'), values.endpoint)
     const inputForLabel = (label) => [...document.body.querySelectorAll('.login-field')]
       .find((field) => field.querySelector('label')?.textContent.startsWith(label))
       ?.querySelector('input')
@@ -2792,6 +2809,7 @@ describe('关键交互组件', () => {
     await setDomInput(inputForLabel('Bucket'), values.bucket)
 
     const switches = [...document.body.querySelectorAll('[role="switch"]')]
+    expect(document.querySelector('.login-advanced').open).toBe(false)
     expect(switches).toHaveLength(3)
     expect(switches[0].getAttribute('aria-checked')).toBe('false')
     expect(switches[1].getAttribute('aria-checked')).toBe('true')

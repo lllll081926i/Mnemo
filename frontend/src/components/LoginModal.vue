@@ -118,6 +118,17 @@ const providerListEl = ref(null)
 const selectionStyle = ref({})
 const selectionVisible = ref(false)
 let providerListObserver = null
+function onProviderKeydown(event) {
+  if (busy.value || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const list = availableProviders.value
+  if (!list.length) return
+  const current = list.findIndex(item => item.ID === providerId.value)
+  const step = ['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? list.length - 1 : (current + step + list.length) % list.length
+  providerId.value = list[index].ID
+  nextTick(() => providerListEl.value?.querySelector('[aria-selected="true"]')?.focus())
+}
 function updateProviderSelection(reveal = false) {
   const list = providerListEl.value
   const active = [...(list?.querySelectorAll('.lp-item') || [])].find((item) => item.dataset.providerId === providerId.value)
@@ -165,12 +176,13 @@ const hasPasswordSmsSwitch = computed(() => {
 })
 const loginMethodOptions = [
   { value: 'password', label: '密码登录' },
-  { value: 'sms', label: '短信验证码登录' },
+  { value: 'sms', label: '短信登录' },
 ]
 const isMounted = computed(() => providerId.value === 'webdav' || providerId.value === 's3')
 const isOAuthField = (field) => field.type === 'oauth'
 const isOAuth = computed(() => !isMounted.value && fields.value.length > 0 && fields.value.every(isOAuthField))
 const visibleFields = computed(() => loginFields(provider.value?.Login, declaredMethod.value))
+const activeFields = computed(() => visibleFields.value.filter(isLoginFieldVisible))
 const hasRefreshToken = computed(() => String(form.value.refresh_token || '').trim() !== '')
 function isFieldRequired(field) {
   if (!field.purpose && loginModeField.value && ['password', 'sms_code'].includes(field.key)) return field.key === (form.value.login_mode === 'sms' ? 'sms_code' : 'password')
@@ -744,8 +756,8 @@ async function submit() {
     const successMessage = attemptOAuth
       ? '授权成功'
       : (attemptMounted && attemptProvider === 's3'
-        ? (mountedForm.value.verifyWrite ? 'S3 已添加（浏览和写入权限已验证）' : 'S3 已添加（浏览权限已验证，写入权限将在首次上传时验证）')
-        : '登录成功；写入、套餐和目录权限以实际操作结果为准')
+        ? (mountedForm.value.verifyWrite ? 'S3 已添加（浏览和写入权限已验证）' : 'S3 已添加')
+        : '登录成功')
     emit('toast', successMessage, 'success')
 		info('login', 'login form submit completed', { provider: attemptProvider })
     emit('close')
@@ -800,10 +812,10 @@ async function submit() {
 </script>
 
 <template>
-  <Modal title="添加网盘" dialog-class="login-modal" body-class="login-body" :window-controls="false" close-label="关闭添加网盘" @close="emit('close')">
+  <Modal title="添加网盘" dialog-class="login-modal" body-class="login-body" initial-focus=".login-form input:not([type=checkbox]), .login-form textarea, .login-actions .primary" :window-controls="false" close-label="关闭添加网盘" @close="emit('close')">
             <aside class="login-side">
-              <div class="login-side-heading"><span>选择服务</span><span>{{ availableProviders.length }}</span></div>
-              <div ref="providerListEl" class="login-provider-list" role="tablist" aria-label="网盘服务">
+              <div class="login-side-heading">选择网盘</div>
+              <div ref="providerListEl" class="login-provider-list" role="tablist" aria-label="网盘服务" @keydown="onProviderKeydown">
                 <span v-if="selectionVisible" class="lp-selection" :style="selectionStyle" aria-hidden="true"></span>
                 <button
                   v-for="p in availableProviders"
@@ -812,6 +824,9 @@ async function submit() {
                   role="tab"
                   class="lp-item"
                   :data-provider-id="p.ID"
+                  :id="'login-provider-' + p.ID"
+                  aria-controls="login-panel"
+                  :tabindex="p.ID === providerId ? 0 : -1"
                   :class="{ active: p.ID === providerId }"
                   :aria-selected="p.ID === providerId"
                   :title="p.Meta.label"
@@ -825,52 +840,56 @@ async function submit() {
               </div>
             </aside>
 
-            <form v-if="provider" class="login-form" @submit.prevent="submit">
+            <form v-if="provider" id="login-panel" class="login-form" role="tabpanel" :aria-labelledby="'login-provider-' + provider.ID" @submit.prevent="submit">
               <div class="login-provider-heading">
                 <span class="login-provider-logo"><img :src="providerIconUrl(provider.Meta)" alt="" /></span>
-                <div class="login-provider-intro"><strong>{{ provider.Meta.label }}</strong><span>{{ isOAuth ? '通过浏览器授权登录' : (isMounted ? '配置存储连接信息' : '填写账号信息以继续') }}</span></div>
+                <div class="login-provider-intro"><strong>{{ provider.Meta.label }}</strong><span v-if="isOAuth">将在浏览器中完成授权</span></div>
               </div>
               <div class="login-form-content" :key="providerId">
-                <p v-if="provider.Login?.notice" class="hint">{{ provider.Login.notice }}</p>
                 <!-- 挂载存储（WebDAV / S3） -->
                 <template v-if="isMounted">
                   <div class="login-section">
-                    <div class="field login-field"><label>连接名称</label><input class="input" v-model="mountedForm.name" placeholder="我的 WebDAV / S3" /></div>
+                    <div class="field login-field"><label for="mounted-name">连接名称</label><input id="mounted-name" class="input" v-model="mountedForm.name" :placeholder="providerId === 's3' ? '我的 S3' : '我的 WebDAV'" /></div>
                     <div v-if="providerId === 'webdav'" class="field login-field">
                       <label>服务预设</label>
-                      <UiSelect v-model="webdavPreset" :options="webdavPresetOptions" block @change="applyWebDAVPreset" />
+                      <UiSelect v-model="webdavPreset" aria-label="服务预设" :options="webdavPresetOptions" block @change="applyWebDAVPreset" />
                     </div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Endpoint (可选)' : 'WebDAV 地址' }}</label><input class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? 's3.us-east-1.amazonaws.com (可选，默认 AWS)' : 'https://dav.example.com'" /></div>
+                    <div class="field login-field"><label for="mounted-endpoint">{{ providerId === 's3' ? 'Endpoint（可选）' : 'WebDAV 地址' }}</label><input id="mounted-endpoint" class="input" v-model="mountedForm.endpoint" :placeholder="providerId === 's3' ? '默认 AWS，可填写其他服务地址' : 'https://dav.example.com'" /></div>
                     <div v-if="providerId === 'webdav'" class="field login-field">
                       <label>认证方式</label>
-                      <UiSelect v-model="mountedForm.authType" :options="webdavAuthOptions" block />
+                      <UiSelect v-model="mountedForm.authType" aria-label="认证方式" :options="webdavAuthOptions" block />
                     </div>
-                    <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label>{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}</label><input class="input" v-model="mountedForm.username" :placeholder="providerId === 's3' ? '请输入 Access Key ID' : '请输入用户名'" /></div>
-                    <div class="field login-field"><label>{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" :placeholder="providerId === 's3' ? '请输入 Secret Access Key' : '请输入密码'" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="15" /></button></div></div>
-                    <template v-if="providerId === 's3'">
-                      <div class="field login-field"><label>Bucket</label><input class="input" v-model="mountedForm.bucket" placeholder="存储桶名称" /></div>
-                      <div class="field login-field"><label>Region (可选)</label><input class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
-                      <div class="field login-field"><label>Session Token (可选)</label><div class="password-input-wrap"><input class="input" :type="passwordVisible('mounted.sessionToken') ? 'text' : 'password'" v-model="mountedForm.sessionToken" placeholder="可选临时令牌" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" :aria-label="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" @click="togglePassword('mounted.sessionToken')"><UiIcon :name="passwordVisible('mounted.sessionToken') ? 'eye-off' : 'eye'" :size="15" /></button></div></div>
-                    </template>
+                    <div v-if="providerId !== 'webdav' || mountedForm.authType !== 'bearer'" class="field login-field"><label for="mounted-username">{{ providerId === 's3' ? 'Access Key ID' : '用户名' }}</label><input id="mounted-username" class="input" v-model="mountedForm.username" autocomplete="username" :placeholder="providerId === 's3' ? '请输入 Access Key ID' : '请输入用户名'" /></div>
+                    <div class="field login-field"><label for="mounted-password">{{ providerId === 's3' ? 'Secret Access Key' : (mountedForm.authType === 'bearer' ? 'Bearer Token' : '密码') }}</label><div class="password-input-wrap"><input id="mounted-password" class="input" :type="passwordVisible('mounted.password') ? 'text' : 'password'" v-model="mountedForm.password" autocomplete="current-password" :placeholder="providerId === 's3' ? '请输入 Secret Access Key' : (mountedForm.authType === 'bearer' ? '请输入 Bearer Token' : '请输入密码')" /><button class="password-toggle" type="button" :title="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" :aria-label="passwordVisible('mounted.password') ? '隐藏密码' : '显示密码'" @click="togglePassword('mounted.password')"><UiIcon :name="passwordVisible('mounted.password') ? 'eye-off' : 'eye'" :size="15" /></button></div></div>
+                    <div v-if="providerId === 's3'" class="field login-field"><label for="mounted-bucket">Bucket</label><input id="mounted-bucket" class="input" v-model="mountedForm.bucket" placeholder="存储桶名称" /></div>
+                    <details class="login-advanced">
+                      <summary>高级设置</summary>
+                      <div class="login-section">
+                        <template v-if="providerId === 's3'">
+                          <div class="field login-field"><label for="mounted-region">Region</label><input id="mounted-region" class="input" v-model="mountedForm.region" placeholder="us-east-1" /></div>
+                          <div class="field login-field"><label for="mounted-session-token">Session Token</label><div class="password-input-wrap"><input id="mounted-session-token" class="input" :type="passwordVisible('mounted.sessionToken') ? 'text' : 'password'" v-model="mountedForm.sessionToken" placeholder="临时凭据使用" /><button class="password-toggle" type="button" :aria-label="passwordVisible('mounted.sessionToken') ? '隐藏令牌' : '显示令牌'" @click="togglePassword('mounted.sessionToken')"><UiIcon :name="passwordVisible('mounted.sessionToken') ? 'eye-off' : 'eye'" :size="15" /></button></div></div>
+                        </template>
                     <!-- 开关组：全部收成一行 chip，避免每个开关独占一行 -->
                     <div class="field login-field">
                       <div class="switch-chips">
                         <label class="switch-chip">
-                          <button class="switch" :class="{ on: mountedForm.allowPrivateNetwork }" type="button" role="switch" :aria-checked="mountedForm.allowPrivateNetwork" @click="mountedForm.allowPrivateNetwork = !mountedForm.allowPrivateNetwork"></button>
+                          <button class="switch" :class="{ on: mountedForm.allowPrivateNetwork }" type="button" role="switch" aria-label="内网媒体预览" :aria-checked="mountedForm.allowPrivateNetwork" @click="mountedForm.allowPrivateNetwork = !mountedForm.allowPrivateNetwork"></button>
                           <span>内网媒体预览</span>
                         </label>
                         <label v-if="providerId === 's3'" class="switch-chip">
-                          <button class="switch" :class="{ on: mountedForm.forcePathStyle }" type="button" role="switch" :aria-checked="mountedForm.forcePathStyle" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></button>
+                          <button class="switch" :class="{ on: mountedForm.forcePathStyle }" type="button" role="switch" aria-label="路径风格" :aria-checked="mountedForm.forcePathStyle" @click="mountedForm.forcePathStyle = !mountedForm.forcePathStyle"></button>
                           <span>路径风格</span>
                         </label>
                         <label v-if="providerId === 's3'" class="switch-chip">
-                          <button class="switch" :class="{ on: mountedForm.verifyWrite }" type="button" role="switch" :aria-checked="mountedForm.verifyWrite" @click="mountedForm.verifyWrite = !mountedForm.verifyWrite"></button>
+                          <button class="switch" :class="{ on: mountedForm.verifyWrite }" type="button" role="switch" aria-label="写入权限验证" :aria-checked="mountedForm.verifyWrite" @click="mountedForm.verifyWrite = !mountedForm.verifyWrite"></button>
                           <span>写入权限验证</span>
                         </label>
                       </div>
                     </div>
-                    <div v-if="providerId === 'webdav'" class="field login-field"><label>根目录 (可选)</label><input class="input" v-model="mountedForm.rootPath" placeholder="/" /></div>
-                    <div v-else class="field login-field"><label>挂载路径 (可选)</label><input class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
+                    <div v-if="providerId === 'webdav'" class="field login-field"><label for="mounted-path">根目录</label><input id="mounted-path" class="input" v-model="mountedForm.rootPath" placeholder="/" /></div>
+                    <div v-else class="field login-field"><label for="mounted-path">挂载路径</label><input id="mounted-path" class="input" v-model="mountedForm.basePath" placeholder="/" /></div>
+                      </div>
+                    </details>
                   </div>
                 </template>
 
@@ -879,15 +898,15 @@ async function submit() {
                   <div v-if="declaredMethods.length" class="login-method-switch" role="group" aria-label="授权来源">
                     <button v-for="method in declaredMethods" :key="method.id" type="button" :class="{ active: declaredMethod?.id === method.id }" :aria-pressed="declaredMethod?.id === method.id" :disabled="busy" @click="selectDeclaredMethod(method)">{{ method.label }}</button>
                   </div>
-                  <section v-if="declaredMethod" class="login-state-card" aria-label="令牌使用说明">
-                    <p>{{ declaredMethod.notice }}</p><p class="hint" style="overflow-wrap:anywhere">令牌接收方：{{ declaredMethod.recipient }}</p>
-                    <label v-if="declaredMethod.consent" class="hint"><input v-model="form.relay_consent" type="checkbox" true-value="true" false-value="false" :disabled="busy" /> {{ declaredMethod.consent }}</label>
+                  <section v-if="declaredMethod?.consent" class="login-consent" aria-label="令牌使用说明">
+                    <label class="hint"><input v-model="form.relay_consent" type="checkbox" true-value="true" false-value="false" :disabled="busy" /> {{ declaredMethod.consent }}</label>
+                    <details v-if="declaredMethod.recipient"><summary>授权详情</summary><p>{{ declaredMethod.notice }}</p><p>令牌接收方：{{ declaredMethod.recipient }}</p></details>
                   </section>
                   <div v-if="hasPasswordSmsSwitch" class="login-method-switch" role="group" aria-label="登录方式">
                     <button v-for="method in loginMethodOptions" :key="method.value" type="button" :class="{ active: form.login_mode === method.value }" :aria-pressed="form.login_mode === method.value" :disabled="busy || smsBusy || thunderOpening" @click="form.login_mode = method.value">{{ method.label }}</button>
                   </div>
-                  <div v-if="visibleFields.length" class="login-section">
-                    <div v-for="f in visibleFields" v-show="isLoginFieldVisible(f)" :key="f.key" class="field login-field" :class="{ 'login-sms-field': f.key === 'sms_code' && ['thunder', 'pan139', 'pan189', 'guangya'].includes(providerId) && !(providerId === 'guangya' && hasRefreshToken) }">
+                  <div v-if="activeFields.length" class="login-section">
+                    <div v-for="f in activeFields" :key="f.key" class="field login-field" :class="{ 'login-sms-field': f.key === 'sms_code' && ['thunder', 'pan139', 'pan189', 'guangya'].includes(providerId) && !(providerId === 'guangya' && hasRefreshToken) }">
                       <label :for="'login-field-' + f.key">{{ f.label }}</label>
                       <textarea v-if="f.multiline && f.type !== 'password'" :id="'login-field-' + f.key" class="textarea" v-model="form[f.key]" :placeholder="f.placeholder || ''" rows="3"></textarea>
                       <UiSelect v-else-if="f.type === 'select'" :id="'login-field-' + f.key" v-model="form[f.key]" :aria-label="f.label" :options="f.options || []" block />
@@ -911,19 +930,18 @@ async function submit() {
                       </div>
                     </div>
                   </div>
-                  <div v-else class="login-empty-state">无需配置额外参数，点击下方按钮直接登录。</div>
                 </template>
 
                 <!-- 网盘专属帮助链接 -->
-                <button v-if="providerHelp" type="button" class="login-help" @click="openHelp">
-                  <UiIcon name="external" :size="12" /><span>{{ providerHelp.label }}</span>
+                <button v-if="providerHelp" type="button" class="login-help" :title="providerHelp.label" @click="openHelp">
+                  <UiIcon name="external" :size="12" /><span>登录帮助</span>
                 </button>
 
                 <div v-if="thunderVerification && (thunderNativeWindow || thunderOpening)" class="login-state-card captcha-box">
                   <div class="captcha-head">
                     <div>
-                      <strong>请完成迅雷官方安全验证</strong>
-                      <p>{{ thunderOpening ? '正在打开验证页面…' : (thunderVerification.purpose === 'sms' ? '完成验证后将发送短信验证码，收到后请在页面中输入' : '完成验证后将继续登录') }}</p>
+                      <strong>请完成安全验证</strong>
+                      <p>{{ thunderOpening ? '正在打开验证页面…' : (thunderVerification.purpose === 'sms' ? '验证后发送短信' : '验证后继续登录') }}</p>
                     </div>
                     <button v-if="thunderNativeWindow" class="btn sm" type="button" :disabled="busy || thunderOpening" @click="openThunderVerification">打开验证窗口</button>
                   </div>
@@ -946,7 +964,7 @@ async function submit() {
                 </div>
 
                 <!-- 统一错误提示（带 Shake 抖动动画） -->
-                <div v-if="errorText" class="form-error shake">
+                <div v-if="errorText" class="form-error" role="alert">
                   <UiIcon name="warning" :size="14" /><span>{{ errorText }}</span>
                 </div>
               </div>
@@ -1034,7 +1052,7 @@ async function submit() {
 }
 .login-provider-heading {
   display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
-  min-height: 84px; padding: 18px 24px;
+  min-height: 72px; padding: 16px 24px;
   border-bottom: 1px solid var(--border-lighter);
   color: var(--text-primary); font-size: 14px;
 }
@@ -1058,6 +1076,13 @@ async function submit() {
 }
 .login-form-content::-webkit-scrollbar { display: none; }
 .login-section { display: grid; gap: 18px; width: 100%; min-width: 0; }
+.login-advanced { border-top: 1px solid var(--border-light); padding-top: 14px; }
+.login-advanced > summary, .login-consent summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
+.login-advanced[open] > summary { margin-bottom: 16px; }
+.login-consent { display: grid; gap: 8px; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.login-consent > label { display: flex; align-items: flex-start; gap: 7px; line-height: 1.6; }
+.login-consent input { flex: none; margin-top: 3px; }
+.login-consent details p { margin-top: 6px; }
 .login-method-switch {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%;
   padding: 4px; box-sizing: border-box; border: 1px solid var(--border-light);

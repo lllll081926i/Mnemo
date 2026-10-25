@@ -28,11 +28,12 @@ const deadline = computed(() => {
 
 <template>
   <details v-if="issue?.code" class="task-issue">
-    <summary>处理建议 · {{ issue.code }}</summary>
+    <summary>处理建议</summary>
     <p>{{ issue.message }}</p>
     <p>{{ actionText }}</p>
     <p v-if="deadline">网盘限制参考恢复时间：{{ deadline }}（到时不代表已解除限制，请稍后重试）</p>
     <p v-if="writeOperation">重试前确认目标目录，避免重复写入。</p>
+    <code>{{ issue.code }}</code>
     <button v-if="['network_settings', 'reauthorize'].includes(issue.action)" type="button" class="btn sm" @click="emit('repair', issue.action)">{{ issue.action === 'reauthorize' ? '重新登录账号' : '网络设置' }}</button>
   </details>
 </template>

@@ -18,7 +18,6 @@ import UiSelect from '../components/UiSelect.vue'
 import TreeNode from '../components/TreeNode.vue'
 import DragDropZone from '../components/DragDropZone.vue'
 import SharePrivacyNotice from '../components/SharePrivacyNotice.vue'
-import AccountCapabilities from '../components/AccountCapabilities.vue'
 const DeletionHistory = defineAsyncComponent(() => import('../components/DeletionHistory.vue'))
 const showDeletionHistory = ref(false)
 async function openTrashWebsite() {
@@ -1042,7 +1041,8 @@ function targets(file) {
 }
 
 // ---------- 收藏（后端按网盘能力选择云端或本地） ----------
-function isFav(file) { return !!file && (favorites.value.some((f) => f.file_id === file.file_id) || ((!favoritesLoaded.value || favoriteError.value) && !!file.starred)) }
+const favoriteIDs = computed(() => new Set(favorites.value.map(file => file.file_id)))
+function isFav(file) { return !!file && (favoriteIDs.value.has(file.file_id) || ((!favoritesLoaded.value || favoriteError.value) && !!file.starred)) }
 function removingFavorites(file) { return targets(file).filter(Boolean).every(isFav) }
 
 async function toggleFav(file) {
@@ -1767,7 +1767,6 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
-      <AccountCapabilities :key="account.user_id + ':' + account.drive_id" :account="account" />
       <div class="pan-split">
         <!-- 左侧：快捷入口 + 收藏 + 目录树 -->
         <div class="pan-left" :style="{ width: sideWidth + 'px' }">
@@ -1851,7 +1850,7 @@ onBeforeUnmount(() => {
           <!-- 未选中时管理目录，选中后只显示选择操作。 -->
           <div class="toppanbtns pan-file-toolbar" :class="{ 'has-selection': selected.length }">
             <div v-if="!selected.length" class="toppanbtn">
-              <UiSelect v-if="mode !== 'trash'" aria-label="文件工作模式" :model-value="workMode" :options="[{ value: 'files', label: '文件列表' }, { value: 'album', label: '相册' }, { value: 'reader', label: '阅读与播放' }]" style="width:130px" @update:modelValue="setWorkMode" />
+              <UiSelect v-if="mode !== 'trash'" aria-label="文件类型" :model-value="workMode" :options="[{ value: 'files', label: '全部文件' }, { value: 'album', label: '图片与视频' }, { value: 'reader', label: '文档与影音' }]" style="width:130px" @update:modelValue="setWorkMode" />
               <button v-if="mode === 'list' && pathStack.length" class="tbtn icon" title="后退 (Backspace)" @click="goUp"><UiIcon name="back" :size="16" /></button>
               <button class="tbtn icon" :disabled="loading" title="刷新 (F5)" @click="refresh"><UiIcon name="refresh" :size="16" /></button>
               <button v-if="caps.search && mode !== 'search'" class="tbtn icon" title="全盘搜索 (Ctrl/⌘+F)" @click="enterSearch"><UiIcon name="search" :size="16" /></button>
@@ -1904,7 +1903,6 @@ onBeforeUnmount(() => {
             <span>刷新失败，当前显示为本地缓存</span>
             <button type="button" :disabled="loading" @click="refresh">重试</button>
           </div>
-          <p v-if="workMode !== 'files' && mode !== 'trash'" class="directory-stale" role="status">{{ workMode === 'album' ? '仅显示当前视图已加载的图片与视频，按修改时间排列，不代表拍摄时间。' : '仅显示当前视图已加载的文档与影音；打开文件使用独立预览或播放器，实际格式支持取决于系统。' }}</p>
 
           <!-- 骨架屏加载状态 -->
           <div v-if="loading && !listShown.length" :class="viewMode === 'list' ? 'skeleton-list' : 'skeleton-grid'">
