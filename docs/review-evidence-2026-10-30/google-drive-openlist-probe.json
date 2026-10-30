@@ -1,0 +1,83 @@
+{
+  "research_date": "2026-10-30",
+  "project_commit": "ddd877e1b1c2ce155b68d0f01dc85abf02a7943f",
+  "source_commits": {
+    "OpenList": "e72822f5390f4272c9fe9da8cabba3c1a270182f",
+    "OpenList_APIPages": "4322fd1f0f5e4e77454fd8a5edb89727854b0092"
+  },
+  "method": "匿名 HTTPS GET；刷新使用固定无效研究令牌；未登录，未访问网盘文件",
+  "proxy": "使用本机系统代理，未记录代理地址",
+  "refresh_test_value": "mnemo-invalid-research-token",
+  "real_credentials_used": false,
+  "token_refresh_success_verified": false,
+  "source_deployment_commit_known": false,
+  "redaction": "不保存真实令牌、Cookie 值、client_id、state、完整授权 URL 或原始网络异常",
+  "probes": [
+    {
+      "utc": "2026-10-30T05:30:51.4140531Z",
+      "node": "https://api.oplist.org",
+      "route": "requests",
+      "status": 200,
+      "auth_host": "accounts.google.com",
+      "redirect_uri": "https://api.oplist.org/googleui/callback",
+      "scope": "https://www.googleapis.com/auth/drive",
+      "access_type": "offline",
+      "prompt": "consent",
+      "has_state": true,
+      "has_client_id": true
+    },
+    {
+      "utc": "2026-10-30T05:30:51.8921022Z",
+      "node": "https://api.oplist.org",
+      "route": "renewapi",
+      "status": 500,
+      "error_text": "The OAuth client was deleted."
+    },
+    {
+      "utc": "2026-10-30T05:30:53.0300629Z",
+      "node": "https://api.oplist.org.cn",
+      "route": "requests",
+      "status": 200,
+      "auth_host": "accounts.google.com",
+      "redirect_uri": "https://api.oplist.org.cn/googleui/callback",
+      "scope": "https://www.googleapis.com/auth/drive",
+      "access_type": "offline",
+      "prompt": "consent",
+      "has_state": true,
+      "has_client_id": true
+    },
+    {
+      "utc": "2026-10-30T05:30:54.3128262Z",
+      "node": "https://api.oplist.org.cn",
+      "route": "renewapi",
+      "status": 500,
+      "error_text": "The OAuth client was deleted."
+    },
+    {
+      "utc": "2026-10-30T05:30:54.6125052Z",
+      "node": "https://api-cn.oplist.org",
+      "route": "requests",
+      "status": null,
+      "error_text": "HttpRequestException",
+      "message": "网络请求未完成；未记录含查询参数的原始异常"
+    },
+    {
+      "utc": "2026-10-30T05:30:54.6251229Z",
+      "node": "https://api-cn.oplist.org",
+      "route": "renewapi",
+      "status": null,
+      "error_text": "HttpRequestException",
+      "message": "网络请求未完成；未记录含查询参数的原始异常"
+    }
+  ],
+  "google_authorization_page": {
+    "utc": "2026-10-30T05:31:15.2101115Z",
+    "source_node": "https://api.oplist.org",
+    "action": "仅打开生成的 Google 授权入口，未登录",
+    "status": 200,
+    "response_host": "accounts.google.com",
+    "deleted_client_present": true,
+    "deleted_client_description_present": true,
+    "logged_in": false
+  }
+}
