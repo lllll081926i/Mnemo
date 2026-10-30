@@ -16,8 +16,7 @@ let stageObserver = null
 
 function resizeViewer() {
   if (!stage.value || !host.value) return
-  const ratio = viewer?.slideWidth && viewer.slideHeight ? viewer.slideWidth / viewer.slideHeight : 16 / 9
-  const width = Math.max(280, Math.min(stage.value.clientWidth - 48, (stage.value.clientHeight - 48) * ratio))
+  const width = Math.max(240, stage.value.clientWidth - 48)
   host.value.style.width = `${width}px`
 }
 
@@ -32,10 +31,11 @@ async function openPresentation() {
       zipLimits: RECOMMENDED_ZIP_LIMITS,
       lazyMedia: true,
       lazySlides: true,
+      scrollContainer: stage.value,
       pdfjs: false,
       onSlideChange: index => { currentSlide.value = index },
     })
-    await viewer.open(props.bytes, { renderMode: 'slide', signal: controller.signal, lazyMedia: true, lazySlides: true })
+    await viewer.open(props.bytes, { renderMode: 'list', listOptions: { windowed: true, initialSlides: 2, overscanViewport: 1.5 }, signal: controller.signal, lazyMedia: true, lazySlides: true })
     if (disposed) return
     slideCount.value = viewer.slideCount
     currentSlide.value = viewer.currentSlideIndex
@@ -48,16 +48,17 @@ async function openPresentation() {
   }
 }
 
-async function goToSlide(index) {
-  if (!viewer || index < 0 || index >= slideCount.value) return
-  await viewer.goToSlide(index)
-  currentSlide.value = viewer.currentSlideIndex
-}
-
 async function changeZoom(step) {
   if (!viewer) return
+  const previousZoom = zoom.value
+  const scrollTop = stage.value.scrollTop
   zoom.value = Math.max(50, Math.min(200, zoom.value + step))
-  await viewer.setZoom(zoom.value)
+  try {
+    await viewer.setZoom(zoom.value)
+    if (!disposed) stage.value.scrollTop = scrollTop * zoom.value / previousZoom
+  } catch (cause) {
+    if (!disposed) error.value = String(cause?.message || cause)
+  }
 }
 
 onMounted(() => {
@@ -74,7 +75,7 @@ onBeforeUnmount(() => { disposed = true; controller.abort(); stageObserver?.disc
   <div class="pptx-viewer">
     <div class="pptx-toolbar"><strong>演示文稿预览</strong>
       <div v-if="slideCount" class="pptx-controls">
-        <button class="btn sm" :disabled="currentSlide === 0" @click="goToSlide(currentSlide - 1)">上一张</button><span>{{ currentSlide + 1 }} / {{ slideCount }}</span><button class="btn sm" :disabled="currentSlide + 1 >= slideCount" @click="goToSlide(currentSlide + 1)">下一张</button>
+        <span>{{ currentSlide + 1 }} / {{ slideCount }}</span>
         <span class="pptx-divider"></span><button class="btn sm" @click="changeZoom(-10)">−</button><span>{{ zoom }}%</span><button class="btn sm" @click="changeZoom(10)">＋</button>
       </div>
     </div>
@@ -91,7 +92,7 @@ onBeforeUnmount(() => { disposed = true; controller.abort(); stageObserver?.disc
 .pptx-controls { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .pptx-divider { width: 1px; height: 20px; background: var(--border-light); }
 .pptx-state { position: absolute; z-index: 2; inset: 48px 0 0; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); background: var(--bg-base); font-size: 13px; }
-.pptx-stage { flex: 1; min-height: 0; overflow: auto; padding: 24px; display: flex; justify-content: center; background: var(--bg-base); }
-.pptx-host { flex: 0 0 auto; width: min(100%, 900px); }
+.pptx-stage { flex: 1; min-height: 0; overflow: auto; padding: 24px; background: var(--bg-base); }
+.pptx-host { width: 100%; margin: 0 auto; }
 @media (max-width: 600px) { .pptx-toolbar, .pptx-controls { flex-wrap: wrap; } }
 </style>
