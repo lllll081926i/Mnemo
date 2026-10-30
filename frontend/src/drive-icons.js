@@ -4,6 +4,7 @@ export const driveIcons = [
   { id: 'aliopen.svg', label: '阿里云盘', keywords: 'aliyun' },
   { id: 'onedrive.svg', label: 'OneDrive' },
   { id: 'dropbox.svg', label: 'Dropbox' },
+  { id: 'gdrive.svg', label: 'Google Drive', keywords: '谷歌云端硬盘' },
   { id: 'pan123.svg', label: '123 云盘' },
   { id: 'pan189.svg', label: '天翼云盘', keywords: 'tianyi' },
   { id: 'pan139.svg', label: '移动云盘', keywords: 'yidong' },

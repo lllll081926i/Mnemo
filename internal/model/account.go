@@ -6,11 +6,12 @@ import (
 	"strings"
 )
 
-// Known drive providers. gofile and gdrive are intentionally removed.
+// 已注册网盘；gofile 和一刻相册不再支持。
 const (
 	ProviderPikpak   = "pikpak"
 	ProviderOnedrive = "onedrive"
 	ProviderDropbox  = "dropbox"
+	ProviderGdrive   = "gdrive"
 	ProviderPan123   = "pan123"
 	ProviderLanzou   = "lanzou"
 	ProviderIlanzou  = "ilanzou"
@@ -40,18 +41,19 @@ type TokenInfo struct {
 	OpenAPIRefreshToken string `json:"open_api_refresh_token"`
 	OpenAPIExpiresIn    int64  `json:"open_api_expires_in"`
 
-	Signature  string `json:"signature,omitempty"`
-	DeviceID   string `json:"device_id,omitempty"`
-	UserID     string `json:"user_id,omitempty"`
-	UserName   string `json:"user_name,omitempty"`
-	Avatar     string `json:"avatar,omitempty"`
-	NickName   string `json:"nick_name,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Role       string `json:"role,omitempty"`
-	Status     string `json:"status,omitempty"`
-	State      string `json:"state,omitempty"`
-	ExpireTime string `json:"expire_time,omitempty"`
-	SpuID      string `json:"spu_id,omitempty"`
+	Signature       string `json:"signature,omitempty"`
+	DeviceID        string `json:"device_id,omitempty"`
+	UserID          string `json:"user_id,omitempty"`
+	UserName        string `json:"user_name,omitempty"`
+	Avatar          string `json:"avatar,omitempty"`
+	NickName        string `json:"nick_name,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Role            string `json:"role,omitempty"`
+	Status          string `json:"status,omitempty"`
+	State           string `json:"state,omitempty"`
+	ExpireTime      string `json:"expire_time,omitempty"`
+	OAuthRefreshURL string `json:"oauth_refresh_url,omitempty"`
+	SpuID           string `json:"spu_id,omitempty"`
 
 	DefaultDriveID     string `json:"default_drive_id,omitempty"`
 	ResourceDriveID    string `json:"resource_drive_id,omitempty"`
@@ -62,6 +64,7 @@ type TokenInfo struct {
 
 	ProviderAccountID string `json:"provider_account_id,omitempty"`
 	ProviderRootID    string `json:"provider_root_id,omitempty"`
+	ProviderSpaceID   string `json:"provider_space_id,omitempty"`
 	ProviderDriveType string `json:"provider_drive_type,omitempty"`
 
 	UsedSize             int64 `json:"used_size,omitempty"`
@@ -150,7 +153,7 @@ func ResolveProviderFromUserID(userID string) string {
 
 // AllProviders lists every registered provider key in stable order.
 func AllProviders() []string {
-	v := []string{ProviderPikpak, ProviderOnedrive, ProviderDropbox, ProviderPan123,
+	v := []string{ProviderPikpak, ProviderOnedrive, ProviderDropbox, ProviderGdrive, ProviderPan123,
 		ProviderLanzou, ProviderIlanzou, ProviderPan139, ProviderPan189,
 		ProviderAliopen, ProviderGuangya, ProviderThunder, ProviderWebdav, ProviderS3}
 	sort.Strings(v)

@@ -53,6 +53,9 @@ function rawErrorText(error) {
 export function driveErrorNotice(error, action = '网盘操作') {
   const text = rawErrorText(error)
   const normalized = text.toLowerCase()
+  if (/授权服务.*不可用|deleted_client|invalid_client/.test(normalized)) {
+    return { category: 'service', type: 'error', message: '授权服务暂不可用，请等待恢复或配置可信的自建授权服务' }
+  }
   if (/401|unauthorized|invalid_grant|invalid[_ -]?token|token.*expir|登录.*失效|凭据.*失效|重新登录/.test(normalized)) {
     const message = /登录|连接|验证/.test(action)
       ? '登录信息无效，请检查账号、密码或授权信息'

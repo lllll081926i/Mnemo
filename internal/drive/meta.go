@@ -22,6 +22,7 @@ var builtinMetas = map[string]Meta{
 	model.ProviderPikpak:   {Key: "pikpak", Label: "PikPak", Icon: "drive-icons/pikpak.png", RootKey: "pikpak_root", RootTitle: "网盘文件"},
 	model.ProviderOnedrive: {Key: "onedrive", Label: "OneDrive", Icon: "drive-icons/onedrive.svg"},
 	model.ProviderDropbox:  {Key: "dropbox", Label: "Dropbox", Icon: "drive-icons/dropbox.svg"},
+	model.ProviderGdrive:   {Key: "gdrive", Label: "Google Drive", Icon: "drive-icons/gdrive.svg", RootKey: "root", RootTitle: "我的云端硬盘"},
 	model.ProviderPan123:   {Key: "pan123", Label: "123 云盘", Icon: "drive-icons/pan123.svg"},
 	model.ProviderLanzou:   {Key: "lanzou", Label: "蓝奏云", Icon: "drive-icons/lanzou.svg"},
 	model.ProviderIlanzou:  {Key: "ilanzou", Label: "优享版蓝奏云", Icon: "drive-icons/ilanzou.svg"},
@@ -37,6 +38,7 @@ var builtinMetas = map[string]Meta{
 // userIDPrefixes maps provider -> user id prefix (for resolution).
 var userIDPrefixes = map[string]string{
 	"pikpak": "pikpak_", "onedrive": "onedrive_", "dropbox": "dropbox_",
+	"gdrive": "gdrive_",
 	"pan123": "pan123_", "lanzou": "lanzou_", "ilanzou": "ilanzou_",
 	"pan139": "pan139_", "pan189": "pan189_",
 	"aliopen": "aliopen_", "guangya": "guangya_", "thunder": "thunder_",
@@ -93,10 +95,10 @@ func GetMeta(provider string) Meta {
 	return Meta{Key: provider, Label: provider}
 }
 
-// ListProviders returns the 13 in-scope provider keys in a stable order.
+// ListProviders 按固定顺序返回已支持的网盘。
 func ListProviders() []string {
 	return []string{
-		model.ProviderPikpak, model.ProviderOnedrive, model.ProviderDropbox,
+		model.ProviderPikpak, model.ProviderOnedrive, model.ProviderDropbox, model.ProviderGdrive,
 		model.ProviderPan123, model.ProviderLanzou, model.ProviderIlanzou,
 		model.ProviderPan139, model.ProviderPan189,
 		model.ProviderAliopen, model.ProviderGuangya, model.ProviderThunder,

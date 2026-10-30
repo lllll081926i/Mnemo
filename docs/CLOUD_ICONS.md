@@ -6,7 +6,7 @@
 
 图标保存在 `frontend/src/assets/drive-icons/`。目录由 `frontend/src/drive-icons.js` 维护，账号“自定义”窗口支持中文、英文与文件名搜索。内置图标由 Vite 打包，不依赖远程图标服务。
 
-本轮新增 31 个 SVG：19 个品牌图标与 12 个原创通用图标。连同原有 24 个，共 55 个。补上原先未进入选择器的迅雷图标。新增图标不新增登录入口、网盘驱动或协议能力；不会恢复已移除的 Google Drive、GoFile、一刻相册或加密流功能。
+图标库扩充时新增 31 个 SVG：19 个品牌图标与 12 个原创通用图标，连同原有 24 个共 55 个。Google Drive 接入另补 1 个本地绘制的 `gdrive.svg`，当前共 56 个。图标选择不改变账号驱动；GoFile、一刻相册和加密流不再支持。
 
 打开 [图标明暗预览](cloud-icons-preview.html) 可查看全部图标。
 
@@ -44,6 +44,8 @@
 | `scaleway.svg` | Scaleway | [Simple Icons](https://github.com/simple-icons/simple-icons/blob/90646e4bf7f3b89df6c37e65baf3e7bc759a517c/icons/scaleway.svg) | [来源](https://ultraviolet.scaleway.com) |
 
 ## 原创图标
+
+Google Drive 接入使用单独绘制的三色三角形 `gdrive.svg`，未复制第三方 SVG 路径。该图标用于识别 Google Drive 账号，品牌标记归 Google 所有，不表示合作关系。
 
 以下图标在本项目直接使用 SVG 路径绘制，沿用项目许可。使用 64×64 画布、60×60 圆角底板、统一留白及描边。个人云、团队云、共享云分别用单人、多人、连接节点区分；NAS、传输协议与存储用途分别使用房屋、终端、目录网络、时钟、归档盒、存储桶和服务器形状。原创图标不冒充任何厂商标志。
 

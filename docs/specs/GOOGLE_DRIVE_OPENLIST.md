@@ -8,7 +8,7 @@
 
 **当前公共共享应用存在阻断问题，不能把此方案标记为已可用。** 本次匿名探测中，`api.oplist.org` 和 `api.oplist.org.cn` 的刷新接口都返回 HTTP 500，正文为 `{"text":"The OAuth client was deleted."}`。匿名打开全球节点生成的 Google 授权链接，也在 Google 页面中检测到 `deleted_client` 及相同描述。Google 官方将该错误定义为 OAuth 客户端已删除，区别于用户令牌失效的 `invalid_grant`。[Google OAuth 错误说明](https://developers.google.com/identity/protocols/oauth2/web-server#errors)
 
-这是本次网络环境与时间点的观测，不能据此断言全部 OpenList 部署均不可用。未使用真实账号授权，未验证有效令牌刷新，未执行文件读写。本次只新增研究和脱敏证据；项目仍保持 13 个已注册驱动，未恢复 `gdrive`，未发布新版本。
+这是本次网络环境与时间点的观测，不能据此断言全部 OpenList 部署均不可用。研究阶段未使用真实账号授权，未验证有效令牌刷新，未执行文件读写。研究提交 `baeed02` 仅新增文档；后续用户明确要求接入，驱动实现现已恢复，当前范围与验收状态见 [Google Drive 驱动说明](../providers/gdrive.md)。未发布新版本。
 
 ## 2. 上游基线与实际探测
 

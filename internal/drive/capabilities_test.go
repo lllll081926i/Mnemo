@@ -16,6 +16,7 @@ func TestProviderDeleteCapabilitiesAreExplicit(t *testing.T) {
 		model.ProviderPikpak:   {recycle: true, permanent: true},
 		model.ProviderOnedrive: {recycle: true, permanent: false},
 		model.ProviderDropbox:  {recycle: true, permanent: false},
+		model.ProviderGdrive:   {recycle: true, permanent: true},
 		model.ProviderPan123:   {recycle: true, permanent: true},
 		model.ProviderLanzou:   {recycle: true, permanent: false},
 		model.ProviderIlanzou:  {recycle: true, permanent: true},

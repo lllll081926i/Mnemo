@@ -58,6 +58,9 @@ describe('工作区辅助逻辑', () => {
     }
   })
   it('把网盘原始错误转换为可操作的统一提示，不暴露服务端详情', () => {
+    for (const message of ['OpenList 的 Google 授权服务当前不可用，请等待服务恢复', 'deleted_client', 'invalid_client']) {
+      expect(driveErrorNotice(message, '登录网盘')).toMatchObject({ category: 'service', message: '授权服务暂不可用，请等待恢复或配置可信的自建授权服务' })
+    }
     expect(driveErrorNotice(new Error('http 401: invalid_grant secret-token'), '刷新账号')).toMatchObject({ category: 'auth', message: '网盘登录已失效，请重新登录' })
     expect(driveErrorNotice(new Error('dial tcp: i/o timeout'), '加载目录')).toMatchObject({ category: 'network', message: '加载目录失败，请检查网络或代理设置后重试' })
     expect(driveErrorNotice(new Error('HTTP 429 request_id=private'), '上传文件')).toMatchObject({ category: 'limited', message: '请求过于频繁，请稍后再试' })

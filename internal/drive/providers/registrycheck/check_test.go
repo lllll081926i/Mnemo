@@ -9,7 +9,7 @@ import (
 )
 
 func TestAllProvidersRegistered(t *testing.T) {
-	want := []string{"aliopen", "dropbox", "guangya", "ilanzou", "lanzou", "onedrive", "pan123", "pan139", "pan189", "pikpak", "s3", "thunder", "webdav"}
+	want := []string{"aliopen", "dropbox", "gdrive", "guangya", "ilanzou", "lanzou", "onedrive", "pan123", "pan139", "pan189", "pikpak", "s3", "thunder", "webdav"}
 	if drive.Count() != len(want) {
 		t.Fatalf("registered %d providers, want %d", drive.Count(), len(want))
 	}
@@ -26,7 +26,7 @@ func TestAllProvidersRegistered(t *testing.T) {
 		}
 	}
 	// 已移除的网盘不能继续注册。
-	if seen["gofile"] || seen["gdrive"] || seen["yike"] {
+	if seen["gofile"] || seen["yike"] {
 		t.Error("已移除的网盘仍被注册")
 	}
 	_ = model.ProviderUnknown
@@ -65,7 +65,7 @@ func TestColdFreshLookupsCannotReturnPlaceholderMetadata(testContext *testing.T)
 }
 
 func TestFavoriteCapabilitiesMatchCompleteNativeAdapters(t *testing.T) {
-	native := map[string]bool{"pikpak": true, "onedrive": true, "pan123": true, "aliopen": true}
+	native := map[string]bool{"pikpak": true, "onedrive": true, "pan123": true, "aliopen": true, "gdrive": true}
 	for _, p := range drive.All() {
 		_, implemented := p.Factory().(drive.RemoteFavorites)
 		if implemented != native[p.ID] || p.Caps.Favorite != native[p.ID] {

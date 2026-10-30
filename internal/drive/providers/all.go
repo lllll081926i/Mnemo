@@ -5,6 +5,7 @@ package providers
 import (
 	_ "mnemo-go/internal/drive/providers/aliopen"
 	_ "mnemo-go/internal/drive/providers/dropbox"
+	_ "mnemo-go/internal/drive/providers/gdrive"
 	_ "mnemo-go/internal/drive/providers/guangya"
 	_ "mnemo-go/internal/drive/providers/ilanzou"
 	_ "mnemo-go/internal/drive/providers/lanzou"

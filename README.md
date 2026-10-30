@@ -82,7 +82,7 @@ Windows 需要 WebView2 Runtime（Windows 10/11 通常已提供）。Linux 运�
 
 ## 支持的服务
 
-当前包含 13 个已注册驱动。一刻相册已移除，不再支持。
+当前源码包含 14 个已注册驱动。一刻相册已移除，不再支持。Google Drive 为 v0.4.7 发版后的新增适配。
 
 | 服务 | 服务 | 服务 |
 |---|---|---|
@@ -90,9 +90,11 @@ Windows 需要 WebView2 Runtime（Windows 10/11 通常已提供）。Linux 运�
 | 123 云盘 | 蓝奏云 | 蓝奏优享 |
 | 移动云盘 | 天翼云盘 | 阿里云盘开放版 |
 | 光鸭云 | WebDAV | S3 对象存储 |
-| 迅雷网盘 |  |  |
+| 迅雷网盘 | Google Drive |  |
 
 WebDAV 提供坚果云、InfiniCLOUD、Nextcloud、ownCloud、Seafile、OpenList / AList、群晖、Koofr、Yandex Disk 与 pCloud 等连接模板，也可以填写自定义地址。S3 支持 AWS S3 与兼容对象存储。
+
+Google Drive 优先使用 OpenList 网页授权和在线刷新，支持浏览、上传下载、云端收藏及回收站。公共 OAuth 应用目前存在配置故障，可显式配置可信自建 OpenList 服务；真实账号尚待验收，详见 [接入说明](docs/providers/gdrive.md)。
 
 迅雷网盘支持密码和短信验证码登录、浏览、下载、视频预览、文件操作、云离线、分享及回收站。上传支持 GCID 秒传和 S3 兼容整包/分片上传；真实账号与套餐限制仍需验收，详见 `docs/providers/thunder.md`。
 
@@ -117,7 +119,7 @@ Vue 3 + Vite 前端（WebView）
       drive 统一操作门面
  ┌──────────┼───────────┬───────────┐
 网盘插件层   传输引擎      同步引擎      预览代理
-13 个驱动    分段下载      双向同步      HLS / DASH / 字幕
+14 个驱动    分段下载      双向同步      HLS / DASH / 字幕
  └──────────┴───────────┴───────────┘
       原子 JSON 本地持久化
 ```

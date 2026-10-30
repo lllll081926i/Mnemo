@@ -937,6 +937,37 @@ describe('声明式授权来源', () => {
     expect(current().dataset.providerId).toBe('pikpak')
   })
 
+  it('Google Drive 导入令牌使用密码框，自建服务需要地址并重新确认接收方', async () => {
+    const provider = { ID: 'gdrive', Meta: { label: 'Google Drive' }, Login: {
+      helpLabel: '打开 OpenList 公共授权页面', helpUrl: 'https://api.oplist.org/',
+      fields: [{ key: 'refresh_token', purpose: 'token', type: 'password', label: '刷新令牌', required: true }, { key: 'api_url', purpose: 'endpoint', type: 'text', label: 'OpenList 刷新地址' }, { key: 'root_id', purpose: 'root', type: 'text', label: '根目录 ID' }],
+      methods: [{ id: 'online', label: 'OpenList 在线授权', fieldKeys: ['refresh_token', 'root_id'], recipient: 'https://api.oplist.org/googleui/renewapi', notice: '公共授权服务', consent: '同意公共服务刷新' }, { id: 'custom', label: '自建 OpenList 服务', fieldKeys: ['refresh_token', 'api_url', 'root_id'], requiredKeys: ['api_url'], recipient: '填写的自建服务', notice: '自建服务', consent: '信任填写的自建服务' }],
+    } }
+    const wrapper = mountAttached(LoginModal, { props: { initialProvider: 'gdrive', providers: [provider] } })
+    await nextTick()
+    expect(document.querySelector('#login-field-refresh_token').type).toBe('password')
+    expect(document.querySelector('#login-field-api_url')).toBeNull()
+    wrapper.vm.form.refresh_token = 'private-refresh'
+    wrapper.vm.form.relay_consent = 'true'
+    expect(wrapper.vm.validate()).toBe('')
+    document.querySelector('.login-help').click()
+    await flushPromises()
+    expect(api.OpenBrowser).toHaveBeenCalledWith('https://api.oplist.org/')
+    document.querySelectorAll('[aria-label="授权来源"] button')[1].click()
+    await nextTick()
+    expect(wrapper.vm.form.relay_consent).toBeUndefined()
+    expect(document.querySelector('#login-field-api_url')).not.toBeNull()
+    expect(wrapper.vm.validate()).toContain('OpenList 刷新地址')
+    wrapper.vm.form.api_url = 'https://trusted.test/googleui/renewapi'
+    expect(wrapper.vm.validate()).toContain('同意')
+    wrapper.vm.form.relay_consent = 'true'
+    expect(wrapper.vm.validate()).toBe('')
+    document.querySelectorAll('[aria-label="授权来源"] button')[0].click()
+    await nextTick()
+    expect(wrapper.vm.form.api_url).toBeUndefined()
+    expect(wrapper.vm.form.relay_consent).toBeUndefined()
+  })
+
   it('确认第三方接收方后才能提交，切换自有应用清除中转同意和隐藏凭据', async () => {
     const provider = { ID: 'aliopen', Meta: { label: '阿里云盘' }, Login: {
       fields: [{ key: 'refresh_token', type: 'text', label: 'Refresh Token', required: true }, { key: 'client_id', type: 'text', label: 'Client ID' }, { key: 'client_secret', type: 'password', label: 'Client Secret' }],

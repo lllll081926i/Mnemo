@@ -5,10 +5,10 @@
 **Mnemo-Go** is a free multi-cloud desktop file manager built with Go + Wails v2.
 Mythology: Mnemosyne — memory.
 
-**Active providers** (13, login + `drive.Driver`):
-`pikpak` · `onedrive` · `dropbox` · `pan123` · `lanzou` · `ilanzou` · `pan139` · `pan189` · `aliopen` · `guangya` · `thunder` · `webdav` · `s3`
+**Active providers** (14, login + `drive.Driver`):
+`pikpak` · `onedrive` · `dropbox` · `gdrive` · `pan123` · `lanzou` · `ilanzou` · `pan139` · `pan189` · `aliopen` · `guangya` · `thunder` · `webdav` · `s3`
 
-> `gofile`、`gdrive`、`yike`（一刻相册）已按需求移除；`encryption`（加密文件名/加密流）不再支持。
+> Google Drive 按新需求恢复，优先使用 OpenList 在线授权和刷新。`gofile`、`yike`（一刻相册）已按需求移除；`encryption`（加密文件名/加密流）不再支持。
 
 Default login provider: **PikPak**.
 
@@ -48,7 +48,7 @@ OAuth client_id 等从 `config.LoadSecrets(dataDir)` 读取（`internal/config`�
 | `main.go` | Wails 应用装配（入口） |
 | `internal/app/` | Wails 绑定层（前端调用的全部方法 + 事件） |
 | `internal/drive/` | provider 插件契约（接口/能力/元数据/注册表）+ ops 门面 |
-| `internal/drive/providers/` | 13 个网盘插件（每个一个包，init() 注册） |
+| `internal/drive/providers/` | 14 个网盘插件（每个一个包，init() 注册） |
 | `internal/drive/driveutil/` | 通用工具（路径、冲突策略） |
 | `internal/model/` | 统一数据模型（文件/账号/分享/任务/设置） |
 | `internal/netx/` | HTTP 客户端/上传/哈希/限速 |
@@ -68,7 +68,7 @@ OAuth client_id 等从 `config.LoadSecrets(dataDir)` 读取（`internal/config`�
 
 ## Out of scope (removed)
 
-`gofile`、`gdrive`、`yike`（一刻相册）、`encryption`（加密文件名/加密流）已移除。媒体库 UI、媒体服务器、WebDAV server 等也不在范围内。
+`gofile`、`yike`（一刻相册）、`encryption`（加密文件名/加密流）已移除。媒体库 UI、媒体服务器、WebDAV server 等也不在范围内。
 
 ## Testing
 
@@ -76,4 +76,4 @@ OAuth client_id 等从 `config.LoadSecrets(dataDir)` 读取（`internal/config`�
 
 ## Provider checklist
 
-新增 provider 参见 `docs/PROVIDER_GUIDE.md` 和 `docs/providers/<id>.md`（13 个盘的功能详情与迁移状态）。
+新增 provider 参见 `docs/PROVIDER_GUIDE.md` 和 `docs/providers/<id>.md`（14 个盘的功能详情与迁移状态）。
