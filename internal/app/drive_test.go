@@ -157,6 +157,79 @@ type favoriteTestTransport func(*http.Request) (*http.Response, error)
 
 func (f favoriteTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestPikPakFavoritesRoundTripPreservesSnapshotOnFailure(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous; drive.SetTokenResolver(nil) })
+	drive.SetTokenResolver(func(_, _ string) (*model.TokenInfo, error) {
+		return &model.TokenInfo{AccessToken: "token", DeviceID: "device", TokenFrom: "pikpak"}, nil
+	})
+	starred, failList := false, false
+	netx.TestTransportHook = favoriteTestTransport(func(req *http.Request) (*http.Response, error) {
+		status, body := http.StatusOK, `{}`
+		switch req.URL.Path {
+		case "/drive/v1/files":
+			var filter map[string]map[string]any
+			if err := json.Unmarshal([]byte(req.URL.Query().Get("filters")), &filter); err != nil {
+				t.Fatal(err)
+			}
+			if req.Method != http.MethodGet || req.URL.Query().Get("parent_id") != "*" || filter["system_tag"]["in"] != "STAR" || filter["trashed"]["eq"] != false || filter["starred"] != nil {
+				t.Fatalf("收藏筛选条件错误：%s", req.URL)
+			}
+			body = `{"files":[]}`
+			if starred {
+				body = `{"files":[{"id":"file","name":"movie.mkv","size":"42","parent_id":"folder","starred":false,"system_tag":"STAR"}]}`
+			}
+			if failList {
+				status, body = http.StatusServiceUnavailable, `{"error":"unavailable"}`
+			}
+		case "/drive/v1/files:star", "/drive/v1/files:unstar":
+			var payload struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if req.Method != http.MethodPost || req.Header.Get("Content-Type") != "application/json" || len(payload.IDs) != 1 || payload.IDs[0] != "file" {
+				t.Fatal("收藏写入请求不符合 JSON 协议")
+			}
+			starred = strings.HasSuffix(req.URL.Path, ":star")
+		default:
+			t.Fatalf("意外请求：%s", req.URL)
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	})
+	a := &App{store: st}
+	const user, space = "pikpak_favorites-roundtrip", "space"
+	if list, err := a.ListFavorites(user, space); err != nil || len(list) != 0 {
+		t.Fatalf("切换账号加载空收藏失败：%+v，%v", list, err)
+	}
+	if err := a.AddFavorite(user, space, store.Favorite{FileID: "file", Name: "movie.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := a.ListFavorites(user, space)
+	if err != nil || len(list) != 1 || list[0].Source != "cloud" || list[0].File == nil || list[0].File.ParentFileID != "folder" || list[0].File.Size != 42 || !list[0].File.Starred {
+		t.Fatalf("云端收藏刷新失败：%+v，%v", list, err)
+	}
+	failList = true
+	if _, err := a.ListFavorites(user, space); err == nil {
+		t.Fatal("收藏读取失败被误报为空列表")
+	}
+	if cached, err := st.ListFavorites(user, space); err != nil || len(cached) != 1 || cached[0].FileID != "file" {
+		t.Fatalf("读取失败覆盖了收藏快照：%+v，%v", cached, err)
+	}
+	failList = false
+	if err := a.RemoveFavorite(user, space, "file"); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := a.ListFavorites(user, space); err != nil || len(list) != 0 || starred {
+		t.Fatalf("取消收藏未同步：%+v，%v", list, err)
+	}
+}
+
 func TestFavoritesCloudFailureDoesNotChangeLocalRecords(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {

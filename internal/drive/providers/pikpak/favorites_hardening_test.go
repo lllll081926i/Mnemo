@@ -19,6 +19,8 @@ func TestPikPakSystemStarTagOverridesFalseBoolean(t *testing.T) {
 	}{
 		{"tag with false starred", `{"id":"one","name":"movie.mkv","starred":false,"tags":[{"name":"STAR","id":"tag"}]}`, true},
 		{"legacy boolean", `{"id":"two","name":"movie.mkv","starred":true}`, true},
+		{"system tag", `{"id":"system","name":"movie.mkv","starred":false,"system_tag":"STAR"}`, true},
+		{"system tags", `{"id":"systems","name":"movie.mkv","starred":false,"system_tags":["OTHER","STAR"]}`, true},
 		{"unstarred", `{"id":"three","name":"movie.mkv","starred":false,"tags":[{"name":"SOMETHING_ELSE"}]}`, false},
 		{"case insensitive tag", `{"id":"four","name":"folder","kind":"drive#folder","tags":[{"name":"star"}]}`, true},
 	} {
@@ -35,7 +37,7 @@ func TestPikPakSystemStarTagOverridesFalseBoolean(t *testing.T) {
 	}
 }
 
-func TestPikPakFavoritesUsesStarredFilterWithoutPhaseRestriction(t *testing.T) {
+func TestPikPakFavoritesUsesSystemTagFilterWithoutPhaseRestriction(t *testing.T) {
 	previous := netx.TestTransportHook
 	t.Cleanup(func() { netx.TestTransportHook = previous })
 	calls := 0
@@ -45,7 +47,7 @@ func TestPikPakFavoritesUsesStarredFilterWithoutPhaseRestriction(t *testing.T) {
 		}
 		calls++
 		filter := req.URL.Query().Get("filters")
-		if !strings.Contains(filter, `"starred":{"eq":true}`) || !strings.Contains(filter, `"trashed":{"eq":false}`) || strings.Contains(filter, "phase") {
+		if !strings.Contains(filter, `"system_tag":{"in":"STAR"}`) || !strings.Contains(filter, `"trashed":{"eq":false}`) || strings.Contains(filter, "phase") || strings.Contains(filter, "starred") {
 			t.Errorf("incorrect favorites filter: %s", filter)
 		}
 		if req.URL.Query().Get("parent_id") != "*" {
@@ -78,6 +80,9 @@ func TestPikPakStarAndUnstarUseBatchEndpoints(t *testing.T) {
 			return nil, fmt.Errorf("unexpected star request %s %s", req.Method, req.URL)
 		}
 		operations++
+		if req.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("收藏请求必须声明 JSON 类型，实际为 %q", req.Header.Get("Content-Type"))
+		}
 		var b struct {
 			IDs []string `json:"ids"`
 		}

@@ -147,7 +147,13 @@
 |:----:|---------|------|
 | ✅ | `client.go` POST `/drive/v1/files:star` 或 `:unstar`，body 为 `ids` | 无 |
 
-`Driver` 同时实现 `RemoteFavorites`：`ListFavorites` 通过全局列表的 `starred=true`、`trashed=false` 筛选读取全部分页，保留真实父目录。异常页或重复游标返回错误，不替换缓存。前端统一收藏入口由后端选择云端实现，避免重复调用。已通过模拟 HTTP 的分页与收藏/取消回归；未进行真实账号写入验证。
+`Driver` 同时实现 `RemoteFavorites`：`ListFavorites` 通过全局列表的 `system_tag.in=STAR`、`trashed.eq=false` 筛选读取全部分页，保留真实父目录。兼容 `starred`、`system_tag`、`system_tags` 和 `tags` 的收藏状态。异常页或重复游标返回错误，不替换缓存。前端统一收藏入口由后端选择云端实现，避免重复调用。
+
+2026-10-30 修复切换 PikPak 时自动加载收藏报错：筛选条件改为官方网页使用的系统标签；JSON 写入明确发送 `Content-Type: application/json`。HTTP 200 中的业务错误和响应读取失败不再当作成功。收藏读取或写入收到明确登录失效时，刷新并保存会话后重试一次；权限不足、限流、服务异常不触发刷新或循环重试。刷新后仍失效则返回统一登录提示。模拟 HTTP 回归覆盖空收藏、添加、刷新、取消、失败保留快照及会话刷新；没有使用真实账号写入。
+
+协议核查：[PikPak 官方网页](https://mypikpak.com/drive/) 的公开脚本 `main.7cf8c574.js`（系统标签筛选）与 `8247.d1c2d61c.js`（star/unstar 端点），另对照 [PikPakAPI 的原始实现](https://github.com/Quan666/PikPakAPI/blob/main/pikpakapi/__init__.py)；2026-10-30 只读核查，未调用用户账号。
+
+本轮核验通过：`go test ./...`、`go test -race ./internal/drive/providers/pikpak ./internal/app`、`go vet ./...`；Windows 生产模式构建通过，更新 `build/bin/Mnemo-review.exe`。收藏相关改动仅涉及后端，复用上轮已构建的前端资源。
 
 ---
 

@@ -140,7 +140,7 @@ func TestFavoritePaginationAndNativeStarOperations(t *testing.T) {
 			if err := json.Unmarshal([]byte(q.Get("filters")), &filter); err != nil {
 				t.Fatal(err)
 			}
-			if r.URL.Path != "/drive/v1/files" || q.Get("parent_id") != "*" || filter["starred"]["eq"] != true || filter["trashed"]["eq"] != false {
+			if r.URL.Path != "/drive/v1/files" || q.Get("parent_id") != "*" || filter["system_tag"]["in"] != "STAR" || filter["trashed"]["eq"] != false {
 				t.Fatalf("wrong favorite filter: %s", r.URL)
 			}
 			if reads == 1 {

@@ -62,11 +62,12 @@ func (d *Driver) SupportsRemoteFavorites(context.Context, drive.Context) (bool, 
 }
 
 func (d *Driver) ListFavorites(ctx context.Context, c drive.Context) ([]model.File, error) {
-	cl, err := clientOf(c)
-	if err != nil {
-		return nil, err
-	}
-	items, err := cl.ListFavorites(ctx)
+	var items []File
+	err := d.withFavoriteClient(ctx, c, func(cl *client) error {
+		var err error
+		items, err = cl.ListFavorites(ctx)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +78,28 @@ func (d *Driver) ListFavorites(ctx context.Context, c drive.Context) ([]model.Fi
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// withFavoriteClient 仅在服务端明确拒绝登录凭据时刷新会话并重试一次。
+func (d *Driver) withFavoriteClient(ctx context.Context, c drive.Context, operation func(*client) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cl, err := clientOf(c)
+	if err == nil {
+		err = operation(cl)
+	}
+	if !errors.Is(err, drive.ErrUnauthorized) || c.Token == nil || strings.TrimSpace(c.Token.RefreshToken) == "" {
+		return err
+	}
+	if _, err := d.RefreshAccount(ctx, c, c.Token); err != nil {
+		return err
+	}
+	cl, err = clientOf(c)
+	if err != nil {
+		return err
+	}
+	return operation(cl)
 }
 
 func clientOf(c drive.Context) (*client, error) {
@@ -270,11 +293,9 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 }
 
 func (d *Driver) Favorite(ctx context.Context, c drive.Context, fileIDs []string, favorite bool) ([]string, error) {
-	cl, err := clientOf(c)
-	if err != nil {
-		return nil, err
-	}
-	if err := cl.Star(ctx, fileIDs, favorite); err != nil {
+	if err := d.withFavoriteClient(ctx, c, func(cl *client) error {
+		return cl.Star(ctx, fileIDs, favorite)
+	}); err != nil {
 		return nil, err
 	}
 	return fileIDs, nil
@@ -612,7 +633,13 @@ func mapFile(item *File, driveID, parentID string) model.File {
 	if !isDir {
 		f.Thumbnail = item.Thumbnail
 	}
-	f.Starred = item.Starred
+	f.Starred = item.Starred || strings.EqualFold(strings.TrimSpace(item.SystemTag), "STAR")
+	for _, tag := range item.SystemTags {
+		if strings.EqualFold(strings.TrimSpace(tag), "STAR") {
+			f.Starred = true
+			break
+		}
+	}
 	for _, tag := range item.Tags {
 		if strings.EqualFold(strings.TrimSpace(tag.Name), "STAR") {
 			f.Starred = true

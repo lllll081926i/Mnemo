@@ -175,14 +175,21 @@ func (c *client) jsonDoOnce(ctx context.Context, method, path string, body any, 
 	if body != nil {
 		reader = netx.JSONBody(body)
 	}
-	resp, err := c.http.Do(ctx, method, target, c.headers(extra), reader)
+	headers := c.headers(extra)
+	if body != nil {
+		headers["Content-Type"] = "application/json"
+	}
+	resp, err := c.http.Do(ctx, method, target, headers, reader)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return parseAPIErrorWithRetry(data, resp.StatusCode, resp.Header.Get("Retry-After"))
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if err := driveResponseError(data, resp.StatusCode, resp.Header.Get("Retry-After")); err != nil {
+		return err
 	}
 	if out == nil {
 		return nil
@@ -270,9 +277,12 @@ func (c *client) getOnce(ctx context.Context, path string, q url.Values, out any
 		return err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return parseAPIErrorWithRetry(data, resp.StatusCode, resp.Header.Get("Retry-After"))
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if err := driveResponseError(data, resp.StatusCode, resp.Header.Get("Retry-After")); err != nil {
+		return err
 	}
 	if out == nil {
 		return nil
@@ -347,6 +357,27 @@ func parseAPIError(data []byte, status int) error {
 	return parseAPIErrorWithRetry(data, status, "")
 }
 
+// driveResponseError 同时检查 HTTP 状态与 HTTP 200 中的业务错误。
+func driveResponseError(data []byte, status int, retryAfter string) error {
+	if status >= 400 {
+		return parseAPIErrorWithRetry(data, status, retryAfter)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	var envelope struct {
+		Error     string `json:"error"`
+		ErrorCode int    `json:"error_code"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	if envelope.Error != "" || envelope.ErrorCode != 0 {
+		return parseAPIErrorWithRetry(data, status, retryAfter)
+	}
+	return nil
+}
+
 func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 	var e struct {
 		Error            string          `json:"error"`
@@ -396,6 +427,11 @@ func parseAPIErrorWithRetry(data []byte, status int, retryAfter string) error {
 		return errors.New("PikPak invalid account or password")
 	case "captcha_invalid", "captcha_required":
 		return &pikpakCaptchaError{reason: strings.ToLower(e.Error)}
+	case "unauthenticated", "invalid_token", "expired_token":
+		return drive.AuthExpired("PikPak 登录凭据已失效，请刷新会话或重新登录")
+	}
+	if status == http.StatusUnauthorized {
+		return drive.AuthExpired("PikPak 登录凭据已失效，请刷新会话或重新登录")
 	}
 	msg := e.ErrorDescription
 	if msg == "" {
@@ -455,6 +491,8 @@ type File struct {
 	ModifiedTime   string          `json:"modified_time"`
 	Trashed        bool            `json:"trashed"`
 	Starred        bool            `json:"starred"`
+	SystemTag      string          `json:"system_tag"`
+	SystemTags     []string        `json:"system_tags"`
 	Tags           []pikpakFileTag `json:"tags"`
 	Thumbnail      string          `json:"thumbnail_link"`
 	WebContentLink string          `json:"web_content_link"`
@@ -1296,11 +1334,9 @@ func (c *client) Copy(ctx context.Context, ids []string, toParentID string) erro
 	})
 }
 
-// ListFavorites reads the global starred feed with cursor pagination.
-// Starred is a system tag: ordinary file listings may report starred=false
-// even after a successful star operation (PikPak SDK live probe, 2026-09-24).
+// ListFavorites 按官方网页的系统标签读取全局收藏，保留分页和回收站过滤。
 func (c *client) ListFavorites(ctx context.Context) ([]File, error) {
-	q := url.Values{"limit": {"100"}, "parent_id": {"*"}, "thumbnail_size": {"SIZE_LARGE"}, "filters": {`{"starred":{"eq":true},"trashed":{"eq":false}}`}}
+	q := url.Values{"limit": {"100"}, "parent_id": {"*"}, "thumbnail_size": {"SIZE_LARGE"}, "filters": {`{"system_tag":{"in":"STAR"},"trashed":{"eq":false}}`}}
 	out := []File{}
 	seen := map[string]bool{}
 	for {
