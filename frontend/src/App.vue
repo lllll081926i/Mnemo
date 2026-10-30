@@ -8,7 +8,6 @@ import WorkspaceView from './views/WorkspaceView.vue'
 import { accountHealth, healthLabels, recordAccountHealth, syncAccountAuthState } from './workspace'
 import { refreshAccountNow } from './api'
 import AccountRail from './components/AccountRail.vue'
-import WorkspaceOverview from './components/WorkspaceOverview.vue'
 import AccountAvatar from './components/AccountAvatar.vue'
 import UiIcon from './components/UiIcon.vue'
 import appIcon from './assets/logo/icon.svg'
@@ -96,7 +95,6 @@ const showLogin = ref(false)
 const loginProvider = ref('')
 const showQuickOpen = ref(false)
 const showSearch = ref(false)
-const showOverview = ref(false)
 const checkingAccount = ref(false)
 async function checkAccount() {
   if (!infoAcc.value || checkingAccount.value) return
@@ -544,7 +542,8 @@ onBeforeUnmount(() => {
         <img class="app-brand-icon" :src="appIcon" alt="" aria-hidden="true" draggable="false" />
         <span>Mnemo</span>
       </div>
-      <nav class="top-tabs" aria-label="主导航">
+      <span class="title-divider" aria-hidden="true"></span>
+      <nav class="top-tabs" :class="{ 'has-active-tab': tab !== 'settings' }" :style="{ '--active-tab': Math.min(tabOrder.indexOf(tab), tabs.length - 1) }" aria-label="主导航">
         <button
           v-for="t in tabs"
           :key="t.key"
@@ -562,8 +561,6 @@ onBeforeUnmount(() => {
         <input v-model="globalQuery" aria-label="搜索网盘文件" placeholder="搜索文件…" aria-keyshortcuts="Control+Shift+F Meta+Shift+F" />
         <button type="submit" title="全盘搜索" aria-label="全盘搜索"><UiIcon name="chevron-right" :size="14" /></button>
       </form>
-      <span class="topbar-divider" aria-hidden="true"></span>
-      <button v-if="tab === 'pan'" class="icon-btn" title="我的空间" aria-label="我的空间" @click="showOverview = true"><UiIcon name="workspace" :size="17" /></button>
       <button v-if="tab === 'pan'" class="icon-btn" :class="{ active: dualPane }" :title="dualPane ? '切换单栏' : '切换双栏'" :aria-label="dualPane ? '切换单栏' : '切换双栏'" aria-keyshortcuts="Control+Backslash Meta+Backslash" :aria-pressed="dualPane" @click="dualPane = !dualPane"><UiIcon :name="dualPane ? 'columns' : 'single-pane'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
@@ -604,7 +601,6 @@ onBeforeUnmount(() => {
     </div>
 
     <LoginModal v-if="showLogin" :providers="providers" :initial-provider="loginProvider" @close="closeLogin" @toast="toast" />
-    <WorkspaceOverview v-if="showOverview" :accounts="orderedAccounts" @close="showOverview = false" @select="account => { showOverview = false; select(account) }" @navigate="location => { showOverview = false; navigateTo(location) }" @tasks="showOverview = false; switchTab('transfer')" />
     <GlobalSearch v-if="showSearch" :initial-query="globalQuery" :accounts="orderedAccounts" :providers="providers" @close="showSearch = false" @navigate="navigateTo" />
 
     <QuickOpen

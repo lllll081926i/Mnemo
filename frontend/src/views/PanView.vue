@@ -81,12 +81,6 @@ function onSortPick(action) {
 const rangIsSelecting = ref(false)
 const rangAnchor = ref('')
 const viewMode = ref(initialPrefs.viewMode || 'list')  // list | grid | columns
-const workMode = ref('files')
-function setWorkMode(value) {
-  workMode.value = value
-  clearSelection()
-  viewMode.value = value === 'album' ? 'grid' : (getPrefs().viewMode || 'list')
-}
 const sideWidth = ref(initialPrefs.sideWidth || 220) // 侧边栏宽度
 const isSideResizing = ref(false)
 let sideResizing = null
@@ -927,13 +921,7 @@ function toggleRangSelect() {
   rangAnchor.value = ''
 }
 
-const listShown = computed(() => {
-  const files = mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value
-  if (workMode.value === 'files' || mode.value === 'trash') return files
-  const kinds = workMode.value === 'album' ? ['image', 'video'] : ['text', 'pdf', 'docx', 'xlsx', 'pptx', 'audio', 'video']
-  const filtered = files.filter(file => !file.isDir && kinds.includes(openKindOf(file)))
-  return workMode.value === 'album' ? filtered.sort((first, second) => (second.time || 0) - (first.time || 0)) : filtered
-})
+const listShown = computed(() => mode.value === 'favorite' ? favoriteFiles.value : displayFiles.value)
 watch(listShown, (list) => {
   const visible = new Map(list.map((file) => [file.file_id, file]))
   const next = selected.value.map((file) => visible.get(file.file_id)).filter(Boolean)
@@ -1913,10 +1901,6 @@ onBeforeUnmount(() => {
         <DragDropZone class="pan-right" @drop-files="onDropUpload" @drop="dropCloudFiles($event)">
           <!-- 面包屑路径条（置顶、矮） -->
           <div class="pathbar">
-            <div class="path-navigation">
-              <button type="button" class="path-back" title="返回上级 (Backspace)" aria-label="返回上级" :disabled="mode === 'list' && !pathStack.length" @click="mode === 'list' ? goUp() : goHome()"><UiIcon name="back" :size="16" /></button>
-              <span class="path-divider" aria-hidden="true"></span>
-            </div>
             <template v-if="mode === 'list'">
               <template v-for="(c, i) in crumbs" :key="c.id + i">
                 <span v-if="i" class="crumb-sep">/</span>
@@ -1930,8 +1914,13 @@ onBeforeUnmount(() => {
 
           <!-- 未选中时管理目录，选中后只显示选择操作。 -->
           <div class="toppanbtns pan-file-toolbar" :class="{ 'has-selection': selected.length }">
+            <div class="toppanbtn" v-if="!selected.length && mode === 'list'">
+              <button v-if="caps.createFolder" class="tbtn sm" title="新建文件夹 (Ctrl+Shift+N)" @click="inputText = ''; modal = 'mkdir'"><UiIcon name="plus" :size="14" />新建</button>
+              <button v-if="caps.upload" class="tbtn sm" title="上传 (Ctrl+U)" @click="uploadPickModal = true"><UiIcon name="upload" :size="14" />上传</button>
+              <button v-if="fileClipboard" class="tbtn sm" :disabled="clipboardBusy || !!fileClipboard.jobId" title="粘贴到当前目录 (Ctrl/⌘+V)" @click="pasteFiles"><UiIcon name="copy" :size="14" />粘贴 {{ fileClipboard.files.length }}</button>
+              <button v-if="fileClipboard" class="tbtn icon" :disabled="clipboardBusy" title="清空剪贴板" @click="clearFileClipboard"><UiIcon name="close" :size="14" /></button>
+            </div>
             <div v-if="!selected.length" class="toppanbtn">
-              <UiSelect v-if="mode !== 'trash'" aria-label="文件类型" :model-value="workMode" :options="[{ value: 'files', label: '全部文件' }, { value: 'album', label: '图片与视频' }, { value: 'reader', label: '文档与影音' }]" style="width:130px" @update:modelValue="setWorkMode" />
               <button class="tbtn icon" :disabled="loading" title="刷新 (F5)" @click="refresh"><UiIcon name="refresh" :size="16" /></button>
               <button v-if="caps.search && mode !== 'search'" class="tbtn icon" title="全盘搜索 (Ctrl/⌘+F)" @click="enterSearch"><UiIcon name="search" :size="16" /></button>
               <button v-if="caps.offlineDownload && mode === 'list'" class="tbtn icon" title="云离线下载" @click="inputText = ''; modal = 'offline'"><UiIcon name="cloud-down" :size="16" /></button>
@@ -1948,12 +1937,6 @@ onBeforeUnmount(() => {
                 />
                 <button v-if="keyword" class="sq-clear" title="清空搜索" @click="keyword = ''; if (mode === 'search') goHome()"><UiIcon name="close" :size="11" /></button>
               </span>
-            </div>
-            <div class="toppanbtn" v-if="!selected.length && mode === 'list'">
-              <button v-if="caps.createFolder" class="tbtn sm" title="新建文件夹 (Ctrl+Shift+N)" @click="inputText = ''; modal = 'mkdir'"><UiIcon name="plus" :size="14" />新建</button>
-              <button v-if="caps.upload" class="tbtn sm" title="上传 (Ctrl+U)" @click="uploadPickModal = true"><UiIcon name="upload" :size="14" />上传</button>
-              <button v-if="fileClipboard" class="tbtn sm" :disabled="clipboardBusy || !!fileClipboard.jobId" title="粘贴到当前目录 (Ctrl/⌘+V)" @click="pasteFiles"><UiIcon name="copy" :size="14" />粘贴 {{ fileClipboard.files.length }}</button>
-              <button v-if="fileClipboard" class="tbtn icon" :disabled="clipboardBusy" title="清空剪贴板" @click="clearFileClipboard"><UiIcon name="close" :size="14" /></button>
             </div>
             <div v-if="selected.length || listShown.length" class="toppanbtn sel-mgmt">
               <DropdownBtn :label="selected.length ? `已选 ${selected.length} 项` : rangIsSelecting ? '区间选择中' : '选择'" icon="check" :items="selectionMenuItems" :class="{ 'selection-active': selected.length || rangIsSelecting }" title="选择" @select="onSelectionPick" />
@@ -2087,7 +2070,7 @@ onBeforeUnmount(() => {
                 </template>
                 <template v-else>{{ r.f.name }}</template>
               </div>
-              <div class="gridinfo">{{ workMode === 'album' ? (formatTime(r.f.time) || '日期未知') : r.f.isDir ? '文件夹' : r.sizeText }}</div>
+              <div class="gridinfo">{{ r.f.isDir ? '文件夹' : r.sizeText }}</div>
             </div>
             <div v-if="gridVirtualized" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualBottom + 'px' }"></div>
             <div v-if="!listShown.length" class="workspace-empty-state" style="grid-column:1/-1">

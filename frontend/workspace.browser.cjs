@@ -141,7 +141,7 @@ async function main() {
       await page.screenshot({ path: path.join(output, 'columns-dark.png') })
       await page.locator('.file-column').first().getByTitle('项目10', { exact: true }).click()
       await page.waitForFunction(() => document.querySelectorAll('.file-column').length === 2 && document.querySelector('.file-column:last-child .column-heading').textContent.includes('项目10'))
-      await page.getByRole('button', { name: '返回上级', exact: true }).click()
+      await page.locator('.pathbar .crumb').first().click()
       await page.waitForFunction(() => document.querySelectorAll('.file-column').length === 1)
       const list = page.locator('.column-list')
       await list.evaluate(element => { element.scrollTop = 38000 })
