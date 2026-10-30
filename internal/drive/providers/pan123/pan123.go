@@ -967,8 +967,6 @@ func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID 
 	}
 	if trashed {
 		query["orderBy"] = "trashed_at"
-		query["fileAttributes"] = "[]"
-		query["fileTypes"] = "[0]"
 		if len(markers) > 0 && markers[0] != "" {
 			query["next"] = markers[0]
 		}

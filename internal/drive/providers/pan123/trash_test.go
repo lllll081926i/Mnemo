@@ -18,7 +18,7 @@ func TestRecycleListUsesRecycleParametersAndReadsAllPages(t *testing.T) {
 	netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		pages++
 		query := req.URL.Query()
-		if req.URL.Path != "/b/api/file/list/new" || query.Get("event") != "recycleListFile" || query.Get("operateType") != "1" || query.Get("trashed") != "true" || query.Get("orderBy") != "trashed_at" || query.Get("fileTypes") != "[0]" {
+		if req.URL.Path != "/b/api/file/list/new" || query.Get("event") != "recycleListFile" || query.Get("operateType") != "1" || query.Get("trashed") != "true" || query.Get("orderBy") != "trashed_at" {
 			t.Errorf("回收站请求参数无效: %s", req.URL)
 		}
 		body := `{"code":0,"data":{"InfoList":[{"FileId":9007199254740993,"FileName":"删除的文件.txt","Type":0}],"Next":"cursor"}}`
@@ -33,6 +33,24 @@ func TestRecycleListUsesRecycleParametersAndReadsAllPages(t *testing.T) {
 	items, err := (&Driver{}).ListTrash(t.Context(), drive.Context{UserID: "pan123_test", DriveID: "test", Token: &model.TokenInfo{AccessToken: "token"}}, nil)
 	if err != nil || len(items) != 2 || items[0].FileID != "9007199254740993" || !items[1].IsDir || pages != 2 {
 		t.Fatalf("回收站列表 = %+v, err=%v, pages=%d", items, err, pages)
+	}
+}
+
+func TestRecycleListOmitsJSONEncodedFilters(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
+	netx.TestTransportHook = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"code":200,"data":{"InfoList":[],"Next":"-1"}}`
+		for _, key := range []string{"fileAttributes", "fileTypes"} {
+			if req.URL.Query().Has(key) {
+				body = `{"code":400,"message":"strconv.ParseInt: parsing \"[]\": invalid syntax"}`
+			}
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	})
+	items, err := (&Driver{}).ListTrash(t.Context(), drive.Context{Token: &model.TokenInfo{AccessToken: "token"}}, nil)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("无筛选的空回收站应正常加载: items=%+v, err=%v", items, err)
 	}
 }
 
