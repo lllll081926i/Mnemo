@@ -89,6 +89,25 @@ function archiveLicenses(directory, identity, output) {
   return collected
 }
 
+function archiveBundledIcons(root, output) {
+  const manifestPath = 'third_party/simple-icons/provenance.json'
+  const provenance = JSON.parse(fs.readFileSync(path.join(root, manifestPath), 'utf8'))
+  const files = [provenance.licenseFile, ...provenance.assets]
+  for (const file of files) {
+    if (!file.path || path.isAbsolute(file.path) || file.path.includes('\\') || file.path.split('/').includes('..')) throw new Error('图标来源清单包含无效路径')
+    if (digest(path.join(root, file.path)) !== file.sha256) throw new Error(`图标或许可摘要不符：${file.path}`)
+  }
+  const folder = path.join('licenses', 'simple-icons')
+  fs.mkdirSync(path.join(output, folder), { recursive: true })
+  const archived = []
+  for (const [source, name] of [[provenance.licenseFile.path, 'LICENSE'], [manifestPath, 'provenance.json'], ['docs/CLOUD_ICONS.md', 'CLOUD_ICONS.md']]) {
+    const target = path.join(folder, name)
+    fs.copyFileSync(path.join(root, source), path.join(output, target), fs.constants.COPYFILE_EXCL)
+    archived.push({ path: target.replaceAll(path.sep, '/'), sha256: digest(path.join(output, target)) })
+  }
+  return { ecosystem: 'asset', name: 'simple-icons', version: provenance.revision, source: provenance.source, declaredLicense: 'CC0-1.0', integrity: `sha256:${digest(path.join(root, manifestPath))}`, licenseFiles: archived }
+}
+
 function collectInventory(root, output) {
   if (fs.existsSync(output) && fs.readdirSync(output).length) throw new Error('归档目录必须为空，不覆盖已有资产')
   fs.mkdirSync(output, { recursive: true })
@@ -96,7 +115,7 @@ function collectInventory(root, output) {
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'frontend/package-lock.json'), 'utf8'))
   const policy = JSON.parse(fs.readFileSync(path.join(root, 'tools/supply-chain-policy.json'), 'utf8'))
   validateSources(manifest, lock, policy)
-  const components = []
+  const components = [archiveBundledIcons(root, output)]
   for (const [location, entry] of Object.entries(lock.packages)) {
     if (!location || entry.dev) continue
     const name = packageName(location)
@@ -123,9 +142,9 @@ function collectInventory(root, output) {
     if (!entry.Dir || !entry.Sum) throw new Error(`Go 模块未完整下载：${entry.Path}；先运行 go mod download`)
     components.push({ ecosystem: 'go', name: entry.Path, version: entry.Version, integrity: entry.Sum, source: `https://${entry.Path}`, licenseFiles: archiveLicenses(entry.Dir, `go:${entry.Path}@${entry.Version}`, output) })
   }
-  const inputs = ['go.mod', 'go.sum', 'frontend/package.json', 'frontend/package-lock.json', 'tools/supply-chain-policy.json', 'LICENSE', 'third_party/canvas-1.0.9/LICENSE', 'third_party/canvas-1.0.9/provenance.json'].map(file => ({ path: file, sha256: digest(path.join(root, file)) }))
+  const inputs = ['go.mod', 'go.sum', 'frontend/package.json', 'frontend/package-lock.json', 'tools/supply-chain-policy.json', 'LICENSE', 'third_party/canvas-1.0.9/LICENSE', 'third_party/canvas-1.0.9/provenance.json', 'third_party/simple-icons/provenance.json', 'docs/licenses/simple-icons-CC0-1.0.txt', 'docs/CLOUD_ICONS.md'].map(file => ({ path: file, sha256: digest(path.join(root, file)) }))
   fs.copyFileSync(path.join(root, 'LICENSE'), path.join(output, 'LICENSE'), fs.constants.COPYFILE_EXCL)
-  const inventory = { format: 'mnemo-dependency-inventory', version: 1, commit: run('git', ['rev-parse', 'HEAD'], root), projectVersion: manifest.version, projectLicense: 'GPL-3.0-only', scope: 'Go 模块整体依赖与前端生产依赖；不是每种平台二进制的精确链接清单', tools: { node: process.version, go: run('go', ['version'], root) }, inputs, components }
+  const inventory = { format: 'mnemo-dependency-inventory', version: 1, commit: run('git', ['rev-parse', 'HEAD'], root), projectVersion: manifest.version, projectLicense: 'GPL-3.0-only', scope: 'Go 模块整体依赖、前端生产依赖与手动引入的 Simple Icons 图标；不是每种平台二进制的精确链接清单', tools: { node: process.version, go: run('go', ['version'], root) }, inputs, components }
   fs.writeFileSync(path.join(output, 'dependency-inventory.json'), JSON.stringify(inventory, null, 2) + '\n', { flag: 'wx' })
   const notices = ['Mnemo 第三方依赖归档', 'Mnemo 自有代码按根目录 GNU GPL v3 分发；第三方代码保留各自许可证与署名。', `对应源代码：https://github.com/lllll081926i/Mnemo/tree/${inventory.commit}`, '自动扫描不等同于法律审查。没有找到许可证文本的组件明确标记待人工核对。', '', ...components.flatMap(component => [`${component.ecosystem}:${component.name}@${component.version}`, `来源：${component.source}`, `完整性：${component.integrity}`, `声明许可证：${component.declaredLicense || '见原始文件与 SBOM 检测证据'}`, ...component.licenseFiles.map(file => `许可证/署名：${file.path}`), ...(component.licenseFiles.length ? [] : ['警告：未归档许可证文本，需要人工核对；未安装的可选组件不代表当前平台已分发。']), ''])]
   fs.writeFileSync(path.join(output, 'THIRD_PARTY_NOTICES.txt'), notices.join('\n'), { flag: 'wx' })
@@ -150,4 +169,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { validateSources, licenseFiles, archiveLicenses, collectInventory }
+module.exports = { validateSources, licenseFiles, archiveLicenses, archiveBundledIcons, collectInventory }

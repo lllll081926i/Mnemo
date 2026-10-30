@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { validateSources, licenseFiles, archiveLicenses } = require('./supply-chain.cjs')
+const { validateSources, licenseFiles, archiveLicenses, archiveBundledIcons } = require('./supply-chain.cjs')
 
 function fixture() {
   const manifest = { dependencies: { xlsx: 'https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz' } }
@@ -100,4 +100,24 @@ test('归档 README 中的完整许可声明，不收集无关 README', context 
   const files = archiveLicenses(directory, 'npm:readme-license@1.0.0', output)
   assert.equal(files.length, 1)
   assert.equal(fs.readFileSync(path.join(output, files[0].path), 'utf8'), fs.readFileSync(path.join(directory, 'README.md'), 'utf8'))
+})
+
+test('安装包保留图标来源与完整许可，并拒绝摘要变化', context => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mnemo-icons-license-'))
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const root = path.resolve(__dirname, '..')
+  const component = archiveBundledIcons(root, directory)
+  assert.equal(component.declaredLicense, 'CC0-1.0')
+  assert.equal(component.licenseFiles.length, 3)
+  const license = component.licenseFiles.find(file => file.path.endsWith('/LICENSE'))
+  assert.deepEqual(fs.readFileSync(path.join(directory, license.path)), fs.readFileSync(path.join(root, 'docs/licenses/simple-icons-CC0-1.0.txt')))
+  const provenance = JSON.parse(fs.readFileSync(path.join(directory, 'licenses/simple-icons/provenance.json'), 'utf8'))
+  assert.equal(provenance.assets.length, 19)
+  const changedRoot = path.join(directory, 'changed')
+  fs.mkdirSync(path.join(changedRoot, 'third_party/simple-icons'), { recursive: true })
+  provenance.licenseFile.sha256 = '0'.repeat(64)
+  fs.writeFileSync(path.join(changedRoot, 'third_party/simple-icons/provenance.json'), JSON.stringify(provenance))
+  fs.mkdirSync(path.join(changedRoot, 'docs/licenses'), { recursive: true })
+  fs.copyFileSync(path.join(root, provenance.licenseFile.path), path.join(changedRoot, provenance.licenseFile.path))
+  assert.throws(() => archiveBundledIcons(changedRoot, directory), /许可摘要不符/)
 })

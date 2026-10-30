@@ -1,0 +1,86 @@
+{
+  "source": "https://github.com/simple-icons/simple-icons/tree/90646e4bf7f3b89df6c37e65baf3e7bc759a517c",
+  "revision": "90646e4bf7f3b89df6c37e65baf3e7bc759a517c",
+  "licenseFile": {
+    "path": "docs/licenses/simple-icons-CC0-1.0.txt",
+    "sha256": "9046848b63a5c92bff14e4accca80bd987e0623b74adf9226ce5198d312b79d5"
+  },
+  "assets": [
+    {
+      "path": "frontend/src/assets/drive-icons/box.svg",
+      "sha256": "43ff99fec94589c709d7d035c98ecf0791f9cb080f95b3cb7618d007c95dac34"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/mega.svg",
+      "sha256": "f0ef9479de31d7514ae22c44bd311abf8312efbee63eee242171a4703d76ba93"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/protondrive.svg",
+      "sha256": "dba41939d678c47663a9f7508b127aac19d8b9ab8400a92a795bfcf03c248ba9"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/icloud.svg",
+      "sha256": "87b4223ceabd2193cf62d51c9dc4ca2486d6a4c6c77e3bf7f2de92002baf06e0"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/tresorit.svg",
+      "sha256": "a03615e322f32c3a7ff9c45029810286a04c29ece3d16b588e3c9d832cf31319"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/filen.svg",
+      "sha256": "4fc2fe37ae688621c6cd600cebf748892d3c79476252d33722bec46b7d164278"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/backblaze.svg",
+      "sha256": "4f7d438ea5e8e3aec98c2e85644bba7177b6a77045639de5d8d060d393a0c07d"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/cloudflare.svg",
+      "sha256": "22d3430a28ccbd7eb659ec0aa5bf50f615688690d4e44bc93e10f456c6627b03"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/wasabi.svg",
+      "sha256": "09e0ebd7be95b89f0cd547063ce5d6e356d89200565fb40a513fc6ecfa60b3ca"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/minio.svg",
+      "sha256": "f02f32e7040e1bac39006f7f6a47d1bfab6f085249848229eca63bac1f59e6ba"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/digitalocean.svg",
+      "sha256": "2736ec7de1d04929746fb7bb58d7aae0afa1121d4e7ffb643b980e38d7acd641"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/qnap.svg",
+      "sha256": "b996f40db88014ddc603217bb2b74b7806a9ae80a8b52ff43bc6e99f837b1bec"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/truenas.svg",
+      "sha256": "51ebb5f71aca24a331f5bc9b9785678178bfc981cec724597ffbc42da3d3bffb"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/hetzner.svg",
+      "sha256": "db11e67b1050943f6df288ae6ce37f64ce9271854331efc683f6e1952b7c3701"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/ovh.svg",
+      "sha256": "bb8bc63e4b1b62bfa999f9594c29f779edb01cac753d9b8385a2c6143d0a7875"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/syncthing.svg",
+      "sha256": "6f0cebb406da36fe1bfb12d2aaef767bffad39a523fb8da1c0b703b65720958d"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/rclone.svg",
+      "sha256": "97283ee914467389683729dd9b4705550dc50d3a57bf9e54cb0c8ca855166331"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/ceph.svg",
+      "sha256": "033b49d69c82df914af6d495018728d368a1552181c5dc02bb8de7536cd9e8a0"
+    },
+    {
+      "path": "frontend/src/assets/drive-icons/scaleway.svg",
+      "sha256": "66bade137fdcfe0198062cead93e32796dbff31f3224a4b4c4c56f2145190201"
+    }
+  ]
+}

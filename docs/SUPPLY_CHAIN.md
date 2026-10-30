@@ -11,6 +11,7 @@ Mnemo 自有代码按照根目录 `LICENSE` 的 GNU GPL v3 分发，包元数据
 - `THIRD_PARTY_NOTICES.txt`：可读清单与未找到原始许可文本的警告。
 - `licenses/`：原样复制的 LICENSE、NOTICE、COPYING 等文件；README 含许可正文时也归档。
 - Go 和前端的 CycloneDX SBOM。检测到的许可证标识属于证据，不替代原始许可文件。
+- `licenses/simple-icons/`：新增 19 个品牌 SVG 的 CC0 许可全文、固定提交与文件摘要，以及图标来源说明。归档前校验图标与许可摘要；原创通用图标沿用项目许可。
 
 清单包含整体依赖图，不代表每个平台安装包精确链接的组件集合。未安装的可选平台组件明确标记为未安装，不假称已归档其许可文件。所有平台包同时携带归档，Windows 位于安装目录 `licenses/`，Linux 原生包位于 `/usr/share/doc/mnemo/`，便携包位于 `licenses/`，macOS 位于应用资源目录 `licenses/`。
 
