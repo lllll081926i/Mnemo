@@ -384,7 +384,13 @@ async function exportLogs() {
           <div class="sg-card">
             <div class="sg-row"><div class="sg-text"><span class="sg-label">偏好备份</span><span class="sg-desc">备份外观、自定义名称、排序与收藏，不包含登录凭据</span></div><div class="sg-control"><button class="btn" :disabled="backupBusy" @click="exportPrefs">导出</button><button class="btn" :disabled="backupBusy" @click="readBackup">恢复</button></div></div>
             <div class="sg-row">
-              <div class="sg-text"><span class="sg-label">外观主题</span></div>
+              <div class="sg-text"><span class="sg-label">界面风格</span><span class="sg-desc">两种风格均支持浅色与深色</span></div>
+              <div class="sg-control theme-style-options">
+                <button v-for="style in [{ value: 'paper', label: '静谧纸感' }, { value: 'mono', label: '极简黑白' }]" :key="style.value" type="button" class="theme-style-card" :data-style="style.value" :class="{ active: prefs.themeStyle === style.value }" :aria-pressed="prefs.themeStyle === style.value" @click="onPref('themeStyle', style.value)"><span class="theme-style-swatch"><i></i><i></i><i></i></span><span>{{ style.label }}</span><UiIcon v-if="prefs.themeStyle === style.value" name="check" :size="14" /></button>
+              </div>
+            </div>
+            <div class="sg-row">
+              <div class="sg-text"><span class="sg-label">明暗模式</span></div>
               <div class="sg-control">
                 <div class="theme-cards">
                   <button
@@ -392,7 +398,7 @@ async function exportLogs() {
                     :class="{ active: settings.theme === 'system' || !settings.theme }"
                     @click="onThemeChange('system')"
                   >
-                    <UiIcon name="globe" :size="14" /><span>跟随系统</span>
+                    <UiIcon name="monitor" :size="14" /><span>跟随系统</span>
                   </button>
                   <button
                     class="theme-card"
@@ -472,7 +478,7 @@ async function exportLogs() {
               <div class="sg-control">
                 <SegTabs
                   aria-label="默认视图"
-                  :options="[{ key: 'list', label: '列表' }, { key: 'grid', label: '网格' }]"
+                  :options="[{ key: 'list', label: '列表' }, { key: 'grid', label: '网格' }, { key: 'columns', label: '分栏' }]"
                   :modelValue="prefs.viewMode"
                   @update:modelValue="(v) => onPref('viewMode', v)"
                 />
@@ -815,6 +821,15 @@ async function exportLogs() {
 </template>
 
 <style scoped>
+.theme-style-options { flex-wrap: wrap; }
+.theme-style-card { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--control-border); border-radius: var(--radius-md); background: var(--control-bg); color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.theme-style-card.active { border-color: var(--border-focus); color: var(--text-primary); background: var(--bg-active); }
+.theme-style-swatch { display: flex; width: 35px; height: 27px; border: 1px solid #0002; border-radius: 4px; overflow: hidden; background: #faf9f5; }
+.theme-style-swatch i { display: block; width: 10px; height: 100%; background: #f3f1ec; border-right: 1px solid #e3e0d8; }
+.theme-style-swatch i:nth-child(2) { width: 5px; background: #262522; height: 15px; margin: 5px; }
+.theme-style-swatch i:nth-child(3) { display: none; }
+[data-style="mono"] .theme-style-swatch { background: #fff; }
+[data-style="mono"] .theme-style-swatch i:first-child { background: #f4f4f5; border-color: #e4e4e7; }
 .theme-cards {
   display: flex;
   gap: 8px;

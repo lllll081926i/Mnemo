@@ -3,6 +3,7 @@ import App from './App.vue'
 import { Environment } from '../wailsjs/runtime/runtime'
 import './styles/design-tokens.css'
 import './styles/main.css'
+import { applyThemeStyle, isDarkMode } from './appearance'
 
 async function start() {
   try {
@@ -24,7 +25,11 @@ async function start() {
     window.__mnemoPreviewDrain = () => Promise.allSettled([...pendingSaves])
     window.__mnemoPreviewHasPendingSave = () => pendingSaves.size > 0
     window.__mnemoPreviewPrefs = seed.preferences || {}
-    document.documentElement.classList.add('dark', 'preview-window')
+    const media = ['image', 'audio', 'video'].includes(seed.kind)
+    document.documentElement.classList.add('preview-window')
+    document.documentElement.classList.toggle('media-preview', media)
+    document.documentElement.classList.toggle('dark', media || isDarkMode(seed.preferences?.theme || 'system'))
+    applyThemeStyle()
     document.documentElement.classList.toggle('oled', seed.preferences?.oledBackground === true)
     const { default: PreviewWindow } = await import('./PreviewWindow.vue')
     createApp(PreviewWindow, { seed }).mount('#app')

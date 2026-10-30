@@ -58,7 +58,7 @@ async function close(force = false) {
 </template>
 
 <style>
-html.dark.preview-window {
+html.dark.preview-window.media-preview {
   color-scheme: dark;
   --bg-base: #000; --bg-surface: #101010; --bg-elevated: #1b1b1b;
   --bg-hover: #ffffff14; --bg-subtle: #ffffff12;
@@ -66,20 +66,20 @@ html.dark.preview-window {
   --color-primary: #fff; --border-light: #ffffff1a; --border-focus: #fff;
   --listselectbg: #ffffff18; --control-border: #ffffff38;
 }
-.preview-window body, .preview-window #app { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+.preview-window body, .preview-window #app { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg-base); }
 .preview-window .modal.preview-modal { position: fixed; inset: 0; width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important; border: 0; border-radius: 0; }
 .preview-window .preview-modal .modal-head { padding-right: 0; padding-top: 0; }
-.preview-window .preview-modal svg { color: #fff !important; stroke: #fff; fill: none; stroke-width: 1.6; }
+.preview-window.media-preview .preview-modal svg { color: #fff !important; stroke: #fff; fill: none; stroke-width: 1.6; }
 .preview-window .preview-modal .pv-abtn-main { background: #ffffff16; }
-.preview-window .preview-modal .modal-head { height: 32px; min-height: 32px; padding: 0 0 0 12px; border-bottom: 1px solid #ffffff14; --wails-draggable: drag; }
+.preview-window .preview-modal .modal-head { height: 32px; min-height: 32px; padding: 0 0 0 12px; border-bottom: 1px solid var(--border-light); --wails-draggable: drag; }
 .preview-window .preview-modal .modal-window-controls { height: 32px; align-self: stretch; gap: 0; margin: 0; }
 .preview-window .preview-modal .modal-window-btn { height: 32px; border: 0; border-radius: 0; }
 .preview-window .preview-modal .pv-head-icon { display: none; }
 .preview-window .preview-modal .pv-head-title { font-size: 13px; font-weight: 500; }
 .preview-window .preview-modal .pv-head-sub { font-size: 10px; }
-.preview-window .preview-modal .pv-head-pill { background: #ffffff10; color: #bbb; }
-.preview-window .preview-modal .pv-toolbar { box-shadow: none; background: #101010; border-bottom: 1px solid #ffffff14; }
-.preview-window .preview-modal .btn.primary, .preview-window .preview-modal .pv-save-btn { color: #fff; background: #ffffff16; }
+.preview-window .preview-modal .pv-head-pill { background: var(--bg-subtle); color: var(--text-secondary); }
+.preview-window .preview-modal .pv-toolbar { box-shadow: none; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); }
+.preview-window.media-preview .preview-modal .btn.primary, .preview-window.media-preview .preview-modal .pv-save-btn { color: #fff; background: #ffffff16; }
 .preview-window .preview-modal .pv-audio-cover { box-shadow: none; background: #161616; border: 1px solid #ffffff16; }
 .preview-window .preview-modal .pv-audio-title { font-weight: 500; }
 .preview-window .preview-modal .pv-image-stage { background: #000; }

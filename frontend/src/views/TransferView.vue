@@ -1182,7 +1182,7 @@ onBeforeUnmount(() => {
                   <div class="transfering-state">
                     <p class="text-state"><span class="badge" :class="upStatusBadge(t)">{{ upStatus(t) }}</span><span>{{ upProgressText(t) }}</span></p>
                     <div class="progress-total">
-                      <div class="progress-current active" :style="{ width: upProgress(t) + '%' }"></div>
+                      <div class="progress-current" :class="uploadNeedsReview(t) ? 'warning' : t.Upload?.IsFailed ? 'error' : 'active'" :style="{ width: upProgress(t) + '%' }"></div>
                     </div>
                     <TaskIssue v-if="!t.Upload?.IsCompleted && !t.Upload?.IsDowning" :issue="t.Upload?.issue" :reason="t.Upload?.failedMessage" action="上传文件" :user-id="t.user_id" write-operation />
                   </div>
@@ -1424,7 +1424,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.taskrow:has(.task-notice) { height: auto; min-height: 52px; padding-block: 8px; }
+.taskrow:has(.task-notice) { height: auto; min-height: 68px; padding-block: 10px; }
 .transfer-error {
   display: flex;
   align-items: center;

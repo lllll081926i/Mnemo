@@ -26,4 +26,13 @@ describe('UiIcon', () => {
 
     expect(wrapper.get('svg').attributes('data-icon-name')).toBe('file')
   })
+
+  it('空间总览、双栏工作区和目录分栏使用不同的已注册图标', () => {
+    const paths = ['workspace', 'columns', 'browse-columns', 'transfer', 'drive'].map(name => {
+      const wrapper = mount(UiIcon, { props: { name } })
+      expect(wrapper.get('svg').attributes('data-icon-name')).toBe(name)
+      return wrapper.get('svg').html()
+    })
+    expect(new Set(paths).size).toBe(paths.length)
+  })
 })

@@ -4,6 +4,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { listDir, providerMetaOf, providerIconUrl, accountName, mkdir } from '../api'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
+import { sortedDirectories } from '../file-order'
 
 const newFolderName = ref('')
 const creatingFolder = ref(false)
@@ -44,7 +45,7 @@ async function load(id) {
   try {
     const list = await listDir(props.account.user_id, props.account.drive_id, id)
     if (seq !== loadSeq) return // 过期响应丢弃
-    dirs.value = (list || []).filter((f) => f.isDir)
+    dirs.value = sortedDirectories(list || [])
   } catch (e) {
     if (seq !== loadSeq) return
     error.value = String(e)

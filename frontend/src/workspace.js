@@ -81,7 +81,7 @@ export function driveErrorNotice(error, action = '网盘操作') {
     return { category: 'conflict', type: 'warn', message: '目标位置存在同名项目，请更换名称或冲突处理方式' }
   }
   if (/not supported|unsupported|不支持|未实现/.test(normalized)) {
-    return { category: 'unsupported', type: 'warn', message: '当前网盘不支持此操作' }
+    return { category: 'unsupported', type: 'warn', message: action === '加载回收站' ? '当前授权不支持读取回收站，请通过官网管理' : '当前网盘不支持此操作' }
   }
   if (/timeout|timed out|network|fetch|dial tcp|connection|connect|eof|网络|超时|连接失败|无法连接/.test(normalized)) {
     return { category: 'network', type: 'error', message: `${action}失败，请检查网络或代理设置后重试` }
@@ -91,6 +91,9 @@ export function driveErrorNotice(error, action = '网盘操作') {
   }
   if (/incorrect|invalid.?password|bad.?credentials|login.?fail|密码.*错|账号.*错|授权信息.*错/.test(normalized)) {
     return { category: 'credentials', type: 'warn', message: '账号、密码或授权信息不正确，请检查后重试' }
+  }
+  if (action === '加载回收站') {
+    return { category: 'response', type: 'error', message: '回收站暂时无法读取，请刷新重试；持续失败时请到官网检查' }
   }
   return { category: 'unknown', type: 'error', message: `${action}失败，请稍后重试` }
 }
@@ -120,7 +123,8 @@ export function cleanBackupPrefs(prefs) {
   const clean = {}
   for (const key of ['oledBackground', 'hoverPreview', 'downloadSound', 'autoCloseOnEnd', 'autoLoadSubtitles', 'defaultSortAsc']) if (typeof prefs?.[key] === 'boolean') clean[key] = prefs[key]
   for (const [key, [min, max]] of Object.entries({ defaultVolume: [0, 200], defaultSpeed: [0.25, 4], seekStep: [1, 300], sideWidth: [160, 500] })) if (Number.isFinite(prefs?.[key])) clean[key] = Math.max(min, Math.min(max, prefs[key]))
-  if (['list', 'grid'].includes(prefs?.viewMode)) clean.viewMode = prefs.viewMode
+  if (['list', 'grid', 'columns'].includes(prefs?.viewMode)) clean.viewMode = prefs.viewMode
+  if (['paper', 'mono'].includes(prefs?.themeStyle)) clean.themeStyle = prefs.themeStyle
   if (DOWNLOAD_SOUNDS.some(sound => sound.value === prefs?.downloadSoundType)) clean.downloadSoundType = prefs.downloadSoundType
   if (['name', 'time', 'size'].includes(prefs?.defaultSortKey)) clean.defaultSortKey = prefs.defaultSortKey
   if (Array.isArray(prefs?.accountOrder)) clean.accountOrder = [...new Set(prefs.accountOrder.filter(id => typeof id === 'string' && id.length < 512))]

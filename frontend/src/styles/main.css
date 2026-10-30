@@ -49,11 +49,11 @@ body {
 /* ============ 应用外壳 ============ */
 .app-shell { display: flex; flex-direction: column; height: 100%; }
 
-/* 42px 顶栏：品牌 + 主 tab + 弹性拖动区 + 常用入口 */
+/* 标题栏：品牌、独立文字导航、搜索与窗口操作。 */
 .topbar {
-  height: 42px; flex-shrink: 0;
-  display: flex; align-items: center; gap: 6px;
-  padding: 0 0 0 10px;
+  height: 52px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 0 0 16px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-light);
   --wails-draggable: drag;
@@ -64,7 +64,7 @@ body {
   align-items: center;
   gap: 7px;
   height: 100%;
-  margin-right: 0;
+  margin-right: 12px;
   padding-left: 0;
   color: var(--text-primary);
   font-size: 14px;
@@ -120,30 +120,45 @@ html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .modal
 html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .pv-window-controls,
 html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .pp-window-controls { display: none; }
 .top-tabs {
-  position: relative; display: flex; align-items: center; gap: 2px;
-  align-self: center; height: 28px; margin-left: 0; padding: 3px;
-  border-radius: var(--radius-full);
-  background: var(--bg-subtle);
-}
-.top-tab-glider {
-  position: absolute; top: 3px; bottom: 3px; left: 0; width: 0;
-  border-radius: var(--radius-full);
-  background: var(--listselectbg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 22%, transparent);
-  transition: transform 320ms cubic-bezier(0.22, 1.25, 0.36, 1), width 320ms cubic-bezier(0.22, 1.25, 0.36, 1), opacity 180ms ease;
-  pointer-events: none;
+  display: flex; align-items: stretch; gap: 4px;
+  align-self: stretch; padding: 0 8px 0 12px;
+  border-left: 1px solid var(--border-light);
 }
 .top-tab {
-  position: relative; z-index: 1;
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 22px; width: 34px; padding: 0;
+  min-width: 70px; padding: 0 12px;
   color: var(--text-secondary); font-size: 13px; cursor: pointer;
-  border: none; background: none; border-radius: var(--radius-full);
-  transition: color var(--motion-fast) var(--motion-ease);
+  border: 0; background: none; border-radius: 0; font-family: inherit;
+  transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
   --wails-draggable: no-drag;
 }
-.top-tab:hover { color: var(--color-primary); }
-.top-tab.active { color: var(--color-primary); font-weight: 600; }
+.top-tab::after { content: ''; position: absolute; bottom: 0; left: 12px; right: 12px; height: 2px; background: transparent; border-radius: 2px 2px 0 0; }
+.top-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+.top-tab.active { color: var(--text-primary); font-weight: 650; }
+.top-tab.active::after { background: var(--color-primary); }
+.top-search { display: flex; align-items: center; gap: 7px; width: clamp(150px, 20vw, 280px); min-width: 110px; height: 31px; padding: 0 6px 0 10px; border: 1px solid var(--control-border); border-radius: var(--radius-sm); background: var(--control-bg); color: var(--text-tertiary); --wails-draggable: no-drag; }
+.top-search:focus-within { border-color: var(--border-focus); box-shadow: var(--ring-focus); }
+.top-search input { width: 100%; min-width: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; outline: 0; }
+.top-search input::placeholder { color: var(--control-placeholder); }
+.top-search button { display: flex; align-items: center; justify-content: center; width: 22px; height: 23px; flex: none; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.top-search button:hover { background: var(--bg-hover); }
+.topbar-divider { width: 1px; height: 19px; background: var(--border-light); margin: 0 2px; flex: none; }
+@media (max-width: 1100px) {
+  .topbar { gap: 4px; padding-left: 10px; }
+  .app-brand { margin-right: 5px; }
+  .top-tabs { gap: 0; padding-inline: 5px; }
+  .top-tab { min-width: 58px; padding-inline: 8px; }
+  .top-search { width: 160px; }
+}
+@media (max-width: 800px) {
+  .app-brand > span { display: none; }
+  .topbar-account { display: none; }
+  .top-tab { min-width: 51px; padding-inline: 6px; gap: 4px; font-size: 12px; }
+  .top-tab svg { display: none !important; }
+  .top-search { flex: 1; width: 120px; }
+  .topbar .spacer, .topbar-divider { display: none; }
+}
 
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -186,7 +201,7 @@ html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .pp-wi
   height: 100%; min-height: 0;
   display: flex; flex-direction: column; gap: 8px;
   padding: 10px 0;
-  background: var(--bg-surface);
+  background: var(--bg-sidebar);
   border-right: 1px solid var(--border-light);
   overflow: hidden;
   transition: width 300ms var(--rail-ease), flex-basis 300ms var(--rail-ease), padding 300ms var(--rail-ease), box-shadow 300ms var(--rail-ease);
@@ -316,17 +331,17 @@ body.rail-drag-active { cursor: grabbing; user-select: none; }
   transition: width 260ms var(--rail-ease), height 260ms var(--rail-ease), border-radius 260ms var(--rail-ease), transform .22s var(--rail-ease), background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 html.dark .account-rail .rail-icon {
-  background: #333047;
-  border-color: #5b5279;
+  background: var(--bg-subtle);
+  border-color: var(--border-light);
 }
 html.dark .account-rail .rail-item.active .rail-icon {
-  background: #49376e;
-  border-color: #a78bfa;
-  box-shadow: 0 0 0 1px #a78bfa55;
+  background: var(--bg-active);
+  border-color: var(--control-border-hover);
+  box-shadow: none;
 }
 html.dark .account-rail .rail-active-indicator {
-  background: #a78bfa24;
-  border-color: #a78bfa80;
+  background: var(--bg-active);
+  border-color: var(--control-border);
 }
 .account-rail.expanded .rail-icon { width: 32px; height: 32px; border-radius: 8px; }
 .rail-item:hover .rail-icon { transform: scale(1.03); }
@@ -374,10 +389,10 @@ html.dark .account-rail .rail-active-indicator {
 }
 .btn:hover { border-color: var(--control-border-hover); background: var(--bg-hover); }
 .btn:active { transform: scale(.97); }
-.btn.primary { background: var(--color-primary-strong); border-color: var(--color-primary-strong); color: var(--text-inverse); box-shadow: 0 1px 2px color-mix(in srgb, var(--color-primary) 30%, transparent); }
+.btn.primary { background: var(--color-primary-strong); border-color: var(--color-primary-strong); color: var(--text-on-primary); box-shadow: none; }
 .btn.primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
 .btn.primary:active { background: var(--color-primary-active); transform: none; }
-.btn.primary.danger { background: var(--color-error); border-color: var(--color-error); color: var(--text-inverse); box-shadow: 0 1px 2px color-mix(in srgb, var(--color-error) 30%, transparent); }
+.btn.primary.danger { background: var(--color-error); border-color: var(--color-error); color: var(--text-on-error); box-shadow: 0 1px 2px color-mix(in srgb, var(--color-error) 30%, transparent); }
 .btn.primary.danger:hover { background: color-mix(in srgb, var(--color-error) 88%, black); border-color: color-mix(in srgb, var(--color-error) 88%, black); }
 .btn.primary.danger:active { background: color-mix(in srgb, var(--color-error) 75%, black); transform: none; }
 .btn.danger { color: var(--color-error); }
@@ -450,7 +465,7 @@ html.dark .account-rail .rail-active-indicator {
   width: 216px; flex-shrink: 0; overflow-y: auto;
   border-right: 1px solid var(--border-lighter);
   padding: 6px 8px;
-  background: var(--bg-surface);
+  background: var(--bg-sidebar);
 }
 /* ============ 侧边栏拖拽手柄 ============ */
 .pan-resizer {
@@ -496,8 +511,8 @@ html.dark .account-rail .rail-active-indicator {
 
 .pathbar {
   display: flex; align-items: center; gap: 2px;
-  padding: 3px 12px; font-size: 13px; color: var(--text-tertiary);
-  border-bottom: 1px solid var(--border-lighter);
+  min-height: 38px; padding: 4px 12px; font-size: 12px; color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-light);
   overflow-x: auto; white-space: nowrap; flex-shrink: 0;
 }
 .pathbar .crumb { cursor: pointer; padding: 1px 5px; border-radius: var(--radius-xs); color: var(--text-secondary); }
@@ -577,6 +592,11 @@ html.dark .account-rail .rail-active-indicator {
   height: min(760px, 82vh);
   max-height: 82vh;
 }
+.path-navigation { display: flex; align-items: center; gap: 10px; margin-right: 5px; position: sticky; left: -12px; background: var(--bg-base); z-index: 1; padding: 0 4px; }
+.path-back { display: flex; align-items: center; justify-content: center; width: 27px; height: 27px; border: 1px solid var(--control-border); border-radius: var(--radius-xs); background: var(--control-bg); color: var(--text-primary); cursor: pointer; }
+.path-back:hover:enabled { background: var(--bg-hover); border-color: var(--control-border-hover); }
+.path-back:disabled { color: var(--text-disabled); cursor: default; }
+.path-divider { height: 18px; width: 1px; background: var(--control-border); }
 .modal.preview-modal .modal-head { height: 32px; min-height: 32px; padding-left: 12px; }
 .modal.preview-modal .modal-window-btn { height: 32px; }
 .modal-head {
@@ -939,7 +959,7 @@ html.dark .account-rail .rail-active-indicator {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18);
   transition: transform 350ms var(--motion-bounce), width 180ms var(--motion-ease), border-radius 180ms var(--motion-ease);
 }
-.switch.on::after { transform: translateX(20px); }
+.switch.on::after { transform: translateX(20px); background: var(--text-on-primary); }
 .switch:active::after { width: 24px; }
 .switch.on:active::after { transform: translateX(14px); border-radius: 9px; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition-duration: 1ms; } }
@@ -1115,8 +1135,8 @@ html.dark .account-rail .rail-active-indicator {
 .tbtn:hover { color: var(--color-primary); border-color: var(--color-primary); background: var(--bg-active); }
 .tbtn:active { transform: scale(.96); }
 .tbtn:disabled, .tbtn:disabled:hover { color: var(--text-disabled); background: var(--bg-subtle); border-color: var(--border-lighter); box-shadow: none; transform: none; cursor: not-allowed; opacity: .7; }
-.tbtn.primary { color: var(--text-inverse); background: var(--color-primary-strong); border-color: var(--color-primary-strong); }
-.tbtn.primary:hover { color: var(--text-inverse); background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.tbtn.primary { color: var(--text-on-primary); background: var(--color-primary-strong); border-color: var(--color-primary-strong); }
+.tbtn.primary:hover { color: var(--text-on-primary); background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
 .tbtn.danger { color: var(--color-error); }
 .tbtn.danger:hover { color: var(--color-error); border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, transparent); }
 /* 描边实体按钮（对齐旧版工具栏）：白底 + 边框，悬停主色描边 + 浅填充，按下微缩 */
@@ -1133,8 +1153,8 @@ html.dark .account-rail .rail-active-indicator {
 .toppanbtn .tbtn:hover { color: var(--color-primary); border-color: var(--color-primary); background: var(--bg-active); }
 .toppanbtn .tbtn:active { transform: scale(.95); }
 .toppanbtn .tbtn:disabled, .toppanbtn .tbtn:disabled:hover { color: var(--text-disabled); background: var(--bg-subtle); border-color: var(--border-lighter); box-shadow: none; transform: none; cursor: default; }
-.toppanbtn .tbtn.primary { color: var(--text-inverse); background: var(--color-primary-strong); border-color: var(--color-primary-strong); }
-.toppanbtn .tbtn.primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); color: var(--text-inverse); }
+.toppanbtn .tbtn.primary { color: var(--text-on-primary); background: var(--color-primary-strong); border-color: var(--color-primary-strong); }
+.toppanbtn .tbtn.primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); color: var(--text-on-primary); }
 .toppanbtn .tbtn.danger { color: var(--color-error); }
 .toppanbtn .tbtn.danger:hover { color: var(--color-error); border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, transparent); }
 /* 图标钮（无文字）与极小文字钮 */
@@ -1197,7 +1217,7 @@ html.dark .account-rail .rail-active-indicator {
 }
 .btn-check:hover { border-color: var(--color-primary); }
 .btn-check:active { transform: scale(.9); }
-.btn-check.on { background: var(--color-primary); border-color: var(--color-primary); }
+.btn-check.on { background: var(--color-primary); border-color: var(--color-primary); color: var(--text-on-primary); }
 
 /* 视图切换：分段描边控件，当前项高亮 */
 .view-switch {
@@ -1289,7 +1309,7 @@ html.dark .account-rail .rail-active-indicator {
   cursor: pointer;
 }
 .fileitem .filename > div:hover { color: var(--color-primary); }
-.fileitem .filesize { flex: 0 0 86px; width: 86px; text-align: center; margin-right: 14px; color: var(--text-tertiary); font-size: 14px; line-height: 16px; }
+.fileitem .filesize { flex: 0 0 86px; width: 86px; text-align: right; margin-right: 14px; color: var(--text-secondary); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .fileitem .filetime { display: flex; flex-direction: column; align-items: center; flex: 0 0 96px; width: 96px; margin-right: 12px; font-size: 13px; line-height: 15px; text-align: center; }
 .fileitem .filetime .filedate { color: var(--text-secondary); }
 .fileitem .filetime .fileclock { font-size: 12px; line-height: 14px; color: var(--text-tertiary); }
@@ -1333,10 +1353,10 @@ html.dark .account-rail .rail-active-indicator {
 /* ---- 传输任务行（旧版 DownDowning 行式复刻） ---- */
 .taskrow {
   display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center;
-  height: 52px; margin: 1px 8px 1px 2px; padding-right: 6px;
-  border: 1px solid transparent; border-radius: var(--radius-sm);
+  min-height: 68px; margin: 0 12px; padding: 10px 4px;
+  border: 0; border-bottom: 1px solid var(--border-lighter); border-radius: 0;
   transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
-  content-visibility: auto; contain-intrinsic-size: 52px;
+  content-visibility: auto; contain-intrinsic-size: 68px;
 }
 .taskrow:hover { background: var(--listhoverbg); }
 .taskrow.selected {
@@ -1344,14 +1364,25 @@ html.dark .account-rail .rail-active-indicator {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 .taskrow .fileicon { width: 26px; flex: 0 0 26px; padding-right: 4px; display: flex; align-items: center; justify-content: center; }
-.taskrow .filename { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-primary); font-size: 14.5px; margin-right: 6px; }
+.taskrow .filename { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-primary); font-size: 13px; margin-right: 16px; }
 .taskrow .filename > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 20px; cursor: default; }
 .taskrow .filename .fsub { font-size: 12px; color: var(--text-tertiary); line-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .taskrow .filesize { flex: 0 0 76px; width: 76px; text-align: right; margin-right: 12px; color: var(--text-tertiary); font-size: 13.5px; }
-.taskrow .downprogress { flex: 0 0 200px; width: 200px; margin-right: 12px; }
+.taskrow .downprogress { flex: 0 1 220px; min-width: 140px; width: 220px; margin-right: 20px; }
 .taskrow .downspeed { flex: 0 0 86px; width: 86px; text-align: right; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
 .taskrow .tactions { flex: 0 0 auto; display: flex; gap: 2px; }
-.transfering-state { display: flex; flex-direction: column; gap: 3px; }
+.transfering-state { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+.transfering-state .task-notice { align-self: flex-start; }
+@media (max-width: 1000px) {
+  .taskrow { display: grid; grid-template-columns: 20px 24px minmax(100px, 1fr) auto; column-gap: 8px; row-gap: 10px; }
+  .taskrow .rangselect { grid-column: 1; grid-row: 1 / span 2; width: 20px; }
+  .taskrow .fileicon { grid-column: 2; grid-row: 1; width: 24px; }
+  .taskrow .filename { grid-column: 3; grid-row: 1; margin: 0; }
+  .taskrow .filesize { grid-column: 4; grid-row: 1; width: auto; margin: 0; font-size: 12px; }
+  .taskrow .downprogress { grid-column: 3; grid-row: 2; width: auto; min-width: 0; margin: 0; }
+  .taskrow .downspeed { grid-column: 4; grid-row: 2; width: auto; }
+  .taskrow .tactions { grid-column: 3 / span 2; grid-row: 3; justify-content: flex-end; flex-wrap: wrap; }
+}
 .transfering-state p { margin: 0; }
 .transfering-state .text-state { font-size: 12.5px; color: var(--text-secondary); line-height: 14px; display: flex; justify-content: space-between; align-items: center; }
 .transfering-state .text-state .badge { padding: 0 6px; font-size: 11.5px; line-height: 15px; }

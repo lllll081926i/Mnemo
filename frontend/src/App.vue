@@ -231,29 +231,16 @@ function handleConfirmOk() {
   if (typeof cb === 'function') cb()
 }
 const tabs = [
-  { key: 'pan', label: '网盘', icon: 'cloud' },
-  { key: 'transfer', label: '传输', icon: 'migrate' },
+  { key: 'pan', label: '网盘', icon: 'drive' },
+  { key: 'transfer', label: '传输', icon: 'transfer' },
   { key: 'sync', label: '同步', icon: 'refresh' },
   { key: 'share', label: '分享', icon: 'share' },
 ]
 
 const panView = ref(null)
 
-// 顶栏滑动色块：跟随当前 tab 的位置与宽度
-const tabStrip = ref(null)
-const gliderStyle = ref({ opacity: 0 })
-function updateGlider() {
-  const strip = tabStrip.value
-  if (!strip) return
-  const el = strip.querySelector('.top-tab.active')
-  if (!el) { gliderStyle.value = { opacity: 0 }; return }
-  gliderStyle.value = {
-    opacity: 1,
-    transform: `translateX(${el.offsetLeft}px)`,
-    width: el.offsetWidth + 'px',
-  }
-}
-watch(tab, () => nextTick(updateGlider))
+const globalQuery = ref('')
+function openGlobalSearch() { showSearch.value = true }
 
 let refreshEpoch = 0
 function refresh() {
@@ -532,12 +519,9 @@ onMounted(async () => {
     // 原生传输悬浮窗点击/菜单「显示主窗口」时跳到传输页
     onEvent('nav:tab', (key) => { if (typeof key === 'string' && tabOrder.includes(key)) switchTab(key) }),
   ]
-  nextTick(updateGlider)
-  window.addEventListener('resize', updateGlider)
 	cleanupFns = () => {
 		removeMouseNavigation()
 		removeGlobalErrorLogging()
-    window.removeEventListener('resize', updateGlider)
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('contextmenu', preventNativeContextMenu, true)
 		window.removeEventListener('mnemo:drive-notice', onDriveNotice)
@@ -560,8 +544,7 @@ onBeforeUnmount(() => {
         <img class="app-brand-icon" :src="appIcon" alt="" aria-hidden="true" draggable="false" />
         <span>Mnemo</span>
       </div>
-      <div ref="tabStrip" class="top-tabs">
-        <span class="top-tab-glider" :style="gliderStyle"></span>
+      <nav class="top-tabs" aria-label="主导航">
         <button
           v-for="t in tabs"
           :key="t.key"
@@ -569,12 +552,18 @@ onBeforeUnmount(() => {
           :title="t.label"
           :aria-label="t.label"
           :class="{ active: tab === t.key }"
+          :aria-current="tab === t.key ? 'page' : undefined"
           @click="switchTab(t.key)"
-        ><UiIcon :name="t.icon" :size="18" /></button>
-      </div>
+        ><UiIcon :name="t.icon" :size="16" /><span>{{ t.label }}</span></button>
+      </nav>
       <div class="spacer"></div>
-      <button v-if="tab === 'pan'" class="icon-btn" title="我的空间" aria-label="我的空间" @click="showOverview = true"><UiIcon name="home" :size="17" /></button>
-      <button class="icon-btn" title="全盘搜索" aria-label="全盘搜索" aria-keyshortcuts="Control+Shift+F Meta+Shift+F" @click="showSearch = true"><UiIcon name="globe" :size="17" /></button>
+      <form class="top-search" role="search" @submit.prevent="openGlobalSearch">
+        <UiIcon name="search" :size="15" />
+        <input v-model="globalQuery" aria-label="搜索网盘文件" placeholder="搜索文件…" aria-keyshortcuts="Control+Shift+F Meta+Shift+F" />
+        <button type="submit" title="全盘搜索" aria-label="全盘搜索"><UiIcon name="chevron-right" :size="14" /></button>
+      </form>
+      <span class="topbar-divider" aria-hidden="true"></span>
+      <button v-if="tab === 'pan'" class="icon-btn" title="我的空间" aria-label="我的空间" @click="showOverview = true"><UiIcon name="workspace" :size="17" /></button>
       <button v-if="tab === 'pan'" class="icon-btn" :class="{ active: dualPane }" :title="dualPane ? '切换单栏' : '切换双栏'" :aria-label="dualPane ? '切换单栏' : '切换双栏'" aria-keyshortcuts="Control+Backslash Meta+Backslash" :aria-pressed="dualPane" @click="dualPane = !dualPane"><UiIcon :name="dualPane ? 'columns' : 'single-pane'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
@@ -616,7 +605,7 @@ onBeforeUnmount(() => {
 
     <LoginModal v-if="showLogin" :providers="providers" :initial-provider="loginProvider" @close="closeLogin" @toast="toast" />
     <WorkspaceOverview v-if="showOverview" :accounts="orderedAccounts" @close="showOverview = false" @select="account => { showOverview = false; select(account) }" @navigate="location => { showOverview = false; navigateTo(location) }" @tasks="showOverview = false; switchTab('transfer')" />
-    <GlobalSearch v-if="showSearch" :accounts="orderedAccounts" :providers="providers" @close="showSearch = false" @navigate="navigateTo" />
+    <GlobalSearch v-if="showSearch" :initial-query="globalQuery" :accounts="orderedAccounts" :providers="providers" @close="showSearch = false" @navigate="navigateTo" />
 
     <QuickOpen
       :show="showQuickOpen"

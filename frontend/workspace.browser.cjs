@@ -78,10 +78,11 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.addInitScript(() => {
+  await page.addInitScript(({ themeQA }) => {
     const accounts = Array.from({length:20}, (_,i) => ({user_id:`webdav:account-${i}`,drive_id:`drive-${i}`,custom_name:`资料库 ${i+1}`,token:{},usage:{size:100000000,used:100000,status:'available'}}))
     accounts.push({user_id:'aliopen_one',drive_id:'ali',custom_name:'阿里资料',token:{}})
     const files = Array.from({length:10000},(_,i) => ({file_id:`file-${i}`,parent_file_id:'root',name:`资料-${String(i).padStart(5,'0')}.txt`,size:1024,time:1700000000,isDir:false}))
+    const folders = [10, 2, 1].map(i => ({file_id:`folder-${i}`, parent_file_id:'root', name:`项目${i}`, isDir:true}))
     const listeners = {}
     window.runtime = new Proxy({EventsOnMultiple:(name,fn) => { (listeners[name] ||= []).push(fn); return () => {} }, EventsEmit:(name,...args) => (listeners[name] || []).forEach(fn=>fn(...args)), Environment:async()=>({platform:'windows'}), WindowGetSize:async()=>({w:1440,h:1000})}, {get:(target,key)=>target[key] || (()=>{})})
     window.__qaCalls = []
@@ -92,9 +93,18 @@ async function main() {
       ],
       GetSettings:async()=>({theme:'dark',autoUpdate:false,defaultTab:'pan'}), SaveSettings:async()=>{},
       RefreshAccount:async id=>accounts.find(a=>a.user_id===id), RefreshAccountNow:async id=>accounts.find(a=>a.user_id===id),
-      ListDir:async(user,drive,dir)=>{await new Promise(r=>setTimeout(r,20));return dir==='root'? files : [files[0]]},
+      ListDir:async(user,drive,dir)=>{await new Promise(r=>setTimeout(r,20));return dir==='root'? (themeQA ? [...folders, ...files] : files) : themeQA && dir.startsWith('folder-') ? [{file_id:`child-${dir}`,parent_file_id:dir,name:'会议资料',isDir:true},files[0]] : [files[0]]},
       ListFavorites:async()=>[],GetDirectoryCache:async()=>null,SaveDirectoryCache:async()=>{},DeleteDirectoryCache:async()=>{},
-      ListDownloads:async()=>[],ListUploads:async()=>[],ListOfflineTasks:async()=>[],
+      ListDownloads:async()=>themeQA ? [
+        {id:'active',user_id:accounts[0].user_id,name:'设计资料.pdf',size:104857600,status:'downloading',progress:45,speed:5242880},
+        {id:'paused',user_id:accounts[0].user_id,name:'项目归档.zip',size:209715200,status:'paused',progress:23},
+        {id:'failed',user_id:accounts[0].user_id,name:'会议记录.docx',size:1048576,status:'failed',progress:12,issue:{code:'NETWORK_UNAVAILABLE',message:'网络请求中断',action:'network_settings'}}
+      ] : [],
+      ListUploads:async()=>themeQA ? [
+        {UploadID:'hashing',user_id:accounts[0].user_id,Info:{name:'线性代数.pdf',size:130000000},Upload:{IsDowning:true,stage:'hashing',stageProgress:48}},
+        {UploadID:'confirming',user_id:accounts[0].user_id,Info:{name:'参考资料.zip',size:20971520},Upload:{IsDowning:true,stage:'uploading',DownProcess:100}},
+        {UploadID:'review',user_id:accounts[0].user_id,Info:{name:'待核对资料.pdf',size:1048576},Upload:{IsFailed:true,attempt:{state:'unknown'},issue:{code:'UPLOAD_RESULT_UNKNOWN',action:'check_target'}}}
+      ] : [], ListOfflineTasks:async()=>[],
       ListShareHistory:async()=>[], ListShareImportReceipts:async()=>[], GetLogPath:async()=>'',
       SetAccountCustomMeta:async(id,name,icon)=>{const a=accounts.find(a=>a.user_id===id);a.custom_name=name;a.custom_icon=icon;window.runtime.EventsEmit('account:changed')},
       SearchCachedFiles:async()=>[{userId:accounts[0].user_id,driveId:accounts[0].drive_id,parentId:'root',file:files[0],updatedAt:1700000000}],
@@ -109,10 +119,85 @@ async function main() {
       ImportPreferences:async()=>JSON.stringify({format:'mnemo-preferences',version:1,preferences:{oledBackground:true,accountAliases:{},accountIcons:{},accountOrder:accounts.map(a=>a.user_id).reverse()},theme:'dark',favorites:[]}),
     }
     window.go={app:{App:new Proxy(api,{get:(target,key)=>(...args)=>{window.__qaCalls.push({method:key,args});return target[key] ? target[key](...args) : Promise.resolve(null)}})}}
-  })
+  }, { themeQA: process.env.QA_THEME_ONLY === '1' })
   try {
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:5173')
     await page.locator('.fileitem').first().waitFor()
+    if (process.env.QA_THEME_ONLY === '1') {
+      assert.deepEqual(await page.locator('.top-tabs button').allTextContents(), ['网盘', '传输', '同步', '分享'])
+      assert.equal(await page.locator('.top-tabs [aria-current="page"]').innerText(), '网盘')
+      await page.getByRole('textbox', { name: '搜索网盘文件', exact: true }).fill('资料')
+      await page.getByRole('textbox', { name: '搜索网盘文件', exact: true }).press('Enter')
+      await page.locator('.workspace-result').first().waitFor()
+      assert.equal(await page.getByRole('textbox', { name: '跨盘搜索名称' }).inputValue(), '资料')
+      await page.getByRole('button', { name: '关闭对话框', exact: true }).click()
+      await page.getByTitle('分栏视图', { exact: true }).click()
+      assert(await page.locator('.column-file').count() < 100, '分栏大目录必须使用虚拟列表')
+      assert.deepEqual((await page.locator('.column-file').allTextContents()).slice(0, 3).map(text => text.trim()), ['项目1', '项目2', '项目10'])
+      await page.locator('.column-file').filter({ hasText: '项目2' }).click()
+      await page.locator('.file-column').nth(1).getByTitle('会议资料', { exact: true }).waitFor()
+      await page.locator('.file-column').nth(1).getByTitle('会议资料', { exact: true }).click()
+      await page.locator('.file-column').nth(2).waitFor()
+      await page.screenshot({ path: path.join(output, 'columns-dark.png') })
+      await page.locator('.file-column').first().getByTitle('项目10', { exact: true }).click()
+      await page.waitForFunction(() => document.querySelectorAll('.file-column').length === 2 && document.querySelector('.file-column:last-child .column-heading').textContent.includes('项目10'))
+      await page.getByRole('button', { name: '返回上级', exact: true }).click()
+      await page.waitForFunction(() => document.querySelectorAll('.file-column').length === 1)
+      const list = page.locator('.column-list')
+      await list.evaluate(element => { element.scrollTop = 38000 })
+      await page.waitForFunction(() => document.querySelector('.column-file')?.textContent.includes('009'))
+      assert(await page.locator('.column-file').count() < 100, '滚动不能渲染整个目录')
+      await list.evaluate(element => { element.scrollTop = 0 })
+      await page.locator('.rail-item').nth(1).click()
+      await page.waitForFunction(() => document.querySelectorAll('.file-column').length === 1 && document.querySelector('.column-file')?.textContent.includes('项目1'))
+      const themes = []
+      for (const style of ['paper', 'mono']) {
+        for (const mode of ['light', 'dark']) {
+          await page.getByTitle('设置 (Alt+5)').click()
+          await page.locator(`.theme-style-card[data-style="${style}"]`).click()
+          await page.getByRole('button', { name: mode === 'light' ? '浅色' : '深色', exact: true }).click()
+          await page.waitForFunction(({ style, mode }) => document.documentElement.dataset.theme === style && document.documentElement.classList.contains('dark') === (mode === 'dark'), { style, mode })
+          await page.getByRole('button', { name: '网盘', exact: true }).click()
+          await page.screenshot({ path: path.join(output, `${style}-${mode}.png`) })
+          const colors = await page.evaluate(() => {
+            const css = getComputedStyle(document.documentElement)
+            return { bg: css.getPropertyValue('--bg-base').trim(), fg: css.getPropertyValue('--text-primary').trim(), button: css.getPropertyValue('--color-primary-strong').trim(), buttonText: css.getPropertyValue('--text-on-primary').trim() }
+          })
+          themes.push({ style, mode, ...colors })
+        }
+      }
+      await page.getByTitle('设置 (Alt+5)').click()
+      await page.screenshot({ path: path.join(output, 'theme-settings.png') })
+      await page.getByRole('button', { name: '跟随系统', exact: true }).click()
+      await page.emulateMedia({ colorScheme: 'light' })
+      await page.waitForFunction(() => !document.documentElement.classList.contains('dark'))
+      await page.emulateMedia({ colorScheme: 'dark' })
+      await page.waitForFunction(() => document.documentElement.classList.contains('dark'))
+      await page.getByRole('button', { name: '传输', exact: true }).click()
+      await page.locator('.taskrow').first().waitFor()
+      await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.down-content')).opacity) === 1)
+      await page.screenshot({ path: path.join(output, 'transfer-dark.png') })
+      await page.getByRole('tab', { name: /正在上传/ }).click()
+      await page.getByText('计算哈希', { exact: true }).waitFor()
+      await page.getByText('等待网盘确认', { exact: true }).waitFor()
+      await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.down-content')).opacity) === 1)
+      assert.equal(await page.locator('.taskrow details').count(), 0, '错误详情必须使用统一通知')
+      await page.screenshot({ path: path.join(output, 'upload-dark.png') })
+      const layouts = []
+      for (const width of [1440, 1024, 800, 680]) {
+        await page.setViewportSize({ width, height: 768 })
+        const clipped = await page.locator('.topbar button, .topbar input').evaluateAll(elements => elements.filter(element => { const rect = element.getBoundingClientRect(); return rect.width > 0 && (rect.left < 0 || rect.right > innerWidth) }).map(element => element.outerHTML))
+        assert.deepEqual(clipped, [], `标题栏控件被裁剪: ${width}`)
+        assert(await page.locator('.top-tabs .active').count() === 1, '导航必须标识当前页面')
+        const filename = await page.locator('.taskrow .filename').first().boundingBox()
+        assert(filename.width >= 100, `窄窗口必须保留文件名：${width}`)
+        layouts.push(width)
+      }
+      await page.screenshot({ path: path.join(output, 'navigation-680.png') })
+      assert.deepEqual(errors, [], '主题与分栏验收不能出现页面异常')
+      console.log(JSON.stringify({ passed: true, themes, layouts, errors, output }, null, 2))
+      return
+    }
     if (process.env.QA_RAIL_SCROLL_ONLY === '1') {
       const checked = []
       for (const zoom of [1, 1.25, 1.5]) {
@@ -282,6 +367,10 @@ async function main() {
     await page.screenshot({path:path.join(output,'dual-1024.png')})
     assert.deepEqual(errors,[], 'no page errors')
     console.log(JSON.stringify({passed:true,errors,output},null,2))
+  } catch (error) {
+    await page.screenshot({ path: path.join(output, 'failure.png') })
+    console.error(JSON.stringify({ errors, body: (await page.locator('body').innerText()).slice(0, 1600) }))
+    throw error
   } finally { await browser.close() }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

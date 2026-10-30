@@ -1,13 +1,14 @@
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { motion, MotionConfig } from 'motion-v'
 import { search, capsOf, accountName, providerMetaOf, providerIconUrl } from '../api'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
 import { compactReveal, reducedMotion } from '../motion/presets'
-const props = defineProps({ accounts: Array, providers: Array })
+const props = defineProps({ accounts: Array, providers: Array, initialQuery: { type: String, default: '' } })
 const emit = defineEmits(['close', 'navigate'])
-const keyword = ref(''), results = ref([]), errors = ref([]), busy = ref(false), remote = ref(false), stopped = ref(false)
+const keyword = ref(props.initialQuery), results = ref([]), errors = ref([]), busy = ref(false), remote = ref(false), stopped = ref(false)
+onMounted(() => { if (keyword.value.trim()) void run() })
 const accountStates = ref([]), visibleCount = ref(200)
 const activeRequests = new Set()
 const searchSession = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`

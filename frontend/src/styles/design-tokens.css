@@ -1,39 +1,43 @@
-/* Mnemo design tokens — 单一品牌紫色强调色，明/暗两套表面围绕它适配。 */
+/* 纸感与黑白共享组件语义，明暗模式只替换变量。 */
 
 :root {
   /* Surfaces */
-  --bg-base: #f8fafc;
-  --bg-surface: #ffffff;
-  --bg-hover: #f1f5f9;
-  --bg-active: #f5f3ff;
-  --bg-subtle: #f1f5f9;
+  color-scheme: light;
+  --bg-base: #faf9f5;
+  --bg-surface: #fdfcf9;
+  --bg-sidebar: #f3f1ec;
+  --bg-hover: #eeece5;
+  --bg-active: #e9e5dc;
+  --bg-subtle: #f3f1ec;
 
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --text-tertiary: #748199;
-  --text-disabled: #748199;
-  --text-link: #6d28d9;
+  --text-primary: #262522;
+  --text-secondary: #69665f;
+  --text-tertiary: #767269;
+  --text-disabled: #928d83;
+  --text-link: #48443b;
   --text-inverse: #ffffff;
 
-  --border-light: #e2e8f0;
-  --border-lighter: #f1f5f9;
-  --border-focus: #7c3aed;
+  --border-light: #e3e0d8;
+  --border-lighter: #edeae3;
+  --border-focus: #625b4e;
 
-  --control-bg: #ffffff;
-  --control-border: #cbd5e1;
-  --control-border-hover: #94a3b8;
-  --control-placeholder: #64748b;
+  --control-bg: #fdfcf9;
+  --control-border: #d8d3c9;
+  --control-border-hover: #a69e90;
+  --control-placeholder: #767269;
 
-  /* 品牌强调色：紫（唯一强调色，不提供色包切换） */
-  --color-primary: #7c3aed;
-  --color-primary-hover: #6d28d9;
-  --color-primary-active: #5b21b6;
-  /* 实心按钮/徽标底色（压白字，须过 WCAG AA） */
-  --color-primary-strong: #7c3aed;
+  --color-primary: #39362f;
+  --color-primary-hover: #24221e;
+  --color-primary-active: #171612;
+  /* 实心按钮底色与前景色成对使用。 */
+  --color-primary-strong: #302d27;
+  --text-on-primary: #faf9f5;
 
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-error: #e11d48;
+  --color-success: #287653;
+  --color-warning: #94620b;
+  --color-error: #bc3e43;
+  --text-on-error: #ffffff;
+  --color-info: #38698c;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
@@ -41,7 +45,7 @@
   --shadow-modal: 0 16px 32px -4px rgb(0 0 0 / 0.12), 0 6px 16px -2px rgb(0 0 0 / 0.08);
 
   --listhoverbg: var(--bg-hover);
-  --listselectbg: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --listselectbg: var(--bg-active);
 
   /* 形状 / 层级标尺（组件统一取用，避免散落硬编码） */
   --radius-xs: 4px;
@@ -51,63 +55,81 @@
   --radius-xl: 12px;
   --radius-full: 999px;
 
-  --bg-elevated: #ffffff;
+  --bg-elevated: #fdfcf9;
   --ring-focus: 0 0 0 2px color-mix(in srgb, var(--color-primary) 35%, transparent);
 
-  /* 动效标尺与物理物理缓动 */
-  --motion-fast: 120ms;
-  --motion-normal: 220ms;
-  --motion-slow: 360ms;
+  /* 动效时长与缓动 */
+  --motion-fast: 100ms;
+  --motion-normal: 180ms;
+  --motion-slow: 260ms;
   --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  /* 弹簧：常规弹性（轻微过冲）；回弹：弹入类元素（弹窗/气泡/Toast）用，过冲更明显 */
-  --motion-spring: cubic-bezier(0.34, 1.45, 0.5, 1);
-  --motion-bounce: cubic-bezier(0.3, 1.65, 0.45, 1);
-  --motion-glide: cubic-bezier(0.22, 1.25, 0.36, 1);
+  /* 保留既有变量名，统一使用平稳缓动。 */
+  --motion-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-bounce: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-glide: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* 文件类型色板（分类语义色，用于文件图标着色） */
-  --ft-folder: #e8a33d;
-  --ft-video: #8b5cf6;
-  --ft-audio: #10b981;
-  --ft-image: #0ea5e9;
-  --ft-archive: #f59e0b;
-  --ft-doc: #7c3aed;
-  --ft-file: #94a3b8;
+  --ft-folder: #aa7936;
+  --ft-video: #7b6a89;
+  --ft-audio: #527a65;
+  --ft-image: #597e97;
+  --ft-archive: #947444;
+  --ft-doc: #66738c;
+  --ft-file: #827d73;
 }
 
-/* ---------- 深色：表面与紫色强调协调适配 ---------- */
-html.dark {
-  --bg-base: #121212;
-  --bg-surface: #1b1b1b;
-  --bg-hover: #2a2a2a;
-  --bg-active: #3b2d63;
-  --bg-subtle: #222222;
+html[data-theme="mono"] {
+  --bg-base: #fff; --bg-surface: #fff; --bg-sidebar: #f7f7f7;
+  --bg-hover: #f1f1f2; --bg-active: #e8e8ea; --bg-subtle: #f5f5f5;
+  --text-primary: #202023; --text-secondary: #606067; --text-tertiary: #707078;
+  --text-disabled: #93939b; --text-link: #37373c;
+  --border-light: #e2e2e5; --border-lighter: #efeff1; --border-focus: #57575e;
+  --control-bg: #fff; --control-border: #d5d5da; --control-border-hover: #a0a0aa; --control-placeholder: #707078;
+  --color-primary: #29292e; --color-primary-hover: #121215; --color-primary-active: #000;
+  --color-primary-strong: #232327; --text-on-primary: #fff; --bg-elevated: #fff;
+  --ft-folder: #55555e; --ft-video: #6d6d76; --ft-audio: #6d6d76; --ft-image: #6d6d76;
+  --ft-archive: #6d6d76; --ft-doc: #6d6d76; --ft-file: #777780;
+}
 
-  --text-primary: #f1eefb;
-  --text-secondary: #bcb7d1;
-  --text-tertiary: #aaa5c3;
-  --text-disabled: #948db8;
-  --text-link: #c4b5fd;
+/* ---------- 深色纸感：暖炭色表面与暖灰文字 ---------- */
+html.dark {
+  color-scheme: dark;
+  --bg-base: #1c1b18;
+  --bg-surface: #23221e;
+  --bg-sidebar: #201f1b;
+  --bg-hover: #302e28;
+  --bg-active: #3c3931;
+  --bg-subtle: #292721;
+
+  --text-primary: #eeeae0;
+  --text-secondary: #bdb7a9;
+  --text-tertiary: #aaa393;
+  --text-disabled: #7b7569;
+  --text-link: #dbd1bb;
   --text-inverse: #ffffff;
 
-  --border-light: #342b52;
-  --border-lighter: #241e3a;
-  --border-focus: #a78bfa;
+  --border-light: #3e3a31;
+  --border-lighter: #302d27;
+  --border-focus: #c6baa0;
 
-  --control-bg: #1b1b1b;
-  --control-border: #453a6b;
-  --control-border-hover: #6e6890;
-  --control-placeholder: #a29ec0;
+  --control-bg: #26241f;
+  --control-border: #4b463b;
+  --control-border-hover: #777061;
+  --control-placeholder: #aaa393;
 
-  --color-primary: #a78bfa;
-  --color-primary-hover: #c4b5fd;
-  --color-primary-active: #8b5cf6;
-  /* 实心按钮/徽标底色（压白字，须过 WCAG AA） */
-  --color-primary-strong: #7c3aed;
+  --color-primary: #ded5c1;
+  --color-primary-hover: #f4eedf;
+  --color-primary-active: #c9bfa9;
+  /* 深色模式使用浅色按钮底色与深色前景。 */
+  --color-primary-strong: #e3d9c3;
+  --text-on-primary: #27231a;
 
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-error: #fb7185;
+  --color-success: #89c8a6;
+  --color-warning: #dfba75;
+  --color-error: #ee9697;
+  --text-on-error: #341b1c;
+  --color-info: #93b9d2;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
   --shadow-md: 0 4px 8px -1px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.4);
@@ -115,26 +137,40 @@ html.dark {
   --shadow-modal: 0 16px 32px -4px rgb(0 0 0 / 0.65), 0 6px 16px -2px rgb(0 0 0 / 0.5);
 
   --listhoverbg: rgb(255 255 255 / 0.05);
-  --listselectbg: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  --listselectbg: var(--bg-active);
 
   /* 暗色抬升面：弹层/卡片与底面拉开层次 */
-  --bg-elevated: #262626;
+  --bg-elevated: #2b2923;
 
   --ring-focus: 0 0 0 2px color-mix(in srgb, var(--color-primary) 45%, transparent);
 
-  --ft-folder: #f0b35c;
-  --ft-video: #a78bfa;
-  --ft-audio: #34d399;
-  --ft-image: #38bdf8;
-  --ft-archive: #fbbf24;
-  --ft-doc: #a78bfa;
-  --ft-file: #6e6890;
+  --ft-folder: #c3a06b;
+  --ft-video: #b3a1c1;
+  --ft-audio: #9cbea6;
+  --ft-image: #9cb8cc;
+  --ft-archive: #c7b082;
+  --ft-doc: #a5b3ce;
+  --ft-file: #aaa393;
+}
+
+html.dark[data-theme="mono"] {
+  --bg-base: #171719; --bg-surface: #1e1e21; --bg-sidebar: #1b1b1e;
+  --bg-hover: #2b2b2f; --bg-active: #37373d; --bg-subtle: #252529;
+  --text-primary: #eeeeef; --text-secondary: #bcbcc3; --text-tertiary: #a4a4ae;
+  --text-disabled: #777781; --text-link: #d4d4dc;
+  --border-light: #38383f; --border-lighter: #2c2c32; --border-focus: #b5b5c0;
+  --control-bg: #242428; --control-border: #47474f; --control-border-hover: #777781; --control-placeholder: #a4a4ae;
+  --color-primary: #dedee3; --color-primary-hover: #fff; --color-primary-active: #c6c6cf;
+  --color-primary-strong: #e4e4e9; --text-on-primary: #222226; --bg-elevated: #29292e;
+  --ft-folder: #c3c3cb; --ft-video: #aaaab5; --ft-audio: #aaaab5; --ft-image: #aaaab5;
+  --ft-archive: #aaaab5; --ft-doc: #aaaab5; --ft-file: #a4a4ae;
 }
 
 /* OLED 仅替换静态背景，强调色、文字、边框及交互反馈保持原样。 */
 html.dark.oled {
   --bg-base: #000000;
   --bg-surface: #000000;
+  --bg-sidebar: #000000;
   --bg-subtle: #000000;
   --bg-elevated: #000000;
   --control-bg: #000000;

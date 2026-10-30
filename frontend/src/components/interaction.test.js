@@ -263,6 +263,29 @@ describe('网盘文件选择与目录切换', () => {
     { file_id: 'c', name: 'C.txt', isDir: false },
   ]
 
+  it('分栏切入子目录后保留祖先内容，切换账号后清除祖先内容', async () => {
+    const folder = { file_id: 'folder', name: '项目2', isDir: true }
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockImplementation((user, _drive, dir) => Promise.resolve(user === account.user_id ? (dir === 'root' ? [folder] : files) : [{ file_id: 'new', name: '新账号.txt' }]))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.get('[title="分栏视图"]').trigger('click')
+    await wrapper.get('.column-file').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.file-column')).toHaveLength(2)
+    expect(wrapper.findAll('.file-column')[0].text()).toContain('项目2')
+    expect(wrapper.findAll('.file-column')[1].text()).toContain('A.txt')
+    await wrapper.vm.clearCache()
+    await flushPromises()
+    expect(wrapper.findAll('.file-column')[0].text()).toContain('项目2')
+    expect(wrapper.findAll('.file-column')[0].text()).not.toContain('正在加载')
+    await wrapper.setProps({ account: { user_id: 'webdav:other-columns', drive_id: 'other' } })
+    await flushPromises()
+    expect(wrapper.findAll('.file-column')).toHaveLength(1)
+    expect(wrapper.text()).toContain('新账号.txt')
+    expect(wrapper.find('.column-file').text()).not.toContain('项目2')
+  })
+
   it('新目录尚未返回时隐藏旧文件，保留加载占位', async () => {
     let finishDirectory
     api.capsOf.mockReturnValue({})
@@ -1724,7 +1747,8 @@ describe('关键交互组件', () => {
     const wrapper = mountAttached(App, { global: { stubs: { PanView: true, AccountAvatar: true } } })
     await flushPromises()
     expect(wrapper.find('.workspace-controls').exists()).toBe(false)
-    expect(wrapper.findAll('header button').every(button => button.text().trim() === '')).toBe(true)
+    expect(wrapper.findAll('.top-tabs button').map(button => button.text())).toEqual(['网盘', '传输', '同步', '分享'])
+    expect(wrapper.get('.top-search input').attributes('aria-label')).toBe('搜索网盘文件')
     await wrapper.get('button[aria-label="切换双栏"]').trigger('click')
     expect(wrapper.get('button[aria-label="切换单栏"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('.workspace-pane')).toHaveLength(2)

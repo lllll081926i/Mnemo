@@ -23,6 +23,15 @@ afterEach(() => {
 })
 
 describe('全盘搜索', () => {
+  it('接收顶部搜索框的文字并自动搜索本地缓存', async () => {
+    const searchCache = vi.fn().mockResolvedValue([])
+    vi.stubGlobal('go', { app: { App: { SearchCachedFiles: searchCache } } })
+    wrapper = mount(GlobalSearch, { props: { accounts: [account], providers: [], initialQuery: '设计资料' }, global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    expect(wrapper.vm.keyword).toBe('设计资料')
+    expect(searchCache).toHaveBeenCalledWith('设计资料')
+    expect(api.search).not.toHaveBeenCalled()
+  })
   it('在线结果不截断，并按批次显示', async () => {
     vi.stubGlobal('go', { app: { App: { SearchCachedFiles: vi.fn().mockResolvedValue([]) } } })
     api.search.mockResolvedValue(Array.from({ length: 601 }, (_, index) => ({ file_id: `file-${index}`, name: `文件-${index}` })))

@@ -1,4 +1,4 @@
-// 外观应用：主题（明/暗）。强调色固定为品牌紫，不再提供色包切换。
+// 外观风格与明暗模式独立保存，共用语义设计变量。
 import { WindowSetDarkTheme, WindowSetLightTheme, WindowSetSystemDefaultTheme, EventsEmit } from '../wailsjs/runtime/runtime'
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { DEFAULT_DOWNLOAD_SOUND, downloadSoundOf } from './download-sounds'
@@ -11,6 +11,7 @@ export function isDarkMode(theme) {
 export function applyAppearance(theme) {
   const dark = isDarkMode(theme)
   document.documentElement.classList.toggle('dark', dark)
+  applyThemeStyle()
   applyOledBackground()
   // 清理旧版色包残留
   localStorage.removeItem('mnemo.themePackLight')
@@ -34,8 +35,9 @@ const LAST_DRIVE_KEY = 'mnemo.lastDrive'
 let cachedPrefsRaw
 let cachedPrefs
 const PREFS_DEFAULTS = {
+  themeStyle: 'paper',    // paper | mono
   oledBackground: false, // 深色模式使用纯黑背景
-  viewMode: 'list',       // 网盘默认视图 list | grid
+  viewMode: 'list',       // 网盘默认视图 list | grid | columns
   hoverPreview: true,     // 目录树悬停预览
   downloadSound: true,    // 传输完成提示音
   downloadSoundType: DEFAULT_DOWNLOAD_SOUND,
@@ -65,6 +67,8 @@ export function getPrefs() {
 
 function resolvePrefs(prefs) {
   const resolved = { ...PREFS_DEFAULTS, ...prefs }
+  resolved.themeStyle = ['paper', 'mono'].includes(resolved.themeStyle) ? resolved.themeStyle : 'paper'
+  resolved.viewMode = ['list', 'grid', 'columns'].includes(resolved.viewMode) ? resolved.viewMode : 'list'
   resolved.downloadSoundType = downloadSoundOf(resolved.downloadSoundType).value
   return resolved
 }
@@ -74,6 +78,7 @@ export function setPref(key, value) {
   p[key] = value
   localStorage.setItem(PREFS_KEY, JSON.stringify(p))
   if (key === 'oledBackground') applyOledBackground()
+  if (key === 'themeStyle') applyThemeStyle()
   // localStorage is not reactive. Let mounted views update immediately when a
   // preference is changed from the settings page.
   if (typeof window !== 'undefined') {
@@ -83,6 +88,10 @@ export function setPref(key, value) {
 
 function applyOledBackground() {
   document.documentElement.classList.toggle('oled', getPrefs().oledBackground === true)
+}
+
+export function applyThemeStyle() {
+  document.documentElement.dataset.theme = getPrefs().themeStyle
 }
 
 // 侧栏与页面共用账号顺序；拖拽保存后立即通知所有使用者。

@@ -2,6 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { parseShareText, cleanBackupPrefs, recordAccountHealth, accountHealth, directoryCacheKey, driveErrorNotice, syncAccountAuthState } from './workspace'
 
 describe('工作区辅助逻辑', () => {
+  it('主题和分栏偏好可以备份，无效风格不进入备份', () => {
+    expect(cleanBackupPrefs({ themeStyle: 'mono', viewMode: 'columns' })).toMatchObject({ themeStyle: 'mono', viewMode: 'columns' })
+    expect(cleanBackupPrefs({ themeStyle: 'external', viewMode: 'invalid' })).not.toHaveProperty('themeStyle')
+    expect(cleanBackupPrefs({ themeStyle: 'external', viewMode: 'invalid' })).not.toHaveProperty('viewMode')
+  })
+  it('回收站失败提供恢复动作，隐藏原始协议错误', () => {
+    expect(driveErrorNotice('响应缺少 list request_id=private', '加载回收站')).toMatchObject({ category: 'response', message: expect.stringContaining('官网检查') })
+    expect(driveErrorNotice('Open 授权不支持读取回收站', '加载回收站')).toMatchObject({ category: 'unsupported', message: expect.stringContaining('官网管理') })
+  })
   it('账号刷新只同步认证状态，不覆盖网络和容量诊断', () => {
     accountHealth.networkAccount = { status: 'network' }
     accountHealth.quotaAccount = { status: 'quota' }

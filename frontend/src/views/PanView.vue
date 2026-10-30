@@ -16,6 +16,8 @@ import ConfirmModal from '../components/ConfirmModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import TreeNode from '../components/TreeNode.vue'
+import FileColumns from '../components/FileColumns.vue'
+import { compareFileNames, sortedDirectories } from '../file-order'
 import DragDropZone from '../components/DragDropZone.vue'
 import SharePrivacyNotice from '../components/SharePrivacyNotice.vue'
 const DeletionHistory = defineAsyncComponent(() => import('../components/DeletionHistory.vue'))
@@ -78,7 +80,7 @@ function onSortPick(action) {
 // 区间选择模式：开启后点两个行选定区间
 const rangIsSelecting = ref(false)
 const rangAnchor = ref('')
-const viewMode = ref(initialPrefs.viewMode || 'list')  // list | grid
+const viewMode = ref(initialPrefs.viewMode || 'list')  // list | grid | columns
 const workMode = ref('files')
 function setWorkMode(value) {
   workMode.value = value
@@ -119,6 +121,10 @@ const treeNames = ref({})     // id -> name
 const treeParents = ref({})   // id -> parent id
 const expanded = ref({})
 const treeSelected = ref('root')
+const columnSnapshots = shallowRef({})
+const columnBrowser = ref(null)
+const columnErrors = ref({})
+let columnLoadSeq = 0
 
 // 弹窗
 const modal = ref(null) // mkdir | rename | renamemulti | share | upload | offline | migrate | movedir | copydir | preview | detail | download
@@ -254,6 +260,11 @@ function persistDir(key, list, epoch = cacheEpoch) {
 }
 function isPersistableMode(modeV) { return modeV === 'list' }
 function invalidateDirCache(uidV, didV, modeV, idV) {
+  if (uidV === uid.value && didV === did.value && modeV === 'list') {
+    const snapshots = { ...columnSnapshots.value }
+    delete snapshots[idV]
+    columnSnapshots.value = snapshots
+  }
   if (uidV === uid.value && didV === did.value && modeV === mode.value && idV === dirId.value) {
     cacheEpoch++
     cancelDirectoryPrefetch()
@@ -407,7 +418,9 @@ async function load(id, options = {}) {
 
 function updateTreeSnapshot(id, list, snapUid = uid.value, snapDid = did.value) {
   if (snapUid !== uid.value || snapDid !== did.value) return
-  tree.value[id] = (list || []).filter((f) => f.isDir)
+  tree.value[id] = sortedDirectories(list || [])
+  const snapshots = { ...columnSnapshots.value, [id]: list }
+  columnSnapshots.value = Object.fromEntries(Object.entries(snapshots).slice(-DIR_CACHE_MAX))
   for (const f of tree.value[id]) {
     treeNames.value[f.file_id] = f.name
     treeParents.value[f.file_id] = id
@@ -484,7 +497,10 @@ async function listDirectorySnapshot(id, options = {}) {
   const epoch = cacheEpoch
   const key = dirCacheKey(snapUid, snapDid, 'list', id, '')
   const inMemory = getCachedDir(key)
-  if (inMemory) return inMemory.files
+  if (inMemory) {
+    updateTreeSnapshot(id, inMemory.files, snapUid, snapDid)
+    return inMemory.files
+  }
   const persisted = await GetDirectoryCache(key).catch(() => null)
   if (epoch !== cacheEpoch || snapUid !== uid.value || snapDid !== did.value) return []
   if (validDirectory(persisted)) {
@@ -518,17 +534,16 @@ async function loadFavorites() {
   }
 }
 
-const nameCollator = new Intl.Collator('zh-Hans-CN')
 const displayFiles = computed(() => {
   const arr = [...files.value]
   const key = sortKey.value
   arr.sort((a, b) => {
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
     let r = 0
-    if (key === 'name') r = nameCollator.compare(a.name || '', b.name || '')
+    if (key === 'name') r = compareFileNames(a, b)
     else if (key === 'time') r = (a.time || 0) - (b.time || 0)
     else r = (a.size || 0) - (b.size || 0)
-    return sortAsc.value ? r : -r
+    return (sortAsc.value ? r : -r) || compareFileNames(a, b)
   })
   return arr
 })
@@ -566,6 +581,57 @@ function renderRows(list) {
 }
 
 const crumbs = computed(() => [{ id: rootKey.value, name: rootTitle.value }, ...pathStack.value])
+const browserColumns = computed(() => {
+  if (mode.value !== 'list') return [{ id: mode.value, name: modeTitle.value, files: listShown.value }]
+  return crumbs.value.map((crumb, index) => ({ ...crumb,
+    files: index === crumbs.value.length - 1 ? listShown.value : [...(columnSnapshots.value[crumb.id] || [])].sort((a, b) => Number(b.isDir) - Number(a.isDir) || compareFileNames(a, b)),
+    activeId: crumbs.value[index + 1]?.id || '',
+    loading: index < crumbs.value.length - 1 && !columnSnapshots.value[crumb.id] && !columnErrors.value[crumb.id],
+    error: columnErrors.value[crumb.id] || '',
+  }))
+})
+async function loadColumnAncestors() {
+  const seq = ++columnLoadSeq
+  if (viewMode.value !== 'columns' || mode.value !== 'list') return
+  const account = uid.value, drive = did.value
+  const ancestors = crumbs.value.slice(0, -1)
+  for (const ancestor of ancestors) {
+    if (seq !== columnLoadSeq || account !== uid.value || drive !== did.value) return
+    if (columnSnapshots.value[ancestor.id]) continue
+    try { await listDirectorySnapshot(ancestor.id) }
+    catch (cause) {
+      if (seq === columnLoadSeq && account === uid.value && drive === did.value) columnErrors.value = { ...columnErrors.value, [ancestor.id]: String(cause?.message || cause) }
+    }
+  }
+}
+watch([viewMode, () => JSON.stringify(pathStack.value), mode], loadColumnAncestors, { flush: 'post' })
+async function retryColumn(id) {
+  columnErrors.value = { ...columnErrors.value, [id]: '' }
+  await loadColumnAncestors()
+}
+async function selectColumnFile(index, file, event, open = false, navigate = true) {
+  const ancestor = mode.value === 'list' && index < crumbs.value.length - 1
+  if (ancestor) {
+    const parent = crumbs.value[index]
+    pathStack.value = pathStack.value.slice(0, index)
+    dirId.value = parent.id
+    treeSelected.value = parent.id
+    clearSelection()
+    const user = uid.value, drive = did.value
+    const pending = load(parent.id), seq = loadSeq
+    await pending
+    if (seq !== loadSeq || user !== uid.value || drive !== did.value || dirId.value !== parent.id || mode.value !== 'list' || error.value) return
+    file = files.value.find(entry => entry.file_id === file.file_id)
+    if (!file) return
+  }
+  toggleSel(file, event)
+  if (open || (navigate && file.isDir && !event?.ctrlKey && !event?.metaKey && !event?.shiftKey)) onRowOpen(file)
+}
+async function contextColumnFile(index, event, file) {
+  const user = uid.value, drive = did.value
+  if (index < browserColumns.value.length - 1) await selectColumnFile(index, file, event, false, false)
+  if (user === uid.value && drive === did.value && listShown.value.some(entry => entry.file_id === file.file_id)) onCtx(event, file)
+}
 
 const modeTitle = computed(() => ({
   trash: '回收站',
@@ -649,7 +715,7 @@ function navigateHistory(direction) {
 }
 
 function refresh() {
-  if (mode.value === 'list') return load(dirId.value)
+  if (mode.value === 'list') return load(dirId.value).then(loadColumnAncestors)
   if (mode.value === 'favorite') return loadFavorites()
   return load(null)
 }
@@ -975,7 +1041,7 @@ async function openFile(file) {
       await window.go.app.App.OpenPreviewWindow({
         account: { user_id: uid.value, drive_id: did.value },
         file, files: listShown.value, capabilities: caps.value, kind,
-        preferences: Object.fromEntries(['defaultVolume', 'defaultSpeed', 'seekStep', 'autoCloseOnEnd', 'autoLoadSubtitles', 'oledBackground'].map(key => [key, prefs[key]])),
+        preferences: { ...Object.fromEntries(['defaultVolume', 'defaultSpeed', 'seekStep', 'autoCloseOnEnd', 'autoLoadSubtitles', 'oledBackground', 'themeStyle'].map(key => [key, prefs[key]])), theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light' },
       })
       recordRecentItem({ userId: accountId, driveId, fileId: file.file_id, dirId: parentId, name: file.name, isDir: false, path: openedPath })
     } catch (error) { emit('toast', `打开预览窗口失败：${String(error)}`, 'error') }
@@ -1563,6 +1629,9 @@ function onKey(e) {
 
 watch(() => [props.account?.user_id || '', props.account?.drive_id || '', rootKey.value], ([nextUid, nextDid]) => {
   const a = props.account
+  ++columnLoadSeq
+  columnSnapshots.value = {}
+  columnErrors.value = {}
   showDeletionHistory.value = false
   confirmDialog.value = null
   menu.value = null
@@ -1644,6 +1713,9 @@ async function invalidateDirectories(user, drive, ids = []) {
   const active = user === uid.value && drive === did.value
   if (active) {
     cacheEpoch++
+    columnLoadSeq++
+    columnSnapshots.value = {}
+    columnErrors.value = {}
     cancelDirectoryPrefetch()
     tree.value = {}
     treeParents.value = {}
@@ -1680,11 +1752,14 @@ defineExpose({
     cancelDirectoryPrefetch()
     cacheEpoch++
     loadSeq++
+    columnLoadSeq++
+    columnSnapshots.value = {}
+    columnErrors.value = {}
     dirCache.clear()
     tree.value = {}
     expanded.value = {}
     treeParents.value = {}
-    if (props.account) load(dirId.value)
+    if (props.account) return refresh()
   },
 })
 
@@ -1745,6 +1820,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   viewDisposed = true
+  ++columnLoadSeq
   cacheEpoch++
   cancelDirectoryPrefetch()
   clearTimeout(locSaveTimer)
@@ -1837,6 +1913,10 @@ onBeforeUnmount(() => {
         <DragDropZone class="pan-right" @drop-files="onDropUpload" @drop="dropCloudFiles($event)">
           <!-- 面包屑路径条（置顶、矮） -->
           <div class="pathbar">
+            <div class="path-navigation">
+              <button type="button" class="path-back" title="返回上级 (Backspace)" aria-label="返回上级" :disabled="mode === 'list' && !pathStack.length" @click="mode === 'list' ? goUp() : goHome()"><UiIcon name="back" :size="16" /></button>
+              <span class="path-divider" aria-hidden="true"></span>
+            </div>
             <template v-if="mode === 'list'">
               <template v-for="(c, i) in crumbs" :key="c.id + i">
                 <span v-if="i" class="crumb-sep">/</span>
@@ -1852,7 +1932,6 @@ onBeforeUnmount(() => {
           <div class="toppanbtns pan-file-toolbar" :class="{ 'has-selection': selected.length }">
             <div v-if="!selected.length" class="toppanbtn">
               <UiSelect v-if="mode !== 'trash'" aria-label="文件类型" :model-value="workMode" :options="[{ value: 'files', label: '全部文件' }, { value: 'album', label: '图片与视频' }, { value: 'reader', label: '文档与影音' }]" style="width:130px" @update:modelValue="setWorkMode" />
-              <button v-if="mode === 'list' && pathStack.length" class="tbtn icon" title="后退 (Backspace)" @click="goUp"><UiIcon name="back" :size="16" /></button>
               <button class="tbtn icon" :disabled="loading" title="刷新 (F5)" @click="refresh"><UiIcon name="refresh" :size="16" /></button>
               <button v-if="caps.search && mode !== 'search'" class="tbtn icon" title="全盘搜索 (Ctrl/⌘+F)" @click="enterSearch"><UiIcon name="search" :size="16" /></button>
               <button v-if="caps.offlineDownload && mode === 'list'" class="tbtn icon" title="云离线下载" @click="inputText = ''; modal = 'offline'"><UiIcon name="cloud-down" :size="16" /></button>
@@ -1895,6 +1974,7 @@ onBeforeUnmount(() => {
               <div class="view-switch">
                 <button class="vs-btn" :class="{ on: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'; setPref('viewMode', 'list')"><UiIcon name="list" :size="15" /></button>
                 <button class="vs-btn" :class="{ on: viewMode === 'grid' }" title="网格视图" @click="viewMode = 'grid'; setPref('viewMode', 'grid')"><UiIcon name="grid" :size="15" /></button>
+                <button class="vs-btn" :class="{ on: viewMode === 'columns' }" title="分栏视图" aria-label="分栏视图" @click="viewMode = 'columns'; setPref('viewMode', 'columns')"><UiIcon name="browse-columns" :size="15" /></button>
               </div>
             </div>
           </div>
@@ -1923,10 +2003,12 @@ onBeforeUnmount(() => {
               </div>
             </template>
           </div>
-          <div v-else-if="error" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>{{ error }}</span><button class="btn sm" @click="refresh">重试</button></div>
+          <div v-else-if="error" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>{{ error }}</span><button class="btn sm" @click="refresh">重试</button><button v-if="mode === 'trash' && caps.trashWebUrl" class="btn sm" @click="openTrashWebsite">官网回收站</button></div>
           <div v-else-if="mode === 'favorite' && favoriteError && !favorites.length" class="empty"><span class="empty-icon"><UiIcon name="warning" :size="30" /></span><span>收藏加载失败：{{ favoriteError }}</span><button class="btn sm" @click="loadFavorites">重试</button></div>
 
-          <!-- 列表视图（旧版 fileitem 行） -->
+          <FileColumns v-else-if="viewMode === 'columns'" ref="columnBrowser" :columns="browserColumns" :selected-ids="selSet" :focus-id="focusId" :drag-enabled="cloudDragEnabled && mode === 'list'" @select="selectColumnFile" @open="(index, file, event) => selectColumnFile(index, file, event, true)" @context="contextColumnFile" @clear="clearSelection" @retry="retryColumn" @drag-start="startCloudDrag" @drag-end="emit('cloud-drag-end')" @drop="dropCloudFiles" />
+
+          <!-- 列表视图 -->
           <div v-else-if="viewMode === 'list'" ref="listEl" :key="'list:' + currentViewKey()" class="file-list" @click="onListBackgroundClick" @scroll.passive="onListScroll">
             <div v-if="listVirtualized" aria-hidden="true" :style="{ height: listVirtualTop + 'px' }"></div>
             <div
