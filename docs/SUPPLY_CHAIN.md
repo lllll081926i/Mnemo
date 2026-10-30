@@ -46,7 +46,7 @@ go mod download all
 node tools/supply-chain.cjs collect <空目录>
 ```
 
-归档拒绝覆盖已有资产。完整 CI 另外生成 SBOM，并检查锁文件没有被构建改写。AppImage 打包工具执行前校验固定 SHA-256；上游 continuous 附件变化会使构建失败，需要重新核对后更新摘要。
+归档拒绝覆盖已有资产。完整 CI 另外生成 SBOM，并检查锁文件没有被构建改写。AppImage 打包工具固定为上游正式版 1.9.1，执行前校验各架构 SHA-256；不再使用会被上游替换的 continuous 下载入口。
 
 ## 发布来源证明
 

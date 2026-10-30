@@ -257,11 +257,11 @@ jobs:
           trap 'rm -rf "$package_stage" "$archive_stage" "$appdir" "$tool_dir"' EXIT
           package_arch="amd64"
           appimage_arch="x86_64"
-          appimage_sha256="95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6"
+          appimage_sha256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
           if [[ "${{ matrix.platform }}" == 'linux/arm64' ]]; then
             package_arch="arm64"
             appimage_arch="aarch64"
-            appimage_sha256="a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270"
+            appimage_sha256="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
           fi
 
           mkdir -p "$package_stage/data" "$archive_stage/data"
@@ -326,7 +326,7 @@ jobs:
           EOF
           chmod 0755 "$appdir/AppRun"
           appimage_tool="$tool_dir/appimagetool-${appimage_arch}.AppImage"
-          curl --fail --location --retry 3 --retry-delay 2 --output "$appimage_tool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimage_arch}.AppImage"
+          curl --fail --location --retry 3 --retry-delay 2 --output "$appimage_tool" "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-${appimage_arch}.AppImage"
           printf '%s  %s\n' "$appimage_sha256" "$appimage_tool" | sha256sum --check
           chmod 0755 "$appimage_tool"
           (
