@@ -7,7 +7,6 @@ import (
 	stdhtml "html"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -16,7 +15,35 @@ import (
 	"mnemo-go/internal/model"
 )
 
-var recycleFormHash = regexp.MustCompile(`name=["']formhash["']\s+value=["']([^"']+)["']`)
+func recycleFormToken(page string) string {
+	doc, err := html.Parse(strings.NewReader(page))
+	if err != nil {
+		return ""
+	}
+	var token string
+	var visit func(*html.Node)
+	visit = func(node *html.Node) {
+		if node.Type == html.ElementNode && node.Data == "input" {
+			name, value := "", ""
+			for _, attr := range node.Attr {
+				if attr.Key == "name" {
+					name = attr.Val
+				}
+				if attr.Key == "value" {
+					value = attr.Val
+				}
+			}
+			if strings.EqualFold(name, "formhash") {
+				token = value
+			}
+		}
+		for child := node.FirstChild; child != nil && token == ""; child = child.NextSibling {
+			visit(child)
+		}
+	}
+	visit(doc)
+	return token
+}
 
 func (d *Driver) recycleRequest(ctx context.Context, c drive.Context, method string, query, form url.Values) (string, error) {
 	cookie, _, _, baseURL := sessionOf(c)
@@ -37,6 +64,9 @@ func (d *Driver) recycleRequest(ctx context.Context, c drive.Context, method str
 	if result.status < 200 || result.status >= 300 {
 		return "", fmt.Errorf("蓝奏回收站 HTTP %d", result.status)
 	}
+	if strings.Contains(result.text, "网盘用户登录") || strings.Contains(result.text, "用户登录</title>") {
+		return "", drive.AuthExpired("蓝奏云网页登录已失效，请重新登录")
+	}
 	return result.text, nil
 }
 
@@ -45,10 +75,14 @@ func (d *Driver) ListTrash(ctx context.Context, c drive.Context, _ *drive.ListOp
 	if err != nil {
 		return nil, err
 	}
-	if !recycleFormHash.MatchString(page) {
-		return nil, errors.New("蓝奏回收站页面无效，请检查登录状态")
+	items, err := parseLanzouRecycle(page, c.DriveID)
+	if err != nil {
+		return nil, err
 	}
-	return parseLanzouRecycle(page, c.DriveID)
+	if len(items) == 0 && recycleFormToken(page) == "" && !strings.Contains(page, "回收站") {
+		return nil, errors.New("蓝奏云回收站页面未返回有效内容，请刷新重试或前往官网检查")
+	}
+	return items, nil
 }
 
 func parseLanzouRecycle(page, driveID string) ([]model.File, error) {
@@ -144,14 +178,18 @@ func (d *Driver) Restore(ctx context.Context, c drive.Context, fileIDs []string)
 			failures = append(failures, err)
 			continue
 		}
-		match := recycleFormHash.FindStringSubmatch(page)
-		if len(match) != 2 {
+		token := recycleFormToken(page)
+		if token == "" {
 			failures = append(failures, fmt.Errorf("%s: 无法获取蓝奏回收站表单", id))
 			continue
 		}
-		response, err := d.recycleRequest(ctx, c, http.MethodPost, url.Values{"item": {"recycle"}}, url.Values{"action": {action}, "task": {action}, key: {value}, "formhash": {match[1]}})
-		if err != nil || !strings.Contains(response, "恢复成功") {
-			failures = append(failures, fmt.Errorf("%s: 蓝奏回收站恢复失败: %v", id, err))
+		response, err := d.recycleRequest(ctx, c, http.MethodPost, url.Values{"item": {"recycle"}}, url.Values{"action": {action}, "task": {action}, key: {value}, "formhash": {token}})
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", id, err))
+			continue
+		}
+		if !strings.Contains(response, "恢复成功") {
+			failures = append(failures, fmt.Errorf("%s: 蓝奏云未确认恢复成功，请检查官网回收站", id))
 			continue
 		}
 		completed = append(completed, id)

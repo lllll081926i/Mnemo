@@ -88,6 +88,7 @@ func init() {
 			"copy":            false,
 			"permanentDelete": true,
 		}, func(c *drive.Capabilities) {
+			c.TrashWebURL = "https://yun.123pan.com/recycle"
 			c.SetHashes([]string{"md5"}, []string{"md5"})
 		}),
 		Auth: authLogin,
@@ -316,7 +317,7 @@ func (d *Driver) api(ctx context.Context, c drive.Context, method, rawURL string
 			}
 		}
 	}
-	if resp.Code != 0 {
+	if resp.Code != 0 && !(method == http.MethodGet && rawURL == apiFileList && resp.Code == 200) {
 		if resp.Code == 401 {
 			return nil, drive.AuthExpired("123 云盘登录已失效，请重新登录")
 		}
@@ -935,7 +936,7 @@ func (d *Driver) Favorite(ctx context.Context, c drive.Context, fileIDs []string
 
 // fileListPageRaw returns one page from the 123 API. The API uses a numeric
 // Page field and reports "-1" in Next for the final page.
-func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID string, trashed bool, search string, page int) ([]pan123File, string, error) {
+func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID string, trashed bool, search string, page int, markers ...string) ([]pan123File, string, error) {
 	parentFileID := toPan123FileID(parentID)
 	if page < 1 {
 		page = 1
@@ -945,6 +946,9 @@ func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID 
 	if search != "" {
 		event = "homeSearchFile"
 		operateType = "2"
+	}
+	if trashed {
+		event, operateType = "recycleListFile", "1"
 	}
 	query := map[string]string{
 		"driveId":              "0",
@@ -961,23 +965,42 @@ func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID 
 		"operateType":          operateType,
 		"inDirectSpace":        "false",
 	}
+	if trashed {
+		query["orderBy"] = "trashed_at"
+		query["fileAttributes"] = "[]"
+		query["fileTypes"] = "[0]"
+		if len(markers) > 0 && markers[0] != "" {
+			query["next"] = markers[0]
+		}
+	}
 	resp, err := d.api(ctx, c, http.MethodGet, apiFileList, nil, query)
 	if err != nil {
 		return nil, "", err
 	}
 	data := parseMap(resp.Data)
 	list := rawList(data)
+	if trashed && list == nil {
+		return nil, "", errors.New("123 云盘回收站未返回有效文件列表，请刷新重试")
+	}
 	res := make([]pan123File, 0, len(list))
 	for _, raw := range list {
 		if m, ok := raw.(map[string]any); ok {
-			res = append(res, putPool(c, normalizePan123File(m)))
+			item := normalizePan123File(m)
+			if trashed && (item.FileID == "" || item.FileName == "") {
+				return nil, "", errors.New("123 云盘回收站文件信息无效")
+			}
+			res = append(res, putPool(c, item))
+		} else if trashed {
+			return nil, "", errors.New("123 云盘回收站文件列表格式无效")
 		}
 	}
 	next := asString(pick(data, "Next", "next"))
 	if len(list) == 0 || next == "-1" {
 		next = ""
-	} else {
+	} else if !trashed {
 		next = strconv.Itoa(page + 1)
+	} else if next == "" {
+		return nil, "", errors.New("123 云盘回收站缺少分页信息，请刷新重试")
 	}
 	return res, next, nil
 }
@@ -985,17 +1008,28 @@ func (d *Driver) fileListPageRaw(ctx context.Context, c drive.Context, parentID 
 // fileListRaw implements the AList getFiles paging loop (guard 200 pages).
 func (d *Driver) fileListRaw(ctx context.Context, c drive.Context, parentID string, trashed bool, search string) ([]pan123File, error) {
 	var res []pan123File
-	marker := "1"
+	seen := make(map[string]bool)
+	cursor := "0"
 	for guard := 0; guard < 200; guard++ {
-		page, next, err := d.fileListPageRaw(ctx, c, parentID, trashed, search, pageMarker123(marker))
+		page, next, err := d.fileListPageRaw(ctx, c, parentID, trashed, search, guard+1, cursor)
 		if err != nil {
 			return nil, err
 		}
-		res = append(res, page...)
+		added := 0
+		for _, file := range page {
+			if !trashed || !seen[file.FileID] {
+				res = append(res, file)
+				seen[file.FileID] = true
+				added++
+			}
+		}
+		if trashed && next != "" && added == 0 {
+			return nil, errors.New("123 云盘回收站分页未返回新文件，请刷新重试")
+		}
 		if next == "" {
 			return res, nil
 		}
-		marker = next
+		cursor = next
 	}
 	return nil, errors.New("123: 文件列表分页超过上限")
 }

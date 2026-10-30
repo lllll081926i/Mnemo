@@ -25,6 +25,7 @@ func init() {
 			"trashView":       true,
 			"trashRestore":    true,
 		}, func(c *drive.Capabilities) {
+			c.TrashWebURL = "https://www.ilanzou.com/"
 			c.SetHashes([]string{"md5"}, []string{"md5"})
 		}),
 		Login: drive.LoginConfig{Notice: "账号和密码发送至蓝奏优享；凭据用于建立平台会话。", Fields: []drive.LoginField{

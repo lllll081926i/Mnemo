@@ -11,7 +11,8 @@
 ```
 favorite, search, createShare, shareExpiration, sharePassword, shareHistory, importShare: true
 copy, recycleBin, permanentDelete: true
-trashView, trashRestore: true
+trashView, trashRestore: false
+trashWebUrl: https://www.alipan.com/drive
 SetHashes(["sha1"], ["sha1"])
 SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 ```
@@ -104,8 +105,10 @@ SetConflictPolicies(["refuse", "rename", "skip", "overwrite"])
 |------|:----:|---------|------|
 | Trash | ✅ | `aliopen.go:352-361` recyclebin/trash | 无 |
 | Delete | ✅ | `aliopen.go:363-372` delete | 无 |
-| ListTrash | ✅ | `aliopen.go` 按备份盘与资源盘分页列举回收站；仅在 Open API 返回 404 时切换到兼容接口 | 无 |
-| Restore | ✅ | `aliopen.go` 以带空间前缀的 ID 恢复原空间文件 | 无 |
+| ListTrash | 官网入口 | 当前 Open 授权没有回收站列表接口，侧栏显示「官网回收站」 | 需要在官网读取 |
+| Restore | 官网入口 | 不再将 Open access token 发送到原生网页登录接口 | 需要在官网恢复 |
+
+2026-10-30 核验：[Open 平台](https://www.alipan.com/developer)。未授权探测中，普通 Open 文件列表路由返回令牌校验错误，`openFile/recyclebin/list` 与 `openFile/recyclebin/restore` 返回路由不存在。旧实现从不存在的 Open 路由切换到原生网页接口，但两者使用不同的授权凭据。已移除该回退，回归测试确保回收站读取和恢复不发起这些请求。移入回收站仍使用已支持的 `openFile/recyclebin/trash`。未执行真实账号恢复写入。
 
 ---
 

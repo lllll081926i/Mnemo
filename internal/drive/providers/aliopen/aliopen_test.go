@@ -453,41 +453,23 @@ func TestCreateShareFallsBackToNativeRouteOnlyAfterNotFound(t *testing.T) {
 	}
 }
 
-func TestRecycleListAndRestoreFallbackKeepsDriveScope(t *testing.T) {
-	previous, limiter := netx.TestTransportHook, aliOpenLimiter
-	aliOpenLimiter = newAliOpenRateLimiter(2, 0)
-	t.Cleanup(func() { netx.TestTransportHook = previous; aliOpenLimiter = limiter })
-	var calls []string
+func TestRecycleUsesWebsiteWithoutSendingOpenTokenToNativeAPI(t *testing.T) {
+	previous := netx.TestTransportHook
+	t.Cleanup(func() { netx.TestTransportHook = previous })
 	netx.TestTransportHook = aliOpenRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		calls = append(calls, req.URL.Host+req.URL.Path)
-		var body map[string]any
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			t.Error(err)
-		}
-		if body["drive_id"] != "backup-1" {
-			t.Errorf("recycle scope = %v", body)
-		}
-		status, response := http.StatusOK, `{"items":[{"file_id":"deleted-1","parent_file_id":"root","name":"removed.txt","type":"file"}],"next_marker":""}`
-		if req.URL.Host == "openapi.alipan.com" {
-			status, response = http.StatusNotFound, `{"code":"NotFound"}`
-		} else if req.URL.Path == "/v2/recyclebin/restore" {
-			status, response = http.StatusNoContent, ""
-		}
-		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response)), Request: req}, nil
+		t.Errorf("回收站不应发起不受支持的 API 请求: %s", req.URL)
+		return nil, errors.New("不应发起网络请求")
 	})
-	session := &Session{AccessToken: "access", DriveID: "backup-1"}
-	context := drive.Context{UserID: "aliopen:test", DriveID: "aliopen:test", Token: &model.TokenInfo{AccessToken: "access", RefreshToken: mustJSON(session)}}
 	driver := &Driver{}
-	items, err := driver.ListTrash(t.Context(), context, nil)
-	if err != nil || len(items) != 1 || items[0].FileID != "b:deleted-1" || items[0].Name != "removed.txt" {
-		t.Fatalf("recycle = %+v, %v", items, err)
+	caps := driver.Capabilities()
+	if caps.TrashView || caps.TrashRestore || caps.TrashWebURL != "https://www.alipan.com/drive" || !caps.RecycleBin {
+		t.Fatalf("回收站能力声明 = %+v", caps)
 	}
-	ids, err := driver.Restore(t.Context(), context, []string{items[0].FileID})
-	if err != nil || len(ids) != 1 || ids[0] != "b:deleted-1" {
-		t.Fatalf("restored = %+v, %v", ids, err)
+	if _, err := driver.ListTrash(t.Context(), drive.Context{}, nil); err == nil {
+		t.Fatal("不受支持的回收站读取必须返回明确错误")
 	}
-	if strings.Join(calls, ",") != "openapi.alipan.com/adrive/v1.0/openFile/recyclebin/list,api.aliyundrive.com/v2/recyclebin/list,openapi.alipan.com/adrive/v1.0/openFile/recyclebin/restore,api.aliyundrive.com/v2/recyclebin/restore" {
-		t.Fatalf("calls = %v", calls)
+	if _, err := driver.Restore(t.Context(), drive.Context{}, []string{"b:deleted-1"}); err == nil {
+		t.Fatal("不受支持的恢复必须返回明确错误")
 	}
 }
 

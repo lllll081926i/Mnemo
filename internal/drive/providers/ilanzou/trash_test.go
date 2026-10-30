@@ -27,7 +27,7 @@ func TestILanzouRecycleListRestoreAndDeleteStatus(t *testing.T) {
 			}
 			offsets = append(offsets, request.URL.Query().Get("offset"))
 			if len(offsets) == 1 {
-				_, _ = w.Write([]byte(`{"code":200,"data":{"list":[{"fileType":1,"fileId":9007199254740993,"fileName":"a.txt","fileSize":2},{"fileType":0,"folderId":"9007199254740995","folderName":"dir"}],"totalPage":2}}`))
+				_, _ = w.Write([]byte(`{"code":200,"list":[{"fileType":1,"fileId":9007199254740993,"fileName":"a.txt","fileSize":2},{"fileType":0,"folderId":"9007199254740995","folderName":"dir"}],"totalPage":2}`))
 			} else {
 				_, _ = w.Write([]byte(`{"code":200,"data":{"list":[],"totalPage":2}}`))
 			}
@@ -92,5 +92,21 @@ func TestILanzouRecycleRejectsInvalidResponse(t *testing.T) {
 	}
 	if _, err := provider.Restore(context.Background(), account, []string{"file:8"}); err == nil {
 		t.Fatal("服务端恢复失败不能呈现成功")
+	}
+}
+
+func TestILanzouRecycleRejectsRepeatedPage(t *testing.T) {
+	withNoThrottle(t)
+	oldBase := ILANZOU_CONF.Base
+	t.Cleanup(func() { ILANZOU_CONF.Base = oldBase })
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"code":200,"list":[{"fileType":1,"fileId":9,"fileName":"重复文件"}],"totalPage":10}`))
+	}))
+	defer srv.Close()
+	ILANZOU_CONF.Base = srv.URL
+	if _, err := (&Driver{}).ListTrash(t.Context(), drive.Context{Token: &model.TokenInfo{AccessToken: "token"}}, nil); err == nil || calls != 2 {
+		t.Fatalf("重复分页应及时停止: calls=%d, err=%v", calls, err)
 	}
 }

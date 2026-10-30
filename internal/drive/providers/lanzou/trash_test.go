@@ -29,10 +29,10 @@ func TestTrashListAndRestore(t *testing.T) {
 			return
 		}
 		if r.URL.Query().Get("action") == "file_restore" {
-			fmt.Fprint(w, `<input name="formhash" value="token">`)
+			fmt.Fprint(w, `<input value='token' type='hidden' name='formhash' id='hash'>`)
 			return
 		}
-		fmt.Fprint(w, `<input name="formhash" value="token"><table><tr><td><input name="fl_sel_ids[]" value="123"></td><td><a href="#">report &amp; notes.txt</a></td></tr><tr><td><input name="fd_sel_ids[]" value="45"></td><td><a href="?item=recycle&amp;action=folder_restore&amp;folder_id=45">资料</a></td></tr></table>`)
+		fmt.Fprint(w, `<table><tr><td><input name="fl_sel_ids[]" value="123"></td><td><a href="#">report &amp; notes.txt</a></td></tr><tr><td><input name="fd_sel_ids[]" value="45"></td><td><a href="?item=recycle&amp;action=folder_restore&amp;folder_id=45">资料</a></td></tr></table>`)
 	}))
 	defer server.Close()
 	ctx := testCtx("lanzou:test", server.URL, "ylogin=test")
@@ -64,5 +64,17 @@ func TestTrashSendsDeletionTask(t *testing.T) {
 	ids, err := (&Driver{}).Trash(t.Context(), ctx, []string{"file-1"})
 	if err != nil || len(ids) != 1 || ids[0] != "file-1" || strings.Join(tasks, ",") != "6" {
 		t.Fatalf("trash = %v, %v, tasks = %v", ids, err, tasks)
+	}
+}
+
+func TestRecycleRejectsLoginAndInvalidPages(t *testing.T) {
+	withNoThrottle(t)
+	for _, page := range []string{`<title>网盘用户登录</title><input name="formhash" value="login-token">`, `<html>验证访问后继续</html>`} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, page) }))
+		ctx := testCtx("lanzou:invalid-trash", server.URL, "ylogin=test")
+		if _, err := (&Driver{}).ListTrash(t.Context(), ctx, nil); err == nil {
+			t.Errorf("登录或验证页不能显示为空回收站: %s", page)
+		}
+		server.Close()
 	}
 }

@@ -27,7 +27,9 @@ func init() {
 			"permanentDelete": false,
 			"trashView":       true,
 			"trashRestore":    true,
-		}, nil),
+		}, func(c *drive.Capabilities) {
+			c.TrashWebURL = "https://pc.woozooo.com/mydisk.php?item=recycle&action=files"
+		}),
 		Login: drive.LoginConfig{Notice: "账号和密码发送至蓝奏云；会员等级仅用于配置上传限制，不会改变实际套餐。", Fields: []drive.LoginField{
 			{Key: "cookie", Multiline: true, Hidden: true, Purpose: "cookie", Type: "text", Label: "蓝奏云 Cookie", Required: false, Hint: "粘贴 Cookie 直接登录"},
 			{Key: "username", Purpose: "account", Type: "text", Label: "账号", Required: true},

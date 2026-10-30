@@ -25,9 +25,15 @@ func (d *Driver) ListTrash(ctx context.Context, c drive.Context, _ *drive.ListOp
 		}
 		data := mapVal(response, "data")
 		if data == nil {
-			return nil, errors.New("优享版蓝奏云回收站列表响应无效")
+			data = response
 		}
 		entries, ok := data["list"].([]any)
+		if data["list"] == nil && numOf(data["totalPage"]) == 0 {
+			_, hasList := data["list"]
+			if hasList {
+				entries, ok = []any{}, true
+			}
+		}
 		if !ok {
 			return nil, errors.New("优享版蓝奏云回收站文件列表无效")
 		}
@@ -35,6 +41,7 @@ func (d *Driver) ListTrash(ctx context.Context, c drive.Context, _ *drive.ListOp
 		if len(items) != len(entries) {
 			return nil, errors.New("优享版蓝奏云回收站文件列表格式无效")
 		}
+		added := 0
 		for _, item := range items {
 			if item.FileType != 1 {
 				item.FileType = 2
@@ -51,11 +58,15 @@ func (d *Driver) ListTrash(ctx context.Context, c drive.Context, _ *drive.ListOp
 			if !seen[file.FileID] {
 				seen[file.FileID] = true
 				files = append(files, file)
+				added++
 			}
 		}
 		totalPage := int(numOf(data["totalPage"]))
 		if totalPage < 1 || offset >= totalPage {
 			return files, nil
+		}
+		if len(entries) == 0 || added == 0 {
+			return nil, errors.New("优享版蓝奏云回收站分页未返回新文件，请刷新重试")
 		}
 	}
 	return nil, errors.New("优享版蓝奏云回收站分页超过安全上限")
