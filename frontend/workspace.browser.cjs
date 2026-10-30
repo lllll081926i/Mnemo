@@ -113,6 +113,45 @@ async function main() {
   try {
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:5173')
     await page.locator('.fileitem').first().waitFor()
+    if (process.env.QA_RAIL_SCROLL_ONLY === '1') {
+      const checked = []
+      for (const zoom of [1, 1.25, 1.5]) {
+        await page.setViewportSize({ width: 1024, height: 680 })
+        await page.evaluate(zoom => { document.documentElement.style.zoom = String(zoom) }, zoom)
+        await page.locator('.rail-item').first().hover()
+        await page.waitForTimeout(600)
+        await page.locator('.rail-item').nth(2).click()
+        await page.waitForTimeout(400)
+        const bounds = await page.locator('.rail-list').evaluate(async list => {
+          list.scrollTop = 0
+          await new Promise(requestAnimationFrame)
+          const first = list.querySelector('.rail-item').getBoundingClientRect()
+          const rail = list.getBoundingClientRect()
+          const indicator = list.querySelector('.rail-active-indicator')
+          if (!indicator) throw new Error('缺少选中底色')
+          const selected = list.querySelector('.rail-item[data-selected="true"]')
+          const initial = indicator.getBoundingClientRect().top - selected.getBoundingClientRect().top
+          const offsets = []
+          for (const offset of [8, 42, 97, 180, 45, 0]) {
+            list.scrollTop = offset
+            await new Promise(requestAnimationFrame)
+            offsets.push(indicator.getBoundingClientRect().top - selected.getBoundingClientRect().top)
+          }
+          return { firstTop: first.top, listTop: rail.top, firstHeight: first.height, initial, offsets, zoom: getComputedStyle(document.documentElement).zoom }
+        })
+        assert(bounds.firstTop >= bounds.listTop - 1, `首个账号被裁剪：${JSON.stringify(bounds)}`)
+        assert(bounds.firstHeight >= 44 * zoom - 1, `账号项目被压缩：${JSON.stringify(bounds)}`)
+        for (const offset of bounds.offsets) assert(Math.abs(offset - bounds.initial) < 1, `滚动时底色滞后：${JSON.stringify(bounds)}`)
+        assert(Math.abs(bounds.initial) < 2, `底色位置未与账号对齐：${JSON.stringify(bounds)}`)
+        checked.push({ zoom, ...bounds })
+        await page.mouse.move(900, 100)
+        await page.waitForTimeout(500)
+      }
+      await page.screenshot({ path: path.join(output, 'rail-scroll.png') })
+      assert.deepEqual(errors, [], '侧栏滚动不能产生页面异常')
+      console.log(JSON.stringify({ passed: true, checked }, null, 2))
+      return
+    }
     if (process.env.QA_ACCOUNT_ORDER_ONLY === '1') {
       const labels = await page.locator('.rail-list .rail-item').evaluateAll(items => items.map(item => item.getAttribute('aria-label')))
       const expectedLabels = [labels[1], labels[2], labels[0], ...labels.slice(3)]
@@ -139,13 +178,16 @@ async function main() {
       return
     }
     if (process.env.QA_TASK_ISSUE_ONLY === '1') {
+      await page.evaluate(() => window.runtime.EventsEmit('transfer:event', { kind: 'upload', task: { id: 'background-upload', user_id: 'webdav:account-0', status: 'failed', issue: { code: 'UPLOAD_RESULT_UNKNOWN', message: '网盘可能已接收文件', action: 'check_target' } } }))
+      await page.locator('.toast').filter({ hasText: '上传结果尚未确认' }).waitFor()
+      assert.equal(await page.locator('.toast').filter({ hasText: 'UPLOAD_RESULT_UNKNOWN' }).count(), 0, '通知不能暴露内部错误码')
       await page.evaluate(() => {
         window.go.app.App.ListDownloads = async () => [{ id: 'network-task', user_id: 'webdav:account-0', name: '网络失败任务.txt', status: 'failed', error: 'HTTP 401', issue: { code: 'NETWORK_UNAVAILABLE', message: '网络请求中断', action: 'network_settings' } }]
       })
       await page.getByRole('button', { name: '传输', exact: true }).click()
-      const recommendation = page.locator('.task-issue').first()
-      await recommendation.locator('summary').click()
-      await recommendation.getByRole('button', { name: '网络设置', exact: true }).click()
+      assert.equal(await page.locator('.taskrow details').count(), 0, '任务行不能内联错误详情')
+      await page.getByRole('button', { name: '查看通知', exact: true }).first().click()
+      await page.locator('.toast').getByRole('button', { name: '网络设置', exact: true }).click()
       await page.getByRole('combobox', { name: '默认排序', exact: true }).waitFor()
       assert.deepEqual(errors, [], '任务处理入口不能出现页面异常')
       console.log(JSON.stringify({ passed: true, taskRepair: 'network_settings', errors }, null, 2))

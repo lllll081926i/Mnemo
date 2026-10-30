@@ -298,6 +298,8 @@ func pan189UploadedBytes(size, slice int64, completed map[int]bool) int64 {
 
 // UploadOneFile uploads a single file in slices
 // (initMultiUpload → getMultiUploadUrls → PUT → commitMultiUploadFile).
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("pan189: 上传文件路径为空")
@@ -353,6 +355,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	sessionKey := pan189UploadSessionKey(c, parentID, fileName, size, fileMD5Hex)
 	savedSessionID, savedParts := drive.LoadUploadSessionState(sessionKey)
 	uploadFileID, uploadedSet := restorePan189UploadState(savedSessionID, savedParts, count)
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	if uploadFileID == "" {
 		initRes, err := d.initMultiUpload(ctx, c, base, parentID, fileName, size, slice, count, fileMD5Hex, sliceMD5Hex)
 		if err != nil {
@@ -364,6 +369,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		if initRes.FileDataExists == 1 {
 			// 服务端按 MD5 命中已存在文件，免上传提交。
+			ui.Info.IsMiaoChuan = true
 			fileID, err := d.commitMultiUploadFile(ctx, c, base, parentID, uploadFileID, fileMD5Hex, sliceMD5Hex, false)
 			if err != nil {
 				return err

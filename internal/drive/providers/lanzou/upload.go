@@ -96,6 +96,8 @@ func (d *Driver) ValidateUpload(_ context.Context, c drive.Context, name string,
 // UploadOneFile uploads a whole file via html5up.php. The endpoint does not
 // support chunked upload, so the multipart payload is staged in a temporary
 // file: retries stay seekable without retaining an entire upload in memory.
+func (*Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil {
 		return errors.New("蓝奏: 无效的上传任务")
@@ -134,6 +136,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		_ = os.Remove(path)
 	}()
 
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	j, err := uploadLanzouRaw(ctx, cookie, baseURL, contentType, body, contentLength)
 	if err != nil {
 		return err

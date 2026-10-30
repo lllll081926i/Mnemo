@@ -1,12 +1,12 @@
 # 网盘功能支持矩阵（Provider Status）
 
-> 数据来源：当前仓库 `internal/drive/providers/*`、统一能力注册表和本地自动化测试（最近更新：2026-10-05）。迅雷仅完成模拟协议验证；其他网盘的历史验收边界见第四节。分享创建已补齐协议级回归；未使用真实网盘账号创建公开链接。
-> 废弃说明：`gofile`、`gdrive` 已按需求移除；`encryption`（加密文件名/加密流）不再支持，相关能力位不再纳入矩阵。
+> 数据来源：当前仓库 `internal/drive/providers/*`、统一能力注册表和本地自动化测试（最近更新：2026-10-30）。迅雷仅完成模拟协议验证；其他网盘的历史验收边界见第四节。分享创建已补齐协议级回归；未使用真实网盘账号创建公开链接。
+> 废弃说明：`gofile`、`gdrive`、`yike`（一刻相册）已按需求移除；`encryption`（加密文件名/加密流）不再支持，相关能力位不再纳入矩阵。
 > 图示：✅ 已实现 · ⚠️ 部分/有差距 · ❌ 缺失/不支持 · ➖ 设计上不适用
 
 ---
 
-## 一、在役网盘（14 个）
+## 一、在役网盘（13 个）
 
 | # | Provider | 登录方式 | 能力实现 | 当前自动验证范围 | 已知限制 |
 |---|----------|---------|:--------:|------------------|----------|
@@ -19,11 +19,10 @@
 | 7 | ilanzou（优享版蓝奏云） | 账密 | ✅ 已注册 | 包内单测 + mock/e2e | 从 account/map 读取基础、会员、奖励及已用容量 |
 | 8 | onedrive | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 真实 OAuth/服务未在本轮验证 |
 | 9 | dropbox | OAuth PKCE | ✅ 已注册 | 包内单测 + mock/e2e | 国内直连受限需配置网络代理（见 docs/KNOWN_ISSUES.md） |
-| 10 | yike（一刻相册） | BDUSS / Cookie | ✅ 已注册 | mock/e2e | 按无限空间展示，不参与跨盘秒传目标 |
-| 11 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e（含 `/assets/v1/get_assets` 容量） | 包内覆盖仍不足 |
-| 12 | webdav | URL + 账密 / Bearer Token | ✅ 已注册 | 本地 HTTP e2e（Basic、Digest、动态下载鉴权） | 支持自动 Basic/Digest 协商和显式 Bearer；客户端证书、NTLM 等不支持；配额取决于 RFC 4331 支持；支持各类预设定制图标 |
-| 13 | s3 | endpoint + AK/SK | ✅ 已注册 | mock/e2e | 无通用总容量接口；连接校验不证明写权限 |
-| 14 | thunder（迅雷网盘） | 手机号＋密码 / 短信验证码，自动安全验证续办 | ✅ 已注册 | 包内模拟协议测试 + 应用离线、容量、回收站与分享流程 | 密码不落盘；上传/分享导入/自定义提取码/搜索/保险箱未开放；真实账号待验收 |
+| 10 | guangya（光鸭云盘） | 手机号 + 短信 / refresh_token | ✅ 已注册 | mock/e2e（含 `/assets/v1/get_assets` 容量） | 包内覆盖仍不足 |
+| 11 | webdav | URL + 账密 / Bearer Token | ✅ 已注册 | 本地 HTTP e2e（Basic、Digest、动态下载鉴权） | 支持自动 Basic/Digest 协商和显式 Bearer；客户端证书、NTLM 等不支持；配额取决于 RFC 4331 支持；支持各类预设定制图标 |
+| 12 | s3 | endpoint + AK/SK | ✅ 已注册 | mock/e2e | 无通用总容量接口；连接校验不证明写权限 |
+| 13 | thunder（迅雷网盘） | 手机号＋密码 / 短信验证码，自动安全验证续办 | ✅ 已注册 | 模拟上传、秒传、离线、容量、回收站与分享流程 | 密码不落盘；分享导入/自定义提取码/搜索/保险箱未开放；真实账号待验收 |
 
 “已注册/已实现”只表示统一驱动入口和对应代码路径存在，不代表所有真实服务商版本、权限模型和风控条件均已验证；可靠性应以测试范围和已知限制判断，不使用主观完成度百分比。
 
@@ -44,7 +43,6 @@
 | ilanzou | ✅ | ➖ | session | ➖ | ➖ | ✅(内联) | ✅ | ✅ |
 | onedrive | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
 | dropbox | ➖ | ✅ | refresh_token | ➖ | ➖ | ✅ | ✅ | ✅ |
-| yike | ➖ | ➖ | BDUSS | ➖ | ➖ | ➖ | ✅ | 无限空间 |
 | guangya | ➖ | ➖ | refresh_token | ✅ | ➖ | ✅ | ✅ | ✅ |
 | thunder | ✅ | ➖ | 旧 refresh_token 会话兼容 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | webdav | ➖ | ➖ | 账密 | ➖ | ➖ | ➖ | ✅(可选配额) | ✅(RFC 4331) |
@@ -67,7 +65,6 @@
 | ilanzou | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
 | onedrive | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | dropbox | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| yike | ✅ | ➖ | ✅ | ➖ | ❌(设计) | — |
 | guangya | ✅ | ➖ | page翻页 | ➖ | ❌(设计) | — |
 | thunder | ✅ | ✅ | page_token | ➖ | ❌(未开放) | — |
 | webdav | ✅ | ➖ | ➖ | ➖ | ❌(设计) | — |
@@ -88,7 +85,6 @@
 | ilanzou | ✅ | proxy | 1 | ✅ | ➖ | ➖ | ➖ |
 | onedrive | ✅ | redirect | ➖ | ✅(新增) | ➖ | ➖ | ➖ |
 | dropbox | ✅ | redirect | ➖ | ✅(新增) | ➖ | ➖ | ✅(4h) |
-| yike | ✅ | proxy | ➖ | ➖ | ➖ | ➖ | ➖ |
 | guangya | ✅ | proxy | ➖ | ✅ | ➖ | ➖ | ➖ |
 | thunder | ✅ | redirect | ➖ | ✅ | ➖ | ➖ | ➖ |
 | webdav | ✅ | 普通连接默认 / Digest proxy | 普通连接随设置 / Digest 1 | ➖ | ➖ | ➖ | ➖ |
@@ -102,7 +98,7 @@
 
 | Provider | UploadOneFile | 分片上传 | 整包上传 | 断点续传 | 秒传 | 冲突策略 | 进度回调 | 上传模式 |
 |----------|:-------------:|:--------:|:--------:|:--------:|:----:|:--------:|:--------:|:--------:|
-| pikpak | ✅ | ➖ | ✅(OSS PUT) | ➖（失败从头重试） | ✅(GCID) | ✅(refuse/skip/rename/overwrite) | ✅ | queue |
+| pikpak | ✅ | ➖ | ✅(OSS PUT) | ➖（失败从头重试） | ✅(GCID) | ✅(refuse/skip/rename；拒绝覆盖) | ✅ | queue |
 | aliopen | ✅ | ✅(动态20MiB-5GiB) | ➖ | ✅ | ✅(SHA1/pre_hash) | ✅(refuse/rename/skip/overwrite) | ✅ | queue |
 | pan123 | ✅ | ✅(16MB) | ➖ | ✅ | ✅(MD5) | ✅(1/2 映射) | ✅ | queue |
 | pan189 | ✅ | ✅(10/20MB) | ➖ | ✅ | ✅(MD5) | ➖ | ✅ | queue |
@@ -111,9 +107,8 @@
 | ilanzou | ✅ | ✅(8MB) | ✅(≤8MB) | ✅（分片，>8MB） | ✅(MD5) | ➖ | ✅ | queue |
 | onedrive | ✅ | ✅(10MB session) | ✅(≤4MB) | ✅ | ➖ | ❌(固定rename) | ✅ | queue |
 | dropbox | ✅ | ✅(8MB session) | ✅(≤150MB) | ✅（会话，>150MB） | ➖ | ❌(固定add) | ✅ | queue |
-| yike | ✅ | ✅(4MB) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
 | guangya | ✅ | ✅(OSS multipart) | ➖ | ➖ | ✅ | ➖ | ✅ | queue |
-| thunder | ➖ | ➖ | ➖ | ➖ | ➖ | ➖ | ➖ | none |
+| thunder | ✅ | ✅(≥16MiB S3 multipart) | ✅(<16MiB S3 PUT) | ➖ | ✅(GCID，本地文件) | ✅(rename/skip/refuse) | ✅ | queue |
 | webdav | ✅ | ➖ | ✅(PUT) | ➖ | ➖ | ✅ | ✅ | direct |
 | s3 | ✅ | ✅(16MiB multipart) | ✅(<16MiB PUT) | ✅（multipart/ListParts） | ➖ | ✅ | ✅ | direct |
 
@@ -139,7 +134,6 @@
 | ilanzou | ✅ | ✅ | ✅ | ❌(设计) | ➖ |
 | onedrive | ✅ | ✅ | ✅ | ✅ | ✅(monitor轮询) |
 | dropbox | ✅ | ✅ | ✅ | ✅ | ➖ |
-| yike | ✅(建相册) | ✅(仅相册) | ❌(设计) | ❌(设计) | ➖ |
 | guangya | ✅ | ✅ | ✅ | ✅ | ➖ |
 | thunder | ✅ | ✅ | ✅ | ✅ | ➖ |
 | webdav | ✅ | ✅ | ✅ | ✅ | ➖ |
@@ -162,7 +156,6 @@
 | ilanzou | ✅ | ✅ | ✅ | ✅ | ➖ | ➖ |
 | onedrive | ✅ | ➖(与 Trash 同一接口) | ⚠️(仅个人版已知 ID) | ➖ | ➖ | ➖ |
 | dropbox | ✅ | ➖(与 Trash 同一接口) | ✅(仅文件) | ✅(仅文件) | ➖ | ➖ |
-| yike | ✅(照片) | ➖ | ✅(照片) | ✅(照片) | ➖ | ➖ |
 | guangya | ✅ | ➖ | ✅ | ✅ | ➖ | ➖ |
 | thunder | ✅ | ✅(仅回收站条目) | ✅ | ✅(完整分页) | ➖ | ➖ |
 | webdav | ➖ | ✅ | ➖ | ➖ | ➖ | ➖ |
@@ -187,7 +180,6 @@
 | ilanzou | ❌ | — | — | — | ➖ | ➖ |
 | onedrive | ✅ | 单项 | 受账号/策略限制 | 受账号/策略限制 | ➖ | ✅ |
 | dropbox | ✅ | 单项 | 受套餐/策略限制 | 受套餐/策略限制 | ➖ | ✅ |
-| yike | ❌ | — | — | — | ➖ | ➖ |
 | guangya | ✅ | 多项 | 永久 / 1 / 7 / 30 天 | 自定义 | ➖ | ✅ |
 | thunder | ✅ | 多项文件/目录 | 永久 / 1–7 天 | 服务端生成 | ➖ | ✅ |
 | webdav | ❌ | — | — | — | ➖ | ➖ |
@@ -227,7 +219,6 @@
 | ilanzou | ➖ | ✅(md5) | ✅(md5) | ✅ |
 | onedrive | ✅ 工作/学校；个人为本地 | ✅(sha1/quickXor) | ➖ | ➖ |
 | dropbox | ➖ | ✅(dropbox) | ➖ | ➖ |
-| yike | ➖ | ✅(md5) | ➖ | ➖ |
 | guangya | ➖ | ✅(md5) | ➖ | ✅ |
 | thunder | ➖ | ➖ | ➖ | ✅(本地) |
 | webdav | ➖ | ➖ | ➖ | ➖ |
@@ -249,7 +240,6 @@
 | 蓝奏优享 | 本地 | 当前接口与网页未找到原生文件收藏读写路径。[官网](https://www.ilanzou.com/)。 |
 | 移动云盘 | 本地 | 当前个人云接口与网页未找到完整文件收藏读写路径；`star` 字段、“我的应用收藏”不单独作为原生收藏依据。[官方网页](https://yun.139.com/w/)。 |
 | 天翼云盘 | 本地 | 个人云与家庭云当前接入接口均未确认原生文件收藏读写能力。[官方网页](https://cloud.189.cn/web/main/)。 |
-| 一刻相册 | 本地，暂不适配云端 | 按用户要求，本轮不核查或接入云端收藏。 |
 | 阿里云盘 Open | 云端 | 官方 `openFile/starredList` + `openFile/update` 的 `starred` 参数；备份盘与资源库分别分页读取，以 `b:`/`r:` 保持文件身份。[列表文档](https://www.yuque.com/aliyundrive/zpfszx/zqkqp6)、[更新文档](https://www.yuque.com/aliyundrive/zpfszx/dp9gn443hh8oksgd)。 |
 | 光鸭云盘 | 本地 | 当前文件接口与网页未找到原生文件收藏读写能力；最近文件、云收藏转存任务不等同文件收藏。[官方网页](https://www.guangyapan.com/)。 |
 | WebDAV | 本地 | 通用 WebDAV 没有跨服务器统一的用户收藏语义；不写私有扩展属性。 |
@@ -300,7 +290,6 @@
 | 16 | 版本历史缺失 | 2 盘 | onedrive/dropbox 当前驱动未提供版本历史/恢复能力 |
 | 17 | 缩略图缺失 | 1 盘 | dropbox 当前 `mapItem` 未填充缩略图 |
 | 18 | 上传进度回调已实现 | 2 盘 | ✅ webdav/s3 已实现 ProgressReader + 令牌桶限速（`progress.go:22`） |
-| 19 | yike decryptYikeMd5 | 1 盘 | ✅已实现；yike 按需求不参与跨盘秒传能力路由 |
 
 ---
 
@@ -327,7 +316,6 @@
 - [docs/providers/ilanzou.md](providers/ilanzou.md)
 - [docs/providers/onedrive.md](providers/onedrive.md)
 - [docs/providers/dropbox.md](providers/dropbox.md)
-- [docs/providers/yike.md](providers/yike.md)
 - [docs/providers/guangya.md](providers/guangya.md)
 - [docs/providers/webdav.md](providers/webdav.md)
 - [docs/providers/s3.md](providers/s3.md)

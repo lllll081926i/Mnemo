@@ -912,6 +912,8 @@ func (d *Driver) copyObj(ctx context.Context, cc *conn, from, to string) error {
 // UploadOneFile performs a direct upload. Small files use PUT; larger files
 // use multipart upload with cleanup on failure. It honors ui.Info.ConflictPolicy
 // when the target object already exists.
+func (*Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("s3: 上传文件路径为空")
@@ -985,6 +987,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	size := info.Size()
 	ui.Info.Size = size
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
+	ui.Upload.FileID = cc.idOf(key)
 	if size < s3MultipartThreshold {
 		pr := driveutil.NewProgressOnlyReader(f, size, func(read int64) {
 			updateUploadProgress(ui, read)

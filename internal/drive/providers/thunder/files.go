@@ -39,6 +39,8 @@ type file struct {
 	Kind         string    `json:"kind"`
 	ParentID     string    `json:"parent_id"`
 	Name         string    `json:"name"`
+	Hash         string    `json:"hash"`
+	Phase        string    `json:"phase"`
 	Size         integer   `json:"size"`
 	ModifiedTime time.Time `json:"modified_time"`
 	CreatedTime  time.Time `json:"created_time"`
@@ -78,6 +80,7 @@ func (entry file) model(driveID string) model.File {
 	}
 	result := driveutil.NewFile(driveID, entry.ID, parent, entry.Name, entry.Kind == "drive#folder", int64(entry.Size), stamp)
 	result.Thumbnail = entry.Thumbnail
+	result.ContentHash, result.ContentHashName = entry.Hash, "gcid"
 	return result
 }
 
@@ -189,7 +192,11 @@ func (driver *Driver) GetFile(ctx context.Context, account drive.Context, fileID
 	if err != nil {
 		return nil, err
 	}
-	mapped := result.(*file).model(account.DriveID)
+	entry := result.(*file)
+	if entry.Phase != "" && entry.Phase != "PHASE_TYPE_COMPLETE" {
+		return nil, errors.New("迅雷文件尚未完成，不能确认上传成功")
+	}
+	mapped := entry.model(account.DriveID)
 	return &mapped, nil
 }
 

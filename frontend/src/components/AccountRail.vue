@@ -72,15 +72,13 @@ function syncActiveIndicator(animate = false) {
   }
   const item = listRoot.querySelector('.rail-item[data-selected="true"]')
   if (!item) return
-  const railRect = railEl.value.getBoundingClientRect()
-  const itemRect = item.getBoundingClientRect()
-  if (itemRect.width < 1 || itemRect.height < 1) return
+  if (item.offsetWidth < 1 || item.offsetHeight < 1) return
   const next = {
     visible: true,
-    x: Math.round(itemRect.left - railRect.left),
-    y: Math.round(itemRect.top - railRect.top),
-    width: Math.round(itemRect.width),
-    height: Math.round(itemRect.height),
+    x: item.offsetLeft,
+    y: item.offsetTop,
+    width: item.offsetWidth,
+    height: item.offsetHeight,
   }
   if (!activeIndicator.value.visible || !animate) {
     indicatorReady.value = false
@@ -92,7 +90,6 @@ function syncActiveIndicator(animate = false) {
   activeIndicator.value = next
 }
 
-function onListScroll() { syncActiveIndicator(false) }
 function onWindowResize() { syncActiveIndicator(false) }
 
 // 账号切换只让新选中的图标沿切换方向轻微滑入。
@@ -456,7 +453,8 @@ function onMenu(action) {
     @mouseleave="onRailLeave"
     @focusout="scheduleCollapse"
   >
-    <TransitionGroup ref="listEl" name="rail" tag="div" class="rail-list" :class="{ reordering: dragIdx >= 0 }" @scroll="onListScroll">
+    <TransitionGroup ref="listEl" name="rail" tag="div" class="rail-list" :class="{ reordering: dragIdx >= 0 }">
+      <span v-if="activeIndicator.visible" key="__active_indicator" class="rail-active-indicator" :class="{ ready: indicatorReady }" :style="activeIndicatorStyle" aria-hidden="true"></span>
       <button
         v-for="(acc, i) in orderedAccounts"
         :key="acc.user_id"
@@ -495,7 +493,6 @@ function onMenu(action) {
         <span v-show="expanded">尚未登录网盘账号</span>
       </div>
     </TransitionGroup>
-    <span v-if="activeIndicator.visible" class="rail-active-indicator" :class="{ ready: indicatorReady }" :style="activeIndicatorStyle" aria-hidden="true"></span>
     <button type="button" class="rail-add" :title="'添加网盘账号'" @click="emit('add')" @keydown="onRailKey($event)">
       <UiIcon name="plus" :size="17" class="rail-add-icon" />
       <span class="rail-add-text">添加网盘</span>

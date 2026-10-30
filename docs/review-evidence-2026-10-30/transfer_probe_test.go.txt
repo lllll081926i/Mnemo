@@ -1,0 +1,84 @@
+package transfer
+
+import (
+ "encoding/json"
+ "errors"
+ "io"
+ "net/http"
+ "strings"
+ "testing"
+ "mnemo-go/internal/drive"
+ _ "mnemo-go/internal/drive/providers/aliopen"
+ "mnemo-go/internal/model"
+ "mnemo-go/internal/netx"
+)
+
+type reviewTransport func(*http.Request) (*http.Response,error)
+func (f reviewTransport) RoundTrip(r *http.Request) (*http.Response,error) { return f(r) }
+
+// 审查探针确认当前缺陷表现，不代表期望行为。
+func TestReviewNoNetworkFailureBecomesUnknown(t *testing.T) {
+ q, source, _ := newReceiptQueue(t)
+ previous := netx.TestTransportHook
+ requests := 0
+ netx.TestTransportHook = reviewTransport(func(*http.Request)(*http.Response,error){requests++; return nil, errors.New("不应发出请求")})
+ drive.SetTokenResolver(func(string,string)(*model.TokenInfo,error){ return &model.TokenInfo{TokenFrom:model.ProviderAliopen},nil })
+ t.Cleanup(func(){ netx.TestTransportHook=previous; drive.SetTokenResolver(nil) })
+ job := q.enqueue("aliopen_review", "drive", "b:parent", "rename", source, "源文件.txt", 14)
+ q.workers.Wait()
+ got := q.List()[0]
+ if requests!=0 || got.Upload.Attempt.State!="unknown" || got.Upload.Issue.Code!="UPLOAD_RESULT_UNKNOWN" { t.Fatalf("结果与待调查路径不符: requests=%d %+v",requests,got) }
+ if err:=q.Resume(job.UploadID); !errors.Is(err,errUploadReviewRequired) { t.Fatalf("重试结果: %v",err) }
+ t.Logf("零网络请求，本地连接校验失败仍成为待核对；原始错误=%s",got.Upload.FailedMessage)
+}
+
+func TestReviewAliVirtualRootIsSubmittedAsRealParent(t *testing.T) {
+ q,source,_:=newReceiptQueue(t)
+ previous:=netx.TestTransportHook
+ drive.SetTokenResolver(func(string,string)(*model.TokenInfo,error){return &model.TokenInfo{TokenFrom:model.ProviderAliopen,RefreshToken:`{"access_token":"test","drive_id":"drive"}`},nil})
+ t.Cleanup(func(){netx.TestTransportHook=previous;drive.SetTokenResolver(nil)})
+ submitted:=""
+ netx.TestTransportHook=reviewTransport(func(r *http.Request)(*http.Response,error){
+  if r.URL.Path!="/adrive/v1.0/openFile/create"{t.Fatalf("非预期请求 %s",r.URL.Path)}
+  var body map[string]any;if err:=json.NewDecoder(r.Body).Decode(&body);err!=nil{t.Fatal(err)}
+  submitted,_=body["parent_file_id"].(string)
+  return &http.Response{StatusCode:400,Header:make(http.Header),Body:io.NopCloser(strings.NewReader(`{"code":"InvalidParameter","message":"模拟：虚拟根不能作为真实目录"}`)),Request:r},nil
+ })
+ q.enqueue("aliopen_review","drive","aliopen_root","rename",source,"源文件.txt",14);q.workers.Wait()
+ if submitted!="aliopen_root"||q.List()[0].Upload.Attempt.State!="unknown"{t.Fatalf("未复现虚拟根提交: parent=%s task=%+v",submitted,q.List())}
+ t.Log("虚拟根 aliopen_root 被当成真实 parent_file_id 发送；模拟明确拒绝后仍显示待核对")
+}
+
+func TestReviewAliLostReceiptCannotReconcileMatchingFile(t *testing.T) {
+ q, source, _ := newReceiptQueue(t)
+ hash,err:=netx.HashFile(source,netx.HashSHA1); if err!=nil {t.Fatal(err)}
+ previous:=netx.TestTransportHook
+ drive.ClearFileMetaCache()
+ drive.SetTokenResolver(func(string,string)(*model.TokenInfo,error){return &model.TokenInfo{TokenFrom:model.ProviderAliopen, RefreshToken:`{"access_token":"test","drive_id":"drive","backup_drive_id":"drive"}`},nil})
+ t.Cleanup(func(){netx.TestTransportHook=previous; drive.SetTokenResolver(nil); drive.ClearFileMetaCache()})
+ creates,gets:=0,0
+ netx.TestTransportHook=reviewTransport(func(r *http.Request)(*http.Response,error){
+  body:="{}"
+  switch {
+  case r.Method==http.MethodPut:
+   if _,err:=io.Copy(io.Discard,r.Body);err!=nil{return nil,err}
+  case r.URL.Path=="/adrive/v1.0/openFile/create":
+   creates++; body=`{"file_id":"file","upload_id":"session","part_info_list":[{"part_number":1,"upload_url":"https://upload.example/part"}]}`
+  case r.URL.Path=="/adrive/v1.0/openFile/complete":
+   return nil,errors.New("模拟：服务端提交后回执丢失")
+  case r.URL.Path=="/adrive/v1.0/openFile/get":
+   gets++; body=`{"file_id":"file","parent_file_id":"parent","name":"源文件.txt","type":"file","size":14,"content_hash_name":"sha1","content_hash":"`+hash+`"}`
+  default: t.Fatalf("非预期请求 %s",r.URL.Path)
+  }
+  return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(strings.NewReader(body)),Request:r},nil
+ })
+ job:=q.enqueue("aliopen_review","drive","b:parent","rename",source,"源文件.txt",14)
+ q.workers.Wait()
+ got:=q.List()[0]
+ if got.Upload.Attempt.FileID!="b:file" || got.Upload.Attempt.State!="unknown" {t.Fatalf("上传未进入预期状态: %+v",got)}
+ err=q.Resume(job.UploadID)
+ if !errors.Is(err,errUploadReviewRequired) || gets!=1 || creates!=1 {t.Fatalf("核对结果: %v, get=%d create=%d",err,gets,creates)}
+ f,ok:=drive.CachedFile("aliopen_review","drive","b:file"); if !ok{t.Fatal("核对后未记住远端元数据")}
+ if f.ParentFileID!="b:b:parent" {t.Fatalf("未复现重复前缀: %+v",f)}
+ t.Logf("目标 ID/名称/大小/SHA1 均匹配，父目录被映射为 %q，预期 %q；自动核对被拒绝",f.ParentFileID,got.Upload.Attempt.ParentID)
+}

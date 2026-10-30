@@ -304,7 +304,9 @@ func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *mod
 				return fmt.Errorf("分片上传失败 HTTP %d", status)
 			}
 			uploadedSet[int(j)] = true
-			_ = drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), drive.SortedUniqueParts(uploadedSet))
+			if err := drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), drive.SortedUniqueParts(uploadedSet)); err != nil {
+				return fmt.Errorf("123: 保存上传分片进度失败: %w", err)
+			}
 			ui.ReportUploadProgress(offset+cur, size)
 		}
 	}
@@ -313,6 +315,8 @@ func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *mod
 
 // UploadOneFile uploads a single file: MD5 → upload_request (可能秒传) →
 // 分片预签名 PUT → upload_complete。
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil {
 		return errors.New("123: 无效的上传任务")
@@ -368,6 +372,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	defer f.Close()
 
 	plan := calcPan123ChunkPlan(size)
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	for sessionAttempt := 0; sessionAttempt < 2; sessionAttempt++ {
 		if !resumed {
 			reqResp, reqErr := d.api(ctx, c, http.MethodPost, apiUploadReq, map[string]any{
@@ -391,6 +398,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			}
 			if data.Reuse {
 				// 本地 MD5 命中秒传
+				ui.Info.IsMiaoChuan = true
 				ui.Upload.FileID = data.FileID
 				ui.ReportUploadProgress(size, size)
 				drive.ClearUploadSession(sessionKey)
@@ -404,7 +412,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			}
 			// Persist the remote session before the first part so a stop or process
 			// exit can resume even when no part has completed yet.
-			_ = drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), nil)
+			ui.Upload.FileID = data.FileID
+			if err := drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), nil); err != nil {
+				return fmt.Errorf("123: 保存上传会话失败: %w", err)
+			}
 		}
 		ui.Upload.UploadID = data.UploadID
 		ui.Upload.FileID = data.FileID

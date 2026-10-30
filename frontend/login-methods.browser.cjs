@@ -32,7 +32,7 @@ async function main() {
         ]
         const providers = ['thunder', 'pan139', 'pan189'].map(id => ({ ID: id, Meta: { label: id, icon: `drive-icons/${id}.svg` }, Login: { fields } }))
         providers.push({ ID: 'guangya', Meta: { label: '光鸭', icon: 'drive-icons/guangya.svg' }, Login: { fields: [{ key: 'phone', label: '手机号', type: 'text' }, { key: 'sms_code', label: '短信验证码', type: 'text' }] } })
-        for (const id of ['pikpak', 'onedrive', 'dropbox', 'pan123', 'lanzou', 'ilanzou', 'yike', 'aliopen', 'webdav', 's3']) {
+        for (const id of ['pikpak', 'onedrive', 'dropbox', 'pan123', 'lanzou', 'ilanzou', 'aliopen', 'webdav', 's3']) {
           providers.push({ ID: id, Meta: { label: id, icon: `drive-icons/${id}.svg` }, Login: { type: ['onedrive', 'dropbox', 'aliopen'].includes(id) ? 'oauth' : 'form', fields: [{ key: 'username', label: '账号', type: 'text' }, { key: 'password', label: '密码', type: 'password' }] } })
         }
         const listeners = {}

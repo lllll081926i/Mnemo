@@ -407,6 +407,8 @@ func cleanupPikPakUpload(cl *client, fileID string) error {
 }
 
 // UploadOneFile uploads one file (GCID + create + optional OSS PUT).
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("pikpak: 上传文件路径为空")
@@ -454,12 +456,16 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			Params *pikpakOSSParams `json:"params"`
 		} `json:"resumable"`
 		File *struct {
-			ID string `json:"id"`
+			ID    string `json:"id"`
+			Phase string `json:"phase"`
 		} `json:"file"`
 		ID    string `json:"id"`
 		Error string `json:"error"`
 	}
 	// Use a client where we can pass X-Captcha-Token if needed; basic flow:
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	if err := cl.jsonDo(ctx, httpMethodPost(), "/drive/v1/files", body, &res, nil); err != nil {
 		markPikPakUploadFailed(ui, err)
 		return err
@@ -477,8 +483,22 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		return err
 	}
 	ui.Upload.FileID = fileID
-	// No resumable params => rapid upload completed server side.
-	if res.Resumable == nil {
+	// 缺少上传参数不能单独证明秒传成功，必须确认文件已经完成。
+	if res.File != nil && res.File.Phase == "PHASE_TYPE_COMPLETE" || res.Resumable == nil {
+		phase := ""
+		if res.File != nil {
+			phase = res.File.Phase
+		}
+		if phase != "PHASE_TYPE_COMPLETE" {
+			file, err := cl.detailOnce(ctx, fileID, "FETCH")
+			if err != nil {
+				return err
+			}
+			if file == nil || file.ID != fileID || file.Phase != "PHASE_TYPE_COMPLETE" {
+				return errors.New("PikPak 尚未确认秒传文件完成")
+			}
+		}
+		ui.Info.IsMiaoChuan = true
 		markPikPakUploadComplete(ui, fileID)
 		return nil
 	}

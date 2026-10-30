@@ -3,7 +3,10 @@ package drive_test
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -174,11 +177,13 @@ func TestContextAwareDriveOpsCancelInFlightWebDAVRequests(t *testing.T) {
 
 type cancellationRoundTripFunc func(*http.Request) (*http.Response, error)
 
-func TestQueueUploadRequiresDurableAttemptBeforeProvider(testContext *testing.T) {
+func TestQueueUploadRequiresDurableAttemptBeforeWrite(testContext *testing.T) {
 	previousTransport := netx.TestTransportHook
-	netx.TestTransportHook = cancellationRoundTripFunc(func(*http.Request) (*http.Response, error) {
-		testContext.Error("提交记录失败仍调用了网盘")
-		return nil, errors.New("unexpected request")
+	netx.TestTransportHook = cancellationRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != "PROPFIND" {
+			testContext.Error("提交记录失败仍执行远端写入")
+		}
+		return &http.Response{StatusCode: 404, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
 	})
 	testContext.Cleanup(func() { netx.TestTransportHook = previousTransport })
 	drive.SetTokenResolver(func(string, string) (*model.TokenInfo, error) {
@@ -191,7 +196,11 @@ func TestQueueUploadRequiresDurableAttemptBeforeProvider(testContext *testing.T)
 	}
 	expected := errors.New("receipt unavailable")
 	called := false
-	job := &model.UploadingUI{Info: model.UploadInfo{ParentFileID: "/", Name: "file"}}
+	source := filepath.Join(testContext.TempDir(), "file")
+	if err := os.WriteFile(source, []byte("data"), 0600); err != nil {
+		testContext.Fatal(err)
+	}
+	job := &model.UploadingUI{Info: model.UploadInfo{ParentFileID: "/", Name: "file", LocalFilePath: source}}
 	job.ConfigureUploadAttempt(func() error { called = true; return expected })
 	if err := handler(testContext.Context(), job); !called || !errors.Is(err, expected) {
 		testContext.Fatalf("门面未等待提交记录: called=%v, %v", called, err)

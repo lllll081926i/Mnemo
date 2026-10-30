@@ -202,6 +202,7 @@ html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .pp-wi
   position: relative; z-index: 1;
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none;
+  overflow-anchor: none;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
 }
 .rail-list::-webkit-scrollbar { width: 0; height: 0; }
@@ -209,6 +210,7 @@ html:is([data-platform="linux"], [data-platform="darwin"]).preview-window .pp-wi
 .rail-item {
   position: relative; z-index: 1;
   display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
   width: var(--icon-box); min-width: var(--icon-box); height: var(--icon-box); min-height: var(--icon-box);
   padding: 0; border: 0; border-radius: 10px;
   background: transparent; color: var(--text-primary); cursor: pointer; text-align: left;

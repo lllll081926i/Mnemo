@@ -139,6 +139,10 @@ import (
 ## 6. 上传
 
 `UploadOneFile(ctx, c, ui)` 接收完整上传任务：
+
+驱动实现 `UploadAttemptDriver.ManagesUploadAttempt() == true` 时，必须在凭据、本地文件、哈希和冲突检查完成后，首次远端写入前调用 `ui.BeginUploadAttempt()`，并传播保存失败。获取远端文件 ID 后立即写入 `ui.Upload.FileID`；返回 `nil` 只能表示远端已经确认完成或按明确策略跳过。缺少上传地址、存在同名文件、哈希命中待提交，均不能单独证明完成。远端完成后的凭据保存错误通过 `upload:warning` 通知，不得使上传重新进入重试流程。需要在账号锁内保存完成凭据时调用 `drive.PersistCompletedUploadToken`。
+
+任务错误统一经过 `taskFailureNotice` 进入应用通知；任务行只保留“查看通知”入口，不内联服务商原始错误、错误码或展开式处理建议。真正未知的提交结果继续使用只读核对和显式“核对后重试”。
 - 小文件：单请求 PUT/POST。
 - 大文件：分片/会话（onedrive upload session、dropbox session、aliopen part、
   pikpak GCID+OSS、pan139 chunk）。

@@ -97,6 +97,9 @@ func (d *Driver) familyUpload(ctx context.Context, account drive.Context, upload
 	if err != nil {
 		return err
 	}
+	if err := upload.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	raw, err := d.familyPost(ctx, account, "/orchestration/familyCloud-rebuild/content/v1.0/getFileUploadURL", pan139FamilyPayload(account, map[string]any{
 		"fileCount": 1, "manualRename": 2, "operation": 0,
 		"path": directoryPath, "seqNo": randomHex(16), "totalSize": size,

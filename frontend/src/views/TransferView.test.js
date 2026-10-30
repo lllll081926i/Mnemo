@@ -74,7 +74,7 @@ describe('结构化任务原因', () => {
     try {
       const notify = api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
       notify({ kind: 'download', task: { id: 'rejected', status: 'failed', error: 'HTTP 401', issue: { code: 'REMOTE_ACCESS_REJECTED', message: '链接访问被拒绝，请核对有效期', action: 'check_access' } } })
-      expect(listener.mock.calls[0][0].detail).toMatchObject({ category: 'permission', message: '链接访问被拒绝，请核对有效期' })
+      expect(listener.mock.calls[0][0].detail).toMatchObject({ category: 'permission', message: expect.stringContaining('链接访问被拒绝，请核对有效期') })
     } finally {
       window.removeEventListener('mnemo:drive-notice', listener)
     }
@@ -86,8 +86,11 @@ describe('结构化任务原因', () => {
     wrapper = mount(TransferView, { global: { stubs: { UiIcon: true } } })
     await flushPromises()
     const recommendation = wrapper.getComponent(TaskIssue)
+    let notice
+    window.addEventListener('mnemo:drive-notice', event => { notice = event.detail }, { once: true })
     await recommendation.get('button').trigger('click')
-    expect(wrapper.emitted('repair')).toEqual([[{ action: 'network_settings', userId: 'original-user' }]])
+    expect(notice.action).toMatchObject({ repair: 'network_settings', userId: 'original-user' })
+    expect(wrapper.emitted('repair')).toBeUndefined()
     const notify = api.EventsOn.mock.calls.find(([name]) => name === 'transfer:event')[1]
     notify({ kind: 'download', task: { id: 'issue-download', status: 'downloading' } })
     await flushPromises()
@@ -183,7 +186,8 @@ describe('传输页刷新调度', () => {
     expect(wrapper.text()).toContain('远端资源')
     expect(wrapper.text()).toContain('部分完成')
     expect(wrapper.text()).toContain('70%')
-    expect(wrapper.text()).toContain('部分文件未完成')
+    expect(wrapper.text()).toContain('查看通知')
+    expect(wrapper.find('.text-error').exists()).toBe(false)
     expect(wrapper.find('.progress-current').element.style.width).toBe('70%')
   })
 

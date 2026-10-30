@@ -16,13 +16,14 @@ func init() {
 	drive.Register(drive.Registration{
 		ID: model.ProviderThunder, Meta: drive.GetMeta(model.ProviderThunder),
 		Caps: drive.NewCapabilities(model.ProviderThunder, map[string]bool{
-			"upload": false, "createTextFile": false, "offlineDownload": true,
+			"upload": true, "createTextFile": false, "offlineDownload": true,
 			"cloudVideoPreview": true, "recycleBin": true,
 			"trashView": true, "trashRestore": true, "permanentDelete": true,
 			"createShare": true, "shareExpiration": true, "combinedShare": true,
 			"shareHistory": true, "manageCreatedShares": true, "cancelCreatedShares": true,
 		}, func(caps *drive.Capabilities) {
-			caps.SetUploadMode(drive.UploadModeNone)
+			caps.SetUploadMode(drive.UploadModeQueue)
+			caps.UploadConflictPolicies = []string{"rename", "skip", "refuse"}
 			caps.SetShareExpirationOptions(0, 1, 2, 3, 4, 5, 6, 7)
 		}),
 		Login: drive.LoginConfig{Notice: "手机号、密码或短信验证码发送至迅雷认证服务；人机验证使用迅雷官方页面。", Fields: []drive.LoginField{

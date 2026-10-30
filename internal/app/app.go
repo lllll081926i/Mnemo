@@ -337,6 +337,9 @@ func (a *App) startup(ctx context.Context) {
 		return st.UpdateAccountToken(userID, drive.CloneToken(token))
 	})
 	drive.SetOperationErrorHandler(a.handleDriveOperationError)
+	drive.SetUploadWarningHandler(func(userID, driveID string, issue *model.OperationIssue) {
+		a.emit("upload:warning", map[string]any{"userId": userID, "driveId": driveID, "issue": issue})
+	})
 
 	// secret resolver so providers can read OAuth client ids during refresh
 	drive.SetSecretResolver(func(key string) string {
@@ -914,7 +917,7 @@ func syncAccountUsage(acc *model.Account) {
 	if acc.Usage == nil {
 		acc.Usage = &model.Quota{Type: "account", Status: "unknown"}
 	}
-	if acc.Provider() == model.ProviderYike || acc.Provider() == model.ProviderLanzou {
+	if acc.Provider() == model.ProviderLanzou {
 		acc.Usage.Type = "unlimited"
 		acc.Usage.Size = 0
 		acc.Usage.SizeStr = ""

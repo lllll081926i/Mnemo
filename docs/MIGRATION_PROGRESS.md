@@ -3,7 +3,8 @@
 > 旧项目：`../Mnemo`（Electron + Vue3 + TypeScript + aria2c + mpv）
 > 新项目：`Mnemo-Go`（Go + Wails v2 + Vue3 JS + 原生 Go 下载引擎 + HTML5 网页播放器）
 > 最近更新：2026-08-21（全量源码调研 + 旧版对照 + 迁移回归验证 + 跨平台构建复核；08-20/08-21 两轮审查后同步修正过时声明，详见 [PROJECT_AUDIT_2026-08-20.md](PROJECT_AUDIT_2026-08-20.md) / [PROJECT_AUDIT_2026-08-21.md](PROJECT_AUDIT_2026-08-21.md)）
-> 废弃说明：`gofile`、`gdrive`、`encryption` 已按需求移除/不再支持
+> 2026-10-30 范围调整：一刻相册已移除；迅雷新增本地 GCID 秒传与 S3 上传。其余百分比和历史问题清单保留 2026-08-21 记录，当前验证结果见 [项目审查记录](PROJECT_REVIEW_2026-10-30.md)。
+> 废弃说明：`gofile`、`gdrive`、`yike`、`encryption` 已按需求移除/不再支持
 
 ---
 
@@ -84,8 +85,8 @@
 | ilanzou | ~100% | (已修复；登录续期、下载/视频预览、七牛上传与跨盘 MD5 秒传已闭环) |
 | onedrive | ~95% | (已修复；rclone OAuth 凭据、账号选择、刷新、上传响应和预签名预览链路已覆盖定向回归) |
 | dropbox | ~95% | (已修复；rclone OAuth 凭据、刷新保留、账号隔离、分享分页、上传 ID 校验和预签名预览链路已覆盖定向回归) |
-| yike | ~90% | (已修复；按需求不参与跨盘秒传) |
 | guangya | ~98% | 无 |
+| thunder | 协议回归通过 | 已实现本地 GCID 秒传、S3 PUT/multipart 与完成确认；真实账号待验收，分片跨进程续传未实现 |
 | webdav | ~95% | 递归目录上传、路径段编码、自嵌套移动/复制保护已完成；分享/搜索为设计不支持 |
 | s3 | ~95% | 目录操作、multipart 上传/复制、冲突策略和兼容 404 判断已完成；分享/搜索/回收站为设计不支持 |
 
@@ -185,7 +186,7 @@
 18. ✅ **pan139 ListPage 分页参数推进**：pageNum/startNumber 随 marker 递增
 19. ✅ **onedrive/dropbox 搜索分页**：跟随 nextLink/cursor 分页
 20. ✅ **pikpak batch 操作任务轮询**：waitForTasks 轮询异步任务
-21. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5
+21. 已移除：一刻相册不再支持，原有 MD5 解密实现退出当前范围。
 22. ✅ **sync 引擎高级特性**：快照持久化 + 定时调度 + 删除传播(含 50% 阈值保护) + 日志回调
 23. ✅ **migrate 高级策略**：StreamUploader 流式管道 + 秒传路由(哈希匹配) + 任务持久化+重启恢复
 
@@ -200,7 +201,7 @@
 30. ⚠️ 测试覆盖率：provider 深度覆盖仍不均衡，当前主要是 mock/e2e 关键链路，未覆盖真实云端账号
 31. ✅ **上传进度回调：webdav/s3**：已实现 ProgressReader + 令牌桶限速（`progress.go:22`）
 32. ✅ **MaxUploadSpeed 限速**：已实现 SetGlobalUploadRate + ProgressReader throttle（`app.go:128,328`）
-33. ✅ **yike decryptYikeMd5**：已实现对齐 alist DecryptMd5
+33. 已移除：一刻相册不再支持，原有适配仅保留历史记录。
 34. ⚠️ player 多音轨
 35. ✅ **前端测试框架**：Vitest 已搭建并通过（见上表）
 36. ⚠️ 瀑布流/相册模式

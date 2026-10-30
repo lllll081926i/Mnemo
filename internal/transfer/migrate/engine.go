@@ -509,9 +509,6 @@ func (e *Engine) completeResource(ctx context.Context, job *Job, srcFile *model.
 func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.File, targetParent string) (bool, error) {
 	srcProvider := drive.ResolveProvider(job.SrcUser, job.SrcDrive, "")
 	dstProvider := drive.ResolveProvider(job.DstUser, job.DstDrive, "")
-	if !rapidUploadAllowed(srcProvider, dstProvider) {
-		return false, nil
-	}
 
 	srcCaps := drive.RegistryCaps(srcProvider)
 	dstCaps := drive.RegistryCaps(dstProvider)
@@ -533,7 +530,7 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 		return true, fmt.Errorf("rapid: resolve hash %s failed: %w", method, err)
 	}
 	if strings.TrimSpace(hash) == "" {
-		return true, fmt.Errorf("rapid: resolve hash %s returned empty hash", method)
+		return false, nil
 	}
 	job.Stage = "checking"
 	job.StageProgress = 0
@@ -569,13 +566,6 @@ func (e *Engine) tryRapidMigrate(ctx context.Context, job *Job, srcFile *model.F
 		return true, err
 	}
 	return false, nil
-}
-
-// rapidUploadAllowed keeps providers with incompatible transfer semantics out
-// of the cross-drive rapid-upload path. Yike exposes MD5 metadata for its own
-// uploads, but it does not implement a target-side rapid-upload API.
-func rapidUploadAllowed(srcProvider, dstProvider string) bool {
-	return srcProvider != model.ProviderYike && dstProvider != model.ProviderYike
 }
 
 // commonHashMethod returns the first hash method that appears in both the

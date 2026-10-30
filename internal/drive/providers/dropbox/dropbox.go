@@ -635,7 +635,9 @@ func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File
 					}
 					return err
 				}
-				_ = drive.SaveUploadSessionState(key, sessID, []int{int(pos + int64(n))})
+				if err := drive.SaveUploadSessionState(key, sessID, []int{int(pos + int64(n))}); err != nil {
+					return fmt.Errorf("Dropbox 保存上传会话失败: %w", err)
+				}
 			} else if isLast {
 				var fileID string
 				fileID, err = c.sessionFinish(ctx, sessID, pos, chunk, path, policy)
@@ -664,7 +666,9 @@ func (c *client) UploadSession(ctx context.Context, dc drive.Context, f *os.File
 			if ui != nil {
 				ui.ReportUploadProgress(pos, size)
 			}
-			_ = drive.SaveUploadSessionState(key, sessID, []int{int(pos)})
+			if err := drive.SaveUploadSessionState(key, sessID, []int{int(pos)}); err != nil {
+				return fmt.Errorf("Dropbox 保存上传进度失败: %w", err)
+			}
 			if isLast {
 				fileID, finishErr := c.sessionFinish(ctx, sessID, pos, nil, path, policy)
 				if finishErr != nil {

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { notifyTransferFailure, notifyMigrateFailure, taskFailureNotice } from './task-notices'
 import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, RespondQuit, providerOf, providerMetaOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta, useOrderedAccounts } from './appearance'
 import PanView from './views/PanView.vue'
@@ -147,7 +148,6 @@ const PRESET_ICONS = [
   { id: 'lanzou.svg', label: '蓝奏云' },
   { id: 'ilanzou.svg', label: '优享蓝奏' },
   { id: 'guangya.svg', label: '光鸭云' },
-  { id: 'yike.svg', label: '一刻相册' },
   { id: 'jianguoyun.svg', label: '坚果云' },
   { id: 'infinitycloud.svg', label: 'InfiniCLOUD' },
   { id: 'nextcloud.svg', label: 'Nextcloud' },
@@ -391,12 +391,12 @@ function toast(msg, type = '', action = null) {
   const message = String(msg ?? '')
   const id = Date.now() + Math.random()
   const normalizedType = ['success', 'error', 'warn', 'info'].includes(type) ? type : 'info'
-  const duplicate = toasts.value.find((item) => Date.now() - item.createdAt < 5000 && (
+  const duplicate = toasts.value.find((item) => Date.now() - item.createdAt < 5000 && item.type === normalizedType && JSON.stringify(item.action) === JSON.stringify(action) && (
     item.msg === message || message.includes(item.msg) || item.msg.includes(message)
   ))
   if (duplicate) return duplicate.id
   const labels = { success: '已完成', error: '操作失败', warn: '需要注意', info: '提示' }
-  const item = { id, msg: message, type: normalizedType, label: labels[normalizedType], createdAt: Date.now(), action: action?.tab === 'transfer' ? { label: '查看任务', tab: 'transfer' } : null }
+  const item = { id, msg: message, type: normalizedType, label: labels[normalizedType], createdAt: Date.now(), action: action?.repair || action?.tab === 'transfer' ? action : null }
   toasts.value.push(item)
   const lifetime = item.action ? 6500 : normalizedType === 'error' ? 6500 : 3600
   setTimeout(() => dismissToast(id), lifetime)
@@ -409,6 +409,7 @@ function dismissToast(id) {
 
 function onToastAction(item) {
   if (item.action?.tab === 'transfer') switchTab('transfer')
+  if (item.action?.repair) repairTask({ action: item.action.repair, userId: item.action.userId })
   dismissToast(item.id)
 }
 
@@ -462,6 +463,7 @@ function onQuickAction(action) {
 
 const notifiedTransfers = new Set()
 function onTransferNotice(event) {
+  notifyTransferFailure(event)
   const task = event?.task
   if (!task?.id || task.status !== 'completed' || task.groupId || tab.value === 'transfer') return
   const key = `${event.kind}:${task.id}`
@@ -480,7 +482,7 @@ onMounted(async () => {
 	window.addEventListener('contextmenu', preventNativeContextMenu, true)
 	const onDriveNotice = (event) => {
 	  const notice = event?.detail
-	  if (notice?.message) toast(notice.message, notice.type || 'error')
+	  if (notice?.message) toast(notice.message, notice.type || 'error', notice.action)
 	}
 	window.addEventListener('mnemo:drive-notice', onDriveNotice)
 	const removeGlobalErrorLogging = installGlobalErrorLogging()
@@ -516,6 +518,11 @@ onMounted(async () => {
     onEvent('account:expired', handleAccountExpired),
     onEvent('app:ready', refresh),
     onEvent('transfer:event', onTransferNotice),
+    onEvent('migrate:progress', notifyMigrateFailure),
+    onEvent('upload:warning', (event) => {
+      const notice = taskFailureNotice('', '上传文件', event?.issue, { userId: event?.userId })
+      toast(notice.message, notice.type, notice.action)
+    }),
     onEvent('upload:scan-error', (ev) => toast(String(ev?.error || '上传文件扫描失败，请重新选择文件'), 'error')),
     onEvent('offline:history-error', (ev) => toast(String(ev?.error || '云离线任务已提交，但本地记录保存失败'), 'warn')),
     onEvent('share:history-error', (ev) => {

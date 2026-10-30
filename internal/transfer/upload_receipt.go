@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 	"mnemo-go/internal/netx"
 )
@@ -133,10 +134,15 @@ func (q *UploadQueue) reconcileUpload(snapshot model.UploadingUI) error {
 			return errUploadReviewRequired
 		}
 		kind := netx.HashKind(strings.ToLower(strings.ReplaceAll(file.ContentHashName, "-", "")))
-		if file.ContentHash == "" || (kind != netx.HashMD5 && kind != netx.HashSHA1 && kind != netx.HashSHA256) {
+		if file.ContentHash == "" || (kind != netx.HashMD5 && kind != netx.HashSHA1 && kind != netx.HashSHA256 && kind != "gcid") {
 			return errUploadReviewRequired
 		}
-		hash, err := netx.HashFileWithProgressContext(ctx, snapshot.Info.LocalFilePath, kind, nil, attempt.Size)
+		var hash string
+		if kind == "gcid" {
+			hash, err = driveutil.ComputeGCID(ctx, snapshot.Info.LocalFilePath, nil)
+		} else {
+			hash, err = netx.HashFileWithProgressContext(ctx, snapshot.Info.LocalFilePath, kind, nil, attempt.Size)
+		}
 		if err != nil {
 			return err
 		}

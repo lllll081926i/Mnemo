@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
-	"io"
-	"os"
 
+	"mnemo-go/internal/drive/driveutil"
 	"mnemo-go/internal/model"
 )
 
@@ -27,43 +26,7 @@ func gcidChunkSize(fileSize int64) int64 {
 // computeGCID computes the PikPak GCID for a local file while reporting
 // progress via ui.Upload.
 func computeGCID(ctx context.Context, path string, ui *model.UploadingUI) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	size := info.Size()
-	chunkSize := gcidChunkSize(size)
-	var chunkHashes []byte
-	offset := int64(0)
-	buf := make([]byte, chunkSize)
-	var hashed int64
-	for offset < size {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		if ui != nil && ui.IsUploadStopRequested() {
-			return "", context.Canceled
-		}
-		length := min(chunkSize, size-offset)
-		n, err := io.ReadFull(io.NewSectionReader(f, offset, length), buf[:length])
-		if err != nil {
-			return "", err
-		}
-		sum := sha1.Sum(buf[:n])
-		chunkHashes = append(chunkHashes, sum[:]...)
-		offset += int64(n)
-		hashed += int64(n)
-		if ui != nil {
-			ui.ReportHashProgress(hashed, size)
-		}
-	}
-	finalSum := sha1.Sum(chunkHashes)
-	return hex.EncodeToString(finalSum[:]), nil
+	return driveutil.ComputeGCID(ctx, path, ui)
 }
 
 // gcidFromBytes computes GCID from a byte slice (for testing).

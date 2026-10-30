@@ -99,6 +99,9 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 			Reuse: true, FileID: fileID, ParentID: req.ParentID, Message: "秒传命中",
 		}, nil
 	}
+	if responseString(up, "upToken") == "" {
+		return nil, errors.New("优享版蓝奏云秒传响应缺少目标文件 ID 和上传凭证")
+	}
 	return &drive.RapidUploadResult{ParentID: req.ParentID, Message: "未命中秒传"}, nil
 }
 
@@ -246,6 +249,8 @@ func formatGoTokenTime(t time.Time) string {
 
 // UploadOneFile uploads one file: MD5 → getUpToken (可能秒传) → qiniu 直传
 // (form ≤8MB / multipart >8MB) → /7n/results 确认轮询。
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil {
 		return errors.New("优享版蓝奏云: 无效的上传任务")
@@ -270,6 +275,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Info.SizeStr = model.FormatBytes(size)
 	folderID := ToILanzouFolderId(firstNonEmpty(ui.Info.ParentFileID, "0"))
 	sessionKey := drive.UploadSessionKey(c.UserID, c.DriveID, folderID, ui.Info.Name+"|"+md5hex, size)
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	up, _, err := d.request(ctx, c, "/7n/getUpToken", requestOptions{
 		method: http.MethodPost,
 		body: map[string]any{
@@ -292,6 +300,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	if upToken == "" && rapidFileID != "" {
 		// MD5 命中秒传：直接返回 fileId
+		ui.Info.IsMiaoChuan = true
 		drive.ClearUploadSession(sessionKey)
 		markUploadDone(ui, size, rapidFileID)
 		return nil

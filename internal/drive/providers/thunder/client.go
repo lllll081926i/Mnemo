@@ -81,6 +81,10 @@ type client struct {
 var accountLocks sync.Map
 
 func withClient(ctx context.Context, account drive.Context, operation func(*client) error) error {
+	return withClientMode(ctx, account, operation, false)
+}
+
+func withClientMode(ctx context.Context, account drive.Context, operation func(*client) error, upload bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -118,7 +122,11 @@ func withClient(ctx context.Context, account drive.Context, operation func(*clie
 	}
 	if cl.changed {
 		cl.saveSession()
-		err = errors.Join(err, drive.PersistToken(account))
+		if upload && err == nil {
+			drive.PersistCompletedUploadToken(account)
+		} else {
+			err = errors.Join(err, drive.PersistToken(account))
+		}
 	}
 	return err
 }

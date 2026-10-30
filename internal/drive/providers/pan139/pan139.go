@@ -1705,6 +1705,8 @@ func putPan139UploadPart(ctx context.Context, hc *netx.Client, f *os.File, part 
 }
 
 // UploadOneFile uploads a file through 139's SHA-256 precreate protocol.
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
 		return errors.New("pan139: 上传文件路径为空")
@@ -1740,6 +1742,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 
 	created := pan139UploadCreateData{}
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	if resumed {
 		created.FileID = pan139FlexString(session.FileID)
 		created.UploadID = session.UploadID
@@ -1771,6 +1776,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return errors.New("移动云盘秒传未返回目标文件 ID")
 			}
 			ui.Upload.FileID = pan139FileID(space, created.FileID.String())
+			ui.Info.IsMiaoChuan = true
 			ui.ReportUploadProgress(size, size)
 			drive.ClearUploadSession(sessionKey)
 			return nil
@@ -1783,7 +1789,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		if session.FileID == "" || session.UploadID == "" {
 			return errors.New("pan139: 上传初始化未返回 fileId 或 uploadId")
 		}
-		_ = drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), nil)
+		ui.Upload.FileID = pan139FileID(space, session.FileID)
+		if err := drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), nil); err != nil {
+			return fmt.Errorf("移动云盘保存上传会话失败: %w", err)
+		}
 	}
 
 	if session.FileID == "" {
@@ -1795,6 +1804,8 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if session.FileID == "" || session.UploadID == "" {
 		return errors.New("pan139: 上传会话缺少 fileId 或 uploadId")
 	}
+	ui.Upload.FileID = pan139FileID(space, session.FileID)
+	ui.Upload.UploadID = session.UploadID
 	uploadedSet := make(map[int]bool, len(savedParts))
 	for _, partNumber := range savedParts {
 		if partNumber >= 1 && partNumber <= len(parts) {
@@ -1845,7 +1856,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 		}
 		uploadedSet[part.PartNumber] = true
 		uploaded += part.PartSize
-		_ = drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), drive.SortedUniqueParts(uploadedSet))
+		if err := drive.SaveUploadSessionState(sessionKey, encodePan139UploadSession(session), drive.SortedUniqueParts(uploadedSet)); err != nil {
+			return fmt.Errorf("移动云盘保存上传分片进度失败: %w", err)
+		}
 		ui.ReportUploadProgress(uploaded, size)
 	}
 
@@ -1908,13 +1921,21 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 		return nil, fmt.Errorf("pan139: 秒传响应无效: %w", err)
 	}
 	if !created.Exist && !created.RapidUpload {
+		if created.FileID.String() == "" || created.UploadID == "" {
+			return nil, errors.New("移动云盘秒传探测缺少完整上传会话，请先核对目标目录")
+		}
 		if created.FileID.String() != "" && created.UploadID != "" {
 			key := drive.UploadSessionKey(c.UserID, c.DriveID, req.ParentID, req.FileName, req.Size)
-			_ = drive.SaveUploadSessionState(key, encodePan139UploadSession(pan139UploadSession{
+			if err := drive.SaveUploadSessionState(key, encodePan139UploadSession(pan139UploadSession{
 				FileID: created.FileID.String(), UploadID: created.UploadID, ContentHash: hashValue,
-			}), nil)
+			}), nil); err != nil {
+				return nil, fmt.Errorf("移动云盘保存秒传回退会话失败: %w", err)
+			}
 		}
 		return &drive.RapidUploadResult{Reuse: false, ParentID: req.ParentID, Message: "未命中秒传"}, nil
+	}
+	if strings.TrimSpace(created.FileID.String()) == "" {
+		return nil, errors.New("移动云盘秒传未返回目标文件 ID")
 	}
 	if created.FileID.String() != "" {
 		key := drive.UploadSessionKey(c.UserID, c.DriveID, req.ParentID, req.FileName, req.Size)

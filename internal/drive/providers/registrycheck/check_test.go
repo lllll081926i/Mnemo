@@ -9,7 +9,7 @@ import (
 )
 
 func TestAllProvidersRegistered(t *testing.T) {
-	want := []string{"aliopen", "dropbox", "guangya", "ilanzou", "lanzou", "onedrive", "pan123", "pan139", "pan189", "pikpak", "s3", "thunder", "webdav", "yike"}
+	want := []string{"aliopen", "dropbox", "guangya", "ilanzou", "lanzou", "onedrive", "pan123", "pan139", "pan189", "pikpak", "s3", "thunder", "webdav"}
 	if drive.Count() != len(want) {
 		t.Fatalf("registered %d providers, want %d", drive.Count(), len(want))
 	}
@@ -25,9 +25,9 @@ func TestAllProvidersRegistered(t *testing.T) {
 			t.Errorf("provider %s not registered", w)
 		}
 	}
-	// gofile/gdrive must NOT be present
-	if seen["gofile"] || seen["gdrive"] {
-		t.Error("gofile/gdrive must be removed")
+	// 已移除的网盘不能继续注册。
+	if seen["gofile"] || seen["gdrive"] || seen["yike"] {
+		t.Error("已移除的网盘仍被注册")
 	}
 	_ = model.ProviderUnknown
 }

@@ -33,7 +33,7 @@ node tools/supply-chain.cjs check
 
 前端和 Wails 的安装入口均禁用依赖安装脚本。之前的 `lfa-ponyfill` 带有联网更新字体列表的 postinstall；该依赖现已移除，默认禁止安装脚本的策略继续保留。需要启用新的安装脚本时，必须先审查具体脚本及其网络输入。
 
-云端在安装前检查来源，再运行 `npm ci --ignore-scripts`。Node 固定为 24.22.0；Go 固定为 1.27.2，设置 `GOTOOLCHAIN=local`，不自动下载另一套工具链。前端完整依赖审计和 Go 可达漏洞审计均属于质量门槛。`npm audit` 对外部 tarball 的覆盖有限，零公告不等于所有外部代码已经安全审计。
+云端在安装前检查来源，再运行 `npm ci --ignore-scripts`。Node 固定为 24.22.0；Go 固定为 1.27.3，设置 `GOTOOLCHAIN=local`，不自动下载另一套工具链。前端完整依赖审计和 Go 可达漏洞审计均属于质量门槛。`npm audit` 对外部 tarball 的覆盖有限，零公告不等于所有外部代码已经安全审计。
 
 已用 Node 24.22.0 验证干净安装、测试、生产构建，以及已缓存依赖的 `npm ci --offline --ignore-scripts` 后重建。首次构建仍需要依赖源；这不是完整离线供应镜像，也不承诺跨平台安装包逐字节可重复。来源不可用时允许失败，不自动换源或放宽摘要。
 

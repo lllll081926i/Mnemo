@@ -1,0 +1,60 @@
+package dropbox
+
+import (
+ "encoding/json"
+ "errors"
+ "io"
+ "net/http"
+ "os"
+ "path/filepath"
+ "testing"
+ "mnemo-go/internal/drive"
+ "mnemo-go/internal/model"
+)
+
+func TestReviewDropboxSkipSendsOverwrite(t *testing.T) {
+ reads,writes:=0,0
+ withDropboxTransport(t,dropboxRoundTripper(func(r *http.Request)(*http.Response,error){
+  switch r.URL.Path {
+  case "/2/files/get_metadata":
+   reads++;return dropboxResponse(r,409,`{"error_summary":"path/not_found/","error":{".tag":"path","path":{".tag":"not_found"}}}`),nil
+  case "/2/files/upload":
+   writes++
+   var arg map[string]any
+   if err:=json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")),&arg);err!=nil{t.Fatal(err)}
+   if arg["mode"]!="overwrite" {t.Fatalf("未复现覆盖模式: %+v",arg)}
+   t.Logf("策略 skip 在查询不存在后发送 mode=%s；此时同名文件若被另一客户端创建，将被覆盖",arg["mode"])
+   _,_=io.Copy(io.Discard,r.Body)
+   return dropboxResponse(r,200,`{"id":"file"}`),nil
+  default:t.Fatalf("非预期请求: %s",r.URL.Path)
+  }
+  return nil,errors.New("非预期请求")
+ }))
+ source:=filepath.Join(t.TempDir(),"file.txt");if err:=os.WriteFile(source,[]byte("abc"),0600);err!=nil{t.Fatal(err)}
+ err:=(&Driver{}).UploadOneFile(t.Context(),drive.Context{Token:&model.TokenInfo{AccessToken:"test"}},&model.UploadingUI{Info:model.UploadInfo{LocalFilePath:source,ParentFileID:RootID,Name:"file.txt",ConflictPolicy:"skip"}})
+ if err!=nil||reads!=1||writes!=1{t.Fatalf("请求路径: %v read=%d write=%d",err,reads,writes)}
+}
+
+type reviewFailingSessions struct{ writes int }
+func(s *reviewFailingSessions)SaveUploadSession(string,[]int)error{s.writes++;return errors.New("模拟磁盘写入失败")}
+func(s *reviewFailingSessions)LoadUploadSession(string)[]int{return nil}
+func(s *reviewFailingSessions)ClearUploadSession(string){}
+func(s *reviewFailingSessions)SaveUploadSessionState(string,string,[]int)error{s.writes++;return errors.New("模拟磁盘写入失败")}
+func(s *reviewFailingSessions)LoadUploadSessionState(string)(string,[]int){return "",nil}
+
+func TestReviewDropboxIgnoresCheckpointFailure(t *testing.T) {
+ sessions:=&reviewFailingSessions{};drive.SetUploadSessionStore(sessions);t.Cleanup(func(){drive.SetUploadSessionStore(nil)})
+ finishes:=0
+ withDropboxTransport(t,dropboxRoundTripper(func(r *http.Request)(*http.Response,error){
+  _,_=io.Copy(io.Discard,r.Body)
+  if r.URL.Path=="/2/files/upload_session/start"{return dropboxResponse(r,200,`{"session_id":"session"}`),nil}
+  if r.URL.Path=="/2/files/upload_session/finish"{finishes++;return dropboxResponse(r,200,`{"id":"file"}`),nil}
+  t.Fatalf("非预期请求: %s",r.URL.Path);return nil,errors.New("非预期请求")
+ }))
+ source:=filepath.Join(t.TempDir(),"file.txt");if err:=os.WriteFile(source,[]byte("abc"),0600);err!=nil{t.Fatal(err)}
+ f,err:=os.Open(source);if err!=nil{t.Fatal(err)};defer f.Close()
+ cl,err:=clientOf(drive.Context{Token:&model.TokenInfo{AccessToken:"test"}});if err!=nil{t.Fatal(err)}
+ err=cl.UploadSession(t.Context(),drive.Context{},f,"/file.txt",3,&model.UploadingUI{Info:model.UploadInfo{LocalFilePath:source}},uploadPolicy{mode:"add"})
+ if err!=nil||sessions.writes==0||finishes!=1{t.Fatalf("未复现忽略落盘失败: err=%v writes=%d finishes=%d",err,sessions.writes,finishes)}
+ t.Logf("%d 次检查点写入失败，上传仍提交成功；中途退出无法依赖该检查点恢复",sessions.writes)
+}

@@ -969,7 +969,7 @@ func TestPikPakUploadHonorsConflictPolicy(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{})
 		case r.Method == http.MethodPost && r.URL.Path == "/drive/v1/files":
 			createCalls++
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "new-file"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"file": map[string]any{"id": "new-file", "phase": "PHASE_TYPE_COMPLETE"}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

@@ -43,7 +43,7 @@ func init() {
 			"recycleBin":          true,
 			"favorite":            true,
 			"permanentDelete":     true,
-		}, nil),
+		}, func(c *drive.Capabilities) { c.UploadConflictPolicies = []string{"rename", "skip", "refuse"} }),
 		Login: drive.LoginConfig{Notice: "账号和密码发送至 PikPak；安全验证使用平台验证页面。登录不代表所有套餐和目录写权限已验证。", Fields: []drive.LoginField{
 			{Key: "username", Purpose: "account", Type: "text", Label: "账号（手机/邮箱）", Required: true},
 			{Key: "password", Purpose: "password", Type: "password", Label: "密码", Required: true},

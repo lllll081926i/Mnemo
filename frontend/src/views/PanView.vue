@@ -167,6 +167,7 @@ watch(() => props.accounts.map(account => account.user_id + '\0' + account.drive
   if (source && !accounts.includes(source.user_id + '\0' + source.drive_id)) fileClipboard.value = null
 })
 const caps = computed(() => capsOf(props.account, props.providers))
+const uploadConflictPolicies = computed(() => Array.isArray(caps.value.uploadConflictPolicies) ? caps.value.uploadConflictPolicies : ['overwrite', 'rename', 'skip'])
 const meta = computed(() => providerMetaOf(props.account, props.providers))
 const defaultShareExpirationOptions = [
   { value: '', label: '永久有效' },
@@ -1313,7 +1314,7 @@ async function checkUploadConflict(paths, destination) {
     const name = p.split(/[/\\]/).pop()
     if (existing.has(name)) clashes.push(name)
   }
-  if (clashes.length === 0) return 'overwrite'
+  if (clashes.length === 0) return uploadConflictPolicies.value.includes('overwrite') ? 'overwrite' : uploadConflictPolicies.value[0] || 'rename'
   return new Promise((resolve) => {
     conflictModal.value = {
       names: clashes,
@@ -2225,9 +2226,9 @@ onBeforeUnmount(() => {
         <p class="conflict-q">请选择处理方式：</p>
         <div class="conflict-actions">
           <button class="btn" @click="conflictModal.onPolicy(null)">取消上传</button>
-          <button class="btn primary" @click="conflictModal.onPolicy('overwrite')">覆盖</button>
-          <button class="btn" @click="conflictModal.onPolicy('rename')">自动重命名</button>
-          <button class="btn ghost" @click="conflictModal.onPolicy('skip')">跳过</button>
+          <button v-if="uploadConflictPolicies.includes('overwrite')" class="btn primary" @click="conflictModal.onPolicy('overwrite')">覆盖</button>
+          <button v-if="uploadConflictPolicies.includes('rename')" class="btn" @click="conflictModal.onPolicy('rename')">自动重命名</button>
+          <button v-if="uploadConflictPolicies.includes('skip')" class="btn ghost" @click="conflictModal.onPolicy('skip')">跳过</button>
         </div>
       </div>
     </Modal>

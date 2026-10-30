@@ -330,6 +330,8 @@ func (d *Driver) Copy(ctx context.Context, c drive.Context, refs []drive.FileRef
 // UploadOneFile performs a direct PUT upload. It honors ui.Info.ConflictPolicy
 // when the target path already exists: refuse returns an error, rename uploads
 // to a generated non-conflicting name, overwrite (the default) replaces it.
+func (*Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("webdav: 上传文件路径为空")
@@ -397,6 +399,10 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	pr := driveutil.NewProgressOnlyReader(f, size, func(read int64) {
 		ui.ReportUploadProgress(read, size)
 	})
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
+	ui.Upload.FileID = target
 	if err := client.Put(ctx, target, pr, size, conditions); err != nil {
 		return err
 	}

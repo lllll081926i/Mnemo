@@ -1,0 +1,48 @@
+package aliopen
+
+import (
+ "errors"
+ "io"
+ "net/http"
+ "os"
+ "path/filepath"
+ "strings"
+ "testing"
+ "mnemo-go/internal/drive"
+ "mnemo-go/internal/model"
+ "mnemo-go/internal/netx"
+)
+
+func TestReviewAliURLFailureLosesKnownFileID(t *testing.T) {
+ previous,limiter:=netx.TestTransportHook,aliOpenLimiter
+ aliOpenLimiter=newAliOpenRateLimiter(2,0)
+ t.Cleanup(func(){netx.TestTransportHook=previous;aliOpenLimiter=limiter;drive.SetUploadSessionStore(nil)})
+ source:=filepath.Join(t.TempDir(),"file.txt"); if err:=os.WriteFile(source,[]byte("test"),0600);err!=nil{t.Fatal(err)}
+ sessions:=&testUploadSessions{};drive.SetUploadSessionStore(sessions)
+ netx.TestTransportHook=aliOpenRoundTripperFunc(func(r *http.Request)(*http.Response,error){
+  if r.URL.Path=="/adrive/v1.0/openFile/getUploadUrl" {return nil,errors.New("模拟获取分片地址失败")}
+  if r.URL.Path!="/adrive/v1.0/openFile/create"{t.Fatalf("非预期请求 %s",r.URL.Path)}
+  return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(strings.NewReader(`{"file_id":"file","upload_id":"session"}`)),Request:r},nil
+ })
+ account:=drive.Context{UserID:"aliopen:review",DriveID:"drive",Token:&model.TokenInfo{RefreshToken:mustJSON(Session{AccessToken:"test",DriveID:"drive"})}}
+ ui:=&model.UploadingUI{Info:model.UploadInfo{LocalFilePath:source,ParentFileID:"b:parent",Name:"file.txt"}}
+ err:=(&Driver{}).UploadOneFile(t.Context(),account,ui)
+ if err==nil || sessions.id=="" || ui.Upload.FileID!="" {t.Fatalf("未复现身份丢失: %v session=%s file=%s",err,sessions.id,ui.Upload.FileID)}
+ t.Logf("会话已保存远端 file_id=file，错误回执中的 FileID 仍为空；错误=%v",err)
+}
+
+func TestReviewAliListDoubleWrapsParent(t *testing.T) {
+ previous,limiter:=netx.TestTransportHook,aliOpenLimiter
+ aliOpenLimiter=newAliOpenRateLimiter(2,0)
+ t.Cleanup(func(){netx.TestTransportHook=previous;aliOpenLimiter=limiter})
+ netx.TestTransportHook=aliOpenRoundTripperFunc(func(r *http.Request)(*http.Response,error){
+  return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(strings.NewReader(`{"items":[{"file_id":"file","parent_file_id":"parent","name":"file.txt","type":"file","size":4}]}`)),Request:r},nil
+ })
+ account:=drive.Context{DriveID:"drive",Token:&model.TokenInfo{RefreshToken:mustJSON(Session{AccessToken:"test",DriveID:"drive"})}}
+ for _,parent:=range []string{"b:parent",BackupRoot,"r:parent",ResourceRoot}{
+  files,err:=(&Driver{}).List(t.Context(),account,parent,nil)
+  if err!=nil||len(files)!=1{t.Fatalf("列目录失败: %v %+v",err,files)}
+  if files[0].ParentFileID==parent{t.Fatalf("未复现重复映射: %s",parent)}
+  t.Logf("目录 %q 返回父目录 %q",parent,files[0].ParentFileID)
+ }
+}

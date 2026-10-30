@@ -149,7 +149,7 @@ func TestLegacyPan189CombinedQuotaIsHiddenUntilRefresh(t *testing.T) {
 }
 
 func TestSyncAccountUsageMarksUnlimitedProviders(t *testing.T) {
-	for _, provider := range []string{model.ProviderYike, model.ProviderLanzou} {
+	for _, provider := range []string{model.ProviderLanzou} {
 		t.Run(provider, func(t *testing.T) {
 			acc := &model.Account{
 				UserID: model.BuildUserID(provider, "account-1"),

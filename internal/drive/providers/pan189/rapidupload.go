@@ -3,6 +3,7 @@ package pan189
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -71,14 +72,16 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 			FileDataExists int             `json:"fileDataExists"`
 		} `json:"data"`
 	}
-	_ = json.Unmarshal(raw, &created)
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return nil, err
+	}
 	if created.Data.FileDataExists != 1 {
 		return &drive.RapidUploadResult{Reuse: false, Message: "未命中秒传"}, nil
 	}
 	commitURL := created.Data.FileCommitURL
 	uploadFileID := rawIDString(created.Data.UploadFileID)
 	if commitURL == "" || uploadFileID == "" {
-		return &drive.RapidUploadResult{Reuse: false, Message: "秒传缺少提交地址"}, nil
+		return nil, errors.New("天翼云盘秒传缺少提交地址或上传会话 ID")
 	}
 
 	duplicate := req.Duplicate
@@ -106,9 +109,11 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	var committed struct {
 		ID string `json:"id"`
 	}
-	_ = json.Unmarshal(raw, &committed)
-	if committed.ID == "" {
-		return &drive.RapidUploadResult{Reuse: true, Message: "秒传命中"}, nil
+	if err := json.Unmarshal(raw, &committed); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(committed.ID) == "" {
+		return nil, errors.New("天翼云盘秒传提交未返回目标文件 ID")
 	}
 	space, _ := pan189SpaceID(req.ParentID)
 	return &drive.RapidUploadResult{Reuse: true, FileID: pan189FileID(space, committed.ID), Message: "秒传命中"}, nil

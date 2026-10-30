@@ -187,18 +187,6 @@ func TestCommonHashMethod(t *testing.T) {
 	}
 }
 
-func TestRapidUploadAllowedExcludesYike(t *testing.T) {
-	if rapidUploadAllowed(model.ProviderYike, "pan123") {
-		t.Fatal("yike must not be used as a rapid-upload source")
-	}
-	if rapidUploadAllowed("pan123", model.ProviderYike) {
-		t.Fatal("yike must not be used as a rapid-upload target")
-	}
-	if !rapidUploadAllowed("pan123", "pan189") {
-		t.Fatal("compatible providers should remain eligible")
-	}
-}
-
 func TestEngineCancelUnknown(t *testing.T) {
 	e := NewEngine(nil, nil)
 	// should not panic on unknown id

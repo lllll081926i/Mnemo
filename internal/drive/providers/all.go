@@ -16,5 +16,4 @@ import (
 	_ "mnemo-go/internal/drive/providers/s3"
 	_ "mnemo-go/internal/drive/providers/thunder"
 	_ "mnemo-go/internal/drive/providers/webdav"
-	_ "mnemo-go/internal/drive/providers/yike"
 )

@@ -148,6 +148,12 @@ type ShareCancellationDriver interface {
 // UploadHandler carries a concrete file upload job into the provider.
 type UploadHandler func(ctx context.Context, ui *model.UploadingUI) error
 
+// UploadAttemptDriver 在完成本地校验后、首次远端写入前保存提交记录。
+// 未实现此接口的驱动继续由门面在调用前保存记录。
+type UploadAttemptDriver interface {
+	ManagesUploadAttempt() bool
+}
+
 // UploadValidationItem is the local metadata a provider needs to validate an
 // upload before it enters the asynchronous queue.
 type UploadValidationItem struct {

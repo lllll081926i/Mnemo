@@ -14,7 +14,7 @@ import (
 )
 
 func TestAllProviderTasksRestoreCheckpointProgress(t *testing.T) {
-	providers := []string{"pikpak", "onedrive", "dropbox", "pan123", "lanzou", "ilanzou", "pan139", "pan189", "yike", "aliopen", "guangya", "thunder", "webdav", "s3"}
+	providers := []string{"pikpak", "onedrive", "dropbox", "pan123", "lanzou", "ilanzou", "pan139", "pan189", "aliopen", "guangya", "thunder", "webdav", "s3"}
 	for _, provider := range providers {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", provider, stream), func(t *testing.T) {

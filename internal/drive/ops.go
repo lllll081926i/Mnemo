@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"mnemo-go/internal/logging"
 	"mnemo-go/internal/model"
 )
 
@@ -42,6 +43,35 @@ var operationErrorHandler OperationErrorHandler
 
 // SetOperationErrorHandler installs the application-owned account error hook.
 func SetOperationErrorHandler(fn OperationErrorHandler) { operationErrorHandler = fn }
+
+// SetUploadWarningHandler 接收远端上传成功后的本地凭据保存错误。
+// 此类错误必须通知用户，但不能使已完成的上传重新进入重试流程。
+func SetUploadWarningHandler(fn func(string, string, *model.OperationIssue)) {
+	uploadWarningHandler = fn
+}
+
+var uploadWarningHandler func(string, string, *model.OperationIssue)
+
+// PersistCompletedUploadToken 在账号锁内保存已完成上传的凭据，并单独通知保存失败。
+func PersistCompletedUploadToken(c Context) {
+	_ = withUploadTokenPersist(nil, c)
+	if c.TokenSnapshot != nil && c.Token != nil {
+		*c.TokenSnapshot = *CloneToken(c.Token)
+	}
+}
+
+func withUploadTokenPersist(opErr error, c Context) error {
+	if opErr != nil {
+		return withTokenPersist(opErr, c)
+	}
+	if err := persistToken(c); err != nil {
+		logging.Warn("远端上传已完成，但账号凭据保存失败", "user_id", c.UserID, "error", err)
+		if uploadWarningHandler != nil {
+			uploadWarningHandler(c.UserID, c.DriveID, &model.OperationIssue{Code: "UPLOAD_CREDENTIAL_SAVE_FAILED", Message: "文件已上传成功，但账号凭据未能保存。请检查本地存储后重新登录账号，无需重新上传文件", Action: "reauthorize"})
+		}
+	}
+	return nil
+}
 
 // CloneToken prevents concurrent provider calls from mutating the store's
 // in-memory account object before the refreshed session is persisted.
@@ -873,6 +903,13 @@ func RapidUploadByHashContext(ctx context.Context, userID, driveID string, req R
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	req.Method = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(req.Method)), "-", "")
+	req.Hash = strings.ToLower(strings.TrimSpace(req.Hash))
+	lengths := map[string]int{"md5": 16, "sha1": 20, "sha256": 32}
+	hash, decodeErr := hex.DecodeString(req.Hash)
+	if lengths[req.Method] == 0 || decodeErr != nil || len(hash) != lengths[req.Method] || req.Size < 0 || strings.TrimSpace(req.FileName) == "" {
+		return nil, errors.New("秒传参数无效，请检查哈希算法、哈希值、文件名和文件大小")
+	}
 	release, err := LockTarget(ctx, userID, driveID, req.ParentID, req.FileName)
 	if err != nil {
 		return nil, err
@@ -882,8 +919,18 @@ func RapidUploadByHashContext(ctx context.Context, userID, driveID string, req R
 	if err != nil {
 		return nil, err
 	}
-	defer func() { err = withTokenPersist(err, c) }()
-	return d.RapidUploadByHash(ctx, c, req)
+	defer func() {
+		if err == nil && result != nil && result.Reuse {
+			err = withUploadTokenPersist(nil, c)
+		} else {
+			err = withTokenPersist(err, c)
+		}
+	}()
+	result, err = d.RapidUploadByHash(ctx, c, req)
+	if err == nil && result != nil && result.Reuse && strings.TrimSpace(result.FileID) == "" {
+		err = errors.New("秒传响应缺少目标文件 ID，不能确认完成")
+	}
+	return result, err
 }
 
 // ResolveTransferHash computes/reads a content fingerprint.
@@ -939,11 +986,13 @@ func QueueUploadHandlerContext(ctx context.Context, userID, driveID string) (fun
 			return lockErr
 		}
 		defer release()
-		if err := ui.BeginUploadAttempt(); err != nil {
-			return err
+		if managed, ok := d.(UploadAttemptDriver); !ok || !managed.ManagesUploadAttempt() {
+			if err := ui.BeginUploadAttempt(); err != nil {
+				return err
+			}
 		}
 		opErr := d.UploadOneFile(ctx, c, ui)
-		return withTokenPersist(opErr, c)
+		return withUploadTokenPersist(opErr, c)
 	}, nil
 }
 

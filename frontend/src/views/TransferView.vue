@@ -21,7 +21,7 @@ import UiSelect from '../components/UiSelect.vue'
 import TaskIssue from '../components/TaskIssue.vue'
 import { motion, MotionConfig } from 'motion-v'
 import { compactReveal, reducedMotion } from '../motion/presets'
-import { taskErrorText, createTaskFailureNotifier } from '../task-notices'
+import { taskErrorText, notifyTransferFailure, notifyMigrateFailure } from '../task-notices'
 import { mergeLiveTasks } from '../transfer-refresh'
 
 const props = defineProps({
@@ -29,7 +29,6 @@ const props = defineProps({
   providers: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['toast', 'navigate', 'repair'])
-const { notifyTaskFailure, clearTaskFailure } = createTaskFailureNotifier()
 const detailID = ref('')
 const verifying = ref(false), verification = ref({})
 let verificationSeq = 0
@@ -133,10 +132,8 @@ let refreshQueued = false
 function onTransferEvent(ev) {
   if (!ev || !ev.task) { scheduleRefresh(); return }
   const t = ev.task
+  notifyTransferFailure(ev)
   if (ev.kind === 'download') {
-    const failureKey = `download:${t.id}`
-    if (t.status === 'failed' && !t.groupId) notifyTaskFailure(failureKey, t.error, '下载文件', t.issue)
-    else clearTaskFailure(failureKey)
     const list = downloads.value
     const existing = downloadByID.value.get(t.id)
     if (t.status === 'removed') {
@@ -166,9 +163,6 @@ function onTransferEvent(ev) {
     }
     pendingDownloadEvents?.set(t.id, existing || t)
   } else if (ev.kind === 'upload') {
-    const failureKey = `upload:${t.id}`
-    if (t.status === 'failed') notifyTaskFailure(failureKey, t.error, '上传文件', t.issue)
-    else clearTaskFailure(failureKey)
     const job = uploadByID.value.get(t.id)
     if (!job) {
       // The enqueue event can arrive before the first list refresh. Fetch once
@@ -289,7 +283,6 @@ const upStatusBadge = (t) => ({ 已完成: 'success', 失败: 'error', 已停止
 const upName = (t) => (t.Info && t.Info.name) || ((t.Info && t.Info.localFilePath) || '').split(/[\\/]/).pop() || t.UploadID
 const upSize = (t) => (t.Info && (t.Info.sizeStr || formatBytes(t.Info.size))) || ''
 const upSpeed = (t) => (t.Upload && (t.Upload.DownSpeedStr || formatSpeed(t.Upload.DownSpeed || 0))) || ''
-const upErr = (t) => taskErrorText((t.Upload && t.Upload.failedMessage) || '', '上传文件', t.Upload?.issue)
 const upProgress = (t) => t.Upload?.stage === 'hashing' ? (t.Upload?.stageProgress || 0) : ['preparing', 'checking', 'resuming'].includes(t.Upload?.stage) ? 0 : (t.Upload?.DownProcess || 0)
 const upProgressText = (t) => ['preparing', 'checking', 'resuming'].includes(t.Upload?.stage) ? '…' : `${upProgress(t)}%`
 
@@ -776,9 +769,7 @@ let migrateRefreshSeq = 0
 let pendingMigrateEvents = null
 function onMigrate(job) {
   if (!job || !job.id) return
-  const failureKey = `migrate:${job.id}`
-  if (['failed', 'partial'].includes(job.status)) notifyTaskFailure(failureKey, job.message, '迁移文件')
-  else clearTaskFailure(failureKey)
+  notifyMigrateFailure(job)
   const i = migrateJobs.value.findIndex((j) => j.id === job.id)
   if (i >= 0) migrateJobs.value.splice(i, 1, job)
   else migrateJobs.value.unshift(job)
@@ -1087,8 +1078,7 @@ onBeforeUnmount(() => {
                       <div class="progress-total">
                         <div :class="t.status === 'downloading' || t.status === 'queued' ? 'progress-current active' : t.status === 'completed' ? 'progress-current succeed' : t.status === 'failed' ? 'progress-current error' : 'progress-current'" :style="{ width: downProgress(t) + '%' }"></div>
                       </div>
-                      <p v-if="t.status === 'failed' && t.error" class="text-error" :title="taskErrorText(t.error, '下载文件', t.issue)">{{ taskErrorText(t.error, '下载文件', t.issue) }}</p>
-                      <TaskIssue :issue="t.issue" @repair="action => emit('repair', { action, userId: t.user_id })" />
+                      <TaskIssue v-if="t.status === 'failed'" :issue="t.issue" :reason="t.error" action="下载文件" :user-id="t.user_id" />
                     </div>
                   </div>
                   <div class="downspeed">{{ t.status === 'downloading' ? formatSpeed(t.speed || 0) : '' }}</div>
@@ -1194,8 +1184,7 @@ onBeforeUnmount(() => {
                     <div class="progress-total">
                       <div class="progress-current active" :style="{ width: upProgress(t) + '%' }"></div>
                     </div>
-                    <p v-if="upErr(t)" class="text-error" :title="upErr(t)">{{ upErr(t) }}</p>
-                    <TaskIssue :issue="t.Upload?.issue" write-operation @repair="action => emit('repair', { action, userId: t.user_id })" />
+                    <TaskIssue v-if="!t.Upload?.IsCompleted && !t.Upload?.IsDowning" :issue="t.Upload?.issue" :reason="t.Upload?.failedMessage" action="上传文件" :user-id="t.user_id" write-operation />
                   </div>
                 </div>
                 <div class="downspeed">{{ upSpeed(t) }}</div>
@@ -1299,8 +1288,7 @@ onBeforeUnmount(() => {
                     <div class="progress-total">
                       <div :class="['progress-current', offProgressClass(t.status)]" :style="{ width: offProgress(t) + '%' }"></div>
                     </div>
-                    <p v-if="t.message" class="text-error">{{ t.message }}</p>
-                    <TaskIssue :issue="t.issue" @repair="action => emit('repair', { action, userId: t.user_id })" />
+                    <TaskIssue :issue="t.issue" :reason="t.message" action="云离线下载" :user-id="t.user_id" />
                   </div>
                 </div>
                 <div class="downspeed"></div>
@@ -1342,8 +1330,7 @@ onBeforeUnmount(() => {
                     <div class="progress-total" title="迁移总体进度">
                       <div :class="j.status === 'completed' ? 'progress-current succeed' : j.status === 'failed' ? 'progress-current error' : j.status === 'partial' ? 'progress-current warning' : 'progress-current active'" :style="{ width: migProgress(j) + '%' }"></div>
                     </div>
-                    <p v-if="j.message" class="text-error" :title="['failed','partial'].includes(j.status) ? taskErrorText(j.message, '迁移文件') : j.message">{{ ['failed','partial'].includes(j.status) ? taskErrorText(j.message, '迁移文件') : j.message }}</p>
-                    <TaskIssue :issue="j.issue?.action === 'reauthorize' ? { ...j.issue, action: 'check_access' } : j.issue" write-operation @repair="action => emit('repair', { action })" />
+                    <TaskIssue v-if="['failed','partial'].includes(j.status)" :issue="j.issue?.action === 'reauthorize' ? { ...j.issue, action: 'check_access' } : j.issue" :reason="j.message" action="迁移文件" write-operation />
                     <div v-if="j.issue?.action === 'reauthorize'" class="migration-auth-actions"><button type="button" class="btn sm" @click="emit('repair', { action: 'reauthorize', userId: j.srcUser })">重新登录来源账号</button><button type="button" class="btn sm" @click="emit('repair', { action: 'reauthorize', userId: j.dstUser })">重新登录目标账号</button></div>
                   </div>
                 </div>
@@ -1425,7 +1412,7 @@ onBeforeUnmount(() => {
       <div class="td-row" v-if="detailTask.url"><span class="td-label">来源链接</span><span class="td-val td-url">{{ detailTask.url }}</span></div>
       <div class="td-row" v-if="detailTask.error"><span class="td-label">失败原因</span><span class="td-val" style="color:var(--color-error)">{{ taskErrorText(detailTask.error, '下载文件') }}</span></div>
       <div class="td-row" v-if="detailTask.error"><span class="td-label">错误详情</span><span class="td-val">{{ detailTask.error }}</span></div>
-      <TaskIssue :issue="detailTask.issue" @repair="action => emit('repair', { action, userId: detailTask.user_id })" />
+      <TaskIssue :issue="detailTask.issue" :reason="detailTask.error" action="下载文件" :user-id="detailTask.user_id" />
       <div class="td-row"><span class="td-label">创建时间</span><span class="td-val">{{ formatTime(detailTask.created) }}</span></div>
       <template #actions>
         <button class="btn primary" @click="detailTask = null">关闭</button>
@@ -1437,7 +1424,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.taskrow:has(.task-issue) { height: auto; min-height: 52px; padding-block: 8px; }
+.taskrow:has(.task-notice) { height: auto; min-height: 52px; padding-block: 8px; }
 .transfer-error {
   display: flex;
   align-items: center;

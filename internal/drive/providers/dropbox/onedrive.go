@@ -269,6 +269,8 @@ func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.S
 }
 
 // UploadOneFile uploads one file.
+func (*Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("Dropbox: 上传文件路径为空")
@@ -294,6 +296,7 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	case driveutil.ConflictRename:
 		policy = uploadPolicy{mode: "add", autorename: true}
 	case driveutil.ConflictSkip:
+		policy = uploadPolicy{mode: "add", strictConflict: true}
 		if _, err := cl.Detail(ctx, target); err == nil {
 			return nil
 		} else if !strings.Contains(strings.ToLower(err.Error()), "not_found") {
@@ -311,15 +314,25 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	size := info.Size()
 	ui.Info.Size = size
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	if size <= uploadSingleLimit {
 		fileID, err := cl.UploadSmall(ctx, target, f, size, policy)
 		if err != nil {
+			if driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) == driveutil.ConflictSkip && strings.Contains(strings.ToLower(err.Error()), "path/conflict/") {
+				return nil
+			}
 			return err
 		}
 		ui.Upload.FileID = fileID
 		return nil
 	}
-	return cl.UploadSession(ctx, c, f, target, size, ui, policy)
+	err = cl.UploadSession(ctx, c, f, target, size, ui, policy)
+	if err != nil && driveutil.ResolveConflictPolicy(ui.Info.ConflictPolicy) == driveutil.ConflictSkip && strings.Contains(strings.ToLower(err.Error()), "path/conflict/") {
+		return nil
+	}
+	return err
 }
 
 func mapItems(items []Metadata, driveID, parentID string) []model.File {

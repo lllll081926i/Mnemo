@@ -16,7 +16,6 @@ const (
 	ProviderIlanzou  = "ilanzou"
 	ProviderPan139   = "pan139"
 	ProviderPan189   = "pan189"
-	ProviderYike     = "yike"
 	ProviderAliopen  = "aliopen"
 	ProviderGuangya  = "guangya"
 	ProviderThunder  = "thunder"
@@ -152,7 +151,7 @@ func ResolveProviderFromUserID(userID string) string {
 // AllProviders lists every registered provider key in stable order.
 func AllProviders() []string {
 	v := []string{ProviderPikpak, ProviderOnedrive, ProviderDropbox, ProviderPan123,
-		ProviderLanzou, ProviderIlanzou, ProviderPan139, ProviderPan189, ProviderYike,
+		ProviderLanzou, ProviderIlanzou, ProviderPan139, ProviderPan189,
 		ProviderAliopen, ProviderGuangya, ProviderThunder, ProviderWebdav, ProviderS3}
 	sort.Strings(v)
 	return v

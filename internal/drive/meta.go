@@ -27,7 +27,6 @@ var builtinMetas = map[string]Meta{
 	model.ProviderIlanzou:  {Key: "ilanzou", Label: "优享版蓝奏云", Icon: "drive-icons/ilanzou.svg"},
 	model.ProviderPan139:   {Key: "pan139", Label: "移动云盘", Icon: "drive-icons/pan139.svg"},
 	model.ProviderPan189:   {Key: "pan189", Label: "天翼云盘", Icon: "drive-icons/pan189.svg"},
-	model.ProviderYike:     {Key: "yike", Label: "一刻相册", Icon: "drive-icons/yike.svg"},
 	model.ProviderAliopen:  {Key: "aliopen", Label: "阿里云盘", Icon: "drive-icons/aliopen.svg"},
 	model.ProviderGuangya:  {Key: "guangya", Label: "光鸭云盘", Icon: "drive-icons/guangya.svg"},
 	model.ProviderThunder:  {Key: "thunder", Label: "迅雷网盘", Icon: "drive-icons/thunder.svg", RootKey: "thunder_root", RootTitle: "网盘文件"},
@@ -39,7 +38,7 @@ var builtinMetas = map[string]Meta{
 var userIDPrefixes = map[string]string{
 	"pikpak": "pikpak_", "onedrive": "onedrive_", "dropbox": "dropbox_",
 	"pan123": "pan123_", "lanzou": "lanzou_", "ilanzou": "ilanzou_",
-	"pan139": "pan139_", "pan189": "pan189_", "yike": "yike_",
+	"pan139": "pan139_", "pan189": "pan189_",
 	"aliopen": "aliopen_", "guangya": "guangya_", "thunder": "thunder_",
 	"webdav": "webdav:", "s3": "s3:",
 }
@@ -99,8 +98,8 @@ func ListProviders() []string {
 	return []string{
 		model.ProviderPikpak, model.ProviderOnedrive, model.ProviderDropbox,
 		model.ProviderPan123, model.ProviderLanzou, model.ProviderIlanzou,
-		model.ProviderPan139, model.ProviderPan189, model.ProviderYike,
-		model.ProviderAliopen, model.ProviderGuangya,
+		model.ProviderPan139, model.ProviderPan189,
+		model.ProviderAliopen, model.ProviderGuangya, model.ProviderThunder,
 		model.ProviderWebdav, model.ProviderS3,
 	}
 }

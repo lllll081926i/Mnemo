@@ -224,7 +224,7 @@ func TestFavoritesLocalFallbackForEveryUnsupportedProvider(t *testing.T) {
 		return &model.TokenInfo{ProviderDriveType: "personal"}, nil
 	})
 	t.Cleanup(func() { netx.TestTransportHook = old; drive.SetTokenResolver(nil) })
-	for _, provider := range []string{"onedrive", "dropbox", "lanzou", "ilanzou", "pan139", "pan189", "yike", "guangya", "webdav", "s3"} {
+	for _, provider := range []string{"onedrive", "dropbox", "lanzou", "ilanzou", "pan139", "pan189", "guangya", "webdav", "s3"} {
 		t.Run(provider, func(t *testing.T) {
 			st, err := store.Open(t.TempDir())
 			if err != nil {

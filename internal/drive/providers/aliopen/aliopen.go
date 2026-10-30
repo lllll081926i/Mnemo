@@ -447,9 +447,10 @@ type aliOpenDownloadResponse struct {
 
 // client is an authenticated aliopen session.
 type client struct {
-	http    *netx.Client
-	session *Session
-	token   *model.TokenInfo
+	userID, driveID string
+	http            *netx.Client
+	session         *Session
+	token           *model.TokenInfo
 }
 
 func clientOf(c drive.Context) (*client, error) {
@@ -467,7 +468,7 @@ func clientOfContext(ctx context.Context, c drive.Context) (*client, error) {
 	if sess == nil {
 		return nil, errors.New("aliopen: invalid session")
 	}
-	cl := &client{http: netx.NewClient(60 * time.Second), session: sess, token: c.Token}
+	cl := &client{http: netx.NewClient(60 * time.Second), session: sess, token: c.Token, userID: c.UserID, driveID: c.DriveID}
 	if sess.AccessToken == "" {
 		if err := cl.refresh(ctx, c.UserID); err != nil {
 			return nil, err
@@ -1165,6 +1166,7 @@ type aliOpenUploadCreateOptions struct {
 }
 
 type aliOpenUploadCreateResult struct {
+	Name         string              `json:"name"`
 	FileID       string              `json:"file_id"`
 	UploadID     string              `json:"upload_id"`
 	PartInfoList []aliOpenUploadPart `json:"part_info_list"`
@@ -1225,16 +1227,21 @@ func aliOpenCheckNameModeForDuplicate(duplicate int) string {
 }
 
 func (c *client) hasNamedFile(ctx context.Context, scope Scope, parentID, name string) (bool, error) {
+	file, err := c.namedFile(ctx, scope, parentID, name)
+	return file != nil, err
+}
+
+func (c *client) namedFile(ctx context.Context, scope Scope, parentID, name string) (*aliFile, error) {
 	items, err := c.List(ctx, scope, parentID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, item := range items {
 		if item.Name == name {
-			return true, nil
+			return &item, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
 // RapidUpload attempts sha1-based rapid upload (秒传).
@@ -1245,6 +1252,7 @@ func (c *client) RapidUpload(ctx context.Context, scope Scope, parentID, name st
 func (c *client) rapidUploadWithMode(ctx context.Context, scope Scope, parentID, name string, size int64, sha1Str, checkNameMode string) (*drive.RapidUploadResult, error) {
 	var res struct {
 		FileID       string `json:"file_id"`
+		UploadID     string `json:"upload_id"`
 		RapidUpload  bool   `json:"rapid_upload"`
 		PartInfoList []struct {
 			PartNumber int    `json:"part_number"`
@@ -1263,20 +1271,48 @@ func (c *client) rapidUploadWithMode(ctx context.Context, scope Scope, parentID,
 		"content_hash_name": "sha1",
 		"check_name_mode":   checkNameMode,
 	}, &res); err != nil {
+		if aliOpenIsPreHashMatched(err) {
+			return &drive.RapidUploadResult{Message: "需要本地文件完成秒传校验"}, nil
+		}
 		return nil, err
 	}
 	// A miss still returns file_id for the pending upload object. Only the
 	// explicit rapid_upload flag means the remote file is already complete.
-	if res.RapidUpload || res.Exist {
+	confirmed := res.RapidUpload
+	if !confirmed && res.Exist && res.FileID != "" {
+		var verifyErr error
+		confirmed, verifyErr = c.verifyExistingUpload(ctx, scope, parentID, res.FileID, size, sha1Str)
+		if verifyErr != nil {
+			return nil, verifyErr
+		}
+	}
+	if confirmed {
 		if strings.TrimSpace(res.FileID) == "" {
-			return &drive.RapidUploadResult{Reuse: false, Message: "秒传响应缺少 file_id"}, nil
+			return nil, errors.New("aliopen: 秒传响应缺少 file_id")
 		}
 		return &drive.RapidUploadResult{Reuse: true, FileID: res.FileID}, nil
+	}
+	if res.FileID == "" || res.UploadID == "" {
+		return nil, errors.New("aliopen: 秒传探测未返回完整上传会话")
+	}
+	// 哈希探测未命中时复用已经创建的会话，避免普通上传再次创建同名文件。
+	sessionName := name + "\x00" + checkNameMode + "\x00" + strings.ToUpper(sha1Str)
+	key := drive.UploadSessionKey(c.userID, c.driveID, wrapRef(scope, parentID), sessionName, size)
+	if err := drive.SaveUploadSessionState(key, encodeAliOpenUploadSession(res.UploadID, res.FileID), nil); err != nil {
+		return nil, fmt.Errorf("aliopen: 保存秒传回退会话失败: %w", err)
 	}
 	// Do not expose the pending file id: the migration layer treats a file id
 	// as an accepted transfer for compatibility with providers that return one
 	// on a successful probe.
 	return &drive.RapidUploadResult{Reuse: false, Message: "秒传未命中，需要上传"}, nil
+}
+
+func (c *client) verifyExistingUpload(ctx context.Context, scope Scope, parentID, fileID string, size int64, sha1Str string) (bool, error) {
+	file, err := c.Detail(ctx, scope, fileID)
+	if err != nil {
+		return false, err
+	}
+	return file != nil && file.FileID == fileID && file.ParentFileID == parentID && file.Type == "file" && file.Status == "available" && file.Size == size && strings.EqualFold(file.ContentHashName, "sha1") && strings.EqualFold(file.ContentHash, sha1Str), nil
 }
 
 // CreateUploadFile creates an upload entry and returns parts.
@@ -1416,6 +1452,10 @@ func aliOpenLocalFileTime(info os.FileInfo) string {
 func aliOpenIsPreHashMatched(err error) bool {
 	if err == nil {
 		return false
+	}
+	var requestErr *aliOpenRequestError
+	if errors.As(err, &requestErr) && strings.EqualFold(requestErr.Code, "PreHashMatched") {
+		return true
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "prehashmatched") || strings.Contains(message, "pre_hash_matched")
@@ -1679,7 +1719,7 @@ func (d *Driver) Search(ctx context.Context, c drive.Context, keyword string) ([
 			continue
 		}
 		for i := range items {
-			out = append(out, mapFile(&items[i], c.DriveID, wrapRef(sc, items[i].ParentFileID), string(sc)))
+			out = append(out, mapFile(&items[i], c.DriveID, items[i].ParentFileID, string(sc)))
 		}
 	}
 	if len(out) == 0 && len(searchErrs) > 0 {
@@ -1704,7 +1744,7 @@ func (d *Driver) GetInfo(ctx context.Context, c drive.Context, fileID string) (a
 	if err != nil {
 		return nil, err
 	}
-	return mapFile(item, c.DriveID, wrapRef(ref.Scope, item.ParentFileID), string(ref.Scope)), nil
+	return mapFile(item, c.DriveID, item.ParentFileID, string(ref.Scope)), nil
 }
 
 func (d *Driver) GetFile(ctx context.Context, c drive.Context, fileID string) (*model.File, error) {
@@ -1975,12 +2015,17 @@ func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.S
 	return cl.CancelShare(ctx, shareID)
 }
 
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
 		return errors.New("aliopen: 上传文件路径为空")
 	}
+	if ui.Info.ParentFileID == RootID || ui.Info.ParentFileID == "root" || ui.Info.ParentFileID == "" {
+		return errors.New("请先进入备份盘或资源库，再选择上传目录")
+	}
 	ref := parseRef(ui.Info.ParentFileID)
-	cl, err := clientOf(c)
+	cl, err := clientOfContext(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -2053,11 +2098,14 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			LocalModifiedAt: localTime,
 			LocalCreatedAt:  localTime,
 		}
+		if err := ui.BeginUploadAttempt(); err != nil {
+			return err
+		}
 		created, createErr := cl.CreateUploadFile(ctx, ref.Scope, ref.FID, ui.Info.Name, size, options)
 		if createErr != nil && !aliOpenIsPreHashMatched(createErr) {
 			return createErr
 		}
-		if createErr != nil || ((!created.RapidUpload && !created.Exist) && (created.FileID == "" || created.UploadID == "")) {
+		if createErr != nil {
 			proofCode, proofErr := aliOpenProofCode(f, cl.session.AccessToken, size)
 			if proofErr != nil {
 				return fmt.Errorf("aliopen: 计算 proof_code 失败: %w", proofErr)
@@ -2069,11 +2117,25 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 				return createErr
 			}
 		}
-		if created.RapidUpload || created.Exist {
+		if created.Name != "" {
+			ui.Info.Name = created.Name
+		}
+		if created.FileID != "" {
+			ui.Upload.FileID = wrapRef(ref.Scope, created.FileID)
+		}
+		confirmed := created.RapidUpload
+		if !confirmed && created.Exist && created.FileID != "" {
+			confirmed, err = cl.verifyExistingUpload(ctx, ref.Scope, ref.FID, created.FileID, size, contentHash)
+			if err != nil {
+				return err
+			}
+		}
+		if confirmed {
 			if strings.TrimSpace(created.FileID) == "" {
 				return errors.New("aliopen: 秒传响应缺少 file_id")
 			}
 			ui.Upload.FileID = wrapRef(ref.Scope, created.FileID)
+			ui.Info.IsMiaoChuan = true
 			ui.ReportUploadProgress(size, size)
 			return nil
 		}
@@ -2082,7 +2144,11 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 			return errors.New("aliopen: 创建上传任务未返回 file_id 或 upload_id")
 		}
 		parts = created.PartInfoList
+	} else if err := ui.BeginUploadAttempt(); err != nil {
+		return err
 	}
+	ui.Upload.FileID = wrapRef(ref.Scope, fileID)
+	ui.Upload.UploadID = uploadID
 
 	// The persisted record stores only the remote session id and completed
 	// parts. Rebuild part metadata on resume because pre-signed URLs expire.
@@ -2107,7 +2173,6 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	if err := cl.fillUploadURLs(ctx, ref.Scope, fileID, uploadID, parts, uploadedSet); err != nil {
 		return err
 	}
-	ui.Upload.FileID = wrapRef(ref.Scope, fileID)
 
 	var uploadedSize int64
 	for partNumber := range uploadedSet {
@@ -2224,18 +2289,21 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	if req.Method != "sha1" {
 		return nil, errors.New("aliopen: only sha1 supported")
 	}
+	if req.ParentID == RootID || req.ParentID == "root" || req.ParentID == "" {
+		return nil, errors.New("请先进入备份盘或资源库，再选择上传目录")
+	}
 	ref := parseRef(req.ParentID)
-	cl, err := clientOf(c)
+	cl, err := clientOfContext(ctx, c)
 	if err != nil {
 		return nil, err
 	}
 	if req.Duplicate == 1 {
-		exists, err := cl.hasNamedFile(ctx, ref.Scope, ref.FID, req.FileName)
+		existing, err := cl.namedFile(ctx, ref.Scope, ref.FID, req.FileName)
 		if err != nil {
 			return nil, err
 		}
-		if exists {
-			return &drive.RapidUploadResult{Reuse: true, Message: "目标文件已存在，已跳过"}, nil
+		if existing != nil {
+			return &drive.RapidUploadResult{Reuse: true, FileID: wrapRef(ref.Scope, existing.FileID), ParentID: req.ParentID, Message: "目标文件已存在，已跳过"}, nil
 		}
 	}
 	result, err := cl.rapidUploadWithMode(ctx, ref.Scope, ref.FID, req.FileName, req.Size, req.Hash, aliOpenCheckNameModeForDuplicate(req.Duplicate))
@@ -2477,6 +2545,7 @@ func virtualFile(driveID string, scope Scope) model.File {
 }
 
 func mapFiles(items []aliFile, driveID, parentID string, scope Scope) []model.File {
+	parentID = parseRef(parentID).FID
 	out := make([]model.File, 0, len(items))
 	for i := range items {
 		out = append(out, mapFile(&items[i], driveID, parentID, string(scope)))

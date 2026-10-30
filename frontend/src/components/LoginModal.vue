@@ -111,8 +111,7 @@ function togglePassword(key) {
   passwordVisibility.value = { ...passwordVisibility.value, [key]: !passwordVisible(key) }
 }
 
-// 一刻相册（yike）登录入口暂时隐藏（待平台重新开发完成），后端注册保留
-const availableProviders = computed(() => props.providers.filter((p) => p.ID !== 'yike'))
+const availableProviders = computed(() => props.providers)
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
 const providerListEl = ref(null)
 const selectionStyle = ref({})

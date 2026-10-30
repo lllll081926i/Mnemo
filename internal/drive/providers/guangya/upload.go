@@ -82,6 +82,7 @@ type resCenterToken struct {
 	Msg  string `json:"msg"`
 	Data struct {
 		TaskID          string `json:"taskId"`
+		FileID          string `json:"fileId"`
 		ObjectPath      string `json:"objectPath"`
 		BucketName      string `json:"bucketName"`
 		EndPoint        string `json:"endPoint"`
@@ -112,12 +113,12 @@ func waitUploadTask(ctx context.Context, c *client, taskID string) (string, erro
 		if err := c.post(ctx, "/nd.bizuserres.s/v1/file/get_info_by_task_id", map[string]any{"taskId": taskID}, &out); err != nil {
 			return "", err
 		}
+		allowed := map[int]bool{145: true, 146: true, 147: true, 155: true, 163: true, 0: true}
+		if !allowed[out.Code] {
+			return "", fmt.Errorf("光鸭云上传确认失败（%d）：%s", out.Code, out.Msg)
+		}
 		if out.Data.FileID != "" {
 			return out.Data.FileID, nil
-		}
-		allowed := map[int]bool{145: true, 146: true, 147: true, 155: true, 163: true, 0: true}
-		if !allowed[out.Code] && out.Msg != "" && !strings.Contains(strings.ToLower(out.Msg), "success") {
-			return "", errors.New(out.Msg)
 		}
 		select {
 		case <-ctx.Done():
@@ -129,6 +130,8 @@ func waitUploadTask(ctx context.Context, c *client, taskID string) (string, erro
 }
 
 // UploadOneFile mirrors legacy GuangyaUploadDisk.UploadOneFile.
+func (d *Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || ui.Info.LocalFilePath == "" {
 		return errors.New("光鸭：上传文件路径为空")
@@ -150,6 +153,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	ui.Info.Size = info.Size()
 
 	var tokenRes resCenterToken
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	if err := cl.post(ctx, "/nd.bizuserres.s/v1/get_res_center_token", map[string]any{
 		"capacity": 2,
 		"name":     ui.Info.Name,
@@ -162,6 +168,12 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	taskID := tokenRes.Data.TaskID
 	if tokenRes.Code == 156 {
 		// 秒传（服务端已有对象）
+		ui.Info.IsMiaoChuan = true
+		if tokenRes.Data.FileID != "" {
+			ui.Upload.FileID = tokenRes.Data.FileID
+			ui.ReportUploadProgress(ui.Info.Size, ui.Info.Size)
+			return nil
+		}
 		if taskID == "" {
 			return errors.New("秒传未返回 taskId")
 		}

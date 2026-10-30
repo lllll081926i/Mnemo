@@ -565,6 +565,8 @@ func (d *Driver) CancelShare(ctx context.Context, c drive.Context, share model.S
 }
 
 // UploadOneFile uploads one file (simple PUT for small, upload session for large).
+func (*Driver) ManagesUploadAttempt() bool { return true }
+
 func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.UploadingUI) error {
 	if ui == nil || strings.TrimSpace(ui.Info.LocalFilePath) == "" {
 		return errors.New("OneDrive: 上传文件路径为空")
@@ -589,6 +591,9 @@ func (d *Driver) UploadOneFile(ctx context.Context, c drive.Context, ui *model.U
 	}
 	parentID := ui.Info.ParentFileID
 	behavior := oneDriveConflictBehavior(ui.Info.ConflictPolicy)
+	if err := ui.BeginUploadAttempt(); err != nil {
+		return err
+	}
 	if info.Size() <= smallUploadLimit {
 		target := graphUploadTarget(graphHost+smallUploadPath(parentID, name), behavior)
 		fileID, putErr := cl.rawPut(ctx, target, f)

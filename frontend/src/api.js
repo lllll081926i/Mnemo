@@ -365,8 +365,6 @@ function displayAccountText(provider, value) {
       return text.replace(/^优享版蓝奏云(?:\s+|\s*[-:：]\s*)/u, '')
     case 'pan189':
       return text.replace(/\s*·\s*家庭云$/u, '')
-    case 'yike':
-      return text.replace(/^一刻相册(?:\s+|\s*[-:：]\s*)/u, '')
     default:
       return text
   }

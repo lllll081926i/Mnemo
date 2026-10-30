@@ -1655,8 +1655,20 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, c drive.Context, req dri
 	data := parseMap(resp.Data)
 	reuse := asBool(pick(data, "Reuse", "reuse"))
 	fileID := firstString(data, "FileId", "fileId")
+	if reuse && (strings.TrimSpace(fileID) == "" || fileID == "0") {
+		return nil, errors.New("123: 秒传响应缺少有效目标文件 ID")
+	}
 	if strings.TrimSpace(fileID) != "" && fileID != "0" && reuse {
 		return &drive.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: req.ParentID, Message: "秒传命中"}, nil
+	}
+	session := parseUploadRequestData(data)
+	_, complete := decodePan123UploadSession(encodePan123UploadSession(session))
+	if !complete || session.FileID == "0" {
+		return nil, errors.New("123: 秒传未命中，但响应缺少完整上传会话")
+	}
+	key := pan123UploadSessionKey(c, strconv.FormatInt(toPan123Number(req.ParentID), 10), req.FileName, req.Size, etag)
+	if err := drive.SaveUploadSessionState(key, encodePan123UploadSession(session), nil); err != nil {
+		return nil, fmt.Errorf("123: 保存秒传回退会话失败: %w", err)
 	}
 	return &drive.RapidUploadResult{Reuse: false, Message: "未命中秒传"}, nil
 }

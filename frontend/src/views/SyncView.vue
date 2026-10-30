@@ -363,7 +363,7 @@ onBeforeUnmount(() => {
               <span>{{ progress[job.id].done || 0 }} / {{ progress[job.id].total || 0 }}（{{ pct(job.id) }}%）</span>
             </div>
           </div>
-          <TaskIssue :issue="runStates[job.id]?.issue" write-operation @repair="action => emit('repair', { action, userId: job.user_id })" />
+          <TaskIssue :issue="runStates[job.id]?.issue" action="同步文件" :user-id="job.user_id" write-operation />
         </div>
         <div class="sync-task-actions">
           <button type="button" class="switch" role="switch" :aria-label="'自动同步：' + job.name" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在保存…' : job.enabled ? '停用自动同步' : '启用自动同步'" @click="toggle(job)"></button>
