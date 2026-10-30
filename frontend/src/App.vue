@@ -19,6 +19,7 @@ import { CheckUpdate } from './api'
 import { debug, error, errorText, info, installGlobalErrorLogging } from './logger'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 import { createNavigationHistory, installMouseNavigation } from './navigation'
+import { filterDriveIcons } from './drive-icons'
 
 const tab = ref('pan')
 const dualPane = ref(false)
@@ -135,31 +136,8 @@ const cropImageSrc = ref('')
 const cropIsSvg = ref(false)
 const fileInputRef = ref(null)
 
-const PRESET_ICONS = [
-  { id: 'pikpak.svg', label: 'PikPak' },
-  { id: 'aliopen.svg', label: '阿里云盘' },
-  { id: 'onedrive.svg', label: 'OneDrive' },
-  { id: 'dropbox.svg', label: 'Dropbox' },
-  { id: 'pan123.svg', label: '123 云盘' },
-  { id: 'pan189.svg', label: '天翼云盘' },
-  { id: 'pan139.svg', label: '移动云盘' },
-  { id: 'lanzou.svg', label: '蓝奏云' },
-  { id: 'ilanzou.svg', label: '优享蓝奏' },
-  { id: 'guangya.svg', label: '光鸭云' },
-  { id: 'jianguoyun.svg', label: '坚果云' },
-  { id: 'infinitycloud.svg', label: 'InfiniCLOUD' },
-  { id: 'nextcloud.svg', label: 'Nextcloud' },
-  { id: 'owncloud.svg', label: 'ownCloud' },
-  { id: 'seafile.svg', label: 'Seafile' },
-  { id: 'openlist.svg', label: 'OpenList/AList' },
-  { id: 'synology.svg', label: '群晖' },
-  { id: 'koofr.svg', label: 'Koofr' },
-  { id: 'yandex.svg', label: 'Yandex' },
-  { id: 'pcloud-eu.svg', label: 'pCloud (EU)' },
-  { id: 'pcloud-us.svg', label: 'pCloud (US)' },
-  { id: 's3.svg', label: 'S3' },
-  { id: 'webdav.svg', label: 'WebDAV' },
-]
+const presetIconQuery = ref('')
+const presetIcons = computed(() => filterDriveIcons(presetIconQuery.value))
 const windowMaximized = ref(false)
 const curTheme = ref('system')
 const isDark = ref(false)
@@ -329,6 +307,7 @@ function openRename(acc) {
   renameAcc.value = acc
   renameName.value = acc.custom_name || getAccountAlias(acc.user_id) || ''
   renameIcon.value = acc.custom_icon || getAccountCustomIcon(acc.user_id) || ''
+  presetIconQuery.value = ''
   showPresetIcons.value = true
 }
 
@@ -688,19 +667,22 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 内置预设图标网格展开 -->
+          <input v-if="showPresetIcons" v-model="presetIconQuery" class="input preset-icons-search" aria-label="搜索网盘图标" placeholder="搜索网盘或存储服务…" />
           <div v-if="showPresetIcons" class="preset-icons-grid">
             <button
-              v-for="p in PRESET_ICONS"
+              v-for="p in presetIcons"
               :key="p.id"
               type="button"
               class="preset-icon-chip"
               :class="{ active: renameIcon === p.id || (!renameIcon && providerMetaOf(renameAcc, providers).icon === 'drive-icons/' + p.id) }"
               :title="p.label"
+              :aria-label="p.label"
               @click="renameIcon = p.id; showPresetIcons = false"
             >
-              <img :src="providerIconUrl(p.id)" :alt="p.label" />
+              <img :src="providerIconUrl(p.id)" alt="" aria-hidden="true" />
               <span>{{ p.label }}</span>
             </button>
+            <p v-if="!presetIcons.length" class="preset-icons-empty" role="status">没有匹配的图标</p>
           </div>
         </div>
       </div>

@@ -663,8 +663,8 @@ html.dark .account-rail .rail-active-indicator {
 .acc-icon-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .preset-icons-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
-  max-height: 190px; overflow-y: auto; padding: 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px;
+  max-height: 240px; overflow-y: auto; padding: 8px;
   margin-top: 8px; border: 1px solid var(--border-light);
   border-radius: var(--radius-md); background: var(--bg-base);
 }
@@ -802,6 +802,8 @@ html.dark .account-rail .rail-active-indicator {
   width: 176px; flex-shrink: 0; min-height: 0;
   border-right: 1px solid var(--border-light); overflow: hidden;
 }
+.preset-icons-search { margin-top: 8px; width: 100%; }
+.preset-icons-empty { grid-column: 1 / -1; padding: 12px; text-align: center; color: var(--text-secondary); font-size: 12px; }
 .login-form { flex: 1; min-width: 0; min-height: 0; }
 .modal.login-modal .modal-head { height: 40px; min-height: 40px; padding-left: 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-light); }
 .modal.login-modal .modal-head h3 { font-size: 14px; font-weight: 650; }
