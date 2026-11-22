@@ -163,7 +163,7 @@ jobs:
             artifact: Mnemo-linux-arm64
             kind: linux
           - name: macOS arm64
-            os: macos-14
+            os: macos-15
             platform: darwin/arm64
             artifact: Mnemo-macos-arm64
             kind: macos
