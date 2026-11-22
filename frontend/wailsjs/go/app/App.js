@@ -370,6 +370,10 @@ export function ProviderLogin(arg1, arg2) {
   return window['go']['app']['App']['ProviderLogin'](arg1, arg2);
 }
 
+export function ReconnectMountedAccount(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ReconnectMountedAccount'](arg1, arg2, arg3, arg4);
+}
+
 export function RefreshAccount(arg1) {
   return window['go']['app']['App']['RefreshAccount'](arg1);
 }

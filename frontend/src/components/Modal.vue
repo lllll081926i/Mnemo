@@ -2,10 +2,12 @@
 // 全局弹窗栈：管理多层弹窗，确保 Esc 按键只关闭最顶层弹窗
 const modalStack = []
 let globalKeydownBound = false
+let pendingRestore = null
 
-function handleGlobalKeydown(e) {
-  if (e.key === 'Escape' && !e.defaultPrevented && !e.isComposing && modalStack.length > 0) {
-    modalStack[modalStack.length - 1].close()
+function handleGlobalKeydown(event) {
+  if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && modalStack.length > 0) {
+    event.preventDefault()
+    if (!event.repeat) modalStack.at(-1).close()
   }
 }
 </script>
@@ -32,9 +34,8 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 const dialogEl = ref(null)
 const windowMaximized = ref(false)
-let previousActiveElement = null
-
 const handleClose = () => emit('close')
+const entry = { close: handleClose, element: null, mask: null, returnTo: null }
 
 function focusableElements() {
   if (!dialogEl.value) return []
@@ -79,46 +80,61 @@ function toggleWindowMaximise() {
 }
 
 onMounted(() => {
-  previousActiveElement = document.activeElement
+  const active = document.activeElement
+  entry.element = dialogEl.value
+  entry.mask = entry.element?.parentElement
+  entry.returnTo = pendingRestore && (active === document.body || pendingRestore.element?.contains(active)) ? pendingRestore.returnTo : active
   if (props.windowControls) {
     try { WindowIsMaximised().then((value) => { windowMaximized.value = !!value }).catch(() => {}) } catch {}
   }
-  modalStack.push({ close: handleClose, element: dialogEl.value })
+  modalStack.at(-1)?.mask?.setAttribute('inert', '')
+  modalStack.push(entry)
   if (!globalKeydownBound) {
     window.addEventListener('keydown', handleGlobalKeydown)
     globalKeydownBound = true
   }
   nextTick(() => {
-    if (!dialogEl.value || dialogEl.value.contains(document.activeElement)) return
-    if (props.focusDialog) { dialogEl.value.focus(); return }
+    if (modalStack.at(-1) !== entry || !dialogEl.value || dialogEl.value.contains(document.activeElement)) return
+    if (props.focusDialog) { dialogEl.value.focus({ preventScroll: true }); return }
     const items = focusableElements()
     const preferred = props.initialFocus ? items.find(element => element.matches(props.initialFocus)) : null
     const input = items.find(element => element.matches('input:not([type="checkbox"]):not([type="radio"]), textarea, [role="combobox"]'))
-    ;(preferred || input || items.find(element => element.closest('.modal-actions')) || items[0])?.focus()
-    if (!dialogEl.value.contains(document.activeElement)) dialogEl.value.focus()
+    ;(preferred || input || items.find(element => element.closest('.modal-actions')) || items[0])?.focus({ preventScroll: true })
+    if (!dialogEl.value.contains(document.activeElement)) dialogEl.value.focus({ preventScroll: true })
   })
 })
 
 onBeforeUnmount(() => {
-  const idx = modalStack.findIndex(entry => entry.close === handleClose)
+  const wasTop = modalStack.at(-1) === entry
+  entry.mask?.setAttribute('inert', '')
+  const idx = modalStack.indexOf(entry)
   if (idx >= 0) modalStack.splice(idx, 1)
+  for (const remaining of modalStack) {
+    if (entry.element?.contains(remaining.returnTo)) remaining.returnTo = entry.returnTo
+  }
   if (modalStack.length === 0 && globalKeydownBound) {
     window.removeEventListener('keydown', handleGlobalKeydown)
     globalKeydownBound = false
   }
-  if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-    nextTick(() => {
-      const top = modalStack.at(-1)?.element
-      if (previousActiveElement?.isConnected && (!top || top.contains(previousActiveElement))) previousActiveElement.focus()
-      else top?.focus()
-    })
-  }
+  if (!wasTop) return
+  const nextTop = modalStack.at(-1)
+  nextTop?.mask?.removeAttribute('inert')
+  pendingRestore = entry
+  nextTick(() => {
+    if (pendingRestore !== entry) return
+    pendingRestore = null
+    if (modalStack.at(-1) !== nextTop) return
+    const top = nextTop?.element
+    const target = entry.returnTo
+    if (target?.isConnected && (!top || top.contains(target))) target.focus?.({ preventScroll: true })
+    else if (top && !top.contains(document.activeElement)) top.focus({ preventScroll: true })
+  })
 })
 </script>
 
 <template>
   <teleport to="body">
-    <transition name="modal-fade">
+    <transition name="modal-fade" appear>
       <div class="modal-mask" :class="maskClass" @click.self="emit('close')">
         <div
           ref="dialogEl"

@@ -190,6 +190,8 @@ export function PrioritizeDownload(arg1:string):Promise<void>;
 
 export function ProviderLogin(arg1:string,arg2:Record<string, string>):Promise<model.Account>;
 
+export function ReconnectMountedAccount(arg1:string,arg2:string,arg3:string,arg4:string):Promise<model.Account>;
+
 export function RefreshAccount(arg1:string):Promise<model.Account>;
 
 export function RefreshAccountNow(arg1:string):Promise<model.Account>;

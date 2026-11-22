@@ -32,6 +32,40 @@ afterEach(() => {
 })
 
 describe('设置页加载', () => {
+  it('分类跳转保持目标高亮，手动滚动后跟随实际位置', async () => {
+    api.GetSettings.mockResolvedValue({})
+    wrapper = mount(SettingsView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const body = wrapper.get('.settings-body')
+    const tabs = wrapper.findAll('.sn-item')
+    const current = () => tabs.findIndex(tab => tab.attributes('aria-current') === 'location')
+    Object.defineProperties(body.element, { scrollHeight: { value: 2400 }, clientHeight: { value: 600 }, scrollTo: { value: vi.fn() } })
+    wrapper.findAll('.settings-group').forEach((section, index) => Object.defineProperty(section.element, 'offsetTop', { value: 40 + index * 400 }))
+    try {
+      vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] })
+      await tabs[5].trigger('click')
+      expect(body.element.scrollTo).toHaveBeenLastCalledWith({ top: 1800, behavior: 'smooth' })
+      body.element.scrollTop = 540
+      await body.trigger('scroll')
+      vi.advanceTimersToNextFrame()
+      expect(current()).toBe(5)
+      await tabs[3].trigger('click')
+      expect(current()).toBe(3)
+      await body.trigger('wheel')
+      expect(body.element.scrollTo).toHaveBeenLastCalledWith({ top: 540, behavior: 'instant' })
+      vi.advanceTimersToNextFrame()
+      await wrapper.vm.$nextTick()
+      expect(current()).toBe(1)
+      body.element.scrollTop = 1800
+      await body.trigger('scroll')
+      vi.advanceTimersToNextFrame()
+      await wrapper.vm.$nextTick()
+      expect(current()).toBe(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('设置开关、输入框与选择器均提供可访问名称', async () => {
     api.GetSettings.mockResolvedValue({})
     api.GetLogPath.mockResolvedValue('D:/logs/app.log')
@@ -72,6 +106,65 @@ describe('设置页加载', () => {
     await flushPromises()
     expect(wrapper.vm.logPath).toBe('D:/logs/app.log')
   })
+
+  it('下载目录查询未返回时仍可保存其他设置，并忽略旧目录响应', async () => {
+    api.GetSettings.mockResolvedValue({ downloadDir: 'D:/旧目录' })
+    api.SaveSettings.mockResolvedValue(undefined)
+    let finishOldDirectory
+    api.GetDownloadDirectory.mockResolvedValueOnce('D:/旧目录')
+      .mockImplementationOnce(() => new Promise(resolve => { finishOldDirectory = resolve }))
+      .mockResolvedValueOnce('D:/新目录')
+    wrapper = mount(SettingsView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const input = wrapper.get('[aria-label="下载保存目录"]')
+    await input.setValue('D:/中间目录')
+    await input.trigger('keydown.enter')
+    await input.trigger('blur')
+    await flushPromises()
+    expect(api.SaveSettings).toHaveBeenCalledTimes(1)
+    await input.setValue('D:/新目录')
+    await input.trigger('blur')
+    wrapper.vm.toggle('autoUpdate')
+    await flushPromises()
+    expect(api.SaveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ downloadDir: 'D:/新目录', autoUpdate: wrapper.vm.settings.autoUpdate }))
+    finishOldDirectory('D:/过期目录')
+    await flushPromises()
+    expect(input.element.value).toBe('D:/新目录')
+    expect(input.attributes('placeholder')).toBe('D:/新目录')
+  })
+
+  it('下载目录选择器等待期间只打开一次，取消后可重新打开', async () => {
+    let closePicker
+    api.GetSettings.mockResolvedValue({})
+    api.PickDirectory.mockImplementationOnce(() => new Promise(resolve => { closePicker = resolve })).mockResolvedValueOnce('')
+    wrapper = mount(SettingsView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const picker = wrapper.findAll('button').find(button => button.text() === '选择')
+    await picker.trigger('click')
+    expect(picker.attributes('aria-busy')).toBe('true')
+    await picker.trigger('click')
+    expect(api.PickDirectory).toHaveBeenCalledOnce()
+    closePicker('')
+    await flushPromises()
+    expect(picker.attributes('aria-busy')).toBe('false')
+    await picker.trigger('click')
+    expect(api.PickDirectory).toHaveBeenCalledTimes(2)
+    expect(api.SaveSettings).not.toHaveBeenCalled()
+  })
+
+  it('目录保存失败时保留输入，并在行内显示仍生效的目录', async () => {
+    api.GetSettings.mockResolvedValue({ downloadDir: 'D:/原目录' })
+    api.GetDownloadDirectory.mockResolvedValueOnce('D:/原目录')
+    api.SaveSettings.mockRejectedValueOnce(new Error('目录不可写'))
+    wrapper = mount(SettingsView, { global: { stubs: { UiIcon: true } } })
+    await flushPromises()
+    const input = wrapper.get('[aria-label="下载保存目录"]')
+    await input.setValue('D:/无效目录')
+    await input.trigger('blur')
+    await flushPromises()
+    expect(input.element.value).toBe('D:/无效目录')
+    expect(wrapper.get('[role="alert"]').text()).toContain('目录不可写。仍使用：D:/原目录')
+  })
 })
 
 describe('下载完成提示音设置', () => {
@@ -92,6 +185,21 @@ describe('下载完成提示音设置', () => {
     api.GetLogPath.mockResolvedValue('D:/logs/app.log')
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it('滑块拖动实时显示音量，只在确认时持久化', async () => {
+    await prepare()
+    const volume = wrapper.get('[aria-label="默认播放音量"]')
+    for (const value of [120, 130, 140]) {
+      volume.element.value = value
+      await volume.trigger('input')
+    }
+    expect(volume.attributes('aria-valuetext')).toBe('140%')
+    expect(localStorage.setItem).not.toHaveBeenCalled()
+    await volume.trigger('change')
+    await volume.trigger('blur')
+    expect(localStorage.setItem).toHaveBeenCalledOnce()
+    expect(JSON.parse(rawPrefs).defaultVolume).toBe(140)
+  })
 
   async function prepare() {
     wrapper = mount(SettingsView, { global: { stubs: { UiIcon: true } } })

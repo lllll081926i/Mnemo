@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { listShareImportReceipts, refreshShareImportReceipt, accountName, onEvent, copyText } from '../api'
 
 const props = defineProps({ accounts: { type: Array, default: () => [] }, latest: { type: Object, default: null } })
@@ -76,10 +76,27 @@ async function copyReceipt(receipt) {
   }
 }
 
-watch(() => props.accounts.map(account => [account.user_id, account.drive_id]), load, { immediate: true, deep: true })
 const offs = []
-onMounted(() => offs.push(onEvent('share:imports-changed', load)))
-onBeforeUnmount(() => { ++sequence; offs.forEach(off => off?.()) })
+let active = false
+function activate() {
+  if (active) return
+  active = true
+  load()
+  offs.push(onEvent('share:imports-changed', load))
+}
+function deactivate() {
+  active = false
+  ++sequence
+  loading.value = false
+  offs.splice(0).forEach(off => off?.())
+}
+watch(() => props.accounts.map(account => [account.user_id, account.drive_id]), () => {
+  if (active) load()
+}, { deep: true })
+onMounted(activate)
+onActivated(activate)
+onDeactivated(deactivate)
+onBeforeUnmount(deactivate)
 </script>
 
 <template>

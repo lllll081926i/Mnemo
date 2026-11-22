@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -51,5 +52,29 @@ describe('账号容量刷新', () => {
     await wrapper.vm.manualRefresh()
     await flushPromises()
     expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('刷新失败')
+  })
+})
+
+describe('容量弹窗键盘访问', () => {
+  it('焦点进入头像可打开弹窗，Escape 关闭并收回焦点', async () => {
+    vi.useFakeTimers()
+    try {
+      const account = { user_id: 'quota:keyboard', token: {}, usage: null }
+      api.refreshAccountSilently.mockResolvedValue(account)
+      wrapper = mount(AccountAvatar, { attachTo: document.body, props: { account }, global: { stubs: { UiIcon: true } } })
+      const root = wrapper.get('.acc-ava')
+      expect(root.attributes('tabindex')).toBe('0')
+      root.element.focus()
+      await vi.advanceTimersByTimeAsync(200)
+      expect(wrapper.vm.show).toBe(true)
+      expect(document.body.querySelector('.acc-pop')).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      await nextTick()
+      expect(wrapper.vm.show).toBe(false)
+      expect(document.activeElement).toBe(root.element)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

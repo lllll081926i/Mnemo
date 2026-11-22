@@ -26,18 +26,22 @@ function onClick() {
   <div
     class="tree-node"
     :class="{ active: selectedId === node.file_id }"
+    role="treeitem"
+    :aria-selected="selectedId === node.file_id"
+    :aria-expanded="isOpen"
+    :tabindex="selectedId === node.file_id ? 0 : -1"
     @click="onClick"
     @contextmenu.prevent="emit('ctx', $event, node)"
     @mouseenter="emit('enter', $event, node)"
     @mouseleave="emit('leave')"
   >
-    <span class="tn-arrow" :class="{ open: isOpen }" @click.stop="emit('toggle', node)">
+    <span class="tn-arrow" :class="{ open: isOpen }" aria-hidden="true" @click.stop="emit('toggle', node)">
       <UiIcon name="chevron-right" :size="12" />
     </span>
     <UiIcon name="folder" :size="14" /><span class="tn-label">{{ node.name }}</span>
   </div>
   <Transition name="tree-expand">
-    <div v-if="isOpen" class="tree-children">
+    <div v-if="isOpen" class="tree-children" role="group">
       <div class="tree-clip">
         <div v-if="children && !children.length" class="tree-empty-tip">空文件夹</div>
         <TreeNode

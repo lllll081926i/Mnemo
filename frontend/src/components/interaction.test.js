@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { h, nextTick } from 'vue'
 import Modal from './Modal.vue'
 import UiSelect from './UiSelect.vue'
 import ContextMenu from './ContextMenu.vue'
@@ -128,6 +128,7 @@ const api = vi.hoisted(() => ({
   remove: vi.fn(),
   restore: vi.fn(),
   migrateFiles: vi.fn().mockResolvedValue({ id: 'migration-test', status: 'pending' }),
+  PreviewMigration: vi.fn(),
   move: vi.fn().mockResolvedValue(['folder', 'file']),
   copy: vi.fn().mockResolvedValue(['folder', 'file']),
   DeleteDirectoryCache: vi.fn().mockResolvedValue(undefined),
@@ -194,6 +195,35 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
 })
 
+describe('迁移检查', () => {
+  it('目标空间改变后立即允许新检查，并忽略旧响应', async () => {
+    const account = { user_id: 'webdav:source', drive_id: 'source' }
+    const target = { user_id: 'webdav:target', drive_id: 'old-space' }
+    api.capsOf.mockReturnValue({ upload: true })
+    let finishOld, finishNew
+    api.PreviewMigration.mockReset()
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve }))
+    const wrapper = mountAttached(PanView, { props: { account, accounts: [account, target] } })
+    wrapper.vm.modalFile = [{ file_id: 'file', name: '资料.txt' }]
+    wrapper.vm.modal = 'migrate'
+    wrapper.vm.migrateTarget = target.user_id
+    await nextTick()
+    const oldCheck = wrapper.vm.checkMigration()
+    await wrapper.setProps({ accounts: [account, { ...target, drive_id: 'new-space' }] })
+    const newCheck = wrapper.vm.checkMigration()
+    expect(api.PreviewMigration).toHaveBeenLastCalledWith(account.user_id, account.drive_id, target.user_id, 'new-space', 'root', ['file'])
+    finishOld({ files: 9, conflicts: [] })
+    await oldCheck
+    expect(wrapper.vm.migrationPreview).toBeNull()
+    expect(wrapper.vm.migrationChecking).toBe(true)
+    finishNew({ files: 1, conflicts: [] })
+    await newCheck
+    expect(wrapper.vm.migrationPreview.files).toBe(1)
+    expect(wrapper.vm.migrationChecking).toBe(false)
+  })
+})
+
 describe('网盘工具栏状态', () => {
   const account = { user_id: 'pikpak_toolbar', drive_id: 'drive' }
   const file = { file_id: 'file', name: 'photo.jpg', isDir: false, size: 42 }
@@ -204,10 +234,12 @@ describe('网盘工具栏状态', () => {
     const wrapper = mountAttached(PanView, { props: { account } })
     await flushPromises()
     const toolbar = wrapper.get('.pan-file-toolbar')
+    const selection = toolbar.get('.sel-mgmt .dropbtn').element
     expect(toolbar.text()).toContain('新建')
     expect(toolbar.text()).toContain('上传')
     expect(toolbar.text()).not.toContain('快速筛选')
     await wrapper.get('.fileitem').trigger('click')
+    expect(toolbar.get('.sel-mgmt .dropbtn').element).toBe(selection)
     expect(toolbar.text()).toContain('已选 1 项')
     expect(toolbar.text()).toContain('下载')
     expect(toolbar.text()).toContain('更多')
@@ -219,6 +251,12 @@ describe('网盘工具栏状态', () => {
     ;[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.includes('取消选择')).click()
     await nextTick()
     expect(toolbar.text()).toContain('新建')
+    await wrapper.get('.fileitem').trigger('click')
+    const clear = toolbar.get('button[aria-label="取消选择"]')
+    clear.element.focus()
+    await clear.trigger('click')
+    expect(document.activeElement).toBe(selection)
+    expect(toolbar.text()).not.toContain('已选 1 项')
   })
 
   it('回收站选中时不显示普通文件操作', async () => {
@@ -249,9 +287,156 @@ describe('网盘工具栏状态', () => {
     expect(toolbar.find('[title="全盘搜索 (Ctrl/⌘+F)"]').exists()).toBe(false)
     expect(toolbar.findAll('.search-quick')).toHaveLength(1)
     await toolbar.get('.search-quick').setValue('photo')
-    await toolbar.get('.search-quick').trigger('keydown.enter')
+    await toolbar.get('.search-quick').trigger('keydown', { key: 'Enter', isComposing: true })
+    expect(api.search).not.toHaveBeenCalled()
+    await toolbar.get('.search-quick').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(api.search).toHaveBeenCalledWith(account.user_id, account.drive_id, 'photo')
+  })
+
+  it('搜索支持点击提交，并可从空搜索返回原目录', async () => {
+    api.capsOf.mockReturnValue({ search: true })
+    api.listDir.mockImplementation(async (_user, _drive, dir) => dir === 'root' ? [{ ...file, file_id: 'folder', name: '资料夹', isDir: true }] : [file])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.get('.fileitem').trigger('dblclick')
+    await flushPromises()
+    const toolbar = wrapper.get('.pan-file-toolbar')
+    const search = () => toolbar.get('[title="全盘搜索 (Ctrl/⌘+F)"]')
+    await search().trigger('click')
+    expect(toolbar.get('button[type="submit"]').element.disabled).toBe(true)
+    await toolbar.get('[aria-label="退出搜索"]').trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(search().element)
+    expect(wrapper.get('[aria-current="location"]').text()).toBe('资料夹')
+    await search().trigger('click')
+    await toolbar.get('.search-quick').setValue('photo')
+    await toolbar.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.search).toHaveBeenCalledWith(account.user_id, account.drive_id, 'photo')
+  })
+
+  it('编辑未提交的关键词不重建结果，刷新和历史记录只使用已提交关键词', async () => {
+    api.capsOf.mockReturnValue({ search: true })
+    api.listDir.mockResolvedValue([file])
+    api.search.mockResolvedValue([file])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await wrapper.get('[title="全盘搜索 (Ctrl/⌘+F)"]').trigger('click')
+    const input = wrapper.get('.search-quick')
+    const submit = () => input.trigger('keydown', { key: 'Enter' })
+    await input.setValue(' photo ')
+    await submit()
+    await flushPromises()
+    const viewport = wrapper.get('.file-list').element
+    viewport.scrollTop = 48
+    await wrapper.get('.file-list').trigger('scroll')
+    await input.setValue('jpg')
+    expect(wrapper.get('.file-list').element).toBe(viewport)
+    expect(viewport.scrollTop).toBe(48)
+    expect(wrapper.get('.fileitem mark').text()).toBe('photo')
+    await wrapper.get('[title="刷新 (F5)"]').trigger('click')
+    await flushPromises()
+    expect(api.search).toHaveBeenLastCalledWith(account.user_id, account.drive_id, 'photo')
+    await submit()
+    await flushPromises()
+    expect(wrapper.get('.fileitem mark').text()).toBe('jpg')
+    expect(wrapper.vm.navigateHistory(-1)).toBe(true)
+    await flushPromises()
+    expect(wrapper.get('.search-quick').element.value).toBe('photo')
+    expect(wrapper.get('.fileitem mark').text()).toBe('photo')
+    expect(api.search).toHaveBeenLastCalledWith(account.user_id, account.drive_id, 'photo')
+  })
+})
+
+describe('文件区布局与键盘可访问性', () => {
+  const account = { user_id: 'webdav:file-a11y', drive_id: 'drive' }
+  const files = [
+    { file_id: 'a', name: '设计规范.pdf', isDir: false, size: 42 },
+    { file_id: 'b', name: '产品演示.mp4', isDir: false, size: 128 },
+  ]
+
+  async function prepare() {
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValue(files)
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('列表提供固定列头、全选和可多选语义', async () => {
+    const wrapper = await prepare()
+    expect(wrapper.get('.file-list-head').text()).toContain('名称')
+    expect(wrapper.get('.file-list-head').text()).toContain('大小')
+    expect(wrapper.get('.file-list-head').text()).toContain('修改时间')
+    expect(wrapper.get('.file-list').attributes('role')).toBe('listbox')
+    expect(wrapper.get('.file-list').attributes('aria-multiselectable')).toBe('true')
+    expect(wrapper.findAll('.fileitem[role="option"]')).toHaveLength(2)
+    await wrapper.get('.file-list-head .btn-check').trigger('click')
+    expect(wrapper.findAll('.fileitem[aria-selected="true"]')).toHaveLength(2)
+    expect(wrapper.get('.file-list-head .btn-check').attributes('aria-label')).toBe('取消全选')
+  })
+
+  it('文件列表焦点支持方向键导航和空格选择', async () => {
+    const wrapper = await prepare()
+    const list = wrapper.get('.file-list')
+    list.element.focus()
+    await nextTick()
+    expect(list.attributes('aria-activedescendant')).toBe(wrapper.findAll('.fileitem')[0].attributes('id'))
+    await list.trigger('keydown', { key: 'ArrowDown', code: 'ArrowDown' })
+    expect(list.attributes('aria-activedescendant')).toBe(wrapper.findAll('.fileitem')[1].attributes('id'))
+    await list.trigger('keydown', { key: ' ', code: 'Space' })
+    expect(wrapper.findAll('.fileitem')[1].attributes('aria-selected')).toBe('true')
+  })
+
+  it('双栏选项 ID 独立，虚拟列表支持跳转首尾并只引用已渲染选项', async () => {
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValue(Array.from({ length: 1000 }, (_, index) => ({ file_id: `${index}`, name: `文件 ${index}`, isDir: false })))
+    const workspace = mountAttached({ render: () => h('div', [h(PanView, { account }), h(PanView, { account, keyboardActive: false, locationKey: 'right' })]) })
+    await flushPromises()
+    const [first, second] = workspace.findAllComponents(PanView)
+    const list = first.get('.file-list')
+    Object.defineProperty(list.element, 'clientHeight', { value: 480 })
+    expect(first.get('.fileitem').attributes('id')).not.toBe(second.get('.fileitem').attributes('id'))
+    list.element.focus()
+    await list.trigger('keydown', { key: 'End', code: 'End' })
+    const lastID = list.attributes('aria-activedescendant')
+    expect(document.getElementById(lastID)?.getAttribute('aria-posinset')).toBe('1000')
+    expect(document.getElementById(lastID)?.getAttribute('aria-setsize')).toBe('1000')
+    list.element.scrollTop = 0
+    await list.trigger('scroll')
+    expect(list.attributes('aria-activedescendant')).toBeUndefined()
+    await list.trigger('keydown', { key: 'Home', code: 'Home' })
+    expect(document.getElementById(list.attributes('aria-activedescendant'))?.getAttribute('aria-posinset')).toBe('1')
+    await list.trigger('keydown', { key: 'PageDown', code: 'PageDown' })
+    expect(document.getElementById(list.attributes('aria-activedescendant'))?.getAttribute('aria-posinset')).toBe('11')
+    await list.trigger('keydown', { key: 'PageDown', code: 'PageDown', shiftKey: true })
+    expect(first.text()).toContain('已选 11 项')
+    await list.trigger('keydown', { key: 'ArrowUp', code: 'ArrowUp', shiftKey: true })
+    expect(first.text()).toContain('已选 10 项')
+    await list.trigger('keydown', { key: 'Home', code: 'Home', shiftKey: true })
+    expect(first.text()).toContain('已选 11 项')
+    const slice = vi.spyOn(first.vm.listShown, 'slice')
+    try {
+      await list.trigger('keydown', { key: 'End', code: 'End', shiftKey: true })
+      expect(first.text()).toContain('已选 990 项')
+      expect(slice).not.toHaveBeenCalledWith(10, 1000)
+      await first.get('[title="更多"]').trigger('click')
+      expect(slice).toHaveBeenCalledWith(10, 1000)
+    } finally {
+      slice.mockRestore()
+    }
+  })
+
+  it('侧栏分隔条支持键盘调整并恢复默认宽度', async () => {
+    const wrapper = await prepare()
+    const separator = wrapper.get('.pan-resizer')
+    const initial = Number(separator.attributes('aria-valuenow'))
+    await separator.trigger('keydown', { key: 'ArrowRight' })
+    expect(Number(separator.attributes('aria-valuenow'))).toBe(initial + 12)
+    await separator.trigger('keydown', { key: 'Home' })
+    expect(separator.attributes('aria-valuenow')).toBe('220')
+    expect(wrapper.get('.pan-left').attributes('style')).toContain('width: 220px')
   })
 })
 
@@ -275,6 +460,14 @@ describe('网盘文件选择与目录切换', () => {
     expect(wrapper.findAll('.file-column')).toHaveLength(2)
     expect(wrapper.findAll('.file-column')[0].text()).toContain('项目2')
     expect(wrapper.findAll('.file-column')[1].text()).toContain('A.txt')
+    const ancestor = wrapper.vm.browserColumns[0]
+    wrapper.vm.files = Array.from({ length: 1000 }, (_, index) => ({ file_id: `entry-${index}`, name: `文件-${String(index).padStart(4, '0')}.txt` }))
+    wrapper.vm.focusId = 'entry-999'
+    await flushPromises()
+    expect(wrapper.vm.browserColumns[0]).toBe(ancestor)
+    const child = wrapper.findAll('.file-column')[1]
+    expect(child.get('.column-file.focus').text()).toContain('文件-0999.txt')
+    expect(child.findAll('.column-file').length).toBeLessThan(100)
     await wrapper.vm.clearCache()
     await flushPromises()
     expect(wrapper.findAll('.file-column')[0].text()).toContain('项目2')
@@ -284,6 +477,42 @@ describe('网盘文件选择与目录切换', () => {
     expect(wrapper.findAll('.file-column')).toHaveLength(1)
     expect(wrapper.text()).toContain('新账号.txt')
     expect(wrapper.find('.column-file').text()).not.toContain('项目2')
+  })
+
+  it('万条文件刷新结果不变时复用排序和行模型，元数据变化时更新对应行', async () => {
+    const snapshot = Array.from({ length: 10000 }, (_, index) => ({ file_id: `entry-${index}`, name: `文件-${index}.txt`, isDir: false, size: index }))
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockImplementation(async () => snapshot.map(file => ({ ...file })))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    const ordered = wrapper.vm.displayFiles
+    const rows = wrapper.vm.listRenderRows
+    const formatCalls = api.formatBytes.mock.calls.length
+    await wrapper.vm.refreshFromToolbar()
+    await flushPromises()
+    expect(wrapper.vm.displayFiles).toBe(ordered)
+    expect(wrapper.vm.listRenderRows).toBe(rows)
+    expect(api.formatBytes.mock.calls.length).toBe(formatCalls)
+    snapshot[0].size = 42
+    await wrapper.vm.refreshFromToolbar()
+    await flushPromises()
+    expect(wrapper.vm.displayFiles[0].size).toBe(42)
+    expect(wrapper.vm.listRenderRows.rows[0].sizeText).toBe('42 B')
+    expect(wrapper.vm.listRenderRows.rows[1]).toBe(rows.rows[1])
+
+    const beforeInsert = wrapper.vm.listRenderRows.rows[1]
+    snapshot.unshift({ file_id: 'folder', name: '新目录', isDir: true })
+    await wrapper.vm.refreshFromToolbar()
+    await flushPromises()
+    expect(wrapper.vm.listRenderRows.rows[0].f.file_id).toBe('folder')
+    expect(wrapper.vm.listRenderRows.rows[2]).toBe(beforeInsert)
+
+    snapshot.shift()
+    snapshot.reverse()
+    await wrapper.vm.refreshFromToolbar()
+    await flushPromises()
+    expect(wrapper.vm.displayFiles).toHaveLength(10000)
+    expect(wrapper.vm.listRenderRows.rows[1]).toBe(beforeInsert)
   })
 
   it('新目录尚未返回时隐藏旧文件，保留加载占位', async () => {
@@ -597,7 +826,7 @@ describe('传输页面任务提交', () => {
     document.querySelector('.modal-actions .btn.primary').click()
     await flushPromises()
     expect(api.DownloadURL).toHaveBeenCalledTimes(2)
-    expect(wrapper.emitted('toast')).toContainEqual(['已添加 1/2 个下载任务；失败：Error: 服务不可用', 'error'])
+    expect(document.querySelector('.modal [role="alert"]').textContent).toContain('已添加 1/2 个下载任务；失败：Error: 服务不可用')
     expect(document.querySelector('.modal textarea').value).toBe('https://example.com/bad')
   })
 
@@ -899,7 +1128,7 @@ describe('主窗口顶栏', () => {
     expect(wrapper.find('[data-test="global-search"]').exists()).toBe(true)
     vi.unstubAllGlobals()
   })
-  it('移除重复入口但保留搜索、设置与快捷命令', async () => {
+  it('顶栏保留搜索、快捷命令与设置入口，且都有可见按钮', async () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     api.listAccounts.mockResolvedValue([])
     api.listProviders.mockResolvedValue([])
@@ -908,7 +1137,7 @@ describe('主窗口顶栏', () => {
       const wrapper = mountAttached(App, { global: { stubs: { PanView: true, AccountAvatar: true } } })
       await flushPromises()
       const topbar = wrapper.get('.topbar')
-      expect(topbar.find('[title="快捷命令面板 (Ctrl+P)"]').exists()).toBe(false)
+      expect(topbar.find('[title="快捷命令面板 (Ctrl+P)"]').exists()).toBe(true)
       expect(topbar.find('[title="切换到深色"]').exists()).toBe(false)
       expect(topbar.find('[title="全盘搜索"]').exists()).toBe(true)
       expect(topbar.find('[title="设置 (Alt+5)"]').exists()).toBe(true)
@@ -1250,6 +1479,18 @@ describe('关键交互组件', () => {
     expect(wrapper.text()).toContain('总空间不限量')
     expect(wrapper.find('.rail-quota').exists()).toBe(false)
   })
+  it('已确认登录失效不被目录读取成功覆盖，重新授权后才清除', async () => {
+    const { accountHealth, recordAccountHealth } = await import('../workspace')
+    const account = { user_id: 'webdav:rail-expired', auth_state: 'reauth_required' }
+    const wrapper = mountAttached(AccountRail, { props: { accounts: [account], current: account } })
+    expect(wrapper.get('.rail-status').text()).toBe('登录失效')
+    recordAccountHealth(account.user_id)
+    await nextTick()
+    expect(wrapper.get('.rail-status').text()).toBe('登录失效')
+    await wrapper.setProps({ accounts: [{ ...account, auth_state: '' }] })
+    expect(wrapper.find('.rail-status').exists()).toBe(false)
+    delete accountHealth[account.user_id]
+  })
   it('账号栏收起时仍为当前账号保留明确选中标记', () => {
     const current = { user_id: 'pikpak:current' }
     const wrapper = mountAttached(AccountRail, {
@@ -1266,11 +1507,30 @@ describe('关键交互组件', () => {
     const wrapper = mountAttached(AccountRail, { props: { accounts, current: accounts[0] } })
     await wrapper.setProps({ current: accounts[1] })
     const items = wrapper.findAll('.rail-item')
-    expect(items[1].classes()).toContain('active-enter-down')
+    expect(items[1].attributes('aria-current')).toBe('true')
     expect(items[1].attributes('data-switch-direction')).toBe('down')
+    expect(items[0].attributes('aria-current')).toBeUndefined()
     await wrapper.setProps({ current: accounts[0] })
-    expect(items[0].classes()).toContain('active-enter-up')
+    expect(items[0].attributes('aria-current')).toBe('true')
     expect(items[0].attributes('data-switch-direction')).toBe('up')
+    expect(items[1].attributes('aria-current')).toBeUndefined()
+  })
+  it('快速掠过不展开，收起延迟内返回不会闪烁', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountAttached(AccountRail, { props: { accounts: [{ user_id: 'webdav:one' }] } })
+    const rail = wrapper.get('.account-rail')
+    await rail.trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(80)
+    await rail.trigger('mouseleave')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(rail.classes()).not.toContain('expanded')
+    await rail.trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(250)
+    await rail.trigger('mouseleave')
+    await vi.advanceTimersByTimeAsync(70)
+    await rail.trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(180)
+    expect(rail.classes()).toContain('expanded')
   })
   it('展开账号栏后仍可正常切换账号', async () => {
     vi.useFakeTimers()
@@ -1280,6 +1540,26 @@ describe('关键交互组件', () => {
     await vi.advanceTimersByTimeAsync(250)
     await wrapper.findAll('.rail-item')[1].trigger('click')
     expect(wrapper.emitted('select')?.[0]).toEqual([accounts[1]])
+  })
+  it('收起时仅当前账号保留选中样式，删除账号后不残留', async () => {
+    const accounts = [{ user_id: 'webdav:one' }, { user_id: 'webdav:two' }]
+    const wrapper = mountAttached(AccountRail, { props: { accounts, current: accounts[0] } })
+    expect(wrapper.findAll('.rail-item.active')).toHaveLength(1)
+    await wrapper.setProps({ current: accounts[1] })
+    expect(wrapper.findAll('.rail-item')[1].classes()).toContain('active')
+    await wrapper.setProps({ accounts: [accounts[0]], current: null })
+    expect(wrapper.find('.rail-item.active, .rail-active-indicator.ready').exists()).toBe(false)
+  })
+  it('键盘导航保留收起状态，可以移到添加按钮', async () => {
+    vi.useFakeTimers()
+    const accounts = [{ user_id: 'webdav:keyboard' }]
+    const wrapper = mountAttached(AccountRail, { props: { accounts } })
+    await wrapper.get('.rail-item').trigger('keydown', { key: 'ArrowDown' })
+    expect(wrapper.get('.account-rail').classes()).not.toContain('expanded')
+    expect(document.activeElement).toBe(wrapper.get('.rail-add').element)
+    document.activeElement.blur()
+    await vi.advanceTimersByTimeAsync(250)
+    expect(wrapper.get('.account-rail').classes()).not.toContain('expanded')
   })
   it('系统默认下载目录显示实际路径，可直接打开并用于文件夹选择器', async () => {
     api.GetSettings.mockResolvedValue({ downloadDir: '' })
@@ -1325,6 +1605,26 @@ describe('关键交互组件', () => {
     failSave(new Error('保存失败'))
     await resetting
     expect(wrapper.vm.settings.downloadDir).toBe('D:/新目录')
+  })
+  it('错误的下载目录不会阻止其他设置保存，限速也不会因保存被取整', async () => {
+    api.GetSettings.mockResolvedValue({ downloadDir: 'D:/原目录', maxDownloadSpeed: 1537, maxUploadSpeed: 513 })
+    api.GetDownloadDirectory.mockResolvedValue('D:/原目录')
+    api.SaveSettings.mockReset().mockRejectedValueOnce(new Error('目录不可用')).mockResolvedValue(undefined)
+    const wrapper = mountAttached(SettingsView)
+    await flushPromises()
+    const directory = wrapper.get('[aria-label="下载保存目录"]')
+    await directory.setValue('Z:/无效目录')
+    await directory.trigger('blur')
+    await flushPromises()
+    expect(api.SaveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ downloadDir: 'Z:/无效目录' }))
+    const toggle = wrapper.get('[aria-label="最小化到托盘"]')
+    const next = toggle.attributes('aria-checked') !== 'true'
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(api.SaveSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      downloadDir: 'D:/原目录', closeToTray: next, maxDownloadSpeed: 1537, maxUploadSpeed: 513,
+    }))
+    expect(directory.element.value).toBe('Z:/无效目录')
   })
 
   it('设置页合并相关分类，并使用可访问的开关按钮', async () => {
@@ -1384,6 +1684,59 @@ describe('关键交互组件', () => {
     expect(api.listDir).toHaveBeenCalledTimes(7)
   })
 
+  it('切换目录后放弃仍在等本地缓存的预取，并立即给新目录让出名额', async () => {
+    vi.useFakeTimers()
+    const account = { user_id: 'pan189:prefetch-cache', drive_id: 'drive' }
+    const folder = id => ({ file_id: id, name: id, isDir: true })
+    const pending = []
+    api.GetDirectoryCache.mockImplementation(key => /\|(old-a|old-b)\|$/.test(key)
+      ? new Promise(resolve => pending.push(resolve)) : Promise.resolve(null))
+    api.listDir.mockImplementation(async (_user, _drive, id) => ({ root: [folder('old-a'), folder('old-b'), folder('target')], target: [folder('new-child')] })[id] || [])
+    try {
+      const wrapper = mountAttached(PanView, { props: { account } })
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(181)
+      expect(pending).toHaveLength(2)
+      await wrapper.findAll('.fileitem').find(row => row.text().includes('target')).trigger('dblclick')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(181)
+      expect(api.listDir.mock.calls.map(([, , id]) => id)).toEqual(['root', 'target', 'new-child'])
+      for (const resolve of pending) resolve(null)
+      await flushPromises()
+      expect(api.listDir.mock.calls.map(([, , id]) => id)).toEqual(['root', 'target', 'new-child'])
+    } finally {
+      api.GetDirectoryCache.mockResolvedValue(null)
+    }
+  })
+
+  it('切换目录不突破远程预取并发上限，不重试或写入过期预取', async () => {
+    vi.useFakeTimers()
+    const account = { user_id: 'pan189:prefetch-remote', drive_id: 'drive' }
+    const folder = id => ({ file_id: id, name: id, isDir: true })
+    const pending = new Map()
+    api.listDir.mockImplementation(async (_user, _drive, id) => {
+      if (id === 'root') return [folder('old-a'), folder('old-b'), folder('target')]
+      if (id === 'target') return [folder('new-child')]
+      if (id.startsWith('old-')) return new Promise((resolve, reject) => pending.set(id, { resolve, reject }))
+      return []
+    })
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(181)
+    expect([...pending.keys()]).toEqual(['old-a', 'old-b'])
+    await wrapper.findAll('.fileitem').find(row => row.text().includes('target')).trigger('dblclick')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(181)
+    expect(api.listDir).not.toHaveBeenCalledWith(account.user_id, 'drive', 'new-child')
+    pending.get('old-a').reject(new Error('后台请求失败'))
+    await flushPromises()
+    expect(api.listDir).toHaveBeenCalledWith(account.user_id, 'drive', 'new-child')
+    pending.get('old-b').resolve([folder('stale-child')])
+    await vi.advanceTimersByTimeAsync(1001)
+    expect(api.listDir.mock.calls.map(([, , id]) => id)).toEqual(['root', 'old-a', 'old-b', 'target', 'new-child'])
+    expect(api.SaveDirectoryCache.mock.calls.some(([, entries]) => entries.some(entry => entry.file_id === 'stale-child'))).toBe(false)
+  })
+
   it('快速切换账号丢弃旧响应，列表网格切换和空目录更新不会破坏 DOM', async () => {
     const accounts = [{ user_id: 'pan189:slow', drive_id: 'slow' }, { user_id: 'webdav:fast', drive_id: 'fast' }]
     let slow
@@ -1424,6 +1777,51 @@ describe('关键交互组件', () => {
     await wrapper.get('[title="网格视图"]').trigger('click')
     expect(wrapper.findAll('.griditem').length).toBeLessThan(100)
     expect(api.formatTimeParts.mock.calls.length).toBeLessThan(200)
+  })
+  it.each([
+    { view: '列表', item: '.fileitem', pitch: 48 },
+    { view: '网格', item: '.griditem', pitch: 168 },
+  ])('$view 滚动只格式化新进入虚拟窗口的文件', async ({ view, item, pitch }) => {
+    const account = { user_id: 'webdav:scroll', drive_id: 'scroll' }
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValue(Array.from({ length: 1000 }, (_, index) => ({ file_id: `scroll-${index}`, name: `文件 ${index}`, size: index })))
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    if (view === '网格') await wrapper.get('[title="网格视图"]').trigger('click')
+    const list = wrapper.get('.file-list')
+    list.element.scrollTop = 1
+    await list.trigger('scroll')
+    api.formatTimeParts.mockClear()
+    for (const top of [2, 8, 15]) {
+      list.element.scrollTop = top
+      await list.trigger('scroll')
+    }
+    expect(api.formatTimeParts).not.toHaveBeenCalled()
+    const previousIds = new Set(wrapper.findAll(item).map(row => row.attributes('aria-posinset')))
+    list.element.scrollTop = pitch + 1
+    await list.trigger('scroll')
+    const entering = wrapper.findAll(item).filter(row => !previousIds.has(row.attributes('aria-posinset'))).length
+    expect(entering).toBeGreaterThan(0)
+    expect(api.formatTimeParts).toHaveBeenCalledTimes(entering)
+    api.formatTimeParts.mockClear()
+    list.element.scrollTop = 9600
+    await list.trigger('scroll')
+    expect(api.formatTimeParts).toHaveBeenCalled()
+    expect(wrapper.findAll(item).length).toBeLessThan(100)
+  })
+
+  it('同一文件刷新后使用新的名称和大小', async () => {
+    const account = { user_id: 'webdav:row-update', drive_id: 'drive' }
+    const file = { file_id: 'same-id', name: '旧名称.txt', isDir: false, size: 5 }
+    api.capsOf.mockReturnValue({})
+    api.listDir.mockResolvedValueOnce([file]).mockResolvedValueOnce([{ ...file, name: '新名称.txt', size: 12 }])
+    const wrapper = mountAttached(PanView, { props: { account } })
+    await flushPromises()
+    expect(wrapper.get('.fileitem').text()).toContain('旧名称.txt')
+    await wrapper.get('[title="刷新 (F5)"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.fileitem').text()).toContain('新名称.txt')
+    expect(wrapper.get('.fileitem').text()).toContain('12 B')
   })
 
   it('目录缓存先展示再后台更新，写缓存失败不影响目录显示', async () => {
@@ -1751,7 +2149,7 @@ describe('关键交互组件', () => {
     api.openKindOf.mockReturnValue('text')
     api.PinFileSnapshot.mockResolvedValue(undefined)
     api.PreviewURL.mockResolvedValue('http://127.0.0.1/document')
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new TextEncoder().encode('```html\n<img src=x onerror=alert(1)>\n```').buffer }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('```html\n<img src=x onerror=alert(1)>\n```')))
     try {
       mountAttached(PreviewModal, { props: { file: { file_id: 'md', name: 'readme.md' }, account: { user_id: 'webdav:one', drive_id: 'drive' } } })
       await flushPromises()
@@ -2099,17 +2497,21 @@ describe('关键交互组件', () => {
     vi.spyOn(api, 'openKindOf').mockReturnValue('text')
     api.PreviewURL.mockImplementation(async (_user, _drive, id) => `https://example.test/${id}`)
     const pending = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation((url, options) => Promise.resolve({
-      ok: true,
-      arrayBuffer: () => new Promise(resolve => pending.push({ url, options, resolve })),
-    }))
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url, options) => Promise.resolve(new Response(new ReadableStream({
+      start(controller) {
+        pending.push({ url, options, resolve(content) {
+          controller.enqueue(new TextEncoder().encode(content))
+          controller.close()
+        } })
+      },
+    }))))
     const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: { file_id: 'old', name: 'old.txt' } } })
     await flushPromises()
     await wrapper.setProps({ file: { file_id: 'new', name: 'new.txt' } })
     await flushPromises()
-    pending[1].resolve(new TextEncoder().encode('new content').buffer)
+    pending[1].resolve('new content')
     await flushPromises()
-    pending[0].resolve(new TextEncoder().encode('old content').buffer)
+    pending[0].resolve('old content')
     await flushPromises()
     expect(wrapper.vm.text).toBe('new content')
     expect(pending[0].options.signal.aborted).toBe(true)
@@ -2120,7 +2522,7 @@ describe('关键交互组件', () => {
     vi.spyOn(api, 'openKindOf').mockReturnValue('text')
     api.PinFileSnapshot.mockResolvedValue(undefined)
     api.PreviewURL.mockResolvedValue('http://127.0.0.1/document')
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, arrayBuffer: async () => new TextEncoder().encode('hello').buffer })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('hello'))
     const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: { file_id: 'text', name: 'test.txt' } } })
     await flushPromises()
     const toolbar = document.querySelector('.pv-toolbar')
@@ -2225,12 +2627,166 @@ describe('关键交互组件', () => {
       await flushPromises()
       document.querySelector('.pv-edge.left').click()
       await flushPromises()
+      const layers = [...document.querySelectorAll('.pv-img-layer')]
+      expect(layers).toHaveLength(2)
+      expect(layers[0].getAttribute('aria-hidden')).toBe('true')
+      expect(layers[0].querySelector('img').alt).toBe('second.png')
+      layers[0].dispatchEvent(new Event('animationend', { bubbles: true }))
+      await nextTick()
+      expect(document.querySelectorAll('.pv-img-layer')).toHaveLength(2)
+      layers[1].dispatchEvent(new Event('animationend', { bubbles: true }))
+      await nextTick()
+      expect(document.querySelectorAll('.pv-img-layer')).toHaveLength(1)
       expect(api.cachedPreviewImageURL).toHaveBeenCalledTimes(2)
       expect(api.PinFileSnapshot).toHaveBeenCalledTimes(2)
       expect(document.querySelector('.pv-topbar-name').textContent).toBe('first.png')
     } finally {
       vi.stubGlobal('Image', originalImage)
     }
+  })
+
+  it('超大图片不参与后台预载，用户切换到该图后仍会加载', async () => {
+    const originalImage = globalThis.Image
+    vi.stubGlobal('Image', class {
+      naturalWidth = 640
+      naturalHeight = 480
+      set src(value) { queueMicrotask(() => this.onload?.()) }
+    })
+    const files = [
+      { file_id: 'small', name: 'small.png', size: 100 },
+      { file_id: 'large', name: 'large.png', size: 65 * 1024 * 1024 },
+      { file_id: 'wide', name: 'wide.png', size: 100, media_width: 12000, media_height: 8000 },
+    ]
+    api.cachedPreviewImageURL.mockImplementation(async (_user, _drive, file) => `http://127.0.0.1/cache/${file.file_id}`)
+    api.PreviewURL.mockResolvedValue('http://127.0.0.1/stream/large')
+    try {
+      mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: files[0], fileList: files } })
+      await flushPromises()
+      expect(api.PinFileSnapshot.mock.calls.map(([, , file]) => file.file_id)).toEqual(['small'])
+      expect(api.PreviewURL).not.toHaveBeenCalled()
+      document.querySelector('.pv-edge.right').click()
+      await flushPromises()
+      expect(api.PreviewURL).toHaveBeenCalledExactlyOnceWith('test', 'test', 'large')
+      expect(document.querySelector('.pv-topbar-name').textContent).toBe('large.png')
+    } finally {
+      vi.stubGlobal('Image', originalImage)
+    }
+  })
+
+  it('图片切换未成功时保留当前画面的标题和序号，仍可前进到下一张', async () => {
+    const originalImage = globalThis.Image
+    vi.stubGlobal('Image', class {
+      naturalWidth = 640
+      naturalHeight = 480
+      set src(value) { queueMicrotask(() => this.onload?.()) }
+    })
+    const files = ['first', 'broken', 'third'].map(file_id => ({ file_id, name: `${file_id}.png`, size: 100 }))
+    let failImage
+    api.cachedPreviewImageURL.mockImplementation(async (_user, _drive, file) => {
+      if (file.file_id === 'broken') return new Promise((resolve, reject) => { failImage = reject })
+      return `http://127.0.0.1/cache/${file.file_id}`
+    })
+    api.PreviewURL.mockRejectedValue(new Error('图片不可用'))
+    try {
+      const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: files[0], fileList: files } })
+      await flushPromises()
+      document.querySelector('.pv-edge.right').click()
+      await flushPromises()
+      expect(document.querySelector('.pv-topbar-name').textContent).toBe('first.png')
+      expect(document.querySelector('.pv-ctl-counter').textContent).toBe('1 / 3')
+      failImage(new Error('图片不可用'))
+      await flushPromises()
+      expect(wrapper.emitted('toast')).toContainEqual(['无法加载「broken.png」：图片不可用', 'error'])
+      expect(document.querySelector('.pv-topbar-name').textContent).toBe('first.png')
+      expect(document.querySelector('.pv-ctl-counter').textContent).toBe('1 / 3')
+      document.querySelector('.pv-edge.right').click()
+      await flushPromises()
+      expect(document.querySelector('.pv-topbar-name').textContent).toBe('third.png')
+      expect(document.querySelector('.pv-ctl-counter').textContent).toBe('3 / 3')
+    } finally {
+      vi.stubGlobal('Image', originalImage)
+    }
+  })
+
+  it('图片预览合并同帧输入，并在界面缩放后保持鼠标锚点和拖动距离', async () => {
+    const originalImage = globalThis.Image
+    const frames = new Map()
+    let frameId = 0
+    vi.stubGlobal('Image', class {
+      naturalWidth = 640
+      naturalHeight = 480
+      set src(value) { queueMicrotask(() => this.onload?.()) }
+    })
+    api.cachedPreviewImageURL.mockResolvedValue('http://127.0.0.1/cache/image')
+    const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: { file_id: 'image', name: 'image.png', size: 100 } } })
+    const pointer = (target, type, clientX, pointerId = 1) => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX, clientY: 300 })
+      Object.defineProperty(event, 'pointerId', { value: pointerId })
+      target.dispatchEvent(event)
+    }
+    try {
+      await flushPromises()
+      const stage = document.querySelector('.pv-stage')
+      const measure = vi.spyOn(stage, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 900, height: 714 })
+      Object.defineProperty(stage, 'currentCSSZoom', { value: 1.5 })
+      vi.stubGlobal('requestAnimationFrame', callback => { frames.set(++frameId, callback); return frameId })
+      vi.stubGlobal('cancelAnimationFrame', id => frames.delete(id))
+      const tick = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback()) }
+      const wheel = () => stage.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -1, clientX: 600, clientY: 300 }))
+      wrapper.vm.rotateBy(90)
+      wheel()
+      wheel()
+      expect(frames.size).toBe(1)
+      expect(measure).not.toHaveBeenCalled()
+      tick()
+      expect(measure).toHaveBeenCalledOnce()
+      const wheelOffset = 100 * (1 - Math.exp(2 * 0.00165))
+      expect(wrapper.vm.pos.x).toBeCloseTo(wheelOffset)
+      expect(wrapper.vm.pos.y).toBe(0)
+      pointer(stage, 'pointerdown', 600)
+      pointer(window, 'pointermove', 615)
+      pointer(window, 'pointermove', 630)
+      pointer(window, 'pointermove', 700, 2)
+      expect(frames.size).toBe(1)
+      tick()
+      expect(wrapper.vm.pos.x).toBeCloseTo(wheelOffset + 20)
+      pointer(window, 'pointermove', 645)
+      pointer(window, 'pointerup', 645)
+      expect(frames.size).toBe(0)
+      expect(wrapper.vm.pos.x).toBeCloseTo(wheelOffset + 30)
+      pointer(stage, 'pointerdown', 645)
+      pointer(window, 'pointermove', 700)
+      pointer(window, 'pointercancel', 700)
+      expect(wrapper.vm.isDragging).toBe(false)
+      expect(frames.size).toBe(0)
+      expect(wrapper.vm.pos.x).toBeCloseTo(wheelOffset + 30)
+    } finally {
+      vi.stubGlobal('Image', originalImage)
+    }
+  })
+
+  it('关闭图片预览时停止正在解码的图片，不回退到新的网络地址', async () => {
+    const originalImage = globalThis.Image
+    let decoding
+    const removeSource = vi.fn()
+    const decode = vi.fn(() => new Promise(resolve => { decoding = resolve }))
+    vi.stubGlobal('Image', class {
+      decode = decode
+      removeAttribute = removeSource
+      set src(value) { queueMicrotask(() => this.onload?.()) }
+    })
+    api.PinFileSnapshot.mockResolvedValue(undefined)
+    api.cachedPreviewImageURL.mockResolvedValue('http://127.0.0.1/local/pending')
+    try {
+      const wrapper = mountAttached(PreviewModal, { props: { account: { user_id: 'test', drive_id: 'test' }, file: { file_id: 'image', name: 'image.png', size: 100 } } })
+      await flushPromises()
+      expect(decode).toHaveBeenCalledOnce()
+      wrapper.unmount()
+      expect(removeSource).toHaveBeenCalledExactlyOnceWith('src')
+      decoding()
+      await flushPromises()
+      expect(api.PreviewURL).not.toHaveBeenCalled()
+    } finally { vi.stubGlobal('Image', originalImage) }
   })
 
   it('图片磁盘缓存损坏时回退到原始预览地址', async () => {
@@ -2299,6 +2855,7 @@ describe('关键交互组件', () => {
     await wrapper.get('.rail-add').trigger('keydown', { key: 'ArrowUp' })
     expect(document.activeElement).toBe(account.element)
   })
+
 
   it('鼠标仍在账号侧栏内时焦点移出不会收起侧栏', async () => {
     vi.useFakeTimers()
@@ -2380,9 +2937,16 @@ describe('关键交互组件', () => {
     for (let step = 0; step < 8; step++) await flushFrame()
     expect(wrapper.find('.rail-item.bump-up').exists()).toBe(true)
     expect(wrapper.findAll('.rail-list .rail-item').map(item => item.attributes('aria-label'))).toEqual(['pikpak · pikpak:two', 'pikpak · pikpak:one'])
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })))
+    const { promise: finished, resolve: finish } = Promise.withResolvers()
+    wrapper.get('.rail-ghost').element.animate = vi.fn(() => ({ finished, cancel: finish }))
     window.dispatchEvent(new MouseEvent('pointerup', { clientX: 10, clientY: 80 }))
     expect(save).toHaveBeenCalledWith('accountOrder', ['pikpak:two', 'pikpak:one'])
     expect(wrapper.find('.rail-ghost.dropping').exists()).toBe(true)
+    finish()
+    await finished
+    await nextTick()
+    expect(wrapper.find('.rail-ghost').exists()).toBe(false)
   })
 
   it.each(['首帧之前松手', '动画尚未收敛', '松手位置更新'])('账号拖拽%s时立即保存最终位置，重新挂载后保留顺序', async (mode) => {
@@ -2473,7 +3037,6 @@ describe('关键交互组件', () => {
     await nextTick()
     expect(wrapper.emitted('toast')?.[0]?.[0]).toContain('保存失败')
     expect(wrapper.find('.rail-ghost').exists()).toBe(false)
-    expect(wrapper.get('.account-rail').classes()).not.toContain('rail-frozen')
     expect(document.body.classList.contains('rail-drag-active')).toBe(false)
     expect(wrapper.find('.rail-item.dragging').exists()).toBe(false)
     expect(localStorage.getItem('mnemo.prefs')).toBeNull()
@@ -2519,6 +3082,24 @@ describe('关键交互组件', () => {
     expect(document.activeElement.textContent).toContain('刷新')
   })
 
+  it('菜单内容刷新时保留原操作焦点，原操作禁用时移到相邻项', async () => {
+    const open = { label: '打开', action: 'open' }
+    const rename = { label: '重命名', action: 'rename' }
+    const detail = { label: '属性', action: 'detail' }
+    const wrapper = mountAttached(ContextMenu, { props: { x: 10, y: 10, items: [open, rename, detail] } })
+    await flushPromises()
+    document.querySelectorAll('.ctx-item')[1].focus()
+    await wrapper.setProps({ items: [open, detail, { ...rename, label: '修改名称' }] })
+    await flushPromises()
+    expect(document.activeElement.textContent).toContain('修改名称')
+    await wrapper.setProps({ items: [open, detail, { ...rename, disabled: true }] })
+    await flushPromises()
+    expect(document.activeElement.textContent).toContain('属性')
+    await wrapper.setProps({ x: 20, y: 20, items: [open, rename, detail] })
+    await flushPromises()
+    expect(document.activeElement.textContent).toContain('打开')
+  })
+
   it('菜单外部滚动关闭，内部滚动不关闭，Escape 恢复触发位置焦点', async () => {
     const opener = document.createElement('button')
     document.body.appendChild(opener)
@@ -2537,6 +3118,26 @@ describe('关键交互组件', () => {
     await flushPromises()
     window.dispatchEvent(new Event('scroll'))
     expect(second.emitted('close')).toHaveLength(1)
+  })
+
+  it('右键菜单忽略打开前排队的滚动，滚动位置真的变化后才关闭', async () => {
+    const viewport = document.createElement('div')
+    const opener = document.createElement('button')
+    viewport.appendChild(opener)
+    document.body.appendChild(viewport)
+    try {
+      opener.focus()
+      viewport.scrollTop = 5
+      const wrapper = mountAttached(ContextMenu, { props: { x: 10, y: 10, items: [{ label: '属性' }] } })
+      await flushPromises()
+      viewport.dispatchEvent(new Event('scroll'))
+      expect(wrapper.emitted('close')).toBeUndefined()
+      viewport.scrollTop = 25
+      viewport.dispatchEvent(new Event('scroll'))
+      expect(wrapper.emitted('close')).toHaveLength(1)
+    } finally {
+      viewport.remove()
+    }
   })
 
   it('PikPak 独立窗口使用原会话，提前到达的最终 token 只自动登录一次', async () => {

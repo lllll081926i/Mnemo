@@ -10,6 +10,8 @@ const loading = ref(true)
 const error = ref('')
 const pages = ref(0)
 const pageNumber = ref(1)
+const pageInput = ref('')
+const editingPage = ref(false)
 const zoom = ref(1)
 const fitWidth = ref(true)
 const passwordRequired = ref(false)
@@ -21,9 +23,39 @@ let viewerController = null
 let openSequence = 0
 let disposed = false
 let stageObserver = null
-function fitOnResize() { if (fitWidth.value && pages.value && viewer) viewer.currentScaleValue = 'page-width' }
+let fitFrame = null
+let fittedWidth = null
+
+function cancelFit() {
+  if (fitFrame !== null) cancelAnimationFrame(fitFrame)
+  fitFrame = null
+}
+
+function applyFit() {
+  const width = stage.value?.clientWidth
+  if (!fitWidth.value || !pages.value || !viewer || width === undefined || fittedWidth === width) return
+  fittedWidth = width
+  viewer.currentScaleValue = 'page-width'
+}
+
+function fitOnResize() {
+  if (!fitWidth.value || !pages.value || !viewer || fitFrame !== null) return
+  fitFrame = requestAnimationFrame(() => {
+    fitFrame = null
+    applyFit()
+  })
+}
+
+function fitPageWidth() {
+  cancelFit()
+  fitWidth.value = true
+  fittedWidth = null
+  applyFit()
+}
 
 function releasePDF() {
+  cancelFit()
+  fittedWidth = null
   viewer?.setDocument(null)
   viewerController?.abort()
   viewer = null
@@ -56,7 +88,8 @@ async function openPDF() {
     eventBus.on('pagesinit', () => {
       if (!isCurrent()) return
       activeViewer.scrollMode = ScrollMode.VERTICAL
-      activeViewer.currentScaleValue = fitWidth.value ? 'page-width' : zoom.value
+      if (fitWidth.value) applyFit()
+      else activeViewer.currentScaleValue = zoom.value
       loading.value = false
     })
     eventBus.on('pagechanging', event => { if (isCurrent()) pageNumber.value = event.pageNumber })
@@ -101,8 +134,17 @@ function submitPassword() {
 
 function changeZoom(step) {
   if (!viewer || !pages.value) return
+  cancelFit()
   fitWidth.value = false
   viewer.currentScale = Math.max(.25, Math.min(3, viewer.currentScale + step))
+}
+
+function submitPage() {
+  const requested = Number(pageInput.value)
+  if (!viewer || !pages.value || !Number.isInteger(requested) || !pageInput.value.trim()) return
+  const target = Math.max(1, Math.min(pages.value, requested))
+  viewer.currentPageNumber = target
+  pageInput.value = String(target)
 }
 
 onMounted(() => {
@@ -126,11 +168,14 @@ onBeforeUnmount(() => {
     <div class="document-toolbar">
       <strong>PDF 预览</strong>
       <div v-if="pages" class="document-controls">
-        <span>{{ pageNumber }} / {{ pages }}</span>
+        <form class="pdf-page-jump" @submit.prevent="submitPage">
+          <input class="input" aria-label="跳转到 PDF 页码" title="输入页码后按 Enter 跳转" inputmode="numeric" :value="editingPage ? pageInput : pageNumber" @focus="editingPage = true; pageInput = String(pageNumber); $event.target.select()" @input="pageInput = $event.target.value" @blur="editingPage = false" />
+          <span>/ {{ pages }}</span>
+        </form>
         <span class="document-divider"></span>
-        <button class="btn sm" @click="changeZoom(-.25)">−</button>
-        <button class="btn sm" @click="fitWidth = true; fitOnResize()">适合宽度</button>
-        <button class="btn sm" @click="changeZoom(.25)">＋</button>
+        <button class="btn sm" aria-label="缩小 PDF" @click="changeZoom(-.25)">−</button>
+        <button class="btn sm" :aria-pressed="fitWidth" @click="fitPageWidth">适合宽度</button>
+        <button class="btn sm" aria-label="放大 PDF" @click="changeZoom(.25)">＋</button>
       </div>
     </div>
     <div class="document-body">
@@ -151,6 +196,9 @@ onBeforeUnmount(() => {
 .document-toolbar strong { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .document-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .document-divider { width: 1px; height: 20px; margin: 0 4px; background: var(--border-light); }
+.pdf-page-jump { display: flex; align-items: center; gap: 5px; }
+.pdf-page-jump input { width: 54px; height: 26px; padding: 0 5px; text-align: center; font-variant-numeric: tabular-nums; }
+.document-controls [aria-pressed=true] { background: var(--bg-active); }
 .document-body { position: relative; flex: 1; min-height: 0; }
 .document-state { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--text-secondary); background: var(--bg-base); font-size: 13px; }
 .document-state form { display: flex; align-items: center; gap: 8px; }

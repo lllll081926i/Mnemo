@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -41,6 +42,16 @@ func (a *App) beginSyncRun(parent context.Context, jobID, source string) (contex
 	run := &activeSyncRun{cancel: cancel, startedAt: time.Now().Unix(), source: source}
 
 	a.syncRunMu.Lock()
+	if a.syncStopping {
+		a.syncRunMu.Unlock()
+		cancel()
+		return nil, nil, errors.New("同步已取消或应用正在退出")
+	}
+	if err := ctx.Err(); err != nil {
+		a.syncRunMu.Unlock()
+		cancel()
+		return nil, nil, err
+	}
 	if a.syncRuns == nil {
 		a.syncRuns = make(map[string]*activeSyncRun)
 	}
@@ -50,29 +61,41 @@ func (a *App) beginSyncRun(parent context.Context, jobID, source string) (contex
 		return nil, nil, fmt.Errorf("同步任务正在运行: %s", jobID)
 	}
 	a.syncRuns[jobID] = run
+	a.syncRunWG.Add(1)
 	a.syncRunMu.Unlock()
 	a.emit("sync:state", map[string]any{"id": jobID, "running": true, "source": source, "startedAt": run.startedAt})
 
+	var finishOnce stdsync.Once
 	finish := func(runErr error) {
-		cancel()
-		a.syncRunMu.Lock()
-		if current := a.syncRuns[jobID]; current == run {
-			delete(a.syncRuns, jobID)
-		}
-		a.syncRunMu.Unlock()
-		status := "completed"
-		if errors.Is(runErr, context.Canceled) {
-			status = "canceled"
-		} else if runErr != nil {
-			status = "failed"
-		}
-		a.emit("sync:state", map[string]any{"id": jobID, "running": false, "status": status, "issue": drive.DescribeOperationError(runErr)})
+		finishOnce.Do(func() {
+			defer a.syncRunWG.Done()
+			cancel()
+			status := "completed"
+			if errors.Is(runErr, context.Canceled) {
+				status = "canceled"
+			} else if runErr != nil {
+				status = "failed"
+			}
+			a.emit("sync:state", map[string]any{"id": jobID, "running": false, "status": status, "issue": drive.DescribeOperationError(runErr)})
+			a.syncRunMu.Lock()
+			if current := a.syncRuns[jobID]; current == run {
+				delete(a.syncRuns, jobID)
+			}
+			a.syncRunMu.Unlock()
+		})
 	}
 	return ctx, finish, nil
 }
 
 func (a *App) executeSync(parent context.Context, cfg sync.Config, engine *sync.Engine, source string) (runErr error) {
-	ctx, finish, err := a.beginSyncRun(parent, cfg.ID, source)
+	return a.executeSyncRun(parent, cfg.ID, source, func(ctx context.Context) error {
+		return engine.Run(ctx, cfg)
+	})
+}
+
+// 所有执行入口共用运行记录；完成记录落盘后才允许退出。
+func (a *App) executeSyncRun(parent context.Context, jobID, source string, execute func(context.Context) error) (runErr error) {
+	ctx, finish, err := a.beginSyncRun(parent, jobID, source)
 	if err != nil {
 		return err
 	}
@@ -89,15 +112,15 @@ func (a *App) executeSync(parent context.Context, cfg sync.Config, engine *sync.
 		if errors.Is(runErr, context.Canceled) {
 			status = "canceled"
 		}
-		if err := st.SaveSyncRunState(cfg.ID, store.SyncRunState{Status: status, Issue: drive.DescribeOperationError(runErr)}); err != nil {
+		if err := st.SaveSyncRunState(jobID, store.SyncRunState{Status: status, Issue: drive.DescribeOperationError(runErr)}); err != nil {
 			runErr = errors.Join(runErr, fmt.Errorf("同步结果记录保存失败，请核对目录后处理: %w", err))
 		}
 		finish(runErr)
 	}()
-	if err := st.SaveSyncRunState(cfg.ID, store.SyncRunState{Status: "running"}); err != nil {
+	if err := st.SaveSyncRunState(jobID, store.SyncRunState{Status: "running"}); err != nil {
 		return err
 	}
-	return engine.Run(ctx, cfg)
+	return execute(ctx)
 }
 
 func (a *App) ListSyncRunStates() (map[string]store.SyncRunState, error) {
@@ -171,6 +194,7 @@ func (a *App) CancelSync(id string) bool {
 
 func (a *App) cancelAllSyncRuns() {
 	a.syncRunMu.Lock()
+	a.syncStopping = true
 	runs := make([]*activeSyncRun, 0, len(a.syncRuns))
 	for _, run := range a.syncRuns {
 		runs = append(runs, run)
@@ -255,13 +279,19 @@ func (a *App) StartSyncScheduler() string {
 		logging.Error("sync scheduler startup failed", "error", err)
 		return fmt.Sprint(err)
 	}
+	a.stateMu.Lock()
+	a.syncRunMu.Lock()
+	stopping := a.syncStopping
+	a.syncRunMu.Unlock()
+	if stopping {
+		a.stateMu.Unlock()
+		return "应用正在退出，无法启动同步调度"
+	}
 	stop := make(chan struct{})
 	eng := a.newSyncEngine(st, false)
 	eng.StartScheduler(stop, st.ListSyncConfigs, func(ctx context.Context, cfg sync.Config) error {
 		return a.executeSync(ctx, cfg, eng, "scheduler")
 	})
-	// keep the stop channel for Shutdown; a.schedStop is closed on shutdown
-	a.stateMu.Lock()
 	previous := a.schedStop
 	if previous != nil {
 		close(previous)
@@ -324,10 +354,7 @@ func (a *App) RunSyncPlan(id, token string, choices map[string]string) (runErr e
 	if err != nil {
 		return err
 	}
-	ctx, finish, err := a.beginSyncRun(a.appContext(), id, "preview")
-	if err != nil {
-		return err
-	}
-	defer func() { finish(runErr) }()
-	return a.newSyncEngine(st, true).ExecutePlan(ctx, cfg, token, choices)
+	return a.executeSyncRun(a.appContext(), id, "preview", func(ctx context.Context) error {
+		return a.newSyncEngine(st, true).ExecutePlan(ctx, cfg, token, choices)
+	})
 }

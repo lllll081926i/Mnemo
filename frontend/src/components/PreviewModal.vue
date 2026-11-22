@@ -8,10 +8,13 @@ import { PreviewURL, cachedPreviewImageURL, PinFileSnapshot, openKindOf, formatB
 import { getPrefs } from '../appearance'
 import { useSeekDisplay } from '../player/seek-display'
 import { createPreviewLease, createPreviewLeasePool } from '../player/preview-lease'
+import { readTextPreview } from '../player/text-preview'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import UiIcon from './UiIcon.vue'
+import PreviewFilmstrip from './PreviewFilmstrip.vue'
+import MediaPlaylist from './MediaPlaylist.vue'
 const DocumentPreview = defineAsyncComponent(() => import('./DocumentPreview.vue'))
 const documentKinds = new Set(['pdf', 'docx', 'xlsx', 'pptx'])
 
@@ -64,19 +67,24 @@ const currentImageIdx = computed(() => {
 // ---------- 图片查看器（沉浸式重写） ----------
 // 图层转场模型：切图时旧层冻结变换退出、新层解码完成后才淡入，切换无白屏闪烁
 const stageEl = ref(null)
-const layers = ref([]) // [{ key, url, file, w, h, leaving, frozen }]
+const layers = ref([])
+const displayedFile = computed(() => (kind.value === 'image' && layers.value.at(-1)?.file) || activeFile.value)
+const displayedImageIdx = computed(() => imageList.value.findIndex(file => file.file_id === displayedFile.value.file_id))
 const natural = ref({ w: 0, h: 0 })
 const fitScale = ref(1) // 适配视口的基准缩放（不超过原始尺寸）
 const zoom = ref(1) // 1 = 适配窗口
 const rotation = ref(0)
 const pos = ref({ x: 0, y: 0 })
 const isDragging = ref(false)
+const directTransform = ref(false)
 const uiHidden = ref(false) // 光标闲置后隐藏控件
 const showFilm = ref(false)
 const imgSwitching = ref(false)
-let dragStart = { x: 0, y: 0, posX: 0, posY: 0 }
 let activeDragCleanup = null
+let wheelFrame = null
+const wheelSteps = []
 let idleTimer = null
+let idleDeadline = 0
 let imgSeq = 0
 let stageRO = null
 
@@ -87,39 +95,68 @@ const liveTransform = computed(
 function computeFit() {
   const el = stageEl.value, n = natural.value
   if (!el || !n.w || !n.h) { fitScale.value = 1; return }
-  fitScale.value = Math.min(1, (el.clientWidth - 24) / n.w, Math.max(1, el.clientHeight - 100) / n.h)
+  const sideways = rotation.value % 180 !== 0
+  const width = sideways ? n.h : n.w
+  const height = sideways ? n.w : n.h
+  fitScale.value = Math.min(1, Math.max(1, el.clientWidth - 24) / width, Math.max(1, el.clientHeight - 100) / height)
 }
 
-function resetImageTransform() {
+function resetImageTransform(preserveTurn = true) {
+  activeDragCleanup?.()
+  clearWheel()
+  directTransform.value = false
   zoom.value = 1
-  rotation.value = 0
+  rotation.value = preserveTurn ? Math.round(rotation.value / 360) * 360 : 0
   pos.value = { x: 0, y: 0 }
+  computeFit()
 }
 
-function stagePoint(e) {
-  const r = stageEl.value.getBoundingClientRect()
-  return { x: e.clientX - r.left - r.width / 2, y: e.clientY - r.top - (r.height - 76) / 2 }
+function stageOrigin() {
+  const stage = stageEl.value
+  const rect = stage.getBoundingClientRect()
+  const scale = stage.currentCSSZoom || 1
+  return { x: rect.left + rect.width / 2, y: rect.top + (rect.height - 76 * scale) / 2, scale }
 }
 
-// 缩放（origin 存在且未旋转时锚定光标位置）
+// 缩放（origin 存在时锚定光标位置）
 function zoomTo(next, origin) {
   const old = zoom.value
-  const nz = Math.min(10, Math.max(0.1, Number(next.toFixed(3))))
+  const nz = Math.min(Math.max(10, 1 / fitScale.value), Math.max(0.1, next))
   if (nz === old) return
-  if (origin && rotation.value % 360 === 0) {
+  if (origin) {
     const k = nz / old
     pos.value = { x: origin.x - (origin.x - pos.value.x) * k, y: origin.y - (origin.y - pos.value.y) * k }
   }
   zoom.value = nz
 }
-function zoomByFactor(f) { zoomTo(zoom.value * f) }
-function rotateBy(deg) { rotation.value = (rotation.value + deg + 360) % 360 }
+function zoomByFactor(factor) { clearWheel(); directTransform.value = false; zoomTo(zoom.value * factor) }
+function rotateBy(degrees) { clearWheel(); directTransform.value = false; rotation.value += degrees; computeFit() }
 
 function onWheel(e) {
-  if (kind.value !== 'image') return
+  if (kind.value !== 'image' || !layers.value.length || !e.deltaY || e.target.closest('.pv-filmstrip, .pv-ctl')) return
   e.preventDefault()
+  if (isDragging.value) return
   pokeUI()
-  zoomTo(zoom.value * (e.deltaY < 0 ? 1.18 : 1 / 1.18), stagePoint(e))
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1
+  const delta = Math.max(-240, Math.min(240, e.deltaY * unit))
+  wheelSteps.push({ x: e.clientX, y: e.clientY, factor: Math.exp(-delta * (e.ctrlKey ? 0.008 : 0.00165)) })
+  if (wheelFrame === null) wheelFrame = requestAnimationFrame(applyWheel)
+}
+
+function applyWheel() {
+  wheelFrame = null
+  if (stageEl.value && wheelSteps.length) {
+    directTransform.value = true
+    const origin = stageOrigin()
+    for (const step of wheelSteps) zoomTo(zoom.value * step.factor, { x: (step.x - origin.x) / origin.scale, y: (step.y - origin.y) / origin.scale })
+  }
+  wheelSteps.length = 0
+}
+
+function clearWheel() {
+  if (wheelFrame !== null) cancelAnimationFrame(wheelFrame)
+  wheelFrame = null
+  wheelSteps.length = 0
 }
 
 // 双击：适配 ↔ 2x（锚定点击点）
@@ -127,34 +164,70 @@ function onDblClick(e) {
   if (kind.value !== 'image') return
   if (e.target.closest('.pv-ctl, .pv-edge, .pv-filmstrip')) return
   if (Math.abs(zoom.value - 1) > 0.01 || pos.value.x || pos.value.y) resetImageTransform()
-  else zoomTo(2, stagePoint(e))
+  else {
+    clearWheel()
+    directTransform.value = false
+    const origin = stageOrigin()
+    zoomTo(2, { x: (e.clientX - origin.x) / origin.scale, y: (e.clientY - origin.y) / origin.scale })
+  }
 }
 
 function onPointerDown(e) {
-  if (kind.value !== 'image' || e.button !== 0) return
+  if (kind.value !== 'image' || !layers.value.length || e.button !== 0 || activeDragCleanup) return
   if (e.target.closest('.pv-ctl, .pv-edge, .pv-filmstrip')) return
+  clearWheel()
+  pokeUI()
+  directTransform.value = true
   isDragging.value = true
-  dragStart = { x: e.clientX, y: e.clientY, posX: pos.value.x, posY: pos.value.y }
-  const onMove = (ev) => {
-    if (!isDragging.value) return
-    pos.value = { x: dragStart.posX + (ev.clientX - dragStart.x), y: dragStart.posY + (ev.clientY - dragStart.y) }
+  const start = { x: e.clientX, y: e.clientY, pos: pos.value, scale: stageEl.value.currentCSSZoom || 1 }
+  let frame = null
+  let point = null
+  const apply = () => {
+    frame = null
+    pos.value = { x: start.pos.x + (point.clientX - start.x) / start.scale, y: start.pos.y + (point.clientY - start.y) / start.scale }
   }
-  const onUp = () => {
+  const onMove = (ev) => {
+    if (ev.pointerId !== e.pointerId) return
+    point = ev
+    pokeUI()
+    if (frame === null) frame = requestAnimationFrame(apply)
+  }
+  const cleanup = () => {
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
     isDragging.value = false
     window.removeEventListener('pointermove', onMove)
-    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    window.removeEventListener('blur', cleanup)
     activeDragCleanup = null
   }
+  const finish = (ev) => {
+    if (ev.pointerId !== e.pointerId) return
+    const latest = point
+    cleanup()
+    if (ev.type === 'pointerup' && latest) { point = ev; apply() }
+    pokeUI()
+  }
   window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
-  activeDragCleanup = onUp
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
+  window.addEventListener('blur', cleanup)
+  activeDragCleanup = cleanup
 }
 
 // 控件自动隐藏（类播放器）：光标活动 2.4s 后隐藏
 function pokeUI() {
   uiHidden.value = false
-  clearTimeout(idleTimer)
-  idleTimer = setTimeout(() => { if (!isDragging.value && !stageEl.value?.querySelector('.pv-ctl:hover, .pv-ctl:focus-within, .pv-filmstrip:hover, .pv-filmstrip:focus-within')) uiHidden.value = true }, 2400)
+  idleDeadline = performance.now() + 2400
+  if (idleTimer === null) idleTimer = setTimeout(hideIdleUI, 2400)
+}
+
+function hideIdleUI() {
+  idleTimer = null
+  const remaining = idleDeadline - performance.now()
+  if (remaining > 0) idleTimer = setTimeout(hideIdleUI, Math.ceil(remaining))
+  else if (!isDragging.value && !stageEl.value?.querySelector('.pv-ctl:hover, .pv-ctl:focus-within, .pv-filmstrip:hover, .pv-filmstrip:focus-within')) uiHidden.value = true
 }
 
 function switchImage(step) {
@@ -167,7 +240,10 @@ function switchImage(step) {
 }
 
 function selectImage(img) {
-  if (activeFile.value.file_id === img.file_id) return
+  if (activeFile.value.file_id === img.file_id) {
+    if (!imgSwitching.value && displayedFile.value.file_id !== img.file_id) void loadImage()
+    return
+  }
   if (slideshow.value) stopSlideshow()
   activeFile.value = img
 }
@@ -182,15 +258,34 @@ function zoomToOne() {
 }
 const isOneToOne = computed(() => Math.abs(fitScale.value * zoom.value - 1) < 0.01)
 
-function loadImageBitmap(url) {
+function loadImageBitmap(url, signal) {
   return new Promise((resolve, reject) => {
-    const im = new Image()
-    im.onload = () => {
-      if (typeof im.decode === 'function') Promise.resolve().then(() => im.decode()).then(() => resolve(im), () => reject(new Error('图片解码失败')))
-      else resolve(im)
+    if (signal.aborted) { reject(signal.reason); return }
+    const image = new Image()
+    function cleanup() {
+      image.onload = null
+      image.onerror = null
+      signal.removeEventListener('abort', abort)
     }
-    im.onerror = () => reject(new Error('图片解码失败'))
-    im.src = url
+    function abort() {
+      cleanup()
+      image.removeAttribute('src')
+      reject(signal.reason)
+    }
+    function fail() {
+      cleanup()
+      reject(new Error('图片解码失败'))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    image.onload = async () => {
+      try {
+        await image.decode?.()
+        cleanup()
+        if (!signal.aborted) resolve(image)
+      } catch { fail() }
+    }
+    image.onerror = fail
+    image.src = url
   })
 }
 
@@ -198,8 +293,9 @@ const imageCache = new Map()
 const imageLoads = new Map()
 const imageLeases = createPreviewLeasePool()
 const loadingImageLeases = new Set()
-const requestedImageLeases = new Set()
-const layerTimers = new Set()
+const requestedImageLeases = new Map()
+const imageController = new AbortController()
+let layerTimer = null
 const IMAGE_CACHE_MAX_PIXELS = 64 * 1024 * 1024
 const IMAGE_CACHE_MAX_ITEMS = 32
 const IMAGE_DISK_MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -220,7 +316,7 @@ function releaseUnusedImageLeases() {
     ...[...imageCache.values()].map(entry => entry.leaseKey),
     ...layers.value.map(layer => layer.leaseKey),
     ...loadingImageLeases,
-    ...requestedImageLeases,
+    ...requestedImageLeases.keys(),
   ])
 }
 
@@ -257,12 +353,12 @@ async function prepareImage(file) {
     if (previewClosed) throw new Error('预览已关闭')
     let bitmap
     try {
-      bitmap = await loadImageBitmap(previewUrl)
+      bitmap = await loadImageBitmap(previewUrl, imageController.signal)
     } catch (cause) {
-      if (!previewUrl.includes('/local/')) throw cause
+      if (previewClosed || !previewUrl.includes('/local/')) throw cause
       previewUrl = await PreviewURL(userID, driveID, file.file_id)
       lease.add(previewUrl)
-      bitmap = await loadImageBitmap(previewUrl)
+      bitmap = await loadImageBitmap(previewUrl, imageController.signal)
     }
     const entry = { url: previewUrl, bitmap, w: bitmap.naturalWidth, h: bitmap.naturalHeight, leaseKey }
     const pixels = entry.w * entry.h
@@ -289,43 +385,54 @@ async function loadImage() {
   const seq = ++imgSeq
   const file = activeFile.value
   const leaseKey = imageLeaseKey(file)
-  requestedImageLeases.add(leaseKey)
+  requestedImageLeases.set(leaseKey, (requestedImageLeases.get(leaseKey) || 0) + 1)
   imgSwitching.value = true
   error.value = ''
   try {
     const image = await prepareImage(file)
     if (seq !== imgSeq) return
-    const frozen = liveTransform.value
-    layers.value.forEach((l) => { l.leaving = true; l.frozen = frozen })
+    const previous = layers.value.at(-1)
+    const outgoing = previous && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      ? { ...previous, leaving: true, frozen: liveTransform.value } : null
     natural.value = { w: image.w, h: image.h }
-    computeFit()
-    resetImageTransform()
-    layers.value.push({ key: `${file.file_id}-${seq}`, url: image.url, file, w: image.w, h: image.h, leaseKey: image.leaseKey })
-    const timer = setTimeout(() => {
-      layerTimers.delete(timer)
-      layers.value = layers.value.filter((l) => !l.leaving)
-      releaseUnusedImageLeases()
-    }, 300)
-    layerTimers.add(timer)
+    resetImageTransform(false)
+    const incoming = { key: `${file.file_id}-${seq}`, url: image.url, file, w: image.w, h: image.h, leaseKey: image.leaseKey }
+    clearTimeout(layerTimer)
+    layers.value = outgoing ? [outgoing, incoming] : [incoming]
+    if (outgoing) layerTimer = setTimeout(() => finishImageTransition(incoming.key), 300)
     preloadNeighbors()
   } catch (e) {
     if (seq !== imgSeq) return
     // 首次加载失败才全屏报错；切换失败保留当前图
-    if (!layers.value.length) error.value = String(e && e.message ? e.message : e)
+    const message = String(e?.message || e)
+    if (!layers.value.length) error.value = message
+    else emit('toast', `无法加载「${file.name}」：${message}`, 'error')
   } finally {
-    requestedImageLeases.delete(leaseKey)
+    const remaining = requestedImageLeases.get(leaseKey) - 1
+    if (remaining > 0) requestedImageLeases.set(leaseKey, remaining)
+    else requestedImageLeases.delete(leaseKey)
     releaseUnusedImageLeases()
     if (seq === imgSeq) { imgSwitching.value = false; loading.value = false }
   }
+}
+
+function finishImageTransition(key) {
+  if (layers.value.length !== 2 || layers.value[1].key !== key) return
+  clearTimeout(layerTimer)
+  layerTimer = null
+  layers.value = [layers.value[1]]
+  releaseUnusedImageLeases()
 }
 
 // 相邻图片与切换共用同一加载任务，避免重复申请预览地址。
 function preloadNeighbors() {
   const list = imageList.value, idx = currentImageIdx.value
   for (const step of [1, -1]) {
-    const f = list[(idx + step + list.length) % list.length]
-    if (!f || f.file_id === activeFile.value.file_id) continue
-    void prepareImage(f).catch(() => {}).finally(releaseUnusedImageLeases)
+    const neighbor = list[(idx + step + list.length) % list.length]
+    if (!neighbor || neighbor.file_id === activeFile.value.file_id) continue
+    const pixels = (neighbor.media_width || 0) * (neighbor.media_height || 0)
+    if (neighbor.size > IMAGE_DISK_MAX_FILE_BYTES || pixels > IMAGE_CACHE_MAX_PIXELS) continue
+    void prepareImage(neighbor).catch(() => {}).finally(releaseUnusedImageLeases)
   }
 }
 
@@ -340,14 +447,16 @@ const audioPlaying = ref(false)
 const audioPos = ref(0)
 const audioSeekDisplay = useSeekDisplay(audioPos)
 const audioDisplayPos = audioSeekDisplay.display
-let audioSeekDragging = false
+const audioSeekDragging = ref(false)
 const audioDur = ref(0)
 const audioBuffered = ref(0)
+const audioSeeking = ref(false)
 const audioVolume = ref(Math.min(200, Math.max(0, getPrefs().defaultVolume ?? 100)))
 const audioMuted = ref(false)
 const audioSpeed = ref(getPrefs().defaultSpeed || 1)
 const audioLoop = ref(false)
 const audioMenu = ref('') // 'speed' | 'playlist' | ''
+const audioPlaylistButton = ref(null)
 const audioError = ref('')
 const AUDIO_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 let audioCtx = null
@@ -361,8 +470,9 @@ const audioExt = computed(() => {
   const i = n.lastIndexOf('.')
   return i > 0 ? n.slice(i + 1).toUpperCase() : 'AUDIO'
 })
-const audioPct = computed(() => (audioDur.value ? (audioDisplayPos.value / audioDur.value) * 100 : 0))
-const audioBufPct = computed(() => (audioDur.value ? Math.min(100, (audioBuffered.value / audioDur.value) * 100) : 0))
+const audioProgress = computed(() => audioDur.value ? Math.min(1, Math.max(0, audioDisplayPos.value / audioDur.value)) : 0)
+const audioBufferProgress = computed(() => audioDur.value ? Math.min(1, audioBuffered.value / audioDur.value) : 0)
+const audioGliding = computed(() => audioPlaying.value && !audioSeekDragging.value && !audioSeeking.value)
 
 function fmtClock(seconds) {
   const s = Math.max(0, Math.floor(Number(seconds) || 0))
@@ -376,6 +486,7 @@ function fmtClock(seconds) {
 // 注意：切曲时 <audio> 元素会被重建，MediaElementSource 必须针对新元素重建，
 // 否则增益链仍挂在旧元素上，>100% 音量会静默失效。
 let audioSourceEl = null
+let audioSource = null
 function ensureAudioGain() {
   const el = audioEl.value
   if (!el) return
@@ -389,13 +500,15 @@ function ensureAudioGain() {
       audioGain.connect(audioCtx.destination)
     }
     if (audioSourceEl !== el) {
-      const source = audioCtx.createMediaElementSource(el)
-      source.connect(audioGain)
+      audioSource?.disconnect()
+      audioSource = audioCtx.createMediaElementSource(el)
+      audioSource.connect(audioGain)
       audioSourceEl = el
     }
   } catch {
     audioGain = null
     audioSourceEl = null
+    audioSource = null
   }
 }
 
@@ -403,8 +516,8 @@ function applyAudioVolume() {
   const el = audioEl.value
   if (!el) return
   const level = audioVolume.value
-  if (level > 100) ensureAudioGain()
-  if (audioGain) {
+  if (level > 100 || audioGain) ensureAudioGain()
+  if (audioGain && audioSourceEl === el) {
     el.volume = 1
     audioGain.gain.value = level / 100
   } else {
@@ -443,28 +556,42 @@ function audioSeekBy(delta) {
   const el = audioEl.value
   if (!el || !audioDur.value) return
   const target = Math.min(Math.max(0, audioDur.value - 0.2), Math.max(0, audioDisplayPos.value + delta))
+  seekAudio(el, target)
+}
+
+function seekAudio(element, target) {
+  if (element.currentTime === target) { audioSeekDisplay.cancelPreview(); return }
+  audioSeeking.value = true
   audioSeekDisplay.commit(target)
-  el.currentTime = target
+  element.currentTime = target
 }
 
 function onAudioSeekInput(e) {
   const el = audioEl.value
   if (!el) return
   const target = Number(e.target.value)
-  if (audioSeekDragging) {
+  if (audioSeekDragging.value) {
     audioSeekDisplay.showPreview(target)
   } else {
-    audioSeekDisplay.commit(target)
-    el.currentTime = target
+    seekAudio(el, target)
   }
 }
 
 function onAudioSeekCommit(e) {
-  if (!audioSeekDragging) return
-  audioSeekDragging = false
+  if (!audioSeekDragging.value) return
+  audioSeekDragging.value = false
   const target = Number(e.target.value)
-  audioSeekDisplay.commit(target)
-  if (audioEl.value) audioEl.value.currentTime = target
+  if (audioEl.value) seekAudio(audioEl.value, target)
+}
+
+function cancelAudioSeek() {
+  audioSeekDragging.value = false
+  audioSeekDisplay.cancelPreview()
+}
+
+function onAudioSeeked() {
+  audioSeeking.value = false
+  onAudioTime()
 }
 
 function onAudioTime() {
@@ -479,7 +606,7 @@ function onAudioTime() {
 function onAudioMeta() {
   const el = audioEl.value
   if (!el) return
-  audioDur.value = el.duration || 0
+  audioDur.value = Number.isFinite(el.duration) ? el.duration : 0
   el.playbackRate = audioSpeed.value
   applyAudioVolume()
   if (pendingAudioResume > 0 && audioDur.value > 5 && pendingAudioResume < audioDur.value - 3) {
@@ -504,10 +631,15 @@ function switchAudio(step) {
 }
 
 function selectAudioFile(f) {
-  audioMenu.value = ''
+  dismissAudioPlaylist()
   if (!f || f.file_id === activeFile.value.file_id) return
   saveAudioCursor(activeFile.value?.file_id)
   activeFile.value = f
+}
+
+function dismissAudioPlaylist() {
+  audioMenu.value = ''
+  audioPlaylistButton.value?.focus({ preventScroll: true })
 }
 
 function onAudioEnded() {
@@ -527,7 +659,7 @@ function onAudioEnded() {
 
 function saveAudioCursor(fileId = activeFile.value?.file_id) {
   const el = audioEl.value
-  if (!fileId || !el) return
+  if (!fileId || !el || el.dataset.fileId !== fileId) return
   const pos = el.currentTime || 0
   if (pos > 3 && audioDur.value > 0 && pos < audioDur.value - 3) {
     savePlayCursor(props.account.user_id, props.account.drive_id, fileId, pos).catch(() => {})
@@ -602,7 +734,9 @@ const encoding = ref('UTF-8')
 const copiedFull = ref(false)
 const showSearch = ref(false)
 const searchKw = ref('')
+const searchIndex = ref(0)
 const searchInputEl = ref(null)
+const searchToggleEl = ref(null)
 
 // 光标位置
 const cursorPos = ref({ line: 1, col: 1 })
@@ -613,6 +747,15 @@ const confirmLeaveDialog = ref(false)
 
 const currentText = computed(() => (textMode.value === 'edit' ? editContent.value : text.value))
 const textLines = computed(() => currentText.value.split('\n'))
+const textBlockSize = 256
+const lineNumbers = computed(() => Array.from({ length: Math.ceil(textLines.value.length / textBlockSize) }, (_, block) => {
+  const start = block * textBlockSize
+  return Array.from({ length: Math.min(textBlockSize, textLines.value.length - start) }, (_, index) => start + index + 1).join('\n')
+}))
+const textBlocks = computed(() => {
+  const lines = textLines.value
+  return Array.from({ length: Math.ceil(lines.length / textBlockSize) }, (_, block) => lines.slice(block * textBlockSize, (block + 1) * textBlockSize).join('\n'))
+})
 const isModified = computed(() => textMode.value === 'edit' && editContent.value !== text.value)
 
 // 语言标签识别
@@ -656,34 +799,77 @@ function onContentScroll(e) {
 const charCount = computed(() => currentText.value.length)
 const lineEnding = computed(() => (currentText.value.includes('\r\n') ? 'CRLF' : 'LF'))
 
-// 搜索匹配拆分
-function searchParts(line) {
-  const kw = searchKw.value.trim()
-  if (!kw) return null
-  const str = String(line || '')
-  const i = str.toLowerCase().indexOf(kw.toLowerCase())
-  if (i < 0) return null
-  return [
-    { text: str.slice(0, i), hit: false },
-    { text: str.slice(i, i + kw.length), hit: true },
-    { text: str.slice(i + kw.length), hit: false },
-  ]
+const searchResult = computed(() => {
+  const keyword = searchKw.value.trim()
+  if (!keyword) return null
+  const pattern = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')
+  let count = 0
+  const limit = 400
+  const blocks = textBlocks.value.map(source => {
+    const first = count
+    const hits = []
+    pattern.lastIndex = 0
+    let match
+    while ((match = pattern.exec(source))) {
+      count++
+      if (count <= limit) hits.push({ offset: match.index, length: match[0].length, index: count - 1 })
+    }
+    return { source, first, end: count, hits }
+  })
+  return { count, blocks, pattern, dense: count > limit }
+})
+const matchCount = computed(() => searchResult.value?.count || 0)
+const highlightedBlocks = computed(() => {
+  const result = searchResult.value
+  if (!result?.count) return []
+  const active = searchIndex.value
+  return result.blocks.map(block => {
+    let hits = block.hits
+    if (result.dense) {
+      hits = []
+      if (active >= block.first && active < block.end) {
+        const pattern = result.pattern
+        pattern.lastIndex = 0
+        let match
+        for (let index = block.first; index <= active; index++) match = pattern.exec(block.source)
+        hits = [{ offset: match.index, length: match[0].length, index: active }]
+      }
+    }
+    let start = 0
+    const parts = hits.map(hit => {
+      const before = block.source.slice(start, hit.offset)
+      start = hit.offset + hit.length
+      return { before, hit: block.source.slice(hit.offset, start), index: hit.index }
+    })
+    return { parts, tail: block.source.slice(start) }
+  })
+})
+
+async function revealSearchHit() {
+  await nextTick()
+  const view = viewEl.value
+  const hit = view?.querySelector('.pv-search-hit.current')
+  if (!hit) return
+  const viewport = view.getBoundingClientRect()
+  const target = hit.getBoundingClientRect()
+  const scale = view.currentCSSZoom || 1
+  const top = view.scrollTop + (target.top - viewport.top) / scale - view.clientHeight / 2
+  const left = target.left < viewport.left || target.right > viewport.right
+    ? view.scrollLeft + (target.left - viewport.left) / scale - 24
+    : view.scrollLeft
+  view.scrollTo({ top, left, behavior: 'instant' })
 }
 
-const matchCount = computed(() => {
-  const kw = searchKw.value.trim()
-  if (!kw) return 0
-  let count = 0
-  const kwLower = kw.toLowerCase()
-  for (const line of textLines.value) {
-    let p = 0
-    const lower = line.toLowerCase()
-    while ((p = lower.indexOf(kwLower, p)) !== -1) {
-      count++
-      p += kwLower.length
-    }
-  }
-  return count
+function stepSearch(direction) {
+  const count = matchCount.value
+  if (!count || textMode.value !== 'preview') return
+  searchIndex.value = (searchIndex.value + direction + count) % count
+  void revealSearchHit()
+}
+
+watch([searchKw, currentText, textMode], () => {
+  searchIndex.value = 0
+  if (showSearch.value && textMode.value === 'preview') void revealSearchHit()
 })
 
 function toggleSearch() {
@@ -692,6 +878,7 @@ function toggleSearch() {
     nextTick(() => searchInputEl.value?.focus())
   } else {
     searchKw.value = ''
+    nextTick(() => searchToggleEl.value?.focus({ preventScroll: true }))
   }
 }
 
@@ -881,6 +1068,22 @@ async function loadPreview() {
   // 切曲/换图时保留已渲染舞台，避免整屏闪烁；仅首次或空态才展示全屏 loading
   if (!url.value) loading.value = true
   error.value = ''
+  if (kind.value === 'audio') {
+    audioEl.value?.pause()
+    audioSource?.disconnect()
+    audioSource = null
+    audioSourceEl = null
+    clearInterval(audioSaveTimer)
+    audioSaveTimer = null
+    audioPlaying.value = false
+    audioError.value = ''
+    audioSeekDisplay.reset()
+    audioSeekDragging.value = false
+    audioSeeking.value = false
+    audioPos.value = 0
+    audioDur.value = 0
+    audioBuffered.value = 0
+  }
   url.value = ''
   try {
     if (!['image', 'text', 'audio'].includes(kind.value)) {
@@ -903,22 +1106,15 @@ async function loadPreview() {
       const resume = await getPlayCursor(userID, driveID, file.file_id).catch(() => 0)
       if (seq !== loadSeq) return
       pendingAudioResume = resume
-      audioSeekDisplay.reset()
-      audioSeekDragging = false
-      audioPos.value = 0
-      audioDur.value = 0
-      audioBuffered.value = 0
     }
     url.value = previewUrl
     if (kind.value === 'text') {
       textController = new AbortController()
       const resp = await fetch(previewUrl, { signal: textController.signal })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} 加载失败`)
-      const buf = await resp.arrayBuffer()
+      const bytes = await readTextPreview(resp)
       requestLease.dispose()
       if (seq !== loadSeq) return
-      if (buf.byteLength > 4 * 1024 * 1024) throw new Error('文本文件超过 4MB，请下载到本地查看')
-      const decoded = decodeText(buf)
+      const decoded = decodeText(bytes)
       text.value = decoded.text
       encoding.value = decoded.encoding
       editContent.value = text.value
@@ -978,18 +1174,19 @@ onMounted(() => {
 })
 watch(stageEl, (el) => {
   stageRO?.disconnect()
+  if (!el) { activeDragCleanup?.(); clearWheel() }
   if (el && stageRO) { stageRO.observe(el); nextTick(computeFit) }
 })
 onBeforeUnmount(() => {
   previewClosed = true
+  imageController.abort()
   ++loadSeq
   ++imgSeq
   cacheGeneration++
   imageLoads.clear()
   imageCache.clear()
   imageLeases.dispose()
-  for (const timer of layerTimers) clearTimeout(timer)
-  layerTimers.clear()
+  clearTimeout(layerTimer)
   cachedPixels = 0
   audioSeekDisplay.reset()
   stopCacheCleared?.()
@@ -997,6 +1194,7 @@ onBeforeUnmount(() => {
   contentLease?.dispose()
   window.removeEventListener('keydown', onKey)
   clearTimeout(idleTimer)
+  clearWheel()
   stageRO?.disconnect()
   if (activeDragCleanup) activeDragCleanup()
   // 音频播放器清理：保存进度、停表、释放 WebAudio、注销 MediaSession
@@ -1036,8 +1234,7 @@ function stopSlideshow() {
 }
 
 // 文本编码探测
-function decodeText(buf) {
-  const u8 = new Uint8Array(buf)
+function decodeText(u8) {
   if (u8.length >= 3 && u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) {
     return { text: new TextDecoder('utf-8').decode(u8.subarray(3)), encoding: 'UTF-8 (BOM)' }
   }
@@ -1154,6 +1351,7 @@ function decodeText(buf) {
           v-if="textMode !== 'markdown'"
           class="tbtn xs"
           :class="{ active: showSearch }"
+          ref="searchToggleEl"
           title="文本查找 (Ctrl+F)"
           @click="toggleSearch"
         >
@@ -1181,16 +1379,21 @@ function decodeText(buf) {
         class="pv-search-input"
         placeholder="在文本中查找… (Esc 关闭)"
         @keydown.esc.stop="toggleSearch"
+        @keydown.enter.prevent.stop="stepSearch($event.shiftKey ? -1 : 1)"
       />
-      <span class="pv-search-count">{{ matchCount ? `${matchCount} 个匹配` : (searchKw ? '无匹配' : '') }}</span>
+      <span class="pv-search-count" role="status">{{ matchCount ? (textMode === 'preview' ? `${searchIndex + 1} / ${matchCount} 个匹配` : `${matchCount} 个匹配`) : (searchKw.trim() ? '无匹配' : '') }}</span>
+      <template v-if="textMode === 'preview'">
+        <button type="button" class="btn-circle sm" title="上一处 (Shift+Enter)" aria-label="上一处匹配" :disabled="!matchCount" @click="stepSearch(-1)"><UiIcon name="chevron-up" :size="13" /></button>
+        <button type="button" class="btn-circle sm" title="下一处 (Enter)" aria-label="下一处匹配" :disabled="!matchCount" @click="stepSearch(1)"><UiIcon name="chevron-down" :size="13" /></button>
+      </template>
       <button class="btn-circle sm" title="关闭查找" @click="toggleSearch"><UiIcon name="close" :size="12" /></button>
     </div>
 
     <header v-if="isImmersive" class="pv-topbar">
       <div class="pv-topbar-meta">
         <UiIcon :name="kind === 'image' ? 'image' : 'audio'" :size="20" />
-        <span class="pv-topbar-name" :title="activeFile.name">{{ activeFile.name }}</span>
-        <span class="pv-topbar-sub">{{ formatBytes(activeFile.size) }}<template v-if="kind === 'image' && natural.w"> · {{ natural.w }} × {{ natural.h }}</template></span>
+        <span class="pv-topbar-name" :title="displayedFile.name">{{ displayedFile.name }}</span>
+        <span class="pv-topbar-sub">{{ formatBytes(displayedFile.size) }}<template v-if="kind === 'image' && natural.w"> · {{ natural.w }} × {{ natural.h }}</template></span>
       </div>
       <div class="pv-topbar-actions" aria-label="窗口控制">
         <div class="pv-topbar-extra">
@@ -1221,7 +1424,7 @@ function decodeText(buf) {
         v-if="kind === 'image'"
         ref="stageEl"
         class="pv-stage"
-        :class="{ 'ui-hidden': uiHidden, grabbing: isDragging }"
+        :class="{ 'ui-hidden': uiHidden, grabbing: isDragging, 'direct-transform': directTransform }"
         @wheel="onWheel"
         @pointerdown="onPointerDown"
         @pointermove="pokeUI"
@@ -1232,6 +1435,8 @@ function decodeText(buf) {
           :key="layer.key"
           class="pv-img-layer"
           :class="{ leaving: layer.leaving }"
+          :aria-hidden="layer.leaving ? 'true' : undefined"
+          @animationend.self="finishImageTransition(layer.key)"
         >
           <img
             :src="layer.url"
@@ -1249,36 +1454,23 @@ function decodeText(buf) {
         </template>
 
         <!-- 胶卷缩略图条（控制条切换） -->
-        <div v-if="showFilm && imageList.length > 1" class="pv-filmstrip" @pointerdown.stop @dblclick.stop>
-          <button
-            type="button"
-            v-for="img in imageList"
-            :key="img.file_id"
-            class="pv-film-thumb"
-            :class="{ active: img.file_id === activeFile.file_id }"
-            :title="img.name"
-            @click="selectImage(img)"
-          >
-            <img v-if="img.thumbnail" :src="img.thumbnail" alt="" draggable="false" loading="lazy" />
-            <UiIcon v-else name="image" :size="16" />
-          </button>
-        </div>
+        <PreviewFilmstrip v-if="showFilm && imageList.length > 1" :files="imageList" :selected-index="displayedImageIdx" @select="selectImage" />
 
         <!-- 浮动控制条 -->
         <div class="pv-ctl" @pointerdown.stop @dblclick.stop>
           <button class="pv-ctl-btn" :disabled="imageList.length <= 1" title="上一张 (←)" @click="switchImage(-1)"><UiIcon name="chevron-left" :size="18" /></button>
-          <span class="pv-ctl-counter">{{ currentImageIdx + 1 }} / {{ imageList.length }}</span>
+          <span class="pv-ctl-counter">{{ displayedImageIdx + 1 }} / {{ imageList.length }}</span>
           <button class="pv-ctl-btn" :disabled="imageList.length <= 1" title="下一张 (→)" @click="switchImage(1)"><UiIcon name="chevron-right" :size="18" /></button>
           <span class="pv-ctl-sep"></span>
           <button class="pv-ctl-btn pv-ctl-text" title="缩小 (-)" @click="zoomByFactor(1 / 1.25)">−</button>
-          <button type="button" class="pv-ctl-zoom" title="点击复原（适配窗口）" @click="resetImageTransform">{{ Math.round(fitScale * zoom * 100) }}%</button>
+          <button type="button" class="pv-ctl-zoom" title="点击复原（适配窗口）" @click="resetImageTransform()">{{ Math.round(fitScale * zoom * 100) }}%</button>
           <button class="pv-ctl-btn" title="放大 (+)" @click="zoomByFactor(1.25)"><UiIcon name="plus" :size="13" /></button>
-          <button class="pv-ctl-btn" title="适配窗口 (0)" @click="resetImageTransform"><UiIcon name="maximize" :size="18" /></button>
+          <button class="pv-ctl-btn" title="适配窗口 (0)" @click="resetImageTransform()"><UiIcon name="maximize" :size="18" /></button>
           <button class="pv-ctl-btn pv-ctl-text pv-ctl-ratio" :class="{ active: isOneToOne }" title="实际大小 (双击百分比)" @click="zoomToOne">1:1</button>
           <button class="pv-ctl-btn" title="顺时针旋转 90° (R)" @click="rotateBy(90)"><UiIcon name="rotate-right" :size="18" /></button>
           <span class="pv-ctl-sep"></span>
           <button v-if="imageList.length > 1" class="pv-ctl-btn" :class="{ active: slideshow }" :title="slideshow ? '暂停幻灯片' : '幻灯片放映（3 秒/张）'" @click="toggleSlideshow"><UiIcon :name="slideshow ? 'pause' : 'play'" :size="14" /></button>
-          <button class="pv-ctl-btn" :class="{ active: showFilm }" :disabled="imageList.length <= 1" title="缩略图" @click="showFilm = !showFilm"><UiIcon name="grid" :size="14" /></button>
+          <button class="pv-ctl-btn" :class="{ active: showFilm }" :aria-pressed="showFilm" :disabled="imageList.length <= 1" title="缩略图" @click="showFilm = !showFilm"><UiIcon name="grid" :size="14" /></button>
         </div>
       </div>
 
@@ -1304,11 +1496,12 @@ function decodeText(buf) {
         <!-- 底部播放工具栏 -->
         <div class="pv-audio-dock" @pointerdown.stop @dblclick.stop>
           <div class="pv-audio-progress">
-            <div class="pv-audio-track">
-              <div class="pv-audio-buffer" :style="{ width: audioBufPct + '%' }"></div>
-              <div class="pv-audio-fill" :style="{ width: audioPct + '%' }"><span class="pv-audio-thumb"></span></div>
+            <div class="pv-audio-track" :class="{ gliding: audioGliding }">
+              <div class="pv-audio-buffer" :style="{ transform: `scaleX(${audioBufferProgress})` }"></div>
+              <div class="pv-audio-fill" :style="{ transform: `scaleX(${audioProgress})` }"></div>
+              <span class="pv-audio-thumb" :style="{ left: `${audioProgress * 100}%` }"></span>
             </div>
-            <input type="range" min="0" :max="audioDur || 0" step="0.1" :value="audioDisplayPos" aria-label="播放进度" @pointerdown="audioSeekDragging = true" @pointerup="onAudioSeekCommit" @pointercancel="onAudioSeekCommit" @change="onAudioSeekCommit" @blur="onAudioSeekCommit" @input="onAudioSeekInput" />
+            <input type="range" min="0" :max="audioDur" step="0.1" :value="audioDisplayPos" :disabled="!audioDur" aria-label="播放进度" :aria-valuetext="`${fmtClock(audioDisplayPos)} / ${fmtClock(audioDur)}`" @pointerdown="audioSeekDragging = true" @pointerup="onAudioSeekCommit" @pointercancel="cancelAudioSeek" @change="onAudioSeekCommit" @blur="cancelAudioSeek" @input="onAudioSeekInput" />
           </div>
           <div class="pv-audio-times">
             <span>{{ fmtClock(audioDisplayPos) }}</span>
@@ -1316,7 +1509,7 @@ function decodeText(buf) {
           </div>
           <div class="pv-audio-controls">
             <div class="pv-audio-group">
-              <button v-if="audioList.length > 1" class="pv-abtn" :class="{ active: audioMenu === 'playlist' }" title="播放列表" @click.stop="audioMenu = audioMenu === 'playlist' ? '' : 'playlist'"><UiIcon name="list" :size="17" /></button>
+              <button v-if="audioList.length > 1" ref="audioPlaylistButton" class="pv-abtn" :class="{ active: audioMenu === 'playlist' }" title="播放列表" aria-haspopup="listbox" :aria-expanded="audioMenu === 'playlist'" @click.stop="audioMenu = audioMenu === 'playlist' ? '' : 'playlist'"><UiIcon name="list" :size="17" /></button>
               <button v-if="audioList.length > 1" class="pv-abtn" title="上一曲" @click="switchAudio(-1)"><UiIcon name="skip-back" :size="20" /></button>
               <button class="pv-abtn pv-abtn-main" :title="audioPlaying ? '暂停 (空格)' : '播放 (空格)'" @click="toggleAudioPlay"><UiIcon :name="audioPlaying ? 'pause' : 'play'" :size="22" /></button>
               <button v-if="audioList.length > 1" class="pv-abtn" title="下一曲" @click="switchAudio(1)"><UiIcon name="skip-forward" :size="20" /></button>
@@ -1342,11 +1535,9 @@ function decodeText(buf) {
           <!-- 弹层：播放列表 -->
           <div v-if="audioMenu === 'playlist'" class="pv-audio-pop pv-audio-pop-list" @pointerdown.stop>
             <div class="pv-audio-pop-title">播放列表 <span>{{ audioIdx + 1 }}/{{ audioList.length }}</span></div>
-            <button v-for="(t, i) in audioList" :key="t.file_id" class="pv-audio-pop-item pv-audio-track-item" :class="{ on: t.file_id === activeFile.file_id }" :title="t.name" @click.stop="selectAudioFile(t)">
-              <span class="pv-audio-track-no">{{ i + 1 }}</span>
-              <span class="pv-audio-track-name">{{ t.name }}</span>
-              <span v-if="t.file_id === activeFile.file_id" class="pv-audio-eq" :class="{ paused: !audioPlaying }"><i></i><i></i><i></i></span>
-            </button>
+            <MediaPlaylist :files="audioList" :selected-index="audioIdx" @select="selectAudioFile" @dismiss="dismissAudioPlaylist">
+              <template #selected><span class="pv-audio-eq" :class="{ paused: !audioPlaying }"><i></i><i></i><i></i></span></template>
+            </MediaPlaylist>
           </div>
         </div>
 
@@ -1360,6 +1551,8 @@ function decodeText(buf) {
         <audio
           v-if="url"
           ref="audioEl"
+          :key="activeFile.file_id"
+          :data-file-id="activeFile.file_id"
           :src="url"
           class="pv-audio-el"
           crossorigin="anonymous"
@@ -1369,6 +1562,7 @@ function decodeText(buf) {
           @pause="onAudioPause"
           @ended="onAudioEnded"
           @timeupdate="onAudioTime"
+          @seeked="onAudioSeeked"
           @progress="onAudioTime"
           @loadedmetadata="onAudioMeta"
           @volumechange="onAudioVolChange"
@@ -1391,7 +1585,7 @@ function decodeText(buf) {
         <div v-else class="pv-code-box">
           <!-- 智能同步行号槽 -->
           <div v-if="showLineNumbers" ref="gutterEl" class="pv-gutter" :style="{ fontSize: fontSize + 'px' }">
-            <div v-for="n in textLines.length" :key="n" class="pv-gutter-line">{{ n }}</div>
+            <div v-for="(numbers, index) in lineNumbers" :key="index" class="pv-gutter-line" aria-hidden="true">{{ numbers }}</div>
           </div>
 
           <!-- 在线编辑 textarea -->
@@ -1418,19 +1612,7 @@ function decodeText(buf) {
             :style="{ fontSize: fontSize + 'px' }"
             @scroll="onContentScroll"
           >
-            <div
-              v-for="(line, idx) in textLines"
-              :key="idx"
-              class="pv-code-line"
-            >
-              <template v-if="searchKw && searchParts(line)">
-                <template v-for="(part, pIdx) in searchParts(line)" :key="pIdx">
-                  <mark v-if="part.hit" class="pv-search-hit">{{ part.text }}</mark>
-                  <template v-else>{{ part.text }}</template>
-                </template>
-              </template>
-              <template v-else>{{ line || ' ' }}</template>
-            </div>
+            <div class="pv-code-text" :style="{ minHeight: textLines.length * 24 + 'px' }"><template v-if="highlightedBlocks.length"><div v-for="(block, blockIndex) in highlightedBlocks" :key="blockIndex"><template v-for="part in block.parts" :key="part.index">{{ part.before }}<mark class="pv-search-hit" :class="{ current: part.index === searchIndex }">{{ part.hit }}</mark></template>{{ block.tail }}</div></template><template v-else><div v-for="(block, index) in textBlocks" :key="index">{{ block }}</div></template></div>
           </div>
         </div>
 
@@ -1586,7 +1768,7 @@ function decodeText(buf) {
   background: transparent;
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: all var(--motion-fast) var(--motion-ease);
+  transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .pv-seg-btn:hover { color: var(--text-primary); }
 .pv-seg-btn.active {
@@ -1650,8 +1832,8 @@ function decodeText(buf) {
   background: color-mix(in srgb, var(--color-warning) 50%, transparent);
   color: inherit;
   border-radius: 2px;
-  padding: 0 1px;
 }
+.pv-search-hit.current { background: var(--color-warning); color: var(--bg-base); }
 
 /* 文本与代码主区容器 */
 .pv-text-container {
@@ -1695,8 +1877,12 @@ function decodeText(buf) {
   font-variant-numeric: tabular-nums;
 }
 .pv-gutter-line {
-  height: 24px;
+  flex: none;
+  margin: 0;
+  font: inherit;
   line-height: 24px;
+  text-align: right;
+  white-space: pre;
 }
 
 /* 查看与编辑内容区 */
@@ -1723,14 +1909,7 @@ function decodeText(buf) {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.pv-code-line {
-  height: 24px;
-  line-height: 24px;
-}
-.pv-code-view.wrap .pv-code-line {
-  height: auto;
-  min-height: 24px;
-}
+.pv-code-text > div::after { content: '\200b'; }
 
 /* Markdown 文档渲染视图 */
 .pv-markdown-view {
@@ -1853,17 +2032,19 @@ function decodeText(buf) {
   pointer-events: none;
 }
 .pv-img-layer:not(.leaving) { animation: pv-layer-in 260ms var(--motion-ease) both; }
-.pv-img-layer.leaving { animation: pv-layer-out 240ms ease both; }
-@keyframes pv-layer-in { from { opacity: 0; transform: scale(1.015); } }
-@keyframes pv-layer-out { to { opacity: 0; transform: scale(.99); } }
+@keyframes pv-layer-in { from { opacity: 0; } }
 .pv-img-layer img {
-  display: block; max-width: none; max-height: none;
+  display: block; flex: none; max-width: none; max-height: none;
   transform-origin: center center;
   transition: transform 200ms var(--motion-ease);
   box-shadow: 0 10px 44px rgba(0, 0, 0, .55);
   border-radius: 2px;
 }
-.pv-stage.grabbing .pv-img-layer img { transition: none; }
+.pv-stage.direct-transform .pv-img-layer img, .pv-img-layer.leaving img { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .pv-img-layer:not(.leaving) { animation: none; }
+  .pv-img-layer img { transition: none; }
+}
 .pv-stage-busy { position: absolute; z-index: 10; top: 12px; right: 14px; color: rgba(255,255,255,.7); }
 
 /* 媒体标题栏 */
@@ -1951,8 +2132,8 @@ function decodeText(buf) {
 /* 胶卷缩略图条（默认隐藏，控制条切换） */
 .pv-filmstrip {
   position: absolute; z-index: 8; left: 50%; bottom: 66px; transform: translateX(-50%);
-  display: flex; gap: 6px; max-width: min(78%, 560px); overflow-x: auto;
-  padding: 7px; border-radius: 12px;
+  display: flex; max-width: calc(100% - 120px); overflow-x: auto; overflow-y: hidden;
+  border-radius: 12px; overflow-anchor: none;
   background: var(--pv-media-dock);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--pv-media-dock-border);
@@ -1961,17 +2142,6 @@ function decodeText(buf) {
   transition: opacity .25s ease;
 }
 .pv-filmstrip::-webkit-scrollbar { display: none; }
-.pv-film-thumb {
-  width: 56px; height: 40px; flex: none;
-  border-radius: 7px; overflow: hidden; cursor: pointer;
-  border: 1.5px solid transparent;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--pv-media-surface); color: var(--pv-media-muted);
-  transition: transform .18s var(--motion-spring), border-color .15s ease;
-}
-.pv-film-thumb:hover { transform: translateY(-2px); }
-.pv-film-thumb.active { border-color: var(--pv-media-active); }
-.pv-film-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
 /* 控件自动隐藏 */
 .pv-stage.ui-hidden { cursor: none; }
@@ -2037,16 +2207,22 @@ function decodeText(buf) {
   position: relative; width: 100%; height: 4px; border-radius: 999px;
   background: color-mix(in srgb, var(--pv-media-muted) 28%, transparent); overflow: visible;
 }
-.pv-audio-buffer { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: color-mix(in srgb, var(--pv-media-muted) 48%, transparent); }
+.pv-audio-buffer { position: absolute; inset: 0; transform-origin: left; border-radius: 999px; background: color-mix(in srgb, var(--pv-media-muted) 48%, transparent); }
 .pv-audio-fill {
-  position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+  position: absolute; inset: 0; transform-origin: left; border-radius: 999px;
   background: var(--pv-media-active);
 }
 .pv-audio-thumb {
-  position: absolute; right: -6px; top: 50%; translate: 0 -50%;
+  position: absolute; top: 50%; translate: -50% -50%;
   width: 12px; height: 12px; border-radius: 50%; background: var(--pv-media-active-fg);
   box-shadow: 0 1px 6px rgba(0, 0, 0, .5);
   opacity: 0; transition: opacity .15s ease, scale .15s var(--motion-spring);
+}
+.pv-audio-track.gliding .pv-audio-fill { transition: transform 180ms linear; }
+.pv-audio-track.gliding .pv-audio-thumb { transition: left 180ms linear, opacity .15s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .pv-audio-track.gliding .pv-audio-fill, .pv-audio-track.gliding .pv-audio-thumb { transition: none; }
+  .pv-audio-pop, .pv-audio-eq i { animation: none; }
 }
 .pv-audio-progress:hover .pv-audio-thumb, .pv-audio-progress:focus-within .pv-audio-thumb { opacity: 1; }
 .pv-audio-progress:hover .pv-audio-track { height: 5px; }
@@ -2115,8 +2291,6 @@ function decodeText(buf) {
 .pv-audio-pop-item:hover { background: var(--pv-media-surface-hover); border-color: var(--pv-media-border); }
 .pv-audio-pop-item.on { color: var(--pv-media-active-fg); background: var(--pv-media-active); border-color: var(--pv-media-active); }
 .pv-audio-pop-check { width: 15px; flex: none; display: inline-flex; }
-.pv-audio-track-no { width: 20px; flex: none; text-align: right; color: var(--pv-media-muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
-.pv-audio-track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-audio-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
 .pv-audio-eq i { width: 3px; border-radius: 2px; background: currentColor; animation: pv-eq 900ms ease-in-out infinite; }
 .pv-audio-eq i:nth-child(1) { height: 60%; animation-delay: -200ms; }
@@ -2166,8 +2340,7 @@ function decodeText(buf) {
 .pv-ctl-btn.active { color: var(--color-primary); background: var(--listselectbg); }
 .pv-ctl-btn :deep(svg) { width: 18px; height: 18px; }
 .pv-window-btn :deep(svg) { width: 14px; height: 14px; }
-.pv-filmstrip { bottom: 82px; padding: 8px; gap: 8px; max-width: calc(100% - 120px); }
-.pv-film-thumb { width: 64px; height: 48px; }
+.pv-filmstrip { bottom: 82px; }
 .pv-stage.ui-hidden .pv-ctl:focus-within, .pv-stage.ui-hidden .pv-filmstrip:focus-within { opacity: 1; pointer-events: auto; }
 .pv-stage.ui-hidden .pv-ctl:focus-within { transform: translateX(-50%); }
 .pv-audio-center { inset: 0 0 150px; flex-direction: row; gap: 40px; padding: 40px max(32px, 10vw); }

@@ -8,7 +8,7 @@
 
 #define MyAppName "Mnemo"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.7"
+  #define MyAppVersion "0.4.8"
 #endif
 #define MyAppExeName "Mnemo.exe"
 

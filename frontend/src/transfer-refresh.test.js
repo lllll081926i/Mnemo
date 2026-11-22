@@ -19,4 +19,15 @@ describe('传输任务刷新', () => {
       { id: 'remaining' },
     ])
   })
+
+  it('按最新顺序复用未变任务，保留嵌套字段删除和实时状态', () => {
+    const previous = [{ id: 'one', parts: [{ name: '资料' }] }, { id: 'two', issue: { message: '旧错误' } }, { id: 'three', count: 1 }]
+    const snapshot = [{ id: 'two' }, { id: 'one', parts: [{ name: '资料' }] }, { id: 'three', count: 0 }]
+    const events = new Map([['three', { id: 'three', count: 2 }]])
+    const next = mergeLiveTasks(snapshot, events, task => task.id, previous)
+    expect(next.map(task => task.id)).toEqual(['two', 'one', 'three'])
+    expect(next[0]).not.toHaveProperty('issue')
+    expect(next[1]).toBe(previous[0])
+    expect(next[2].count).toBe(2)
+  })
 })

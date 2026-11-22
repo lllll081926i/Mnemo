@@ -6,7 +6,7 @@ import {
   RemoveDownload, PrioritizeDownload, OpenFile,
   CancelUpload, ClearUploads, DownloadURL, ResumeUpload, ResumeUploadReviewed,
   ListOfflineTasks, refreshOfflineTasks, OfflineDownload, DeleteOfflineTask,
-  ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs, VerifyMigration,
+  ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs,
   EventsOn, RevealInFolder,
   accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
@@ -19,8 +19,12 @@ import ContextMenu from '../components/ContextMenu.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import TaskIssue from '../components/TaskIssue.vue'
-import { motion, MotionConfig } from 'motion-v'
-import { compactReveal, reducedMotion } from '../motion/presets'
+import TransferUploadRow from '../components/TransferUploadRow.vue'
+import TransferDownloadRow from '../components/TransferDownloadRow.vue'
+import TransferFolderDetails from '../components/TransferFolderDetails.vue'
+import TransferMigrateRow from '../components/TransferMigrateRow.vue'
+import TransferMigrateDetails from '../components/TransferMigrateDetails.vue'
+import { downProgress, downTaskStatus } from '../download-display'
 import { taskErrorText, notifyTransferFailure, notifyMigrateFailure } from '../task-notices'
 import { mergeLiveTasks } from '../transfer-refresh'
 
@@ -30,20 +34,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['toast', 'navigate', 'repair'])
 const detailID = ref('')
-const verifying = ref(false), verification = ref({})
-let verificationSeq = 0
-async function verifyMigration() {
-  if (!detailID.value || verifying.value) return
-  const id = detailID.value, seq = ++verificationSeq; verifying.value = true
-  try {
-    const result = await VerifyMigration(id)
-    if (seq === verificationSeq && detailID.value === id) verification.value = Object.fromEntries((result || []).map(item => [item.id,item]))
-  } catch(e) { if (seq === verificationSeq && detailID.value === id) emit('toast',String(e),'error') }
-  finally { if (seq === verificationSeq) verifying.value = false }
-}
-watch(detailID, () => { verificationSeq++; verifying.value = false; verification.value = {} })
-const detailJob = computed(() => migrateJobs.value.find(j => j.id === detailID.value))
-const verificationLabels = { unverified: '未校验', size: '传输大小已核对', 'transferred-size': '传输大小已核对', 'remote-size': '目标大小已核对', 'remote-hash': '目标哈希已核对', 'provider-hash': '网盘已校验哈希' }
+const detailJob = computed(() => migrateByID.value.get(detailID.value))
 
 // ---------- 菜单 / 账号筛选 ----------
 const menu = ref('downloading')
@@ -77,11 +68,17 @@ const downloads = ref([])
 const uploads = ref([])
 const downloadByID = computed(() => new Map(downloads.value.map(task => [task.id, task])))
 const uploadByID = computed(() => new Map(uploads.value.map(task => [task.UploadID, task])))
+const hasWorkingTransfers = computed(() =>
+  downloads.value.some(task => task.status === 'downloading' || task.status === 'queued') ||
+  uploads.value.some(({ Upload }) => Upload?.DownState === 'uploading' || Upload?.DownState === 'queued'),
+)
 const loading = ref(true)
 const refreshError = ref('')
 let refreshSeq = 0
 let pendingDownloadEvents = null
 let pendingUploadEvents = null
+let progressFrame = null
+const queuedProgress = new Map()
 
 // 下载完成提示音
 const finishSoundPlayer = createDownloadSoundPlayer()
@@ -91,6 +88,7 @@ function playFinishSound() {
 }
 
 async function refresh() {
+  if (!viewActive) return
   if (refreshInFlight) {
     refreshQueued = true
     return
@@ -104,8 +102,9 @@ async function refresh() {
   try {
     const [d, u] = await Promise.all([ListDownloads(), ListUploads()])
     if (seq !== refreshSeq) return
-    downloads.value = mergeLiveTasks(d, downloadEvents, (task) => task.id)
-    uploads.value = mergeLiveTasks(u, uploadEvents, (task) => task.UploadID)
+    flushProgress()
+    downloads.value = mergeLiveTasks(d, downloadEvents, (task) => task.id, downloads.value)
+    uploads.value = mergeLiveTasks(u, uploadEvents, (task) => task.UploadID, uploads.value)
     if (selectedIds.value.size) {
       const activeIds = new Set(downloads.value.filter((task) => task.status !== 'completed').map((task) => task.id))
       const next = new Set([...selectedIds.value].filter((id) => activeIds.has(id)))
@@ -115,13 +114,15 @@ async function refresh() {
   } catch (e) {
     if (seq === refreshSeq) refreshError.value = String(e && e.message ? e.message : e)
   } finally {
-    if (pendingDownloadEvents === downloadEvents) pendingDownloadEvents = null
-    if (pendingUploadEvents === uploadEvents) pendingUploadEvents = null
-    if (seq === refreshSeq) loading.value = false
-    refreshInFlight = false
-    if (refreshQueued) {
-      refreshQueued = false
-      scheduleRefresh(0)
+    if (seq === refreshSeq) {
+      pendingDownloadEvents = null
+      pendingUploadEvents = null
+      loading.value = false
+      refreshInFlight = false
+      if (refreshQueued) {
+        refreshQueued = false
+        scheduleRefresh(0)
+      }
     }
   }
 }
@@ -130,9 +131,46 @@ let refreshInFlight = false
 let refreshQueued = false
 
 function onTransferEvent(ev) {
+  if (!viewActive) return
   if (!ev || !ev.task) { scheduleRefresh(); return }
-  const t = ev.task
   notifyTransferFailure(ev)
+  const { kind, task } = ev
+  const key = `${kind}:${task.id}`
+  const previous = queuedProgress.get(key)
+  const upload = kind === 'upload' ? uploadByID.value.get(task.id)?.Upload : null
+  const liveProgress = !task.issue && !task.error && (
+    (kind === 'download' && task.status === 'downloading' && downloadByID.value.get(task.id)?.status === 'downloading') ||
+    (kind === 'upload' && task.status === 'uploading' && upload?.IsDowning && upload.DownState === 'uploading')
+  )
+  if (liveProgress) {
+    let next = task
+    if (previous && kind === 'download') next = { ...previous.task, ...task }
+    if (previous && kind === 'upload') {
+      next = { ...task }
+      for (const field of ['downloaded', 'progress']) {
+        if (!Number.isFinite(next[field])) next[field] = previous.task[field]
+      }
+    }
+    queuedProgress.set(key, { kind, task: next })
+    if (progressFrame === null) progressFrame = requestAnimationFrame(flushProgress)
+    return
+  }
+  if (previous) {
+    queuedProgress.delete(key)
+    applyTransferEvent(previous)
+  }
+  applyTransferEvent(ev)
+}
+
+function flushProgress() {
+  if (progressFrame !== null) cancelAnimationFrame(progressFrame)
+  progressFrame = null
+  for (const event of queuedProgress.values()) applyTransferEvent(event)
+  queuedProgress.clear()
+}
+
+function applyTransferEvent(ev) {
+  const t = ev.task
   if (ev.kind === 'download') {
     const list = downloads.value
     const existing = downloadByID.value.get(t.id)
@@ -170,9 +208,8 @@ function onTransferEvent(ev) {
       scheduleRefresh(150)
       return
     }
-    const previous = upStatus(job)
+    const wasCompleted = job.Upload?.IsCompleted === true
     const next = {
-      ...(job.Upload || {}),
       DownSize: Number.isFinite(t.downloaded) ? t.downloaded : (job.Upload?.DownSize || 0),
       DownSpeed: Number.isFinite(t.speed) ? t.speed : (job.Upload?.DownSpeed || 0),
       DownSpeedStr: t.speed ? formatSpeed(t.speed) : '',
@@ -187,17 +224,17 @@ function onTransferEvent(ev) {
       failedMessage: t.error || '',
       issue: t.issue || null,
     }
-    // Keep the rich upload metadata returned by ListUploads while replacing
-    // only the progress fields carried by the lightweight event snapshot.
-    job.Upload = next
+    if (job.Upload) Object.assign(job.Upload, next)
+    else job.Upload = next
     pendingUploadEvents?.set(t.id, job)
-    if (previous !== upStatus(job) && t.status === 'completed') scheduleRefresh(0)
+    if (!wasCompleted && t.status === 'completed') scheduleRefresh(0)
   }
 }
 
 let refreshTimer = null
 let refreshDue = 0
 function scheduleRefresh(delay = 400) {
+  if (!viewActive) return
   const due = Date.now() + Math.max(0, delay)
   if (refreshTimer && refreshDue <= due) return
   clearTimeout(refreshTimer)
@@ -242,8 +279,11 @@ const groupChildrenByID = computed(() => {
 const groupChildren = id => groupChildrenByID.value.get(id) || []
 const groupChildLimits = ref({})
 const failedGroupOnly = ref({})
-const filteredGroupChildren = id => failedGroupOnly.value[id] ? groupChildren(id).filter(child => child.status === 'failed' || child.status === 'canceled') : groupChildren(id)
-const shownGroupChildren = id => filteredGroupChildren(id).slice(0, groupChildLimits.value[id] || 100)
+const openFolderIds = ref(new Set())
+function setFolderOpen(id, open) {
+  if (open) openFolderIds.value.add(id)
+  else openFolderIds.value.delete(id)
+}
 function toggleFailedGroup(id) { failedGroupOnly.value = { ...failedGroupOnly.value, [id]: !failedGroupOnly.value[id] }; groupChildLimits.value = { ...groupChildLimits.value, [id]: 100 } }
 async function retryGroupChild(parent, child) {
   if (!['failed', 'paused'].includes(child.status)) return
@@ -260,31 +300,9 @@ function toggleSelectAllActive() {
   selectedIds.value = allActiveSelected.value ? new Set() : new Set(activeDownloads.value.map((t) => t.id))
 }
 
-const downStatusText = (s) => ({ queued: '排队中', downloading: '下载中', paused: '已暂停', completed: '已完成', failed: '失败', canceled: '已取消' }[s] || s)
-const downTaskStatus = (t) => t.status === 'downloading' ? ({ resolving: '获取下载链接', connecting: '建立连接', scanning: '扫描目录', verifying: `校验内容 ${t.stageProgress || 0}%` }[t.stage] || downStatusText(t.status)) : downStatusText(t.status)
-const downStatusBadge = (s) => ({ downloading: 'primary', queued: 'primary', completed: 'success', failed: 'error', canceled: 'warn', paused: 'warn' }[s] || '')
-const downProgress = (t) => Number.isFinite(t.progress) ? Math.max(0, Math.min(100, Math.round(t.progress))) : 0
 
-function upStatus(t) {
-  const u = t.Upload || {}
-  if (u.IsCompleted) return '已完成'
-  if (!u.IsDowning && uploadNeedsReview(t)) return '待核对'
-  if (u.IsFailed) return '失败'
-  if (u.IsStop) return '已停止'
-  if (u.stage === 'hashing') return '计算哈希'
-  if (u.stage === 'preparing') return '准备目录'
-  if (u.stage === 'checking') return '检查秒传'
-  if (u.stage === 'resuming') return '检查续传'
-  if (u.stage === 'uploading' && u.DownProcess >= 100) return '等待网盘确认'
-  if (u.IsDowning) return '上传中'
-  return '排队中'
-}
-const upStatusBadge = (t) => ({ 已完成: 'success', 失败: 'error', 已停止: 'warn', 待核对: 'warn' }[upStatus(t)] || 'primary')
 const upName = (t) => (t.Info && t.Info.name) || ((t.Info && t.Info.localFilePath) || '').split(/[\\/]/).pop() || t.UploadID
 const upSize = (t) => (t.Info && (t.Info.sizeStr || formatBytes(t.Info.size))) || ''
-const upSpeed = (t) => (t.Upload && (t.Upload.DownSpeedStr || formatSpeed(t.Upload.DownSpeed || 0))) || ''
-const upProgress = (t) => t.Upload?.stage === 'hashing' ? (t.Upload?.stageProgress || 0) : ['preparing', 'checking', 'resuming'].includes(t.Upload?.stage) ? 0 : (t.Upload?.DownProcess || 0)
-const upProgressText = (t) => ['preparing', 'checking', 'resuming'].includes(t.Upload?.stage) ? '…' : `${upProgress(t)}%`
 
 // ---------- 选择 / 批量 ----------
 const selectedIds = ref(new Set())
@@ -623,11 +641,19 @@ const dlName = ref('')
 const dlAdvanced = ref(false)
 const dlHeaders = ref({ ua: '', referer: '', cookie: '' })
 const downloadingUrls = ref(false)
+const dlSubmitted = ref(0)
+const dlSubmitError = ref('')
 function openDlModal() {
   if (downloadingUrls.value) return
-  dlLinks.value = ''; dlName.value = ''; dlAdvanced.value = false
-  dlHeaders.value = { ua: '', referer: '', cookie: '' }
+  if (!dlSubmitError.value) {
+    dlLinks.value = ''; dlName.value = ''; dlAdvanced.value = false
+    dlHeaders.value = { ua: '', referer: '', cookie: '' }
+  }
   dlModal.value = true
+}
+function closeDlModal() {
+  dlModal.value = false
+  if (!downloadingUrls.value) dlSubmitError.value = ''
 }
 function isHttpUrl(value) {
   try {
@@ -642,7 +668,9 @@ async function submitDownload() {
   const urls = dlUrlList.value
   if (!urls.length || dlInvalidCount.value) { emit('toast', '链接列表中包含无效链接，请检查', 'error'); return }
   downloadingUrls.value = true
-  dlModal.value = false
+  dlSubmitted.value = 0
+  dlSubmitError.value = ''
+  const name = urls.length === 1 ? dlName.value.trim() : ''
   const headers = {}
   if (dlHeaders.value.ua.trim()) headers['User-Agent'] = dlHeaders.value.ua.trim()
   if (dlHeaders.value.referer.trim()) headers['Referer'] = dlHeaders.value.referer.trim()
@@ -651,14 +679,18 @@ async function submitDownload() {
   let firstError = null
   try {
     for (const url of urls) {
-      const name = urls.length === 1 ? dlName.value.trim() : ''
       try { await DownloadURL(name, url, headers) } catch (error) { failed.push(url); firstError ||= error }
+      dlSubmitted.value++
     }
     if (failed.length) {
       dlLinks.value = failed.join('\n')
-      dlModal.value = true
-      emit('toast', `已添加 ${urls.length - failed.length}/${urls.length} 个下载任务；失败：${String(firstError)}`, 'error')
-    } else emit('toast', `已添加 ${urls.length} 个下载任务`, 'success')
+      dlName.value = name
+      dlSubmitError.value = `已添加 ${urls.length - failed.length}/${urls.length} 个下载任务；失败：${String(firstError)}`
+      if (!dlModal.value) emit('toast', `${dlSubmitError.value}。可从「新建下载」重试失败链接。`, 'error')
+    } else {
+      dlModal.value = false
+      emit('toast', `已添加 ${urls.length} 个下载任务`, 'success')
+    }
     refresh()
   } finally {
     downloadingUrls.value = false
@@ -671,6 +703,8 @@ const offlineTasks = ref([])
 const offlineLoading = ref(false)
 const offlineError = ref('')
 let offlineRefreshSeq = 0
+let offlineRequest = null
+let offlineHasSnapshot = false
 const offModal = ref(false)
 const offLinks = ref('')
 let offlineTimer = null
@@ -688,59 +722,113 @@ const offlineDriveId = computed(() => {
   return acc ? acc.drive_id : ''
 })
 
-async function refreshOffline() {
-  const seq = ++offlineRefreshSeq
+function invalidateOfflineRefresh() {
+  offlineRefreshSeq++
+  offlineRequest = null
+  offlineLoading.value = false
+}
+
+function refreshOffline() {
   const userID = offlineUser.value
   const driveID = offlineDriveId.value
-  if (!userID) { offlineTasks.value = []; offlineError.value = ''; offlineLoading.value = false; return }
+  if (!viewActive || menu.value !== 'offline' || !userID) return
+  if (offlineRequest) return offlineRequest
+  const seq = ++offlineRefreshSeq
+  const isCurrent = () => seq === offlineRefreshSeq && userID === offlineUser.value && driveID === offlineDriveId.value && menu.value === 'offline'
   offlineLoading.value = true
-  try {
-    const list = (await ListOfflineTasks(userID)) || []
-    if (seq !== offlineRefreshSeq || userID !== offlineUser.value) return
-    offlineTasks.value = list.filter(task => task.drive_id === driveID)
-    const remote = (await refreshOfflineTasks(userID, driveID)) || []
-    if (seq !== offlineRefreshSeq || userID !== offlineUser.value || driveID !== offlineDriveId.value) return
-    offlineTasks.value = remote
-    offlineError.value = ''
-  } catch (e) {
-    if (seq === offlineRefreshSeq && userID === offlineUser.value) offlineError.value = String(e && e.message ? e.message : e)
-  } finally {
-    if (seq === offlineRefreshSeq) offlineLoading.value = false
-  }
+  offlineRequest = Promise.resolve().then(async () => {
+    if (!isCurrent()) return
+    try {
+      if (!offlineHasSnapshot) {
+        const cached = (await ListOfflineTasks(userID)) || []
+        if (!isCurrent()) return
+        offlineTasks.value = cached.filter(task => task.drive_id === driveID)
+        offlineHasSnapshot = true
+      }
+      const remote = (await refreshOfflineTasks(userID, driveID)) || []
+      if (!isCurrent()) return
+      offlineTasks.value = remote
+      offlineError.value = ''
+    } catch (error) {
+      if (isCurrent()) offlineError.value = String(error?.message || error)
+    } finally {
+      if (isCurrent()) {
+        offlineRequest = null
+        offlineLoading.value = false
+      }
+    }
+  })
+  return offlineRequest
 }
-watch(offlineUser, refreshOffline)
-watch(menu, (m) => { if (m === 'offline') refreshOffline() })
+watch([menu, offlineUser, offlineDriveId], ([tab, user, drive], [, previousUser, previousDrive]) => {
+  invalidateOfflineRefresh()
+  if (user !== previousUser || drive !== previousDrive) {
+    offlineHasSnapshot = false
+    offlineTasks.value = []
+    offlineError.value = ''
+    offModal.value = false
+  }
+  if (tab === 'offline') void refreshOffline()
+})
 
 function isOfflineUrl(value) { return isHttpUrl(value) || /^magnet:\?.+/i.test(value) || /^ed2k:\/\/.+/i.test(value) }
 const offUrlList = computed(() => offLinks.value.split('\n').map((s) => s.trim()).filter(isOfflineUrl))
 const offInvalidCount = computed(() => offLinks.value.split('\n').map((s) => s.trim()).filter((s) => s && !isOfflineUrl(s)).length)
 const submittingOffline = ref(false)
+const offlineSubmitted = ref(0)
+const offlineRetries = ref(new Map())
+const offlineScope = computed(() => JSON.stringify([offlineUser.value, offlineDriveId.value]))
+const offlineSubmitError = computed(() => offlineRetries.value.get(offlineScope.value)?.message || '')
+
+function openOfflineModal() {
+  if (submittingOffline.value || !offlineUser.value || !offlineDriveId.value) return
+  offLinks.value = offlineRetries.value.get(offlineScope.value)?.links || ''
+  offModal.value = true
+}
+
+function closeOfflineModal() {
+  offModal.value = false
+  if (!submittingOffline.value) offlineRetries.value.delete(offlineScope.value)
+}
+
 async function submitOffline() {
   if (submittingOffline.value) return
   const urls = offUrlList.value
   if (!urls.length || offInvalidCount.value) { emit('toast', '链接列表中包含无效链接，请检查', 'error'); return }
   const userID = offlineUser.value, driveID = offlineDriveId.value
   if (!userID || !driveID) { emit('toast', '当前账号不支持离线下载', 'error'); return }
+  const scope = offlineScope.value
+  const isCurrentScope = () => offlineScope.value === scope
   submittingOffline.value = true
-  offModal.value = false
+  offlineSubmitted.value = 0
+  offlineRetries.value.delete(scope)
   const failed = []
   let firstError = null
   try {
     for (const url of urls) {
       try { await OfflineDownload(userID, driveID, url, '') }
       catch (error) { failed.push(url); firstError ||= error }
+      offlineSubmitted.value++
     }
     if (failed.length) {
-      offLinks.value = failed.join('\n')
-      if (offlineUser.value === userID) offModal.value = true
-      emit('toast', `已提交 ${urls.length - failed.length}/${urls.length} 个离线任务；失败：${String(firstError)}`, 'error')
+      const links = failed.join('\n')
+      const message = `已提交 ${urls.length - failed.length}/${urls.length} 个离线任务；失败：${String(firstError)}`
+      offlineRetries.value.set(scope, { links, message })
+      if (viewActive && offModal.value && isCurrentScope()) offLinks.value = links
+      else emit('toast', `${message}。请回到原账号重试失败链接。`, 'error')
     } else {
-      offLinks.value = ''
+      if (isCurrentScope()) {
+        offLinks.value = ''
+        offModal.value = false
+      }
       emit('toast', `已提交 ${urls.length} 个离线任务`, 'success')
     }
-    if (offlineUser.value === userID) refreshOffline()
   } finally {
     submittingOffline.value = false
+  }
+  if (isCurrentScope()) {
+    await offlineRequest
+    if (isCurrentScope()) await refreshOffline()
   }
 }
 const offProgress = (t) => Math.max(0, Math.min(100, Math.round(t.progress || 0)))
@@ -750,6 +838,8 @@ const offProgressClass = (status) => ['completed', 'PHASE_TYPE_COMPLETE'].includ
 async function delOfflineTask(t) {
   const userID = offlineUser.value, driveID = offlineDriveId.value, taskID = t.task_id || t.id
   askConfirm(`确定删除离线任务「${t.file_name || t.url || t.task_id}」并同步删除网盘文件？`, async () => {
+    if (offlineUser.value !== userID || offlineDriveId.value !== driveID) { emit('toast', '账号已切换，请重新选择任务', 'warn'); return }
+    await offlineRequest
     if (offlineUser.value !== userID || offlineDriveId.value !== driveID) { emit('toast', '账号已切换，请重新选择任务', 'warn'); return }
     // 乐观剔除
     offlineTasks.value = offlineTasks.value.filter((x) => x.task_id !== taskID && x.id !== taskID)
@@ -763,26 +853,55 @@ async function delOfflineTask(t) {
 
 // ---------- 迁移 ----------
 const migrateJobs = ref([])
+const migrateByID = computed(() => new Map(migrateJobs.value.map(job => [job.id, job])))
 const visibleMigrateJobs = computed(() => filterUser.value ? migrateJobs.value.filter((job) => job.srcUser === filterUser.value || job.dstUser === filterUser.value) : migrateJobs.value)
 const migrateLoading = ref(false)
 let migrateRefreshSeq = 0
 let pendingMigrateEvents = null
+let migrateFrame = null
+const queuedMigrateJobs = new Map()
 function onMigrate(job) {
-  if (!job || !job.id) return
+  if (!viewActive || !job?.id) return
   notifyMigrateFailure(job)
-  const i = migrateJobs.value.findIndex((j) => j.id === job.id)
-  if (i >= 0) migrateJobs.value.splice(i, 1, job)
-  else migrateJobs.value.unshift(job)
-  pendingMigrateEvents?.set(job.id, job)
+  const current = migrateByID.value.get(job.id)
+  if (current?.status === 'running' && job.status === 'running' && current.stage === job.stage && !job.issue) {
+    queuedMigrateJobs.set(job.id, job)
+    if (migrateFrame === null) migrateFrame = requestAnimationFrame(flushMigrateProgress)
+    return
+  }
+  queuedMigrateJobs.delete(job.id)
+  applyMigrateSnapshot(job)
 }
-async function refreshMigrateJobs() {
+function applyMigrateSnapshot(job) {
+  const current = migrateByID.value.get(job.id)
+  if (current) {
+    for (const key of Object.keys(current)) {
+      if (!Object.hasOwn(job, key)) delete current[key]
+    }
+    Object.assign(current, job)
+  } else migrateJobs.value.unshift(job)
+  pendingMigrateEvents?.set(job.id, current || job)
+}
+function flushMigrateProgress() {
+  if (migrateFrame !== null) cancelAnimationFrame(migrateFrame)
+  migrateFrame = null
+  for (const job of queuedMigrateJobs.values()) applyMigrateSnapshot(job)
+  queuedMigrateJobs.clear()
+}
+async function refreshMigrateJobs({ background = false } = {}) {
+  if (!viewActive) return
+  if (background && pendingMigrateEvents) return
   const seq = ++migrateRefreshSeq
   const migrateEvents = new Map()
   pendingMigrateEvents = migrateEvents
-  migrateLoading.value = true
+  flushMigrateProgress()
+  if (!background) migrateLoading.value = true
   try {
     const list = await ListMigrateJobs()
-    if (seq === migrateRefreshSeq) migrateJobs.value = mergeLiveTasks(list, migrateEvents, (job) => job.id)
+    if (seq === migrateRefreshSeq) {
+      flushMigrateProgress()
+      migrateJobs.value = mergeLiveTasks(list, migrateEvents, (job) => job.id, migrateJobs.value)
+    }
   } catch (e) {
     if (seq === migrateRefreshSeq && !migrateJobs.value.length) emit('toast', '迁移任务加载失败: ' + String(e), 'error')
   } finally {
@@ -845,18 +964,7 @@ const migName = (uid) => {
   return acc ? accountName(acc) : uid
 }
 const migIcon = (uid) => providerIconUrl(providerMetaOf(props.accounts.find(a => a.user_id === uid) || { user_id: uid }, props.providers))
-const migBadge = (s) => ({ completed: 'success', failed: 'error', running: 'primary' }[s] || 'warn')
 const migStatusText = (s) => ({ pending: '等待中', running: '迁移中', completed: '已完成', partial: '部分完成', failed: '失败', canceled: '已取消' }[s] || s)
-const migCompletedTopLevel = (j) => (j.fileIDs || []).filter((id) => (j.completedFileIDs || []).includes(id)).length
-const migRemaining = (j) => Math.max(0, (j.fileIDs || []).length - migCompletedTopLevel(j))
-const migProgress = (j) => j.totalBytes > 0
-  ? Math.min(100, Math.round(((j.processedBytes || 0) / j.totalBytes) * 100))
-  : (j.total ? Math.min(100, Math.round(((j.processed || 0) / j.total) * 100)) : 0)
-const migShownText = (j) => ['hashing', 'local-upload'].includes(j.stage) ? `${j.stageProgress || 0}%` : ['checking', 'preparing', 'resuming', 'scanning', 'cleaning'].includes(j.stage) ? '…' : `${migProgress(j)}%`
-const migStageText = (j) => j.status !== 'running' ? migStatusText(j.status) : ({ hashing: '计算哈希', checking: '检查秒传', preparing: '准备目标', resuming: '检查续传', downloading: '下载来源', scanning: '读取目录', cleaning: '核对并清理来源', 'local-upload': j.stageProgress >= 100 ? '等待网盘确认' : '上传目标' }[j.stage] || (j.stage === 'uploading' && migProgress(j) >= 100 ? '等待网盘确认' : migStatusText(j.status)))
-const migProgressText = (j) => j.totalBytes > 0
-  ? `${formatBytes(j.processedBytes || 0)} / ${formatBytes(j.totalBytes || 0)}`
-  : `${j.processed || 0} / ${j.total || 0} 个文件`
 
 // ---------- 生命周期 ----------
 let pollTimer = null
@@ -890,11 +998,12 @@ function startPolling() {
   const epoch = pollEpoch
   const pollTransfers = async () => {
     if (!viewActive || epoch !== pollEpoch) return
-    if (!document.hidden && (activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate')) {
-      await refresh()
-      if (viewActive && epoch === pollEpoch && menu.value === 'migrate') await refreshMigrateJobs()
+    if (!document.hidden) {
+      const transfers = hasWorkingTransfers.value ? refresh() : null
+      const migrations = menu.value === 'migrate' ? refreshMigrateJobs({ background: true }) : null
+      await Promise.all([transfers, migrations])
     }
-    if (viewActive && epoch === pollEpoch) pollTimer = setTimeout(pollTransfers, activeDownloads.value.length || activeUploads.value.length || menu.value === 'migrate' ? 5000 : 15000)
+    if (viewActive && epoch === pollEpoch) pollTimer = setTimeout(pollTransfers, hasWorkingTransfers.value || menu.value === 'migrate' ? 5000 : 15000)
   }
   const pollOffline = async () => {
     if (!viewActive || epoch !== pollEpoch) return
@@ -911,18 +1020,34 @@ function activateView() {
   bindEvents()
   refresh()
   refreshMigrateJobs()
+  if (menu.value === 'offline') void refreshOffline()
   startPolling()
 }
 
 function deactivateView() {
   if (!viewActive) return
   viewActive = false
+  invalidateOfflineRefresh()
+  offModal.value = false
+  detailID.value = ''
+  if (progressFrame !== null) cancelAnimationFrame(progressFrame)
+  progressFrame = null
+  queuedProgress.clear()
+  if (migrateFrame !== null) cancelAnimationFrame(migrateFrame)
+  migrateFrame = null
+  queuedMigrateJobs.clear()
+  migrateRefreshSeq++
+  pendingMigrateEvents = null
+  migrateLoading.value = false
   stopPolling()
   clearTimeout(refreshTimer)
   refreshTimer = null
   refreshDue = 0
   refreshQueued = false
   refreshSeq++
+  refreshInFlight = false
+  pendingDownloadEvents = null
+  pendingUploadEvents = null
   unbindEvents()
 }
 
@@ -938,15 +1063,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <Modal v-if="detailJob" title="迁移详情" width="760px" @close="detailID = ''">
-      <p class="account-inline"><img :src="migIcon(detailJob.srcUser)" alt="" />{{ migName(detailJob.srcUser) }} → <img :src="migIcon(detailJob.dstUser)" alt="" />{{ migName(detailJob.dstUser) }}</p>
-      <p>目标目录：{{ detailJob.dstParent }} · {{ migStatusText(detailJob.status) }}</p>
-      <div class="workspace-results"><div v-for="item in Object.values(detailJob.items || {})" :key="item.id" class="workspace-result"><span><strong>{{ item.name }}</strong><small>{{ migStatusText(item.status) }} · {{ verificationLabels[item.verification] || '未校验' }}</small><small v-if="item.error">{{ taskErrorText(item.error, '迁移文件') }}</small></span></div><p v-if="!Object.keys(detailJob.items || {}).length">早期版本的任务未记录子项，继续执行后将记录详情。</p></div>
-      <p class="hint">大小核对仅比对传输字节；网盘校验由服务端直接确认，未二次读取校验。</p>
-      <button class="btn" :disabled="verifying || ['running','pending'].includes(detailJob.status)" @click="verifyMigration">{{ verifying ? '校验中…' : '校验文件完整性' }}</button>
-      <p v-for="item in Object.values(verification)" :key="item.id" :style="item.status === 'mismatch' ? {color:'var(--color-error)'} : {}">{{ detailJob.items?.[item.id]?.name || item.id }}：{{ item.detail }}</p>
-      <template #actions><button class="btn" @click="emit('navigate', {userId:detailJob.dstUser,dirId:detailJob.dstParent,name:'迁移目标'})">打开目标目录</button><button v-if="['failed','partial','canceled'].includes(detailJob.status)" class="btn primary" @click="resumeMigrateJob(detailJob)">重试未完成项</button></template>
-    </Modal>
+    <TransferMigrateDetails
+      v-if="detailJob"
+      :key="detailID"
+      :job="detailJob"
+      :source-name="migName(detailJob.srcUser)"
+      :source-icon="migIcon(detailJob.srcUser)"
+      :target-name="migName(detailJob.dstUser)"
+      :target-icon="migIcon(detailJob.dstUser)"
+      :status-label="migStatusText"
+      @close="detailID = ''"
+      @toast="(message, type) => emit('toast', message, type)"
+      @navigate="emit('navigate', $event)"
+      @resume="resumeMigrateJob"
+    />
     <div class="down-layout">
       <!-- 左侧边栏 -->
       <aside class="down-side" aria-label="传输分类与账号筛选">
@@ -983,14 +1113,7 @@ onBeforeUnmount(() => {
       </aside>
 
       <!-- 右侧内容区 -->
-      <MotionConfig :reduced-motion="reducedMotion">
-      <motion.section
-        :key="menu"
-        class="down-content"
-        :initial="compactReveal.initial"
-        :animate="compactReveal.animate"
-        :transition="compactReveal.transition"
-      >
+      <section :key="menu" class="down-content content-reveal">
         <div v-if="refreshError" class="transfer-error" role="alert">
           <UiIcon name="alert" :size="15" />
           <span>传输列表刷新失败：{{ refreshError }}</span>
@@ -1039,62 +1162,47 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="file-list">
-            <template v-if="loading && !activeDownloads.length">
+            <div v-if="loading && !activeDownloads.length" class="skeleton-pulse">
               <div v-for="i in 5" :key="i" class="skeleton-row">
                 <div class="skeleton skeleton-icon"></div>
                 <div class="skeleton skeleton-name" :style="{ width: (45 + (i * 9) % 30) + '%' }"></div>
                 <div class="skeleton skeleton-size"></div>
                 <div class="skeleton skeleton-date"></div>
               </div>
-            </template>
+            </div>
             <template v-else>
-              <transition-group name="task-list">
-                <div
-                  v-for="t in activeDownloads" :key="t.id"
-                  class="taskrow" :class="{ selected: selectedIds.has(t.id) }"
-                  @click="onItemClick($event, t.id)"
-                  @contextmenu.prevent="onCtx($event, t)"
-                >
-                  <div class="rangselect">
-                    <button class="btn-circle" :class="{ on: selectedIds.has(t.id) }" tabindex="-1" @click.stop="toggleSelect(t.id)">
-                      <UiIcon :name="selectedIds.has(t.id) ? 'check' : 'plus'" :size="13" />
-                    </button>
-                  </div>
-                  <div class="fileicon" :class="'ft-' + iconOf({ name: t.name })"><UiIcon :name="iconOf({ name: t.name })" :size="20" /></div>
-                  <div class="filename">
-                    <div :title="t.localPath || t.url || ''">{{ t.name || t.url || t.id }}</div>
-                    <div class="fsub">{{ t.isDir ? `${t.scanDone ? '' : '正在扫描 · '}${t.completedFiles || 0}/${t.totalFiles || 0} 个文件${t.failedFiles ? ` · 失败 ${t.failedFiles}` : ''}` : t.localPath || t.url || '' }}</div>
-                    <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details" @click.stop>
-                      <summary>查看文件（{{ Math.min(filteredGroupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ filteredGroupChildren(t.id).length }}）</summary>
-                      <button class="btn sm" type="button" @click.stop="toggleFailedGroup(t.id)">{{ failedGroupOnly[t.id] ? '查看全部' : '只看失败项' }}</button>
-                      <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath"><span>{{ child.name }} · {{ downTaskStatus(child) }} <template v-if="child.status === 'downloading'">{{ downProgress(child) }}%</template></span><button v-if="['failed', 'paused'].includes(child.status)" class="btn sm" type="button" @click.stop="retryGroupChild(t, child)">重试</button></div>
-                      <button v-if="filteredGroupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
-                    </details>
-                  </div>
-                    <div class="filesize">{{ t.isDir && !t.scanDone ? '扫描中' : formatBytes(t.size) }}</div>
-                  <div class="downprogress">
-                    <div class="transfering-state">
-                      <p class="text-state"><span class="badge" :class="downStatusBadge(t.status)">{{ downTaskStatus(t) }}</span><span>{{ t.isDir && !t.scanDone ? '…' : t.stage && t.status === 'downloading' ? '…' : `${downProgress(t)}%` }}</span></p>
-                      <div class="progress-total">
-                        <div :class="t.status === 'downloading' || t.status === 'queued' ? 'progress-current active' : t.status === 'completed' ? 'progress-current succeed' : t.status === 'failed' ? 'progress-current error' : 'progress-current'" :style="{ width: downProgress(t) + '%' }"></div>
-                      </div>
-                      <TaskIssue v-if="t.status === 'failed'" :issue="t.issue" :reason="t.error" action="下载文件" :user-id="t.user_id" />
-                    </div>
-                  </div>
-                  <div class="downspeed">{{ t.status === 'downloading' ? formatSpeed(t.speed || 0) : '' }}</div>
-                  <div class="tactions" @click.stop>
-                    <button v-if="t.status !== 'completed' && !t.isDir" class="btn-circle" title="优先下载（暂停其他任务）" @click="prioritizeTask(t)"><UiIcon name="priority" :size="14" /></button>
-                    <button v-if="t.status === 'downloading' || t.status === 'queued'" class="btn-circle" title="暂停" @click="pauseTask(t)"><UiIcon name="pause" :size="14" /></button>
-                    <button v-else-if="t.status === 'paused' || t.status === 'failed'" class="btn-circle" :title="t.status === 'failed' ? '重试' : '继续'" @click="resumeTask(t)"><UiIcon name="play" :size="14" /></button>
-                    <button v-if="t.localPath" class="btn-circle" title="打开所在目录" @click="reveal(t)"><UiIcon name="folder" :size="14" /></button>
-                    <button v-if="t.status !== 'canceled'" class="btn-circle" title="取消" style="color:var(--color-error)" @click="cancelTask(t)"><UiIcon name="x-circle" :size="14" /></button>
-                    <button class="btn-circle" title="删除记录" style="color:var(--color-error)" @click="removeTask(t)"><UiIcon name="trash" :size="14" /></button>
-                  </div>
-                </div>
-              </transition-group>
+              <TransferDownloadRow
+                v-for="task in activeDownloads"
+                :key="task.id"
+                :task="task"
+                :selected="selectedIds.has(task.id)"
+                @select="onItemClick($event, task.id)"
+                @toggle="toggleSelect(task.id)"
+                @context="onCtx($event, task)"
+                @prioritize="prioritizeTask"
+                @pause="pauseTask"
+                @resume="resumeTask"
+                @reveal="reveal"
+                @cancel="cancelTask"
+                @remove="removeTask"
+              >
+                <TransferFolderDetails
+                  v-if="task.isDir && groupChildren(task.id).length"
+                  :children="groupChildren(task.id)"
+                  :open="openFolderIds.has(task.id)"
+                  :failed-only="failedGroupOnly[task.id]"
+                  :limit="groupChildLimits[task.id] || 100"
+                  track-progress
+                  @toggle="setFolderOpen(task.id, $event)"
+                  @filter="toggleFailedGroup(task.id)"
+                  @more="showMoreGroupChildren(task.id)"
+                  @retry="retryGroupChild(task, $event)"
+                />
+              </TransferDownloadRow>
               <div v-if="!activeDownloads.length" class="workspace-empty-state">
-                <UiIcon name="download" :size="36" style="opacity:.4" />
+                <UiIcon name="download" :size="36" />
                 <span class="wes-title">暂无正在下载的任务</span>
+                <span class="wes-desc">在网盘中选中文件后点击「下载」，任务会显示在这里。</span>
               </div>
             </template>
           </div>
@@ -1116,25 +1224,29 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="file-list">
-            <transition-group name="task-list">
               <div v-for="t in doneDownloads" :key="t.id" class="taskrow" @contextmenu.prevent="onCtx($event, t)">
                 <div class="rangselect"></div>
                 <div class="fileicon" :class="'ft-' + iconOf({ name: t.name })"><UiIcon :name="iconOf({ name: t.name })" :size="20" /></div>
                 <div class="filename">
                   <div :title="t.localPath || ''">{{ t.name || t.url || t.id }}</div>
                   <div class="fsub">{{ t.isDir ? `${t.completedFiles || 0} 个文件 · ${t.localPath || ''}` : t.localPath || '' }}<template v-if="t.updated"> · {{ formatTime(t.updated) }}</template></div>
-                  <details v-if="t.isDir && groupChildren(t.id).length" class="folder-task-details">
-                    <summary>查看文件（{{ Math.min(filteredGroupChildren(t.id).length, groupChildLimits[t.id] || 100) }}/{{ filteredGroupChildren(t.id).length }}）</summary>
-                    <button class="btn sm" type="button" @click.stop="toggleFailedGroup(t.id)">{{ failedGroupOnly[t.id] ? '查看全部' : '只看失败项' }}</button>
-                    <div v-for="child in shownGroupChildren(t.id)" :key="child.id" class="folder-task-child" :title="child.error || child.localPath"><span>{{ child.name }} · {{ downTaskStatus(child) }}</span><button v-if="['failed', 'paused'].includes(child.status)" class="btn sm" type="button" @click.stop="retryGroupChild(t, child)">重试</button></div>
-                    <button v-if="filteredGroupChildren(t.id).length > (groupChildLimits[t.id] || 100)" class="btn sm" @click.stop="showMoreGroupChildren(t.id)">显示更多</button>
-                  </details>
+                  <TransferFolderDetails
+                    v-if="t.isDir && groupChildren(t.id).length"
+                    :children="groupChildren(t.id)"
+                    :open="openFolderIds.has(t.id)"
+                    :failed-only="failedGroupOnly[t.id]"
+                    :limit="groupChildLimits[t.id] || 100"
+                    @toggle="setFolderOpen(t.id, $event)"
+                    @filter="toggleFailedGroup(t.id)"
+                    @more="showMoreGroupChildren(t.id)"
+                    @retry="retryGroupChild(t, $event)"
+                  />
                 </div>
                 <div class="filesize">{{ formatBytes(t.size) }}</div>
                 <div class="downprogress">
                   <div class="transfering-state">
                     <p class="text-state"><span>已完成</span><span>100%</span></p>
-                    <div class="progress-total"><div class="progress-current succeed" style="width:100%"></div></div>
+                    <div class="progress-total"><div class="progress-current succeed"></div></div>
                   </div>
                 </div>
                 <div class="downspeed"></div>
@@ -1145,13 +1257,13 @@ onBeforeUnmount(() => {
                     <UiIcon v-if="copiedLinkMap[t.id]" name="check" :size="14" class="icon-check-pop" />
                     <UiIcon v-else name="link" :size="14" />
                   </button>
-                  <button class="btn-circle" title="删除记录" style="color:var(--color-error)" @click="removeTask(t)"><UiIcon name="trash" :size="14" /></button>
+                  <button class="btn-circle danger" title="删除记录" @click="removeTask(t)"><UiIcon name="trash" :size="14" /></button>
                 </div>
               </div>
-            </transition-group>
             <div v-if="!doneDownloads.length" class="workspace-empty-state">
-              <UiIcon name="check" :size="36" style="opacity:.4" />
+              <UiIcon name="check" :size="36" />
               <span class="wes-title">暂无已下载记录</span>
+              <span class="wes-desc">下载完成后会保留记录，可随时打开所在目录。</span>
             </div>
           </div>
         </template>
@@ -1169,38 +1281,23 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="file-list">
-            <transition-group name="task-list">
-              <div v-for="t in activeUploads" :key="t.UploadID" class="taskrow">
-                <div class="rangselect"></div>
-                <div class="fileicon" :class="'ft-' + iconOf({ name: upName(t) })"><UiIcon :name="iconOf({ name: upName(t) })" :size="20" /></div>
-                <div class="filename">
-                  <div>{{ upName(t) }}</div>
-                  <div class="fsub">{{ (t.Info && t.Info.localFilePath) || '' }}</div>
-                </div>
-                <div class="filesize">{{ upSize(t) }}</div>
-                <div class="downprogress">
-                  <div class="transfering-state">
-                    <p class="text-state"><span class="badge" :class="upStatusBadge(t)">{{ upStatus(t) }}</span><span>{{ upProgressText(t) }}</span></p>
-                    <div class="progress-total">
-                      <div class="progress-current" :class="uploadNeedsReview(t) ? 'warning' : t.Upload?.IsFailed ? 'error' : 'active'" :style="{ width: upProgress(t) + '%' }"></div>
-                    </div>
-                    <TaskIssue v-if="!t.Upload?.IsCompleted && !t.Upload?.IsDowning" :issue="t.Upload?.issue" :reason="t.Upload?.failedMessage" action="上传文件" :user-id="t.user_id" write-operation />
-                  </div>
-                </div>
-                <div class="downspeed">{{ upSpeed(t) }}</div>
-                <div class="tactions">
-                  <template v-if="t.Upload && !t.Upload.IsDowning && (t.Upload.IsFailed || t.Upload.IsStop)">
-                    <button v-if="uploadNeedsReview(t)" class="btn sm" title="打开上传目标目录" @click="emit('navigate', { userId: t.user_id, driveId: t.Info?.drive_id, dirId: t.Upload?.attempt?.parentId || t.Info?.parent_file_id, name: '上传目标' })">目标目录</button>
-                    <button class="btn-circle" :title="uploadNeedsReview(t) ? '复核上传结果，不重新提交' : '重试上传'" @click="resumeUploadTask(t)"><UiIcon name="refresh" :size="14" /></button>
-                    <button v-if="uploadNeedsReview(t)" class="btn sm" @click="reviewAndResumeUpload(t)">核对后重试</button>
-                  </template>
-                  <button class="btn-circle" title="取消上传" style="color:var(--color-error)" @click="cancelUploadTask(t)"><UiIcon name="x-circle" :size="14" /></button>
-                </div>
-              </div>
-            </transition-group>
+            <TransferUploadRow
+              v-for="task in activeUploads"
+              :key="task.UploadID"
+              :task="task"
+              :name="upName(task)"
+              :icon="iconOf({ name: upName(task) })"
+              :size="upSize(task)"
+              :needs-review="uploadNeedsReview(task)"
+              @navigate="emit('navigate', $event)"
+              @resume="resumeUploadTask"
+              @review="reviewAndResumeUpload"
+              @cancel="cancelUploadTask"
+            />
             <div v-if="!activeUploads.length" class="workspace-empty-state">
-              <UiIcon name="upload" :size="36" style="opacity:.4" />
+              <UiIcon name="upload" :size="36" />
               <span class="wes-title">暂无正在上传的任务</span>
+              <span class="wes-desc">在网盘工具栏点击「上传」选择本地文件或文件夹。</span>
             </div>
           </div>
         </template>
@@ -1221,7 +1318,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="file-list">
-            <transition-group name="task-list">
               <div v-for="t in doneUploads" :key="t.UploadID" class="taskrow">
                 <div class="rangselect"></div>
                 <div class="fileicon" :class="'ft-' + iconOf({ name: upName(t) })"><UiIcon :name="iconOf({ name: upName(t) })" :size="20" /></div>
@@ -1233,18 +1329,18 @@ onBeforeUnmount(() => {
                 <div class="downprogress">
                   <div class="transfering-state">
                     <p class="text-state"><span>已完成</span><span>100%</span></p>
-                    <div class="progress-total"><div class="progress-current succeed" style="width:100%"></div></div>
+                    <div class="progress-total"><div class="progress-current succeed"></div></div>
                   </div>
                 </div>
                 <div class="downspeed"></div>
                 <div class="tactions">
-                  <button class="btn-circle" title="删除记录" style="color:var(--color-error)" @click="cancelUploadTask(t)"><UiIcon name="trash" :size="14" /></button>
+                  <button class="btn-circle danger" title="删除记录" @click="cancelUploadTask(t)"><UiIcon name="trash" :size="14" /></button>
                 </div>
               </div>
-            </transition-group>
             <div v-if="!doneUploads.length" class="workspace-empty-state">
-              <UiIcon name="check" :size="36" style="opacity:.4" />
+              <UiIcon name="check" :size="36" />
               <span class="wes-title">暂无已上传记录</span>
+              <span class="wes-desc">上传完成后会保留记录，失败任务可在此重试。</span>
             </div>
           </div>
         </template>
@@ -1255,15 +1351,16 @@ onBeforeUnmount(() => {
             <div class="toppanbtn">
               <UiSelect
                 v-model="offlineUser"
+                aria-label="云离线账号"
                 style="width:200px"
                 :options="offlineAccounts.map((acc) => ({ value: acc.user_id, label: accLabel(acc) }))"
               />
-              <button class="tbtn primary" :disabled="!offlineUser || submittingOffline" @click="offLinks = ''; offModal = true"><UiIcon name="plus" :size="14" />新建离线任务</button>
+              <button class="tbtn primary" :disabled="!offlineUser || !offlineDriveId || submittingOffline" @click="openOfflineModal"><UiIcon name="plus" :size="14" />新建离线任务</button>
             </div>
             <div class="toolbar-spacer"></div>
             <div class="toppanbtn">
-              <button class="tbtn" :disabled="offlineLoading" @click="refreshOffline">
-                <span v-if="offlineLoading" class="spin"></span><template v-else><UiIcon name="refresh" :size="14" />刷新</template>
+              <button class="tbtn offline-refresh" :aria-busy="offlineLoading" @click="refreshOffline">
+                <span class="offline-refresh-icon" aria-hidden="true"><span v-if="offlineLoading" class="spin"></span><UiIcon v-else name="refresh" :size="14" /></span>刷新
               </button>
             </div>
           </div>
@@ -1273,7 +1370,6 @@ onBeforeUnmount(() => {
             <button type="button" class="transfer-error-retry" @click="refreshOffline">重试</button>
           </div>
           <div class="file-list">
-            <transition-group name="task-list">
               <div v-for="t in offlineTasks" :key="t.id || t.task_id" class="taskrow">
                 <div class="rangselect"></div>
                 <div class="fileicon" :class="'ft-' + iconOf({ name: t.file_name })"><UiIcon :name="iconOf({ name: t.file_name })" :size="20" /></div>
@@ -1284,22 +1380,22 @@ onBeforeUnmount(() => {
                 <div class="filesize">{{ t.file_size ? formatBytes(t.file_size) : '' }}</div>
                 <div class="downprogress">
                   <div class="transfering-state">
-                    <p class="text-state"><span>{{ offStatusText(t.status) }}</span><span>{{ offProgress(t) }}%</span></p>
-                    <div class="progress-total">
-                      <div :class="['progress-current', offProgressClass(t.status)]" :style="{ width: offProgress(t) + '%' }"></div>
+                    <p class="text-state"><span :key="t.status" class="content-reveal">{{ offStatusText(t.status) }}</span><span>{{ offProgress(t) }}%</span></p>
+                    <div class="progress-total" role="progressbar" :aria-label="`${t.file_name || '离线任务'}：${offStatusText(t.status)}`" :aria-valuenow="offProgress(t)">
+                      <div :class="['progress-current', offProgressClass(t.status)]" :style="{ '--progress': offProgress(t) / 100 }"></div>
                     </div>
                     <TaskIssue :issue="t.issue" :reason="t.message" action="云离线下载" :user-id="t.user_id" />
                   </div>
                 </div>
                 <div class="downspeed"></div>
                 <div class="tactions">
-                  <button class="btn-circle" title="删除离线任务" style="color:var(--color-error)" @click="delOfflineTask(t)"><UiIcon name="trash" :size="14" /></button>
+                  <button class="btn-circle danger" title="删除离线任务" @click="delOfflineTask(t)"><UiIcon name="trash" :size="14" /></button>
                 </div>
               </div>
-            </transition-group>
             <div v-if="!offlineTasks.length && !offlineLoading" class="workspace-empty-state">
-              <UiIcon name="cloud-down" :size="36" style="opacity:.4" />
+              <UiIcon name="cloud-down" :size="36" />
               <span class="wes-title">暂无离线任务</span>
+              <span class="wes-desc">选中文件后使用「离线下载」，网盘云端会代为拉取资源。</span>
             </div>
             <div v-if="offlineLoading && !offlineTasks.length" class="empty"><span class="spin"></span><span>加载中…</span></div>
           </div>
@@ -1315,81 +1411,73 @@ onBeforeUnmount(() => {
             <div v-if="migrateLoading" class="toppanbtn"><span class="spin"></span></div>
           </div>
           <div class="file-list">
-            <transition-group name="task-list">
-              <div v-for="j in visibleMigrateJobs" :key="j.id" class="taskrow">
-                <div class="rangselect"></div>
-                <div class="fileicon"><UiIcon name="migrate" :size="20" style="color:var(--color-primary)" /></div>
-                <div class="filename">
-                  <button class="tbtn account-inline" @click="detailID = j.id"><img :src="migIcon(j.srcUser)" alt="" />{{ migName(j.srcUser) }}<span>→</span><img :src="migIcon(j.dstUser)" alt="" />{{ migName(j.dstUser) }} · 详情</button>
-                  <div class="fsub">{{ (j.fileIDs || []).length }} 个文件<template v-if="j.status === 'running' && j.stageName"> · {{ j.stageName }}</template><template v-if="j.failed"> · 失败 {{ j.failed }}</template><template v-if="['partial', 'failed', 'canceled'].includes(j.status) && migRemaining(j)"> · 剩余未完成 {{ migRemaining(j) }} 项</template></div>
-                </div>
-                <div class="filesize"></div>
-                <div class="downprogress">
-                  <div class="transfering-state">
-                    <p class="text-state"><span class="badge" :class="migBadge(j.status)">{{ migStageText(j) }}</span><span>{{ migShownText(j) }}</span></p>
-                    <div class="progress-total" title="迁移总体进度">
-                      <div :class="j.status === 'completed' ? 'progress-current succeed' : j.status === 'failed' ? 'progress-current error' : j.status === 'partial' ? 'progress-current warning' : 'progress-current active'" :style="{ width: migProgress(j) + '%' }"></div>
-                    </div>
-                    <TaskIssue v-if="['failed','partial'].includes(j.status)" :issue="j.issue?.action === 'reauthorize' ? { ...j.issue, action: 'check_access' } : j.issue" :reason="j.message" action="迁移文件" write-operation />
-                    <div v-if="j.issue?.action === 'reauthorize'" class="migration-auth-actions"><button type="button" class="btn sm" @click="emit('repair', { action: 'reauthorize', userId: j.srcUser })">重新登录来源账号</button><button type="button" class="btn sm" @click="emit('repair', { action: 'reauthorize', userId: j.dstUser })">重新登录目标账号</button></div>
-                  </div>
-                </div>
-                <div class="downspeed">{{ migProgressText(j) }}</div>
-                <div class="tactions">
-                  <button v-if="j.status === 'pending' || j.status === 'running'" class="btn-circle" title="取消迁移" style="color:var(--color-error)" @click="cancelMigrateJob(j)"><UiIcon name="x-circle" :size="14" /></button>
-                  <template v-else>
-                    <button v-if="['partial', 'failed', 'canceled'].includes(j.status) && migRemaining(j)" class="btn-circle" title="继续未完成任务" @click="resumeMigrateJob(j)"><UiIcon name="refresh" :size="14" /></button>
-                    <button class="btn-circle" title="删除记录" style="color:var(--color-error)" @click="removeMigrateJob(j)"><UiIcon name="trash" :size="14" /></button>
-                  </template>
-                </div>
-              </div>
-            </transition-group>
+            <TransferMigrateRow
+              v-for="job in visibleMigrateJobs"
+              :key="job.id"
+              :job="job"
+              :source-name="migName(job.srcUser)"
+              :source-icon="migIcon(job.srcUser)"
+              :target-name="migName(job.dstUser)"
+              :target-icon="migIcon(job.dstUser)"
+              :status-text="migStatusText(job.status)"
+              @details="detailID = $event"
+              @repair="emit('repair', $event)"
+              @cancel="cancelMigrateJob"
+              @resume="resumeMigrateJob"
+              @remove="removeMigrateJob"
+            />
             <div v-if="!visibleMigrateJobs.length" class="workspace-empty-state">
-              <UiIcon name="migrate" :size="36" style="opacity:.4" />
+              <UiIcon name="migrate" :size="36" />
               <span class="wes-title">{{ migrateJobs.length ? '该账号暂无迁移任务' : '暂无迁移任务' }}</span>
+              <span class="wes-desc">在网盘中选中文件后使用「迁移」，可在不同网盘间搬移文件。</span>
             </div>
           </div>
         </template>
-      </motion.section>
-      </MotionConfig>
+      </section>
     </div>
     <!-- 新建下载弹窗 -->
-    <Modal v-if="dlModal" title="新建下载" width="480px" @close="dlModal = false">
+    <Modal v-if="dlModal" title="新建下载" width="480px" @close="closeDlModal">
       <div class="field">
         <label>下载链接（支持 HTTP/HTTPS，每行一个）</label>
-        <textarea v-model="dlLinks" class="textarea" rows="5" placeholder="https://example.com/file.zip"></textarea>
+        <textarea v-model="dlLinks" class="textarea" rows="5" :readonly="downloadingUrls" placeholder="https://example.com/file.zip"></textarea>
         <p v-if="dlInvalidCount" class="hint" role="alert">有 {{ dlInvalidCount }} 行链接无效，请检查后提交。</p>
+        <p v-if="dlSubmitError" class="hint" role="alert">{{ dlSubmitError }}。下方操作只会提交保留的链接。</p>
       </div>
       <div class="field">
         <label>文件名（可选，仅单个链接时生效）</label>
-        <input v-model="dlName" class="input" placeholder="留空则自动命名" :disabled="dlUrlList.length !== 1" />
+        <input v-model="dlName" class="input" placeholder="留空则自动命名" :readonly="downloadingUrls" :disabled="dlUrlList.length !== 1" />
       </div>
       <div class="field">
         <label style="cursor:pointer;user-select:none" @click="dlAdvanced = !dlAdvanced">
           <UiIcon :name="dlAdvanced ? 'chevron-down' : 'chevron-right'" :size="12" /> 高级选项
         </label>
         <template v-if="dlAdvanced">
-          <input v-model="dlHeaders.ua" class="input" style="width:100%;margin-bottom:8px" placeholder="User-Agent（可选）" />
-          <input v-model="dlHeaders.referer" class="input" style="width:100%;margin-bottom:8px" placeholder="Referer（可选）" />
-          <textarea v-model="dlHeaders.cookie" class="textarea" rows="2" placeholder="Cookie（可选）" style="width:100%"></textarea>
+          <input v-model="dlHeaders.ua" class="input" :readonly="downloadingUrls" style="width:100%;margin-bottom:8px" placeholder="User-Agent（可选）" />
+          <input v-model="dlHeaders.referer" class="input" :readonly="downloadingUrls" style="width:100%;margin-bottom:8px" placeholder="Referer（可选）" />
+          <textarea v-model="dlHeaders.cookie" class="textarea" :readonly="downloadingUrls" rows="2" placeholder="Cookie（可选）" style="width:100%"></textarea>
         </template>
       </div>
       <template #actions>
-        <button class="btn" @click="dlModal = false">取消</button>
-        <button class="btn primary" :disabled="!dlUrlList.length || dlInvalidCount || downloadingUrls" @click="submitDownload">开始下载{{ dlUrlList.length > 1 ? ` (${dlUrlList.length})` : '' }}</button>
+        <button class="btn" @click="closeDlModal">{{ downloadingUrls ? '转到后台' : '取消' }}</button>
+        <button class="btn primary" :disabled="!dlUrlList.length || !!dlInvalidCount" :aria-busy="downloadingUrls" :aria-disabled="downloadingUrls" @click="submitDownload">
+          {{ downloadingUrls ? `正在添加 ${dlSubmitted}/${dlUrlList.length}…` : dlSubmitError ? '重试失败链接' : dlUrlList.length > 1 ? `开始下载 (${dlUrlList.length})` : '开始下载' }}
+        </button>
       </template>
     </Modal>
 
     <!-- 新建离线任务弹窗 -->
-    <Modal v-if="offModal" title="新建离线任务" width="480px" @close="offModal = false">
+    <Modal v-if="offModal" title="新建离线任务" width="480px" @close="closeOfflineModal">
       <div class="field">
         <label>离线链接（支持磁力链接、HTTP、ed2k，每行一个）</label>
-        <textarea v-model="offLinks" class="textarea" rows="6" placeholder="magnet:?xt=urn:btih:…"></textarea>
+        <textarea v-model="offLinks" class="textarea" rows="6" :readonly="submittingOffline" placeholder="magnet:?xt=urn:btih:…"></textarea>
         <p v-if="offInvalidCount" class="hint" role="alert">有 {{ offInvalidCount }} 行链接无效，请检查后提交。</p>
+        <p v-if="offlineSubmitError" class="hint" role="alert">{{ offlineSubmitError }}。重试仅提交保留的链接。</p>
       </div>
       <template #actions>
-        <button class="btn" @click="offModal = false">取消</button>
-        <button class="btn primary" :disabled="!offUrlList.length || offInvalidCount || submittingOffline" @click="submitOffline">提交{{ offUrlList.length > 1 ? ` (${offUrlList.length})` : '' }}</button>
+        <button class="btn" @click="closeOfflineModal">{{ submittingOffline ? '转到后台' : '取消' }}</button>
+        <button class="btn primary" :disabled="!offUrlList.length || !!offInvalidCount" :aria-busy="submittingOffline" :aria-disabled="submittingOffline" @click="submitOffline">
+          {{ submittingOffline ? `正在提交 ${offlineSubmitted}/${offUrlList.length}…` : offlineSubmitError ? '重试失败链接' : offUrlList.length > 1 ? `提交 (${offUrlList.length})` : '提交' }}
+        </button>
       </template>
     </Modal>
 
@@ -1410,7 +1498,7 @@ onBeforeUnmount(() => {
       <div class="td-row"><span class="td-label">状态</span><span class="td-val">{{ statusText(detailTask.status) }}</span></div>
       <div class="td-row" v-if="detailTask.speed"><span class="td-label">速度</span><span class="td-val">{{ formatSpeed(detailTask.speed) }}</span></div>
       <div class="td-row" v-if="detailTask.url"><span class="td-label">来源链接</span><span class="td-val td-url">{{ detailTask.url }}</span></div>
-      <div class="td-row" v-if="detailTask.error"><span class="td-label">失败原因</span><span class="td-val" style="color:var(--color-error)">{{ taskErrorText(detailTask.error, '下载文件') }}</span></div>
+      <div class="td-row" v-if="detailTask.error"><span class="td-label">失败原因</span><span class="td-val error">{{ taskErrorText(detailTask.error, '下载文件') }}</span></div>
       <div class="td-row" v-if="detailTask.error"><span class="td-label">错误详情</span><span class="td-val">{{ detailTask.error }}</span></div>
       <TaskIssue :issue="detailTask.issue" :reason="detailTask.error" action="下载文件" :user-id="detailTask.user_id" />
       <div class="td-row"><span class="td-label">创建时间</span><span class="td-val">{{ formatTime(detailTask.created) }}</span></div>
@@ -1424,6 +1512,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.offline-refresh-icon { display:inline-grid; place-items:center; width:14px; height:14px; }
 .taskrow:has(.task-notice) { height: auto; min-height: 68px; padding-block: 10px; }
 .transfer-error {
   display: flex;
@@ -1455,9 +1544,6 @@ onBeforeUnmount(() => {
 .td-row:last-child { border-bottom: none; }
 .td-label { width: 72px; flex-shrink: 0; color: var(--text-tertiary); font-size: 12.5px; font-weight: 600; }
 .td-val { flex: 1; min-width: 0; color: var(--text-primary); word-break: break-all; user-select: text; }
+.td-val.error { color: var(--color-error); }
 .td-url { font-size: 12px; color: var(--text-link); }
-.folder-task-details { color: var(--text-secondary); font-size: 12px; max-height: 180px; overflow: auto; }
-.folder-task-details summary { cursor: pointer; width: fit-content; color: var(--color-primary); }
-.folder-task-child { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 0 2px 12px; }
-.folder-task-child span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

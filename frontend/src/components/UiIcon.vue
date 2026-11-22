@@ -66,6 +66,7 @@ import {
   Square,
   Star,
   Sun,
+  Terminal,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -159,6 +160,7 @@ const ICONS = Object.freeze({
   'more-horizontal': Ellipsis,
   'picture-in-picture': PictureInPicture2,
   stop: Square,
+  command: Terminal,
 })
 
 const resolvedName = computed(() => (ICONS[props.name] ? props.name : 'file'))

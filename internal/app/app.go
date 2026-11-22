@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -85,6 +86,8 @@ type App struct {
 
 	syncRunMu      sync.Mutex
 	syncRuns       map[string]*activeSyncRun
+	syncRunWG      sync.WaitGroup
+	syncStopping   bool
 	searchMu       sync.Mutex
 	searchRuns     map[string]context.CancelFunc
 	searchStopping bool
@@ -458,6 +461,7 @@ func (a *App) Shutdown(ctx context.Context) {
 		return
 	}
 	a.shutdownOnce.Do(func() {
+		a.cancelAllSyncRuns()
 		a.cancelAllSearches()
 		a.CancelUpdate()
 		a.previewStopping.Store(true)
@@ -476,10 +480,10 @@ func (a *App) Shutdown(ctx context.Context) {
 		if keepAliveCancel != nil {
 			keepAliveCancel()
 		}
-		a.cancelAllSyncRuns()
 		if migrations != nil {
 			migrations.CancelAll()
 		}
+		a.syncRunWG.Wait()
 
 		if downloads != nil {
 			downloads.Shutdown()
@@ -607,6 +611,9 @@ func (a *App) SendPan189SMS(username, validateCode string) (string, error) {
 
 // ProviderLogin performs a login for a provider with form config.
 func (a *App) ProviderLogin(provider string, config map[string]string) (*model.Account, error) {
+	config = maps.Clone(config)
+	expectedUser := strings.TrimSpace(config["reauth_user_id"])
+	delete(config, "reauth_user_id")
 	started := time.Now()
 	logging.Info("provider login started", "provider", provider, "config_keys", configKeys(config), "has_captcha_token", strings.TrimSpace(config["captcha_token"]) != "")
 	reg, ok := drive.Get(provider)
@@ -722,6 +729,16 @@ func (a *App) ProviderLogin(provider string, config map[string]string) (*model.A
 	if err != nil {
 		return nil, err
 	}
+	if expectedUser != "" {
+		if acc.UserID != expectedUser {
+			return nil, errors.New("授权返回的是另一个账号，请在授权页面选择原账号后重试")
+		}
+		updated, err := st.ReauthorizeAccount(expectedUser, acc.DriveID, tok)
+		if err != nil {
+			return nil, fmt.Errorf("无法更新原账号: %w", err)
+		}
+		return a.finishReauthorization(updated), nil
+	}
 	if prior, lookupErr := st.GetAccount(acc.UserID); lookupErr == nil && prior != nil {
 		acc.Order = prior.Order
 		acc.CustomName = prior.CustomName
@@ -777,6 +794,51 @@ func (a *App) SaveMountedAccount(provider string, conn model.ConnConfig) (*model
 	logging.Info("mounted account save completed", "provider", provider, "account_id", redactID(accountID), "duration", logging.Duration(started))
 	a.emit("account:changed", acc)
 	return acc, nil
+}
+
+// ReconnectMountedAccount 用新凭据验证原挂载，不修改连接目标和账号标识。
+func (a *App) ReconnectMountedAccount(userID, accessKey, secret, sessionToken string) (*model.Account, error) {
+	st, err := a.storeOrError()
+	if err != nil {
+		return nil, err
+	}
+	account, err := st.GetAccount(userID)
+	if err != nil {
+		return nil, fmt.Errorf("无法读取原账号: %w", err)
+	}
+	provider := account.Provider()
+	if account.Token == nil || account.Token.Conn == nil || (provider != model.ProviderWebdav && provider != model.ProviderS3) {
+		return nil, errors.New("该账号不是挂载存储")
+	}
+	if strings.TrimSpace(secret) == "" {
+		return nil, errors.New("请填写新的凭据")
+	}
+	token := *account.Token
+	connection := *token.Conn
+	connection.Password = secret
+	if provider == model.ProviderS3 {
+		if strings.TrimSpace(accessKey) == "" {
+			return nil, errors.New("请填写 Access Key ID")
+		}
+		connection.Username = strings.TrimSpace(accessKey)
+		connection.SessionToken = strings.TrimSpace(sessionToken)
+	}
+	if err := drive.ValidateConnection(provider, &connection); err != nil {
+		return nil, fmt.Errorf("连接校验失败: %w", err)
+	}
+	token.Conn = &connection
+	updated, err := st.ReauthorizeAccount(userID, account.DriveID, &token)
+	if err != nil {
+		return nil, fmt.Errorf("无法更新原账号: %w", err)
+	}
+	return a.finishReauthorization(updated), nil
+}
+
+func (a *App) finishReauthorization(account *model.Account) *model.Account {
+	syncAccountUsage(account)
+	a.expiredAccounts.Delete(account.UserID)
+	a.emit("account:changed", account)
+	return account
 }
 
 // RenameMountedAccount changes only the local display name of a WebDAV/S3

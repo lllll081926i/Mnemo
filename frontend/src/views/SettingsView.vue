@@ -1,9 +1,7 @@
 <script setup>
 import packageInfo from '../../package.json'
 // 设置页：简短分组导航 + 右侧紧凑设置卡片
-import { computed, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { motion } from 'motion-v'
-import { compactSpring, panelReveal } from '../motion/presets'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { GetSettings, SaveSettings, GetDownloadDirectory, OpenDownloadDirectory, ClearCache, PickDirectory, RevealInFolder, GetLogPath, ClearLogs, ExportLogs } from '../api'
 import { Environment } from '../../wailsjs/runtime/runtime'
 import { getPrefs, setPref } from '../appearance'
@@ -96,16 +94,25 @@ const clearingLogs = ref(false)
 const exportingLogs = ref(false)
 const logPath = ref('')
 const effectiveDownloadDir = ref(''), downloadDirError = ref('')
+const downloadDirSaveError = ref('')
+const pickingDownloadDir = ref(false)
 let directoryReadSeq = 0
 let directoryPickSeq = 0
 let settingsLoadSeq = 0
-async function refreshDownloadDirectory() {
+let savedDownloadDir = ''
+let requestedDownloadDir = ''
+async function refreshDownloadDirectory(directory) {
   const seq = ++directoryReadSeq
   try {
     const dir = await GetDownloadDirectory()
     if (seq !== directoryReadSeq) return
     effectiveDownloadDir.value = dir || ''
     downloadDirError.value = ''
+    if (directory && dir && savedDownloadDir === directory) {
+      savedDownloadDir = dir
+      if (requestedDownloadDir === directory) requestedDownloadDir = dir
+      if (settings.value.downloadDir === directory) settings.value.downloadDir = dir
+    }
   } catch (error) {
     if (seq !== directoryReadSeq) return
     effectiveDownloadDir.value = ''
@@ -128,11 +135,20 @@ const activeNavIndex = computed(() => Math.max(0, groups.findIndex(group => grou
 
 // 纯前端偏好
 const prefs = ref(getPrefs())
+const draftVolume = ref(null)
+const shownVolume = computed(() => draftVolume.value ?? prefs.value.defaultVolume)
 const testSoundPlayer = createDownloadSoundPlayer()
 function onPref(key, value) {
   if (key === 'downloadSoundType' || (key === 'downloadSound' && !value)) testSoundPlayer.stop()
   prefs.value = { ...prefs.value, [key]: value }
   setPref(key, value)
+}
+
+function commitVolume() {
+  if (draftVolume.value === null) return
+  const volume = draftVolume.value
+  draftVolume.value = null
+  if (volume !== prefs.value.defaultVolume) onPref('defaultVolume', volume)
 }
 
 async function playTestSound() {
@@ -181,9 +197,11 @@ async function loadSettings() {
       ...defaults,
       ...s,
       // Backend stores bytes/s; the settings UI presents the friendlier KB/s.
-      maxDownloadSpeed: Math.round((Number(s.maxDownloadSpeed) || 0) / 1024),
-      maxUploadSpeed: Math.round((Number(s.maxUploadSpeed) || 0) / 1024),
+      maxDownloadSpeed: (Number(s.maxDownloadSpeed) || 0) / 1024,
+      maxUploadSpeed: (Number(s.maxUploadSpeed) || 0) / 1024,
     }
+
+    savedDownloadDir = requestedDownloadDir = settings.value.downloadDir || ''
 		settings.value.logLevel = settings.value.logLevel || 'info'
     logPath.value = ''
     loaded.value = true
@@ -203,6 +221,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  commitVolume()
   testSoundPlayer.stop()
   ++settingsLoadSeq
   ++directoryReadSeq
@@ -211,14 +230,38 @@ onBeforeUnmount(() => {
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
 })
 
-async function scrollTo(id) {
+function scrollTo(id) {
+  const root = bodyEl.value
+  const section = root?.querySelector('#sg-' + id)
+  if (!root || !section || !loaded.value) return
+  const top = Math.max(0, Math.min(sectionTop(section) - 20, root.scrollHeight - root.clientHeight))
+  const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
+  if (scrollFrame) cancelAnimationFrame(scrollFrame)
+  scrollFrame = 0
   activeNav.value = id
-  await nextTick()
-  document.getElementById('sg-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  navScrollTop = Math.abs(top - root.scrollTop) > 1 ? top : null
+  root.scrollTo({ top, behavior: navScrollTop === null ? 'instant' : behavior })
 }
 
+const sectionTop = section => section.offsetTop + section.parentElement.offsetTop
+
 let scrollFrame = 0
+let navScrollTop = null
+function interruptNavScroll() {
+  if (navScrollTop === null) return
+  navScrollTop = null
+  const root = bodyEl.value
+  root?.scrollTo({ top: root.scrollTop, behavior: 'instant' })
+  onScroll()
+}
+
 function onScroll() {
+  const root = bodyEl.value
+  if (navScrollTop !== null && root) {
+    const destination = Math.min(navScrollTop, root.scrollHeight - root.clientHeight)
+    if (Math.abs(destination - root.scrollTop) <= 1) navScrollTop = null
+    return
+  }
   if (scrollFrame) return
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = 0
@@ -227,11 +270,16 @@ function onScroll() {
 }
 function updateActiveSection() {
   const root = bodyEl.value
-  if (!root) return
+  if (!root || navScrollTop !== null || !loaded.value) return
+  const bottom = root.scrollHeight - root.clientHeight
+  if (bottom > 1 && root.scrollTop >= bottom - 1) {
+    activeNav.value = groups.at(-1).id
+    return
+  }
   let current = groups[0].id
   for (const g of groups) {
-    const el = document.getElementById('sg-' + g.id)
-    if (el && el.offsetTop <= root.scrollTop + 96) current = g.id
+    const el = root.querySelector('#sg-' + g.id)
+    if (el && sectionTop(el) <= root.scrollTop + 96) current = g.id
   }
   activeNav.value = current
 }
@@ -240,22 +288,26 @@ async function save(silent) {
   if (!loaded.value) return
   if (saving.value) { pendingSave = true; return }
   saving.value = true
+  const directory = requestedDownloadDir
+  const directoryChanged = directory !== savedDownloadDir
   try {
-    const s = { ...settings.value }
-    s.maxConcurrentDownloads = Math.min(8, Math.max(1, Number(s.maxConcurrentDownloads) || 1))
+    const s = { ...settings.value, downloadDir: directory }
+    s.maxConcurrentDownloads = Math.min(8, Math.max(1, Math.trunc(Number(s.maxConcurrentDownloads) || 1)))
     s.maxDownloadConnections = Math.min(16, Math.max(1, Math.trunc(Number(s.maxDownloadConnections) || 8)))
     settings.value.maxDownloadConnections = s.maxDownloadConnections
-    s.maxDownloadSpeed = Math.max(0, Number(s.maxDownloadSpeed) || 0) * 1024
-    s.maxUploadSpeed = Math.max(0, Number(s.maxUploadSpeed) || 0) * 1024
+    s.maxDownloadSpeed = Math.round(Math.max(0, Number(s.maxDownloadSpeed) || 0) * 1024)
+    s.maxUploadSpeed = Math.round(Math.max(0, Number(s.maxUploadSpeed) || 0) * 1024)
     await SaveSettings(s)
-    await refreshDownloadDirectory()
-    if (settings.value.downloadDir === s.downloadDir && s.downloadDir.trim() && effectiveDownloadDir.value) {
-      settings.value.downloadDir = effectiveDownloadDir.value
-    }
+    savedDownloadDir = directory
+    if (directoryChanged || downloadDirError.value) void refreshDownloadDirectory(directory.trim() ? directory : undefined)
     if (!silent) emit('toast', '设置已保存', 'success')
     return true
   } catch (e) {
-    emit('toast', '保存失败: ' + String(e), 'error')
+    if (directoryChanged && requestedDownloadDir === directory) {
+      requestedDownloadDir = savedDownloadDir
+      const activeDirectory = effectiveDownloadDir.value || savedDownloadDir || '系统默认下载目录'
+      downloadDirSaveError.value = `保存下载目录失败：${String(e?.message || e)}。仍使用：${activeDirectory}`
+    } else emit('toast', '保存失败: ' + String(e), 'error')
     return false
   } finally {
     saving.value = false
@@ -278,14 +330,29 @@ function onInputCommit() {
   save(true)
 }
 
+function commitDownloadDir(event) {
+  if (event?.isComposing || event?.keyCode === 229 || settings.value.downloadDir === requestedDownloadDir) return
+  downloadDirSaveError.value = ''
+  requestedDownloadDir = settings.value.downloadDir
+  return save(true)
+}
+
 async function pickDownloadDir() {
+  if (pickingDownloadDir.value) return
+  pickingDownloadDir.value = true
   const seq = ++directoryPickSeq
   const previous = settings.value.downloadDir
   let dir
-  try { dir = await PickDirectory('选择下载文件夹', effectiveDownloadDir.value || '') } catch { return }
+  try { dir = await PickDirectory('选择下载文件夹', effectiveDownloadDir.value || '') }
+  catch (error) {
+    if (seq === directoryPickSeq) emit('toast', '选择下载目录失败：' + String(error?.message || error), 'error')
+    return
+  } finally {
+    if (seq === directoryPickSeq) pickingDownloadDir.value = false
+  }
   if (!dir || seq !== directoryPickSeq || settings.value.downloadDir !== previous) return
   settings.value.downloadDir = dir
-  save(true)
+  commitDownloadDir()
 }
 
 async function openDownloadDir() {
@@ -294,9 +361,16 @@ async function openDownloadDir() {
 }
 
 async function resetDownloadDir() {
-  const previous = settings.value.downloadDir
+  if (saving.value || !requestedDownloadDir) {
+    if (!saving.value) {
+      settings.value.downloadDir = ''
+      downloadDirSaveError.value = ''
+    }
+    return
+  }
+  const previous = requestedDownloadDir
   settings.value.downloadDir = ''
-  if (!(await save(true)) && !settings.value.downloadDir) settings.value.downloadDir = previous
+  if (!(await commitDownloadDir()) && !settings.value.downloadDir) settings.value.downloadDir = previous
 }
 
 function setDownloadLimitPreset(kb) {
@@ -351,16 +425,17 @@ async function exportLogs() {
 </script>
 
 <template>
-  <motion.div class="settings-layout settings-view" :initial="panelReveal.initial" :animate="panelReveal.animate" :transition="panelReveal.transition">
+  <div class="settings-layout settings-view">
     <ConfirmModal v-if="pendingBackup" title="恢复偏好设置" message="此操作将应用备份中的偏好设置并合并收藏。登录账号不受影响。确定恢复？" @cancel="pendingBackup = null" @ok="restorePrefs" />
     <aside class="settings-nav" aria-label="设置分类">
-      <motion.div class="sn-active-pill" :animate="{ y: activeNavIndex * 54 }" :transition="compactSpring" />
+      <div class="sn-active-pill" aria-hidden="true" :style="{ transform: `translateY(${activeNavIndex * 54}px)` }" />
       <button
         v-for="g in groups"
         :key="g.id"
         type="button"
         class="sn-item"
         :class="{ active: activeNav === g.id }"
+        :aria-current="activeNav === g.id ? 'location' : undefined"
         @click="scrollTo(g.id)"
       >
         <UiIcon :name="g.icon" :size="16" />
@@ -368,13 +443,13 @@ async function exportLogs() {
       </button>
     </aside>
 
-    <div class="settings-body" ref="bodyEl">
+    <div class="settings-body" ref="bodyEl" @wheel.passive="interruptNavScroll" @pointerdown="interruptNavScroll" @keydown="interruptNavScroll">
       <div v-if="loadError" role="alert" class="sg-row">
         <span>{{ loadError }}</span>
         <button class="btn" @click="loadSettings">重试</button>
       </div>
       <div v-if="loadingSettings" role="status">正在加载设置…</div>
-      <div v-show="loaded" class="settings-column">
+      <div v-show="loaded" class="settings-column content-reveal">
         <header class="settings-intro">
           <p>设置</p>
         </header>
@@ -525,16 +600,17 @@ async function exportLogs() {
                   v-model="settings.downloadDir"
                   aria-label="下载保存目录"
                   :placeholder="effectiveDownloadDir || '系统默认下载目录'"
-                  :title="downloadDirError || effectiveDownloadDir"
-                  @blur="onInputCommit"
-                  @keydown.enter="onInputCommit"
+                  :title="downloadDirSaveError || downloadDirError || effectiveDownloadDir"
+                  :aria-describedby="downloadDirSaveError || downloadDirError ? 'settings-download-dir-error' : undefined"
+                  @blur="commitDownloadDir"
+                  @keydown.enter="commitDownloadDir"
                 />
-                <button class="btn sm" @click="pickDownloadDir">选择</button>
+                <button class="btn sm" :aria-busy="pickingDownloadDir" :aria-disabled="pickingDownloadDir" @click="pickDownloadDir">{{ pickingDownloadDir ? '选择中…' : '选择' }}</button>
                 <button class="btn sm" :disabled="!effectiveDownloadDir || saving" @click="openDownloadDir">打开</button>
                 <button v-if="settings.downloadDir" class="btn sm" :disabled="saving" @click="resetDownloadDir">恢复默认</button>
               </div>
             </div>
-            <div v-if="downloadDirError" class="sg-row" role="alert"><span class="sg-desc">{{ downloadDirError }}</span></div>
+            <div v-if="downloadDirSaveError || downloadDirError" id="settings-download-dir-error" class="sg-row" role="alert"><span class="sg-desc">{{ downloadDirSaveError || downloadDirError }}</span></div>
 
             <div class="sg-row">
               <div class="sg-text"><span class="sg-label">最大并发下载数</span><span class="sg-desc">同时下载的文件数量，与单文件连接数独立</span></div>
@@ -675,12 +751,14 @@ async function exportLogs() {
                   class="sg-range"
                   min="0"
                   max="200"
-                  :value="prefs.defaultVolume"
+                  :value="shownVolume"
                   aria-label="默认播放音量"
-                  :aria-valuetext="prefs.defaultVolume + '%'"
-                  @input="(e) => onPref('defaultVolume', Number(e.target.value))"
+                  :aria-valuetext="shownVolume + '%'"
+                  @input="draftVolume = Number($event.target.value)"
+                  @change="commitVolume"
+                  @blur="commitVolume"
                 />
-                <span class="sg-value sg-value-num">{{ prefs.defaultVolume }}%</span>
+                <span class="sg-value sg-value-num">{{ shownVolume }}%</span>
               </div>
             </div>
 
@@ -817,12 +895,12 @@ async function exportLogs() {
         </section>
       </div>
     </div>
-  </motion.div>
+  </div>
 </template>
 
 <style scoped>
 .theme-style-options { flex-wrap: wrap; }
-.theme-style-card { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--control-border); border-radius: var(--radius-md); background: var(--control-bg); color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.theme-style-card { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--control-border); border-radius: var(--radius-md); background: var(--control-bg); color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease); }
 .theme-style-card.active { border-color: var(--border-focus); color: var(--text-primary); background: var(--bg-active); }
 .theme-style-swatch { display: flex; width: 35px; height: 27px; border: 1px solid #0002; border-radius: 4px; overflow: hidden; background: #faf9f5; }
 .theme-style-swatch i { display: block; width: 10px; height: 100%; background: #f3f1ec; border-right: 1px solid #e3e0d8; }

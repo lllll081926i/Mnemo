@@ -25,7 +25,7 @@ describe('分栏浏览', () => {
   it('祖先目录保留路径选中态，右键和重试带上所属列', async () => {
     const folder = { file_id: 'child', name: '项目', isDir: true }
     wrapper = mount(FileColumns, { props: { columns: [{ id: 'root', name: '根目录', files: [folder], activeId: 'child' }, { id: 'child', name: '项目', files: [], error: '加载失败' }], selectedIds: new Set(), focusId: '' } })
-    expect(wrapper.get('.column-file').classes()).toContain('selected')
+    expect(wrapper.get('.column-file').attributes('aria-selected')).toBe('true')
     await wrapper.get('.column-file').trigger('contextmenu')
     expect(wrapper.emitted('context')[0][0]).toBe(0)
     expect(wrapper.emitted('context')[0][2]).toEqual(folder)

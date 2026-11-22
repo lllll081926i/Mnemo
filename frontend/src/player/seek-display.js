@@ -21,6 +21,8 @@ export function useSeekDisplay(position) {
     if (Number.isFinite(value)) preview.value = value
   }
 
+  function cancelPreview() { preview.value = null }
+
   function commit(value) {
     if (!Number.isFinite(value)) return
     preview.value = null
@@ -35,5 +37,5 @@ export function useSeekDisplay(position) {
     if (pending.value !== null && Math.abs(value - pending.value) <= 0.75) clearPending()
   }
 
-  return { display, showPreview, commit, sync, reset }
+  return { display, showPreview, cancelPreview, commit, sync, reset }
 }

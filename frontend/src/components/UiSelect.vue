@@ -1,7 +1,7 @@
 <script setup>
 // 统一自定义下拉选择器（替代原生 <select>）。
 // props: modelValue, options: [{ value, label, icon?(UiIcon 名), img?(图片URL), disabled }], placeholder, width
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, useId, watch } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, useId, watch } from 'vue'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps({
@@ -19,8 +19,10 @@ const root = ref(null)
 const btn = ref(null)
 const popup = ref(null)
 const dropStyle = ref({})
+const dropPlacement = ref('down')
 const activeIndex = ref(-1)
 const listId = `uiselect-list-${useId()}`
+let repositionFrame = null
 
 const current = computed(() => props.options.find((o) => o.value === props.modelValue) || null)
 const availableIndexes = computed(() => props.options.flatMap((option, optionIndex) => option.disabled ? [] : [optionIndex]))
@@ -32,8 +34,13 @@ function initialIndex() {
 
 function showActive() {
   nextTick(() => {
-    if (!open.value) return
-    popup.value?.querySelectorAll('.uiselect-opt')[activeIndex.value]?.scrollIntoView?.({ block: 'nearest' })
+    const list = popup.value
+    const option = list?.children[activeIndex.value]
+    if (!open.value || !option) return
+    const top = option.offsetTop
+    const bottom = top + option.offsetHeight
+    if (top < list.scrollTop) list.scrollTop = top
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight
   })
 }
 
@@ -48,29 +55,45 @@ function toggle() {
 }
 
 function position() {
-  const r = btn.value && btn.value.getBoundingClientRect()
-  if (!r) return
-  const w = Math.max(r.width, 160)
-  const maxH = 280
-  const below = window.innerHeight - r.bottom - 8
-  const up = below < 120 && r.top > below
+  const rect = btn.value?.getBoundingClientRect()
+  if (!rect) return
+  const zoom = popup.value?.currentCSSZoom || document.body.currentCSSZoom || 1
+  const width = window.innerWidth / zoom, height = window.innerHeight / zoom
+  const top = rect.top / zoom, bottom = rect.bottom / zoom
+  const left = rect.left / zoom
+  const w = Math.min(Math.max(0, width - 16), Math.max(rect.width / zoom, 160))
+  const below = Math.max(0, height - bottom - 12)
+  const above = Math.max(0, top - 12)
+  const list = popup.value
+  const desiredHeight = list ? Math.min(280, list.scrollHeight + list.offsetHeight - list.clientHeight) : 120
+  const up = below < desiredHeight && above > below
+  dropPlacement.value = up ? 'up' : 'down'
   dropStyle.value = {
-    left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px',
+    left: Math.max(8, Math.min(left, width - w - 8)) + 'px',
     width: w + 'px',
     ...(up
-      ? { bottom: window.innerHeight - r.top + 4 + 'px', top: 'auto' }
-      : { top: Math.min(r.bottom + 4, window.innerHeight - maxH - 8) + 'px', bottom: 'auto' }),
-    maxHeight: maxH + 'px',
+      ? { bottom: height - top + 4 + 'px', top: 'auto' }
+      : { top: bottom + 4 + 'px', bottom: 'auto' }),
+    maxHeight: Math.min(280, up ? above : below) + 'px',
   }
 }
 
+// 弹层固定定位：窗口滚动/缩放/内容变化时跟随触发器重算位置
+function onReposition(event) {
+  if (!open.value || repositionFrame !== null || event.target === popup.value) return
+  repositionFrame = requestAnimationFrame(() => {
+    repositionFrame = null
+    if (open.value) position()
+  })
+}
+
 function pick(o) {
-  if (o.disabled) return
+  if (!open.value || o.disabled) return
   emit('update:modelValue', o.value)
   emit('change', o.value)
   open.value = false
   activeIndex.value = props.options.findIndex((item) => item.value === o.value)
-  nextTick(() => btn.value?.focus())
+  nextTick(() => btn.value?.focus({ preventScroll: true }))
 }
 
 function onDown(e) {
@@ -95,6 +118,7 @@ function onKey(e) {
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault()
     e.stopPropagation()
+    if (e.repeat) return
     if (!open.value) {
       toggle()
       return
@@ -128,19 +152,28 @@ function onFocus(event) {
 
 watch(() => props.disabled, disabled => { if (disabled) open.value = false })
 watch(() => [props.options, props.modelValue], () => {
-  if (open.value) { activeIndex.value = initialIndex(); showActive() }
-}, { deep: true })
+  if (open.value) { activeIndex.value = initialIndex(); position(); showActive() }
+}, { deep: true, flush: 'post' })
 
-onMounted(() => {
+function bindListeners() {
   window.addEventListener('mousedown', onDown, true)
   window.addEventListener('focusin', onFocus)
   window.addEventListener('blur', onBlur)
-})
-onBeforeUnmount(() => {
+  window.addEventListener('scroll', onReposition, true)
+  window.addEventListener('resize', onReposition)
+}
+function unbindListeners() {
   window.removeEventListener('mousedown', onDown, true)
   window.removeEventListener('focusin', onFocus)
   window.removeEventListener('blur', onBlur)
-})
+  window.removeEventListener('scroll', onReposition, true)
+  window.removeEventListener('resize', onReposition)
+  if (repositionFrame !== null) cancelAnimationFrame(repositionFrame)
+  repositionFrame = null
+}
+watch(open, value => value ? bindListeners() : unbindListeners(), { flush: 'sync' })
+watch(open, value => { if (value) position() }, { flush: 'post' })
+onBeforeUnmount(unbindListeners)
 </script>
 
 <template>
@@ -165,8 +198,8 @@ onBeforeUnmount(() => {
       <UiIcon name="chevron-down" :size="12" class="uiselect-arrow" />
     </button>
     <teleport to="body">
-      <transition name="popover-zoom">
-        <div v-if="open" ref="popup" :id="listId" class="uiselect-drop" :style="dropStyle" role="listbox" :aria-label="ariaLabel || placeholder || '选项'" @keydown="onKey">
+      <transition name="uiselect-popup" @before-leave="element => { element.inert = true }">
+        <div v-if="open" ref="popup" :id="listId" class="uiselect-drop" :style="dropStyle" :data-placement="dropPlacement" role="listbox" :aria-label="ariaLabel || placeholder || '选项'" @keydown="onKey">
           <div v-if="!options.length" class="uiselect-empty">无可选项</div>
           <button
             v-for="(o, i) in options"
@@ -220,35 +253,28 @@ onBeforeUnmount(() => {
 .uiselect-arrow { flex-shrink: 0; color: var(--text-tertiary); transition: transform 240ms var(--motion-spring); }
 .uiselect-btn.open .uiselect-arrow { transform: rotate(180deg); }
 
-/* 浮层：毛玻璃卡片，选项逐个弹入，选中项打勾弹跳 */
 .uiselect-drop {
   position: fixed; z-index: 400; overflow-y: auto; padding: 5px;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  background: var(--bg-elevated); overscroll-behavior: contain;
   border: 1px solid var(--border-light);
   border-radius: 12px; box-shadow: var(--shadow-modal);
   transform-origin: top center;
+  --uiselect-offset: -4px;
+}
+.uiselect-drop[data-placement="up"] { transform-origin: bottom center; --uiselect-offset: 4px; }
+.uiselect-popup-enter-active { transition: opacity 100ms var(--motion-ease), transform 150ms var(--motion-glide); }
+.uiselect-popup-leave-active { transition: opacity 90ms var(--motion-ease), transform 100ms var(--motion-glide); pointer-events: none; }
+.uiselect-popup-enter-from, .uiselect-popup-leave-to { opacity: 0; transform: translateY(var(--uiselect-offset)) scale(.99); }
+@media (prefers-reduced-motion: reduce) {
+  .uiselect-popup-enter-active, .uiselect-popup-leave-active { transition: none; }
+  .uiselect-popup-enter-from, .uiselect-popup-leave-to { transform: none; }
 }
 .uiselect-opt {
   display: flex; align-items: center; gap: 7px; width: 100%;
   padding: 6px 9px; border: none; border-radius: 8px;
   background: transparent; font-size: 13.5px; color: var(--text-primary);
   cursor: pointer; text-align: left;
-  animation: uiselect-opt-in .24s var(--motion-ease) both;
   transition: background var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
-}
-/* 前 10 项依次弹入（波纹入场） */
-.uiselect-opt:nth-child(2) { animation-delay: 20ms; }
-.uiselect-opt:nth-child(3) { animation-delay: 40ms; }
-.uiselect-opt:nth-child(4) { animation-delay: 58ms; }
-.uiselect-opt:nth-child(5) { animation-delay: 74ms; }
-.uiselect-opt:nth-child(6) { animation-delay: 88ms; }
-.uiselect-opt:nth-child(7) { animation-delay: 100ms; }
-.uiselect-opt:nth-child(8) { animation-delay: 110ms; }
-.uiselect-opt:nth-child(9) { animation-delay: 118ms; }
-.uiselect-opt:nth-child(n+10) { animation-delay: 124ms; }
-@keyframes uiselect-opt-in {
-  from { opacity: 0; transform: translateY(4px) scale(.98); }
 }
 .uiselect-opt:hover:not(.disabled) { background: var(--bg-hover); }
 .uiselect-opt.highlighted:not(.disabled) { outline: 2px solid var(--border-focus); outline-offset: -2px; }

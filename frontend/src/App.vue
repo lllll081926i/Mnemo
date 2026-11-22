@@ -26,6 +26,7 @@ const dualPane = ref(false)
 const pageHistory = createNavigationHistory()
 pageHistory.reset('pan')
 let restoringPage = false
+let navigationChosen = false
 watch(tab, value => {
   if (!restoringPage) pageHistory.record(value)
 }, { flush: 'sync' })
@@ -48,8 +49,8 @@ const SettingsView = defineAsyncComponent(() => import('./views/SettingsView.vue
 const LoginModal = defineAsyncComponent(() => import('./components/LoginModal.vue'))
 const GlobalSearch = defineAsyncComponent(() => import('./components/GlobalSearch.vue'))
 const QuickOpen = defineAsyncComponent(() => import('./components/QuickOpen.vue'))
-const prevTabIdx = ref(0)
 const pageTrans = ref('page-slide-left')
+const finishPageLeave = (_, done) => queueMicrotask(done)
 const pageComponents = { pan: WorkspaceView, transfer: TransferView, sync: SyncView, share: ShareView, settings: SettingsView }
 const pageComponent = computed(() => pageComponents[tab.value] || PanView)
 const pageProps = computed(() => {
@@ -70,11 +71,11 @@ const pageListeners = computed(() => {
   return listeners
 })
 function switchTab(key) {
+	navigationChosen = true
 	if (key === tab.value) return
 	info('navigation', 'page switch requested', { from: tab.value, to: key })
   const ni = tabOrder.indexOf(key)
   pageTrans.value = ni >= tabOrder.indexOf(tab.value) ? 'page-slide-left' : 'page-slide-right'
-  prevTabIdx.value = tabOrder.indexOf(tab.value)
   tab.value = key
 }
 const accounts = ref([])
@@ -94,6 +95,7 @@ watch([accounts, providers], ([nextAccounts, nextProviders]) => {
 }, { flush: 'post' })
 const showLogin = ref(false)
 const loginProvider = ref('')
+const reauthAccount = ref(null)
 const showQuickOpen = ref(false)
 const showSearch = ref(false)
 const checkingAccount = ref(false)
@@ -121,7 +123,13 @@ function repairTask(request) {
   if (request?.action !== 'reauthorize') return
   const account = accounts.value.find(item => item.user_id === request.userId)
   if (!account) { toast('原账号已移除，请先核对任务所属账号', 'warn'); return }
+  openReauthorization(account)
+}
+function openReauthorization(account) {
+  if (!account) return
+  reauthAccount.value = account
   loginProvider.value = providerOf(account.user_id)
+  infoAcc.value = null
   showLogin.value = true
 }
 const showUpdate = ref(false)
@@ -140,6 +148,7 @@ const presetIconQuery = ref('')
 const presetIcons = computed(() => filterDriveIcons(presetIconQuery.value))
 const windowMaximized = ref(false)
 const curTheme = ref('system')
+let themeChosen = false
 const isDark = ref(false)
 applyAppearance('system') // 防启动闪白，随后以设置为准
 isDark.value = document.documentElement.classList.contains('dark')
@@ -245,6 +254,7 @@ function refresh() {
 
 async function select(acc) {
   if (!acc) return
+  navigationChosen = true
   const sameAccount = current.value?.user_id === acc.user_id && current.value?.drive_id === acc.drive_id
   current.value = acc
   setLastDriveSelection(acc.user_id, acc.drive_id)
@@ -275,6 +285,7 @@ function handleAccountExpired(event) {
 function closeLogin() {
   showLogin.value = false
   loginProvider.value = ''
+  reauthAccount.value = null
 }
 
 function clearPanCache() {
@@ -378,6 +389,7 @@ function onToastAction(item) {
 }
 
 function applyTheme(theme) {
+  themeChosen = true
   curTheme.value = theme || 'system'
   applyAppearance(curTheme.value)
   isDark.value = document.documentElement.classList.contains('dark')
@@ -439,7 +451,32 @@ function onTransferNotice(event) {
   }
 }
 
-onMounted(async () => {
+let startupDisposed = false
+let updateTimer = null
+async function loadStartupSettings() {
+  let autoUpdateEnabled = true
+  try {
+    const settings = await GetSettings()
+    if (startupDisposed) return
+    if (settings) {
+      if (!themeChosen) applyTheme(settings.theme || 'system')
+      if (!navigationChosen && pageComponents[settings.defaultTab]) tab.value = settings.defaultTab
+      autoUpdateEnabled = settings.autoUpdate !== false
+    }
+  } catch { /* 设置不可用时保留当前界面 */ }
+  if (startupDisposed || !autoUpdateEnabled) return
+  updateTimer = setTimeout(async () => {
+    try {
+      const update = await CheckUpdate()
+      if (!startupDisposed && update?.available) {
+        pendingUpdateInfo.value = update
+        showUpdate.value = true
+      }
+    } catch { /* 静默更新检查失败不打断操作 */ }
+  }, 3000)
+}
+
+onMounted(() => {
 	stopQuitConfirmation = onEvent('app:quit-confirm', (active) => { quitDialog.value = Number(active) || 0 })
 	const removeMouseNavigation = installMouseNavigation(window, navigateMouse, mouseNavigationBlocked)
 	info('app', 'frontend mounted')
@@ -450,29 +487,6 @@ onMounted(async () => {
 	}
 	window.addEventListener('mnemo:drive-notice', onDriveNotice)
 	const removeGlobalErrorLogging = installGlobalErrorLogging()
-	listProviders().then((p) => { providers.value = p || [] }).catch(() => {})
-	let autoUpdateEnabled = true
-	try {
-	  const s = await GetSettings()
-	  // 颜色模式默认跟随系统；顶栏可手动切换（不出现在设置页）
-	  if (s) {
-		applyTheme(s.theme || 'system')
-		if (pageComponents[s.defaultTab]) tab.value = s.defaultTab
-		autoUpdateEnabled = s.autoUpdate !== false
-	  }
-	} catch { /* 默认跟随系统 */ }
-	refresh()
-	// 启动后延迟检查更新（静默，仅发现有新版时弹窗）
-	if (autoUpdateEnabled) {
-	  setTimeout(() => {
-		CheckUpdate().then((r) => {
-		  if (r && r.available) {
-			pendingUpdateInfo.value = r
-			showUpdate.value = true
-		  }
-		}).catch(() => {})
-	  }, 3000)
-	}
   window.addEventListener('keydown', onKey)
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => applyAppearance(curTheme.value)
@@ -505,10 +519,16 @@ onMounted(async () => {
     mq.removeEventListener('change', onScheme)
     offFns.forEach((fn) => { try { fn && fn() } catch { /* noop */ } })
 	}
+  listProviders().then((list) => { if (!startupDisposed) providers.value = list || [] }).catch(() => {})
+  refresh()
+  void loadStartupSettings()
 	debug('app', 'frontend initialization tasks scheduled')
 })
 let cleanupFns = null
 onBeforeUnmount(() => {
+  startupDisposed = true
+  ++refreshEpoch
+  clearTimeout(updateTimer)
   stopQuitConfirmation?.()
   cleanupFns?.()
 })
@@ -540,6 +560,7 @@ onBeforeUnmount(() => {
         <input v-model="globalQuery" aria-label="搜索网盘文件" placeholder="搜索文件…" aria-keyshortcuts="Control+Shift+F Meta+Shift+F" />
         <button type="submit" title="全盘搜索" aria-label="全盘搜索"><UiIcon name="chevron-right" :size="14" /></button>
       </form>
+      <button class="icon-btn" :class="{ active: showQuickOpen }" title="快捷命令面板 (Ctrl+P)" aria-label="快捷命令面板 (Ctrl+P)" aria-keyshortcuts="Control+P Meta+P" :aria-expanded="showQuickOpen" @click="showQuickOpen = true"><UiIcon name="command" :size="16" /></button>
       <button v-if="tab === 'pan'" class="icon-btn" :class="{ active: dualPane }" :title="dualPane ? '切换单栏' : '切换双栏'" :aria-label="dualPane ? '切换单栏' : '切换双栏'" aria-keyshortcuts="Control+Backslash Meta+Backslash" :aria-pressed="dualPane" @click="dualPane = !dualPane"><UiIcon :name="dualPane ? 'columns' : 'single-pane'" :size="17" /></button>
       <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
@@ -561,10 +582,11 @@ onBeforeUnmount(() => {
         @remove="remove"
         @info="infoAcc = $event"
         @rename="openRename"
+        @reauthorize="openReauthorization"
         @toast="toast"
       />
       <main class="page-host">
-        <transition :name="pageTrans" mode="out-in">
+        <transition :name="pageTrans" mode="out-in" @leave="finishPageLeave">
           <KeepAlive>
             <component
               :is="pageComponent"
@@ -579,7 +601,7 @@ onBeforeUnmount(() => {
       </main>
     </div>
 
-    <LoginModal v-if="showLogin" :providers="providers" :initial-provider="loginProvider" @close="closeLogin" @toast="toast" />
+    <LoginModal v-if="showLogin" :key="reauthAccount?.user_id || 'new'" :providers="providers" :initial-provider="loginProvider" :reauth-account="reauthAccount" @close="closeLogin" @toast="toast" />
     <GlobalSearch v-if="showSearch" :initial-query="globalQuery" :accounts="orderedAccounts" :providers="providers" @close="showSearch = false" @navigate="navigateTo" />
 
     <QuickOpen
@@ -598,7 +620,7 @@ onBeforeUnmount(() => {
       <div class="kv-row"><span class="kv-label">状态</span><span>{{ healthLabels[accountHealth[infoAcc.user_id]?.status] || '未检查' }}</span></div>
       <p v-if="accountHealth[infoAcc.user_id]?.checkedAt" class="hint">最近检查：{{ new Date(accountHealth[infoAcc.user_id].checkedAt).toLocaleString() }}</p>
       <p v-if="accountHealth[infoAcc.user_id]?.message" role="alert">{{ accountHealth[infoAcc.user_id].message }}</p>
-      <div class="workspace-controls"><button class="btn" :disabled="checkingAccount" @click="checkAccount">{{ checkingAccount ? '检查中…' : '检查' }}</button><button v-if="accountHealth[infoAcc.user_id]?.status === 'auth'" class="btn" @click="infoAcc = null; showLogin = true">重新登录</button><button v-if="accountHealth[infoAcc.user_id]?.status === 'network'" class="btn" @click="infoAcc = null; switchTab('settings')">网络设置</button></div>
+      <div class="workspace-controls"><button class="btn" :disabled="checkingAccount" @click="checkAccount">{{ checkingAccount ? '检查中…' : '检查' }}</button><button v-if="infoAcc.auth_state === 'reauth_required' || accountHealth[infoAcc.user_id]?.status === 'auth'" class="btn" @click="openReauthorization(infoAcc)">重新登录</button><button v-if="accountHealth[infoAcc.user_id]?.status === 'network'" class="btn" @click="infoAcc = null; switchTab('settings')">网络设置</button></div>
       <div class="kv-row"><span class="kv-label">账号</span><span style="user-select:text">{{ accountName(infoAcc) }}</span></div>
       <div class="kv-row"><span class="kv-label">网盘</span><span>{{ providerLabel(infoAcc) }}</span></div>
       <div class="kv-row" v-if="infoAcc.usage && infoAcc.usage.size">

@@ -31,4 +31,15 @@ describe('播放进度拖动', () => {
     seek.reset()
     expect(seek.display.value).toBe(6)
   })
+
+  it('取消拖动时保留先前尚未完成的定位', () => {
+    const position = ref(10)
+    const seek = useSeekDisplay(position)
+    seek.commit(20)
+    seek.showPreview(45)
+    seek.cancelPreview()
+    expect(seek.display.value).toBe(20)
+    seek.sync(20)
+    expect(seek.display.value).toBe(20)
+  })
 })

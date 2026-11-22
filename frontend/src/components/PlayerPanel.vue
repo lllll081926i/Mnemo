@@ -11,6 +11,7 @@ import { loadASSRenderer } from '../player/ass-renderer'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised } from '../../wailsjs/runtime/runtime'
 import UiIcon from './UiIcon.vue'
 import PlaybackInfo from './PlaybackInfo.vue'
+import MediaPlaylist from './MediaPlaylist.vue'
 
 const props = defineProps({
   account: { type: Object, required: true },
@@ -29,7 +30,8 @@ const playing = ref(false)
 const position = ref(0)
 const seekDisplay = useSeekDisplay(position)
 const displayPosition = seekDisplay.display
-let seekDragging = false
+const seekDragging = ref(false)
+const nativeSeeking = ref(false)
 const duration = ref(0)
 const buffered = ref(0)
 const volume = ref(Math.min(200, Math.max(0, getPrefs().defaultVolume ?? 100)))
@@ -65,6 +67,7 @@ const subtitleTracks = ref([])
 const currentSubtitle = ref('')
 const subtitleEnabled = ref(false)
 const activeMenu = ref('')
+const playlistButton = ref(null)
 const subtitleScale = ref(1)
 const subtitlePosition = ref('bottom')
 const scrubVisible = ref(false)
@@ -91,6 +94,9 @@ let unmounted = false
 let playbackSeq = 0
 let sourceSeq = 0
 let controlsTimer = null
+let controlsDeadline = 0
+let scrubFrame = null
+let scrubClientX = 0
 let saveTimer = null
 let pendingResume = 0
 let pendingAutoplay = true
@@ -148,6 +154,7 @@ watch(() => [props.account.user_id, props.account.drive_id, props.file?.file_id]
 })
 onBeforeUnmount(() => {
   unmounted = true
+  onProgressPointerLeave()
   seekDisplay.reset()
   playbackSeq++
   sourceSeq++
@@ -179,8 +186,10 @@ function isVideoFile(file) {
 
 async function startPlayback() {
   const seq = ++playbackSeq
+  onProgressPointerLeave()
   seekDisplay.reset()
-  seekDragging = false
+  seekDragging.value = false
+  nativeSeeking.value = false
   const { user_id: userID, drive_id: driveID } = props.account
   const file = props.file
   sourceSeq++
@@ -616,7 +625,7 @@ function seekTo(requested) {
   if (!v || !Number.isFinite(requested)) return false
   tsSeekController?.abort()
   tsSeekController = null
-  const total = Number.isFinite(v.duration) ? v.duration : duration.value
+  const total = tsPlayer ? duration.value : Number.isFinite(v.duration) ? v.duration : duration.value
   const target = Math.max(0, total > 0 ? Math.min(total, requested) : requested)
   seekDisplay.commit(target)
   if (tsPlayer && target > 0) {
@@ -632,6 +641,7 @@ function seekTo(requested) {
   playbackEnded = false
   if (tsPlayer && target < tsTimeBase) { seekTS(target, !v.paused); return true }
   v.currentTime = target - tsTimeBase
+  nativeSeeking.value = v.seeking
   position.value = target
   return true
 }
@@ -675,7 +685,7 @@ async function seekTS(target, autoplay) {
 
 function onSeekInput(e) {
   const target = Number(e.target.value)
-  if (seekDragging) {
+  if (seekDragging.value) {
     seekDisplay.showPreview(target)
   } else if (!seekTo(target)) {
     e.target.value = String(displayPosition.value)
@@ -683,9 +693,23 @@ function onSeekInput(e) {
 }
 
 function onSeekCommit(e) {
-  if (!seekDragging) return
-  seekDragging = false
+  if (!seekDragging.value) return
+  seekDragging.value = false
   if (!seekTo(Number(e.target.value))) seekDisplay.reset()
+  scheduleHideControls()
+}
+
+function cancelSeek() {
+  if (!seekDragging.value) return
+  seekDragging.value = false
+  seekDisplay.cancelPreview()
+  onProgressPointerLeave()
+  scheduleHideControls()
+}
+
+function onSeeked() {
+  nativeSeeking.value = false
+  onTimeUpdate()
 }
 
 function onVolume(e) {
@@ -1161,6 +1185,19 @@ function closeMenu() {
   activeMenu.value = ''
 }
 
+function dismissPlaylist() {
+  closeMenu()
+  playlistButton.value?.focus({ preventScroll: true })
+}
+
+function choosePlaylistEpisode(episode) {
+  if (episode.file_id === props.file?.file_id) dismissPlaylist()
+  else {
+    containerEl.value?.focus({ preventScroll: true })
+    selectEpisode(episode)
+  }
+}
+
 // ---- save cursor ----
 function saveCursor(fileId = props.file?.file_id, userID = props.account.user_id, driveID = props.account.drive_id) {
   if (playbackEnded) {
@@ -1204,13 +1241,14 @@ async function switchQuality(quality) {
 function onKeyDown(e) {
   if (e.code === 'Escape') {
     e.preventDefault()
-    if (activeMenu.value) activeMenu.value = ''
+    if (seekDragging.value) cancelSeek()
+    else if (activeMenu.value) activeMenu.value = ''
     else if (isFullscreen.value) toggleFullscreen()
     else emit('close')
     return
   }
   if (e.key === 'Tab') {
-    const controls = [...(containerEl.value?.querySelectorAll('button:not(:disabled), input:not([type="file"]):not(:disabled)') || [])].filter(el => el.offsetParent !== null)
+    const controls = [...(containerEl.value?.querySelectorAll('button:not(:disabled), input:not([type="file"]):not(:disabled), .media-playlist') || [])].filter(el => el.offsetParent !== null)
     const index = controls.indexOf(document.activeElement)
     if (controls.length && (index < 0 || (e.shiftKey ? index === 0 : index === controls.length - 1))) {
       e.preventDefault()
@@ -1251,12 +1289,29 @@ function adjustBrightness(delta) {
 
 // ---- auto-hide controls ----
 function scheduleHideControls() {
-  if (controlsTimer) clearTimeout(controlsTimer)
-  if (loading.value || error.value) return
-  controlsTimer = setTimeout(() => {
-    if (!activeMenu.value && !containerEl.value?.querySelector(':focus-visible:not(.player-panel)')) showControls.value = false
-  }, 2600)
+  controlsDeadline = performance.now() + 2600
+  if (controlsTimer === null && canHideControls()) controlsTimer = setTimeout(hideIdleControls, 2600)
 }
+
+function canHideControls() {
+  return !loading.value && !error.value && !seekDragging.value && !activeMenu.value
+}
+
+function hideIdleControls() {
+  controlsTimer = null
+  if (!canHideControls()) return
+  const remaining = controlsDeadline - performance.now()
+  if (remaining > 0) {
+    controlsTimer = setTimeout(hideIdleControls, Math.ceil(remaining))
+    return
+  }
+  if (!containerEl.value?.querySelector('.pp-topbar:hover, .pp-bottom:hover, :focus-visible:not(.player-panel)')) {
+    showControls.value = false
+    onProgressPointerLeave()
+  }
+}
+
+watch(activeMenu, menu => { if (!menu) scheduleHideControls() })
 
 function onMouseMove() {
   showControls.value = true
@@ -1268,16 +1323,25 @@ function onMouseLeave() {
 }
 
 function onProgressPointerMove(event) {
-  const element = progressEl.value
-  if (!element || !duration.value) return
-  const rect = element.getBoundingClientRect()
-  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
-  scrubX.value = ratio * 100
-  scrubTime.value = ratio * duration.value
-  scrubVisible.value = true
+  if (!duration.value) return
+  scrubClientX = event.clientX
+  if (scrubFrame !== null) return
+  scrubFrame = requestAnimationFrame(() => {
+    scrubFrame = null
+    const rect = progressEl.value?.getBoundingClientRect()
+    if (!rect?.width || !duration.value) return
+    const ratio = Math.max(0, Math.min(1, (scrubClientX - rect.left) / rect.width))
+    scrubX.value = ratio * 100
+    scrubTime.value = ratio * duration.value
+    scrubVisible.value = true
+  })
 }
 
-function onProgressPointerLeave() { scrubVisible.value = false }
+function onProgressPointerLeave() {
+  if (scrubFrame !== null) cancelAnimationFrame(scrubFrame)
+  scrubFrame = null
+  scrubVisible.value = false
+}
 
 function onWheel(event) {
   if (event.target?.closest?.('.pp-pop, .pp-bottom, .pp-topbar')) return
@@ -1311,6 +1375,7 @@ function fmtTime(seconds) {
 
 const pct = computed(() => duration.value > 0 ? Math.min(100, (displayPosition.value / duration.value) * 100) : 0)
 const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value / duration.value) * 100) : 0)
+const progressGliding = computed(() => playing.value && showControls.value && !isBuffering.value && !seekDragging.value && !nativeSeeking.value)
 </script>
 
 <template>
@@ -1340,6 +1405,8 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
           @loadeddata="onLoadedData"
           @durationchange="onDurationChange"
           @timeupdate="onTimeUpdate"
+          @seeking="nativeSeeking = true"
+          @seeked="onSeeked"
           @progress="onProgress"
           @play="onPlay"
           @pause="onPause"
@@ -1407,7 +1474,7 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         </transition>
       </div>
 
-      <header class="pp-topbar" :class="{ hidden: !showControls }" @focusin="onMouseMove" @focusout="scheduleHideControls">
+      <header class="pp-topbar" :class="{ hidden: !showControls }" @pointerleave="scheduleHideControls" @focusin="onMouseMove" @focusout="scheduleHideControls">
         <div class="pp-media-mark"><UiIcon name="video" :size="20" /></div>
         <div class="pp-file-meta pp-window-drag">
           <div class="pp-title" :title="file.name">{{ file.name }}</div>
@@ -1425,20 +1492,22 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
         </div>
       </header>
 
-      <section v-if="!loading && !error" class="pp-bottom" :class="{ hidden: !showControls }" @focusin="onMouseMove" @focusout="scheduleHideControls" aria-label="播放控制">
+      <section v-if="!loading && !error" class="pp-bottom" :class="{ hidden: !showControls }" @pointerleave="scheduleHideControls" @focusin="onMouseMove" @focusout="scheduleHideControls" aria-label="播放控制">
         <div
           ref="progressEl"
           class="pp-progress"
-          :style="{ '--played': pct + '%', '--buffered': bufPct + '%' }"
+          :class="{ gliding: progressGliding }"
+          :style="{ '--played': pct / 100, '--buffered': bufPct / 100, '--thumb-x': pct + '%' }"
           @pointermove="onProgressPointerMove"
           @pointerleave="onProgressPointerLeave"
         >
           <div class="pp-progress-buffer"></div>
-          <div class="pp-progress-fill"><span class="pp-progress-thumb"></span></div>
+          <div class="pp-progress-fill"></div>
+          <div class="pp-progress-marker"><span class="pp-progress-thumb"></span></div>
           <div v-if="scrubVisible" class="pp-scrub" :style="{ left: scrubX + '%' }">
             <span>{{ fmtTime(scrubTime) }}</span>
           </div>
-          <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="displayPosition" aria-label="播放进度" @pointerdown="seekDragging = true" @pointerup="onSeekCommit" @pointercancel="onSeekCommit" @change="onSeekCommit" @blur="onSeekCommit" @input="onSeekInput" />
+          <input type="range" class="pp-progress-input" min="0" :max="duration || 0" step="0.1" :value="displayPosition" :disabled="!duration" aria-label="播放进度" :aria-valuetext="`${fmtTime(displayPosition)} / ${fmtTime(duration)}`" @pointerdown="seekDragging = true" @pointerup="onSeekCommit" @pointercancel="cancelSeek" @change="onSeekCommit" @blur="cancelSeek" @input="onSeekInput" />
         </div>
 
         <div class="pp-controls">
@@ -1503,14 +1572,12 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
             </div>
 
             <div class="pp-menu-root">
-              <button type="button" class="pp-btn" :class="{ active: activeMenu === 'episodes' }" title="播放列表" @click.stop="toggleMenu('episodes')"><UiIcon name="list" :size="20" /></button>
+              <button ref="playlistButton" type="button" class="pp-btn" :class="{ active: activeMenu === 'episodes' }" title="播放列表" aria-haspopup="listbox" :aria-expanded="activeMenu === 'episodes'" @click.stop="toggleMenu('episodes')"><UiIcon name="list" :size="20" /></button>
               <div v-if="activeMenu === 'episodes'" class="pp-pop pp-pop-list">
                 <div class="pp-pop-title">播放列表 <span class="pp-pop-count">{{ episodeIndex + 1 }}/{{ episodeFiles.length }}</span></div>
-                <button v-for="(episode, index) in episodeFiles" :key="episode.file_id" type="button" class="pp-pop-item pp-episode" :class="{ on: episode.file_id === file.file_id }" :title="episode.name" @click="selectEpisode(episode)">
-                  <span class="pp-episode-no">{{ index + 1 }}</span>
-                  <span class="pp-episode-name">{{ episode.name }}</span>
-                  <UiIcon v-if="episode.file_id === file.file_id" name="play" :size="11" />
-                </button>
+                <MediaPlaylist :files="episodeFiles" :selected-index="episodeIndex" @select="choosePlaylistEpisode" @dismiss="dismissPlaylist">
+                  <template #selected><UiIcon name="play" :size="11" /></template>
+                </MediaPlaylist>
               </div>
             </div>
 
@@ -1586,9 +1653,13 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 .pp-progress { position: relative; height: 18px; flex-shrink: 0; cursor: pointer; }
 .pp-progress::before, .pp-progress-buffer, .pp-progress-fill { position: absolute; top: 50%; left: 0; right: 0; height: 3px; transform: translateY(-50%); border-radius: 8px; }
 .pp-progress::before { content: ''; background: var(--bg-subtle); }
-.pp-progress-buffer { right: auto; width: var(--buffered); background: var(--control-border); }
-.pp-progress-fill { right: auto; width: var(--played); background: var(--color-primary); }
-.pp-progress-thumb { position: absolute; top: 50%; right: -5px; width: 10px; height: 10px; transform: translateY(-50%); border-radius: 50%; background: var(--color-primary); opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+.pp-progress-buffer, .pp-progress-fill { transform-origin: left center; }
+.pp-progress-buffer { transform: translateY(-50%) scaleX(var(--buffered)); background: var(--control-border); }
+.pp-progress-fill { transform: translateY(-50%) scaleX(var(--played)); background: var(--color-primary); }
+.pp-progress.gliding .pp-progress-fill { transition: transform 180ms linear; }
+.pp-progress.gliding .pp-progress-marker { transition: transform 180ms linear; }
+.pp-progress-marker { position: absolute; top: 50%; left: 0; right: 0; transform: translateX(var(--thumb-x)); pointer-events: none; }
+.pp-progress-thumb { position: absolute; left: -5px; width: 10px; height: 10px; transform: translateY(-50%); border-radius: 50%; background: var(--color-primary); opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
 .pp-progress:hover .pp-progress-thumb, .pp-progress:focus-within .pp-progress-thumb { opacity: 1; }
 /* 拖动后 range 会保留焦点；只显示进度圆点，避免在视频画面上留下白色外圈。 */
 .pp-progress:focus-within { outline: none; }
@@ -1638,13 +1709,11 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 .pp-pop-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .pp-pop-item.on { background: var(--listselectbg); color: var(--color-primary); }
 .pp-pop-check { display: inline-flex; flex-shrink: 0; width: 16px; }
-.pp-pop-item-label, .pp-episode-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-pop-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-pop-tag { font-size: 10px; padding: 2px 4px; background: var(--bg-subtle); border-radius: 4px; }
 .pp-pop-divider { height: 1px; margin: 5px 8px; background: var(--border-light); }
 .pp-pop-empty { padding: 10px; font-size: 12px; color: var(--text-tertiary); }
 .pp-pop-list { width: 300px; }
-.pp-episode-no { min-width: 22px; color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
-.pp-pop-item.on .pp-episode-no { color: inherit; }
 .pp-shortcut { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
 .pp-pop-tools { display: flex; align-items: center; gap: 6px; padding: 8px; white-space: nowrap; }
 .pp-pop-tools-label, .pp-tool-value { color: var(--text-secondary); font-size: 11px; }
@@ -1666,4 +1735,11 @@ const bufPct = computed(() => duration.value > 0 ? Math.min(100, (buffered.value
 .pp-media-mark { display: none; }
 .pp-play-main, .pp-play-main:hover:not(:disabled) { background: #ffffff14; color: #fff; }
 .player-panel :deep(svg) { color: #fff !important; stroke: #fff; fill: none; stroke-width: 1.6; }
+@media (prefers-reduced-motion: reduce) {
+  .pp-progress.gliding .pp-progress-fill, .pp-progress.gliding .pp-progress-marker,
+  .pp-topbar, .pp-bottom, .pp-vol-slider, .pp-center, .pp-btn,
+  .pp-center-fade-enter-active, .pp-center-fade-leave-active,
+  .pp-osd-enter-active, .pp-osd-leave-active { transition: none; }
+  .pp-pop { animation: none; }
+}
 </style>

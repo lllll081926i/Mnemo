@@ -2,15 +2,6 @@
 // `user` 会遵从 prefers-reduced-motion，自动关闭位移与布局动画。
 export const reducedMotion = 'user'
 
-// 侧栏指标、分段选择器等小范围状态切换统一使用这一组轻弹簧参数。
-export const compactSpring = Object.freeze({ type: 'spring', stiffness: 420, damping: 30, mass: 0.65 })
-
-export const panelReveal = Object.freeze({
-  initial: { opacity: 0, y: 8, scale: 0.985 },
-  animate: { opacity: 1, y: 0, scale: 1 },
-  transition: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-})
-
 export const compactReveal = Object.freeze({
   initial: { opacity: 0, y: 5 },
   animate: { opacity: 1, y: 0 },

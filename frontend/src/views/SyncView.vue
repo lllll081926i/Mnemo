@@ -1,6 +1,6 @@
 <script setup>
 // 文件夹同步页：本地文件夹与网盘目录的双向/单向同步任务管理。
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { ListSyncConfigs, SaveSyncConfig, DeleteSyncConfig, PreviewSync, RunSync, RunSyncPlan, CancelSync, ListRunningSyncIDs, onEvent, accountName, providerMetaOf, providerIconUrl, PickDirectory } from '../api'
 import Modal from '../components/Modal.vue'
 import SegTabs from '../components/SegTabs.vue'
@@ -10,6 +10,8 @@ import SelectDirModal from '../components/SelectDirModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import SyncPreviewChanges from '../components/SyncPreviewChanges.vue'
+import SyncTaskProgress from '../components/SyncTaskProgress.vue'
 import { summarizeSync } from '../sync-risk'
 
 const props = defineProps({
@@ -20,15 +22,38 @@ const props = defineProps({
 const emit = defineEmits(['toast', 'repair'])
 
 const confirmDialog = ref(null)
-const preview = ref(null), previewJob = ref(null), previewBusy = ref(false), conflictChoices = ref({})
+const preview = shallowRef(null), previewJob = ref(null), conflictChoices = ref(Object.create(null))
+const previewPhase = ref('idle')
+const previewBusy = computed(() => previewPhase.value !== 'idle')
+const previewError = ref('')
+let previewRequest = 0
 const riskSummary = computed(() => summarizeSync(preview.value?.changes))
-const actionLabels = { upload: '上传', download: '下载', 'delete-local': '删除本地', 'delete-remote': '删除网盘', conflict: '冲突' }
+function chooseConflict(path, strategy) { conflictChoices.value[path] = strategy }
+function closePreview() {
+  if (previewPhase.value === 'running') return
+  ++previewRequest
+  previewPhase.value = 'idle'
+  previewJob.value = null
+  preview.value = null
+  previewError.value = ''
+  conflictChoices.value = Object.create(null)
+}
 async function showPreview(job) {
-  if (previewBusy.value || running.value.has(job.id)) return
-  previewBusy.value = true; previewJob.value = job; preview.value = null; conflictChoices.value = {}
-  try { preview.value = await PreviewSync(job.id) }
-  catch(e) { emit('toast', String(e), 'error'); previewJob.value = null }
-  finally { previewBusy.value = false }
+  if (!job || previewBusy.value || running.value.has(job.id)) return
+  const request = ++previewRequest
+  previewPhase.value = 'loading'
+  previewJob.value = job
+  preview.value = null
+  previewError.value = ''
+  conflictChoices.value = Object.create(null)
+  try {
+    const plan = await PreviewSync(job.id)
+    if (request === previewRequest) preview.value = plan
+  } catch (error) {
+    if (request === previewRequest) previewError.value = `无法加载同步预览：${String(error?.message || error)}`
+  } finally {
+    if (request === previewRequest) previewPhase.value = 'idle'
+  }
 }
 async function executePreview() {
   if (!preview.value || previewBusy.value || preview.value.blocked) return
@@ -46,22 +71,31 @@ async function executePreview() {
 async function runPreview() {
   if (!preview.value || !previewJob.value || previewBusy.value || preview.value.blocked) return
   const job = previewJob.value, plan = preview.value
-  previewBusy.value = true
+  previewPhase.value = 'running'
   try {
     await RunSyncPlan(job.id, plan.token, { ...conflictChoices.value })
-    previewJob.value = null; preview.value = null; emit('toast', '同步完成', 'success')
-  } catch(e) { preview.value = null; emit('toast', String(e), 'error') }
-  finally { previewBusy.value = false }
+    previewPhase.value = 'idle'
+    closePreview()
+    emit('toast', '同步完成', 'success')
+  } catch (error) {
+    preview.value = null
+    previewError.value = `同步未完成：${String(error?.message || error)}。请重新生成预览。`
+  } finally { previewPhase.value = 'idle' }
 }
 
 const jobs = ref([])
 const runStates = ref({})
 const loadingJobs = ref(false)
+const jobsLoaded = ref(false)
 const jobsError = ref('')
 const progress = ref({}) // id -> { done, total }
 const running = ref(new Set())
 const toggling = ref(new Set())
-let syncStateVersion = 0
+let runningSnapshot = null
+let runStateUpdates = null
+let viewActive = false
+let progressFrame = null
+const pendingProgress = new Map()
 
 const showEdit = ref(false)
 const showDirPick = ref(false)
@@ -84,24 +118,39 @@ function emptyForm() {
 
 let refreshSeq = 0
 async function refresh() {
+  if (!viewActive) return
   const seq = ++refreshSeq
   loadingJobs.value = true
   jobsError.value = ''
+  await Promise.all([loadJobs(seq), loadRunStates(seq)])
+}
+
+async function loadJobs(seq) {
   try {
     const list = await ListSyncConfigs()
-    if (seq === refreshSeq) jobs.value = list || []
-    const requestedVersion = syncStateVersion
-    try {
-      const states = await ListSyncRunStates()
-      if (seq === refreshSeq && requestedVersion === syncStateVersion) runStates.value = states || {}
-    } catch { if (seq === refreshSeq) emit('toast', '同步运行记录读取失败，任务配置仍可使用', 'error') }
-  } catch (e) {
+    if (seq !== refreshSeq) return
+    jobs.value = list || []
+    jobsLoaded.value = true
+  } catch (error) {
     if (seq === refreshSeq) {
-      jobsError.value = String(e)
-      emit('toast', String(e), 'error')
+      jobsError.value = String(error)
+      emit('toast', jobsError.value, 'error')
     }
   } finally {
     if (seq === refreshSeq) loadingJobs.value = false
+  }
+}
+
+async function loadRunStates(seq) {
+  const updates = new Map()
+  runStateUpdates = updates
+  try {
+    const states = await ListSyncRunStates()
+    if (seq === refreshSeq) runStates.value = { ...states, ...Object.fromEntries(updates) }
+  } catch {
+    if (seq === refreshSeq) emit('toast', '同步运行记录读取失败，任务配置仍可使用', 'error')
+  } finally {
+    if (runStateUpdates === updates) runStateUpdates = null
   }
 }
 
@@ -155,13 +204,19 @@ function onFormAccount() {
   }
 }
 
+const pickingLocalDir = ref(false)
 // 选择本地同步文件夹（原生目录选择对话框）
 async function pickLocalDir() {
+  if (pickingLocalDir.value) return
   const version = editVersion
   const currentForm = form.value
-  let dir
-  try { dir = await PickDirectory('选择本地文件夹', currentForm.local_dir || '') } catch { return }
-  if (dir && showEdit.value && version === editVersion && form.value === currentForm) currentForm.local_dir = dir
+  pickingLocalDir.value = true
+  try {
+    const dir = await PickDirectory('选择本地文件夹', currentForm.local_dir || '')
+    if (dir && showEdit.value && version === editVersion && form.value === currentForm) currentForm.local_dir = dir
+  } catch {
+    if (showEdit.value && version === editVersion) emit('toast', '无法打开本地目录选择器，请重试', 'error')
+  } finally { pickingLocalDir.value = false }
 }
 
 function closeEdit() {
@@ -216,8 +271,7 @@ async function toggle(job) {
 
 async function run(job) {
   if (running.value.has(job.id)) return
-  syncStateVersion++
-  running.value = new Set([...running.value, job.id])
+  recordRunning(job.id, true)
   emit('toast', `开始同步「${job.name}」…`, 'success')
   try {
     await RunSync(job.id)
@@ -227,13 +281,7 @@ async function run(job) {
     if (/cancel|取消|停止/i.test(message)) emit('toast', `「${job.name}」已停止`, 'info')
     else emit('toast', message, 'error')
   }
-  syncStateVersion++
-  const s = new Set(running.value)
-  s.delete(job.id)
-  running.value = s
-  const p = { ...progress.value }
-  delete p[job.id]
-  progress.value = p
+  recordRunning(job.id, false)
 }
 
 async function cancel(job) {
@@ -265,57 +313,94 @@ function remove(job) {
   }, danger: true, title: '删除同步任务' }
 }
 
-function pct(id) {
-  const p = progress.value[id]
-  if (!p || !p.total) return 0
-  return Math.min(100, Math.round((p.done / p.total) * 100))
+const offs = []
+function recordRunning(id, isRunning) {
+  if (!viewActive) return
+  runningSnapshot?.set(id, isRunning)
+  if (isRunning) running.value.add(id)
+  else {
+    running.value.delete(id)
+    pendingProgress.delete(id)
+    delete progress.value[id]
+  }
 }
 
-const offs = []
-onMounted(() => {
-  refresh()
-  offs.push(onEvent('sync:progress', (ev) => {
-    if (!ev || !ev.id) return
-    progress.value = { ...progress.value, [ev.id]: { done: ev.done || 0, total: ev.total || 0 } }
-  }))
+function queueProgress(event) {
+  if (!viewActive || !event?.id) return
+  pendingProgress.set(event.id, { done: event.done || 0, total: event.total || 0 })
+  if (progressFrame !== null) return
+  progressFrame = requestAnimationFrame(() => {
+    progressFrame = null
+    for (const [id, next] of pendingProgress) progress.value[id] = next
+    pendingProgress.clear()
+  })
+}
+
+function activateView() {
+  if (viewActive) return
+  viewActive = true
+  const updates = new Map()
+  runningSnapshot = updates
+  offs.push(onEvent('sync:progress', queueProgress))
   offs.push(onEvent('account:changed', refresh))
   offs.push(onEvent('sync:state', (ev) => {
-    if (!ev || !ev.id) return
-    syncStateVersion++
-    runStates.value = { ...runStates.value, [ev.id]: { status: ev.running ? 'running' : ev.status, issue: ev.issue } }
-    const next = new Set(running.value)
-    if (ev.running) next.add(ev.id)
-    else next.delete(ev.id)
-    running.value = next
-    if (!ev.running) {
-      const nextProgress = { ...progress.value }
-      delete nextProgress[ev.id]
-      progress.value = nextProgress
-    }
+    if (!viewActive || !ev?.id) return
+    recordRunning(ev.id, ev.running)
+    const state = { status: ev.running ? 'running' : ev.status, issue: ev.issue }
+    runStateUpdates?.set(ev.id, state)
+    runStates.value[ev.id] = state
   }))
-  const requestedAtVersion = syncStateVersion
+  refresh()
   ListRunningSyncIDs().then((ids) => {
-    if (syncStateVersion === requestedAtVersion) running.value = new Set(ids || [])
-  }).catch(() => {})
-})
-onBeforeUnmount(() => {
+    if (runningSnapshot !== updates) return
+    const current = new Set(ids || [])
+    for (const [id, isRunning] of updates) {
+      if (isRunning) current.add(id)
+      else current.delete(id)
+    }
+    running.value = current
+  }).catch(() => {}).finally(() => {
+    if (runningSnapshot === updates) runningSnapshot = null
+  })
+}
+
+function deactivateView() {
+  if (!viewActive) return
+  viewActive = false
+  if (previewPhase.value === 'loading') closePreview()
+  runningSnapshot = null
+  runStateUpdates = null
   ++refreshSeq
-  ++syncStateVersion
-  offs.forEach((off) => off && off())
-})
+  loadingJobs.value = false
+  offs.splice(0).forEach((off) => off && off())
+  if (progressFrame !== null) cancelAnimationFrame(progressFrame)
+  progressFrame = null
+  pendingProgress.clear()
+  progress.value = {}
+}
+
+onMounted(activateView)
+onActivated(activateView)
+onDeactivated(deactivateView)
+onBeforeUnmount(deactivateView)
 </script>
 
 <template>
   <div class="syncpage">
-    <Modal v-if="previewJob" title="同步预览" width="760px" @close="!previewBusy && (previewJob = null)">
-      <p>{{ previewJob.name }} · {{ preview?.changes?.length || 0 }} 项变化</p>
-      <p class="hint">上传 {{ riskSummary.upload }} · 下载 {{ riskSummary.download }} · 冲突 {{ riskSummary.conflict }} · 删除本地 {{ riskSummary['delete-local'] }} · 删除网盘 {{ riskSummary['delete-remote'] }}</p>
+    <Modal v-if="previewJob" title="同步预览" width="760px" @close="closePreview">
+      <p>{{ previewJob.name }}<template v-if="preview"> · {{ preview.changes?.length || 0 }} 项变化</template></p>
       <p class="hint">本地：{{ previewJob.local_dir }} → 网盘：{{ previewJob.remote_name || previewJob.remote_dir }}</p>
-      <p v-if="riskSummary.deletes" role="alert">本次同步包含删除操作。网盘或本地删除可能无法恢复，请确认。</p><p v-else class="hint">本次计划无删除操作；冲突文件按预设策略处理。</p>
-      <p v-if="previewBusy" role="status">正在处理…</p><p v-if="preview?.blocked" role="alert">{{ preview.blocked }}</p>
-      <div class="workspace-results"><div v-for="change in preview?.changes || []" :key="change.path" class="workspace-result"><span><strong>{{ change.path }}</strong><small>{{ actionLabels[change.action] }} · 本地 {{ change.local?.size ?? '不存在' }} / 网盘 {{ change.remote?.size ?? '不存在' }}</small><small v-if="change.action === 'conflict'">修改时间：本地 {{ change.local?.modTime ? new Date(change.local.modTime * 1000).toLocaleString() : '未知' }} / 网盘 {{ change.remote?.modTime ? new Date(change.remote.modTime * 1000).toLocaleString() : '未知' }}</small></span><UiSelect v-if="change.action === 'conflict'" v-model="conflictChoices[change.path]" :disabled="previewBusy" :aria-label="'冲突策略：' + change.path" :placeholder="'默认：' + ({local:'本地',remote:'网盘','keep-both':'保留两份'}[previewJob.conflictPolicy || 'keep-both'])" :options="[{value:'keep-both',label:'保留两份'},{value:'local',label:'使用本地'},{value:'remote',label:'使用网盘'}]" /></div></div>
+      <p v-if="previewPhase === 'loading'" role="status">正在比较本地与网盘文件…</p>
+      <p v-if="previewPhase === 'running'" role="status">正在执行同步计划…</p>
+      <p v-if="previewError" role="alert">{{ previewError }}</p>
+      <template v-if="preview">
+        <p class="hint">上传 {{ riskSummary.upload }} · 下载 {{ riskSummary.download }} · 冲突 {{ riskSummary.conflict }} · 删除本地 {{ riskSummary['delete-local'] }} · 删除网盘 {{ riskSummary['delete-remote'] }}</p>
+        <p v-if="riskSummary.deletes" role="alert">本次同步包含删除操作。网盘或本地删除可能无法恢复，请确认。</p><p v-else class="hint">本次计划无删除操作；冲突文件按预设策略处理。</p>
+        <p v-if="preview.blocked" role="alert">{{ preview.blocked }}</p>
+      </template>
+      <SyncPreviewChanges v-if="preview" :key="preview.token" :changes="preview.changes" :choices="conflictChoices" :policy="previewJob.conflictPolicy" :busy="previewBusy" @choose="chooseConflict" />
       <p class="hint">执行前会重新比对文件状态。为保障数据安全，若单次删除文件超过 50% 将自动终止同步。</p>
-      <template #actions><button class="btn" :disabled="previewBusy" @click="showPreview(previewJob)">刷新</button><button class="btn primary" :disabled="previewBusy || !preview || !!preview.blocked" @click="executePreview">执行</button></template>
+      <template #actions><button class="btn" :aria-disabled="previewBusy" @click="showPreview(previewJob)">{{ previewError ? '重试预览' : '刷新' }}</button><button class="btn primary" :disabled="previewBusy || !preview || !!preview.blocked" @click="executePreview">执行</button></template>
     </Modal>
     <header class="syncpage-head">
       <div class="syncpage-title">
@@ -328,7 +413,7 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
-    <div v-if="loadingJobs && !jobs.length" class="workspace-empty-state" style="flex:1" role="status">
+    <div v-if="loadingJobs && !jobsLoaded" class="workspace-empty-state" style="flex:1" role="status">
       <span class="wes-title">正在加载同步任务…</span>
     </div>
     <div v-else-if="jobsError && !jobs.length" class="workspace-empty-state" style="flex:1" role="alert">
@@ -337,12 +422,12 @@ onBeforeUnmount(() => {
       <button class="btn" @click="refresh">重试</button>
     </div>
     <div v-else-if="!jobs.length" class="workspace-empty-state" style="flex:1">
-      <UiIcon name="refresh" :size="40" style="opacity:.4" />
+      <UiIcon name="refresh" :size="40" />
       <span class="wes-title">还没有同步任务</span>
       <span class="wes-desc">新建任务后，即可在本地文件夹与网盘之间自动保持文件同步</span>
     </div>
 
-    <div v-else class="syncpage-list">
+    <div v-else class="syncpage-list content-reveal">
       <div v-for="job in jobs" :key="job.id" class="sync-task" :class="{ disabled: !job.enabled }">
         <div class="sync-task-main">
           <div class="sync-task-name">
@@ -355,15 +440,8 @@ onBeforeUnmount(() => {
             <span style="color:var(--text-tertiary);flex-shrink:0">{{ dirArrow[job.direction] || '⇄' }}</span>
             <span class="sync-path account-inline" :title="job.remote_name || job.remote_dir"><img v-if="accountOf(job)" :src="providerIconUrl(providerMetaOf(accountOf(job), providers))" alt="" />{{ accountOf(job) ? accountName(accountOf(job)) + ' / ' : '' }}{{ job.remote_name || (job.remote_dir === 'root' ? '根目录' : job.remote_dir) }}</span>
           </div>
-          <div v-if="running.has(job.id) && progress[job.id]" class="sync-task-progress">
-            <div class="progress-total">
-              <div class="progress-current active" :style="{ width: pct(job.id) + '%' }"></div>
-            </div>
-            <div class="sync-task-meta" style="margin-top:4px">
-              <span>{{ progress[job.id].done || 0 }} / {{ progress[job.id].total || 0 }}（{{ pct(job.id) }}%）</span>
-            </div>
-          </div>
-          <TaskIssue :issue="runStates[job.id]?.issue" action="同步文件" :user-id="job.user_id" write-operation />
+          <SyncTaskProgress v-if="running.has(job.id)" :task-id="job.id" :name="job.name" :progress-by-id="progress" />
+          <TaskIssue v-if="!running.has(job.id)" :issue="runStates[job.id]?.issue" action="同步文件" :user-id="job.user_id" write-operation />
         </div>
         <div class="sync-task-actions">
           <button type="button" class="switch" role="switch" :aria-label="'自动同步：' + job.name" :aria-checked="!!job.enabled" :class="{ on: job.enabled }" :disabled="running.has(job.id) || toggling.has(job.id)" :title="toggling.has(job.id) ? '正在保存…' : job.enabled ? '停用自动同步' : '启用自动同步'" @click="toggle(job)"></button>
@@ -371,7 +449,7 @@ onBeforeUnmount(() => {
             <UiIcon :name="running.has(job.id) ? 'close' : 'play'" :size="14" />
           </button>
           <button class="btn-circle" title="编辑" :disabled="toggling.has(job.id)" @click="openEdit(job)"><UiIcon name="pencil" :size="14" /></button>
-          <button class="btn-circle" title="删除" :disabled="toggling.has(job.id)" style="color:var(--color-error)" @click="remove(job)"><UiIcon name="trash" :size="14" /></button>
+          <button class="btn-circle danger" title="删除" :disabled="toggling.has(job.id)" @click="remove(job)"><UiIcon name="trash" :size="14" /></button>
         </div>
       </div>
     </div>
@@ -385,7 +463,7 @@ onBeforeUnmount(() => {
         <label>本地文件夹</label>
         <div style="display:flex;gap:8px">
           <input class="input" style="flex:1" v-model="form.local_dir" placeholder="选择本地文件夹" />
-          <button class="btn sm" @click="pickLocalDir">选择目录</button>
+          <button class="btn sm" :aria-busy="pickingLocalDir" :aria-disabled="pickingLocalDir" @click="pickLocalDir">{{ pickingLocalDir ? '选择中…' : '选择目录' }}</button>
         </div>
       </div>
       <div class="field">

@@ -1,6 +1,6 @@
 <script setup>
 // 分享记录页：聚合全部账号的分享历史，按网盘 + 账号分组展示。
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, useId, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare, cancelShare } from '../api'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
@@ -19,12 +19,11 @@ const emit = defineEmits(['toast', 'navigate'])
 const importedLocation = ref(null)
 const lastImportReceipt = ref(null)
 
-const history = ref([])
+const history = shallowRef([])
 const expiryNow = ref(Date.now())
 let expiryTimer
-onMounted(() => { expiryTimer = setInterval(() => { expiryNow.value = Date.now() }, 60000) })
-onBeforeUnmount(() => clearInterval(expiryTimer))
 const loading = ref(false)
+const historyLoaded = ref(false)
 const loadError = ref('')
 const kw = ref('')
 const kwRaw = ref('')   // 输入原值，kw 为防抖后值
@@ -42,13 +41,43 @@ const confirmDialog = ref(null)
 // 分享导入始终绑定一个明确的目标账号，避免多账号之间串用会话或目录。
 const importOpen = ref(false)
 const importStep = ref('form')
-const importBusy = ref(false)
+const importPhase = ref('idle')
+const importBusy = computed(() => importPhase.value !== 'idle')
+const importError = ref('')
 const importTargetId = ref('')
 const importForm = ref({ url: '', password: '' })
-const importSession = ref(null)
-const importSelected = ref([])
+const importSession = shallowRef(null)
+const importSelected = ref(new Set())
 const importDirPick = ref(false)
 const importDir = ref({ id: 'root', name: '根目录' })
+const IMPORT_ROW_HEIGHT = 36
+const IMPORT_VIEW_ROWS = 7
+const IMPORT_OVERSCAN = 5
+const importFileList = ref(null)
+const importLinkInput = ref(null)
+const importOptionPrefix = useId()
+const importScrollRow = ref(0)
+const importFocusIndex = ref(0)
+const importFiles = computed(() => {
+  const seen = new Set()
+  return (importSession.value?.files || []).filter(file => {
+    if (!file?.fileId || seen.has(file.fileId)) return false
+    seen.add(file.fileId)
+    return true
+  })
+})
+const importWindowStart = computed(() => Math.max(0, importScrollRow.value - IMPORT_OVERSCAN))
+const importWindowEnd = computed(() => Math.min(importFiles.value.length, importScrollRow.value + IMPORT_VIEW_ROWS + 1 + IMPORT_OVERSCAN))
+const visibleImportFiles = computed(() => importFiles.value.slice(importWindowStart.value, importWindowEnd.value))
+const importActiveIndex = computed(() => Math.min(importFiles.value.length - 1, Math.min(importScrollRow.value + IMPORT_VIEW_ROWS - 1, Math.max(importScrollRow.value, importFocusIndex.value))))
+const importOptionId = index => `${importOptionPrefix}-${index}`
+const allImportSelected = computed(() => importFiles.value.length > 0 && importSelected.value.size === importFiles.value.length)
+
+watch(importStep, (step) => {
+  if (!importOpen.value) return
+  const target = step === 'files' ? importFileList.value : importLinkInput.value
+  target?.focus({ preventScroll: true })
+}, { flush: 'post' })
 
 const detectedShare = computed(() => parseShareText(importForm.value.url))
 const importAccounts = computed(() => (props.accounts || []).filter((account) => capsOf(account, props.providers).importShare && (!detectedShare.value.provider || providerOf(account.user_id) === detectedShare.value.provider)))
@@ -60,11 +89,14 @@ const importTarget = computed(() => importAccounts.value.find((account) => accou
 let importSeq = 0
 watch(() => [importTarget.value?.user_id, importTarget.value?.drive_id], ([user, drive], [oldUser, oldDrive]) => {
   if (user === oldUser && drive === oldDrive) return
-  ++importSeq
-  importBusy.value = false
+  if (importPhase.value !== 'saving') {
+    ++importSeq
+    importPhase.value = 'idle'
+  }
+  importError.value = ''
   importStep.value = 'form'
   importSession.value = null
-  importSelected.value = []
+  importSelected.value.clear()
   importDirPick.value = false
 })
 onBeforeUnmount(() => { ++importSeq })
@@ -94,26 +126,33 @@ watch(importAccounts, (list) => {
 }, { immediate: true })
 
 function openImport() {
+  if (importOpen.value) return
   importOpen.value = true
+  importError.value = ''
   importStep.value = 'form'
   importSession.value = null
-  importSelected.value = []
+  importSelected.value.clear()
   importDir.value = importDirRoot.value
 }
 
 function closeImport() {
-  if (importBusy.value) return
+  if (importPhase.value === 'saving') return
+  ++importSeq
+  importPhase.value = 'idle'
+  importError.value = ''
   importOpen.value = false
   importDirPick.value = false
   importSession.value = null
-  importSelected.value = []
+  importSelected.value.clear()
 }
 
-async function parseImport() {
+async function parseImport(event) {
+  if (event?.isComposing || event?.keyCode === 229) return
   const url = detectedShare.value.url
   if (!url || !importTarget.value || importBusy.value) return
   const seq = ++importSeq
-  importBusy.value = true
+  importPhase.value = 'parsing'
+  importError.value = ''
   try {
     const session = await importShare(importTarget.value.user_id, importTarget.value.drive_id, url, importForm.value.password.trim())
     if (seq !== importSeq) return
@@ -121,89 +160,156 @@ async function parseImport() {
       throw new Error('分享中没有可导入的文件')
     }
     importSession.value = session
-    importSelected.value = []
+    if (!importFiles.value.length) {
+      importSession.value = null
+      throw new Error('分享中没有可导入的文件')
+    }
+    importSelected.value.clear()
+    importScrollRow.value = 0
+    importFocusIndex.value = 0
     importDir.value = importDirRoot.value
     importStep.value = 'files'
   } catch (e) {
     if (seq !== importSeq) return
-    emit('toast', String(e), 'error')
+    importError.value = String(e?.message || e)
   } finally {
-    if (seq === importSeq) importBusy.value = false
+    if (seq === importSeq) importPhase.value = 'idle'
   }
 }
 
 function toggleImportFile(file) {
   const id = file && file.fileId
-  if (!id) return
-  const next = new Set(importSelected.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  importSelected.value = [...next]
+  if (!id || importBusy.value) return
+  const selected = importSelected.value
+  if (selected.has(id)) selected.delete(id)
+  else selected.add(id)
 }
 
-function toggleAllImportFiles() {
-  const files = importSession.value?.files || []
-  importSelected.value = importSelected.value.length === files.length ? [] : files.map((file) => file.fileId).filter(Boolean)
+function toggleAllImportFiles(select = !allImportSelected.value) {
+  if (importBusy.value) return
+  if (select) importSelected.value = new Set(importFiles.value.map(file => file.fileId))
+  else importSelected.value.clear()
+}
+
+function updateImportScroll(list) {
+  importScrollRow.value = Math.floor(Math.max(0, list.scrollTop) / IMPORT_ROW_HEIGHT)
+}
+
+function focusImportFile(index) {
+  const list = importFileList.value
+  if (!list) return
+  importFocusIndex.value = index
+  const top = index * IMPORT_ROW_HEIGHT
+  if (top < list.scrollTop) list.scrollTop = top
+  else if (top + IMPORT_ROW_HEIGHT > list.scrollTop + list.clientHeight) list.scrollTop = top + IMPORT_ROW_HEIGHT - list.clientHeight
+  updateImportScroll(list)
+}
+
+function selectImportFile(index) {
+  if (importBusy.value) return
+  importFileList.value?.focus({ preventScroll: true })
+  focusImportFile(index)
+  toggleImportFile(importFiles.value[index])
+}
+
+function onImportFileKey(event) {
+  const last = importFiles.value.length - 1
+  if (last < 0) return
+  const index = importActiveIndex.value
+  let next = index
+  if (event.key === 'ArrowUp') next--
+  else if (event.key === 'ArrowDown') next++
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = last
+  else if (event.key === ' ') {
+    event.preventDefault()
+    if (!event.repeat) toggleImportFile(importFiles.value[index])
+    return
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+    event.preventDefault()
+    if (!allImportSelected.value) toggleAllImportFiles(true)
+    return
+  } else return
+  event.preventDefault()
+  focusImportFile(Math.max(0, Math.min(last, next)))
 }
 
 function backToImportForm() {
   if (importBusy.value) return
   importStep.value = 'form'
   importSession.value = null
-  importSelected.value = []
+  importSelected.value.clear()
 }
 
 async function saveImport() {
-  if (!importTarget.value || !importSession.value || !importSelected.value.length || importBusy.value) return
+  if (!importTarget.value || !importSession.value || !importSelected.value.size || importBusy.value) return
   const seq = ++importSeq
-  importBusy.value = true
+  const target = importTarget.value
+  const dir = importDir.value
+  const selectedIds = [...importSelected.value]
+  importPhase.value = 'saving'
   try {
     const saved = await saveImportedShare(
-      importTarget.value.user_id,
-      importTarget.value.drive_id,
+      target.user_id,
+      target.drive_id,
       importSession.value,
-      importSelected.value,
-      importDir.value.id,
+      selectedIds,
+      dir.id,
     )
     if (seq !== importSeq) return
     const items = saved?.items
     const sourceIDs = new Set(Array.isArray(items) ? items.map(item => item.sourceId) : [])
-    if (!saved?.id || !Array.isArray(items) || items.length !== importSelected.value.length || sourceIDs.size !== items.length || !importSelected.value.every(id => sourceIDs.has(id))) {
+    if (!saved?.id || !Array.isArray(items) || items.length !== selectedIds.length || sourceIDs.size !== items.length || !selectedIds.every(id => sourceIDs.has(id))) {
       throw new Error('转存提交结果不完整，请先检查目标目录，避免重复转存')
     }
     lastImportReceipt.value = saved
     const completed = items.every(item => item.status === 'completed')
     const uncertain = items.some(item => !['completed', 'submitted'].includes(item.status)) || !saved.historySaved
     emit('toast', saved.message || (completed ? `已确认转存 ${items.length} 个项目` : `已提交转存 ${items.length} 个项目，等待网盘处理`), uncertain ? 'warn' : 'success')
-    importedLocation.value = { userId: importTarget.value.user_id, dirId: importDir.value.id, name: importDir.value.name }
+    importedLocation.value = { userId: target.user_id, dirId: dir.id, name: dir.name }
     importOpen.value = false
     importDirPick.value = false
     importSession.value = null
-    importSelected.value = []
+    importSelected.value.clear()
   } catch (e) {
     if (seq !== importSeq) return
     emit('toast', String(e), 'error')
   } finally {
-    if (seq === importSeq) importBusy.value = false
+    if (seq === importSeq) importPhase.value = 'idle'
   }
 }
 
 let refreshSeq = 0
+let refreshQueued = false
 async function refresh() {
+  if (!viewActive) return
+  if (loading.value) { refreshQueued = true; return }
   const seq = ++refreshSeq
   loading.value = true
   loadError.value = ''
   try {
-    const list = (await ListShareHistory('')) || []
-    if (seq === refreshSeq) history.value = list
-  } catch (e) {
-    if (seq === refreshSeq) {
-      loadError.value = '分享记录加载失败，请重试'
-      emit('toast', String(e), 'error')
-    }
+    do {
+      refreshQueued = false
+      try {
+        const list = (await ListShareHistory('')) || []
+        if (seq === refreshSeq && !refreshQueued) {
+          history.value = list
+          historyLoaded.value = true
+        }
+      } catch (error) {
+        if (seq === refreshSeq && !refreshQueued) {
+          loadError.value = '分享记录加载失败，请重试'
+          emit('toast', String(error), 'error')
+        }
+      }
+    } while (seq === refreshSeq && refreshQueued)
   } finally {
     if (seq === refreshSeq) loading.value = false
   }
+}
+
+function refreshFromToolbar() {
+  if (!loading.value) return refresh()
 }
 
 watch(() => props.accounts, (list) => {
@@ -229,8 +335,9 @@ function labelOf(pid) {
 }
 
 function accountOf(userId) {
-  return props.accounts.find((a) => a.user_id === userId) || null
+  return accountsByID.value.get(userId) || null
 }
+const accountsByID = computed(() => new Map(props.accounts.map(account => [account.user_id, account])))
 
 // 从记录中聚合出现过的 provider 列表
 const providerOptions = computed(() => {
@@ -254,19 +361,22 @@ const accountOptions = computed(() => {
   return ids.map(id => ({ id, name: seen.get(id), img: providerIconUrl(providerMetaOf(accountOf(id) || { user_id: id }, props.providers)) }))
 })
 
+const searchIndex = computed(() => history.value.map(record => ({
+  record,
+  provider: record.provider || providerOf(record.account_id),
+  terms: [record.share_name, record.share_url, record.share_pwd].map(value => String(value || '').toLowerCase()),
+})))
+
 const filtered = computed(() => {
   const k = kw.value.trim().toLowerCase()
-  return history.value.filter((h) => {
-    const pid = h.provider || providerOf(h.account_id)
-    if (filterProvider.value && pid !== filterProvider.value) return false
-    if (filterAccount.value && h.account_id !== filterAccount.value) return false
-    if (!k) return true
-    return (
-      String(h.share_name || '').toLowerCase().includes(k) ||
-      String(h.share_url || '').toLowerCase().includes(k) ||
-      String(h.share_pwd || '').toLowerCase().includes(k)
-    )
-  })
+  if (!k && !filterProvider.value && !filterAccount.value) return history.value
+  const matches = []
+  for (const { record, provider, terms } of searchIndex.value) {
+    if (filterProvider.value && provider !== filterProvider.value) continue
+    if (filterAccount.value && record.account_id !== filterAccount.value) continue
+    if (!k || terms.some(term => term.includes(k))) matches.push(record)
+  }
+  return matches
 })
 
 // 按 provider + account 分组
@@ -374,12 +484,28 @@ function handleConfirmOk() {
 }
 
 const offs = []
-onMounted(() => {
+let viewActive = false
+function activateView() {
+  if (viewActive) return
+  viewActive = true
+  expiryNow.value = Date.now()
+  expiryTimer = setInterval(() => { expiryNow.value = Date.now() }, 60000)
   refresh()
   offs.push(onEvent('account:changed', refresh))
   offs.push(onEvent('share:history-changed', refresh))
-})
-onBeforeUnmount(() => offs.forEach((off) => off && off()))
+}
+function deactivateView() {
+  viewActive = false
+  ++refreshSeq
+  refreshQueued = false
+  loading.value = false
+  clearInterval(expiryTimer)
+  offs.splice(0).forEach(off => off?.())
+}
+onMounted(activateView)
+onActivated(activateView)
+onDeactivated(deactivateView)
+onBeforeUnmount(deactivateView)
 </script>
 
 <template>
@@ -409,8 +535,8 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <button class="btn primary" @click="openImport">
             <UiIcon name="download" :size="14" />导入分享
           </button>
-          <button class="tbtn" :disabled="loading" @click="refresh">
-            <span v-if="loading" class="spin"></span><template v-else><UiIcon name="refresh" :size="14" />刷新</template>
+          <button class="tbtn" :aria-disabled="loading" :aria-busy="loading" @click="refreshFromToolbar">
+            <span v-if="loading" class="spin" aria-hidden="true"></span><UiIcon v-else name="refresh" :size="14" />刷新
           </button>
         </div>
       </header>
@@ -422,7 +548,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <button class="btn" :disabled="loading" @click="refresh">重新加载</button>
         </div>
         <!-- 骨架屏加载状态 -->
-        <div v-if="loading && !history.length" class="skeleton-list share-skeleton">
+        <div v-if="loading && !historyLoaded" class="skeleton-list share-skeleton">
           <div v-for="i in 4" :key="i" class="skeleton-row share-skeleton-row">
             <div class="skeleton skeleton-icon share-skeleton-icon"></div>
             <div class="share-skeleton-copy">
@@ -432,7 +558,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
             <div class="skeleton share-skeleton-action"></div>
           </div>
         </div>
-        <div v-else-if="!groups.length && (!loadError || history.length)" class="share-empty">
+        <div v-else-if="!groups.length && (!loadError || history.length)" class="share-empty content-reveal">
           <div class="share-empty-icon"><UiIcon name="link" :size="28" /></div>
           <span class="wes-title">{{ history.length ? '没有匹配的分享记录' : '还没有分享记录' }}</span>
           <template v-if="!history.length">
@@ -447,7 +573,7 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
         </div>
 
         <!-- 分组记录 -->
-        <div v-else class="share-groups">
+        <div v-else class="share-groups content-reveal">
           <section v-for="g in groups" :key="g.key" class="share-group">
             <header class="share-group-header">
               <img v-if="g.icon" :src="g.icon" class="share-group-icon" alt="" />
@@ -503,38 +629,41 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
       <strong>请先添加支持分享导入的网盘账号</strong>
       <p>请先在左侧登录支持该网盘的账号，再粘贴分享链接。</p>
     </div>
-    <template v-else-if="importStep === 'form'">
+    <div v-else-if="importStep === 'form'" key="form" class="content-reveal">
       <div class="field">
         <label>目标网盘账号</label>
-        <UiSelect v-model="importTargetId" block :disabled="importBusy" :options="importAccountOptions" placeholder="选择账号" />
+        <UiSelect v-model="importTargetId" block :disabled="importBusy" :options="importAccountOptions" placeholder="选择账号" aria-label="目标网盘账号" />
       </div>
       <div class="field">
-        <label>分享链接</label>
-        <textarea v-model="importForm.url" class="input" placeholder="粘贴链接或分享文案" :disabled="importBusy" rows="3" autofocus></textarea>
+        <label :for="`${importOptionPrefix}-link`">分享链接</label>
+        <textarea :id="`${importOptionPrefix}-link`" ref="importLinkInput" v-model="importForm.url" class="input" placeholder="粘贴链接或分享文案" :readonly="importBusy" rows="3" autofocus></textarea>
         <span class="hint" v-if="detectedShare.provider">已识别为 {{ providers.find(p => p.ID === detectedShare.provider)?.Meta?.label || detectedShare.provider }} 分享，仅列出兼容账号</span>
         <span v-if="!importAccounts.length" class="hint">未登录该网盘账号，请先添加账号后再试</span>
       </div>
       <div class="field">
-        <label>提取码（可选）</label>
-        <input v-model="importForm.password" class="input" placeholder="没有提取码可留空" :disabled="importBusy" @keydown.enter="parseImport" />
+        <label :for="`${importOptionPrefix}-password`">提取码（可选）</label>
+        <input :id="`${importOptionPrefix}-password`" v-model="importForm.password" class="input" placeholder="没有提取码可留空" :readonly="importBusy" @keydown.enter="parseImport" />
       </div>
-    </template>
+      <p v-if="importError" role="alert">{{ importError }}</p>
+    </div>
 
-    <template v-else>
+    <div v-else key="selection" class="content-reveal">
       <div class="import-summary">
         <div><strong>{{ importSession?.shareUrl || importForm.url }}</strong></div>
-        <span>{{ importSession?.files?.length || 0 }} 个项目 · 已选 {{ importSelected.length }} 个</span>
+        <span aria-live="polite">{{ importFiles.length }} 个项目 · 已选 {{ importSelected.size }} 个</span>
       </div>
       <div class="import-file-toolbar">
-        <button class="tbtn xs" @click="toggleAllImportFiles">{{ importSelected.length === importSession?.files?.length ? '取消全选' : '全选' }}</button>
+        <button class="tbtn xs" :disabled="importBusy" @click="toggleAllImportFiles()">{{ allImportSelected ? '取消全选' : '全选' }}</button>
       </div>
-      <div class="import-file-list">
-        <label v-for="file in importSession.files" :key="file.fileId" class="import-file-row">
-          <input type="checkbox" :checked="importSelected.includes(file.fileId)" @change="toggleImportFile(file)" />
+      <div ref="importFileList" class="import-file-list" :style="{ '--import-row-height': `${IMPORT_ROW_HEIGHT}px`, '--import-list-height': `${IMPORT_ROW_HEIGHT * IMPORT_VIEW_ROWS}px` }" role="listbox" aria-label="待转存文件" aria-multiselectable="true" :aria-disabled="importBusy" :aria-activedescendant="importActiveIndex >= 0 ? importOptionId(importActiveIndex) : undefined" tabindex="0" @scroll.passive="updateImportScroll($event.currentTarget)" @keydown="onImportFileKey">
+        <div aria-hidden="true" :style="{ height: `${importWindowStart * IMPORT_ROW_HEIGHT}px` }"></div>
+        <div v-for="(file, offset) in visibleImportFiles" :id="importOptionId(importWindowStart + offset)" :key="file.fileId" class="import-file-row" role="option" :aria-posinset="importWindowStart + offset + 1" :aria-setsize="importFiles.length" :aria-selected="importSelected.has(file.fileId)" :class="{ 'is-active': importActiveIndex === importWindowStart + offset }" @click="selectImportFile(importWindowStart + offset)">
+          <span class="import-file-check" aria-hidden="true"><UiIcon name="check" :size="12" /></span>
           <UiIcon :name="file.isDir ? 'folder' : 'file'" :size="16" />
           <span class="import-file-name" :title="file.name">{{ file.name }}</span>
           <span class="import-file-size">{{ file.isDir ? '文件夹' : formatSize(file.size) }}</span>
-        </label>
+        </div>
+        <div aria-hidden="true" :style="{ height: `${(importFiles.length - importWindowEnd) * IMPORT_ROW_HEIGHT}px` }"></div>
       </div>
       <div class="field import-target-dir">
         <label>保存到</label>
@@ -543,18 +672,18 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
           <button class="btn" :disabled="importBusy || !importTarget" @click="importDirPick = true">选择目录</button>
         </div>
       </div>
-    </template>
+    </div>
 
     <template #actions>
-      <button class="btn" :disabled="importBusy" @click="closeImport">取消</button>
+      <button class="btn" :disabled="importPhase === 'saving'" @click="closeImport">取消</button>
       <template v-if="importStep === 'form'">
-        <button class="btn primary" :disabled="importBusy || !importForm.url.trim() || !importTarget" @click="parseImport">
-          <span v-if="importBusy" class="spin spin-on-primary"></span>{{ importBusy ? '解析中…' : '解析分享' }}
+        <button class="btn primary" :disabled="!detectedShare.url || !importTarget" :aria-disabled="importBusy" :aria-busy="importPhase === 'parsing'" @click="parseImport">
+          <span v-if="importPhase === 'parsing'" class="spin spin-on-primary"></span>{{ importPhase === 'parsing' ? '解析中…' : '解析分享' }}
         </button>
       </template>
       <template v-else>
         <button class="btn" :disabled="importBusy" @click="backToImportForm">返回</button>
-        <button class="btn primary" :disabled="importBusy || !importSelected.length" @click="saveImport">
+        <button class="btn primary" :disabled="importBusy || !importSelected.size" @click="saveImport">
           <span v-if="importBusy" class="spin spin-on-primary"></span>{{ importBusy ? '导入中…' : '导入所选项目' }}
         </button>
       </template>
@@ -581,9 +710,20 @@ onBeforeUnmount(() => offs.forEach((off) => off && off()))
 .import-summary { display:flex; flex-direction:column; gap:4px; padding:9px 10px; margin-bottom:10px; border:1px solid var(--border-lighter); border-radius:var(--radius-md); color:var(--text-secondary); font-size:12px; }
 .import-summary strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); font-weight:600; }
 .import-file-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-.import-file-list { max-height:260px; overflow-y:auto; border:1px solid var(--border-lighter); border-radius:var(--radius-md); padding:4px; }
-.import-file-row { display:flex; align-items:center; gap:8px; min-height:34px; padding:4px 7px; border-radius:var(--radius-sm); cursor:pointer; }
-.import-file-row:hover { background:var(--surface-hover); }
+.import-file-list { box-sizing:content-box; max-height:var(--import-list-height); overflow-y:auto; overflow-anchor:none; scrollbar-gutter:stable; border:1px solid var(--border-lighter); border-radius:var(--radius-md); padding:0 4px; }
+.import-file-list:focus-visible { outline:1px solid var(--border-focus); }
+.import-file-row { box-sizing:border-box; display:flex; align-items:center; gap:8px; height:var(--import-row-height); padding:0 7px; border-radius:var(--radius-sm); cursor:pointer; transition:background-color var(--motion-fast) var(--motion-ease); }
+.import-file-list:not([aria-disabled=true]) .import-file-row:hover { background:var(--bg-hover); }
+.import-file-list[aria-disabled=true] .import-file-row { cursor:default; }
+.import-file-row[aria-selected=true] { background:var(--bg-active); }
+.import-file-list:focus-visible .import-file-row.is-active { box-shadow:inset 0 0 0 1px var(--border-focus); }
+.import-file-check { display:grid; place-items:center; flex:0 0 16px; height:16px; border:1px solid var(--text-tertiary); border-radius:4px; color:var(--text-on-primary, white); transition:background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease); }
+.import-file-check svg { opacity:0; transform:scale(.7); transition:opacity var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring); }
+.import-file-row[aria-selected=true] .import-file-check { background:var(--color-primary); border-color:var(--color-primary); }
+.import-file-row[aria-selected=true] .import-file-check svg { opacity:1; transform:scale(1); }
+@media (prefers-reduced-motion: reduce) {
+  .import-file-row, .import-file-check, .import-file-check svg { transition:none; }
+}
 .import-file-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .import-file-size { flex:0 0 auto; color:var(--text-tertiary); font-size:12px; }
 .import-dir-row { display:flex; gap:6px; }

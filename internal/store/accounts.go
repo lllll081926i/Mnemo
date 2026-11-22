@@ -165,6 +165,30 @@ func (s *Store) DeleteAccount(userID string) error {
 	return s.writeAccountsUnlocked(out)
 }
 
+func (s *Store) ReauthorizeAccount(userID, driveID string, token *model.TokenInfo) (*model.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.readAccountsUnlocked()
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range list {
+		if account.UserID != userID {
+			continue
+		}
+		if account.DriveID != driveID {
+			return nil, errInvalid("授权返回的网盘空间与原账号不一致")
+		}
+		account.Token = token
+		account.AuthState = ""
+		if err := s.writeAccountsUnlocked(list); err != nil {
+			return nil, err
+		}
+		return account, nil
+	}
+	return nil, os.ErrNotExist
+}
+
 // UpdateAccountToken refreshes the token of an account.
 func (s *Store) UpdateAccountToken(userID string, token *model.TokenInfo) error {
 	s.mu.Lock()

@@ -1,7 +1,7 @@
 <script setup>
 // 工具条下拉按钮：点击在按钮下方弹出菜单（复用 ContextMenu）。
 // items: [{ icon, label, action, danger, disabled, sep }]
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import ContextMenu from './ContextMenu.vue'
 import UiIcon from './UiIcon.vue'
 
@@ -10,7 +10,7 @@ defineOptions({ inheritAttrs: false })
 const props = defineProps({
   label: { type: String, required: true },
   icon: { type: String, default: '' },
-  items: { type: Array, required: true },
+  items: { type: [Array, Function], required: true },
   disabled: { type: Boolean, default: false },
   title: { type: String, default: '' },
 })
@@ -19,13 +19,23 @@ const emit = defineEmits(['select'])
 const btnEl = ref(null)
 const open = ref(false)
 const pos = ref({ x: 0, y: 0 })
+const startLast = ref(false)
+watch(() => props.disabled, disabled => { if (disabled) open.value = false })
 
-function toggle() {
+function toggle(last = false) {
   if (props.disabled) return
   if (open.value) { open.value = false; return }
   const r = btnEl.value.getBoundingClientRect()
   pos.value = { x: r.left, y: r.bottom + 4 }
+  startLast.value = last
   open.value = true
+}
+
+function onKey(event) {
+  if (event.isComposing || !['ArrowDown', 'ArrowUp'].includes(event.key)) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (!open.value) toggle(event.key === 'ArrowUp')
 }
 
 function onSelect(action) {
@@ -43,15 +53,17 @@ function onSelect(action) {
     :class="{ open }"
     :disabled="disabled"
     :title="title || label"
+    :aria-label="$attrs['aria-label'] ?? label"
     aria-haspopup="menu"
     :aria-expanded="open"
-    @click="toggle"
+    @click="toggle()"
+    @keydown="onKey"
   >
     <UiIcon v-if="icon" :name="icon" :size="15" />
-    <span>{{ label }}</span>
+    <span class="dropbtn-label">{{ label }}</span>
     <UiIcon name="chevron-down" :size="11" class="dropbtn-caret" />
   </button>
-  <ContextMenu v-if="open" :x="pos.x" :y="pos.y" :items="items" :trigger="btnEl" @close="open = false" @select="onSelect" />
+  <ContextMenu v-if="open" :x="pos.x" :y="pos.y" :items="typeof items === 'function' ? items() : items" :trigger="btnEl" :start-last="startLast" @close="open = false" @select="onSelect" />
 </template>
 
 <style scoped>

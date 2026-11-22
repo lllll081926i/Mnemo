@@ -34,7 +34,9 @@ node tools/supply-chain.cjs check
 
 前端和 Wails 的安装入口均禁用依赖安装脚本。之前的 `lfa-ponyfill` 带有联网更新字体列表的 postinstall；该依赖现已移除，默认禁止安装脚本的策略继续保留。需要启用新的安装脚本时，必须先审查具体脚本及其网络输入。
 
-云端在安装前检查来源，再运行 `npm ci --ignore-scripts`。Node 固定为 24.22.0；Go 固定为 1.27.3，设置 `GOTOOLCHAIN=local`，不自动下载另一套工具链。前端完整依赖审计和 Go 可达漏洞审计均属于质量门槛。`npm audit` 对外部 tarball 的覆盖有限，零公告不等于所有外部代码已经安全审计。
+云端在安装前检查来源，再运行 `npm ci --ignore-scripts`。Node 固定为 24.22.0；Go 固定为 1.27.4，设置 `GOTOOLCHAIN=local`，不自动下载另一套工具链。前端完整依赖审计和 Go 可达漏洞审计均属于质量门槛。`npm audit` 对外部 tarball 的覆盖有限，零公告不等于所有外部代码已经安全审计。
+
+测试工具使用 `@vue/test-utils` 2.6 系列。其 `js-beautify` 传递依赖通过局部 `overrides` 固定为 `editorconfig@4.0.1` 和 `glob@14.0.6`，消除旧版匹配器与文件遍历告警。这两项覆盖只作用于 `js-beautify`，生产依赖不受影响。升级时必须运行完整前端测试，并核验格式化工具的 glob 文件选择和 EditorConfig 读取；不要删除覆盖后忽略审计失败。本机使用 Node 24.22.1 验证此组合，CI 继续使用既定 Node 24.22.0。
 
 已用 Node 24.22.0 验证干净安装、测试、生产构建，以及已缓存依赖的 `npm ci --offline --ignore-scripts` 后重建。首次构建仍需要依赖源；这不是完整离线供应镜像，也不承诺跨平台安装包逐字节可重复。来源不可用时允许失败，不自动换源或放宽摘要。
 

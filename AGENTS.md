@@ -15,7 +15,7 @@ Default login provider: **PikPak**.
 ## Quick reference
 
 ```bash
-# 环境：Go ≥ 1.26（核验 1.27.3）、gcc（Windows）、Node ≥ 24.22.0
+# 环境：Go ≥ 1.26（核验 1.27.4）、gcc（Windows）、Node ≥ 24.22.0
 go mod tidy
 wails dev          # 热重载开发
 wails build        # 产物 build/bin/

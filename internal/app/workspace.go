@@ -35,7 +35,7 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 	out := &MigrationPreview{Conflicts: []string{}, Warnings: []string{}}
 	items := []drive.UploadValidationItem{}
 	seen := map[string]bool{}
-	targetListings := map[string][]model.File{}
+	targetListings := map[string]map[string]model.File{}
 	if strings.TrimSpace(dstParent) == "" || dstParent == "root" {
 		root, err := drive.RootID(dstUser, dstDrive)
 		if err != nil {
@@ -43,7 +43,7 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 		}
 		dstParent = root
 	}
-	listTarget := func(parent string) ([]model.File, error) {
+	listTarget := func(parent string) (map[string]model.File, error) {
 		if cached, ok := targetListings[parent]; ok {
 			return cached, nil
 		}
@@ -51,27 +51,30 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 		if err != nil {
 			return nil, fmt.Errorf("检查迁移目标目录失败: %w", err)
 		}
-		targetListings[parent] = result
-		return result, nil
+		byName := make(map[string]model.File, len(result))
+		for _, file := range result {
+			if _, exists := byName[file.Name]; !exists {
+				byName[file.Name] = file
+			}
+		}
+		targetListings[parent] = byName
+		return byName, nil
 	}
-	var walk func(id, targetParent, relative string, targetExists bool) error
-	walk = func(id, targetParent, relative string, targetExists bool) error {
+	var walk func(file *model.File, targetParent, relative string, targetExists bool) error
+	walk = func(file *model.File, targetParent, relative string, targetExists bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if file == nil || file.FileID == "" {
+			return fmt.Errorf("来源文件不存在或缺少标识")
+		}
+		id := file.FileID
 		if seen[id] {
 			return fmt.Errorf("来源包含重复或循环目录")
 		}
 		seen[id] = true
 		if len(seen) > 20000 {
 			return fmt.Errorf("预检超过 20000 项，请分批迁移")
-		}
-		file, err := drive.GetFileFreshContext(ctx, srcUser, srcDrive, id)
-		if err != nil {
-			return err
-		}
-		if file == nil {
-			return fmt.Errorf("来源文件不存在")
 		}
 		path := file.Name
 		if relative != "" {
@@ -83,15 +86,11 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 			if err != nil {
 				return err
 			}
-			for _, target := range targetItems {
-				if target.Name != file.Name {
-					continue
-				}
+			if target, exists := targetItems[file.Name]; exists {
 				out.Conflicts = append(out.Conflicts, path)
 				if file.IsDir && target.IsDir {
 					correspondingFolder = target.FileID
 				}
-				break
 			}
 		}
 		if !file.IsDir {
@@ -105,14 +104,18 @@ func (a *App) PreviewMigration(srcUser, srcDrive, dstUser, dstDrive, dstParent s
 			return err
 		}
 		for _, child := range children {
-			if err := walk(child.FileID, correspondingFolder, path, correspondingFolder != ""); err != nil {
+			if err := walk(&child, correspondingFolder, path, correspondingFolder != ""); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	for _, id := range ids {
-		if err := walk(id, dstParent, "", true); err != nil {
+		file, err := drive.GetFileFreshContext(ctx, srcUser, srcDrive, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := walk(file, dstParent, "", true); err != nil {
 			return nil, err
 		}
 	}

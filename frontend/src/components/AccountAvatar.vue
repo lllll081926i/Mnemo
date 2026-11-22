@@ -98,8 +98,9 @@ const avatarText = computed(() => {
   return n ? n.slice(0, 2) : '?'
 })
 
-// ---------- 悬停弹窗 ----------
+// ---------- 悬停/焦点弹窗 ----------
 const rootRef = ref(null)
+const popEl = ref(null)
 const show = ref(false)
 const popStyle = ref({})
 const refreshing = ref(false)
@@ -130,6 +131,25 @@ function onLeave() {
   clearTimeout(enterTimer)
   leaveTimer = setTimeout(() => { show.value = false }, 200)
 }
+
+// 键盘可访问：焦点进入头像即打开；焦点离开根节点/弹层（含两者间移动）才关闭；Escape 关闭并收回焦点
+function onRootFocusOut(e) {
+  if (rootRef.value?.contains(e.relatedTarget) || popEl.value?.contains(e.relatedTarget)) return
+  onLeave()
+}
+function onPopFocusOut(e) {
+  if (rootRef.value?.contains(e.relatedTarget) || popEl.value?.contains(e.relatedTarget)) return
+  onLeave()
+}
+function onKeydown(e) {
+  if (e.key === 'Escape' && show.value) {
+    e.stopPropagation()
+    show.value = false
+    rootRef.value?.focus({ preventScroll: true })
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown, true))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 onBeforeUnmount(() => {
   clearTimeout(enterTimer)
   clearTimeout(leaveTimer)
@@ -172,7 +192,21 @@ onMounted(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="acc-ava" @mouseenter="onEnter" @mouseleave="onLeave">
+  <div
+    ref="rootRef"
+    class="acc-ava"
+    tabindex="0"
+    role="button"
+    :aria-label="`查看 ${nick} 的容量信息`"
+    aria-haspopup="dialog"
+    :aria-expanded="show"
+    @mouseenter="onEnter"
+    @mouseleave="onLeave"
+    @focus="onEnter"
+    @focusout="onRootFocusOut"
+    @keydown.enter.prevent="onEnter"
+    @keydown.space.prevent="onEnter"
+  >
     <div class="ava-circle">
       <img v-if="avatar && !avatarFailed" :src="avatar" alt="" class="ava-img" @error="avatarFailed = true" />
       <img v-else-if="providerIcon" :src="providerIcon" alt="" class="ava-img" />
@@ -183,10 +217,14 @@ onMounted(() => {
       <transition name="popover-zoom">
         <div
           v-if="show"
+          ref="popEl"
           class="acc-pop"
+          role="dialog"
+          :aria-label="`${nick} 的容量信息`"
           :style="popStyle"
           @mouseenter="onEnter"
           @mouseleave="onLeave"
+          @focusout="onPopFocusOut"
         >
           <div class="ap-head">
             <div class="ava-circle sm">
@@ -241,7 +279,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.acc-ava { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; }
+.acc-ava { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 50%; cursor: pointer; }
+.acc-ava:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 .ava-circle {
   width: 30px; height: 30px; border-radius: 50%; overflow: hidden;
   background: var(--bg-subtle); color: var(--text-secondary);
@@ -250,7 +289,7 @@ onMounted(() => {
   flex-shrink: 0;
   transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
 }
-.acc-ava:hover > .ava-circle { border-color: color-mix(in srgb, var(--color-primary) 42%, var(--border-light)); box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary) 14%, transparent); transform: translateY(-1px) scale(1.03); }
+.acc-ava:hover > .ava-circle, .acc-ava:focus-visible > .ava-circle { border-color: color-mix(in srgb, var(--color-primary) 42%, var(--border-light)); box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary) 14%, transparent); transform: translateY(-1px) scale(1.03); }
 .ava-circle.sm { width: 36px; height: 36px; }
 .ava-img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .ava-text { font-size: 12px; font-weight: 600; }

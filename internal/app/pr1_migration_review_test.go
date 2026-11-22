@@ -26,9 +26,7 @@ func TestPR1ReviewMigrationDetectsNestedConflict(testContext *testing.T) {
 		responses := map[string]string{
 			"/v1.0/me/drive/items/source-a":          `{"id":"source-a","name":"A","folder":{}}`,
 			"/v1.0/me/drive/items/source-a/children": `{"value":[{"id":"source-b","name":"B","folder":{}}]}`,
-			"/v1.0/me/drive/items/source-b":          `{"id":"source-b","name":"B","folder":{}}`,
 			"/v1.0/me/drive/items/source-b/children": `{"value":[{"id":"source-x","name":"x.txt","size":3,"file":{}}]}`,
-			"/v1.0/me/drive/items/source-x":          `{"id":"source-x","name":"x.txt","size":3,"file":{}}`,
 			"/v1.0/me/drive/root/children":           `{"value":[{"id":"target-a","name":"A","folder":{}}]}`,
 			"/v1.0/me/drive/items/target-a/children": `{"value":[{"id":"target-b","name":"B","folder":{}}]}`,
 			"/v1.0/me/drive/items/target-b/children": `{"value":[{"id":"target-x","name":"x.txt","size":3,"file":{}}]}`,

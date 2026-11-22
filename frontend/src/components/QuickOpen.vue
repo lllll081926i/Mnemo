@@ -1,11 +1,10 @@
 <script setup>
 // 全局快捷命令面板 (Ctrl+P / Command+P)：
 // 支持模块跳转、网盘账号快切、快捷命令（刷新/上传/新建文件夹/明暗切换）
-import { ref, computed, watch, nextTick } from 'vue'
-import { motion, MotionConfig } from 'motion-v'
+import { ref, computed, watch } from 'vue'
 import { accountName, providerIconUrl, providerMetaOf, providerOf } from '../api'
 import UiIcon from './UiIcon.vue'
-import { panelReveal, reducedMotion } from '../motion/presets'
+import Modal from './Modal.vue'
 import { recentItems, recentEnabled, clearRecentItems, setRecentEnabled } from '../recent-items'
 
 const props = defineProps({
@@ -18,8 +17,11 @@ const emit = defineEmits(['close', 'select-tab', 'select-account', 'action', 'na
 
 const keyword = ref('')
 const activeIndex = ref(0)
-const inputEl = ref(null)
 const listEl = ref(null)
+const firstVisible = ref(0)
+const visibleCount = ref(8)
+const rowHeight = 54
+const overscan = 3
 const shortcutLabel = document.documentElement.dataset.platform === 'darwin' ? '⌘P' : 'Ctrl+P'
 
 const baseItems = computed(() => {
@@ -39,10 +41,10 @@ const baseItems = computed(() => {
   ]
 
   if (recentEnabled.value) {
-    const accounts = new Set(props.accounts.map(account => JSON.stringify([account.user_id, account.drive_id])))
+    const accounts = new Map(props.accounts.map(account => [JSON.stringify([account.user_id, account.drive_id]), account]))
     for (const entry of recentItems.value.filter(item => accounts.has(JSON.stringify([item.userId, item.driveId]))).slice(0, 20)) {
-      items.push({ id: `recent-${entry.userId}-${entry.driveId}-${entry.fileId}`, group: '最近使用', title: entry.name,
-        sub: `${entry.isDir ? '文件夹' : '文件'} · ${accountName(props.accounts.find(account => account.user_id === entry.userId)) || entry.userId}`,
+      items.push({ id: JSON.stringify(['recent', entry.userId, entry.driveId, entry.fileId]), group: '最近使用', title: entry.name,
+        sub: `${entry.isDir ? '文件夹' : '文件'} · ${accountName(accounts.get(JSON.stringify([entry.userId, entry.driveId]))) || entry.userId}`,
         icon: entry.isDir ? 'folder' : 'file', run: () => emit('navigate', entry) })
     }
   }
@@ -52,7 +54,7 @@ const baseItems = computed(() => {
     const meta = providerMetaOf(acc, props.providers)
     const label = (meta && meta.label) || providerOf(acc.user_id) || '网盘'
     items.push({
-      id: 'acc-' + acc.user_id,
+      id: JSON.stringify(['account', acc.user_id, acc.drive_id]),
       group: '网盘账号',
       title: '切换到: ' + accountName(acc),
       sub: label + ' · ' + acc.user_id,
@@ -65,36 +67,43 @@ const baseItems = computed(() => {
     })
   }
 
-  return items
+  return items.map(item => ({ ...item, searchText: `${item.title}\n${item.sub}\n${item.group}`.toLowerCase() }))
 })
 
 const filteredItems = computed(() => {
+  if (!props.show) return []
   const kw = keyword.value.trim().toLowerCase()
   if (!kw) return baseItems.value
-  return baseItems.value.filter(
-    (item) =>
-      item.title.toLowerCase().includes(kw) ||
-      item.sub.toLowerCase().includes(kw) ||
-      item.group.toLowerCase().includes(kw)
-  )
+  return baseItems.value.filter(item => item.searchText.includes(kw))
 })
+const start = computed(() => Math.max(0, firstVisible.value - overscan))
+const end = computed(() => Math.min(filteredItems.value.length, firstVisible.value + visibleCount.value + overscan + 1))
+const visibleItems = computed(() => filteredItems.value.slice(start.value, end.value))
+const activeOptionId = computed(() => activeIndex.value >= start.value && activeIndex.value < end.value ? `qo-option-${activeIndex.value}` : undefined)
 
 watch(filteredItems, () => {
   activeIndex.value = 0
+  firstVisible.value = 0
+  if (listEl.value) listEl.value.scrollTop = 0
 })
 
-watch(
-  () => props.show,
-  (visible) => {
-    if (visible) {
-      keyword.value = ''
-      activeIndex.value = 0
-      nextTick(() => {
-        inputEl.value?.focus()
-      })
-    }
-  }
-)
+watch(() => props.show, visible => { if (visible) keyword.value = '' })
+
+function updateViewport() {
+  const list = listEl.value
+  if (!list) return
+  firstVisible.value = Math.floor(Math.max(0, list.scrollTop - 8) / rowHeight)
+  if (list.clientHeight) visibleCount.value = Math.ceil(list.clientHeight / rowHeight)
+}
+
+watch(listEl, (list, _, onCleanup) => {
+  if (!list) return
+  updateViewport()
+  if (typeof ResizeObserver === 'undefined') return
+  const observer = new ResizeObserver(updateViewport)
+  observer.observe(list)
+  onCleanup(() => observer.disconnect())
+}, { flush: 'post' })
 
 function execute(item) {
   if (!item) return
@@ -102,122 +111,123 @@ function execute(item) {
   item.run()
 }
 
-function onKeyDown(e) {
-  const len = filteredItems.value.length
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    if (len > 0) {
-      activeIndex.value = (activeIndex.value + 1) % len
-      scrollActiveIntoView()
-    }
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    if (len > 0) {
-      activeIndex.value = (activeIndex.value - 1 + len) % len
-      scrollActiveIntoView()
-    }
-  } else if (e.key === 'Enter') {
-    e.preventDefault()
-    if (len > 0 && filteredItems.value[activeIndex.value]) {
-      execute(filteredItems.value[activeIndex.value])
-    }
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    emit('close')
+function onKeyDown(event) {
+  if (event.isComposing || event.keyCode === 229) { event.stopPropagation(); return }
+  if (event.altKey || event.shiftKey) return
+  const total = filteredItems.value.length
+  const jump = (event.ctrlKey || event.metaKey) && ['Home', 'End'].includes(event.key)
+  if (!jump && (event.ctrlKey || event.metaKey)) return
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    if (!event.repeat && activeOptionId.value) execute(filteredItems.value[activeIndex.value])
+    return
   }
+  if (!jump && !['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp'].includes(event.key)) return
+  if (!total) return
+  event.preventDefault()
+  const current = activeOptionId.value ? activeIndex.value : firstVisible.value
+  const page = Math.max(1, visibleCount.value - 1)
+  const next = jump ? (event.key === 'Home' ? 0 : total - 1)
+    : event.key === 'ArrowDown' ? (current + 1) % total
+      : event.key === 'ArrowUp' ? (current - 1 + total) % total
+        : current + (event.key === 'PageDown' ? page : -page)
+  reveal(Math.max(0, Math.min(total - 1, next)))
 }
 
-function scrollActiveIntoView() {
-  nextTick(() => {
-    const list = listEl.value
-    if (!list) return
-    const active = list.querySelector('.qo-item.active')
-    if (active) {
-      active.scrollIntoView({ block: 'nearest' })
-    }
-  })
+function reveal(index) {
+  activeIndex.value = index
+  const list = listEl.value
+  if (!list) return
+  const top = index * rowHeight + 8
+  const height = list.clientHeight || visibleCount.value * rowHeight
+  if (top < list.scrollTop) list.scrollTop = top
+  else if (top + rowHeight > list.scrollTop + height) list.scrollTop = top + rowHeight - height
+  updateViewport()
 }
 </script>
 
 <template>
-  <teleport to="body">
-    <transition name="modal-fade">
-      <div v-if="show" class="modal-mask qo-mask" @click.self="emit('close')">
-        <MotionConfig :reduced-motion="reducedMotion">
-          <motion.div
-            class="qo-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="快捷命令面板"
-            :initial="panelReveal.initial"
-            :animate="panelReveal.animate"
-            :transition="panelReveal.transition"
-          >
-          <div class="qo-input-wrap">
-            <UiIcon name="search" :size="16" class="qo-search-icon" />
-            <input
-              ref="inputEl"
-              v-model="keyword"
-              class="qo-input"
-              placeholder="搜索功能、命令或账号 (↑↓ 选择，Enter 确认)"
-              spellcheck="false"
-              @keydown="onKeyDown"
-            />
-            <span class="qo-badge">{{ shortcutLabel }}</span>
-            <button type="button" class="qo-close" title="关闭 (Esc)" aria-label="关闭快捷命令面板" @click="emit('close')"><UiIcon name="close" :size="15" /></button>
-          </div>
+  <Modal
+    v-if="show"
+    title="快捷命令面板"
+    width="600px"
+    mask-class="qo-mask"
+    dialog-class="qo-panel"
+    body-class="qo-body"
+    initial-focus=".qo-input"
+    hide-head
+    @close="emit('close')"
+  >
+    <div class="qo-input-wrap">
+      <UiIcon name="search" :size="18" class="qo-search-icon" />
+      <input
+        id="qo-input"
+        v-model="keyword"
+        class="qo-input"
+        role="combobox"
+        aria-label="搜索功能、命令或账号"
+        aria-autocomplete="list"
+        aria-expanded="true"
+        aria-controls="qo-list"
+        :aria-activedescendant="activeOptionId"
+        placeholder="搜索功能、命令或账号"
+        spellcheck="false"
+        @keydown="onKeyDown"
+      />
+      <span class="qo-badge">{{ shortcutLabel }}</span>
+      <button type="button" class="qo-close" title="关闭 (Esc)" aria-label="关闭快捷命令面板" @click="emit('close')"><UiIcon name="close" :size="15" /></button>
+    </div>
 
-          <div ref="listEl" class="qo-list" role="listbox" aria-label="快捷命令">
-            <div v-if="!filteredItems.length" class="qo-empty">
-              <UiIcon name="search" :size="20" />
-              <span>没有匹配的命令或账号</span>
-            </div>
-            <div
-              v-for="(item, idx) in filteredItems"
-              :key="item.id"
-              class="qo-item"
-              :class="{ active: idx === activeIndex }"
-              role="option"
-              :aria-selected="idx === activeIndex"
-              @click="execute(item)"
-              @mouseenter="activeIndex = idx"
-            >
-              <img v-if="item.img" :src="item.img" class="qo-item-img" alt="" />
-              <UiIcon v-else :name="item.icon" :size="16" class="qo-item-icon" />
-              <div class="qo-item-text">
-                <span class="qo-item-title">{{ item.title }}</span>
-                <span class="qo-item-sub">{{ item.sub }}</span>
-              </div>
-              <span class="qo-item-group">{{ item.group }}</span>
-            </div>
-          </div>
-          <div class="qo-recent-controls">
-            <button type="button" @click="setRecentEnabled(!recentEnabled)">{{ recentEnabled ? '暂停记录最近使用' : '开启记录最近使用' }}</button>
-            <button v-if="recentItems.length" type="button" @click="clearRecentItems">清空记录</button>
-          </div>
-          </motion.div>
-        </MotionConfig>
+    <div id="qo-list" ref="listEl" class="qo-list" role="listbox" aria-label="快捷命令" @scroll.passive="updateViewport">
+      <div v-if="!filteredItems.length" class="qo-empty">
+        <UiIcon name="search" :size="20" />
+        <span>没有匹配的命令或账号</span>
       </div>
-    </transition>
-  </teleport>
+      <div v-else class="qo-track" :style="{ height: `${filteredItems.length * rowHeight}px` }">
+      <div
+        v-for="(item, offset) in visibleItems"
+        :id="`qo-option-${start + offset}`"
+        :key="item.id"
+        class="qo-item"
+        :class="{ active: start + offset === activeIndex }"
+        :style="{ top: `${(start + offset) * rowHeight}px`, height: `${rowHeight}px` }"
+        role="option"
+        :aria-selected="start + offset === activeIndex"
+        :aria-posinset="start + offset + 1"
+        :aria-setsize="filteredItems.length"
+        @click="execute(item)"
+        @pointermove="($event.movementX || $event.movementY) && (activeIndex = start + offset)"
+      >
+        <img v-if="item.img" :src="item.img" class="qo-item-img" alt="" />
+        <UiIcon v-else :name="item.icon" :size="17" class="qo-item-icon" />
+        <div class="qo-item-text">
+          <span class="qo-item-title">{{ item.title }}</span>
+          <span class="qo-item-sub">{{ item.sub }}</span>
+        </div>
+        <span class="qo-item-group">{{ item.group }}</span>
+      </div>
+      </div>
+    </div>
+    <div class="qo-recent-controls">
+      <span class="qo-hint"><kbd>↑</kbd><kbd>↓</kbd> 导航 <kbd>Enter</kbd> 打开 <kbd>Esc</kbd> 关闭</span>
+      <button type="button" @click="setRecentEnabled(!recentEnabled)">{{ recentEnabled ? '暂停记录最近使用' : '开启记录最近使用' }}</button>
+      <button v-if="recentItems.length" type="button" @click="clearRecentItems">清空记录</button>
+    </div>
+  </Modal>
 </template>
 
 <style scoped>
-.qo-mask {
+:deep(.qo-mask) {
   align-items: flex-start;
   padding-top: 12vh;
 }
-.qo-panel {
-  width: 570px;
+:deep(.qo-panel) {
   max-width: 92vw;
   background: var(--bg-elevated);
-  border: 0;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-modal), 0 0 0 1px var(--border-light);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
+:deep(.qo-body) { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .qo-input-wrap {
   display: flex;
   align-items: center;
@@ -256,10 +266,15 @@ function scrollActiveIntoView() {
   max-height: min(400px, 55vh);
   overflow-y: auto;
   padding: 8px;
+  overflow-anchor: none;
 }
-.qo-recent-controls { display: flex; justify-content: flex-end; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--border-light); }
-.qo-recent-controls button { border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 11px; }
-.qo-recent-controls button:hover { color: var(--color-primary); }
+.qo-track { position: relative; }
+.qo-recent-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px; min-height: 42px; padding: 8px 14px; border-top: 1px solid var(--border-light); background: var(--bg-surface); }
+.qo-hint { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; color: var(--text-tertiary); font-size: 11px; }
+.qo-hint kbd { min-width: 18px; padding: 1px 4px; border: 1px solid var(--border-light); border-radius: var(--radius-xs); background: var(--bg-subtle); color: var(--text-secondary); font: inherit; text-align: center; }
+.qo-recent-controls button { border: 0; border-radius: var(--radius-xs); padding: 4px 6px; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 11px; }
+.qo-recent-controls button:hover { color: var(--color-primary); background: var(--bg-hover); }
+@media (max-width: 640px) { .qo-hint { display: none; } .qo-recent-controls { justify-content: center; } }
 .qo-empty {
   display: grid;
   justify-items: center;
@@ -270,10 +285,12 @@ function scrollActiveIntoView() {
   color: var(--text-tertiary);
 }
 .qo-item {
+  position: absolute;
+  inset-inline: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 54px;
   padding: 9px 11px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -317,5 +334,9 @@ function scrollActiveIntoView() {
   border-radius: 999px;
   background: var(--bg-subtle);
   flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .qo-item { transition: none; }
+  .qo-item:hover { transform: none; }
 }
 </style>

@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import UiSelect from './UiSelect.vue'
 import SegTabs from './SegTabs.vue'
 import Modal from './Modal.vue'
+import QuickOpen from './QuickOpen.vue'
 
 vi.mock('../../wailsjs/runtime/runtime', () => ({
   WindowMinimise: vi.fn(),
@@ -123,10 +124,12 @@ describe('键盘与焦点隔离', () => {
 
   it('关闭底层弹窗不会把焦点抢出仍打开的顶层弹窗', async () => {
     const wrapper = render({
-      data: () => ({ parent: true, child: false }),
-      template: '<div><Modal v-if="parent" title="底层"><button id="open-child">子操作</button></Modal><Modal v-if="child" title="顶层" :focus-dialog="true"><button>确认</button></Modal></div>',
+      data: () => ({ parent: false, child: false }),
+      template: '<div><button id="base-trigger">打开</button><Modal v-if="parent" title="底层"><button id="open-child">子操作</button></Modal><Modal v-if="child" title="顶层" :focus-dialog="true"><button>确认</button></Modal></div>',
     })
-    await nextTick()
+    const base = wrapper.get('#base-trigger').element
+    base.focus()
+    await wrapper.setData({ parent: true })
     document.getElementById('open-child').focus()
     await wrapper.setData({ child: true })
     await flushPromises()
@@ -135,6 +138,71 @@ describe('键盘与焦点隔离', () => {
     await wrapper.setData({ parent: false })
     await flushPromises()
     expect(top.contains(document.activeElement)).toBe(true)
+    await wrapper.setData({ child: false })
+    await flushPromises()
+    expect(document.activeElement).toBe(base)
+  })
+
+  it('同帧替换弹窗时沿用最初的焦点返回位置', async () => {
+    const wrapper = render({
+      data: () => ({ step: 0 }),
+      template: '<div><button id="open-modal">打开</button><Modal v-if="step === 1" title="第一步" focus-dialog/><Modal v-if="step === 2" title="第二步" focus-dialog @close="step = 0"/></div>',
+    })
+    const trigger = wrapper.get('#open-modal').element
+    trigger.focus()
+    await wrapper.setData({ step: 1 })
+    await flushPromises()
+    expect(document.activeElement.getAttribute('aria-label')).toBe('第一步')
+    await wrapper.setData({ step: 2 })
+    await flushPromises()
+    expect(document.activeElement.getAttribute('aria-label')).toBe('第二步')
+    expect(key(document.activeElement, 'Escape').defaultPrevented).toBe(true)
+    await flushPromises()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('只允许最上层弹窗交互，长按 Escape 不会连关两层', async () => {
+    const wrapper = render({
+      data: () => ({ parent: true, child: false }),
+      template: '<div><Modal v-if="parent" title="底层" @close="parent = false"><button id="nested-trigger" @click="child = true">打开二级</button></Modal><Modal v-if="child" title="顶层" focus-dialog @close="child = false"/></div>',
+    })
+    const trigger = document.getElementById('nested-trigger')
+    trigger.focus()
+    trigger.click()
+    await flushPromises()
+    const top = document.querySelector('[aria-label="顶层"]')
+    const parent = trigger.closest('.modal-mask')
+    expect(parent.hasAttribute('inert')).toBe(true)
+    expect(top.closest('.modal-mask').hasAttribute('inert')).toBe(false)
+    key(top, 'Escape')
+    await flushPromises()
+    expect(parent.hasAttribute('inert')).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+    expect(key(trigger, 'Escape', { repeat: true }).defaultPrevented).toBe(true)
+    await nextTick()
+    expect(wrapper.vm.parent).toBe(true)
+    key(trigger, 'Escape')
+    await nextTick()
+    expect(wrapper.vm.parent).toBe(false)
+  })
+
+  it('快捷命令保留输入焦点、同步活动选项并在关闭后恢复触发位置', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{ width: 100, height: 30 }])
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    const wrapper = render(QuickOpen, { props: { show: true } })
+    await nextTick()
+    const input = document.querySelector('.qo-input')
+    expect(document.activeElement).toBe(input)
+    expect(input.getAttribute('aria-controls')).toBe('qo-list')
+    key(input, 'ArrowDown')
+    await nextTick()
+    expect(input.getAttribute('aria-activedescendant')).toBe('qo-option-1')
+    expect(document.getElementById('qo-option-1').getAttribute('aria-selected')).toBe('true')
+    await wrapper.setProps({ show: false })
+    await nextTick()
+    expect(document.activeElement).toBe(opener)
   })
 
   it('选项刷新和控件禁用不会留下无效活动 ID 或可操作浮层', async () => {

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { login, saveMounted, validateMountedWrite, SendGuangyaSms, SendPan139SMS, SendPan189SMS, SendThunderSMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha, ShowPikPakCaptcha, ShowThunderVerification, CancelThunderLogin } from '../api'
+import { login, saveMounted, reconnectMounted, accountName, validateMountedWrite, SendGuangyaSms, SendPan139SMS, SendPan189SMS, SendThunderSMS, providerIconUrl, OpenBrowser, onEvent, ClosePikPakCaptcha, ShowPikPakCaptcha, ShowThunderVerification, CancelThunderLogin } from '../api'
 import UiIcon from './UiIcon.vue'
 import UiSelect from './UiSelect.vue'
 import Modal from './Modal.vue'
@@ -11,6 +11,7 @@ import { loginDefaults, loginFields, loginFieldVisible, loginFieldRequired, sele
 const props = defineProps({
   providers: { type: Array, default: () => [] },
   initialProvider: { type: String, default: '' },
+  reauthAccount: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'toast'])
 
@@ -102,6 +103,11 @@ function handlePikPakRateLimit(error) {
 }
 const errorText = ref('')
 function friendlyLoginError(reason, action = '登录网盘') {
+  if (props.reauthAccount) {
+    const detail = formatErrorText(reason?.cause || reason)
+    if (detail.includes('授权返回的是另一个账号')) return '授权返回的是另一个账号。请在授权页面选择原账号后重试。'
+    if (detail.includes('授权返回的网盘空间与原账号不一致')) return '授权返回的网盘空间与原账号不一致。原账号未修改。'
+  }
   return driveErrorNotice(reason, action).message
 }
 const pan139SMSRequired = ref(false)
@@ -111,7 +117,7 @@ function togglePassword(key) {
   passwordVisibility.value = { ...passwordVisibility.value, [key]: !passwordVisible(key) }
 }
 
-const availableProviders = computed(() => props.providers)
+const availableProviders = computed(() => props.reauthAccount ? props.providers.filter(item => item.ID === props.initialProvider) : props.providers)
 const provider = computed(() => availableProviders.value.find((p) => p.ID === providerId.value) || availableProviders.value[0] || null)
 const providerListEl = ref(null)
 const selectionStyle = ref({})
@@ -642,6 +648,10 @@ function parsePan139SMSRequired(err) {
 function validate() {
   if (isMounted.value) {
     const m = mountedForm.value
+    if (props.reauthAccount) {
+      if (providerId.value === 's3' && !m.username.trim()) return '请填写 Access Key ID'
+      return m.password ? '' : '请填写新的凭据'
+    }
     if (providerId.value === 'webdav' && !m.endpoint.trim()) return '请填写 WebDAV 地址'
     if (providerId.value !== 'webdav' || m.authType !== 'bearer') {
       if (!m.username.trim()) return providerId.value === 's3' ? '请填写 Access Key ID' : '请填写用户名'
@@ -741,7 +751,9 @@ async function submit() {
 		errorText.value = err
 		return
 	}
-    if (attemptMounted) {
+    if (attemptMounted && props.reauthAccount) {
+      await reconnectMounted(props.reauthAccount.user_id, mountedForm.value.username.trim(), mountedForm.value.password, mountedForm.value.sessionToken)
+    } else if (attemptMounted) {
       const mountedConfig = { ...mountedForm.value }
       if (attemptProvider !== 'webdav') delete mountedConfig.authType
       const verifyWrite = attemptProvider === 's3' && mountedConfig.verifyWrite === true
@@ -749,10 +761,10 @@ async function submit() {
       if (verifyWrite) await validateMountedWrite(attemptProvider, mountedConfig)
       await saveMounted(attemptProvider, mountedConfig)
     } else {
-      await login(attemptProvider, { ...form.value })
+      await login(attemptProvider, { ...form.value, ...(props.reauthAccount ? { reauth_user_id: props.reauthAccount.user_id } : {}) })
     }
     if (loginModalDisposed || providerId.value !== attemptProvider) return
-    const successMessage = attemptOAuth
+    const successMessage = props.reauthAccount ? '原账号已重新登录' : attemptOAuth
       ? '授权成功'
       : (attemptMounted && attemptProvider === 's3'
         ? (mountedForm.value.verifyWrite ? 'S3 已添加（浏览和写入权限已验证）' : 'S3 已添加')
@@ -811,9 +823,9 @@ async function submit() {
 </script>
 
 <template>
-  <Modal title="添加网盘" dialog-class="login-modal" body-class="login-body" initial-focus=".login-form input:not([type=checkbox]), .login-form textarea, .login-actions .primary" :window-controls="false" close-label="关闭添加网盘" @close="emit('close')">
+  <Modal :title="reauthAccount ? '重新登录' : '添加网盘'" dialog-class="login-modal" body-class="login-body" initial-focus=".login-form input:not([type=checkbox]), .login-form textarea, .login-actions .primary" :window-controls="false" :close-label="reauthAccount ? '关闭重新登录' : '关闭添加网盘'" @close="emit('close')">
             <aside class="login-side">
-              <div class="login-side-heading">选择网盘</div>
+              <div class="login-side-heading">{{ reauthAccount ? '原网盘' : '选择网盘' }}</div>
               <div ref="providerListEl" class="login-provider-list" role="tablist" aria-label="网盘服务" @keydown="onProviderKeydown">
                 <span v-if="selectionVisible" class="lp-selection" :style="selectionStyle" aria-hidden="true"></span>
                 <button
@@ -845,8 +857,14 @@ async function submit() {
                 <div class="login-provider-intro"><strong>{{ provider.Meta.label }}</strong><span v-if="isOAuth">将在浏览器中完成授权</span></div>
               </div>
               <div class="login-form-content" :key="providerId">
+                <p v-if="reauthAccount" class="hint">正在重新登录「{{ accountName(reauthAccount) }}」。原有任务和收藏将保留。</p>
                 <!-- 挂载存储（WebDAV / S3） -->
-                <template v-if="isMounted">
+                <div v-if="isMounted && reauthAccount" class="login-section">
+                  <div v-if="providerId === 's3'" class="field login-field"><label for="reauth-access-key">Access Key ID</label><input id="reauth-access-key" v-model="mountedForm.username" class="input" autocomplete="off" /></div>
+                  <div class="field login-field"><label for="reauth-secret">{{ providerId === 's3' ? 'Secret Access Key' : '新密码或令牌' }}</label><input id="reauth-secret" v-model="mountedForm.password" class="input" type="password" autocomplete="new-password" /></div>
+                  <div v-if="providerId === 's3'" class="field login-field"><label for="reauth-session-token">Session Token（可选）</label><input id="reauth-session-token" v-model="mountedForm.sessionToken" class="input" type="password" autocomplete="off" /></div>
+                </div>
+                <template v-else-if="isMounted">
                   <div class="login-section">
                     <div class="field login-field"><label for="mounted-name">连接名称</label><input id="mounted-name" class="input" v-model="mountedForm.name" :placeholder="providerId === 's3' ? '我的 S3' : '我的 WebDAV'" /></div>
                     <div v-if="providerId === 'webdav'" class="field login-field">
