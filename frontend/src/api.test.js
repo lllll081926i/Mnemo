@@ -65,6 +65,7 @@ describe('api 纯逻辑辅助函数', () => {
 		expect(openKindOf({ name: 'legacy.doc' })).toBe('download')
 		expect(openKindOf({ name: 'legacy.xls' })).toBe('download')
 		expect(openKindOf({ name: 'legacy.ppt' })).toBe('download')
-		expect(openKindOf({ name: 'archive.zip' })).toBe('download')
+		expect(openKindOf({ name: 'archive.zip' })).toBe('archive')
+		expect(openKindOf({ name: 'archive.rar' })).toBe('download')
 	})
 })

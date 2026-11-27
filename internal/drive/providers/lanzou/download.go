@@ -62,14 +62,14 @@ func lanzouResolveShareDownload(ctx context.Context, shareID, pwd, shareBase, co
 			return shareDownload{}, err
 		}
 		param["p"] = pwd
-		fileID := firstCapture(fileIDRe, fn)
-		if fileID == "" {
-			fileID = firstCapture(fileIDRe, pageData)
+		ajaxURL, ok := resolveLanzouAjaxURL(fn, base)
+		if !ok {
+			ajaxURL, ok = resolveLanzouAjaxURL(pageData, base)
 		}
-		if fileID == "" {
+		if !ok {
 			return shareDownload{}, errors.New("页面中未找到文件 id")
 		}
-		text, err := fetchText(ctx, http.MethodPost, base+"/ajaxm.php?file="+fileID, map[string]string{
+		text, err := fetchText(ctx, http.MethodPost, ajaxURL, map[string]string{
 			"content-type": "application/x-www-form-urlencoded",
 			"user-agent":   LANZOU_DEFAULT.UserAgent,
 			"referer":      base + "/" + shareID,
@@ -103,11 +103,11 @@ func lanzouResolveShareDownload(ctx context.Context, shareID, pwd, shareBase, co
 		if err != nil {
 			return shareDownload{}, err
 		}
-		fileID := firstCapture(fileIDRe, nextData)
-		if fileID == "" {
+		ajaxURL, ok := resolveLanzouAjaxURL(nextData, base)
+		if !ok {
 			return shareDownload{}, errors.New("下载页中未找到文件 id")
 		}
-		text, err := fetchText(ctx, http.MethodPost, base+"/ajaxm.php?file="+fileID, map[string]string{
+		text, err := fetchText(ctx, http.MethodPost, ajaxURL, map[string]string{
 			"content-type": "application/x-www-form-urlencoded",
 			"user-agent":   LANZOU_DEFAULT.UserAgent,
 			"referer":      base + iframe,

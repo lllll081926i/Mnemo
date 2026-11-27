@@ -40,6 +40,12 @@ export function recordRecentItem(item) {
   try { localStorage.setItem(KEY, JSON.stringify(recentItems.value)) } catch { /* 本地存储不可用时仅保留本次会话 */ }
 }
 
+export function removeRecentItem(item) {
+  if (!item) return
+  recentItems.value = recentItems.value.filter(entry => !(entry.userId === item.userId && entry.driveId === item.driveId && entry.fileId === item.fileId))
+  try { localStorage.setItem(KEY, JSON.stringify(recentItems.value)) } catch { /* 无法写入时仍更新本次会话 */ }
+}
+
 export function clearRecentItems() {
   recentItems.value = []
   try { localStorage.removeItem(KEY) } catch { /* 无法写入时仍清除本次会话 */ }

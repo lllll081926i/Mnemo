@@ -5,7 +5,7 @@ import UiIcon from './UiIcon.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import appIcon from '../assets/logo/icon.svg'
 import packageInfo from '../../package.json'
-import { CheckUpdate, GetUpdateStatus, DownloadUpdate, CancelUpdate, ApplyUpdate, RevealInFolder, OpenBrowser, getSettings, onEvent } from '../api'
+import { CheckUpdate, GetUpdateStatus, DownloadUpdate, CancelUpdate, ApplyUpdate, RevealInFolder, OpenBrowser, formatBytes, getSettings, onEvent } from '../api'
 
 const props = defineProps({ initialInfo: { type: Object, default: null } })
 const emit = defineEmits(['close'])
@@ -36,13 +36,7 @@ function pct() {
   const total = progress.value.total || 0
   return total > 0 ? Math.min(100, Math.round(progress.value.downloaded / total * 100)) : 0
 }
-function fmtBytes(n) {
-  let value = Math.max(0, Number(n) || 0)
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++ }
-  return (i ? value.toFixed(1) : String(Math.round(value))) + ' ' + units[i]
-}
+
 function receive(status) {
   if (!alive || !status || Number(status.revision) < revision) return false
   revision = Number(status.revision) || 0
@@ -150,10 +144,10 @@ onBeforeUnmount(() => { alive = false; ++sequence; offState?.() })
             <div><h4 class="upd-title">{{ presentation.title }}</h4><p class="upd-meta">{{ presentation.description }}</p></div>
           </div>
           <div v-if="info?.version && state !== 'idle' && state !== 'checking'" class="upd-version">
-            <span>新版本 <strong>{{ info.version }}</strong></span><span v-if="info?.size">{{ fmtBytes(info.size) }}</span>
+            <span>新版本 <strong>{{ info.version }}</strong></span><span v-if="info?.size">{{ formatBytes(info.size) }}</span>
           </div>
           <div v-if="state === 'downloading' || state === 'verifying'" class="upd-download">
-            <div class="upd-download-meta"><span>{{ fmtBytes(progress.downloaded) }} / {{ progress.total > 0 ? fmtBytes(progress.total) : '大小未知' }}</span><strong v-if="progress.total > 0">{{ pct() }}%</strong></div>
+            <div class="upd-download-meta"><span>{{ formatBytes(progress.downloaded) }} / {{ progress.total > 0 ? formatBytes(progress.total) : '大小未知' }}</span><strong v-if="progress.total > 0">{{ pct() }}%</strong></div>
             <div class="upd-progress" role="progressbar" aria-label="更新下载进度" :aria-valuenow="progress.total > 0 ? pct() : undefined" aria-valuemin="0" aria-valuemax="100"><div class="upd-bar" :class="{ indeterminate: progress.total <= 0 }" :style="{ width: progress.total > 0 ? pct() + '%' : '35%' }"></div></div>
           </div>
           <p v-if="state === 'done' && !updatePath" class="upd-meta">安装包路径不可用，请重新下载或检查更新。</p>

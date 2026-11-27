@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   providerIconUrl: vi.fn(() => ''),
   providerMetaOf: vi.fn(() => ({ label: '网盘' })),
   capsOf: vi.fn(() => ({ importShare: true })),
+  formatBytes: vi.fn(value => `${value || 0} B`),
   formatTime: vi.fn(() => ''),
   copyText: vi.fn(),
   importShare: vi.fn(),

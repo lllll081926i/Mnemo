@@ -292,6 +292,8 @@ export function ValidateMountedWrite(arg1:string,arg2:model.ConnConfig):Promise<
 
 export function ValidateUploadFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
 
+export function VerifyDownload(arg1:string):Promise<app.DownloadVerification>;
+
 export function VerifyMigration(arg1:string):Promise<Array<app.MigrationVerification>>;
 
 export function WatchShowRequests():Promise<void>;

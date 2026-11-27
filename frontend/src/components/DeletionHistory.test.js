@@ -2,7 +2,15 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import DeletionHistory from './DeletionHistory.vue'
 
-vi.mock('../api', () => ({ formatBytes: value => `${value} B`, formatTime: value => String(value) }))
+vi.mock('../api', () => ({
+  formatBytes: value => `${value} B`,
+  formatTime: value => String(value),
+  listDeletionHistory: (...args) => window.go.app.App.ListDeletionHistory(...args),
+  restoreDeletionHistory: (...args) => window.go.app.App.RestoreDeletionHistory(...args),
+  openTrashWebsite: (...args) => window.go.app.App.OpenTrashWebsite(...args),
+  previewEnterpriseTrash: (...args) => window.go.app.App.PreviewEnterpriseTrash(...args),
+  clearDeletionHistory: (...args) => window.go.app.App.ClearDeletionHistory(...args),
+}))
 let wrapper
 afterEach(() => { wrapper?.unmount(); vi.unstubAllGlobals() })
 const account = { user_id: 'onedrive:user', drive_id: 'drive', token: { provider_drive_type: 'personal' } }

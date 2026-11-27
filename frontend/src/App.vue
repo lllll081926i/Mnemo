@@ -1,9 +1,8 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { notifyTransferFailure, notifyMigrateFailure, taskFailureNotice } from './task-notices'
-import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, renameMountedAccount, onEvent, GetSettings, SaveSettings, RespondQuit, providerOf, providerMetaOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
+import { listAccounts, listProviders, prewarmRootDirectories, removeAccount, onEvent, GetSettings, SaveSettings, RespondQuit, providerOf, providerMetaOf, accountName, providerIconUrl, setAccountCustomMeta as setAccountCustomMetaBackend } from './api'
 import { applyAppearance, getLastDriveSelection, setLastDriveSelection, clearLastDriveSelection, getAccountAlias, getAccountCustomIcon, setAccountCustomMeta, useOrderedAccounts } from './appearance'
-import PanView from './views/PanView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
 import { accountHealth, healthLabels, recordAccountHealth, syncAccountAuthState } from './workspace'
 import { refreshAccountNow } from './api'
@@ -13,11 +12,11 @@ import UiIcon from './components/UiIcon.vue'
 import appIcon from './assets/logo/icon.svg'
 import Modal from './components/Modal.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
-import UpdateModal from './components/UpdateModal.vue'
-import ImageCropModal from './components/ImageCropModal.vue'
+const UpdateModal = defineAsyncComponent(() => import('./components/UpdateModal.vue'))
+const ImageCropModal = defineAsyncComponent(() => import('./components/ImageCropModal.vue'))
 import { CheckUpdate } from './api'
 import { debug, error, errorText, info, installGlobalErrorLogging } from './logger'
-import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
+import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '../wailsjs/runtime/runtime'
 import { createNavigationHistory, installMouseNavigation } from './navigation'
 import { filterDriveIcons } from './drive-icons'
 
@@ -52,7 +51,7 @@ const QuickOpen = defineAsyncComponent(() => import('./components/QuickOpen.vue'
 const pageTrans = ref('page-slide-left')
 const finishPageLeave = (_, done) => queueMicrotask(done)
 const pageComponents = { pan: WorkspaceView, transfer: TransferView, sync: SyncView, share: ShareView, settings: SettingsView }
-const pageComponent = computed(() => pageComponents[tab.value] || PanView)
+const pageComponent = computed(() => pageComponents[tab.value] || WorkspaceView)
 const pageProps = computed(() => {
   if (tab.value === 'pan') return { account: current.value, accounts: orderedAccounts.value, providers: providers.value, dual: dualPane.value }
   if (tab.value === 'sync') return { account: current.value, accounts: orderedAccounts.value, providers: providers.value }
@@ -165,10 +164,18 @@ function quickToggleTheme() {
 function windowMinimise() {
   try { WindowMinimise() } catch { /* browser preview */ }
 }
+function syncWindowMaximised() {
+  try {
+    Promise.resolve(WindowIsMaximised?.()).then((v) => {
+      if (!startupDisposed && typeof v === 'boolean') windowMaximized.value = v
+    }).catch(() => {})
+  } catch { /* browser preview */ }
+}
 function windowToggleMaximise() {
   try {
     WindowToggleMaximise()
     windowMaximized.value = !windowMaximized.value
+    syncWindowMaximised()
   } catch { /* browser preview */ }
 }
 function windowQuit() {
@@ -322,14 +329,24 @@ function openRename(acc) {
   showPresetIcons.value = true
 }
 
+const MAX_CUSTOM_ICON_BYTES = 2 * 1024 * 1024
 function onIconFileSelected(e) {
   const file = e.target.files?.[0]
   if (!file) return
+  if (file.size > MAX_CUSTOM_ICON_BYTES) {
+    toast('图标文件不能超过 2 MB，请选择更小的图片', 'warn')
+    if (fileInputRef.value) fileInputRef.value.value = ''
+    return
+  }
   const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')
   const reader = new FileReader()
   reader.onload = () => {
     cropIsSvg.value = isSvg
     cropImageSrc.value = String(reader.result || '')
+    if (fileInputRef.value) fileInputRef.value.value = ''
+  }
+  reader.onerror = () => {
+    toast('读取图标文件失败，请重试', 'error')
     if (fileInputRef.value) fileInputRef.value.value = ''
   }
   reader.readAsDataURL(file)
@@ -362,6 +379,7 @@ async function saveRename() {
   }
 }
 
+const toastTimers = new Map()
 function toast(msg, type = '', action = null) {
   const message = String(msg ?? '')
   const id = Date.now() + Math.random()
@@ -374,11 +392,16 @@ function toast(msg, type = '', action = null) {
   const item = { id, msg: message, type: normalizedType, label: labels[normalizedType], createdAt: Date.now(), action: action?.repair || action?.tab === 'transfer' ? action : null }
   toasts.value.push(item)
   const lifetime = item.action ? 6500 : normalizedType === 'error' ? 6500 : 3600
-  setTimeout(() => dismissToast(id), lifetime)
+  toastTimers.set(id, setTimeout(() => dismissToast(id), lifetime))
   return id
 }
 
 function dismissToast(id) {
+  const timer = toastTimers.get(id)
+  if (timer !== undefined) {
+    clearTimeout(timer)
+    toastTimers.delete(id)
+  }
   toasts.value = toasts.value.filter((t) => t.id !== id)
 }
 
@@ -488,6 +511,8 @@ onMounted(() => {
 	window.addEventListener('mnemo:drive-notice', onDriveNotice)
 	const removeGlobalErrorLogging = installGlobalErrorLogging()
   window.addEventListener('keydown', onKey)
+  window.addEventListener('resize', syncWindowMaximised)
+  syncWindowMaximised()
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => applyAppearance(curTheme.value)
   mq.addEventListener('change', onScheme)
@@ -514,6 +539,7 @@ onMounted(() => {
 		removeMouseNavigation()
 		removeGlobalErrorLogging()
     window.removeEventListener('keydown', onKey)
+    window.removeEventListener('resize', syncWindowMaximised)
     window.removeEventListener('contextmenu', preventNativeContextMenu, true)
 		window.removeEventListener('mnemo:drive-notice', onDriveNotice)
     mq.removeEventListener('change', onScheme)
@@ -529,6 +555,8 @@ onBeforeUnmount(() => {
   startupDisposed = true
   ++refreshEpoch
   clearTimeout(updateTimer)
+  for (const timer of toastTimers.values()) clearTimeout(timer)
+  toastTimers.clear()
   stopQuitConfirmation?.()
   cleanupFns?.()
 })
@@ -562,12 +590,12 @@ onBeforeUnmount(() => {
       </form>
       <button class="icon-btn" :class="{ active: showQuickOpen }" title="快捷命令面板 (Ctrl+P)" aria-label="快捷命令面板 (Ctrl+P)" aria-keyshortcuts="Control+P Meta+P" :aria-expanded="showQuickOpen" @click="showQuickOpen = true"><UiIcon name="command" :size="16" /></button>
       <button v-if="tab === 'pan'" class="icon-btn" :class="{ active: dualPane }" :title="dualPane ? '切换单栏' : '切换双栏'" :aria-label="dualPane ? '切换单栏' : '切换双栏'" aria-keyshortcuts="Control+Backslash Meta+Backslash" :aria-pressed="dualPane" @click="dualPane = !dualPane"><UiIcon :name="dualPane ? 'columns' : 'single-pane'" :size="17" /></button>
-      <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
+      <button class="icon-btn" :class="{ active: tab === 'settings' }" title="设置 (Alt+5)" aria-label="设置 (Alt+5)" :aria-current="tab === 'settings' ? 'page' : undefined" @click="switchTab('settings')"><UiIcon name="settings" :size="17" /></button>
       <AccountAvatar v-if="current" class="topbar-account" :account="current" :providers="providers" />
       <div class="window-actions" aria-label="窗口控制">
-        <button class="window-btn" type="button" title="最小化" @click="windowMinimise"><UiIcon name="window-minimize" :size="13" /></button>
-        <button class="window-btn" type="button" :title="windowMaximized ? '还原窗口' : '最大化'" @click="windowToggleMaximise"><UiIcon :name="windowMaximized ? 'window-restore' : 'window-maximize'" :size="13" /></button>
-        <button class="window-btn window-close" type="button" title="关闭窗口" @click="windowQuit"><UiIcon name="close" :size="14" /></button>
+        <button class="window-btn" type="button" title="最小化" aria-label="最小化窗口" @click="windowMinimise"><UiIcon name="window-minimize" :size="13" /></button>
+        <button class="window-btn" type="button" :title="windowMaximized ? '还原窗口' : '最大化'" :aria-label="windowMaximized ? '还原窗口' : '最大化窗口'" @click="windowToggleMaximise"><UiIcon :name="windowMaximized ? 'window-restore' : 'window-maximize'" :size="13" /></button>
+        <button class="window-btn window-close" type="button" title="关闭窗口" aria-label="关闭窗口" @click="windowQuit"><UiIcon name="close" :size="14" /></button>
       </div>
     </header>
 

@@ -92,6 +92,24 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class DownloadVerification {
+	    taskId: string;
+	    status: string;
+	    algorithm?: string;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DownloadVerification(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.taskId = source["taskId"];
+	        this.status = source["status"];
+	        this.algorithm = source["algorithm"];
+	        this.detail = source["detail"];
+	    }
+	}
 	export class MigrationPreview {
 	    files: number;
 	    bytes: number;
@@ -2144,6 +2162,7 @@ export namespace sync {
 	}
 	export class Change {
 	    path: string;
+	    fromPath?: string;
 	    action: string;
 	    local?: Entry;
 	    remote?: Entry;
@@ -2155,6 +2174,7 @@ export namespace sync {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
+	        this.fromPath = source["fromPath"];
 	        this.action = source["action"];
 	        this.local = this.convertValues(source["local"], Entry);
 	        this.remote = this.convertValues(source["remote"], Entry);

@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   refreshOfflineTasks: vi.fn().mockResolvedValue([]),
   EventsOn: vi.fn(() => () => {}),
   capsOf: vi.fn(() => ({})),
+  verifyDownload: vi.fn(),
   accountName: vi.fn(() => ''),
   providerIconUrl: vi.fn(() => ''),
   providerMetaOf: vi.fn(() => ({})),

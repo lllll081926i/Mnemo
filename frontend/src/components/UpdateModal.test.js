@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   ApplyUpdate: vi.fn(),
   RevealInFolder: vi.fn(),
   OpenBrowser: vi.fn(),
+  formatBytes: vi.fn(value => `${value || 0} B`),
   getSettings: vi.fn().mockResolvedValue({}),
   onEvent: vi.fn(() => () => {}),
 }))

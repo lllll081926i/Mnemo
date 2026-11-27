@@ -667,6 +667,23 @@ func MkdirContext(ctx context.Context, userID, driveID, parentID, name string) (
 	return d.Mkdir(ctx, c, parentID, name)
 }
 
+// RenameContext renames a single file with caller-supplied context cancellation.
+func RenameContext(ctx context.Context, userID, driveID, fileID, newName string) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	d, c, err := driverAndCtx(userID, driveID)
+	if err != nil {
+		return err
+	}
+	defer func() { err = withTokenPersist(err, c) }()
+	_, err = d.Rename(ctx, c, fileID, newName)
+	return err
+}
+
 // RenameBatch renames files one-to-one with names.
 func RenameBatch(userID, driveID string, fileRefs []FileRef, names []string) (out []RenameResult, err error) {
 	if len(fileRefs) != len(names) {

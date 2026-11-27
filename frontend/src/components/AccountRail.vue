@@ -28,12 +28,15 @@ let enterTimer = null
 let leaveTimer = null
 let railMoving = false
 let layoutObserver = null
+let resizeFrame = 0
 let scrollAnchor = null
 onBeforeUnmount(() => {
   cancelDrag?.()
   clearTimeout(enterTimer)
   clearTimeout(leaveTimer)
   clearTimeout(clickTimer)
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+  resizeFrame = 0
   layoutObserver?.disconnect()
   window.removeEventListener('resize', onWindowResize)
 })
@@ -105,8 +108,18 @@ function restoreScrollAnchor() {
 }
 
 function onWindowResize() {
-  restoreScrollAnchor()
-  syncActiveIndicator(false)
+  if (railMoving) return
+  if (typeof requestAnimationFrame !== 'function') {
+    restoreScrollAnchor()
+    syncActiveIndicator(false)
+    return
+  }
+  if (resizeFrame) return
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0
+    restoreScrollAnchor()
+    syncActiveIndicator(false)
+  })
 }
 
 function statusOfAccount(account) {
@@ -428,7 +441,7 @@ function onRailEnter() {
     expanded.value = true
     return
   }
-  enterTimer = setTimeout(() => { expanded.value = true }, 220)
+  enterTimer = setTimeout(() => { expanded.value = true }, 160)
 }
 function onRailLeave() {
   hovering = false
@@ -440,7 +453,7 @@ function scheduleCollapse() {
   clearTimeout(leaveTimer)
   leaveTimer = setTimeout(() => {
     if (!hovering && !menu.value && !(keyboardFocus && railEl.value?.contains(document.activeElement))) expanded.value = false
-  }, 200)
+  }, 180)
 }
 
 watch(menu, (value) => {

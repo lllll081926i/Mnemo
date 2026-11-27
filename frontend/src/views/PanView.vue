@@ -5,13 +5,11 @@ import {
   move, copy, createShare, uploadFiles, validateUploadFiles, migrateFiles, PreviewMigration, download, downloadFolder,
   AddFavorite, RemoveFavorite, ListFavorites, ListMigrateJobs, OfflineDownload, PickDirectory, PickFiles,
   formatBytes, formatTime, formatTimeParts, iconOf, extOf, openKindOf, copyText,
-  capsOf, providerMetaOf, providerOf, accountName, providerIconUrl, GetDirectoryCache, SaveDirectoryCache, DeleteDirectoryCache, OpenBrowser, onEvent,
+  capsOf, providerMetaOf, providerOf, accountName, providerIconUrl, GetDirectoryCache, SaveDirectoryCache, DeleteDirectoryCache, OpenBrowser, openTrashWebsite as openTrashWebsiteApi, openPreviewWindow, onEvent,
 } from '../api'
 import ContextMenu from '../components/ContextMenu.vue'
 import DropdownBtn from '../components/DropdownBtn.vue'
 import Modal from '../components/Modal.vue'
-import SelectDirModal from '../components/SelectDirModal.vue'
-import RenameMultiModal from '../components/RenameMultiModal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import UiIcon from '../components/UiIcon.vue'
 import FileThumbnail from '../components/FileThumbnail.vue'
@@ -20,11 +18,13 @@ import TreeNode from '../components/TreeNode.vue'
 import FileColumns from '../components/FileColumns.vue'
 import { compareFileNames, sortedDirectories } from '../file-order'
 import DragDropZone from '../components/DragDropZone.vue'
-import SharePrivacyNotice from '../components/SharePrivacyNotice.vue'
+const SelectDirModal = defineAsyncComponent(() => import('../components/SelectDirModal.vue'))
+const RenameMultiModal = defineAsyncComponent(() => import('../components/RenameMultiModal.vue'))
+const SharePrivacyNotice = defineAsyncComponent(() => import('../components/SharePrivacyNotice.vue'))
 const DeletionHistory = defineAsyncComponent(() => import('../components/DeletionHistory.vue'))
 const showDeletionHistory = ref(false)
 async function openTrashWebsite() {
-  try { await window.go.app.App.OpenTrashWebsite(uid.value, did.value) }
+  try { await openTrashWebsiteApi(uid.value, did.value) }
   catch (failure) { emit('toast', String(failure), 'error') }
 }
 import { getPrefs, setPref } from '../appearance'
@@ -32,7 +32,7 @@ import { createNavigationHistory } from '../navigation'
 import { directoryCacheKey, recordAccountHealth } from '../workspace'
 import { uniqueFileSelection, transferFiles, transferProblem, sameSpace } from '../file-transfer'
 import { fileClipboard, clipboardBusy, setFileClipboard, clearFileClipboard, retainClipboardFiles, clipboardPasteSource, rememberClipboardCopy, clipboardMigrationEvent } from '../file-clipboard'
-import { recordRecentItem } from '../recent-items'
+import { recordRecentItem, recentItems, recentEnabled, removeRecentItem } from '../recent-items'
 
 const props = defineProps({
   account: Object,
@@ -188,6 +188,35 @@ function onTreeNavigation(event) {
 const menu = ref(null)
 const favorites = ref([])
 const favExpanded = ref(false)
+const recentExpanded = ref(false)
+const accountRecentItems = computed(() => {
+  if (!recentEnabled.value || !uid.value) return []
+  return recentItems.value.filter(entry => entry.userId === uid.value && entry.driveId === did.value).slice(0, 12)
+})
+async function openRecentEntry(entry) {
+  if (!entry) return
+  try {
+    mode.value = 'list'
+    selected.value = []
+    keyword.value = ''
+    submittedSearchQuery.value = ''
+    dirId.value = entry.dirId || rootKey.value
+    pathStack.value = Array.isArray(entry.path) ? entry.path.map(part => ({ id: part.id, name: part.name })) : dirId.value === rootKey.value ? [] : [{ id: dirId.value, name: entry.name || '目录' }]
+    treeSelected.value = dirId.value
+    await load(dirId.value)
+    if (error.value) throw new Error(error.value)
+    if (!entry.isDir && entry.fileId) {
+      const target = files.value.find(item => item.file_id === entry.fileId)
+      if (!target) {
+        emit('toast', '原文件已移动或删除，已停留在所在目录', 'warn')
+        return
+      }
+      await openFile(target)
+    }
+  } catch (cause) {
+    emit('toast', String(cause?.message || cause), 'warn')
+  }
+}
 
 // 目录树
 const tree = ref({})          // id -> 子目录数组
@@ -393,6 +422,8 @@ const VIRTUAL_OVERSCAN = 10
 const virtualScrollTop = ref(0)
 const virtualViewportHeight = ref(0)
 const gridColumnCount = ref(1)
+let listResizeFrame = 0
+let scrollMemoryTimer = null
 const gridRowPitch = ref(168)
 const gridRowGap = ref(8)
 let listResizeObserver = null
@@ -444,10 +475,15 @@ function onListScroll(e) {
   const el = e?.currentTarget || listEl.value
   if (!el || el !== listEl.value || restoringListScroll || !listScrollKey) return
   const top = el.scrollTop
-  virtualScrollTop.value = top
-  scrollMemory.delete(listScrollKey)
-  scrollMemory.set(listScrollKey, top)
-  if (scrollMemory.size > SCROLL_MEMORY_MAX) scrollMemory.delete(scrollMemory.keys().next().value)
+  if (virtualScrollTop.value !== top) virtualScrollTop.value = top
+  const key = listScrollKey
+  // 防抖写入滚动记忆 Map，避免高频滚动事件反复 delete/set
+  clearTimeout(scrollMemoryTimer)
+  scrollMemoryTimer = setTimeout(() => {
+    scrollMemory.delete(key)
+    scrollMemory.set(key, top)
+    if (scrollMemory.size > SCROLL_MEMORY_MAX) scrollMemory.delete(scrollMemory.keys().next().value)
+  }, 100)
 }
 
 async function load(id, options = {}) {
@@ -1053,14 +1089,30 @@ function selectTreeNode(idOrNode, name) {
 }
 
 // ---------- 选中 ----------
-const selSet = computed(() => new Set(selected.value.map((s) => s.file_id)))
+const explicitSelSet = computed(() => new Set(explicitSelection.value.map((s) => s.file_id)))
+const selSet = computed(() => {
+  const range = selectionRange.value
+  if (range) {
+    const ids = new Set()
+    for (let i = range.first; i <= range.last; i++) ids.add(range.files[i].file_id)
+    return ids
+  }
+  return explicitSelSet.value
+})
+function isSelIndex(file, index) {
+  const range = selectionRange.value
+  if (range && range.files === listShown.value) {
+    return index >= range.first && index <= range.last
+  }
+  return explicitSelSet.value.has(file.file_id)
+}
 function isSel(file) {
   const range = selectionRange.value
   if (range && range.files === listShown.value) {
     const index = indexOfFile(file.file_id)
     return index >= range.first && index <= range.last
   }
-  return selSet.value.has(file.file_id)
+  return explicitSelSet.value.has(file.file_id)
 }
 
 // 在 listShown 中选中 [fromId, toId] 区间（含端点）
@@ -1190,6 +1242,30 @@ const gridWindow = computed(previous => {
 })
 const listRenderRows = computed(previous => renderRows(listShown.value, listWindow.value, previous))
 const gridRenderRows = computed(previous => renderRows(listShown.value, gridWindow.value, previous))
+function enrichVisibleRows(rendered, start) {
+  const favSet = favoriteIDs.value
+  const fallbackStarred = !favoritesLoaded.value || Boolean(favoriteError.value)
+  const cutSet = cutClipboardIDs.value
+  const focused = focusId.value
+  const rangeAnchor = rangIsSelecting.value ? rangAnchor.value : ''
+  return rendered.rows.map((row, offset) => {
+    const file = row.f
+    const index = start + offset
+    const selectedRow = isSelIndex(file, index)
+    const fav = favSet.has(file.file_id) || (fallbackStarred && !!file.starred)
+    return {
+      ...row,
+      index,
+      selected: selectedRow,
+      fav,
+      focused: focused === file.file_id,
+      anchor: rangeAnchor === file.file_id,
+      cut: cutSet.has(file.file_id),
+    }
+  })
+}
+const listVisibleRows = computed(() => enrichVisibleRows(listRenderRows.value, listWindow.value.start))
+const gridVisibleRows = computed(() => enrichVisibleRows(gridRenderRows.value, gridWindow.value.start))
 const focusedOptionId = computed(() => {
   const index = focusedFileIndex.value
   const range = viewMode.value === 'grid' ? gridWindow.value : listWindow.value
@@ -1303,7 +1379,7 @@ async function openFile(file) {
       const openedPath = mode.value === 'list' && parentId === dirId.value
         ? pathStack.value.map(part => ({ ...part })) : [{ id: parentId, name: '所在目录' }]
       const prefs = getPrefs()
-      await window.go.app.App.OpenPreviewWindow({
+      await openPreviewWindow({
         account: { user_id: uid.value, drive_id: did.value },
         file, files: listShown.value, capabilities: caps.value, kind,
         preferences: { ...Object.fromEntries(['defaultVolume', 'defaultSpeed', 'seekStep', 'autoCloseOnEnd', 'autoLoadSubtitles', 'oledBackground', 'themeStyle'].map(key => [key, prefs[key]])), theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light' },
@@ -1995,7 +2071,7 @@ function openUploadModal() {
 }
 
 function snapshot() {
-  return { account: props.account, dirId: dirId.value, path: crumbs.value, files: [...selected.value], mode: mode.value }
+  return { account: props.account, dirId: dirId.value, path: crumbs.value, files: [...selected.value], allFiles: listShown.value, mode: mode.value }
 }
 function startCloudDrag(event, file) {
   if (!props.cloudDragEnabled || mode.value !== 'list' || !file.file_id) { event.preventDefault(); return }
@@ -2080,7 +2156,17 @@ watch(listEl, (el) => {
     virtualScrollTop.value = el.scrollTop
     restoringListScroll = false
     if (typeof ResizeObserver === 'undefined') return
-    listResizeObserver = new ResizeObserver(() => updateVirtualMetrics(el))
+    listResizeObserver = new ResizeObserver(() => {
+      if (typeof requestAnimationFrame !== 'function') {
+        updateVirtualMetrics(el)
+        return
+      }
+      if (listResizeFrame) return
+      listResizeFrame = requestAnimationFrame(() => {
+        listResizeFrame = 0
+        updateVirtualMetrics(el)
+      })
+    })
     listResizeObserver.observe(el)
   })
 }, { flush: 'post' })
@@ -2139,6 +2225,9 @@ onBeforeUnmount(() => {
   stopClipboardMigration?.()
   deactivatePage()
   clearTimeout(hoverTimer)
+  clearTimeout(scrollMemoryTimer)
+  if (listResizeFrame) cancelAnimationFrame(listResizeFrame)
+  listResizeFrame = 0
   listResizeObserver?.disconnect()
 })
 </script>
@@ -2156,29 +2245,63 @@ onBeforeUnmount(() => {
       <div class="pan-split">
         <!-- 左侧：快捷入口 + 收藏 + 目录树 -->
         <div class="pan-left" :style="{ width: sideWidth + 'px' }" role="tree" aria-label="网盘目录" @keydown="onTreeNavigation" @scroll.passive="dismissHoverPreview">
+          <div class="pan-left-section" aria-hidden="true">快速访问</div>
+          <template v-if="recentEnabled && accountRecentItems.length">
+            <div class="tree-node" role="treeitem" :aria-selected="false" :aria-expanded="recentExpanded" tabindex="-1" @click="recentExpanded = !recentExpanded">
+              <span class="tn-arrow" :class="{ open: recentExpanded }" aria-hidden="true"><UiIcon name="chevron-right" :size="12" /></span>
+              <UiIcon name="clock" :size="14" /><span class="tn-label">最近使用</span>
+              <span class="tn-count">{{ accountRecentItems.length }}</span>
+            </div>
+            <Transition name="tree-expand">
+              <div v-if="recentExpanded" class="tree-children" role="group">
+                <div class="tree-clip">
+                  <div
+                    v-for="item in accountRecentItems" :key="item.fileId"
+                    class="tree-node tree-recent-item"
+                    role="treeitem"
+                    aria-selected="false"
+                    tabindex="-1"
+                    :title="item.name"
+                    @click="openRecentEntry(item)"
+                  >
+                    <span class="tn-arrow" aria-hidden="true"></span>
+                    <UiIcon :name="item.isDir ? 'folder' : iconOf(item)" :size="14" :class="item.isDir ? '' : 'ft-' + iconOf(item)" />
+                    <span class="tn-label">{{ item.name }}</span>
+                    <button type="button" class="tn-remove" title="移出最近使用" :aria-label="`移出 ${item.name}`" @click.stop="removeRecentItem(item)">
+                      <UiIcon name="close" :size="11" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </template>
           <div class="tree-node" :class="{ active: mode === 'favorite' }" role="treeitem" :aria-selected="mode === 'favorite'" :aria-expanded="favExpanded" :tabindex="mode === 'favorite' ? 0 : -1" @click="showFavorites">
             <span class="tn-arrow" :class="{ open: favExpanded }" aria-hidden="true" @click.stop="favExpanded = !favExpanded"><UiIcon v-if="favorites.length" name="chevron-right" :size="12" /></span>
             <UiIcon name="star" :size="14" /><span class="tn-label">收藏</span>
             <span class="tn-count" v-if="favorites.length">{{ favorites.length }}</span>
           </div>
-          <div v-if="favExpanded" class="tree-children" role="group">
-            <div
-              v-for="f in favorites" :key="f.file_id"
-              class="tree-node"
-              role="treeitem"
-              aria-selected="false"
-              tabindex="-1"
-              :title="`${f.name} · ${f.source === 'cloud' ? '云端收藏' : '本地收藏'}`"
-              @click="openFav(f)"
-            >
-              <span class="tn-arrow" aria-hidden="true"></span><UiIcon :name="f.isDir ? 'folder' : iconOf(f)" :size="14" :class="f.isDir ? '' : 'ft-' + iconOf(f)" /><span class="tn-label">{{ f.name }}</span>
+          <Transition name="tree-expand">
+            <div v-if="favExpanded" class="tree-children" role="group">
+              <div class="tree-clip">
+                <div
+                  v-for="f in favorites" :key="f.file_id"
+                  class="tree-node"
+                  role="treeitem"
+                  aria-selected="false"
+                  tabindex="-1"
+                  :title="`${f.name} · ${f.source === 'cloud' ? '云端收藏' : '本地收藏'}`"
+                  @click="openFav(f)"
+                >
+                  <span class="tn-arrow" aria-hidden="true"></span><UiIcon :name="f.isDir ? 'folder' : iconOf(f)" :size="14" :class="f.isDir ? '' : 'ft-' + iconOf(f)" /><span class="tn-label">{{ f.name }}</span>
+                </div>
+                <div v-if="favoriteError" class="tree-load-error" role="alert">
+                  <span :title="favoriteError">收藏加载失败：{{ favoriteError }}</span>
+                  <button type="button" @click.stop="loadFavorites">重试</button>
+                </div>
+                <div v-else-if="!favorites.length" class="tree-empty">暂无收藏</div>
+              </div>
             </div>
-            <div v-if="favoriteError" class="tree-load-error" role="alert">
-              <span :title="favoriteError">收藏加载失败：{{ favoriteError }}</span>
-              <button type="button" @click.stop="loadFavorites">重试</button>
-            </div>
-            <div v-else-if="!favorites.length" class="tree-empty">暂无收藏</div>
-          </div>
+          </Transition>
           <div
             v-if="caps.trashView"
             class="tree-node"
@@ -2199,6 +2322,8 @@ onBeforeUnmount(() => {
             @click="openTrashWebsite"
           ><span class="tn-arrow" aria-hidden="true"></span><UiIcon name="trash" :size="14" /><span class="tn-label">官网回收站</span></button>
           <button v-if="caps.localDeletionHistory" type="button" class="tree-node" role="treeitem" aria-selected="false" tabindex="-1" @click="showDeletionHistory = true"><span class="tn-arrow" aria-hidden="true"></span><UiIcon name="restore" :size="14" /><span class="tn-label">本机删除记录</span></button>
+          <div class="pan-left-divider" aria-hidden="true"></div>
+          <div class="pan-left-section" aria-hidden="true">目录</div>
           <div
             class="tree-node"
             :class="{ active: mode === 'list' && treeSelected === rootKey }"
@@ -2212,20 +2337,24 @@ onBeforeUnmount(() => {
             <span class="tn-arrow" :class="{ open: expanded[rootKey] }" aria-hidden="true" @click.stop="toggleTree(rootKey, rootTitle)"><UiIcon name="chevron-right" :size="12" /></span>
             <UiIcon name="cloud" :size="14" /><span class="tn-label">{{ rootTitle }}</span>
           </div>
-          <div v-if="expanded[rootKey]" class="tree-children" role="group">
-            <TreeNode
-              v-for="d in treeChildren(rootKey)" :key="d.file_id"
-              :node="d"
-              :tree="tree"
-              :expanded="expanded"
-              :selected-id="mode === 'list' ? treeSelected : ''"
-              @toggle="toggleTree"
-              @select="selectTreeNode"
-              @ctx="onTreeCtx"
-              @enter="onTreeEnter"
-              @leave="onTreeLeave"
-            />
-          </div>
+          <Transition name="tree-expand">
+            <div v-if="expanded[rootKey]" class="tree-children" role="group">
+              <div class="tree-clip">
+                <TreeNode
+                  v-for="d in treeChildren(rootKey)" :key="d.file_id"
+                  :node="d"
+                  :tree="tree"
+                  :expanded="expanded"
+                  :selected-id="mode === 'list' ? treeSelected : ''"
+                  @toggle="toggleTree"
+                  @select="selectTreeNode"
+                  @ctx="onTreeCtx"
+                  @enter="onTreeEnter"
+                  @leave="onTreeLeave"
+                />
+              </div>
+            </div>
+          </Transition>
 
         </div>
         <!-- 侧边栏拖拽手柄 -->
@@ -2372,27 +2501,27 @@ onBeforeUnmount(() => {
           >
             <div v-if="listVirtualized" aria-hidden="true" :style="{ height: listVirtualTop + 'px' }"></div>
             <div
-              v-for="(r, rowIndex) in listRenderRows.rows"
-              :id="`${fileOptionPrefix}-${listWindow.start + rowIndex}`"
+              v-for="r in listVisibleRows"
+              :id="`${fileOptionPrefix}-${r.index}`"
               :key="r.f.file_id"
               class="fileitem"
               role="option"
-              :aria-posinset="listWindow.start + rowIndex + 1"
+              :aria-posinset="r.index + 1"
               :aria-setsize="listShown.length"
-              :aria-selected="isSel(r.f)"
+              :aria-selected="r.selected"
               :draggable="cloudDragEnabled && mode === 'list'"
               @mousedown="listEl?.focus({ preventScroll: true })"
               @dragstart="startCloudDrag($event, r.f)"
               @dragend="emit('cloud-drag-end')"
               @drop="dropCloudFiles($event, r.f)"
-              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id, 'clipboard-cut': cutClipboardIDs.has(r.f.file_id) }"
+              :class="{ selected: r.selected, focus: r.focused, 'anchor-node': r.anchor, 'clipboard-cut': r.cut }"
               @click="toggleSel(r.f, $event)"
               @dblclick="onRowOpen(r.f)"
               @contextmenu.prevent="onCtx($event, r.f)"
             >
               <div class="rangselect">
-                <button type="button" class="btn-check" :class="{ on: isSel(r.f) }" :aria-label="isSel(r.f) ? `取消选择 ${r.f.name}` : `选择 ${r.f.name}`" :aria-pressed="isSel(r.f)" tabindex="-1" @click.stop="toggleSel(r.f, { ctrlKey: true })">
-                  <UiIcon v-if="isSel(r.f)" name="check" :size="11" />
+                <button type="button" class="btn-check" :class="{ on: r.selected }" :aria-label="r.selected ? `取消选择 ${r.f.name}` : `选择 ${r.f.name}`" :aria-pressed="r.selected" tabindex="-1" @click.stop="toggleSel(r.f, { ctrlKey: true })">
+                  <UiIcon v-if="r.selected" name="check" :size="11" />
                 </button>
               </div>
               <div class="fileicon" :class="'ft-' + r.icon">
@@ -2407,7 +2536,7 @@ onBeforeUnmount(() => {
                   <template v-else>{{ r.f.name }}</template>
                 </div>
               </div>
-              <span class="fstar-mark" :class="{ 'is-empty': !isFav(r.f) }" :title="isFav(r.f) ? '已收藏' : ''"><UiIcon v-if="isFav(r.f)" name="star" :size="13" /></span>
+              <span class="fstar-mark" :class="{ 'is-empty': !r.fav }" :title="r.fav ? '已收藏' : ''"><UiIcon v-if="r.fav" name="star" :size="13" /></span>
               <div class="filesize">{{ r.sizeText }}</div>
               <div class="filetime">
                 <span class="filedate">{{ r.timeParts.date }}</span>
@@ -2439,30 +2568,30 @@ onBeforeUnmount(() => {
           >
             <div v-if="gridVirtualTop > 0" aria-hidden="true" :style="{ gridColumn: '1 / -1', height: gridVirtualTop + 'px' }"></div>
             <div
-              v-for="(r, rowIndex) in gridRenderRows.rows"
-              :id="`${fileOptionPrefix}-${gridWindow.start + rowIndex}`"
+              v-for="r in gridVisibleRows"
+              :id="`${fileOptionPrefix}-${r.index}`"
               :key="r.f.file_id"
               class="griditem"
               role="option"
-              :aria-posinset="gridWindow.start + rowIndex + 1"
+              :aria-posinset="r.index + 1"
               :aria-setsize="listShown.length"
-              :aria-selected="isSel(r.f)"
+              :aria-selected="r.selected"
               :draggable="cloudDragEnabled && mode === 'list'"
               @mousedown="listEl?.focus({ preventScroll: true })"
               @dragstart="startCloudDrag($event, r.f)"
               @dragend="emit('cloud-drag-end')"
               @drop="dropCloudFiles($event, r.f)"
-              :class="{ selected: isSel(r.f), focus: focusId === r.f.file_id, 'anchor-node': rangIsSelecting && rangAnchor === r.f.file_id, 'clipboard-cut': cutClipboardIDs.has(r.f.file_id) }"
+              :class="{ selected: r.selected, focus: r.focused, 'anchor-node': r.anchor, 'clipboard-cut': r.cut }"
               @click="toggleSel(r.f, $event)"
               @dblclick="onRowOpen(r.f)"
               @contextmenu.prevent="onCtx($event, r.f)"
             >
               <span class="gsel">
-                <button type="button" class="btn-check" :class="{ on: isSel(r.f) }" :aria-label="isSel(r.f) ? `取消选择 ${r.f.name}` : `选择 ${r.f.name}`" :aria-pressed="isSel(r.f)" tabindex="-1" @click.stop="toggleSel(r.f, { ctrlKey: true })">
-                  <UiIcon v-if="isSel(r.f)" name="check" :size="11" />
+                <button type="button" class="btn-check" :class="{ on: r.selected }" :aria-label="r.selected ? `取消选择 ${r.f.name}` : `选择 ${r.f.name}`" :aria-pressed="r.selected" tabindex="-1" @click.stop="toggleSel(r.f, { ctrlKey: true })">
+                  <UiIcon v-if="r.selected" name="check" :size="11" />
                 </button>
               </span>
-              <span v-if="isFav(r.f)" class="gstar"><UiIcon name="star" :size="12" /></span>
+              <span v-if="r.fav" class="gstar"><UiIcon name="star" :size="12" /></span>
               <div class="gridicon" :class="'ft-' + r.icon">
                 <FileThumbnail v-if="!r.f.isDir && r.f.thumbnail" :source="r.f.thumbnail" :icon="r.icon" :size="32" :failures="thumbErrors" @failed="markThumbError" />
                 <UiIcon v-else :name="r.icon" :size="32" />
@@ -2732,9 +2861,17 @@ mark.hl {
 .conflict-body { padding: 8px 0; }
 .conflict-msg { color: var(--text-secondary); margin-bottom: 8px; }
 .conflict-files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.conflict-file { background: var(--bg-subtle); padding: 2px 8px; border-radius: var(--radius-sm); font-size: var(--fs-aux); color: var(--text-primary); }
-.conflict-more { font-size: var(--fs-aux); color: var(--text-tertiary); align-self: center; }
+.conflict-file { background: var(--bg-subtle); padding: 2px 8px; border-radius: var(--radius-sm); font-size: 12px; color: var(--text-primary); }
+.conflict-more { font-size: 12px; color: var(--text-tertiary); align-self: center; }
 .conflict-q { color: var(--text-primary); margin-bottom: 12px; }
 .conflict-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .fileitem.clipboard-cut, .griditem.clipboard-cut { opacity: .72; transition: opacity var(--motion-fast) var(--motion-ease); }
+.tree-recent-item .tn-remove {
+  margin-left: auto; width: 18px; height: 18px; border: 0; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: transparent; color: var(--text-tertiary); cursor: pointer;
+  opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+.tree-recent-item:hover .tn-remove, .tree-recent-item:focus-within .tn-remove { opacity: 1; }
+.tree-recent-item .tn-remove:hover { background: var(--bg-active); color: var(--text-primary); }
 </style>

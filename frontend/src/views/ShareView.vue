@@ -1,7 +1,7 @@
 <script setup>
 // 分享记录页：聚合全部账号的分享历史，按网盘 + 账号分组展示。
 import { ref, shallowRef, computed, useId, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
-import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatTime, copyText, importShare, saveImportedShare, cancelShare } from '../api'
+import { ListShareHistory, OpenBrowser, onEvent, providerOf, accountName, providerIconUrl, providerMetaOf, capsOf, formatBytes, formatTime, copyText, importShare, saveImportedShare, cancelShare } from '../api'
 import UiIcon from '../components/UiIcon.vue'
 import UiSelect from '../components/UiSelect.vue'
 import Modal from '../components/Modal.vue'
@@ -110,14 +110,7 @@ const importAccountOptions = computed(() => importAccounts.value.map((account) =
   label: `${providerMetaOf(account, props.providers).label || providerOf(account.user_id)} · ${accountName(account)}`,
 })))
 
-function formatSize(size) {
-  const value = Number(size) || 0
-  if (value <= 0) return '0 B'
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
+
 
 watch(importAccounts, (list) => {
   if (!list.some((account) => account.user_id === importTargetId.value)) {
@@ -312,14 +305,14 @@ function refreshFromToolbar() {
   if (!loading.value) return refresh()
 }
 
-watch(() => props.accounts, (list) => {
-  if (filterAccount.value && !list.some((a) => a.user_id === filterAccount.value)) {
+watch(() => props.accounts.map((a) => a.user_id).join('\0') + '|' + props.providers.map((p) => p.ID).join('\0'), () => {
+  if (filterAccount.value && !props.accounts.some((a) => a.user_id === filterAccount.value)) {
     filterAccount.value = ''
   }
   if (filterProvider.value && !props.providers.some((p) => p.ID === filterProvider.value)) {
     filterProvider.value = ''
   }
-}, { deep: true })
+})
 
 function itemKey(h, idx) {
   return `${h.account_id || ''}|${h.share_id || h.share_url || idx}`
@@ -397,7 +390,15 @@ const groups = computed(() => {
         items: [],
       })
     }
-    map.get(key).items.push(h)
+    const idx = map.get(key).items.length
+    map.get(key).items.push({
+      raw: h,
+      idx,
+      rowKey: itemKey(h, idx),
+      createdText: formatTime(h.created_at),
+      expiry: shareExpiry(h, expiryNow.value),
+      canCancel: canCancel(h),
+    })
   }
   const ranks = new Map(props.accounts.map((a, index) => [a.user_id, index]))
   return [...map.values()].sort((a, b) => (ranks.get(a.accountId) ?? Infinity) - (ranks.get(b.accountId) ?? Infinity))
@@ -582,37 +583,37 @@ onBeforeUnmount(deactivateView)
               <span class="share-group-count">{{ g.items.length }} 条</span>
             </header>
 
-            <div v-for="(h, idx) in g.items" :key="itemKey(h, idx)" class="share-record">
+            <div v-for="entry in g.items" :key="entry.rowKey" class="share-record">
               <div class="share-record-main">
-                <div class="share-record-name" :title="h.share_name">{{ h.share_name || '未命名分享' }}</div>
+                <div class="share-record-name" :title="entry.raw.share_name">{{ entry.raw.share_name || '未命名分享' }}</div>
                 <div class="share-record-meta">
-                  <span>创建于 {{ formatTime(h.created_at) }}</span>
-                  <span :class="{ 'share-expiry-warning': shareExpiry(h, expiryNow).warning }">{{ shareExpiry(h, expiryNow).label }}</span>
+                  <span>创建于 {{ entry.createdText }}</span>
+                  <span :class="{ 'share-expiry-warning': entry.expiry.warning }">{{ entry.expiry.label }}</span>
                 </div>
-                <div class="share-record-link" :title="h.share_url"><UiIcon name="link" :size="12" /><span>{{ h.share_url }}</span></div>
+                <div class="share-record-link" :title="entry.raw.share_url"><UiIcon name="link" :size="12" /><span>{{ entry.raw.share_url }}</span></div>
               </div>
               <div class="share-record-side">
-				<span class="sg-desc">{{ h.remote_status === 'active' ? '已创建' : '本地记录' }} · {{ h.share_policy === 'public' ? '持链接可访问' : '访问范围未记录' }} · {{ h.share_pwd ? '含提取码' : '未记录提取码' }}</span>
-                <span v-if="h.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ h.share_pwd }}</span>
+				<span class="sg-desc">{{ entry.raw.remote_status === 'active' ? '已创建' : '本地记录' }} · {{ entry.raw.share_policy === 'public' ? '持链接可访问' : '访问范围未记录' }} · {{ entry.raw.share_pwd ? '含提取码' : '未记录提取码' }}</span>
+                <span v-if="entry.raw.share_pwd" class="share-passcode" title="提取码"><UiIcon name="info" :size="11" />{{ entry.raw.share_pwd }}</span>
                 <div class="share-record-actions">
-                  <button class="btn-circle" title="打开分享链接" :disabled="!h.share_url" @click="openLink(h)"><UiIcon name="external" :size="14" /></button>
-                  <button class="tbtn" :disabled="!h.share_url" @click="copy(h.share_url, '已复制链接', 'url_' + itemKey(h, idx))">
-                    <UiIcon v-if="copiedMap['url_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
+                  <button class="btn-circle" title="打开分享链接" :disabled="!entry.raw.share_url" @click="openLink(entry.raw)"><UiIcon name="external" :size="14" /></button>
+                  <button class="tbtn" :disabled="!entry.raw.share_url" @click="copy(entry.raw.share_url, '已复制链接', 'url_' + entry.rowKey)">
+                    <UiIcon v-if="copiedMap['url_' + entry.rowKey]" name="check" :size="13" class="icon-check-pop" />
                     <UiIcon v-else name="copy" :size="13" />
-                    <span>{{ copiedMap['url_' + itemKey(h, idx)] ? '已复制' : '链接' }}</span>
+                    <span>{{ copiedMap['url_' + entry.rowKey] ? '已复制' : '链接' }}</span>
                   </button>
-                  <button v-if="h.share_pwd" class="tbtn" @click="copy(h.share_pwd, '已复制提取码', 'pwd_' + itemKey(h, idx))">
-                    <UiIcon v-if="copiedMap['pwd_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
+                  <button v-if="entry.raw.share_pwd" class="tbtn" @click="copy(entry.raw.share_pwd, '已复制提取码', 'pwd_' + entry.rowKey)">
+                    <UiIcon v-if="copiedMap['pwd_' + entry.rowKey]" name="check" :size="13" class="icon-check-pop" />
                     <UiIcon v-else name="copy" :size="13" />
-                    <span>{{ copiedMap['pwd_' + itemKey(h, idx)] ? '已复制' : '提取码' }}</span>
+                    <span>{{ copiedMap['pwd_' + entry.rowKey] ? '已复制' : '提取码' }}</span>
                   </button>
-                  <button class="tbtn" @click="copyAll(h, 'all_' + itemKey(h, idx))">
-                    <UiIcon v-if="copiedMap['all_' + itemKey(h, idx)]" name="check" :size="13" class="icon-check-pop" />
+                  <button class="tbtn" @click="copyAll(entry.raw, 'all_' + entry.rowKey)">
+                    <UiIcon v-if="copiedMap['all_' + entry.rowKey]" name="check" :size="13" class="icon-check-pop" />
                     <UiIcon v-else name="copy" :size="13" />
-                    <span>{{ copiedMap['all_' + itemKey(h, idx)] ? '已复制' : '全部' }}</span>
+                    <span>{{ copiedMap['all_' + entry.rowKey] ? '已复制' : '全部' }}</span>
                   </button>
-                  <button v-if="canCancel(h)" class="tbtn danger" :disabled="isCancelling(h, idx)" @click="askCancel(h, idx)">
-                    <span v-if="isCancelling(h, idx)" class="spin"></span>
+                  <button v-if="entry.canCancel" class="tbtn danger" :disabled="isCancelling(entry.raw, entry.idx)" @click="askCancel(entry.raw, entry.idx)">
+                    <span v-if="isCancelling(entry.raw, entry.idx)" class="spin"></span>
                     <template v-else><UiIcon name="trash" :size="13" /><span>取消</span></template>
                   </button>
                 </div>
@@ -661,7 +662,7 @@ onBeforeUnmount(deactivateView)
           <span class="import-file-check" aria-hidden="true"><UiIcon name="check" :size="12" /></span>
           <UiIcon :name="file.isDir ? 'folder' : 'file'" :size="16" />
           <span class="import-file-name" :title="file.name">{{ file.name }}</span>
-          <span class="import-file-size">{{ file.isDir ? '文件夹' : formatSize(file.size) }}</span>
+          <span class="import-file-size">{{ file.isDir ? '文件夹' : formatBytes(file.size) }}</span>
         </div>
         <div aria-hidden="true" :style="{ height: `${(importFiles.length - importWindowEnd) * IMPORT_ROW_HEIGHT}px` }"></div>
       </div>

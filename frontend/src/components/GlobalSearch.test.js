@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   search: vi.fn(),
+  searchCachedFiles: vi.fn((query) => window.go.app.App.SearchCachedFiles(query)),
+  cancelSearch: vi.fn((requestId) => window.go?.app?.App?.CancelSearch?.(requestId)),
   capsOf: vi.fn(() => ({ search: true })),
   accountName: vi.fn(account => account?.user_id || ''),
   providerMetaOf: vi.fn(() => ({ label: '网盘' })),

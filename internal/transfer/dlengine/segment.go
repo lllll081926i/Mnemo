@@ -390,7 +390,8 @@ func download(ctx context.Context, opts Options, url, localPath string, onProgre
 			}
 			lastErr = err
 			var statusErr *httpStatusError
-			if errors.As(err, &statusErr) || errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) || errors.Is(err, errRangeIgnored) {
+			var pathErr *os.PathError
+			if errors.As(err, &statusErr) || errors.Is(err, errResourceChanged) || errors.Is(err, errInvalidRangeResponse) || errors.Is(err, errRangeIgnored) || isFatalLocalWriteError(err) || (errors.As(err, &pathErr) && (errors.Is(err, os.ErrPermission) || isFatalLocalWriteError(pathErr.Err))) {
 				return fmt.Errorf("dlengine: chunk %d rejected: %w", chunkIdx, err)
 			}
 			if gctx.Err() != nil {

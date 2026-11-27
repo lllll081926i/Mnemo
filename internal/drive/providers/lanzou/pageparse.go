@@ -150,7 +150,23 @@ func getJSFunctionByName(html, name string) (string, error) {
 	return "", fmt.Errorf("页面中 %s 函数不完整", name)
 }
 
-var fileIDRe = regexp.MustCompile(`'/ajaxm\.php\?file=(\d+)'`)
+var ajaxURLRe = regexp.MustCompile(`(?i)((?:https?://[^'"\s]+)?/ajax(?:m|file)\.php\?file=(\d+)\b)`)
+var fileIDRe = regexp.MustCompile(`(?i)\b(?:f_id|fid)\s*=\s*['"]?(\d+)['"]?\s*;`)
+
+func resolveLanzouAjaxURL(data, base string) (string, bool) {
+	if m := ajaxURLRe.FindStringSubmatch(data); len(m) == 3 {
+		endpoint := strings.TrimSpace(m[1])
+		if strings.HasPrefix(strings.ToLower(endpoint), "http://") || strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+			return endpoint, true
+		}
+		return strings.TrimRight(base, "/") + endpoint, true
+	}
+	if m := fileIDRe.FindStringSubmatch(data); len(m) == 2 && m[1] != "" {
+		return strings.TrimRight(base, "/") + "/ajaxm.php?file=" + m[1], true
+	}
+	return "", false
+}
+
 var downPageRe = regexp.MustCompile(`<iframe.*?src="(.+?)"`)
 var nameFindRe = regexp.MustCompile(`<title>(.+?) - 蓝奏云</title>|id="filenajax">(.+?)</div>|var filename = '(.+?)';`)
 

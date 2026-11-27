@@ -16,6 +16,8 @@ const api = vi.hoisted(() => ({
   RestoreFavorite: vi.fn(),
   listAccounts: vi.fn(),
   setAccountCustomMeta: vi.fn(),
+  exportPreferences: vi.fn((payload) => window.go.app.App.ExportPreferences(payload)),
+  importPreferences: vi.fn(() => window.go.app.App.ImportPreferences()),
 }))
 
 vi.mock('../api', () => api)

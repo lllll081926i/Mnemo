@@ -2,24 +2,23 @@
 import { ref, onMounted } from 'vue'
 import Modal from './Modal.vue'
 import ConfirmModal from './ConfirmModal.vue'
-import { formatBytes, formatTime } from '../api'
+import { formatBytes, formatTime, listDeletionHistory, restoreDeletionHistory, openTrashWebsite, previewEnterpriseTrash, clearDeletionHistory } from '../api'
 
 const props = defineProps({ account: { type: Object, required: true } })
 const emit = defineEmits(['close', 'toast'])
 const records = ref([]), snapshot = ref(null), busy = ref(false), error = ref(''), confirmingClear = ref(false)
 const account = { userId: props.account.user_id, driveId: props.account.drive_id }
-const bridge = () => window.go.app.App
 const statusText = status => ({ delete_pending: '删除中', delete_unknown: '删除状态未知', deleted: '已删除', restore_pending: '恢复中', restore_unknown: '恢复状态未知', restored: '已恢复' }[status] || '状态未知')
 async function load() {
   busy.value = true
-  try { records.value = await bridge().ListDeletionHistory(account.userId, account.driveId) || []; error.value = '' }
+  try { records.value = await listDeletionHistory(account.userId, account.driveId) || []; error.value = '' }
   catch { error.value = '读取本地删除记录失败，已保留原记录' }
   finally { busy.value = false }
 }
 async function restore(record) {
   busy.value = true
   try {
-    await bridge().RestoreDeletionHistory(account.userId, account.driveId, record.fileId)
+    await restoreDeletionHistory(account.userId, account.driveId, record.fileId)
     emit('toast', '已恢复文件', 'success')
   } catch (failure) { error.value = String(failure) }
   finally {
@@ -30,19 +29,19 @@ async function restore(record) {
   }
 }
 async function openWebsite() {
-  try { await bridge().OpenTrashWebsite(account.userId, account.driveId) }
+  try { await openTrashWebsite(account.userId, account.driveId) }
   catch (failure) { error.value = String(failure) }
 }
 async function preview() {
   busy.value = true
-  try { snapshot.value = await bridge().PreviewEnterpriseTrash(account.userId, account.driveId); error.value = '' }
+  try { snapshot.value = await previewEnterpriseTrash(account.userId, account.driveId); error.value = '' }
   catch (failure) { error.value = `读取失败，当前快照未更新：${String(failure)}` }
   finally { busy.value = false }
 }
 async function clearLocal() {
   confirmingClear.value = false
   busy.value = true
-  try { await bridge().ClearDeletionHistory(account.userId, account.driveId); await load() }
+  try { await clearDeletionHistory(account.userId, account.driveId); await load() }
   catch (failure) { error.value = String(failure) }
   finally { busy.value = false }
 }

@@ -4,7 +4,7 @@
 // 2. 文本与代码专业预览/编辑器（大屏自适应/最大化全屏/滚动同步/防折行排布/Markdown精美排版/Ctrl+S云端回传/状态栏）
 // 3. 音频播放；PDF 与新版 Office 文档站内只读预览，支持时跳转官网编辑
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
-import { PreviewURL, cachedPreviewImageURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, openCloudEditor, copyText, iconOf, getPlayCursor, savePlayCursor, onEvent } from '../api'
+import { PreviewURL, cachedPreviewImageURL, PinFileSnapshot, openKindOf, formatBytes, formatTime, saveCloudText, openCloudEditor, OpenBrowser, copyText, iconOf, getPlayCursor, savePlayCursor, onEvent } from '../api'
 import { getPrefs } from '../appearance'
 import { useSeekDisplay } from '../player/seek-display'
 import { createPreviewLease, createPreviewLeasePool } from '../player/preview-lease'
@@ -16,6 +16,7 @@ import UiIcon from './UiIcon.vue'
 import PreviewFilmstrip from './PreviewFilmstrip.vue'
 import MediaPlaylist from './MediaPlaylist.vue'
 const DocumentPreview = defineAsyncComponent(() => import('./DocumentPreview.vue'))
+const ArchivePreview = defineAsyncComponent(() => import('./ArchivePreview.vue'))
 const documentKinds = new Set(['pdf', 'docx', 'xlsx', 'pptx'])
 
 const props = defineProps({
@@ -745,15 +746,35 @@ const viewEl = ref(null)
 const editorEl = ref(null)
 const confirmLeaveDialog = ref(false)
 
+function countLines(value) {
+  let count = 1
+  let pos = -1
+  while ((pos = value.indexOf('\n', pos + 1)) !== -1) count++
+  return count
+}
+
 const currentText = computed(() => (textMode.value === 'edit' ? editContent.value : text.value))
-const textLines = computed(() => currentText.value.split('\n'))
+const textLineCount = computed(() => countLines(currentText.value))
 const textBlockSize = 256
-const lineNumbers = computed(() => Array.from({ length: Math.ceil(textLines.value.length / textBlockSize) }, (_, block) => {
-  const start = block * textBlockSize
-  return Array.from({ length: Math.min(textBlockSize, textLines.value.length - start) }, (_, index) => start + index + 1).join('\n')
-}))
+const lineNumberBlockCache = []
+function getLineNumberBlock(blockIndex, lineCount) {
+  const start = blockIndex * textBlockSize
+  const size = Math.min(textBlockSize, lineCount - start)
+  if (size === textBlockSize && lineNumberBlockCache[blockIndex]) return lineNumberBlockCache[blockIndex]
+  const textChunk = Array.from({ length: size }, (_, index) => start + index + 1).join('\n')
+  if (size === textBlockSize) lineNumberBlockCache[blockIndex] = textChunk
+  return textChunk
+}
+const lineNumbers = computed(() => {
+  if (!showLineNumbers.value) return []
+  const total = textLineCount.value
+  const blocks = Math.ceil(total / textBlockSize)
+  return Array.from({ length: blocks }, (_, block) => getLineNumberBlock(block, total))
+})
 const textBlocks = computed(() => {
-  const lines = textLines.value
+  // 编辑模式下不渲染代码预览 DOM，跳过全量拆行与分块拼接，避免大文本打字卡顿。
+  if (textMode.value !== 'preview') return []
+  const lines = text.value.split('\n')
   return Array.from({ length: Math.ceil(lines.length / textBlockSize) }, (_, block) => lines.slice(block * textBlockSize, (block + 1) * textBlockSize).join('\n'))
 })
 const isModified = computed(() => textMode.value === 'edit' && editContent.value !== text.value)
@@ -795,14 +816,24 @@ function onContentScroll(e) {
   }
 }
 
-// 统计字符数/字数
+// 统计字符数/换行格式（仅探测首个换行位置，避免每次按键全量扫串）
 const charCount = computed(() => currentText.value.length)
-const lineEnding = computed(() => (currentText.value.includes('\r\n') ? 'CRLF' : 'LF'))
+const lineEnding = computed(() => {
+  const value = currentText.value
+  const firstNewline = value.indexOf('\n')
+  return firstNewline > 0 && value.charCodeAt(firstNewline - 1) === 13 ? 'CRLF' : 'LF'
+})
 
 const searchResult = computed(() => {
   const keyword = searchKw.value.trim()
-  if (!keyword) return null
+  if (!keyword || textMode.value === 'markdown') return null
   const pattern = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')
+  if (textMode.value === 'edit') {
+    let count = 0
+    pattern.lastIndex = 0
+    while (pattern.exec(editContent.value)) count++
+    return { count, blocks: [], pattern, dense: false }
+  }
   let count = 0
   const limit = 400
   const blocks = textBlocks.value.map(source => {
@@ -894,15 +925,23 @@ async function copyAllText() {
   }
 }
 
-// 编辑器光标与按键事件
+// 编辑器光标与按键事件（O(n) 零分配扫描换行，避免大文件按键 slice+split）
 function updateCursorPos(e) {
   const el = e.target
   if (!el || typeof el.selectionStart !== 'number') return
-  const val = el.value.slice(0, el.selectionStart)
-  const lines = val.split('\n')
+  const source = el.value
+  const limit = el.selectionStart
+  let line = 1
+  let lastNewline = -1
+  let idx = source.indexOf('\n')
+  while (idx !== -1 && idx < limit) {
+    line++
+    lastNewline = idx
+    idx = source.indexOf('\n', idx + 1)
+  }
   cursorPos.value = {
-    line: lines.length,
-    col: lines[lines.length - 1].length + 1,
+    line,
+    col: limit - lastNewline,
   }
 }
 
@@ -1034,6 +1073,11 @@ function renderMarkdown(src) {
     return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="md-link">${label}</a>`
   })
 
+  // 将连续的列表项包裹进 <ul>，避免孤立 <li> 与多余换行
+  md = md.replace(/((?:<li class="md-(?:list|task)-item">[\s\S]*?<\/li>\n?)+)/g, (block) => {
+    return `<ul class="md-list">${block.replace(/\n/g, '')}</ul>`
+  })
+
   // 段落
   md = md.replace(/\n\n/g, '<div class="md-gap"></div>')
   md = md.replace(/\n/g, '<br />')
@@ -1046,7 +1090,19 @@ function renderMarkdown(src) {
   return md
 }
 
-const renderedMarkdown = computed(() => renderMarkdown(text.value))
+const renderedMarkdown = computed(() => (textMode.value === 'markdown' ? renderMarkdown(text.value) : ''))
+
+function onMarkdownClick(event) {
+  const anchor = event.target?.closest?.('a.md-link')
+  if (!anchor) return
+  event.preventDefault()
+  const href = anchor.getAttribute('href') || ''
+  if (/^(https?:\/\/|mailto:)/i.test(href)) {
+    Promise.resolve(OpenBrowser(href)).catch((cause) => {
+      emit('toast', `无法打开链接：${String(cause?.message || cause)}`, 'warn')
+    })
+  }
+}
 
 // ---------- 加载核心逻辑 ----------
 let loadSeq = 0
@@ -1061,7 +1117,7 @@ async function loadPreview() {
   const requestLease = createPreviewLease()
   contentLease = requestLease
   if (kind.value === 'image') return loadImage()
-  if (documentKinds.has(kind.value)) { ++imgSeq; loading.value = false; error.value = ''; return }
+  if (documentKinds.has(kind.value) || kind.value === 'archive') { ++imgSeq; loading.value = false; error.value = ''; return }
   ++imgSeq
   const file = activeFile.value
   const { user_id: userID, drive_id: driveID } = props.account
@@ -1572,6 +1628,8 @@ function decodeText(u8) {
 
       <DocumentPreview v-else-if="documentKinds.has(kind)" :key="account.user_id + '/' + account.drive_id + '/' + activeFile.file_id" :account="account" :file="activeFile" :kind="kind" />
 
+      <ArchivePreview v-else-if="kind === 'archive'" :key="account.user_id + '/' + account.drive_id + '/' + activeFile.file_id" :account="account" :file="activeFile" @toast="(msg, type) => emit('toast', msg, type)" />
+
       <!-- 4. 文本/代码/Markdown 专业展示区 -->
       <div v-else class="pv-text-container">
         <!-- Markdown 渲染视图 -->
@@ -1579,6 +1637,7 @@ function decodeText(u8) {
           v-if="textMode === 'markdown'"
           class="pv-markdown-view"
           v-html="renderedMarkdown"
+          @click="onMarkdownClick"
         ></div>
 
         <!-- 代码预览与编辑器双轨容器 -->
@@ -1612,14 +1671,14 @@ function decodeText(u8) {
             :style="{ fontSize: fontSize + 'px' }"
             @scroll="onContentScroll"
           >
-            <div class="pv-code-text" :style="{ minHeight: textLines.length * 24 + 'px' }"><template v-if="highlightedBlocks.length"><div v-for="(block, blockIndex) in highlightedBlocks" :key="blockIndex"><template v-for="part in block.parts" :key="part.index">{{ part.before }}<mark class="pv-search-hit" :class="{ current: part.index === searchIndex }">{{ part.hit }}</mark></template>{{ block.tail }}</div></template><template v-else><div v-for="(block, index) in textBlocks" :key="index">{{ block }}</div></template></div>
+            <div class="pv-code-text" :style="{ minHeight: textLineCount * 24 + 'px' }"><template v-if="highlightedBlocks.length"><div v-for="(block, blockIndex) in highlightedBlocks" :key="blockIndex"><template v-for="part in block.parts" :key="part.index">{{ part.before }}<mark class="pv-search-hit" :class="{ current: part.index === searchIndex }">{{ part.hit }}</mark></template>{{ block.tail }}</div></template><template v-else><div v-for="(block, index) in textBlocks" :key="index">{{ block }}</div></template></div>
           </div>
         </div>
 
         <!-- 文本视图底部状态栏 (类似 VS Code / Sublime 的专业质感) -->
         <footer class="pv-statusbar">
           <div class="pv-sb-section">
-            <span class="pv-sb-item"><UiIcon name="list" :size="12" />{{ textLines.length }} 行</span>
+            <span class="pv-sb-item"><UiIcon name="list" :size="12" />{{ textLineCount }} 行</span>
             <span class="pv-sb-item">{{ charCount }} 字符</span>
             <span class="pv-sb-item">{{ formatBytes(activeFile.size) }}</span>
             <span v-if="textMode === 'edit'" class="pv-sb-item pv-sb-pos">Ln {{ cursorPos.line }}, Col {{ cursorPos.col }}</span>
@@ -1980,6 +2039,7 @@ function decodeText(u8) {
 :deep(.md-link) { color: var(--color-primary); text-decoration: none; font-weight: 500; }
 :deep(.md-link:hover) { text-decoration: underline; }
 :deep(.md-hr) { border: none; border-top: 1px solid var(--border-light); margin: 24px 0; }
+:deep(.md-list) { margin: 8px 0; padding: 0; }
 :deep(.md-list-item) { margin-left: 22px; list-style: disc; margin-bottom: 5px; }
 :deep(.md-task-item) { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
 :deep(.md-task-box) { width: 15px; height: 15px; border: 1.5px solid var(--control-border); border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
@@ -2073,6 +2133,15 @@ function decodeText(u8) {
 .pv-window-controls { align-self: stretch; margin-left: auto; --wails-draggable: no-drag; }
 
 /* 左右翻页箭头 */
+/* 拖拽平移或高频滚轮缩放时关闭/减弱浮层高斯模糊，避免高分屏合成器掉帧 */
+.pv-stage.grabbing :is(.pv-edge, .pv-ctl, .pv-filmstrip) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.pv-stage.direct-transform :is(.pv-edge, .pv-ctl, .pv-filmstrip) {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
 .pv-edge {
   position: absolute; z-index: 6; top: 50%; transform: translateY(-50%);
   width: 40px; height: 64px;

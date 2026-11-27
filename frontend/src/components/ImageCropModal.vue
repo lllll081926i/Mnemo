@@ -1,6 +1,6 @@
 <script setup>
 // 图片/SVG 自定义裁剪弹窗：默认使用整张图片，支持平移、缩放与正方形视口裁剪
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
 
@@ -19,6 +19,7 @@ const userZoom = ref(1)   // 用户缩放倍率 (0.5x - 4x)
 const pos = ref({ x: 0, y: 0 })
 const isDragging = ref(false)
 let dragStart = { x: 0, y: 0, posX: 0, posY: 0 }
+let stopDragListeners = null
 
 const CROP_SIZE = 180 // 视口像素大小
 
@@ -48,6 +49,7 @@ function onWheel(e) {
 
 function onPointerDown(e) {
   if (e.button !== 0) return
+  stopDragListeners?.()
   isDragging.value = true
   dragStart = { x: e.clientX, y: e.clientY, posX: pos.value.x, posY: pos.value.y }
   const onMove = (ev) => {
@@ -61,10 +63,20 @@ function onPointerDown(e) {
     isDragging.value = false
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+    window.removeEventListener('blur', onUp)
+    if (stopDragListeners === onUp) stopDragListeners = null
   }
+  stopDragListeners = onUp
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
+  window.addEventListener('blur', onUp)
 }
+
+onBeforeUnmount(() => {
+  stopDragListeners?.()
+})
 
 function cropAndConfirm() {
   // 如果是 SVG 且未做任何平移缩放，直接返回原矢量 Data URL 保留无限精度

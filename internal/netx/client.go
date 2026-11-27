@@ -230,9 +230,9 @@ func NewClient(timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	c := &Client{HTTP: &http.Client{Timeout: timeout, Transport: &uploadRoutingTransport{control: http.DefaultTransport}}, UA: DefaultUA}
+	c := &Client{HTTP: &http.Client{Timeout: timeout, Transport: &uploadRoutingTransport{control: http.DefaultTransport}, CheckRedirect: SafeCheckRedirect}, UA: DefaultUA}
 	if TestTransportHook != nil {
-		c.HTTP = &http.Client{Timeout: timeout, Transport: TestTransportHook}
+		c.HTTP = &http.Client{Timeout: timeout, Transport: TestTransportHook, CheckRedirect: SafeCheckRedirect}
 		return c
 	}
 	if gp := GlobalProxy(); gp != "" {
@@ -338,7 +338,11 @@ func (c *Client) WithProxy(proxyURL string) *Client {
 	if u, err := url.Parse(proxyURL); err == nil && u.Scheme != "" {
 		transport.Proxy = http.ProxyURL(u)
 	}
-	clone.HTTP = &http.Client{Transport: &uploadRoutingTransport{control: transport}, Timeout: c.HTTP.Timeout}
+	checkRedirect := c.HTTP.CheckRedirect
+	if checkRedirect == nil {
+		checkRedirect = SafeCheckRedirect
+	}
+	clone.HTTP = &http.Client{Transport: &uploadRoutingTransport{control: transport}, Timeout: c.HTTP.Timeout, CheckRedirect: checkRedirect}
 	clone.Proxy = proxyURL
 	return &clone
 }

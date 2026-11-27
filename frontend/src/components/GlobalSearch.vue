@@ -1,10 +1,8 @@
 <script setup>
 import { ref, shallowRef, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
-import { motion, MotionConfig } from 'motion-v'
-import { search, capsOf, accountName, providerMetaOf, providerIconUrl } from '../api'
+import { search, searchCachedFiles, cancelSearch, capsOf, accountName, providerMetaOf, providerIconUrl } from '../api'
 import Modal from './Modal.vue'
 import UiIcon from './UiIcon.vue'
-import { compactReveal, reducedMotion } from '../motion/presets'
 const props = defineProps({ accounts: Array, providers: Array, initialQuery: { type: String, default: '' } })
 const emit = defineEmits(['close', 'navigate'])
 const keyword = ref(props.initialQuery), results = shallowRef([]), errors = ref([]), busy = ref(false), remote = ref(false), stopped = ref(false)
@@ -14,6 +12,8 @@ const submitDisabled = computed(() => !keyword.value.trim() || (busy.value && ma
 const accountStates = ref([])
 const activeRequests = new Map()
 const cancelledSearch = Symbol('cancelled-search')
+const timedOutSearch = Symbol('timed-out-search')
+const ONLINE_ACCOUNT_TIMEOUT_MS = 10_000
 const searchSession = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
 let epoch = 0
 function cancelRequests(remainingAccounts) {
@@ -21,7 +21,7 @@ function cancelRequests(remainingAccounts) {
     if (remainingAccounts?.has(request.key)) continue
     activeRequests.delete(requestId)
     request.release(cancelledSearch)
-    try { Promise.resolve(window.go?.app?.App?.CancelSearch?.(requestId)).catch(() => {}) } catch {}
+    try { Promise.resolve(cancelSearch(requestId)).catch(() => {}) } catch {}
   }
 }
 onBeforeUnmount(() => { ++epoch; cancelRequests() })
@@ -68,7 +68,7 @@ async function run() {
       ...onlineResults.values(),
     ]
   }
-  const cachedTask = Promise.resolve().then(() => window.go.app.App.SearchCachedFiles(query)).then(cached => {
+  const cachedTask = Promise.resolve().then(() => searchCachedFiles(query)).then(cached => {
     if (seq !== epoch) return
     cachedResults = [...new Map((cached || []).map(result => [resultKey(result), { ...result, source: result.partial ? '缓存（部分目录）' : '缓存' }])).values()]
     if ((cached || []).length >= 1000) errors.value.push('缓存结果达到 1000 条显示上限，请缩小搜索范围')
@@ -82,11 +82,21 @@ async function run() {
       if (!accountDisplay.value.has(key)) continue
       const state = accountStates.value.find(item => item.userId === acc.user_id && item.driveId === acc.drive_id)
       const requestId = `${searchSession}:${seq}:${acc.user_id}:${acc.drive_id}`
+      let timeoutTimer = null
       const cancel = new Promise(release => activeRequests.set(requestId, { key, release }))
+      const timeout = new Promise(resolve => {
+        timeoutTimer = setTimeout(() => resolve(timedOutSearch), ONLINE_ACCOUNT_TIMEOUT_MS)
+      })
       if (state) state.status = '搜索中'
       try {
-        const files = await Promise.race([search(acc.user_id, acc.drive_id, query, requestId), cancel])
+        const files = await Promise.race([search(acc.user_id, acc.drive_id, query, requestId), cancel, timeout])
         if (seq !== epoch) return
+        if (files === timedOutSearch) {
+          try { Promise.resolve(cancelSearch(requestId)).catch(() => {}) } catch {}
+          if (state) state.status = '响应超时，已跳过'
+          errors.value.push(`${accountName(acc)}：在线搜索超时（已跳过，不影响其他网盘结果）`)
+          continue
+        }
         if (files === cancelledSearch || !activeRequests.has(requestId) || !accountDisplay.value.has(key)) continue
         if (state) state.status = `在线查询完成 · ${(files || []).length} 项`
         const updatedAt = Date.now() / 1000
@@ -100,7 +110,7 @@ async function run() {
           if (state) state.status = '失败，结果不完整'
           errors.value.push(`${accountName(acc)}：在线搜索失败`)
         }
-      } finally { activeRequests.delete(requestId) }
+      } finally { clearTimeout(timeoutTimer); activeRequests.delete(requestId) }
     }
   }
   try {
@@ -220,8 +230,7 @@ onBeforeUnmount(() => resultsObserver?.disconnect())
 </script>
 <template>
   <Modal title="搜索" width="760px" @close="emit('close')">
-    <MotionConfig :reduced-motion="reducedMotion">
-      <motion.div class="global-search" :initial="compactReveal.initial" :animate="compactReveal.animate" :transition="compactReveal.transition">
+      <div class="global-search">
         <form class="global-search-form" @submit.prevent="run">
           <UiIcon name="search" :size="17" class="global-search-icon" />
           <input ref="inputEl" class="input" v-model="keyword" aria-label="跨盘搜索名称" :placeholder="remote ? '搜索网盘文件' : '搜索已缓存文件'" autofocus @keydown="onSearchKeydown" />
@@ -253,13 +262,13 @@ onBeforeUnmount(() => resultsObserver?.disconnect())
             <span>{{ stopped ? '搜索已停止，可重新搜索' : submittedQuery ? '没有匹配的文件' : '输入关键词搜索文件' }}</span>
           </div>
         </div>
-      </motion.div>
-    </MotionConfig>
+      </div>
   </Modal>
 </template>
 
 <style scoped>
-.global-search { display: grid; gap: 12px; min-height: 0; }
+.global-search { display: grid; gap: 12px; min-height: 0; animation: global-search-in var(--motion-normal) var(--motion-ease); }
+@keyframes global-search-in { from { opacity: 0; transform: translateY(4px); } }
 .global-search-form { display: flex; align-items: center; gap: 9px; padding: 6px 7px 6px 12px; border: 1px solid var(--control-border); border-radius: var(--radius-md); background: var(--control-bg); }
 .global-search-form:focus-within { border-color: var(--border-focus); box-shadow: var(--ring-focus); }
 .global-search-form .input { min-width: 0; flex: 1; height: 30px; border: 0; box-shadow: none; background: transparent; }
@@ -286,10 +295,10 @@ onBeforeUnmount(() => resultsObserver?.disconnect())
 .global-search-results .workspace-result:focus-visible {
   outline: none;
   background: var(--listselectbg);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--color-primary) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border-focus);
 }
 .global-search-empty { display: grid; justify-items: center; gap: 9px; min-height: 160px; color: var(--text-tertiary); }
 .global-search-empty svg { color: var(--color-primary); opacity: .7; }
-@media (prefers-reduced-motion: reduce) { .global-search-results.has-results { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .global-search, .global-search-results.has-results { animation: none; } }
 @media (max-width: 560px) { .global-search-options > span { display: none; } .global-search-form .btn { min-width: 64px; } }
 </style>

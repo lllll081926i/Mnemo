@@ -12,7 +12,7 @@ import UiSelect from '../components/UiSelect.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import DiagnosticsPanel from '../components/DiagnosticsPanel.vue'
 import { cleanBackupPrefs } from '../workspace'
-import { ListFavorites, RestoreFavorite, listAccounts, setAccountCustomMeta as saveAccountMeta } from '../api'
+import { ListFavorites, RestoreFavorite, listAccounts, setAccountCustomMeta as saveAccountMeta, exportPreferences, importPreferences } from '../api'
 
 const emit = defineEmits(['toast', 'theme', 'update', 'clear-cache'])
 const backupBusy = ref(false), pendingBackup = ref(null)
@@ -26,7 +26,7 @@ async function exportPrefs() {
       if (account.custom_icon) preferences.accountIcons[account.user_id] = account.custom_icon
     }
     const payload = { format: 'mnemo-preferences', version: 1, preferences: cleanBackupPrefs(preferences), theme: settings.value.theme, favorites: await ListFavorites('', '') }
-    const path = await window.go.app.App.ExportPreferences(JSON.stringify(payload, null, 2))
+    const path = await exportPreferences(JSON.stringify(payload, null, 2))
     if (path) emit('toast', '偏好已导出', 'success')
   } catch(e) { emit('toast', String(e), 'error') }
   finally { backupBusy.value = false }
@@ -35,7 +35,7 @@ async function readBackup() {
   if (backupBusy.value) return
   backupBusy.value = true
   try {
-    const raw = await window.go.app.App.ImportPreferences()
+    const raw = await importPreferences()
     if (!raw) return
     const data = JSON.parse(raw)
     if (data.format !== 'mnemo-preferences' || data.version !== 1 || !data.preferences || typeof data.preferences !== 'object') throw new Error('不支持的备份格式')
@@ -928,18 +928,16 @@ async function exportLogs() {
   transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
 }
 .theme-card:hover {
-  border-color: var(--color-primary);
+  border-color: var(--control-border-hover);
+  background: var(--bg-hover);
   color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 14px color-mix(in srgb, var(--color-primary) 16%, transparent);
 }
-.theme-card:active { transform: scale(.96); }
+.theme-card:active { transform: scale(.98); }
 .theme-card.active {
-  border-color: var(--color-primary);
-  background: var(--listselectbg);
-  color: var(--color-primary);
+  border-color: var(--border-focus);
+  background: var(--bg-active);
+  color: var(--text-primary);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 
 .preset-pills {
@@ -954,24 +952,22 @@ async function exportLogs() {
   font-size: 11.5px; font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
 .pill-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
-.pill-btn:active { transform: scale(.94); }
 .pill-btn.active {
-  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-  color: var(--color-primary); font-weight: 600;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 35%, transparent);
-  animation: check-pop 240ms var(--motion-spring);
+  background: var(--bg-active);
+  border-color: var(--control-border);
+  color: var(--text-primary); font-weight: 600;
 }
 .settings-view :deep(.btn), .settings-view :deep(.tbtn) {
-  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring);
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
-.settings-view :deep(.btn:hover), .settings-view :deep(.tbtn:hover) { transform: translateY(-1px); box-shadow: 0 5px 12px color-mix(in srgb, var(--text-primary) 10%, transparent); }
-.settings-view :deep(.btn:active), .settings-view :deep(.tbtn:active) { transform: scale(.96); }
+.settings-view :deep(.btn:hover), .settings-view :deep(.tbtn:hover) { box-shadow: none; }
+.settings-view :deep(.btn:active), .settings-view :deep(.tbtn:active) { transform: scale(.98); }
 .settings-view :deep(.btn:focus-visible), .settings-view :deep(.tbtn:focus-visible), .theme-card:focus-visible, .pill-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 .sg-control-grow { flex: 1; min-width: 0; }
 .sg-control-grow .input { flex: 1; min-width: 160px; }

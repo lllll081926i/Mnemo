@@ -8,7 +8,7 @@ import {
   ListOfflineTasks, refreshOfflineTasks, OfflineDownload, DeleteOfflineTask,
   ListMigrateJobs, CancelMigrate, ResumeMigrate, DeleteMigrateJob, ClearMigrateJobs,
   EventsOn, RevealInFolder,
-  accountName, providerIconUrl, providerMetaOf, capsOf,
+  verifyDownload, accountName, providerIconUrl, providerMetaOf, capsOf,
   formatBytes, formatSpeed, formatTime, iconOf, copyText
 } from '../api'
 import { getPrefs } from '../appearance'
@@ -44,6 +44,10 @@ const filterUser = ref('')
 const hasOffline = computed(() => offlineAccounts.value.length > 0)
 const offlineAccounts = computed(() => props.accounts.filter((a) => capsOf(a, props.providers).offlineDownload))
 
+const HISTORY_PAGE_SIZE = 120
+const doneDownloadLimit = ref(HISTORY_PAGE_SIZE)
+const doneUploadLimit = ref(HISTORY_PAGE_SIZE)
+
 const menus = computed(() => {
   const list = [
     { key: 'downloading', icon: 'download', label: '正在下载', cnt: activeDownloads.value.length },
@@ -57,8 +61,19 @@ const menus = computed(() => {
 })
 
 watch(hasOffline, (v) => { if (!v && menu.value === 'offline') menu.value = 'downloading' })
-watch(menu, () => { selectedIds.value = new Set(); ctx.value.show = false; taskFilterRaw.value = ''; taskFilter.value = '' })
-watch(filterUser, () => { selectedIds.value = new Set() })
+watch(menu, () => {
+  selectedIds.value = new Set()
+  ctx.value.show = false
+  taskFilterRaw.value = ''
+  taskFilter.value = ''
+  doneDownloadLimit.value = HISTORY_PAGE_SIZE
+  doneUploadLimit.value = HISTORY_PAGE_SIZE
+})
+watch(filterUser, () => {
+  selectedIds.value = new Set()
+  doneDownloadLimit.value = HISTORY_PAGE_SIZE
+  doneUploadLimit.value = HISTORY_PAGE_SIZE
+})
 
 function accIcon(acc) { return providerIconUrl(providerMetaOf(acc, props.providers)) }
 function accLabel(acc) { return accountName(acc) }
@@ -252,7 +267,11 @@ const taskFilter = ref('')
 let taskFilterTimer = null
 watch(taskFilterRaw, (v) => {
   clearTimeout(taskFilterTimer)
-  taskFilterTimer = setTimeout(() => { taskFilter.value = v }, 120)
+  taskFilterTimer = setTimeout(() => {
+    taskFilter.value = v
+    doneDownloadLimit.value = HISTORY_PAGE_SIZE
+    doneUploadLimit.value = HISTORY_PAGE_SIZE
+  }, 120)
 })
 const byKw = (list, nameFn) => {
   const kw = taskFilter.value.trim().toLowerCase()
@@ -265,8 +284,18 @@ const visibleDownloads = computed(() => {
   const groups = new Set(downloads.value.filter(task => task.isDir).map(task => task.id))
   return downloads.value.filter(task => !task.groupId || !groups.has(task.groupId))
 })
-const activeDownloads = computed(() => byKw(byAccount(visibleDownloads.value.filter((t) => t.status !== 'completed')), (t) => t.name))
-const doneDownloads = computed(() => byKw(byAccount(visibleDownloads.value.filter((t) => t.status === 'completed')), (t) => t.name))
+const downloadStatusBuckets = computed(() => {
+  const active = []
+  const done = []
+  for (const task of visibleDownloads.value) {
+    if (task.status === 'completed') done.push(task)
+    else active.push(task)
+  }
+  return { active, done }
+})
+const activeDownloads = computed(() => byKw(byAccount(downloadStatusBuckets.value.active), (t) => t.name))
+const doneDownloads = computed(() => byKw(byAccount(downloadStatusBuckets.value.done), (t) => t.name))
+const renderedDoneDownloads = computed(() => doneDownloads.value.slice(0, doneDownloadLimit.value))
 const groupChildrenByID = computed(() => {
   const groups = new Map()
   for (const task of downloads.value) {
@@ -291,8 +320,19 @@ async function retryGroupChild(parent, child) {
   await resumeTask(child)
 }
 function showMoreGroupChildren(id) { groupChildLimits.value = { ...groupChildLimits.value, [id]: (groupChildLimits.value[id] || 100) + 100 } }
-const activeUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && !t.Upload.IsCompleted)), upName))
-const doneUploads = computed(() => byKw(byUploadAccount(uploads.value.filter((t) => t.Upload && t.Upload.IsCompleted)), upName))
+const uploadStatusBuckets = computed(() => {
+  const active = []
+  const done = []
+  for (const task of uploads.value) {
+    if (!task.Upload) continue
+    if (task.Upload.IsCompleted) done.push(task)
+    else active.push(task)
+  }
+  return { active, done }
+})
+const activeUploads = computed(() => byKw(byUploadAccount(uploadStatusBuckets.value.active), upName))
+const doneUploads = computed(() => byKw(byUploadAccount(uploadStatusBuckets.value.done), upName))
+const renderedDoneUploads = computed(() => doneUploads.value.slice(0, doneUploadLimit.value))
 
 // 全选（正在下载列表）
 const allActiveSelected = computed(() => activeDownloads.value.length > 0 && activeDownloads.value.every((t) => selectedIds.value.has(t.id)))
@@ -541,6 +581,29 @@ function reviewAndResumeUpload(task) {
       emit('toast', String(error), 'error')
     }
   }, { title: '核对后重试上传', okText: '确认仍需上传', danger: true })
+}
+
+const verifyingDownloadIds = ref(new Set())
+const downloadVerifications = ref({})
+async function verifyDownloadTask(t) {
+  if (!t?.id || t.isDir || verifyingDownloadIds.value.has(t.id)) return
+  const next = new Set(verifyingDownloadIds.value)
+  next.add(t.id)
+  verifyingDownloadIds.value = next
+  try {
+    const res = await verifyDownload(t.id)
+    if (res) {
+      downloadVerifications.value = { ...downloadVerifications.value, [t.id]: res }
+      const tone = res.status === 'hash' ? 'success' : res.status === 'size' ? 'info' : 'warn'
+      emit('toast', res.detail, tone)
+    }
+  } catch (e) {
+    emit('toast', '校验失败：' + String(e?.message || e), 'error')
+  } finally {
+    const done = new Set(verifyingDownloadIds.value)
+    done.delete(t.id)
+    verifyingDownloadIds.value = done
+  }
 }
 
 const copiedLinkMap = ref({})
@@ -1224,7 +1287,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="file-list">
-              <div v-for="t in doneDownloads" :key="t.id" class="taskrow" @contextmenu.prevent="onCtx($event, t)">
+              <div v-for="t in renderedDoneDownloads" :key="t.id" class="taskrow" @contextmenu.prevent="onCtx($event, t)">
                 <div class="rangselect"></div>
                 <div class="fileicon" :class="'ft-' + iconOf({ name: t.name })"><UiIcon :name="iconOf({ name: t.name })" :size="20" /></div>
                 <div class="filename">
@@ -1245,12 +1308,19 @@ onBeforeUnmount(() => {
                 <div class="filesize">{{ formatBytes(t.size) }}</div>
                 <div class="downprogress">
                   <div class="transfering-state">
-                    <p class="text-state"><span>已完成</span><span>100%</span></p>
-                    <div class="progress-total"><div class="progress-current succeed"></div></div>
+                    <p class="text-state">
+                      <span>{{ downloadVerifications[t.id] ? (downloadVerifications[t.id].status === 'hash' ? '哈希已校验' : downloadVerifications[t.id].status === 'size' ? '大小一致' : '校验异常') : '已完成' }}</span>
+                      <span>100%</span>
+                    </p>
+                    <div class="progress-total"><div class="progress-current" :class="downloadVerifications[t.id]?.status === 'mismatch' || downloadVerifications[t.id]?.status === 'missing' ? 'warning' : 'succeed'"></div></div>
                   </div>
                 </div>
                 <div class="downspeed"></div>
                 <div class="tactions">
+                  <button v-if="t.localPath && !t.isDir" class="btn-circle" :disabled="verifyingDownloadIds.has(t.id)" :title="downloadVerifications[t.id]?.detail || '校验本地文件完整性'" @click="verifyDownloadTask(t)">
+                    <span v-if="verifyingDownloadIds.has(t.id)" class="spin"></span>
+                    <UiIcon v-else name="check" :size="14" />
+                  </button>
                   <button v-if="t.localPath && !t.isDir" class="btn-circle" title="打开文件" @click="openFile(t)"><UiIcon name="play" :size="14" /></button>
                   <button v-if="t.localPath" class="btn-circle" title="打开所在目录" @click="reveal(t)"><UiIcon name="folder" :size="14" /></button>
                   <button v-if="t.url" class="btn-circle" title="复制链接" @click="copyLink(t)">
@@ -1260,6 +1330,9 @@ onBeforeUnmount(() => {
                   <button class="btn-circle danger" title="删除记录" @click="removeTask(t)"><UiIcon name="trash" :size="14" /></button>
                 </div>
               </div>
+            <div v-if="doneDownloads.length > renderedDoneDownloads.length" class="history-load-more">
+              <button type="button" class="btn sm" @click="doneDownloadLimit += HISTORY_PAGE_SIZE">加载更多（已显示 {{ renderedDoneDownloads.length }} / {{ doneDownloads.length }}）</button>
+            </div>
             <div v-if="!doneDownloads.length" class="workspace-empty-state">
               <UiIcon name="check" :size="36" />
               <span class="wes-title">暂无已下载记录</span>
@@ -1318,7 +1391,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="file-list">
-              <div v-for="t in doneUploads" :key="t.UploadID" class="taskrow">
+              <div v-for="t in renderedDoneUploads" :key="t.UploadID" class="taskrow">
                 <div class="rangselect"></div>
                 <div class="fileicon" :class="'ft-' + iconOf({ name: upName(t) })"><UiIcon :name="iconOf({ name: upName(t) })" :size="20" /></div>
                 <div class="filename">
@@ -1337,6 +1410,9 @@ onBeforeUnmount(() => {
                   <button class="btn-circle danger" title="删除记录" @click="cancelUploadTask(t)"><UiIcon name="trash" :size="14" /></button>
                 </div>
               </div>
+            <div v-if="doneUploads.length > renderedDoneUploads.length" class="history-load-more">
+              <button type="button" class="btn sm" @click="doneUploadLimit += HISTORY_PAGE_SIZE">加载更多（已显示 {{ renderedDoneUploads.length }} / {{ doneUploads.length }}）</button>
+            </div>
             <div v-if="!doneUploads.length" class="workspace-empty-state">
               <UiIcon name="check" :size="36" />
               <span class="wes-title">暂无已上传记录</span>
@@ -1546,4 +1622,5 @@ onBeforeUnmount(() => {
 .td-val { flex: 1; min-width: 0; color: var(--text-primary); word-break: break-all; user-select: text; }
 .td-val.error { color: var(--color-error); }
 .td-url { font-size: 12px; color: var(--text-link); }
+.history-load-more { display: flex; justify-content: center; padding: 14px 0 8px; }
 </style>

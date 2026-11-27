@@ -9,7 +9,7 @@ const props = defineProps({
   busy: Boolean,
 })
 const emit = defineEmits(['choose'])
-const actionLabels = { upload: '上传', download: '下载', 'delete-local': '删除本地', 'delete-remote': '删除网盘', conflict: '冲突' }
+const actionLabels = { upload: '上传', download: '下载', 'rename-local': '重命名本地', 'rename-remote': '重命名网盘', 'delete-local': '删除本地', 'delete-remote': '删除网盘', conflict: '冲突' }
 const actionOptions = [{ value: '', label: '全部操作' }, ...Object.entries(actionLabels).map(([value, label]) => ({ value, label }))]
 const conflictOptions = [{ value: 'keep-both', label: '保留两份' }, { value: 'local', label: '使用本地' }, { value: 'remote', label: '使用网盘' }]
 const policyLabels = { local: '本地', remote: '网盘', 'keep-both': '保留两份' }
@@ -43,7 +43,7 @@ const formatDate = timestamp => timestamp ? new Date(timestamp * 1000).toLocaleS
     <div v-if="visible.length" :key="`${action}:${current}`" class="content-reveal" role="list">
       <div v-for="change in visible" :key="change.path" class="workspace-result" role="listitem">
         <span>
-          <strong>{{ change.path }}</strong>
+          <strong>{{ change.fromPath ? `${change.fromPath} → ${change.path}` : change.path }}</strong>
           <small>{{ actionLabels[change.action] }} · 本地 {{ change.local?.size ?? '不存在' }} / 网盘 {{ change.remote?.size ?? '不存在' }}</small>
           <small v-if="change.action === 'conflict'">修改时间：本地 {{ formatDate(change.local?.modTime) }} / 网盘 {{ formatDate(change.remote?.modTime) }}</small>
         </span>

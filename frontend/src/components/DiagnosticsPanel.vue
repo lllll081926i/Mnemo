@@ -66,5 +66,5 @@ label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .diagnostic-checks { display: grid; gap: 12px; padding: 0; list-style: none; }
 .diagnostic-checks li { display: grid; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
 .diagnostic-checks span, code { color: var(--text-secondary); }
-.diagnostic-checks .failed strong { color: var(--color-danger); }
+.diagnostic-checks .failed strong { color: var(--color-error); }
 </style>

@@ -1,10 +1,8 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { motion, MotionConfig } from 'motion-v'
 import PlayerPanel from './components/PlayerPanel.vue'
 import PreviewModal from './components/PreviewModal.vue'
 import { EventsOn, WindowHide } from '../wailsjs/runtime/runtime'
-import { compactReveal, reducedMotion } from './motion/presets'
 
 const props = defineProps({ seed: { type: Object, required: true } })
 const file = ref(props.seed.file)
@@ -45,16 +43,13 @@ async function close(force = false) {
 <template>
   <PlayerPanel v-if="opened && seed.kind === 'video'" :account="seed.account" :file="file" :files="seed.files" :capabilities="seed.capabilities" @select-file="file = $event" @close="close" @toast="notify" />
   <PreviewModal v-else-if="opened" ref="preview" :account="seed.account" :file="file" :file-list="seed.files" :capabilities="seed.capabilities" :background-audio="backgroundAudio" @background-audio="backgroundAudio = $event" @stop-close="close(true)" @close="close()" @toast="notify" />
-  <MotionConfig :reduced-motion="reducedMotion">
-    <motion.div
+  <Transition name="preview-toast">
+    <div
       v-if="toast"
       class="preview-window-toast"
       role="status"
-      :initial="compactReveal.initial"
-      :animate="compactReveal.animate"
-      :transition="compactReveal.transition"
-    >{{ toast }}</motion.div>
-  </MotionConfig>
+    >{{ toast }}</div>
+  </Transition>
 </template>
 
 <style>
@@ -86,11 +81,19 @@ html.dark.preview-window.media-preview {
 .preview-window .preview-modal .pv-ctl-btn.active, .preview-window .preview-modal .pv-abtn.active { background: #ffffff20; }
 .preview-window-toast {
   position: fixed; z-index: 9999; bottom: 120px; left: 50%;
+  transform: translateX(-50%);
   max-width: min(80vw, 520px); padding: 9px 13px;
   border: 1px solid #ffffff28; border-radius: 10px;
   background: color-mix(in srgb, #202020 88%, transparent); color: #fff;
   box-shadow: 0 12px 32px #0008; font-size: 13px; line-height: 1.5;
   pointer-events: none; text-align: center;
+}
+.preview-toast-enter-active, .preview-toast-leave-active {
+  transition: opacity var(--motion-normal) var(--motion-ease), transform var(--motion-normal) var(--motion-ease);
+}
+.preview-toast-enter-from, .preview-toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 6px);
 }
 html.dark.preview-window.oled {
   --bg-surface: #000; --bg-elevated: #000; --bg-subtle: #000; --control-bg: #000;
@@ -99,6 +102,6 @@ html.dark.preview-window.oled {
 .preview-window.oled .preview-modal .pv-audio-cover,
 .preview-window.oled .preview-window-toast { background: #000; }
 @media (prefers-reduced-motion: reduce) {
-  .preview-window-toast { transition: none; }
+  .preview-toast-enter-active, .preview-toast-leave-active { transition: none; }
 }
 </style>

@@ -4,14 +4,57 @@ import PanView from './PanView.vue'
 import UiSelect from '../components/UiSelect.vue'
 import UiIcon from '../components/UiIcon.vue'
 import Modal from '../components/Modal.vue'
-import { accountName, providerMetaOf, providerIconUrl, onEvent } from '../api'
+import { accountName, providerMetaOf, providerIconUrl, formatBytes, onEvent } from '../api'
 import { transferFiles, transferProblem } from '../file-transfer'
+import { compareDirectoryLists } from '../dir-compare'
 const props = defineProps({ account: Object, accounts: Array, providers: Array, dual: Boolean })
 const emit = defineEmits(['toast', 'go'])
 const dual = computed(() => props.dual)
 const rightId = ref(''), focused = ref('left'), left = ref(null), right = ref(null), busy = ref(false)
 const cloudDrag = ref(null), dragOver = ref('')
 const pinnedTarget = ref(null), transferPlan = ref(null), lastTarget = ref(null)
+const compareState = ref(null)
+const compareFilter = ref('diff')
+const compareRows = computed(() => {
+  if (!compareState.value) return []
+  const rows = compareState.value.result.rows
+  if (compareFilter.value === 'all') return rows
+  if (compareFilter.value === 'diff') return rows.filter(r => ['leftOnly', 'rightOnly', 'different'].includes(r.status))
+  return rows.filter(r => r.status === compareFilter.value)
+})
+function openCompare() {
+  const leftSnap = left.value?.snapshot()
+  const rightSnap = right.value?.snapshot()
+  if (!leftSnap?.account || !rightSnap?.account || leftSnap.mode !== 'list' || rightSnap.mode !== 'list') {
+    emit('toast', '请先在左右两栏都打开普通目录再对比', 'warn')
+    return
+  }
+  const result = compareDirectoryLists(leftSnap.allFiles || [], rightSnap.allFiles || [])
+  compareFilter.value = 'diff'
+  compareState.value = {
+    left: captureLocation(leftSnap),
+    right: captureLocation(rightSnap),
+    result,
+  }
+}
+function syncCompareSide(direction) {
+  if (!compareState.value) return
+  const fromLeft = direction === 'right'
+  const items = compareState.value.result.rows
+    .filter(r => r.status === (fromLeft ? 'leftOnly' : 'rightOnly'))
+    .map(r => (fromLeft ? r.left : r.right))
+    .filter(Boolean)
+  if (!items.length) {
+    emit('toast', fromLeft ? '左栏没有独有文件需要补齐到右栏' : '右栏没有独有文件需要补齐到左栏', 'info')
+    return
+  }
+  const source = { ...(fromLeft ? compareState.value.left : compareState.value.right), files: items }
+  const target = fromLeft ? compareState.value.right : compareState.value.left
+  const problem = transferProblem(source, target, props.providers, false)
+  if (problem) { emit('toast', problem, 'warn'); return }
+  compareState.value = null
+  transferPlan.value = { source: captureLocation(source), target: captureLocation(target), moving: false }
+}
 function endDrag() { cloudDrag.value = null; dragOver.value = '' }
 watch(dual, () => { focused.value = 'left'; transferPlan.value = null; endDrag() })
 const rightAccount = computed(() => props.accounts.find(a => a.user_id === rightId.value) || null)
@@ -128,6 +171,7 @@ defineExpose({
       <button class="btn" :disabled="busy" @click="transfer('right')"><UiIcon name="copy" :size="14" />复制到右栏</button>
       <button class="btn" :disabled="busy" @click="transfer('left')"><UiIcon name="copy" :size="14" />复制到左栏</button>
       <UiSelect v-model="rightId" :options="options" placeholder="右侧账号" />
+      <button class="btn" :disabled="busy" @click="openCompare"><UiIcon name="columns" :size="14" />对比目录</button>
       <button class="btn" :aria-pressed="!!pinnedTarget" :disabled="busy" @click="togglePinnedTarget">{{ pinnedTarget ? '解除固定目标' : '固定右栏目标' }}</button>
       <button v-if="lastTarget" class="btn" @click="showTarget(lastTarget)">查看目标</button>
     </div>
@@ -136,6 +180,36 @@ defineExpose({
       <dl class="transfer-summary"><dt>来源</dt><dd>{{ locationLabel(transferPlan.source) }}</dd><dt>目标</dt><dd>{{ locationLabel(transferPlan.target) }}</dd><dt>项目</dt><dd>{{ transferPlan.source.files.length }} 项 · {{ transferPlan.source.files.slice(0, 3).map(file => file.name).join('、') }}{{ transferPlan.source.files.length > 3 ? '…' : '' }}</dd></dl>
       <p>{{ transferPlan.moving ? '移动会移除源文件；跨盘移动仅在目标确认成功后移除来源。此操作没有通用撤销功能。' : '复制会保留源文件。跨盘任务将在传输页执行。' }}</p>
       <template #actions><button class="btn" @click="transferPlan = null">取消</button><button class="btn primary" :class="{ danger: transferPlan.moving }" @click="confirmTransfer">{{ transferPlan.moving ? '确认移动' : '确认复制' }}</button></template>
+    </Modal>
+    <Modal v-if="compareState" title="双栏目录对比" width="700px" @close="compareState = null">
+      <div class="compare-head">
+        <div class="compare-path"><strong>左栏</strong><span>{{ locationLabel(compareState.left) }}</span></div>
+        <div class="compare-path"><strong>右栏</strong><span>{{ locationLabel(compareState.right) }}</span></div>
+      </div>
+      <div class="compare-filters">
+        <button type="button" class="btn sm" :class="{ primary: compareFilter === 'diff' }" @click="compareFilter = 'diff'">仅看差异 ({{ compareState.result.counts.leftOnly + compareState.result.counts.rightOnly + compareState.result.counts.different }})</button>
+        <button type="button" class="btn sm" :class="{ primary: compareFilter === 'leftOnly' }" @click="compareFilter = 'leftOnly'">仅左栏 ({{ compareState.result.counts.leftOnly }})</button>
+        <button type="button" class="btn sm" :class="{ primary: compareFilter === 'rightOnly' }" @click="compareFilter = 'rightOnly'">仅右栏 ({{ compareState.result.counts.rightOnly }})</button>
+        <button type="button" class="btn sm" :class="{ primary: compareFilter === 'different' }" @click="compareFilter = 'different'">不同 ({{ compareState.result.counts.different }})</button>
+        <button type="button" class="btn sm" :class="{ primary: compareFilter === 'all' }" @click="compareFilter = 'all'">全部 ({{ compareState.result.rows.length }})</button>
+      </div>
+      <div class="workspace-results compare-list">
+        <div v-for="row in compareRows" :key="row.name" class="workspace-result compare-row">
+          <span>
+            <strong>{{ row.name }}</strong>
+            <small>{{ row.detail }} · 左 {{ row.left ? (row.left.isDir ? '文件夹' : formatBytes(row.left.size)) : '无' }} / 右 {{ row.right ? (row.right.isDir ? '文件夹' : formatBytes(row.right.size)) : '无' }}</small>
+          </span>
+          <span class="badge" :class="row.status === 'hashMatch' ? 'success' : row.status === 'different' ? 'warn' : row.status === 'sameMeta' ? '' : 'primary'">
+            {{ row.status === 'leftOnly' ? '仅左栏' : row.status === 'rightOnly' ? '仅右栏' : row.status === 'different' ? '差异' : row.status === 'hashMatch' ? '哈希一致' : '名称一致' }}
+          </span>
+        </div>
+        <p v-if="!compareRows.length" class="compare-empty">当前筛选下没有条目</p>
+      </div>
+      <template #actions>
+        <button class="btn" :disabled="!compareState.result.counts.leftOnly" @click="syncCompareSide('right')">补齐左栏独有 → 右栏 ({{ compareState.result.counts.leftOnly }})</button>
+        <button class="btn" :disabled="!compareState.result.counts.rightOnly" @click="syncCompareSide('left')">补齐右栏独有 → 左栏 ({{ compareState.result.counts.rightOnly }})</button>
+        <button class="btn primary" @click="compareState = null">关闭</button>
+      </template>
     </Modal>
     <div class="workspace-panes" :class="{dual}">
       <div class="workspace-pane" :class="{focused:focused === 'left', 'cloud-drop-active': dragOver === 'left'}" @pointerdown.capture="focused = 'left'" @focusin="focused = 'left'" @dragover="overPane('left', $event)" @dragleave="leavePane"><PanView ref="left" :account="account" :accounts="accounts" :providers="providers" :keyboard-active="!dual || focused === 'left'" :cloud-drag-enabled="dual && !busy" :cloud-drag-active="!!cloudDrag" @cloud-drag-start="(source, event) => startDrag('left', source, event)" @cloud-drag-end="endDrag" @cloud-drop="folder => dropOnPane('left', folder)" @toast="(...args) => emit('toast', ...args)" @go="emit('go', $event)" /><div v-if="dragOver === 'left'" class="cloud-drop-hint">松开以移动</div></div>
@@ -156,5 +230,13 @@ defineExpose({
 .cloud-drop-active { outline: 2px dashed var(--color-primary); outline-offset: -4px; box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--color-primary) 9%, transparent); }
 .cloud-drop-hint { position: absolute; bottom: 16px; left: 50%; translate: -50% 0; padding: 8px 14px; border-radius: var(--radius-full); background: var(--bg-elevated); color: var(--color-primary); box-shadow: var(--shadow-modal); font-size: 12px; text-align: center; pointer-events: none; z-index: 10; animation: workspace-drop-hint var(--motion-normal) var(--motion-spring); }
 @keyframes workspace-drop-hint { from { opacity: 0; transform: translateY(5px) scale(.96); } }
+.compare-head { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--border-lighter); border-radius: var(--radius-md); background: var(--bg-subtle); font-size: 12.5px; }
+.compare-path { display: flex; gap: 8px; min-width: 0; }
+.compare-path strong { flex: none; color: var(--text-secondary); }
+.compare-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.compare-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.compare-list { max-height: 44vh; border: 1px solid var(--border-lighter); border-radius: var(--radius-md); }
+.compare-row { cursor: default; }
+.compare-empty { padding: 24px 12px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .workspace-pane-enter { animation: none; } }
 </style>

@@ -133,7 +133,7 @@ var previewMethods = map[string]bool{
 	"PreviewURL": true, "CachedPreviewImageURL": true, "CachedPreviewDocumentURL": true, "PinFileSnapshot": true, "PlayVideo": true,
 	"PlayVideoQuality": true, "GetPlayCursor": true, "SavePlayCursor": true,
 	"GetSettings": true, "DownloadFile": true, "SaveCloudTextFile": true,
-	"OpenCloudEditor": true,
+	"OpenCloudEditor": true, "OpenBrowser": true,
 }
 
 type previewProcess struct {
@@ -160,7 +160,7 @@ func (a *App) previewInvoke(seed PreviewWindowSeed, call previewCall) (result pr
 	if !previewMethods[call.Method] {
 		return previewReply{Error: "预览窗口不支持此操作"}
 	}
-	if call.Method != "GetSettings" {
+	if call.Method != "GetSettings" && call.Method != "OpenBrowser" {
 		var uid, did string
 		if len(call.Args) < 2 || json.Unmarshal(call.Args[0], &uid) != nil || json.Unmarshal(call.Args[1], &did) != nil || uid != seed.Account.UserID || did != seed.Account.DriveID {
 			return previewReply{Error: "预览账号不匹配"}

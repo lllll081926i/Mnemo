@@ -17,10 +17,11 @@ import (
 )
 
 type Change struct {
-	Path   string `json:"path"`
-	Action string `json:"action"`
-	Local  *Entry `json:"local,omitempty"`
-	Remote *Entry `json:"remote,omitempty"`
+	Path     string `json:"path"`
+	FromPath string `json:"fromPath,omitempty"`
+	Action   string `json:"action"`
+	Local    *Entry `json:"local,omitempty"`
+	Remote   *Entry `json:"remote,omitempty"`
 }
 type Plan struct {
 	SnapshotTotal int      `json:"snapshotTotal"`
@@ -195,6 +196,15 @@ func (e *Engine) Preview(ctx context.Context, cfg Config) (*Plan, error) {
 			}
 		}
 	}
+	// 重命名追踪：双向或推拉模式中，若同侧出现一删一增且远端支持重命名，
+	// 当仅在同一目录改名且大小+哈希完全匹配时合并为 rename 操作，免重复上传下载。
+	plan.Changes = collapseTrackedRenames(cfg, plan.Changes, caps)
+	deletes = 0
+	for _, c := range plan.Changes {
+		if c.Action == "delete-local" || c.Action == "delete-remote" {
+			deletes++
+		}
+	}
 	if deletes > 0 && !e.guardDelete(cfg.ID, deletes, len(snapshot)) {
 		plan.Blocked = "删除数量超过快照的 50%，请检查两端目录"
 	}
@@ -257,10 +267,17 @@ func (e *Engine) ExecutePlan(ctx context.Context, cfg Config, token string, choi
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := checkPlannedLocal(cfg, c.Path, c.Local); err != nil {
-			return fmt.Errorf("%s: %w", c.Path, err)
+		localCheckPath, remoteCheckPath := c.Path, c.Path
+		localExpected, remoteExpected := c.Local, c.Remote
+		if c.Action == "rename-local" {
+			localCheckPath = c.FromPath
+		} else if c.Action == "rename-remote" {
+			remoteCheckPath = c.FromPath
 		}
-		if err := checkPlannedRemote(ctx, cfg, c.Path, c.Remote); err != nil {
+		if err := checkPlannedLocal(cfg, localCheckPath, localExpected); err != nil {
+			return fmt.Errorf("%s: %w", localCheckPath, err)
+		}
+		if err := checkPlannedRemote(ctx, cfg, remoteCheckPath, remoteExpected); err != nil {
 			return err
 		}
 		action := c.Action
@@ -321,6 +338,10 @@ func (e *Engine) ExecutePlan(ctx context.Context, cfg Config, token string, choi
 			err = e.uploadPlanned(ctx, cfg, *c.Local, c.Remote)
 		case "download":
 			err = e.downloadEntry(ctx, cfg, *c.Remote, c.Path, c.Local)
+		case "rename-local":
+			err = e.renameLocalEntry(cfg, c)
+		case "rename-remote":
+			err = e.renameRemoteEntry(ctx, cfg, c)
 		case "delete-local":
 			err = e.propagateLocalDeletes(cfg, []Entry{*c.Local})
 		case "delete-remote":
@@ -332,7 +353,7 @@ func (e *Engine) ExecutePlan(ctx context.Context, cfg Config, token string, choi
 		if action == "upload" {
 			expectedLocal[c.Path] = *c.Local
 		}
-		if action == "download" {
+		if action == "download" || action == "rename-local" {
 			path, err := safeLocalPath(cfg.LocalDir, c.Path)
 			if err != nil {
 				return err
@@ -345,6 +366,8 @@ func (e *Engine) ExecutePlan(ctx context.Context, cfg Config, token string, choi
 			entry.ModTime = info.ModTime().Unix()
 			entry.ModTimeNano = info.ModTime().UnixNano()
 			expectedLocal[c.Path] = entry
+		} else if action == "rename-remote" && c.Local != nil {
+			expectedLocal[c.Path] = *c.Local
 		}
 		if e.onProgress != nil {
 			e.onProgress(cfg.ID, i+1, len(plan.Changes))

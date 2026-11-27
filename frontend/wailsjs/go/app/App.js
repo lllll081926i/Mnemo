@@ -574,6 +574,10 @@ export function ValidateUploadFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['ValidateUploadFiles'](arg1, arg2, arg3);
 }
 
+export function VerifyDownload(arg1) {
+  return window['go']['app']['App']['VerifyDownload'](arg1);
+}
+
 export function VerifyMigration(arg1) {
   return window['go']['app']['App']['VerifyMigration'](arg1);
 }

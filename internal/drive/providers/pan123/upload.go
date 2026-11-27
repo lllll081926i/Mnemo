@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"mnemo-go/internal/drive"
@@ -22,7 +24,11 @@ import (
 	"mnemo-go/internal/netx"
 )
 
-const maxChunk = 16 * 1024 * 1024 // 单片 ≤16MB（AList newUpload）
+const (
+	maxChunk                = 16 * 1024 * 1024 // 单片 ≤16MB（AList newUpload）
+	pan123UploadConcurrency = 3                // 并发分片上限，兼顾提速与内存占用
+	pan123PersistEveryParts = 3                // 批量持久化已完成分片，减少磁盘 JSON 写放大
+)
 
 var (
 	errPan123UploadSessionInvalid = errors.New("123: 上传会话已失效")
@@ -235,11 +241,39 @@ func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *mod
 		api = apiS3Prepare
 	}
 
+	var stateMu sync.Mutex
 	uploadedSet := make(map[int]bool, len(savedParts))
+	var uploadedBytes atomic.Int64
 	for _, pn := range savedParts {
 		if pn >= 1 && int64(pn) <= plan.ChunkCount {
 			uploadedSet[pn] = true
+			offset := int64(pn-1) * plan.ChunkSize
+			cur := plan.ChunkSize
+			if size-offset < cur {
+				cur = size - offset
+			}
+			uploadedBytes.Add(cur)
 		}
+	}
+	if uploadedBytes.Load() > 0 {
+		ui.ReportUploadProgress(uploadedBytes.Load(), size)
+	}
+
+	encodedSession := encodePan123UploadSession(data)
+	pendingPersists := 0
+	flushState := func(force bool) error {
+		stateMu.Lock()
+		if !force && pendingPersists < pan123PersistEveryParts {
+			stateMu.Unlock()
+			return nil
+		}
+		parts := drive.SortedUniqueParts(uploadedSet)
+		pendingPersists = 0
+		stateMu.Unlock()
+		if err := drive.SaveUploadSessionState(sessionKey, encodedSession, parts); err != nil {
+			return fmt.Errorf("123: 保存上传分片进度失败: %w", err)
+		}
+		return nil
 	}
 
 	for i := int64(1); i <= plan.ChunkCount; i += batchSize {
@@ -251,63 +285,157 @@ func (d *Driver) uploadPan123Parts(ctx context.Context, c drive.Context, ui *mod
 		if end > plan.ChunkCount+1 {
 			end = plan.ChunkCount + 1
 		}
+
+		// 预签名校验（同时用于验证续传的 uploadId 在远端仍有效）
 		urls, err := d.presignBatch(ctx, c, api, data, start, end)
 		if err != nil {
 			return err
 		}
+
+		pending := make([]int64, 0, end-start)
+		stateMu.Lock()
 		for j := start; j < end; j++ {
-			if stopped(ctx, ui) {
-				return errPan123UploadStopped
+			if !uploadedSet[int(j)] {
+				pending = append(pending, j)
 			}
-			offset := (j - 1) * plan.ChunkSize
-			cur := plan.ChunkSize
-			if size-offset < cur {
-				cur = size - offset
-			}
-			// Skip already-uploaded parts (resume).
-			if uploadedSet[int(j)] {
-				ui.ReportUploadProgress(offset+cur, size)
-				continue
-			}
-			uploadURL := urls[strconv.FormatInt(j, 10)]
-			if uploadURL == "" {
-				return fmt.Errorf("%w: 获取分片 %d 上传地址失败", errPan123UploadSessionInvalid, j)
-			}
-			buff, err := readSlice(f, offset, cur)
-			if err != nil {
-				return fmt.Errorf("读取上传文件失败: %w", err)
-			}
-			status, err := putChunk(ctx, uploadURL, buff)
-			if err != nil {
-				return err
-			}
-			if status == http.StatusForbidden {
-				// 预签名过期：整批重签后重试当前片。
-				urls, err = d.presignBatch(ctx, c, api, data, start, end)
+		}
+		stateMu.Unlock()
+		if len(pending) == 0 {
+			continue
+		}
+
+		var urlMu sync.RWMutex
+		var presignEpoch uint64
+		getPartURL := func(part int64) (string, uint64) {
+			urlMu.RLock()
+			defer urlMu.RUnlock()
+			return urls[strconv.FormatInt(part, 10)], presignEpoch
+		}
+		refreshBatchURLs := func(seenEpoch uint64, part int64) (string, error) {
+			urlMu.Lock()
+			defer urlMu.Unlock()
+			if presignEpoch == seenEpoch {
+				nextURLs, err := d.presignBatch(ctx, c, api, data, start, end)
 				if err != nil {
-					return err
+					return "", err
 				}
-				uploadURL = urls[strconv.FormatInt(j, 10)]
-				if uploadURL == "" {
-					return fmt.Errorf("%w: 获取分片 %d 重试上传地址失败", errPan123UploadSessionInvalid, j)
+				urls = nextURLs
+				presignEpoch++
+			}
+			return urls[strconv.FormatInt(part, 10)], nil
+		}
+
+		batchCtx, cancelBatch := context.WithCancel(ctx)
+		workers := pan123UploadConcurrency
+		if len(pending) < workers {
+			workers = len(pending)
+		}
+		if workers < 1 {
+			workers = 1
+		}
+		var nextIdx atomic.Int64
+		var errMu sync.Mutex
+		var firstErr error
+		setErr := func(e error) {
+			if e == nil {
+				return
+			}
+			errMu.Lock()
+			if firstErr == nil {
+				firstErr = e
+				cancelBatch()
+			}
+			errMu.Unlock()
+		}
+
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					if stopped(batchCtx, ui) {
+						setErr(errPan123UploadStopped)
+						return
+					}
+					idx := int(nextIdx.Add(1) - 1)
+					if idx >= len(pending) {
+						return
+					}
+					j := pending[idx]
+					offset := (j - 1) * plan.ChunkSize
+					cur := plan.ChunkSize
+					if size-offset < cur {
+						cur = size - offset
+					}
+					uploadURL, epoch := getPartURL(j)
+					if uploadURL == "" {
+						setErr(fmt.Errorf("%w: 获取分片 %d 上传地址失败", errPan123UploadSessionInvalid, j))
+						return
+					}
+					buff, readErr := readSlice(f, offset, cur)
+					if readErr != nil {
+						setErr(fmt.Errorf("读取上传文件失败: %w", readErr))
+						return
+					}
+					status, putErr := putChunk(batchCtx, uploadURL, buff)
+					if putErr != nil {
+						if stopped(ctx, ui) {
+							setErr(errPan123UploadStopped)
+						} else {
+							setErr(putErr)
+						}
+						return
+					}
+					if status == http.StatusForbidden {
+						retryURL, rerr := refreshBatchURLs(epoch, j)
+						if rerr != nil {
+							setErr(rerr)
+							return
+						}
+						if retryURL == "" {
+							setErr(fmt.Errorf("%w: 获取分片 %d 重试上传地址失败", errPan123UploadSessionInvalid, j))
+							return
+						}
+						status, putErr = putChunk(batchCtx, retryURL, buff)
+						if putErr != nil {
+							setErr(putErr)
+							return
+						}
+					}
+					if status == http.StatusForbidden {
+						drive.ClearUploadSession(sessionKey)
+						setErr(fmt.Errorf("%w: 分片上传失败 HTTP %d", errPan123UploadSessionInvalid, status))
+						return
+					}
+					if status < http.StatusOK || status >= http.StatusMultipleChoices {
+						setErr(fmt.Errorf("分片上传失败 HTTP %d", status))
+						return
+					}
+					stateMu.Lock()
+					uploadedSet[int(j)] = true
+					pendingPersists++
+					stateMu.Unlock()
+					if saveErr := flushState(false); saveErr != nil {
+						setErr(saveErr)
+						return
+					}
+					ui.ReportUploadProgress(uploadedBytes.Add(cur), size)
 				}
-				status, err = putChunk(ctx, uploadURL, buff)
-				if err != nil {
-					return err
-				}
+			}()
+		}
+		wg.Wait()
+		cancelBatch()
+
+		if firstErr != nil {
+			// 出错或暂停时保留已完成的断点，避免重传已完成分片
+			if !errors.Is(firstErr, errPan123UploadSessionInvalid) {
+				_ = flushState(true)
 			}
-			if status == http.StatusForbidden {
-				drive.ClearUploadSession(sessionKey)
-				return fmt.Errorf("%w: 分片上传失败 HTTP %d", errPan123UploadSessionInvalid, status)
-			}
-			if status < http.StatusOK || status >= http.StatusMultipleChoices {
-				return fmt.Errorf("分片上传失败 HTTP %d", status)
-			}
-			uploadedSet[int(j)] = true
-			if err := drive.SaveUploadSessionState(sessionKey, encodePan123UploadSession(data), drive.SortedUniqueParts(uploadedSet)); err != nil {
-				return fmt.Errorf("123: 保存上传分片进度失败: %w", err)
-			}
-			ui.ReportUploadProgress(offset+cur, size)
+			return firstErr
+		}
+		if err := flushState(true); err != nil {
+			return err
 		}
 	}
 	return nil

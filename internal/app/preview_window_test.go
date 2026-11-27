@@ -73,6 +73,10 @@ func TestPreviewWindowRejectsUnrelatedOperationsAndAccounts(t *testing.T) {
 	if got := a.previewInvoke(seed, allowed).Error; got != "图片缓存不可用" {
 		t.Fatalf("图片缓存方法未转发到主窗口: %q", got)
 	}
+	badLink := previewCall{Method: "OpenBrowser", Args: []json.RawMessage{json.RawMessage(`"javascript:alert(1)"`)}}
+	if got := a.previewInvoke(seed, badLink).Error; got == "" || got == "预览窗口不支持此操作" || got == "预览账号不匹配" {
+		t.Fatalf("OpenBrowser 未转发到主窗口协议校验: %q", got)
+	}
 }
 
 func TestShowPreviewWindowsCoalescesRestoreRequests(t *testing.T) {

@@ -596,6 +596,7 @@ export function openKindOf(file, capabilities = {}) {
   if (ext === 'docx') return 'docx'
   if (ext === 'xlsx') return 'xlsx'
   if (ext === 'pptx') return 'pptx'
+  if (ext === 'zip' || mimeOf(file) === 'application/zip') return 'archive'
   if (cat === 'text' || PREVIEW_TEXT_EXTS.has(ext)) return 'text'
   return 'download'
 }
@@ -618,6 +619,27 @@ export async function copyText(text) {
     return ok
   }
 }
+
+function appBridge(method) {
+  const fn = (typeof window !== 'undefined' && window.go?.app?.App?.[method]) || App[method]
+  if (typeof fn !== 'function') throw new Error(`后端接口 ${method} 暂不可用`)
+  return fn
+}
+
+export function openTrashWebsite(userId, driveId) { return appBridge('OpenTrashWebsite')(userId, driveId) }
+export function openPreviewWindow(payload) { return appBridge('OpenPreviewWindow')(payload) }
+export function exportPreferences(json) { return appBridge('ExportPreferences')(json) }
+export function importPreferences() { return appBridge('ImportPreferences')() }
+export function searchCachedFiles(query) { return appBridge('SearchCachedFiles')(query) }
+export function cancelSearch(requestId) {
+  const fn = typeof window !== 'undefined' ? window.go?.app?.App?.CancelSearch : App.CancelSearch
+  return typeof fn === 'function' ? fn(requestId) : Promise.resolve()
+}
+export function listDeletionHistory(userId, driveId) { return appBridge('ListDeletionHistory')(userId, driveId) }
+export function restoreDeletionHistory(userId, driveId, fileId) { return appBridge('RestoreDeletionHistory')(userId, driveId, fileId) }
+export function previewEnterpriseTrash(userId, driveId) { return appBridge('PreviewEnterpriseTrash')(userId, driveId) }
+export function clearDeletionHistory(userId, driveId) { return appBridge('ClearDeletionHistory')(userId, driveId) }
+export function verifyDownload(taskId) { return appBridge('VerifyDownload')(taskId) }
 
 // 打开外部浏览器（后端包装，避免直接依赖 runtime）
 export function OpenBrowser(url) { return App.OpenBrowser(url) }

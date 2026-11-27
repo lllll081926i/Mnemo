@@ -1,9 +1,9 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "Mnemo",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "info": {
-    "productVersion": "0.4.8"
+    "productVersion": "0.4.9"
   },
   "outputfilename": "Mnemo",
   "frontend:install": "npm ci --ignore-scripts",

@@ -90,9 +90,9 @@ function deactivate() {
   loading.value = false
   offs.splice(0).forEach(off => off?.())
 }
-watch(() => props.accounts.map(account => [account.user_id, account.drive_id]), () => {
+watch(() => props.accounts.map(account => `${account.user_id}\0${account.drive_id}`).join('\n'), () => {
   if (active) load()
-}, { deep: true })
+})
 onMounted(activate)
 onActivated(activate)
 onDeactivated(deactivate)
@@ -121,7 +121,7 @@ onBeforeUnmount(deactivate)
 </template>
 
 <style scoped>
-.share-import-history { padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.share-import-history { padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border-light); border-radius: var(--radius-lg); background: var(--bg-surface); }
 .share-import-history summary { cursor: pointer; font-weight: 600; }
 .share-import-history p { margin: 6px 0; }
 </style>

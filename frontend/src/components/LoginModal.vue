@@ -1029,12 +1029,11 @@ async function submit() {
 .login-provider-list::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .lp-selection {
   position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none;
-  border-radius: var(--radius-sm); background: var(--listselectbg);
-  transition: transform var(--motion-normal) var(--motion-ease), width var(--motion-normal) var(--motion-ease), height var(--motion-normal) var(--motion-ease);
+  border-radius: var(--radius-sm); background: var(--bg-active);
+  border: 1px solid var(--border-light);
+  transition: transform 200ms var(--motion-ease), width 200ms var(--motion-ease), height 200ms var(--motion-ease);
 }
-.lp-selection::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--color-primary); }
-:global(html.dark) .lp-selection { background: var(--bg-active); box-shadow: inset 0 0 0 1px var(--control-border-hover); }
-:global(html.dark) .lp-selection::before { width: 3px; background: #c4b5fd; }
+:global(html.dark) .lp-selection { background: var(--bg-active); border-color: var(--border-light); }
 .login-side .lp-item {
   position: relative; z-index: 1;
   display: flex; align-items: center; gap: 9px;

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mnemo-go/internal/netx"
 )
 
 var ErrReadIdleTimeout error = readIdleTimeoutError{}
@@ -44,6 +46,7 @@ func NewRequest(ctx context.Context, method, address string, opts Options) (*htt
 func NewHTTPClient(opts Options) *http.Client {
 	opts.Normalize()
 	return &http.Client{
+		CheckRedirect: netx.SafeCheckRedirect,
 		Transport: &downloadTransport{idleTimeout: opts.ReadIdleTimeout, base: &http.Transport{
 			Proxy: proxyFunc(),
 			DialContext: (&net.Dialer{

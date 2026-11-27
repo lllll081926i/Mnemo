@@ -76,7 +76,10 @@ function resolvePrefs(prefs) {
 export function setPref(key, value) {
   const p = getPrefs()
   p[key] = value
-  localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+  const serialized = JSON.stringify(p)
+  localStorage.setItem(PREFS_KEY, serialized)
+  cachedPrefsRaw = serialized
+  cachedPrefs = p
   if (key === 'oledBackground') applyOledBackground()
   if (key === 'themeStyle') applyThemeStyle()
   // localStorage is not reactive. Let mounted views update immediately when a
@@ -171,7 +174,12 @@ export function setAccountCustomMeta(userId, alias, iconKey) {
 
   p.accountAliases = aliases
   p.accountIcons = icons
-  localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+  try {
+    const serialized = JSON.stringify(p)
+    localStorage.setItem(PREFS_KEY, serialized)
+    cachedPrefsRaw = serialized
+    cachedPrefs = p
+  } catch { /* 本地偏好空间不足时不阻断已落盘的后端账号配置 */ }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('mnemo:prefs-changed', { detail: { key: 'accountCustom', value: { aliases, icons } } }))
   }
